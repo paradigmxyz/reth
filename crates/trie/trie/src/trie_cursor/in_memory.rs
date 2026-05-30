@@ -121,7 +121,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
 
     /// Positions the DB cursor state using the underlying cursor.
     fn cursor_seek(&mut self, key: Nibbles) -> Result<(), DatabaseError> {
-        if self.db_cursor_state.is_positioned_at(&key) {
+        if !self.db_cursor_state.should_seek(&key) {
             return Ok(())
         }
 
@@ -198,6 +198,10 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
                 self.deferred_overlay_seek_start = Some(idx + 1);
             }
             mem_value.clone().map(|node| (key, node))
+        } else if let Some(db_entry) = self.db_cursor_state.exact_entry(&key) {
+            Some(db_entry.clone())
+        } else if !self.db_cursor_state.may_contain_exact(&key) {
+            None
         } else {
             let db_entry = self.get_cursor_mut().map(|c| c.seek_exact(key)).transpose()?.flatten();
             self.db_cursor_state.set_entry(db_entry);
@@ -274,7 +278,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
     fn reset(&mut self) {
         self.cursor.reset();
 
-        self.db_cursor_state.set_entry(None);
+        self.db_cursor_state.reset_position();
         self.in_memory_cursor.reset();
         self.deferred_overlay_seek_start = None;
         self.last_key = None;
@@ -1061,6 +1065,46 @@ mod tests {
             Some((Nibbles::from_nibbles([0x2]), branch_node(2)))
         );
         assert_eq!(visited_keys.lock().len(), 2, "seek should reuse the exact DB position");
+    }
+
+    #[test]
+    fn test_seek_reuses_ahead_db_position() {
+        let db_nodes = BTreeMap::from([(Nibbles::from_nibbles([0x3]), branch_node(3))]);
+        let db_nodes_arc = Arc::new(db_nodes);
+        let visited_keys = Arc::new(Mutex::new(Vec::new()));
+        let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys.clone());
+
+        let overlay = TrieUpdatesOverlay::default();
+        let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &overlay);
+
+        assert_eq!(
+            cursor.seek(Nibbles::from_nibbles([0x2])).unwrap(),
+            Some((Nibbles::from_nibbles([0x3]), branch_node(3)))
+        );
+        assert_eq!(visited_keys.lock().len(), 1);
+
+        assert_eq!(
+            cursor.seek(Nibbles::from_nibbles([0x2])).unwrap(),
+            Some((Nibbles::from_nibbles([0x3]), branch_node(3)))
+        );
+        assert_eq!(visited_keys.lock().len(), 1, "seek should reuse an ahead DB position");
+    }
+
+    #[test]
+    fn test_seek_does_not_reseek_exhausted_db() {
+        let db_nodes = BTreeMap::from([(Nibbles::from_nibbles([0x1]), branch_node(1))]);
+        let db_nodes_arc = Arc::new(db_nodes);
+        let visited_keys = Arc::new(Mutex::new(Vec::new()));
+        let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys.clone());
+
+        let overlay = TrieUpdatesOverlay::default();
+        let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &overlay);
+
+        assert_eq!(cursor.seek(Nibbles::from_nibbles([0x2])).unwrap(), None);
+        assert_eq!(visited_keys.lock().len(), 1);
+
+        assert_eq!(cursor.seek(Nibbles::from_nibbles([0x3])).unwrap(), None);
+        assert_eq!(visited_keys.lock().len(), 1, "exhausted DB cursor should stay exhausted");
     }
 
     #[test]

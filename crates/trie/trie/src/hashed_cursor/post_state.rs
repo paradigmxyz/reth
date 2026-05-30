@@ -169,7 +169,7 @@ where
 
     /// Positions the DB cursor state using the underlying cursor.
     fn cursor_seek(&mut self, key: B256) -> Result<(), DatabaseError> {
-        if self.db_cursor_state.is_positioned_at(&key) {
+        if !self.db_cursor_state.should_seek(&key) {
             return Ok(())
         }
 
@@ -306,7 +306,7 @@ where
     fn reset(&mut self) {
         self.cursor.reset();
 
-        self.db_cursor_state.set_entry(None);
+        self.db_cursor_state.reset_position();
         self.post_state_cursor.reset();
         self.deferred_overlay_seek_start = None;
         self.last_key = None;
@@ -419,20 +419,25 @@ impl HashedPostStateOverlay {
         for (hashed_address, storage) in &state.storages {
             let overlay =
                 Arc::make_mut(&mut self.storage_overlays).entry(*hashed_address).or_default();
+            let storage_slots = storage.storage_slots_ref();
 
             if storage.is_wiped() {
                 overlay.layers.clear();
                 overlay.db_wiped = true;
+                overlay.has_visible_value = false;
             }
 
-            if !storage.storage_slots_ref().is_empty() {
-                overlay.layers.insert(
-                    0,
-                    PostStateOverlayLayer::new(Arc::clone(&state), storage.storage_slots_ref()),
-                );
-            }
+            if !storage_slots.is_empty() {
+                let has_nonzero_slot = storage_slots.iter().any(|(_, value)| !value.is_zero());
+                let recompute_after_insert = !has_nonzero_slot && overlay.has_visible_value;
 
-            overlay.has_visible_value = has_visible_storage_value(&overlay.layers);
+                overlay
+                    .layers
+                    .insert(0, PostStateOverlayLayer::new(Arc::clone(&state), storage_slots));
+
+                overlay.has_visible_value = has_nonzero_slot ||
+                    (recompute_after_insert && has_visible_storage_value(&overlay.layers));
+            }
         }
     }
 
@@ -446,18 +451,19 @@ impl HashedPostStateOverlay {
                 continue;
             }
 
-            if !storage.storage_slots_ref().is_empty() {
-                overlay.layers.push(PostStateOverlayLayer::new(
-                    Arc::clone(state),
-                    storage.storage_slots_ref(),
-                ));
+            let storage_slots = storage.storage_slots_ref();
+            if !storage_slots.is_empty() {
+                if !overlay.has_visible_value &&
+                    layer_has_visible_storage_value(storage_slots, &overlay.layers)
+                {
+                    overlay.has_visible_value = true;
+                }
+                overlay.layers.push(PostStateOverlayLayer::new(Arc::clone(state), storage_slots));
             }
 
             if storage.is_wiped() {
                 overlay.db_wiped = true;
             }
-
-            overlay.has_visible_value = has_visible_storage_value(&overlay.layers);
         }
     }
 
@@ -564,19 +570,25 @@ struct HashedStorageOverlay {
 
 type PostStateOverlayLayer<V> = OverlayLayer<HashedPostStateSorted, B256, V>;
 
+fn layer_has_visible_storage_value(
+    entries: &[(B256, U256)],
+    higher_priority_layers: &[PostStateOverlayLayer<U256>],
+) -> bool {
+    entries.iter().any(|(key, value)| {
+        !value.is_zero() &&
+            !higher_priority_layers.iter().any(|higher_layer| {
+                higher_layer
+                    .entries()
+                    .binary_search_by_key(key, |(entry_key, _)| *entry_key)
+                    .is_ok()
+            })
+    })
+}
+
 fn has_visible_storage_value(layers: &[PostStateOverlayLayer<U256>]) -> bool {
     for (layer_idx, layer) in layers.iter().enumerate() {
-        for (key, value) in layer.entries() {
-            if !value.is_zero() &&
-                !layers[..layer_idx].iter().any(|higher_layer| {
-                    higher_layer
-                        .entries()
-                        .binary_search_by_key(key, |(entry_key, _)| *entry_key)
-                        .is_ok()
-                })
-            {
-                return true
-            }
+        if layer_has_visible_storage_value(layer.entries(), &layers[..layer_idx]) {
+            return true
         }
     }
     false
@@ -687,6 +699,39 @@ mod tests {
             storage_overlay_snapshot(&incremental, hashed_address),
             storage_overlay_snapshot(&rebuilt, hashed_address)
         );
+    }
+
+    #[test]
+    fn test_storage_visible_value_tracks_shadowed_lower_layers() {
+        let hashed_address = key(0x01);
+        let top_delete =
+            Arc::new(storage_post_state_for_address(hashed_address, vec![(key(0x10), U256::ZERO)]));
+        let lower_visible = Arc::new(storage_post_state_for_address(
+            hashed_address,
+            vec![(key(0x10), U256::from(1))],
+        ));
+
+        let overlay = HashedPostStateOverlay::new(vec![top_delete, lower_visible]);
+
+        let (_, _, has_visible_value) = overlay.storage_overlay_layers(hashed_address);
+        assert!(!has_visible_value);
+    }
+
+    #[test]
+    fn test_storage_visible_value_tracks_shadowing_prepend() {
+        let hashed_address = key(0x01);
+        let lower_visible = Arc::new(storage_post_state_for_address(
+            hashed_address,
+            vec![(key(0x10), U256::from(1))],
+        ));
+        let top_delete =
+            Arc::new(storage_post_state_for_address(hashed_address, vec![(key(0x10), U256::ZERO)]));
+
+        let mut overlay = HashedPostStateOverlay::new(vec![lower_visible]);
+        overlay.prepend_layer(top_delete);
+
+        let (_, _, has_visible_value) = overlay.storage_overlay_layers(hashed_address);
+        assert!(!has_visible_value);
     }
 
     #[test]
@@ -803,6 +848,40 @@ mod tests {
 
         assert_eq!(cursor.seek(key(0x02)).unwrap(), Some((key(0x02), account(2))));
         assert_eq!(visited_keys.lock().len(), 2, "seek should reuse the exact DB position");
+    }
+
+    #[test]
+    fn test_seek_reuses_ahead_db_position() {
+        let db_nodes = BTreeMap::from([(key(0x03), account(3))]);
+        let db_nodes_arc = Arc::new(db_nodes);
+        let visited_keys = Arc::new(Mutex::new(Vec::new()));
+        let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys.clone());
+
+        let overlay = HashedPostStateOverlay::default();
+        let mut cursor = HashedPostStateCursor::new_account(mock_cursor, &overlay);
+
+        assert_eq!(cursor.seek(key(0x02)).unwrap(), Some((key(0x03), account(3))));
+        assert_eq!(visited_keys.lock().len(), 1);
+
+        assert_eq!(cursor.seek(key(0x02)).unwrap(), Some((key(0x03), account(3))));
+        assert_eq!(visited_keys.lock().len(), 1, "seek should reuse an ahead DB position");
+    }
+
+    #[test]
+    fn test_seek_does_not_reseek_exhausted_db() {
+        let db_nodes = BTreeMap::from([(key(0x01), account(1))]);
+        let db_nodes_arc = Arc::new(db_nodes);
+        let visited_keys = Arc::new(Mutex::new(Vec::new()));
+        let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys.clone());
+
+        let overlay = HashedPostStateOverlay::default();
+        let mut cursor = HashedPostStateCursor::new_account(mock_cursor, &overlay);
+
+        assert_eq!(cursor.seek(key(0x02)).unwrap(), None);
+        assert_eq!(visited_keys.lock().len(), 1);
+
+        assert_eq!(cursor.seek(key(0x03)).unwrap(), None);
+        assert_eq!(visited_keys.lock().len(), 1, "exhausted DB cursor should stay exhausted");
     }
 
     #[test]

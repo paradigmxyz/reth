@@ -6,6 +6,7 @@ const OVERLAY_CURSOR_PARTITION_POINT_MIN_LEN: usize = 64;
 pub(crate) enum DbCursorState<K, V> {
     Unpositioned,
     Positioned((K, V)),
+    Exhausted,
     Wiped,
 }
 
@@ -25,20 +26,45 @@ impl<K, V> DbCursorState<K, V> {
     pub(crate) const fn entry(&self) -> Option<&(K, V)> {
         match self {
             Self::Positioned(entry) => Some(entry),
-            Self::Unpositioned | Self::Wiped => None,
+            Self::Unpositioned | Self::Exhausted | Self::Wiped => None,
         }
     }
 
     pub(crate) fn set_entry(&mut self, entry: Option<(K, V)>) {
         if !self.is_wiped() {
-            *self = entry.map(Self::Positioned).unwrap_or(Self::Unpositioned);
+            *self = entry.map(Self::Positioned).unwrap_or(Self::Exhausted);
+        }
+    }
+
+    pub(crate) fn reset_position(&mut self) {
+        if !self.is_wiped() {
+            *self = Self::Unpositioned;
         }
     }
 }
 
-impl<K: PartialEq, V> DbCursorState<K, V> {
-    pub(crate) fn is_positioned_at(&self, key: &K) -> bool {
-        matches!(self, Self::Positioned((db_key, _)) if db_key == key)
+impl<K: Ord, V> DbCursorState<K, V> {
+    pub(crate) fn should_seek(&self, key: &K) -> bool {
+        match self {
+            Self::Unpositioned => true,
+            Self::Positioned((db_key, _)) => db_key < key,
+            Self::Exhausted | Self::Wiped => false,
+        }
+    }
+
+    pub(crate) fn exact_entry(&self, key: &K) -> Option<&(K, V)> {
+        match self {
+            Self::Positioned((db_key, _)) if db_key == key => self.entry(),
+            Self::Unpositioned | Self::Positioned(_) | Self::Exhausted | Self::Wiped => None,
+        }
+    }
+
+    pub(crate) fn may_contain_exact(&self, key: &K) -> bool {
+        match self {
+            Self::Unpositioned => true,
+            Self::Positioned((db_key, _)) => db_key <= key,
+            Self::Exhausted | Self::Wiped => false,
+        }
     }
 }
 
@@ -54,6 +80,7 @@ impl<K, V> Default for PositionedOverlayCursor<'_, K, V> {
 }
 
 impl<'a, K, V> PositionedOverlayCursor<'a, K, V> {
+    #[cfg(test)]
     pub(crate) fn new<O>(layers: &'a [OverlayLayer<O, K, V>]) -> Self {
         Self::with_capacity(layers, layers.len())
     }
