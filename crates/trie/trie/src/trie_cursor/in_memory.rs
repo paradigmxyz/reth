@@ -334,7 +334,10 @@ impl TrieUpdatesOverlay {
     fn build_storage_overlays(
         updates: &[Arc<TrieUpdatesSorted>],
     ) -> Arc<B256Map<TrieStorageOverlay>> {
-        let mut overlays: B256Map<TrieStorageOverlay> = B256Map::default();
+        let storage_overlay_capacity =
+            updates.iter().map(|update| update.storage_tries_ref().len()).sum();
+        let mut overlays: B256Map<TrieStorageOverlay> =
+            B256Map::with_capacity_and_hasher(storage_overlay_capacity, Default::default());
 
         for update in updates {
             Self::push_storage_layer(&mut overlays, update);

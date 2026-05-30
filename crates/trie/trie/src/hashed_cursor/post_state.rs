@@ -387,7 +387,9 @@ impl HashedPostStateOverlay {
     fn build_storage_overlays(
         states: &[Arc<HashedPostStateSorted>],
     ) -> Arc<B256Map<HashedStorageOverlay>> {
-        let mut overlays: B256Map<HashedStorageOverlay> = B256Map::default();
+        let storage_overlay_capacity = states.iter().map(|state| state.storages.len()).sum();
+        let mut overlays: B256Map<HashedStorageOverlay> =
+            B256Map::with_capacity_and_hasher(storage_overlay_capacity, Default::default());
 
         for state in states {
             Self::push_storage_layer(&mut overlays, state);
