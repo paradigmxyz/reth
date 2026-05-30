@@ -1305,6 +1305,7 @@ impl ArenaParallelSparseTrie {
         mut current: Index,
         full_path: &Nibbles,
         mut path_offset: usize,
+        full_path_len: usize,
     ) -> Option<&'a Vec<u8>> {
         loop {
             match &arena[current] {
@@ -1316,7 +1317,7 @@ impl ArenaParallelSparseTrie {
                 ArenaSparseNode::Branch(b) => {
                     let short_key = &b.short_key;
                     let logical_end = path_offset + short_key.len();
-                    if full_path.len() <= logical_end ||
+                    if full_path_len <= logical_end ||
                         full_path.slice(path_offset..logical_end) != *short_key
                     {
                         return None;
@@ -1338,6 +1339,7 @@ impl ArenaParallelSparseTrie {
                         subtrie.root,
                         full_path,
                         path_offset,
+                        full_path_len,
                     );
                 }
             }
@@ -1352,6 +1354,7 @@ impl ArenaParallelSparseTrie {
         mut current: Index,
         full_path: &Nibbles,
         mut path_offset: usize,
+        full_path_len: usize,
         expected_value: Option<&Vec<u8>>,
     ) -> Result<LeafLookup, LeafLookupError> {
         loop {
@@ -1379,7 +1382,7 @@ impl ArenaParallelSparseTrie {
                     let short_key = &b.short_key;
                     let logical_end = path_offset + short_key.len();
 
-                    if full_path.len() <= logical_end {
+                    if full_path_len <= logical_end {
                         return Ok(LeafLookup::NonExistent);
                     }
 
@@ -1413,6 +1416,7 @@ impl ArenaParallelSparseTrie {
                         subtrie.root,
                         full_path,
                         path_offset,
+                        full_path_len,
                         expected_value,
                     );
                 }
@@ -2549,7 +2553,13 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn get_leaf_value(&self, full_path: &Nibbles) -> Option<&Vec<u8>> {
-        Self::get_leaf_value_in_arena(&self.upper_arena, self.root, full_path, 0)
+        Self::get_leaf_value_in_arena(
+            &self.upper_arena,
+            self.root,
+            full_path,
+            0,
+            full_path.len(),
+        )
     }
 
     fn find_leaf(
@@ -2557,7 +2567,14 @@ impl SparseTrie for ArenaParallelSparseTrie {
         full_path: &Nibbles,
         expected_value: Option<&Vec<u8>>,
     ) -> Result<LeafLookup, LeafLookupError> {
-        Self::find_leaf_in_arena(&self.upper_arena, self.root, full_path, 0, expected_value)
+        Self::find_leaf_in_arena(
+            &self.upper_arena,
+            self.root,
+            full_path,
+            0,
+            full_path.len(),
+            expected_value,
+        )
     }
 
     fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates> {
