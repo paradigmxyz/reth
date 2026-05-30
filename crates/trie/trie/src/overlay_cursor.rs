@@ -91,9 +91,7 @@ where
     #[inline(always)]
     pub(crate) fn seek_until_exact(&mut self, key: &K) -> Option<(usize, &V)> {
         for (layer_idx, cursor) in self.cursors.iter_mut().enumerate() {
-            if let Some((entry_key, value)) = cursor.seek(key) &&
-                entry_key == key
-            {
+            if let Some((_, value)) = cursor.seek_exact(key) {
                 return Some((layer_idx, value))
             }
         }
@@ -182,6 +180,41 @@ where
 
         self.position += advance;
         self.current()
+    }
+
+    #[inline(always)]
+    fn seek_exact(&mut self, key: &K) -> Option<&'a (K, V)> {
+        if let Some(current @ (entry_key, _)) = self.current() {
+            match entry_key.cmp(key) {
+                std::cmp::Ordering::Less => self.position += 1,
+                std::cmp::Ordering::Equal => return Some(current),
+                std::cmp::Ordering::Greater => return None,
+            }
+        }
+
+        let remaining = &self.entries[self.position..];
+        if remaining.len() >= OVERLAY_CURSOR_PARTITION_POINT_MIN_LEN {
+            self.position += remaining.partition_point(|(entry_key, _)| entry_key < key);
+            let current = self.current()?;
+            return (&current.0 == key).then_some(current)
+        }
+
+        for (advance, (entry_key, _)) in remaining.iter().enumerate() {
+            match entry_key.cmp(key) {
+                std::cmp::Ordering::Less => {}
+                std::cmp::Ordering::Equal => {
+                    self.position += advance;
+                    return self.current()
+                }
+                std::cmp::Ordering::Greater => {
+                    self.position += advance;
+                    return None
+                }
+            }
+        }
+
+        self.position = self.entries.len();
+        None
     }
 
     #[inline(always)]
