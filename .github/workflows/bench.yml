@@ -639,6 +639,8 @@ jobs:
       BENCH_NODE_BIN: ${{ needs.bench-ack.outputs.node-bin }}
       BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
+      BENCH_TARGET_METRICS_CONFIG: .github/config/bench-metrics-targets.json
+      BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS: "200"
       BENCH_OTLP_TRACES_ENDPOINT: ${{ needs.bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_TRACES_ENDPOINT || '' }}
       BENCH_OTLP_LOGS_ENDPOINT: ${{ needs.bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_LOGS_ENDPOINT || '' }}
       BENCH_VICTORIAMETRICS_URL: ${{ secrets.BENCH_VICTORIAMETRICS_URL }}
@@ -1140,15 +1142,98 @@ jobs:
 
           .github/scripts/bench-update-status.sh "Finalizing results..."
 
-      - name: Generate Grafana URL
+      - name: Generate observability URLs
         id: metrics
         if: "!cancelled()"
         run: |
           FROM_MS=$(( BENCH_REFERENCE_EPOCH * 1000 ))
           TO_MS=$(( $(date +%s) * 1000 ))
           GRAFANA_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr?orgId=1&from=${FROM_MS}&to=${TO_MS}&timezone=browser&var-datasource=efk1hcn87dnnkd&var-job=github-reth-bench&var-benchmark_id=${BENCH_ID}&var-benchmark_run=\$__all"
+          OBSERVABILITY_URLS="$(python3 - "$BENCH_ID" "$FROM_MS" "$TO_MS" <<'PY'
+          from datetime import datetime, timezone
+          import json
+          import sys
+          from urllib.parse import quote
+
+          bench_id, from_ms, to_ms = sys.argv[1:4]
+          logs_uid = "cfk1hzy08xekgd"
+          traces_uid = "dfk1hrnxca9s0a"
+
+          def iso_from_epoch_ms(ms):
+              dt = datetime.fromtimestamp(int(ms) / 1000, tz=timezone.utc)
+              return dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+          from_time = iso_from_epoch_ms(from_ms)
+          to_time = iso_from_epoch_ms(to_ms)
+
+          def explore_url(panes):
+              encoded = quote(json.dumps(panes, separators=(",", ":")), safe="")
+              return f"https://tempoxyz.grafana.net/explore?schemaVersion=1&panes={encoded}&orgId=1"
+
+          logs_pane = {
+              "pw4": {
+                  "datasource": logs_uid,
+                  "queries": [{
+                      "refId": "A",
+                      "datasource": {"type": "victoriametrics-logs-datasource", "uid": logs_uid},
+                      "editorMode": "code",
+                      "expr": f"benchmark_id:{bench_id}",
+                      "queryType": "instant",
+                  }],
+                  "range": {"from": from_time, "to": to_time},
+                  "panelsState": {
+                      "logs": {
+                          "sortOrder": "Descending",
+                          "columns": ["Time", "Line"],
+                          "visualisationType": "table",
+                          "labelFieldName": "labels",
+                      },
+                  },
+                  "compact": False,
+              },
+          }
+          traceql_query = "{resource.benchmark_id=" + json.dumps(bench_id) + "}"
+          traces_pane = {
+              "g39": {
+                  "datasource": traces_uid,
+                  "queries": [{
+                      "refId": "A",
+                      "datasource": {"type": "tempo", "uid": traces_uid},
+                      "queryType": "traceqlSearch",
+                      "serviceMapUseNativeHistograms": False,
+                      "filters": [
+                          {
+                              "id": "benchmark-id",
+                              "operator": "=",
+                              "scope": "resource",
+                              "tag": "benchmark_id",
+                              "value": [bench_id],
+                              "valueType": "string",
+                              "isCustomValue": True,
+                          },
+                      ],
+                      "query": traceql_query,
+                  }],
+                  "range": {"from": from_time, "to": to_time},
+                  "panelsState": {"logs": {"visualisationType": "table"}},
+                  "compact": False,
+              },
+          }
+
+          print(explore_url(logs_pane))
+          print(explore_url(traces_pane))
+          PY
+          )"
+          LOGS_URL="$(printf '%s\n' "$OBSERVABILITY_URLS" | sed -n '1p')"
+          TRACES_URL="$(printf '%s\n' "$OBSERVABILITY_URLS" | sed -n '2p')"
           echo "grafana-url=${GRAFANA_URL}" >> "$GITHUB_OUTPUT"
+          echo "logs-url=${LOGS_URL}" >> "$GITHUB_OUTPUT"
+          echo "traces-url=${TRACES_URL}" >> "$GITHUB_OUTPUT"
+          echo "observability-from-ms=${FROM_MS}" >> "$GITHUB_OUTPUT"
+          echo "observability-to-ms=${TO_MS}" >> "$GITHUB_OUTPUT"
           echo "Grafana URL: ${GRAFANA_URL}"
+          echo "Logs URL: ${LOGS_URL}"
+          echo "Traces URL: ${TRACES_URL}"
 
       - name: Scan logs for errors
         if: "!cancelled()"
@@ -1283,9 +1368,29 @@ jobs:
           if [ -n "${BENCH_BAL:-}" ] && [ "${BENCH_BAL}" != "false" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --bal-mode $BENCH_BAL"
           fi
+          if [ -n "${BENCH_ID:-}" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --benchmark-id $BENCH_ID"
+          fi
           GRAFANA_URL='${{ steps.metrics.outputs.grafana-url }}'
           if [ -n "$GRAFANA_URL" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --grafana-url $GRAFANA_URL"
+          fi
+          LOGS_URL='${{ steps.metrics.outputs.logs-url }}'
+          if [ -n "$LOGS_URL" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --logs-url $LOGS_URL"
+          fi
+          TRACES_URL='${{ steps.metrics.outputs.traces-url }}'
+          if [ -n "$TRACES_URL" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --traces-url $TRACES_URL"
+          fi
+          OBSERVABILITY_FROM_MS='${{ steps.metrics.outputs.observability-from-ms }}'
+          OBSERVABILITY_TO_MS='${{ steps.metrics.outputs.observability-to-ms }}'
+          if [ -n "$OBSERVABILITY_FROM_MS" ] && [ -n "$OBSERVABILITY_TO_MS" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --observability-from-ms $OBSERVABILITY_FROM_MS"
+            SUMMARY_ARGS="$SUMMARY_ARGS --observability-to-ms $OBSERVABILITY_TO_MS"
+          fi
+          if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --target-metrics-config $BENCH_TARGET_METRICS_CONFIG"
           fi
           # shellcheck disable=SC2086
           python3 .github/scripts/bench-reth-summary.py $SUMMARY_ARGS
@@ -1413,12 +1518,6 @@ jobs:
               }
             }
 
-            // Grafana dashboard link
-            const grafanaUrl = '${{ steps.metrics.outputs.grafana-url }}';
-            if (grafanaUrl) {
-              comment += `\n\n### Grafana Dashboard\n\n[View real-time metrics](${grafanaUrl})\n`;
-            }
-
             // Node errors (panics / ERROR logs)
             try {
               const errors = fs.readFileSync(process.env.BENCH_WORK_DIR + '/errors.md', 'utf8');
@@ -1450,7 +1549,8 @@ jobs:
               core,
               context,
               chartSha: '${{ steps.push-charts.outputs.sha }}',
-              grafanaUrl: '${{ steps.metrics.outputs.grafana-url }}',
+              logsUrl: '${{ steps.metrics.outputs.logs-url }}',
+              tracesUrl: '${{ steps.metrics.outputs.traces-url }}',
               runId: '${{ github.run_id }}',
             });
 

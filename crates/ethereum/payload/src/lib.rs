@@ -22,7 +22,7 @@ use reth_errors::{BlockExecutionError, BlockValidationError, ConsensusError};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     block::TxResult,
-    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
+    execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::EthEvmConfig;
@@ -175,7 +175,7 @@ where
             execution_cache.cache().clone(),
             // It's ok to recreate the cache every time, because it's cheap to do so for a vanilla
             // Ethereum builder every 12s.
-            CachedStateMetrics::zeroed(CachedStateMetricsSource::Builder),
+            Some(CachedStateMetrics::zeroed(CachedStateMetricsSource::Builder)),
         ));
     }
     let state = StateProviderDatabase::new(state_provider.as_ref());
@@ -221,7 +221,7 @@ where
     // If we have a sparse trie handle, wire a state hook that streams per-tx state diffs
     // to the background trie pipeline for incremental state root computation.
     if let Some(ref handle) = trie_handle {
-        builder.executor_mut().set_state_hook(Some(Box::new(handle.state_hook())));
+        builder.evm_mut().db_mut().set_state_hook(Some(Box::new(handle.state_hook())));
     }
 
     builder.apply_pre_execution_changes().map_err(|err| {
@@ -452,7 +452,7 @@ where
     {
         // Drop the state hook, which drops the StateHookSender and triggers
         // FinishedStateUpdates via its Drop impl, signaling the trie task to finalize.
-        builder.executor_mut().set_state_hook(None);
+        builder.evm_mut().db_mut().set_state_hook(None);
 
         // The sparse trie has been computing incrementally alongside tx execution.
         // This recv() waits for the final root hash — most work is already done.

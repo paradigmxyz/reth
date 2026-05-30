@@ -29,6 +29,7 @@ reth-transaction-pool.workspace = true
 reth-trie.workspace = true
 
 # ethereum
+alloy-chains.workspace = true
 alloy-eip7928.workspace = true
 alloy-eips.workspace = true
 alloy-evm = { workspace = true, features = ["overrides", "call-util"] }

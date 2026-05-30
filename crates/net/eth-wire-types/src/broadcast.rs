@@ -3,7 +3,7 @@
 use crate::{EthMessage, EthVersion, NetworkPrimitives};
 use alloc::{sync::Arc, vec::Vec};
 use alloy_primitives::{
-    map::{HashMap, HashSet},
+    map::{B256Map, B256Set},
     Bytes, TxHash, B128, B256, U128,
 };
 use alloy_rlp::{
@@ -856,7 +856,7 @@ impl DedupPayload for NewPooledTransactionHashes72 {
     fn dedup(self) -> PartiallyValidData<Self::Value> {
         let Self { hashes, mut sizes, mut types, .. } = self;
 
-        let mut deduped_data = HashMap::with_capacity_and_hasher(hashes.len(), Default::default());
+        let mut deduped_data = B256Map::with_capacity_and_hasher(hashes.len(), Default::default());
 
         for hash in hashes.into_iter().rev() {
             if let (Some(ty), Some(size)) = (types.pop(), sizes.pop()) {
@@ -882,7 +882,7 @@ impl DedupPayload for NewPooledTransactionHashes68 {
     fn dedup(self) -> PartiallyValidData<Self::Value> {
         let Self { hashes, mut sizes, mut types } = self;
 
-        let mut deduped_data = HashMap::with_capacity_and_hasher(hashes.len(), Default::default());
+        let mut deduped_data = B256Map::with_capacity_and_hasher(hashes.len(), Default::default());
 
         for hash in hashes.into_iter().rev() {
             if let (Some(ty), Some(size)) = (types.pop(), sizes.pop()) {
@@ -908,7 +908,7 @@ impl DedupPayload for NewPooledTransactionHashes66 {
     fn dedup(self) -> PartiallyValidData<Self::Value> {
         let Self(hashes) = self;
 
-        let mut deduped_data = HashMap::with_capacity_and_hasher(hashes.len(), Default::default());
+        let mut deduped_data = B256Map::with_capacity_and_hasher(hashes.len(), Default::default());
 
         let noop_value: Eth68TxMetadata = None;
 
@@ -979,7 +979,7 @@ pub struct PartiallyValidData<V> {
     #[deref]
     #[deref_mut]
     #[into_iterator]
-    data: HashMap<TxHash, V>,
+    data: B256Map<V>,
     version: Option<EthVersion>,
 }
 
@@ -987,41 +987,41 @@ handle_mempool_data_map_impl!(PartiallyValidData<V>, <V>);
 
 impl<V> PartiallyValidData<V> {
     /// Wraps raw data.
-    pub const fn from_raw_data(data: HashMap<TxHash, V>, version: Option<EthVersion>) -> Self {
+    pub const fn from_raw_data(data: B256Map<V>, version: Option<EthVersion>) -> Self {
         Self { data, version }
     }
 
     /// Wraps raw data with version [`EthVersion::Eth72`].
-    pub const fn from_raw_data_eth72(data: HashMap<TxHash, V>) -> Self {
+    pub const fn from_raw_data_eth72(data: B256Map<V>) -> Self {
         Self::from_raw_data(data, Some(EthVersion::Eth72))
     }
 
     /// Wraps raw data with version [`EthVersion::Eth68`].
-    pub const fn from_raw_data_eth68(data: HashMap<TxHash, V>) -> Self {
+    pub const fn from_raw_data_eth68(data: B256Map<V>) -> Self {
         Self::from_raw_data(data, Some(EthVersion::Eth68))
     }
 
     /// Wraps raw data with version [`EthVersion::Eth66`].
-    pub const fn from_raw_data_eth66(data: HashMap<TxHash, V>) -> Self {
+    pub const fn from_raw_data_eth66(data: B256Map<V>) -> Self {
         Self::from_raw_data(data, Some(EthVersion::Eth66))
     }
 
     /// Returns a new [`PartiallyValidData`] with empty data from an [`Eth72`](EthVersion::Eth72)
     /// announcement.
     pub fn empty_eth72() -> Self {
-        Self::from_raw_data_eth72(HashMap::default())
+        Self::from_raw_data_eth72(B256Map::default())
     }
 
     /// Returns a new [`PartiallyValidData`] with empty data from an [`Eth68`](EthVersion::Eth68)
     /// announcement.
     pub fn empty_eth68() -> Self {
-        Self::from_raw_data_eth68(HashMap::default())
+        Self::from_raw_data_eth68(B256Map::default())
     }
 
     /// Returns a new [`PartiallyValidData`] with empty data from an [`Eth66`](EthVersion::Eth66)
     /// announcement.
     pub fn empty_eth66() -> Self {
-        Self::from_raw_data_eth66(HashMap::default())
+        Self::from_raw_data_eth66(B256Map::default())
     }
 
     /// Returns the version of the message this data was received in if different versions of the
@@ -1031,7 +1031,7 @@ impl<V> PartiallyValidData<V> {
     }
 
     /// Destructs returning the validated data.
-    pub fn into_data(self) -> HashMap<TxHash, V> {
+    pub fn into_data(self) -> B256Map<V> {
         self.data
     }
 }
@@ -1043,7 +1043,7 @@ pub struct ValidAnnouncementData {
     #[deref]
     #[deref_mut]
     #[into_iterator]
-    data: HashMap<TxHash, Eth68TxMetadata>,
+    data: B256Map<Eth68TxMetadata>,
     version: EthVersion,
 }
 
@@ -1053,7 +1053,7 @@ impl ValidAnnouncementData {
     /// Destructs returning only the valid hashes and the announcement message version. Caution! If
     /// this is [`Eth68`](EthVersion::Eth68) announcement data, this drops the metadata.
     pub fn into_request_hashes(self) -> (RequestTxHashes, EthVersion) {
-        let hashes = self.data.into_keys().collect::<HashSet<_>>();
+        let hashes = self.data.into_keys().collect::<B256Set>();
 
         (RequestTxHashes::new(hashes), self.version)
     }
@@ -1070,7 +1070,7 @@ impl ValidAnnouncementData {
     }
 
     /// Destructs returning the validated data.
-    pub fn into_data(self) -> HashMap<TxHash, Eth68TxMetadata> {
+    pub fn into_data(self) -> B256Map<Eth68TxMetadata> {
         self.data
     }
 }
@@ -1087,21 +1087,21 @@ pub struct RequestTxHashes {
     #[deref]
     #[deref_mut]
     #[into_iterator(owned, ref)]
-    hashes: HashSet<TxHash>,
+    hashes: B256Set,
 }
 
 impl RequestTxHashes {
     /// Returns a new [`RequestTxHashes`] with given capacity for hashes. Caution! Make sure to
-    /// call [`HashSet::shrink_to_fit`] on [`RequestTxHashes`] when full, especially where it will
+    /// call `shrink_to_fit` on [`RequestTxHashes`] when full, especially where it will
     /// be stored in its entirety like in the future waiting for a
     /// [`GetPooledTransactions`](crate::GetPooledTransactions) request to resolve.
     pub fn with_capacity(capacity: usize) -> Self {
-        Self::new(HashSet::with_capacity_and_hasher(capacity, Default::default()))
+        Self::new(B256Set::with_capacity_and_hasher(capacity, Default::default()))
     }
 
     /// Returns a new empty instance.
     fn empty() -> Self {
-        Self::new(HashSet::default())
+        Self::new(B256Set::default())
     }
 
     /// Retains the given number of elements, returning an iterator over the rest.
@@ -1389,7 +1389,7 @@ mod tests {
                 b256!("0x0000000000000000000000000000000000000000000000000000000000000005"),
             ]
             .into_iter()
-            .collect::<HashSet<_>>(),
+            .collect::<B256Set>(),
         );
 
         let rest = hashes.retain_count(3);
@@ -1409,7 +1409,7 @@ mod tests {
                 b256!("0x0000000000000000000000000000000000000000000000000000000000000005"),
             ]
             .into_iter()
-            .collect::<HashSet<_>>(),
+            .collect::<B256Set>(),
         );
 
         let _ = hashes.retain_count(6);
@@ -1428,7 +1428,7 @@ mod tests {
                 b256!("0x0000000000000000000000000000000000000000000000000000000000000005"),
             ]
             .into_iter()
-            .collect::<HashSet<_>>(),
+            .collect::<B256Set>(),
         );
 
         let rest = hashes.retain_count(0);

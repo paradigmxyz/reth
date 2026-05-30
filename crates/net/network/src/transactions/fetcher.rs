@@ -1309,12 +1309,16 @@ struct TxFetcherSearchDurations {
 mod test {
     use super::*;
     use crate::test_utils::transactions::{buffer_hash_to_tx_fetcher, new_mock_session};
-    use alloy_primitives::{hex, map::HashMap, B256};
+    use alloy_primitives::{
+        hex,
+        map::{B256Map, B256Set, HashMap},
+        B256,
+    };
     use alloy_rlp::Decodable;
     use derive_more::IntoIterator;
     use reth_eth_wire_types::EthVersion;
     use reth_ethereum_primitives::TransactionSigned;
-    use std::{collections::HashSet, str::FromStr};
+    use std::str::FromStr;
 
     #[derive(IntoIterator)]
     struct TestValidAnnouncementData(Vec<(TxHash, Option<(u8, usize)>)>);
@@ -1363,10 +1367,10 @@ mod test {
         ];
 
         let expected_request_hashes =
-            [eth68_hashes[0], eth68_hashes[2]].into_iter().collect::<HashSet<_>>();
+            [eth68_hashes[0], eth68_hashes[2]].into_iter().collect::<B256Set>();
 
         let expected_surplus_hashes =
-            [eth68_hashes[1], eth68_hashes[3], eth68_hashes[4]].into_iter().collect::<HashSet<_>>();
+            [eth68_hashes[1], eth68_hashes[3], eth68_hashes[4]].into_iter().collect::<B256Set>();
 
         let mut eth68_hashes_to_request = RequestTxHashes::with_capacity(3);
 
@@ -1383,8 +1387,8 @@ mod test {
         let surplus_eth68_hashes =
             tx_fetcher.pack_request_eth68(&mut eth68_hashes_to_request, valid_announcement_data);
 
-        let eth68_hashes_to_request = eth68_hashes_to_request.into_iter().collect::<HashSet<_>>();
-        let surplus_eth68_hashes = surplus_eth68_hashes.into_iter().collect::<HashSet<_>>();
+        let eth68_hashes_to_request = eth68_hashes_to_request.into_iter().collect::<B256Set>();
+        let surplus_eth68_hashes = surplus_eth68_hashes.into_iter().collect::<B256Set>();
 
         assert_eq!(expected_request_hashes, eth68_hashes_to_request);
         assert_eq!(expected_surplus_hashes, surplus_eth68_hashes);
@@ -1405,8 +1409,8 @@ mod test {
         ];
 
         let expected_request_hashes =
-            [eth68_hashes[0], eth68_hashes[2]].into_iter().collect::<HashSet<_>>();
-        let expected_surplus_hashes = std::iter::once(eth68_hashes[1]).collect::<HashSet<_>>();
+            [eth68_hashes[0], eth68_hashes[2]].into_iter().collect::<B256Set>();
+        let expected_surplus_hashes = std::iter::once(eth68_hashes[1]).collect::<B256Set>();
 
         let mut eth68_hashes_to_request = RequestTxHashes::with_capacity(3);
         let valid_announcement_data = TestValidAnnouncementData(
@@ -1420,8 +1424,8 @@ mod test {
         let surplus_eth68_hashes =
             tx_fetcher.pack_request_eth68(&mut eth68_hashes_to_request, valid_announcement_data);
 
-        let eth68_hashes_to_request = eth68_hashes_to_request.into_iter().collect::<HashSet<_>>();
-        let surplus_eth68_hashes = surplus_eth68_hashes.into_iter().collect::<HashSet<_>>();
+        let eth68_hashes_to_request = eth68_hashes_to_request.into_iter().collect::<B256Set>();
+        let surplus_eth68_hashes = surplus_eth68_hashes.into_iter().collect::<B256Set>();
 
         assert_eq!(expected_request_hashes, eth68_hashes_to_request);
         assert_eq!(expected_surplus_hashes, surplus_eth68_hashes);
@@ -1440,7 +1444,7 @@ mod test {
         let announcement_data = hashes
             .into_iter()
             .map(|hash| (hash, Some((0u8, announced_size))))
-            .collect::<HashMap<_, _>>();
+            .collect::<B256Map<_>>();
         let valid_announcement_data = ValidAnnouncementData::from_partially_valid_data(
             PartiallyValidData::from_raw_data_eth72(announcement_data),
         );
@@ -1533,8 +1537,8 @@ mod test {
         let GetPooledTransactions(requested_hashes) = request;
 
         assert_eq!(
-            requested_hashes.into_iter().collect::<HashSet<_>>(),
-            seen_hashes.into_iter().collect::<HashSet<_>>()
+            requested_hashes.into_iter().collect::<B256Set>(),
+            seen_hashes.into_iter().collect::<B256Set>()
         )
     }
 

@@ -4,21 +4,24 @@ use crate::{
     error::{api::FromEthApiError, FromEvmError, ToRpcError},
     EthApiError,
 };
+use alloy_chains::Chain;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_eips::eip2718::WithEncoded;
 use alloy_evm::{block::TxResult, precompiles::PrecompilesMap};
 use alloy_network::{NetworkTransactionBuilder, TransactionBuilder};
 use alloy_rpc_types_eth::{
-    simulate::{SimCallResult, SimulateError, SimulatedBlock},
+    simulate::{SimBlock, SimCallResult, SimulateError, SimulatedBlock},
     state::StateOverride,
-    BlockTransactionsKind,
+    BlockOverrides, BlockTransactionsKind,
 };
 use jsonrpsee_types::ErrorObject;
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
     Evm, HaltReasonFor,
 };
-use reth_primitives_traits::{BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock};
+use reth_primitives_traits::{
+    BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock, SealedHeader,
+};
 use reth_rpc_convert::{RpcBlock, RpcConvert, RpcTxReq};
 use reth_rpc_server_types::result::rpc_err;
 use reth_storage_api::noop::NoopProvider;
@@ -28,6 +31,10 @@ use revm::{
     primitives::{Address, Bytes, TxKind, U256},
     Database,
 };
+
+/// Fallback seconds added between simulated block timestamps when neither the user nor the chain
+/// hint provides a value.
+const SIMULATE_FALLBACK_TIMESTAMP_INCREMENT: u64 = 12;
 
 /// Error code for execution reverted in `eth_simulateV1`.
 ///
@@ -103,6 +110,9 @@ pub enum EthSimulateError {
     /// Attempted to move a non-precompile address.
     #[error("account {0} is not a precompile")]
     NotAPrecompile(Address),
+    /// Attempted to move a precompile to its own address.
+    #[error("cannot move precompile {0} to itself")]
+    MovePrecompileToSelf(Address),
 }
 
 impl EthSimulateError {
@@ -120,6 +130,7 @@ impl EthSimulateError {
             Self::SenderNotEOA => -38024,
             Self::MaxInitCodeSizeExceeded => -38025,
             Self::TooManyBlocks | Self::GasLimitReached => -38026,
+            Self::MovePrecompileToSelf(_) => -38022,
             Self::NotAPrecompile(_) => -32000,
         }
     }
@@ -129,6 +140,107 @@ impl ToRpcError for EthSimulateError {
     fn to_rpc_error(&self) -> ErrorObject<'static> {
         rpc_err(self.error_code(), self.to_string(), None)
     }
+}
+
+/// Sanitizes and gap-fills the chain of [`SimBlock`]s for `eth_simulateV1`.
+///
+/// Walks the provided block-state calls in order and:
+/// - validates that each block number and timestamp strictly increases relative to the parent and
+///   prior simulated block;
+/// - inserts empty filler blocks for every gap in block numbers, so a request like `[block at
+///   number N + k]` over a parent at `N` expands to `k - 1` empty blocks followed by the requested
+///   one (per the execution-apis spec: "If the block number is increased more than `1` compared to
+///   the previous block, new empty blocks are generated in between.");
+/// - assigns default block numbers (`prev_number + 1`) and timestamps (`prev_timestamp + chain
+///   block time`) when missing, so every returned entry has explicit `number` and `time` overrides.
+///   The block time defaults to [`Chain::average_blocktime_hint`] for the chain id, falling back to
+///   `SIMULATE_FALLBACK_TIMESTAMP_INCREMENT` when no hint is registered. Sub-second chain hints are
+///   rounded up because block timestamps are second-granular;
+/// - enforces the global `max_simulate_blocks` cap on the total number of blocks (including
+///   generated fillers).
+pub fn sanitize_chain<TxReq, H>(
+    blocks: Vec<SimBlock<TxReq>>,
+    parent: &SealedHeader<H>,
+    chain_id: u64,
+    max_simulate_blocks: u64,
+) -> Result<Vec<SimBlock<TxReq>>, EthApiError>
+where
+    H: BlockHeader,
+{
+    let timestamp_increment = Chain::from(chain_id)
+        .average_blocktime_hint()
+        .map(|d| d.as_secs().saturating_add(u64::from(d.subsec_nanos() > 0)))
+        .filter(|&s| s > 0)
+        .unwrap_or(SIMULATE_FALLBACK_TIMESTAMP_INCREMENT);
+
+    let mut out = Vec::with_capacity(blocks.len());
+    let base_number = parent.number();
+    let mut prev_number = base_number;
+    let mut prev_timestamp = parent.timestamp();
+
+    for mut block in blocks {
+        let overrides = block.block_overrides.get_or_insert_with(BlockOverrides::default);
+
+        // Default block number to prev + 1 if not specified.
+        let target_number = if let Some(n) = overrides.number {
+            u64::try_from(n).unwrap_or(u64::MAX)
+        } else {
+            let n = prev_number.saturating_add(1);
+            overrides.number = Some(U256::from(n));
+            n
+        };
+
+        if target_number <= prev_number {
+            return Err(EthApiError::other(EthSimulateError::BlockNumberInvalid {
+                got: target_number,
+                parent: prev_number,
+            }));
+        }
+
+        if target_number.saturating_sub(base_number) > max_simulate_blocks {
+            return Err(EthApiError::other(EthSimulateError::TooManyBlocks));
+        }
+
+        // Insert empty filler blocks for any gap between prev_number and target_number.
+        let gap = target_number - prev_number;
+        if gap > 1 {
+            for i in 1..gap {
+                let filler_number = prev_number + i;
+                let filler_time = prev_timestamp + timestamp_increment;
+                out.push(SimBlock {
+                    block_overrides: Some(BlockOverrides {
+                        number: Some(U256::from(filler_number)),
+                        time: Some(filler_time),
+                        ..Default::default()
+                    }),
+                    state_overrides: None,
+                    calls: Vec::new(),
+                });
+                prev_timestamp = filler_time;
+            }
+        }
+
+        prev_number = target_number;
+        // Default timestamp to prev + increment if not specified, otherwise validate ordering.
+        let block_time = if let Some(t) = overrides.time {
+            if t <= prev_timestamp {
+                return Err(EthApiError::other(EthSimulateError::BlockTimestampInvalid {
+                    got: t,
+                    parent: prev_timestamp,
+                }));
+            }
+            t
+        } else {
+            let t = prev_timestamp + timestamp_increment;
+            overrides.time = Some(t);
+            t
+        };
+        prev_timestamp = block_time;
+
+        out.push(block);
+    }
+
+    Ok(out)
 }
 
 /// Applies precompile move overrides from state overrides to the EVM's precompiles map.
@@ -147,6 +259,15 @@ pub fn apply_precompile_overrides(
         })
         .collect();
 
+    for (source, dest) in &moves {
+        if source == dest {
+            if precompiles.get(source).is_none() {
+                return Err(EthSimulateError::NotAPrecompile(*source))
+            }
+            return Err(EthSimulateError::MovePrecompileToSelf(*source))
+        }
+    }
+
     precompiles.move_precompiles(moves).map_err(
         |alloy_evm::precompiles::MovePrecompileError::NotAPrecompile(addr)| {
             EthSimulateError::NotAPrecompile(addr)
@@ -161,12 +282,17 @@ pub fn apply_precompile_overrides(
 ///
 /// Returns all executed transactions and the result of the execution.
 ///
+/// For each call without an explicit `gas` field, the remaining block gas is used as the default.
+/// The RPC gas cap is tracked as a request-wide remaining budget and caps each call before
+/// execution. This matches the spec rule `"gasLimit: blockGasLimit - soFarUsedGasInBlock"` and
+/// geth's per-call `sanitizeCall` behavior.
+///
 /// [`TransactionRequest`]: alloy_rpc_types_eth::TransactionRequest
 #[expect(clippy::type_complexity)]
 pub fn execute_transactions<S, T>(
     mut builder: S,
     calls: Vec<RpcTxReq<T::Network>>,
-    default_gas_limit: u64,
+    remaining_call_gas_limit: &mut Option<u64>,
     chain_id: u64,
     converter: &T,
 ) -> Result<
@@ -183,7 +309,48 @@ where
     builder.apply_pre_execution_changes()?;
 
     let mut results = Vec::with_capacity(calls.len());
-    for call in calls {
+    let mut cumulative_tx_gas_used: u64 = 0;
+    let mut block_regular_gas_used: u64 = 0;
+    let mut block_state_gas_used: u64 = 0;
+    let block_gas_limit = builder.evm().block().gas_limit();
+    let is_amsterdam = builder.evm().cfg_env().enable_amsterdam_eip8037;
+    let tx_gas_limit_cap = builder.evm().cfg_env().tx_gas_limit_cap.unwrap_or(u64::MAX);
+    for mut call in calls {
+        let block_gas_remaining = if is_amsterdam {
+            block_gas_limit
+                .saturating_sub(block_regular_gas_used)
+                .min(block_gas_limit.saturating_sub(block_state_gas_used))
+        } else {
+            block_gas_limit.saturating_sub(cumulative_tx_gas_used)
+        };
+        let mut default_gas_limit = block_gas_remaining;
+
+        if let Some(gas_limit) = call.as_ref().gas_limit() {
+            let exceeds_gas_limit = if is_amsterdam {
+                let regular_available_gas = block_gas_limit.saturating_sub(block_regular_gas_used);
+                let state_available_gas = block_gas_limit.saturating_sub(block_state_gas_used);
+                let regular_tx_gas_limit = gas_limit.min(tx_gas_limit_cap);
+
+                regular_tx_gas_limit > regular_available_gas || gas_limit > state_available_gas
+            } else {
+                gas_limit > block_gas_remaining
+            };
+
+            if exceeds_gas_limit {
+                return Err(EthApiError::other(EthSimulateError::BlockGasLimitExceeded))
+            }
+        }
+
+        if let Some(remaining_call_gas_limit) = *remaining_call_gas_limit {
+            if let Some(gas_limit) = call.as_ref().gas_limit() {
+                if gas_limit > remaining_call_gas_limit {
+                    call.as_mut().set_gas_limit(remaining_call_gas_limit);
+                }
+            } else {
+                default_gas_limit = default_gas_limit.min(remaining_call_gas_limit);
+            }
+        }
+
         // Resolve transaction, populate missing fields and enforce calls
         // correctness.
         let tx = resolve_transaction(
@@ -198,9 +365,23 @@ where
         // The effect for a layer-2 execution client is that it does not charge L1 cost.
         let tx = WithEncoded::new(Default::default(), tx);
 
-        builder.execute_transaction_with_result_closure(tx, |result| {
+        let mut tx_regular_gas_used = 0;
+        let gas_output = builder.execute_transaction_with_result_closure(tx, |result| {
+            tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
             results.push(result.result().result.clone())
         })?;
+
+        let gas_used = gas_output.tx_gas_used();
+        if let Some(remaining_call_gas_limit) = remaining_call_gas_limit.as_mut() {
+            if gas_used > *remaining_call_gas_limit {
+                return Err(EthApiError::other(EthSimulateError::GasLimitReached))
+            }
+            *remaining_call_gas_limit -= gas_used;
+        }
+
+        cumulative_tx_gas_used = cumulative_tx_gas_used.saturating_add(gas_used);
+        block_regular_gas_used = block_regular_gas_used.saturating_add(tx_regular_gas_used);
+        block_state_gas_used = block_state_gas_used.saturating_add(gas_output.state_gas_used());
     }
 
     // Pass noop provider to skip state root calculations.
@@ -314,7 +495,7 @@ where
                         ..SimulateError::invalid_params()
                     }),
                     gas_used: gas.tx_gas_used(),
-                    max_used_gas: Some(gas.total_gas_spent()),
+                    max_used_gas: Some(gas.total_gas_spent().max(gas.floor_gas())),
                     logs: Vec::new(),
                     status: false,
                 }
@@ -322,14 +503,14 @@ where
             ExecutionResult::Revert { output, gas, .. } => {
                 let error = Err::from_revert(output.clone());
                 SimCallResult {
-                    return_data: output,
+                    return_data: Bytes::new(),
                     error: Some(SimulateError {
                         message: error.to_string(),
                         code: SIMULATE_REVERT_CODE,
-                        ..SimulateError::invalid_params()
+                        data: Some(output),
                     }),
                     gas_used: gas.tx_gas_used(),
-                    max_used_gas: Some(gas.total_gas_spent()),
+                    max_used_gas: Some(gas.total_gas_spent().max(gas.floor_gas())),
                     status: false,
                     logs: Vec::new(),
                 }
@@ -338,7 +519,7 @@ where
                 return_data: output.into_data(),
                 error: None,
                 gas_used: gas.tx_gas_used(),
-                max_used_gas: Some(gas.total_gas_spent()),
+                max_used_gas: Some(gas.total_gas_spent().max(gas.floor_gas())),
                 logs: logs
                     .into_iter()
                     .map(|log| {
@@ -368,4 +549,178 @@ where
         |header, size| converter.convert_header(header, size),
     )?;
     Ok(SimulatedBlock { inner: block, calls })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{apply_precompile_overrides, sanitize_chain, EthSimulateError};
+    use crate::EthApiError;
+    use alloy_chains::Chain;
+    use alloy_consensus::Header;
+    use alloy_evm::precompiles::PrecompilesMap;
+    use alloy_primitives::{address, U256};
+    use alloy_rpc_types_eth::{
+        simulate::SimBlock,
+        state::{AccountOverride, StateOverride},
+        BlockOverrides, TransactionRequest,
+    };
+    use reth_primitives_traits::SealedHeader;
+    use revm::precompile::Precompiles;
+
+    fn parent_at(number: u64, timestamp: u64) -> SealedHeader<Header> {
+        SealedHeader::seal_slow(Header { number, timestamp, ..Default::default() })
+    }
+
+    fn block_with_number(number: u64) -> SimBlock<TransactionRequest> {
+        SimBlock {
+            block_overrides: Some(BlockOverrides {
+                number: Some(U256::from(number)),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn precompile_self_move_requires_existing_precompile() {
+        let address = address!("c100000000000000000000000000000000000000");
+        let mut state_overrides = StateOverride::default();
+        state_overrides.insert(
+            address,
+            AccountOverride { move_precompile_to: Some(address), ..Default::default() },
+        );
+        let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+
+        let err = apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap_err();
+
+        assert!(matches!(err, EthSimulateError::NotAPrecompile(addr) if addr == address));
+    }
+
+    #[test]
+    fn precompile_self_move_errors_for_existing_precompile() {
+        let address = address!("0000000000000000000000000000000000000001");
+        let mut state_overrides = StateOverride::default();
+        state_overrides.insert(
+            address,
+            AccountOverride { move_precompile_to: Some(address), ..Default::default() },
+        );
+        let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+
+        let err = apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap_err();
+
+        assert!(matches!(err, EthSimulateError::MovePrecompileToSelf(addr) if addr == address));
+    }
+
+    #[test]
+    fn moved_precompile_is_callable() {
+        let source = address!("0000000000000000000000000000000000000001");
+        let dest = address!("0000000000000000000000000000000000123456");
+        let mut state_overrides = StateOverride::default();
+        state_overrides.insert(
+            source,
+            AccountOverride { move_precompile_to: Some(dest), ..Default::default() },
+        );
+        let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+
+        apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap();
+
+        assert!(precompiles.get(&source).is_none());
+        assert!(precompiles.get(&dest).is_some());
+    }
+
+    #[test]
+    fn sanitize_chain_fills_gaps_with_empty_blocks() {
+        // parent at block 5; user requests one block at 8 — sanitize should insert fillers at 6
+        // and 7 before the requested block.
+        let parent = parent_at(5, 100);
+        let blocks = vec![block_with_number(8)];
+
+        let out = sanitize_chain(blocks, &parent, Chain::mainnet().id(), 256).unwrap();
+        assert_eq!(out.len(), 3);
+
+        let numbers: Vec<u64> = out
+            .iter()
+            .map(|b| b.block_overrides.as_ref().unwrap().number.unwrap().try_into().unwrap())
+            .collect();
+        assert_eq!(numbers, vec![6, 7, 8]);
+
+        assert!(out[0].calls.is_empty());
+        assert!(out[1].calls.is_empty());
+
+        // Mainnet hint is 12s, so timestamps should auto-increment from 100 by 12.
+        let times: Vec<u64> =
+            out.iter().map(|b| b.block_overrides.as_ref().unwrap().time.unwrap()).collect();
+        assert_eq!(times, vec![112, 124, 136]);
+    }
+
+    #[test]
+    fn sanitize_chain_defaults_missing_number_and_time() {
+        let parent = parent_at(10, 1000);
+        let blocks: Vec<SimBlock<TransactionRequest>> =
+            vec![SimBlock::default(), SimBlock::default()];
+
+        let out = sanitize_chain(blocks, &parent, Chain::mainnet().id(), 256).unwrap();
+        assert_eq!(out.len(), 2);
+
+        let overrides = out[0].block_overrides.as_ref().unwrap();
+        assert_eq!(overrides.number.unwrap(), U256::from(11));
+        assert_eq!(overrides.time, Some(1012));
+
+        let overrides = out[1].block_overrides.as_ref().unwrap();
+        assert_eq!(overrides.number.unwrap(), U256::from(12));
+        assert_eq!(overrides.time, Some(1024));
+    }
+
+    #[test]
+    fn sanitize_chain_uses_chain_blocktime_hint() {
+        // Optimism has a 2s blocktime hint; filler/auto timestamps should reflect that.
+        let parent = parent_at(0, 0);
+        let blocks = vec![block_with_number(3)];
+
+        let out = sanitize_chain(blocks, &parent, Chain::optimism_mainnet().id(), 256).unwrap();
+        let times: Vec<u64> =
+            out.iter().map(|b| b.block_overrides.as_ref().unwrap().time.unwrap()).collect();
+        assert_eq!(times, vec![2, 4, 6]);
+    }
+
+    #[test]
+    fn sanitize_chain_rounds_subsecond_blocktime_hint_up() {
+        // Arbitrum has a 260ms blocktime hint. Simulated timestamps are second-granular, so this
+        // rounds up to a 1s increment instead of falling back to the default.
+        let parent = parent_at(0, 0);
+        let blocks = vec![block_with_number(3)];
+
+        let out = sanitize_chain(blocks, &parent, Chain::arbitrum_mainnet().id(), 256).unwrap();
+        let times: Vec<u64> =
+            out.iter().map(|b| b.block_overrides.as_ref().unwrap().time.unwrap()).collect();
+        assert_eq!(times, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn sanitize_chain_falls_back_when_chain_has_no_hint() {
+        // An unknown chain id has no blocktime hint — fall back to the 12s default.
+        let parent = parent_at(0, 0);
+        let blocks = vec![block_with_number(2)];
+
+        let out = sanitize_chain(blocks, &parent, Chain::from_id(123_456_789).id(), 256).unwrap();
+        let times: Vec<u64> =
+            out.iter().map(|b| b.block_overrides.as_ref().unwrap().time.unwrap()).collect();
+        assert_eq!(times, vec![12, 24]);
+    }
+
+    #[test]
+    fn sanitize_chain_rejects_non_increasing_number() {
+        let parent = parent_at(10, 100);
+        let err = sanitize_chain(vec![block_with_number(10)], &parent, Chain::mainnet().id(), 256)
+            .unwrap_err();
+        assert!(matches!(err, EthApiError::Other(_)));
+    }
+
+    #[test]
+    fn sanitize_chain_enforces_max_blocks() {
+        let parent = parent_at(0, 0);
+        let err = sanitize_chain(vec![block_with_number(257)], &parent, Chain::mainnet().id(), 256)
+            .unwrap_err();
+        assert!(matches!(err, EthApiError::Other(_)));
+    }
 }
