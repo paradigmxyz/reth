@@ -32,7 +32,7 @@ use reth_trie_sparse::{
     SparseTrie,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
-use tracing::{debug, debug_span, error, instrument, trace_span};
+use tracing::{debug_span, error, instrument, trace, trace_span};
 
 /// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
 const MAX_PENDING_UPDATES: usize = 100;
@@ -373,7 +373,7 @@ where
 
         self.metrics.sparse_trie_idle_time_seconds.record(total_idle_time.as_secs_f64());
 
-        debug!(target: "engine::root", "All proofs processed, ending calculation");
+        trace!(target: "engine::root", "All proofs processed, ending calculation");
 
         let start = Instant::now();
         let (state_root, trie_updates) = match self.trie.root_with_updates() {
