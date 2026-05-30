@@ -187,10 +187,16 @@ where
 
     let remaining = &entries[*position..];
     if remaining.len() >= OVERLAY_CURSOR_PARTITION_POINT_MIN_LEN {
-        *position += remaining.partition_point(|(entry_key, _)| entry_key < key);
-        return entries
-            .get(*position)
-            .and_then(|(entry_key, _)| (entry_key == key).then_some(*position))
+        return match remaining.binary_search_by(|(entry_key, _)| entry_key.cmp(key)) {
+            Ok(idx) => {
+                *position += idx;
+                Some(*position)
+            }
+            Err(idx) => {
+                *position += idx;
+                None
+            }
+        }
     }
 
     for (advance, (entry_key, _)) in remaining.iter().enumerate() {
