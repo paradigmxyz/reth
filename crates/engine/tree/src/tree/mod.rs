@@ -1668,7 +1668,7 @@ where
                                 tx,
                                 enqueued_at,
                             } => {
-                                debug!(
+                                trace!(
                                     target: "engine::tree",
                                     wait_for_persistence,
                                     wait_for_caches,

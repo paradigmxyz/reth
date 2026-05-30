@@ -201,7 +201,7 @@ where
     Evm: ConfigureEvm,
 {
     fn wait_for_caches(&self) -> CacheWaitDurations {
-        debug!(target: "engine::tree::payload_processor", "Waiting for execution cache and sparse trie locks");
+        trace!(target: "engine::tree::payload_processor", "Waiting for execution cache and sparse trie locks");
 
         // Wait for both caches in parallel using std threads
         let execution_cache = self.execution_cache.clone();
@@ -223,7 +223,7 @@ where
         let sparse_trie_duration =
             sparse_trie_rx.recv().expect("sparse trie wait task failed to send result");
 
-        debug!(
+        trace!(
             target: "engine::tree::payload_processor",
             ?execution_cache_duration,
             ?sparse_trie_duration,
@@ -564,10 +564,10 @@ where
     ///
     /// If the given hash is different then what is recently cached, then this will create a new
     /// instance.
-    #[instrument(level = "debug", target = "engine::caching", skip(self))]
+    #[instrument(level = "trace", target = "engine::caching", skip(self))]
     pub fn cache_for(&self, parent_hash: B256) -> SavedCache {
         if let Some(cache) = self.execution_cache.get_cache_for(parent_hash) {
-            debug!("reusing execution cache");
+            trace!("reusing execution cache");
             cache
         } else {
             debug!("creating new execution cache on cache miss");

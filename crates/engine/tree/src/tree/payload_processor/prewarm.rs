@@ -471,7 +471,7 @@ where
             match event {
                 PrewarmTaskEvent::TerminateTransactionExecution => {
                     // stop tx processing
-                    debug!(target: "engine::tree::prewarm", "Terminating prewarm execution");
+                    trace!(target: "engine::tree::prewarm", "Terminating prewarm execution");
                     self.ctx.stop();
                 }
                 PrewarmTaskEvent::Terminate { execution_outcome, valid_block_rx } => {
@@ -499,7 +499,7 @@ where
             }
         }
 
-        debug!(target: "engine::tree::payload_processor::prewarm", "Completed prewarm execution");
+        trace!(target: "engine::tree::payload_processor::prewarm", "Completed prewarm execution");
 
         // save caches and finish using the shared ExecutionOutcome
         if let Some(Some((execution_outcome, valid_block_rx))) = final_execution_outcome {
