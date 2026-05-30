@@ -1,6 +1,6 @@
 use std::{fmt, slice, sync::Arc};
 
-const OVERLAY_CURSOR_PARTITION_POINT_MIN_LEN: usize = 128;
+const OVERLAY_CURSOR_PARTITION_POINT_MIN_LEN: usize = 64;
 
 #[derive(Debug)]
 pub(crate) enum DbCursorState<K, V> {
