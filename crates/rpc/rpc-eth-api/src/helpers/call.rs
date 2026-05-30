@@ -120,7 +120,12 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 let mut remaining_call_gas_limit = (call_gas_limit > 0).then_some(call_gas_limit);
 
                 for block in block_state_calls {
-                    let attributes = this.next_env_attributes(&parent)?;
+                    let SimBlock { block_overrides, state_overrides, calls } = block;
+
+                    let attributes = this
+                        .pending_env_builder()
+                        .pending_env_attributes(&parent, block_overrides.as_ref())
+                        .map_err(Self::Error::from_eth_err)?;
 
                     let mut evm_env = this
                         .evm_config()
@@ -138,8 +143,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
                         evm_env.block_env.inner_mut().basefee = 0;
                     }
-
-                    let SimBlock { block_overrides, state_overrides, calls } = block;
 
                     // Set prevrandao to zero for simulated blocks by default,
                     // matching spec behavior where MixDigest is zero-initialized.
