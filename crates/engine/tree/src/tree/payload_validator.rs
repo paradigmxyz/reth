@@ -1094,10 +1094,17 @@ where
 
         // Finish execution and get the result
         let post_exec_start = Instant::now();
-        let (_evm, result) = debug_span!(target: "engine::tree", "BlockExecutor::finish")
+        let result = debug_span!(target: "engine::tree", "BlockExecutor::finish")
             .in_scope(|| executor.finish())
-            .map(|(evm, result)| (evm.into_db(), result))?;
+            .map(|(evm, result)| {
+                let _ = evm.into_db();
+                result
+            })?;
         self.metrics.record_post_execution(post_exec_start.elapsed());
+
+        // Post-execution hooks have run, so the state-root task can finish while we merge and
+        // package the execution output.
+        db.set_state_hook(None);
 
         // Merge transitions into bundle state
         debug_span!(target: "engine::tree", "merge_transitions")
