@@ -203,13 +203,18 @@ where
     /// Performs a k-way merge over the positioned overlay cursors and the DB cursor.
     fn choose_next_entry(&mut self) -> Result<Option<(B256, V::NonZero)>, DatabaseError> {
         loop {
-            let mem_key = self.post_state_cursor.min_current_key();
-            let db_key = self.db_cursor_state.entry().map(|(key, _)| *key);
-            let Some(next_key) = mem_key.into_iter().chain(db_key).min() else {
-                return Ok(None);
+            let mem_entry = self.post_state_cursor.min_current_entry();
+            let db_entry = self.db_cursor_state.entry();
+            let next_key = match (mem_entry, db_entry) {
+                (Some((mem_key, _)), Some((db_key, _))) => mem_key.min(*db_key),
+                (Some((mem_key, _)), None) => mem_key,
+                (None, Some((db_key, _))) => *db_key,
+                (None, None) => return Ok(None),
             };
 
-            if let Some(mem_value) = self.post_state_cursor.highest_priority_value_at(&next_key) {
+            if let Some((mem_key, mem_value)) = mem_entry &&
+                mem_key == next_key
+            {
                 if let Some(value) = mem_value {
                     return Ok(Some((next_key, value)))
                 }
@@ -546,12 +551,8 @@ where
         self.cursor.first_after(key);
     }
 
-    fn min_current_key(&self) -> Option<B256> {
-        self.cursor.min_current_key()
-    }
-
-    fn highest_priority_value_at(&self, key: &B256) -> Option<Option<V::NonZero>> {
-        self.cursor.highest_priority_value_at(key).map(|value| (*value).into_option())
+    fn min_current_entry(&self) -> Option<(B256, Option<V::NonZero>)> {
+        self.cursor.min_current_entry().map(|(key, value)| (key, (*value).into_option()))
     }
 
     fn advance_key(&mut self, key: &B256) {

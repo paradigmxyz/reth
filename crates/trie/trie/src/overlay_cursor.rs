@@ -134,13 +134,6 @@ where
     }
 
     #[inline(always)]
-    pub(crate) fn highest_priority_value_at(&self, key: &K) -> Option<&V> {
-        self.cursors.iter().find_map(|cursor| {
-            cursor.current().and_then(|(entry_key, value)| (entry_key == key).then_some(value))
-        })
-    }
-
-    #[inline(always)]
     pub(crate) fn advance_key(&mut self, key: &K) {
         for cursor in &mut self.cursors {
             if cursor.current().is_some_and(|(entry_key, _)| entry_key == key) {
@@ -154,9 +147,23 @@ impl<K, V> PositionedOverlayCursor<'_, K, V>
 where
     K: Copy + Ord,
 {
-    #[inline(always)]
+    #[cfg(test)]
     pub(crate) fn min_current_key(&self) -> Option<K> {
         self.cursors.iter().filter_map(|cursor| cursor.current().map(|(key, _)| *key)).min()
+    }
+
+    #[inline(always)]
+    pub(crate) fn min_current_entry(&self) -> Option<(K, &V)> {
+        let mut min_entry = None;
+        for cursor in &self.cursors {
+            if let Some((key, value)) = cursor.current() {
+                match min_entry {
+                    Some((min_key, _)) if key >= &min_key => {}
+                    _ => min_entry = Some((*key, value)),
+                }
+            }
+        }
+        min_entry
     }
 }
 

@@ -155,15 +155,19 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
     /// Performs a k-way merge over the positioned overlay cursors and the DB cursor.
     fn choose_next_entry(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         loop {
-            let mem_key = self.in_memory_cursor.min_current_key();
-            let db_key = self.db_cursor_state.entry().map(|(key, _)| *key);
-            let Some(next_key) = mem_key.into_iter().chain(db_key).min() else {
-                return Ok(None);
+            let mem_entry = self.in_memory_cursor.min_current_entry();
+            let db_entry = self.db_cursor_state.entry();
+            let next_key = match (mem_entry, db_entry) {
+                (Some((mem_key, _)), Some((db_key, _))) => mem_key.min(*db_key),
+                (Some((mem_key, _)), None) => mem_key,
+                (None, Some((db_key, _))) => *db_key,
+                (None, None) => return Ok(None),
             };
 
-            if let Some(mem_value) =
-                self.in_memory_cursor.highest_priority_value_at(&next_key).cloned()
+            if let Some((mem_key, mem_value)) = mem_entry &&
+                mem_key == next_key
             {
+                let mem_value = mem_value.clone();
                 if let Some(node) = mem_value {
                     return Ok(Some((next_key, node)))
                 }
