@@ -871,23 +871,27 @@ impl ExecutionCache {
     #[instrument(level = "debug", target = "engine::caching", skip_all)]
     #[expect(clippy::result_unit_err)]
     pub fn insert_state(&self, state_updates: &BundleState) -> Result<(), ()> {
-        let _enter =
+        let _enter = tracing::enabled!(target: "engine::tree", tracing::Level::DEBUG).then(|| {
             debug_span!(target: "engine::tree", "contracts", len = state_updates.contracts.len())
-                .entered();
+                .entered()
+        });
         // Insert bytecodes
         for (code_hash, bytecode) in &state_updates.contracts {
             self.insert_code(*code_hash, Some(Bytecode(bytecode.clone())));
         }
         drop(_enter);
 
-        let _enter = debug_span!(
-            target: "engine::tree",
-            "accounts",
-            accounts = state_updates.state.len(),
-            storages =
-                state_updates.state.values().map(|account| account.storage.len()).sum::<usize>()
-        )
-        .entered();
+        let _enter = tracing::enabled!(target: "engine::tree", tracing::Level::DEBUG).then(|| {
+            let storages =
+                state_updates.state.values().map(|account| account.storage.len()).sum::<usize>();
+            debug_span!(
+                target: "engine::tree",
+                "accounts",
+                accounts = state_updates.state.len(),
+                storages
+            )
+            .entered()
+        });
         for (addr, account) in &state_updates.state {
             // If the account was not modified, as in not changed and not destroyed, then we have
             // nothing to do w.r.t. this particular account and can move on
