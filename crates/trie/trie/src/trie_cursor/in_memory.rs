@@ -300,14 +300,16 @@ impl<C: TrieStorageCursor> TrieStorageCursor for InMemoryTrieCursor<'_, C> {
 pub struct TrieUpdatesOverlay {
     account_overlay: Arc<Vec<TrieOverlayLayer>>,
     storage_overlays: Arc<B256Map<TrieStorageOverlay>>,
+    layer_capacity: usize,
 }
 
 impl TrieUpdatesOverlay {
     /// Create a new indexed trie updates overlay stack.
     pub fn new(updates: Vec<Arc<TrieUpdatesSorted>>) -> Self {
+        let layer_capacity = updates.len();
         let account_overlay = Self::build_account_overlay(&updates);
         let storage_overlays = Self::build_storage_overlays(&updates);
-        Self { account_overlay, storage_overlays }
+        Self { account_overlay, storage_overlays, layer_capacity }
     }
 
     /// Returns `true` if the overlay does not contain any trie updates.
@@ -354,12 +356,12 @@ impl TrieUpdatesOverlay {
     }
 
     fn account_overlay(&self) -> OverlayCursor<'_> {
-        OverlayCursor::new(self.account_overlay.as_slice())
+        OverlayCursor::with_capacity(self.account_overlay.as_slice(), self.layer_capacity)
     }
 
     fn storage_overlay(&self, hashed_address: B256) -> (OverlayCursor<'_>, bool) {
         let (layers, db_wiped) = self.storage_overlay_layers(hashed_address);
-        (OverlayCursor::new(layers), db_wiped)
+        (OverlayCursor::with_capacity(layers, self.layer_capacity), db_wiped)
     }
 
     fn storage_overlay_layers(&self, hashed_address: B256) -> (&[TrieOverlayLayer], bool) {
@@ -383,8 +385,7 @@ struct TrieStorageOverlay {
     db_wiped: bool,
 }
 
-type OverlayCursor<'a> =
-    PositionedOverlayCursor<'a, TrieUpdatesSorted, Nibbles, Option<BranchNodeCompact>>;
+type OverlayCursor<'a> = PositionedOverlayCursor<'a, Nibbles, Option<BranchNodeCompact>>;
 type TrieOverlayLayer = OverlayLayer<TrieUpdatesSorted, Nibbles, Option<BranchNodeCompact>>;
 
 #[cfg(test)]

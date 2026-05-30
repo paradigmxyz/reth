@@ -43,55 +43,59 @@ impl<K: PartialEq, V> DbCursorState<K, V> {
 }
 
 #[derive(Debug)]
-pub(crate) struct PositionedOverlayCursor<'a, O, K, V> {
-    layers: &'a [OverlayLayer<O, K, V>],
-    positions: Vec<usize>,
+pub(crate) struct PositionedOverlayCursor<'a, K, V> {
+    cursors: Vec<PositionedOverlayLayerCursor<'a, K, V>>,
 }
 
-impl<O, K, V> Default for PositionedOverlayCursor<'_, O, K, V> {
+impl<K, V> Default for PositionedOverlayCursor<'_, K, V> {
     fn default() -> Self {
-        Self::new(&[])
+        Self { cursors: Vec::new() }
     }
 }
 
-impl<'a, O, K, V> PositionedOverlayCursor<'a, O, K, V> {
-    pub(crate) fn new(layers: &'a [OverlayLayer<O, K, V>]) -> Self {
-        Self { layers, positions: vec![0; layers.len()] }
+impl<'a, K, V> PositionedOverlayCursor<'a, K, V> {
+    pub(crate) fn new<O>(layers: &'a [OverlayLayer<O, K, V>]) -> Self {
+        Self::with_capacity(layers, layers.len())
+    }
+
+    pub(crate) fn with_capacity<O>(layers: &'a [OverlayLayer<O, K, V>], capacity: usize) -> Self {
+        let mut this = Self { cursors: Vec::with_capacity(capacity.max(layers.len())) };
+        this.retarget(layers);
+        this
     }
 
     pub(crate) fn reset(&mut self) {
-        self.positions.fill(0);
+        for cursor in &mut self.cursors {
+            cursor.reset();
+        }
     }
 
-    pub(crate) fn retarget(&mut self, layers: &'a [OverlayLayer<O, K, V>]) {
-        self.layers = layers;
-        self.positions.clear();
-        self.positions.resize(layers.len(), 0);
+    pub(crate) fn retarget<O>(&mut self, layers: &'a [OverlayLayer<O, K, V>]) {
+        debug_assert!(self.cursors.capacity() >= layers.len());
+        self.cursors.clear();
+        self.cursors.extend(layers.iter().map(PositionedOverlayLayerCursor::new));
     }
 }
 
-impl<O, K, V> PositionedOverlayCursor<'_, O, K, V>
+impl<K, V> PositionedOverlayCursor<'_, K, V>
 where
     K: Ord,
 {
     #[inline(always)]
     pub(crate) fn seek_from(&mut self, start: usize, key: &K) {
-        for layer_idx in start..self.layers.len() {
-            let entries = self.layers[layer_idx].entries();
-            let _ = seek_overlay_entries(entries, &mut self.positions[layer_idx], key);
+        for cursor in self.cursors.iter_mut().skip(start) {
+            let _ = cursor.seek(key);
         }
     }
 
     #[inline(always)]
     pub(crate) fn seek_until_exact(&mut self, key: &K) -> Option<(usize, &V)> {
-        for layer_idx in 0..self.layers.len() {
-            let entries = self.layers[layer_idx].entries();
-            let Some(idx) =
-                seek_overlay_entries_exact(entries, &mut self.positions[layer_idx], key)
-            else {
-                continue;
-            };
-            return Some((layer_idx, &entries[idx].1))
+        for (layer_idx, cursor) in self.cursors.iter_mut().enumerate() {
+            if let Some((entry_key, value)) = cursor.seek(key) &&
+                entry_key == key
+            {
+                return Some((layer_idx, value))
+            }
         }
 
         None
@@ -99,117 +103,110 @@ where
 
     #[inline(always)]
     pub(crate) fn first_after(&mut self, key: &K) {
-        for layer_idx in 0..self.layers.len() {
-            let entries = self.layers[layer_idx].entries();
-            let _ = seek_overlay_entries_after(entries, &mut self.positions[layer_idx], key);
+        for cursor in &mut self.cursors {
+            let _ = cursor.first_after(key);
         }
     }
 
     #[inline(always)]
     pub(crate) fn highest_priority_value_at(&self, key: &K) -> Option<&V> {
-        self.layers.iter().zip(&self.positions).find_map(|(layer, position)| {
-            let entries = layer.entries();
-            entries
-                .get(*position)
-                .and_then(|(entry_key, value)| (entry_key == key).then_some(value))
+        self.cursors.iter().find_map(|cursor| {
+            cursor.current().and_then(|(entry_key, value)| (entry_key == key).then_some(value))
         })
     }
 
     #[inline(always)]
     pub(crate) fn advance_key(&mut self, key: &K) {
-        for layer_idx in 0..self.layers.len() {
-            let entries = self.layers[layer_idx].entries();
-            if entries.get(self.positions[layer_idx]).is_some_and(|(entry_key, _)| entry_key == key)
-            {
-                let _ = seek_overlay_entries_after(entries, &mut self.positions[layer_idx], key);
+        for cursor in &mut self.cursors {
+            if cursor.current().is_some_and(|(entry_key, _)| entry_key == key) {
+                let _ = cursor.first_after(key);
             }
         }
     }
 }
 
-impl<O, K, V> PositionedOverlayCursor<'_, O, K, V>
+impl<K, V> PositionedOverlayCursor<'_, K, V>
 where
     K: Copy + Ord,
 {
     #[inline(always)]
     pub(crate) fn min_current_key(&self) -> Option<K> {
-        self.layers
-            .iter()
-            .zip(&self.positions)
-            .filter_map(|(layer, position)| layer.entries().get(*position).map(|(key, _)| *key))
-            .min()
+        self.cursors.iter().filter_map(|cursor| cursor.current().map(|(key, _)| *key)).min()
     }
 }
 
-#[inline(always)]
-fn seek_overlay_entries<K, V>(entries: &[(K, V)], position: &mut usize, key: &K) -> Option<usize>
-where
-    K: Ord,
-{
-    if let Some((entry_key, _)) = entries.get(*position) {
-        match entry_key.cmp(key) {
-            std::cmp::Ordering::Less => *position += 1,
-            std::cmp::Ordering::Equal | std::cmp::Ordering::Greater => return Some(*position),
-        }
-    }
-
-    let remaining = &entries[*position..];
-    let advance = if remaining.len() >= OVERLAY_CURSOR_PARTITION_POINT_MIN_LEN {
-        remaining.partition_point(|(entry_key, _)| entry_key < key)
-    } else {
-        let mut advance = 0;
-        while advance < remaining.len() && &remaining[advance].0 < key {
-            advance += 1;
-        }
-        advance
-    };
-
-    *position += advance;
-    (*position < entries.len()).then_some(*position)
+#[derive(Debug)]
+struct PositionedOverlayLayerCursor<'a, K, V> {
+    entries: &'a [(K, V)],
+    position: usize,
 }
 
-#[inline(always)]
-fn seek_overlay_entries_exact<K, V>(
-    entries: &[(K, V)],
-    position: &mut usize,
-    key: &K,
-) -> Option<usize>
-where
-    K: Ord,
-{
-    let idx = seek_overlay_entries(entries, position, key)?;
-    (&entries[idx].0 == key).then_some(idx)
-}
-
-#[inline(always)]
-fn seek_overlay_entries_after<K, V>(
-    entries: &[(K, V)],
-    position: &mut usize,
-    key: &K,
-) -> Option<usize>
-where
-    K: Ord,
-{
-    if let Some((entry_key, _)) = entries.get(*position) {
-        match entry_key.cmp(key) {
-            std::cmp::Ordering::Greater => return Some(*position),
-            std::cmp::Ordering::Less | std::cmp::Ordering::Equal => *position += 1,
-        }
+impl<'a, K, V> PositionedOverlayLayerCursor<'a, K, V> {
+    fn new<O>(layer: &'a OverlayLayer<O, K, V>) -> Self {
+        Self { entries: layer.entries(), position: 0 }
     }
 
-    let remaining = &entries[*position..];
-    let advance = if remaining.len() >= OVERLAY_CURSOR_PARTITION_POINT_MIN_LEN {
-        remaining.partition_point(|(entry_key, _)| entry_key <= key)
-    } else {
-        let mut advance = 0;
-        while advance < remaining.len() && &remaining[advance].0 <= key {
-            advance += 1;
-        }
-        advance
-    };
+    #[inline(always)]
+    fn current(&self) -> Option<&'a (K, V)> {
+        self.entries.get(self.position)
+    }
 
-    *position += advance;
-    (*position < entries.len()).then_some(*position)
+    const fn reset(&mut self) {
+        self.position = 0;
+    }
+}
+
+impl<'a, K, V> PositionedOverlayLayerCursor<'a, K, V>
+where
+    K: Ord,
+{
+    #[inline(always)]
+    fn seek(&mut self, key: &K) -> Option<&'a (K, V)> {
+        if let Some((entry_key, _)) = self.current() {
+            match entry_key.cmp(key) {
+                std::cmp::Ordering::Less => self.position += 1,
+                std::cmp::Ordering::Equal | std::cmp::Ordering::Greater => return self.current(),
+            }
+        }
+
+        let remaining = &self.entries[self.position..];
+        let advance = if remaining.len() >= OVERLAY_CURSOR_PARTITION_POINT_MIN_LEN {
+            remaining.partition_point(|(entry_key, _)| entry_key < key)
+        } else {
+            let mut advance = 0;
+            while advance < remaining.len() && &remaining[advance].0 < key {
+                advance += 1;
+            }
+            advance
+        };
+
+        self.position += advance;
+        self.current()
+    }
+
+    #[inline(always)]
+    fn first_after(&mut self, key: &K) -> Option<&'a (K, V)> {
+        if let Some((entry_key, _)) = self.current() {
+            match entry_key.cmp(key) {
+                std::cmp::Ordering::Greater => return self.current(),
+                std::cmp::Ordering::Less | std::cmp::Ordering::Equal => self.position += 1,
+            }
+        }
+
+        let remaining = &self.entries[self.position..];
+        let advance = if remaining.len() >= OVERLAY_CURSOR_PARTITION_POINT_MIN_LEN {
+            remaining.partition_point(|(entry_key, _)| entry_key <= key)
+        } else {
+            let mut advance = 0;
+            while advance < remaining.len() && &remaining[advance].0 <= key {
+                advance += 1;
+            }
+            advance
+        };
+
+        self.position += advance;
+        self.current()
+    }
 }
 
 #[derive(Clone)]
@@ -290,17 +287,48 @@ mod tests {
 
         cursor.seek_from(0, &250);
         assert_eq!(cursor.min_current_key(), None);
-        assert_eq!(cursor.positions, vec![201]);
+        assert_eq!(
+            cursor.cursors.iter().map(|cursor| cursor.position).collect::<Vec<_>>(),
+            vec![201]
+        );
 
         assert_eq!(cursor.seek_until_exact(&25), None);
-        assert_eq!(cursor.positions, vec![201]);
+        assert_eq!(
+            cursor.cursors.iter().map(|cursor| cursor.position).collect::<Vec<_>>(),
+            vec![201]
+        );
 
         cursor.first_after(&250);
         assert_eq!(cursor.min_current_key(), None);
-        assert_eq!(cursor.positions, vec![201]);
+        assert_eq!(
+            cursor.cursors.iter().map(|cursor| cursor.position).collect::<Vec<_>>(),
+            vec![201]
+        );
 
         cursor.first_after(&25);
         assert_eq!(cursor.min_current_key(), None);
-        assert_eq!(cursor.positions, vec![201]);
+        assert_eq!(
+            cursor.cursors.iter().map(|cursor| cursor.position).collect::<Vec<_>>(),
+            vec![201]
+        );
+    }
+
+    #[test]
+    fn retarget_reuses_cursor_allocation() {
+        let first_entries = Arc::new(vec![(1, 1)]);
+        let second_entries = Arc::new(vec![(2, 2)]);
+        let first_overlay = [layer(Arc::clone(&first_entries))];
+        let second_overlay = [layer(first_entries), layer(second_entries)];
+        let mut cursor = PositionedOverlayCursor::with_capacity(&first_overlay, 2);
+        let capacity = cursor.cursors.capacity();
+        let ptr = cursor.cursors.as_ptr();
+
+        cursor.retarget(&second_overlay);
+        assert_eq!(cursor.cursors.capacity(), capacity);
+        assert_eq!(cursor.cursors.as_ptr(), ptr);
+
+        cursor.reset();
+        assert_eq!(cursor.cursors.capacity(), capacity);
+        assert_eq!(cursor.cursors.as_ptr(), ptr);
     }
 }

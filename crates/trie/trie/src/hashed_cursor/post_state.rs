@@ -353,14 +353,16 @@ where
 pub struct HashedPostStateOverlay {
     account_overlay: Arc<Vec<PostStateOverlayLayer<Option<Account>>>>,
     storage_overlays: Arc<B256Map<HashedStorageOverlay>>,
+    layer_capacity: usize,
 }
 
 impl HashedPostStateOverlay {
     /// Create a new indexed hashed post-state overlay stack.
     pub fn new(states: Vec<Arc<HashedPostStateSorted>>) -> Self {
+        let layer_capacity = states.len();
         let account_overlay = Self::build_account_overlay(&states);
         let storage_overlays = Self::build_storage_overlays(&states);
-        Self { account_overlay, storage_overlays }
+        Self { account_overlay, storage_overlays, layer_capacity }
     }
 
     /// Returns `true` if the overlay does not contain any hashed post-state updates.
@@ -415,12 +417,12 @@ impl HashedPostStateOverlay {
     }
 
     fn account_overlay(&self) -> PostStateOverlayCursor<'_, Option<Account>> {
-        PostStateOverlayCursor::new(self.account_overlay.as_slice(), false)
+        PostStateOverlayCursor::new(self.account_overlay.as_slice(), false, self.layer_capacity)
     }
 
     fn storage_overlay(&self, hashed_address: B256) -> (PostStateOverlayCursor<'_, U256>, bool) {
         let (layers, db_wiped, has_visible_value) = self.storage_overlay_layers(hashed_address);
-        (PostStateOverlayCursor::new(layers, has_visible_value), db_wiped)
+        (PostStateOverlayCursor::new(layers, has_visible_value, self.layer_capacity), db_wiped)
     }
 
     fn storage_overlay_layers(
@@ -443,19 +445,26 @@ impl AsRef<Self> for HashedPostStateOverlay {
 
 #[derive(Debug)]
 struct PostStateOverlayCursor<'a, V> {
-    cursor: PositionedOverlayCursor<'a, HashedPostStateSorted, B256, V>,
+    cursor: PositionedOverlayCursor<'a, B256, V>,
     has_visible_value: bool,
 }
 
 impl<V> Default for PostStateOverlayCursor<'_, V> {
     fn default() -> Self {
-        Self::new(&[], false)
+        Self::new(&[], false, 0)
     }
 }
 
 impl<'a, V> PostStateOverlayCursor<'a, V> {
-    fn new(layers: &'a [PostStateOverlayLayer<V>], has_visible_value: bool) -> Self {
-        Self { cursor: PositionedOverlayCursor::new(layers), has_visible_value }
+    fn new(
+        layers: &'a [PostStateOverlayLayer<V>],
+        has_visible_value: bool,
+        layer_capacity: usize,
+    ) -> Self {
+        Self {
+            cursor: PositionedOverlayCursor::with_capacity(layers, layer_capacity),
+            has_visible_value,
+        }
     }
 
     fn reset(&mut self) {
