@@ -23,7 +23,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Weak},
 };
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, trace};
 
 /// Represents different pruning strategies for various static file segments.
 #[derive(Debug, Clone, Copy)]
@@ -131,12 +131,12 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
 
     #[instrument(
         name = "StaticFileWriters::commit",
-        level = "debug",
+        level = "trace",
         target = "providers::static_file",
         skip_all
     )]
     pub(crate) fn commit(&self) -> ProviderResult<()> {
-        debug!(target: "providers::static_file", "Committing all static file segments");
+        trace!(target: "providers::static_file", "Committing all static file segments");
 
         for writer_lock in [
             &self.headers,
@@ -152,7 +152,7 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
             }
         }
 
-        debug!(target: "providers::static_file", "Committed all static file segments");
+        trace!(target: "providers::static_file", "Committed all static file segments");
         Ok(())
     }
 
@@ -181,12 +181,12 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
     /// Returns an error if any writer has prune queued.
     #[instrument(
         name = "StaticFileWriters::finalize",
-        level = "debug",
+        level = "trace",
         target = "providers::static_file",
         skip_all
     )]
     pub(crate) fn finalize(&self) -> ProviderResult<()> {
-        debug!(target: "providers::static_file", "Finalizing all static file segments into disk");
+        trace!(target: "providers::static_file", "Finalizing all static file segments into disk");
 
         for writer_lock in [
             &self.headers,
@@ -202,7 +202,7 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
             }
         }
 
-        debug!(target: "providers::static_file", "Finalized all static file segments into disk");
+        trace!(target: "providers::static_file", "Finalized all static file segments into disk");
         Ok(())
     }
 }

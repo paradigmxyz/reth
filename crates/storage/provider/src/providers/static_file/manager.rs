@@ -1046,7 +1046,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         segment: StaticFileSegment,
         segment_max_block: Option<BlockNumber>,
     ) -> ProviderResult<()> {
-        debug!(
+        trace!(
             target: "providers::static_file",
             ?segment,
             ?segment_max_block,
@@ -1159,20 +1159,20 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 }
 
                 // Update the cached provider.
-                debug!(target: "providers::static_file", ?segment, "Inserting updated jar into cache");
+                trace!(target: "providers::static_file", ?segment, "Inserting updated jar into cache");
                 self.map.insert((fixed_range.end(), segment), LoadedJar::new(jar)?);
 
                 // Delete any cached provider that no longer has an associated jar.
-                debug!(target: "providers::static_file", ?segment, "Cleaning up jar map");
+                trace!(target: "providers::static_file", ?segment, "Cleaning up jar map");
                 self.map.retain(|(end, seg), _| !(*seg == segment && *end > fixed_range.end()));
             }
             None => {
-                debug!(target: "providers::static_file", ?segment, "Removing segment from index");
+                trace!(target: "providers::static_file", ?segment, "Removing segment from index");
                 indexes.remove(segment);
             }
         };
 
-        debug!(target: "providers::static_file", ?segment, "Updated provider index");
+        trace!(target: "providers::static_file", ?segment, "Updated provider index");
         Ok(())
     }
 
