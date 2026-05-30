@@ -424,7 +424,7 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     /// A cache which maps `db_tip -> StateTrieOverlay`. If the db tip changes during usage of the
     /// factory then a new entry will get added to this, but in most cases only one entry is
     /// present.
-    overlay_cache: Arc<DashMap<BlockHash, StateTrieOverlay>>,
+    overlay_cache: Arc<DashMap<BlockHash, Arc<StateTrieOverlay>>>,
 }
 
 impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
@@ -453,7 +453,7 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     /// Fetches a [`StateTrieOverlay`] from the cache based on the current db tip block. If there is
     /// no cached value then this calculates the [`StateTrieOverlay`] and populates the cache.
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
-    fn get_overlay<Provider>(&self, provider: &Provider) -> ProviderResult<StateTrieOverlay>
+    fn get_overlay<Provider>(&self, provider: &Provider) -> ProviderResult<Arc<StateTrieOverlay>>
     where
         Provider: StageCheckpointReader
             + PruneCheckpointReader
@@ -466,11 +466,11 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
         let db_tip_block = self.overlay_builder.get_db_tip_block(provider)?;
 
         let overlay = match self.overlay_cache.entry(db_tip_block.hash) {
-            dashmap::Entry::Occupied(entry) => entry.get().clone(),
+            dashmap::Entry::Occupied(entry) => Arc::clone(entry.get()),
             dashmap::Entry::Vacant(entry) => {
                 self.overlay_builder.metrics.overlay_cache_misses.increment(1);
-                let overlay = self.overlay_builder.build_overlay(provider)?;
-                entry.insert(overlay.clone());
+                let overlay = Arc::new(self.overlay_builder.build_overlay(provider)?);
+                entry.insert(Arc::clone(&overlay));
                 overlay
             }
         };
@@ -522,7 +522,7 @@ where
 #[derive(Debug)]
 pub struct OverlayStateProvider<Provider: DBProvider> {
     provider: Provider,
-    overlay: StateTrieOverlay,
+    overlay: Arc<StateTrieOverlay>,
     is_v2: bool,
 }
 
@@ -532,7 +532,7 @@ where
 {
     /// Create new overlay state provider. The `Provider` must be cloneable, which generally means
     /// it should be wrapped in an `Arc`.
-    pub const fn new(provider: Provider, overlay: StateTrieOverlay, is_v2: bool) -> Self {
+    pub const fn new(provider: Provider, overlay: Arc<StateTrieOverlay>, is_v2: bool) -> Self {
         Self { provider, overlay, is_v2 }
     }
 }
