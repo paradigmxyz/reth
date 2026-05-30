@@ -47,7 +47,7 @@ pub(super) fn ordered_worker_outputs<R>(
 
 struct OrderedWorkerOutputs<'a, R> {
     result_rx: &'a Receiver<Result<BalWorkerOutput<R>, BalWorkerError>>,
-    pending: Vec<Option<BalWorkerOutput<R>>>,
+    pending: Option<Vec<Option<BalWorkerOutput<R>>>>,
     next: usize,
     total: usize,
     failed: bool,
@@ -60,7 +60,7 @@ impl<'a, R> OrderedWorkerOutputs<'a, R> {
     ) -> Self {
         Self {
             result_rx,
-            pending: (0..total).map(|_| None).collect(),
+            pending: None,
             next: 0,
             total,
             failed: false,
@@ -77,7 +77,9 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
         }
 
         loop {
-            if let Some(output) = self.pending[self.next].take() {
+            if let Some(output) =
+                self.pending.as_mut().and_then(|pending| pending[self.next].take())
+            {
                 self.next += 1;
                 return Some(Ok(output));
             }
@@ -101,11 +103,22 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
                 self.total
             );
             assert!(
-                index >= self.next && self.pending[index].is_none(),
+                index >= self.next,
                 "BAL worker returned duplicate transaction index {index}",
             );
 
-            self.pending[index] = Some(output);
+            if index == self.next {
+                self.next += 1;
+                return Some(Ok(output));
+            }
+
+            let pending =
+                self.pending.get_or_insert_with(|| (0..self.total).map(|_| None).collect());
+            assert!(
+                pending[index].is_none(),
+                "BAL worker returned duplicate transaction index {index}",
+            );
+            pending[index] = Some(output);
         }
     }
 }
@@ -143,6 +156,23 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(results, vec![0, 10, 20]);
+    }
+
+    #[test]
+    fn avoids_pending_buffer_for_already_ordered_outputs() {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        tx.send(Ok(output(0, 0))).unwrap();
+        tx.send(Ok(output(1, 10))).unwrap();
+        drop(tx);
+
+        let mut outputs = OrderedWorkerOutputs::new(&rx, 2);
+
+        assert!(outputs.pending.is_none());
+        assert_eq!(outputs.next().expect("first item").expect("first output").result, 0);
+        assert!(outputs.pending.is_none());
+        assert_eq!(outputs.next().expect("second item").expect("second output").result, 10);
+        assert!(outputs.pending.is_none());
+        assert!(outputs.next().is_none());
     }
 
     #[test]
