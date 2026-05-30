@@ -390,30 +390,75 @@ impl HashedPostStateOverlay {
         let mut overlays: B256Map<HashedStorageOverlay> = B256Map::default();
 
         for state in states {
-            for (hashed_address, storage) in &state.storages {
-                let overlay = overlays.entry(*hashed_address).or_default();
-                if overlay.db_wiped {
-                    continue;
-                }
-
-                if !storage.storage_slots_ref().is_empty() {
-                    overlay.layers.push(PostStateOverlayLayer::new(
-                        Arc::clone(state),
-                        storage.storage_slots_ref(),
-                    ));
-                }
-
-                if storage.is_wiped() {
-                    overlay.db_wiped = true;
-                }
-            }
-        }
-
-        for overlay in overlays.values_mut() {
-            overlay.has_visible_value = has_visible_storage_value(&overlay.layers);
+            Self::push_storage_layer(&mut overlays, state);
         }
 
         Arc::new(overlays)
+    }
+
+    /// Add a hashed post-state layer at the end of the precedence stack.
+    pub fn push_layer(&mut self, state: Arc<HashedPostStateSorted>) {
+        self.layer_capacity += 1;
+        if !state.accounts.is_empty() {
+            Arc::make_mut(&mut self.account_overlay)
+                .push(PostStateOverlayLayer::new(Arc::clone(&state), state.accounts.as_slice()));
+        }
+        Self::push_storage_layer(Arc::make_mut(&mut self.storage_overlays), &state);
+    }
+
+    /// Add a hashed post-state layer at the beginning of the precedence stack.
+    pub fn prepend_layer(&mut self, state: Arc<HashedPostStateSorted>) {
+        self.layer_capacity += 1;
+        if !state.accounts.is_empty() {
+            Arc::make_mut(&mut self.account_overlay).insert(
+                0,
+                PostStateOverlayLayer::new(Arc::clone(&state), state.accounts.as_slice()),
+            );
+        }
+
+        for (hashed_address, storage) in &state.storages {
+            let overlay =
+                Arc::make_mut(&mut self.storage_overlays).entry(*hashed_address).or_default();
+
+            if storage.is_wiped() {
+                overlay.layers.clear();
+                overlay.db_wiped = true;
+            }
+
+            if !storage.storage_slots_ref().is_empty() {
+                overlay.layers.insert(
+                    0,
+                    PostStateOverlayLayer::new(Arc::clone(&state), storage.storage_slots_ref()),
+                );
+            }
+
+            overlay.has_visible_value = has_visible_storage_value(&overlay.layers);
+        }
+    }
+
+    fn push_storage_layer(
+        overlays: &mut B256Map<HashedStorageOverlay>,
+        state: &Arc<HashedPostStateSorted>,
+    ) {
+        for (hashed_address, storage) in &state.storages {
+            let overlay = overlays.entry(*hashed_address).or_default();
+            if overlay.db_wiped {
+                continue;
+            }
+
+            if !storage.storage_slots_ref().is_empty() {
+                overlay.layers.push(PostStateOverlayLayer::new(
+                    Arc::clone(state),
+                    storage.storage_slots_ref(),
+                ));
+            }
+
+            if storage.is_wiped() {
+                overlay.db_wiped = true;
+            }
+
+            overlay.has_visible_value = has_visible_storage_value(&overlay.layers);
+        }
     }
 
     fn account_overlay(&self) -> PostStateOverlayCursor<'_, Option<Account>> {
@@ -588,6 +633,60 @@ mod tests {
         hashed_address: B256,
     ) -> HashedPostStateCursor<'a, MockHashedCursor<U256>, U256> {
         HashedPostStateCursor::new_storage(cursor, overlay, hashed_address)
+    }
+
+    fn storage_overlay_snapshot(
+        overlay: &HashedPostStateOverlay,
+        hashed_address: B256,
+    ) -> (Vec<Vec<(B256, U256)>>, bool, bool) {
+        let (layers, db_wiped, has_visible_value) = overlay.storage_overlay_layers(hashed_address);
+        (layers.iter().map(|layer| layer.entries().to_vec()).collect(), db_wiped, has_visible_value)
+    }
+
+    #[test]
+    fn test_incremental_storage_push_matches_rebuilt_overlay() {
+        let hashed_address = key(0x01);
+        let top = Arc::new(storage_post_state_for_address(
+            hashed_address,
+            vec![(key(0x10), U256::from(1))],
+        ));
+        let lower = Arc::new(storage_post_state_with_wipe_for_address(
+            hashed_address,
+            vec![(key(0x20), U256::from(2))],
+            true,
+        ));
+
+        let mut incremental = HashedPostStateOverlay::new(vec![Arc::clone(&top)]);
+        incremental.push_layer(Arc::clone(&lower));
+        let rebuilt = HashedPostStateOverlay::new(vec![top, lower]);
+
+        assert_eq!(
+            storage_overlay_snapshot(&incremental, hashed_address),
+            storage_overlay_snapshot(&rebuilt, hashed_address)
+        );
+    }
+
+    #[test]
+    fn test_incremental_storage_prepend_matches_rebuilt_overlay() {
+        let hashed_address = key(0x01);
+        let lower = Arc::new(storage_post_state_with_wipe_for_address(
+            hashed_address,
+            vec![(key(0x10), U256::from(1))],
+            true,
+        ));
+        let top = Arc::new(storage_post_state_for_address(
+            hashed_address,
+            vec![(key(0x10), U256::ZERO), (key(0x20), U256::from(2))],
+        ));
+
+        let mut incremental = HashedPostStateOverlay::new(vec![Arc::clone(&lower)]);
+        incremental.prepend_layer(Arc::clone(&top));
+        let rebuilt = HashedPostStateOverlay::new(vec![top, lower]);
+
+        assert_eq!(
+            storage_overlay_snapshot(&incremental, hashed_address),
+            storage_overlay_snapshot(&rebuilt, hashed_address)
+        );
     }
 
     #[test]

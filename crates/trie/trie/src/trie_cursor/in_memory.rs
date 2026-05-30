@@ -333,26 +333,42 @@ impl TrieUpdatesOverlay {
         let mut overlays: B256Map<TrieStorageOverlay> = B256Map::default();
 
         for update in updates {
-            for (hashed_address, storage) in update.storage_tries_ref() {
-                let overlay = overlays.entry(*hashed_address).or_default();
-                if overlay.db_wiped {
-                    continue;
-                }
-
-                if !storage.storage_nodes_ref().is_empty() {
-                    overlay.layers.push(TrieOverlayLayer::new(
-                        Arc::clone(update),
-                        storage.storage_nodes_ref(),
-                    ));
-                }
-
-                if storage.is_deleted() {
-                    overlay.db_wiped = true;
-                }
-            }
+            Self::push_storage_layer(&mut overlays, update);
         }
 
         Arc::new(overlays)
+    }
+
+    /// Add a trie updates layer at the end of the precedence stack.
+    pub fn push_layer(&mut self, update: Arc<TrieUpdatesSorted>) {
+        self.layer_capacity += 1;
+        if !update.account_nodes_ref().is_empty() {
+            Arc::make_mut(&mut self.account_overlay)
+                .push(TrieOverlayLayer::new(Arc::clone(&update), update.account_nodes_ref()));
+        }
+        Self::push_storage_layer(Arc::make_mut(&mut self.storage_overlays), &update);
+    }
+
+    fn push_storage_layer(
+        overlays: &mut B256Map<TrieStorageOverlay>,
+        update: &Arc<TrieUpdatesSorted>,
+    ) {
+        for (hashed_address, storage) in update.storage_tries_ref() {
+            let overlay = overlays.entry(*hashed_address).or_default();
+            if overlay.db_wiped {
+                continue;
+            }
+
+            if !storage.storage_nodes_ref().is_empty() {
+                overlay
+                    .layers
+                    .push(TrieOverlayLayer::new(Arc::clone(update), storage.storage_nodes_ref()));
+            }
+
+            if storage.is_deleted() {
+                overlay.db_wiped = true;
+            }
+        }
     }
 
     fn account_overlay(&self) -> OverlayCursor<'_> {
@@ -464,6 +480,38 @@ mod tests {
             hashed_address,
         )
         .unwrap()
+    }
+
+    fn storage_overlay_snapshot(
+        overlay: &TrieUpdatesOverlay,
+        hashed_address: B256,
+    ) -> (Vec<Vec<(Nibbles, Option<BranchNodeCompact>)>>, bool) {
+        let (layers, db_wiped) = overlay.storage_overlay_layers(hashed_address);
+        (layers.iter().map(|layer| layer.entries().to_vec()).collect(), db_wiped)
+    }
+
+    #[test]
+    fn test_incremental_storage_push_matches_rebuilt_overlay() {
+        let hashed_address = B256::with_last_byte(1);
+        let top = Arc::new(storage_trie_updates(
+            hashed_address,
+            false,
+            vec![(Nibbles::from_nibbles([0x1]), Some(branch_node(1)))],
+        ));
+        let lower = Arc::new(storage_trie_updates(
+            hashed_address,
+            true,
+            vec![(Nibbles::from_nibbles([0x2]), Some(branch_node(2)))],
+        ));
+
+        let mut incremental = TrieUpdatesOverlay::new(vec![Arc::clone(&top)]);
+        incremental.push_layer(Arc::clone(&lower));
+        let rebuilt = TrieUpdatesOverlay::new(vec![top, lower]);
+
+        assert_eq!(
+            storage_overlay_snapshot(&incremental, hashed_address),
+            storage_overlay_snapshot(&rebuilt, hashed_address)
+        );
     }
 
     #[test]

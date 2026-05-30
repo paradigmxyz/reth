@@ -513,20 +513,20 @@ impl StateTrieOverlay {
 
     /// Add a trie updates layer at the end of the precedence stack.
     pub fn push_trie_updates(&mut self, trie_updates: Arc<TrieUpdatesSorted>) {
-        self.trie_update_layers.push(trie_updates);
-        self.trie_updates = TrieUpdatesOverlay::new(self.trie_update_layers.clone());
+        self.trie_update_layers.push(Arc::clone(&trie_updates));
+        self.trie_updates.push_layer(trie_updates);
     }
 
     /// Add a hashed post-state layer at the end of the precedence stack.
     pub fn push_hashed_post_state(&mut self, hashed_post_state: Arc<HashedPostStateSorted>) {
-        self.hashed_post_state_layers.push(hashed_post_state);
-        self.hashed_post_state = HashedPostStateOverlay::new(self.hashed_post_state_layers.clone());
+        self.hashed_post_state_layers.push(Arc::clone(&hashed_post_state));
+        self.hashed_post_state.push_layer(hashed_post_state);
     }
 
     /// Add a hashed post-state layer at the beginning of the precedence stack.
     pub fn prepend_hashed_post_state(&mut self, hashed_post_state: Arc<HashedPostStateSorted>) {
-        self.hashed_post_state_layers.insert(0, hashed_post_state);
-        self.hashed_post_state = HashedPostStateOverlay::new(self.hashed_post_state_layers.clone());
+        self.hashed_post_state_layers.insert(0, Arc::clone(&hashed_post_state));
+        self.hashed_post_state.prepend_layer(hashed_post_state);
     }
 
     /// Total number of trie update entries across all layers.
