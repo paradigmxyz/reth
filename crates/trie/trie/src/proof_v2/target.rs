@@ -20,9 +20,9 @@ use reth_trie_common::{Nibbles, ProofV2Target};
 // `min_len` of 0 will retain it.
 #[inline]
 pub(crate) fn sub_trie_prefix(target: &ProofV2Target) -> Nibbles {
-    let mut sub_trie_prefix = target.key_nibbles;
-    sub_trie_prefix.truncate(target.min_len.saturating_sub(1) as usize);
-    sub_trie_prefix
+    let prefix_len = target.min_len.saturating_sub(1) as usize;
+    debug_assert!(prefix_len <= target.key_nibbles.len());
+    target.key_nibbles.slice_unchecked(0, prefix_len)
 }
 
 // A helper function which returns the first path following a sub-trie in lexicographical order.
