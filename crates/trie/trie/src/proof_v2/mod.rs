@@ -1481,6 +1481,8 @@ where
             return Ok(Vec::new())
         }
 
+        self.retained_proofs.reserve(targets.len());
+
         // Initialize the variables which track the state of the two cursors. Both indicate the
         // cursors are unseeked.
         let mut trie_cursor_state = TrieCursorState::unseeked();
