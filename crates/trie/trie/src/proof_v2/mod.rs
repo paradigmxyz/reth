@@ -1696,12 +1696,14 @@ impl<'a> TargetsCursor<'a> {
     /// # Panics
     ///
     /// Will panic in debug mode if called with an empty slice.
+    #[inline]
     fn new(targets: &'a [ProofV2Target]) -> Self {
         debug_assert!(!targets.is_empty());
         Self { targets, i: 0 }
     }
 
     /// Returns the current and next [`ProofV2Target`] that the cursor is pointed at.
+    #[inline]
     fn current(&self) -> (&'a ProofV2Target, Option<&'a ProofV2Target>) {
         (&self.targets[self.i], self.targets.get(self.i + 1))
     }
@@ -1711,6 +1713,7 @@ impl<'a> TargetsCursor<'a> {
     /// # Panics
     ///
     /// Will panic if the cursor is exhausted.
+    #[inline]
     fn next(&mut self) -> (&'a ProofV2Target, Option<&'a ProofV2Target>) {
         self.i += 1;
         debug_assert!(self.i < self.targets.len());
@@ -1718,12 +1721,14 @@ impl<'a> TargetsCursor<'a> {
     }
 
     // Iterate forwards over the slice, starting from the [`ProofV2Target`] after the current.
+    #[inline]
     fn skip_iter(&self) -> impl Iterator<Item = &'a ProofV2Target> {
         self.targets[self.i + 1..].iter()
     }
 
     /// Iterated backwards over the slice, starting from the [`ProofV2Target`] previous to the
     /// current.
+    #[inline]
     fn rev_iter(&self) -> impl Iterator<Item = &'a ProofV2Target> {
         self.targets[..self.i].iter().rev()
     }
