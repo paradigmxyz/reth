@@ -519,8 +519,7 @@ impl StateTrieOverlay {
 
     /// Return this overlay with a trie updates layer appended to the precedence stack.
     pub fn with_pushed_trie_updates(mut self, trie_updates: Arc<TrieUpdatesSorted>) -> Self {
-        self.trie_update_layers.push(trie_updates);
-        self.trie_updates = TrieUpdatesOverlay::new(self.trie_update_layers.clone());
+        self.push_trie_updates(trie_updates);
         self
     }
 
@@ -535,8 +534,7 @@ impl StateTrieOverlay {
         mut self,
         hashed_post_state: Arc<HashedPostStateSorted>,
     ) -> Self {
-        self.hashed_post_state_layers.push(hashed_post_state);
-        self.hashed_post_state = HashedPostStateOverlay::new(self.hashed_post_state_layers.clone());
+        self.push_hashed_post_state(hashed_post_state);
         self
     }
 
@@ -551,8 +549,7 @@ impl StateTrieOverlay {
         mut self,
         hashed_post_state: Arc<HashedPostStateSorted>,
     ) -> Self {
-        self.hashed_post_state_layers.insert(0, hashed_post_state);
-        self.hashed_post_state = HashedPostStateOverlay::new(self.hashed_post_state_layers.clone());
+        self.prepend_hashed_post_state(hashed_post_state);
         self
     }
 
