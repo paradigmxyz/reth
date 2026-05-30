@@ -168,7 +168,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     fn resolve_overlays(&self, anchor_hash: BlockHash) -> ProviderResult<StateTrieOverlay> {
         match &self.overlay_source {
             Some(OverlaySource::Managed { manager, state }) => {
-                let mut overlay = if anchor_hash == self.parent_hash {
+                let overlay = if anchor_hash == self.parent_hash {
                     StateTrieOverlay::default()
                 } else {
                     manager
@@ -176,11 +176,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                         .map_err(ProviderError::other)?
                 };
 
-                if !state.is_empty() {
-                    overlay.prepend_hashed_post_state(Arc::clone(state));
-                }
-
-                Ok(overlay)
+                Ok(if state.is_empty() {
+                    overlay
+                } else {
+                    overlay.with_prepended_hashed_post_state(Arc::clone(state))
+                })
             }
             Some(OverlaySource::Immediate { trie, state }) => {
                 if anchor_hash != self.parent_hash {
@@ -348,11 +348,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             let mut overlay = self.resolve_overlays(anchor_hash)?;
 
             if !trie_reverts.is_empty() {
-                overlay.push_trie_updates(Arc::new(trie_reverts));
+                overlay = overlay.with_pushed_trie_updates(Arc::new(trie_reverts));
             }
 
             if !hashed_state_reverts.is_empty() {
-                overlay.push_hashed_post_state(Arc::new(hashed_state_reverts));
+                overlay = overlay.with_pushed_hashed_post_state(Arc::new(hashed_state_reverts));
             }
 
             trie_updates_total_len = overlay.trie_updates_total_len();
