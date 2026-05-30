@@ -256,37 +256,44 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         }
         span.record("cache_reused", false);
 
-        // Resolve the block path and any cached parent overlay before locking the child entry.
-        let mut hash = tip_hash;
-        let mut blocks = Vec::new();
-        loop {
-            let block =
-                self.blocks.get(&hash).ok_or(StateTrieOverlayError { tip_hash, anchor_hash })?;
-            let parent_hash = block.recovered_block().parent_hash();
-            blocks.push(block.clone());
+        // Resolve the immediate parent first. When it already has a cached overlay, avoid walking
+        // and cloning the rest of the in-memory chain just to discard it.
+        let tip_block =
+            self.blocks.get(&tip_hash).ok_or(StateTrieOverlayError { tip_hash, anchor_hash })?;
+        let parent_hash = tip_block.recovered_block().parent_hash();
+        let tip_block = tip_block.clone();
 
-            if parent_hash == anchor_hash {
-                break
-            }
-            hash = parent_hash;
-        }
-        span.record("block_count", blocks.len());
-        let parent_input = blocks.first().and_then(|block| {
-            let parent_hash = block.recovered_block().parent_hash();
-            (parent_hash != anchor_hash)
-                .then(|| {
-                    self.overlays
-                        .get(&OverlayCacheKey { anchor_hash, tip_hash: parent_hash })
-                        .map(|entry| Arc::clone(entry.value()))
-                })
-                .flatten()
-        });
-        span.record("parent_overlay_reused", parent_input.is_some());
+        let parent_input = (parent_hash != anchor_hash)
+            .then(|| {
+                self.overlays
+                    .get(&OverlayCacheKey { anchor_hash, tip_hash: parent_hash })
+                    .map(|entry| Arc::clone(entry.value()))
+            })
+            .flatten();
+
         let compute_input = match parent_input {
             Some(parent_input) => {
-                ComputeOverlayInput::ExtendCached { block: blocks.swap_remove(0), parent_input }
+                span.record("block_count", 1usize);
+                span.record("parent_overlay_reused", true);
+                ComputeOverlayInput::ExtendCached { block: tip_block, parent_input }
             }
-            None => ComputeOverlayInput::MergeBlocks(blocks),
+            None => {
+                let mut hash = parent_hash;
+                let mut blocks = vec![tip_block];
+                while hash != anchor_hash {
+                    let block = self
+                        .blocks
+                        .get(&hash)
+                        .ok_or(StateTrieOverlayError { tip_hash, anchor_hash })?;
+                    let parent_hash = block.recovered_block().parent_hash();
+                    blocks.push(block.clone());
+                    hash = parent_hash;
+                }
+
+                span.record("block_count", blocks.len());
+                span.record("parent_overlay_reused", false);
+                ComputeOverlayInput::MergeBlocks(blocks)
+            }
         };
 
         // The vacant entry is the cache-fill gate: racing callers block instead of recomputing.
