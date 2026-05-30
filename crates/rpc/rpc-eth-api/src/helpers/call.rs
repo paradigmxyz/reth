@@ -121,7 +121,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                     let attributes = this
                         .pending_env_builder()
-                        .pending_env_attributes_with_overrides(&parent, block_overrides.as_ref())
+                        .pending_env_attributes(&parent, block_overrides.as_ref())
                         .map_err(Self::Error::from_eth_err)?;
 
                     let mut evm_env = this

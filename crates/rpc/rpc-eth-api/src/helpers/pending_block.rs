@@ -103,7 +103,7 @@ pub trait LoadPendingBlock:
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
     ) -> Result<<Self::Evm as ConfigureEvm>::NextBlockEnvCtx, Self::Error> {
-        Ok(self.pending_env_builder().pending_env_attributes(parent)?)
+        Ok(self.pending_env_builder().pending_env_attributes(parent, None)?)
     }
 
     /// Returns a [`StateProviderBox`] on a mem-pool built pending block overlaying latest.
@@ -445,20 +445,16 @@ pub trait LoadPendingBlock:
 
 /// A type that knows how to build a [`ConfigureEvm::NextBlockEnvCtx`] for a pending block.
 pub trait PendingEnvBuilder<Evm: ConfigureEvm>: Send + Sync + Unpin + 'static {
-    /// Builds a [`ConfigureEvm::NextBlockEnvCtx`] for pending block.
+    /// Builds a [`ConfigureEvm::NextBlockEnvCtx`] for a pending block.
+    ///
+    /// `block_overrides` can be used for values that need to be part of the next block context
+    /// before the EVM environment is constructed. Other block overrides are applied directly to the
+    /// EVM environment after construction.
     fn pending_env_attributes(
         &self,
         parent: &SealedHeader<HeaderTy<Evm::Primitives>>,
+        block_overrides: Option<&BlockOverrides>,
     ) -> Result<Evm::NextBlockEnvCtx, EthApiError>;
-
-    /// Builds a [`ConfigureEvm::NextBlockEnvCtx`] for pending block with block overrides.
-    fn pending_env_attributes_with_overrides(
-        &self,
-        parent: &SealedHeader<HeaderTy<Evm::Primitives>>,
-        _block_overrides: Option<&BlockOverrides>,
-    ) -> Result<Evm::NextBlockEnvCtx, EthApiError> {
-        self.pending_env_attributes(parent)
-    }
 }
 
 /// Trait that should be implemented on [`ConfigureEvm::NextBlockEnvCtx`] to provide a way for it to
@@ -467,19 +463,15 @@ pub trait PendingEnvBuilder<Evm: ConfigureEvm>: Send + Sync + Unpin + 'static {
 /// This assumes that next environment building doesn't require any additional context, for more
 /// complex implementations one should implement [`PendingEnvBuilder`] on their custom type.
 pub trait BuildPendingEnv<Header> {
-    /// Builds a [`ConfigureEvm::NextBlockEnvCtx`] for pending block.
-    fn build_pending_env(parent: &SealedHeader<Header>) -> Self;
-
-    /// Builds a [`ConfigureEvm::NextBlockEnvCtx`] for pending block with block overrides.
-    fn build_pending_env_with_overrides(
+    /// Builds a [`ConfigureEvm::NextBlockEnvCtx`] for a pending block.
+    ///
+    /// `block_overrides` can be used for values that need to be part of the next block context
+    /// before the EVM environment is constructed. Other block overrides are applied directly to the
+    /// EVM environment after construction.
+    fn build_pending_env(
         parent: &SealedHeader<Header>,
-        _block_overrides: Option<&BlockOverrides>,
-    ) -> Self
-    where
-        Self: Sized,
-    {
-        Self::build_pending_env(parent)
-    }
+        block_overrides: Option<&BlockOverrides>,
+    ) -> Self;
 }
 
 impl<Evm> PendingEnvBuilder<Evm> for ()
@@ -489,22 +481,18 @@ where
     fn pending_env_attributes(
         &self,
         parent: &SealedHeader<HeaderTy<Evm::Primitives>>,
-    ) -> Result<Evm::NextBlockEnvCtx, EthApiError> {
-        Ok(Evm::NextBlockEnvCtx::build_pending_env(parent))
-    }
-
-    fn pending_env_attributes_with_overrides(
-        &self,
-        parent: &SealedHeader<HeaderTy<Evm::Primitives>>,
         block_overrides: Option<&BlockOverrides>,
     ) -> Result<Evm::NextBlockEnvCtx, EthApiError> {
-        Ok(Evm::NextBlockEnvCtx::build_pending_env_with_overrides(parent, block_overrides))
+        Ok(Evm::NextBlockEnvCtx::build_pending_env(parent, block_overrides))
     }
 }
 
 impl<H: BlockHeader> BuildPendingEnv<H> for NextBlockEnvAttributes {
-    fn build_pending_env(parent: &SealedHeader<H>) -> Self {
-        Self {
+    fn build_pending_env(
+        parent: &SealedHeader<H>,
+        block_overrides: Option<&BlockOverrides>,
+    ) -> Self {
+        let mut attributes = Self {
             timestamp: parent.timestamp().saturating_add(12),
             suggested_fee_recipient: parent.beneficiary(),
             prev_randao: B256::random(),
@@ -513,19 +501,14 @@ impl<H: BlockHeader> BuildPendingEnv<H> for NextBlockEnvAttributes {
             withdrawals: parent.withdrawals_root().map(|_| Default::default()),
             extra_data: parent.extra_data().clone(),
             slot_number: parent.slot_number().map(|slot| slot.saturating_add(1)),
-        }
-    }
+        };
 
-    fn build_pending_env_with_overrides(
-        parent: &SealedHeader<H>,
-        block_overrides: Option<&BlockOverrides>,
-    ) -> Self {
-        let mut attributes = Self::build_pending_env(parent);
         if parent.parent_beacon_block_root().is_some() {
             attributes.parent_beacon_block_root = Some(
                 block_overrides.and_then(|overrides| overrides.beacon_root).unwrap_or_default(),
             );
         }
+
         attributes
     }
 }
@@ -544,7 +527,7 @@ mod tests {
         header.parent_beacon_block_root = Some(beacon_root);
         let sealed = SealedHeader::new(header, B256::ZERO);
 
-        let attrs = NextBlockEnvAttributes::build_pending_env(&sealed);
+        let attrs = NextBlockEnvAttributes::build_pending_env(&sealed, None);
 
         assert_eq!(attrs.parent_beacon_block_root, Some(B256::ZERO));
     }
@@ -557,10 +540,7 @@ mod tests {
         let block_overrides =
             BlockOverrides { beacon_root: Some(beacon_root), ..Default::default() };
 
-        let attrs = NextBlockEnvAttributes::build_pending_env_with_overrides(
-            &sealed,
-            Some(&block_overrides),
-        );
+        let attrs = NextBlockEnvAttributes::build_pending_env(&sealed, Some(&block_overrides));
 
         assert_eq!(attrs.parent_beacon_block_root, Some(beacon_root));
     }
@@ -570,7 +550,7 @@ mod tests {
         let header = Header { slot_number: Some(7), ..Default::default() };
         let sealed = SealedHeader::new(header, B256::ZERO);
 
-        let attrs = NextBlockEnvAttributes::build_pending_env(&sealed);
+        let attrs = NextBlockEnvAttributes::build_pending_env(&sealed, None);
 
         assert_eq!(attrs.slot_number, Some(8));
     }
