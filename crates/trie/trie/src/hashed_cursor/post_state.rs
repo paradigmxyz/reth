@@ -346,9 +346,8 @@ where
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.reset();
         self.cursor.set_hashed_address(hashed_address);
-        let (layers, cursor_wiped, has_visible_value) =
-            self.post_states.storage_overlay_layers(hashed_address);
-        self.post_state_cursor.retarget(layers, has_visible_value);
+        let cursor_wiped =
+            self.post_states.retarget_storage_overlay(&mut self.post_state_cursor, hashed_address);
         self.db_cursor_state = DbCursorState::new(cursor_wiped);
     }
 }
@@ -357,7 +356,7 @@ where
 #[derive(Clone, Debug, Default)]
 pub struct HashedPostStateOverlay {
     account_overlay: Arc<Vec<PostStateOverlayLayer<Option<Account>>>>,
-    storage_overlays: Arc<B256Map<HashedStorageOverlay>>,
+    storage_overlays: HashedStorageOverlays,
     layer_capacity: usize,
 }
 
@@ -389,9 +388,11 @@ impl HashedPostStateOverlay {
         )
     }
 
-    fn build_storage_overlays(
-        states: &[Arc<HashedPostStateSorted>],
-    ) -> Arc<B256Map<HashedStorageOverlay>> {
+    fn build_storage_overlays(states: &[Arc<HashedPostStateSorted>]) -> HashedStorageOverlays {
+        if let [state] = states {
+            return HashedStorageOverlays::Single(Arc::clone(state))
+        }
+
         let storage_overlay_capacity = states.iter().map(|state| state.storages.len()).sum();
         let mut overlays: B256Map<HashedStorageOverlay> =
             B256Map::with_capacity_and_hasher(storage_overlay_capacity, Default::default());
@@ -400,7 +401,7 @@ impl HashedPostStateOverlay {
             Self::push_storage_layer(&mut overlays, state);
         }
 
-        Arc::new(overlays)
+        HashedStorageOverlays::Indexed(Arc::new(overlays))
     }
 
     /// Add a hashed post-state layer at the end of the precedence stack.
@@ -410,7 +411,7 @@ impl HashedPostStateOverlay {
             Arc::make_mut(&mut self.account_overlay)
                 .push(PostStateOverlayLayer::new(Arc::clone(&state), state.accounts.as_slice()));
         }
-        Self::push_storage_layer(Arc::make_mut(&mut self.storage_overlays), &state);
+        self.storage_overlays.push_layer(state);
     }
 
     /// Add a hashed post-state layer at the beginning of the precedence stack.
@@ -423,29 +424,7 @@ impl HashedPostStateOverlay {
             );
         }
 
-        for (hashed_address, storage) in &state.storages {
-            let overlay =
-                Arc::make_mut(&mut self.storage_overlays).entry(*hashed_address).or_default();
-            let storage_slots = storage.storage_slots_ref();
-
-            if storage.is_wiped() {
-                overlay.layers.clear();
-                overlay.db_wiped = true;
-                overlay.has_visible_value = false;
-            }
-
-            if !storage_slots.is_empty() {
-                let has_nonzero_slot = storage_slots.iter().any(|(_, value)| !value.is_zero());
-                let recompute_after_insert = !has_nonzero_slot && overlay.has_visible_value;
-
-                overlay
-                    .layers
-                    .insert(0, PostStateOverlayLayer::new(Arc::clone(&state), storage_slots));
-
-                overlay.has_visible_value = has_nonzero_slot ||
-                    (recompute_after_insert && has_visible_storage_value(&overlay.layers));
-            }
-        }
+        self.storage_overlays.prepend_layer(state);
     }
 
     fn push_storage_layer(
@@ -474,24 +453,97 @@ impl HashedPostStateOverlay {
         }
     }
 
+    fn prepend_storage_layer(
+        overlays: &mut B256Map<HashedStorageOverlay>,
+        state: &Arc<HashedPostStateSorted>,
+    ) {
+        for (hashed_address, storage) in &state.storages {
+            let overlay = overlays.entry(*hashed_address).or_default();
+            let storage_slots = storage.storage_slots_ref();
+
+            if storage.is_wiped() {
+                overlay.layers.clear();
+                overlay.db_wiped = true;
+                overlay.has_visible_value = false;
+            }
+
+            if !storage_slots.is_empty() {
+                let has_nonzero_slot = storage_slots.iter().any(|(_, value)| !value.is_zero());
+                let recompute_after_insert = !has_nonzero_slot && overlay.has_visible_value;
+
+                overlay
+                    .layers
+                    .insert(0, PostStateOverlayLayer::new(Arc::clone(state), storage_slots));
+
+                overlay.has_visible_value = has_nonzero_slot ||
+                    (recompute_after_insert && has_visible_storage_value(&overlay.layers));
+            }
+        }
+    }
+
     fn account_overlay(&self) -> PostStateOverlayCursor<'_, Option<Account>> {
         PostStateOverlayCursor::new(self.account_overlay.as_slice(), false, self.layer_capacity)
     }
 
     fn storage_overlay(&self, hashed_address: B256) -> (PostStateOverlayCursor<'_, U256>, bool) {
-        let (layers, db_wiped, has_visible_value) = self.storage_overlay_layers(hashed_address);
-        (PostStateOverlayCursor::new(layers, has_visible_value, self.layer_capacity), db_wiped)
+        match &self.storage_overlays {
+            HashedStorageOverlays::Single(state) => {
+                let Some(storage) = state.storages.get(&hashed_address) else {
+                    return (PostStateOverlayCursor::with_capacity(self.layer_capacity), false)
+                };
+                let storage_slots = storage.storage_slots_ref();
+                let has_visible_value = storage_slots.iter().any(|(_, value)| !value.is_zero());
+                (
+                    PostStateOverlayCursor::from_entries(
+                        storage_slots,
+                        has_visible_value,
+                        self.layer_capacity,
+                    ),
+                    storage.is_wiped(),
+                )
+            }
+            HashedStorageOverlays::Indexed(overlays) => {
+                let Some(overlay) = overlays.get(&hashed_address) else {
+                    return (PostStateOverlayCursor::with_capacity(self.layer_capacity), false)
+                };
+
+                (
+                    PostStateOverlayCursor::new(
+                        overlay.layers.as_slice(),
+                        overlay.has_visible_value,
+                        self.layer_capacity,
+                    ),
+                    overlay.db_wiped,
+                )
+            }
+        }
     }
 
-    fn storage_overlay_layers(
-        &self,
+    fn retarget_storage_overlay<'a>(
+        &'a self,
+        cursor: &mut PostStateOverlayCursor<'a, U256>,
         hashed_address: B256,
-    ) -> (&[PostStateOverlayLayer<U256>], bool, bool) {
-        let Some(overlay) = self.storage_overlays.get(&hashed_address) else {
-            return (&[], false, false);
-        };
-
-        (overlay.layers.as_slice(), overlay.db_wiped, overlay.has_visible_value)
+    ) -> bool {
+        match &self.storage_overlays {
+            HashedStorageOverlays::Single(state) => {
+                let Some(storage) = state.storages.get(&hashed_address) else {
+                    cursor.retarget_entries(&[], false);
+                    return false
+                };
+                let storage_slots = storage.storage_slots_ref();
+                let has_visible_value = storage_slots.iter().any(|(_, value)| !value.is_zero());
+                cursor.retarget_entries(storage_slots, has_visible_value);
+                storage.is_wiped()
+            }
+            HashedStorageOverlays::Indexed(overlays) => {
+                let Some(overlay) = overlays.get(&hashed_address) else {
+                    cursor.retarget(&[], false);
+                    return false
+                };
+                cursor.retarget(overlay.layers.as_slice(), overlay.has_visible_value);
+                overlay.db_wiped
+            }
+        }
     }
 }
 
@@ -529,8 +581,31 @@ impl<'a, V> PostStateOverlayCursor<'a, V> {
         self.cursor.reset();
     }
 
+    fn with_capacity(layer_capacity: usize) -> Self {
+        Self {
+            cursor: PositionedOverlayCursor::with_entries(&[], layer_capacity),
+            has_visible_value: false,
+        }
+    }
+
+    fn from_entries(
+        entries: &'a [(B256, V)],
+        has_visible_value: bool,
+        layer_capacity: usize,
+    ) -> Self {
+        Self {
+            cursor: PositionedOverlayCursor::with_entries(entries, layer_capacity),
+            has_visible_value,
+        }
+    }
+
     fn retarget(&mut self, layers: &'a [PostStateOverlayLayer<V>], has_visible_value: bool) {
         self.cursor.retarget(layers);
+        self.has_visible_value = has_visible_value;
+    }
+
+    fn retarget_entries(&mut self, entries: &'a [(B256, V)], has_visible_value: bool) {
+        self.cursor.retarget_entries(entries);
         self.has_visible_value = has_visible_value;
     }
 }
@@ -569,6 +644,59 @@ struct HashedStorageOverlay {
     layers: Vec<PostStateOverlayLayer<U256>>,
     db_wiped: bool,
     has_visible_value: bool,
+}
+
+#[derive(Clone, Debug)]
+enum HashedStorageOverlays {
+    Single(Arc<HashedPostStateSorted>),
+    Indexed(Arc<B256Map<HashedStorageOverlay>>),
+}
+
+impl Default for HashedStorageOverlays {
+    fn default() -> Self {
+        Self::Indexed(Default::default())
+    }
+}
+
+impl HashedStorageOverlays {
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::Single(state) => state.storages.is_empty(),
+            Self::Indexed(overlays) => overlays.is_empty(),
+        }
+    }
+
+    fn push_layer(&mut self, state: Arc<HashedPostStateSorted>) {
+        match self {
+            Self::Single(existing) => {
+                let storage_overlay_capacity = existing.storages.len() + state.storages.len();
+                let mut overlays: B256Map<HashedStorageOverlay> =
+                    B256Map::with_capacity_and_hasher(storage_overlay_capacity, Default::default());
+                HashedPostStateOverlay::push_storage_layer(&mut overlays, existing);
+                HashedPostStateOverlay::push_storage_layer(&mut overlays, &state);
+                *self = Self::Indexed(Arc::new(overlays));
+            }
+            Self::Indexed(overlays) => {
+                HashedPostStateOverlay::push_storage_layer(Arc::make_mut(overlays), &state);
+            }
+        }
+    }
+
+    fn prepend_layer(&mut self, state: Arc<HashedPostStateSorted>) {
+        match self {
+            Self::Single(existing) => {
+                let storage_overlay_capacity = existing.storages.len() + state.storages.len();
+                let mut overlays: B256Map<HashedStorageOverlay> =
+                    B256Map::with_capacity_and_hasher(storage_overlay_capacity, Default::default());
+                HashedPostStateOverlay::push_storage_layer(&mut overlays, &state);
+                HashedPostStateOverlay::push_storage_layer(&mut overlays, existing);
+                *self = Self::Indexed(Arc::new(overlays));
+            }
+            Self::Indexed(overlays) => {
+                HashedPostStateOverlay::prepend_storage_layer(Arc::make_mut(overlays), &state);
+            }
+        }
+    }
 }
 
 type PostStateOverlayLayer<V> = OverlayLayer<HashedPostStateSorted, B256, V>;
@@ -654,8 +782,29 @@ mod tests {
         overlay: &HashedPostStateOverlay,
         hashed_address: B256,
     ) -> (Vec<Vec<(B256, U256)>>, bool, bool) {
-        let (layers, db_wiped, has_visible_value) = overlay.storage_overlay_layers(hashed_address);
-        (layers.iter().map(|layer| layer.entries().to_vec()).collect(), db_wiped, has_visible_value)
+        match &overlay.storage_overlays {
+            HashedStorageOverlays::Single(state) => {
+                let Some(storage) = state.storages.get(&hashed_address) else {
+                    return (Vec::new(), false, false)
+                };
+                let storage_slots = storage.storage_slots_ref();
+                let layers = (!storage_slots.is_empty())
+                    .then(|| vec![storage_slots.to_vec()])
+                    .unwrap_or_default();
+                let has_visible_value = storage_slots.iter().any(|(_, value)| !value.is_zero());
+                (layers, storage.is_wiped(), has_visible_value)
+            }
+            HashedStorageOverlays::Indexed(overlays) => {
+                let Some(overlay) = overlays.get(&hashed_address) else {
+                    return (Vec::new(), false, false)
+                };
+                (
+                    overlay.layers.iter().map(|layer| layer.entries().to_vec()).collect(),
+                    overlay.db_wiped,
+                    overlay.has_visible_value,
+                )
+            }
+        }
     }
 
     #[test]
@@ -716,7 +865,7 @@ mod tests {
 
         let overlay = HashedPostStateOverlay::new(vec![top_delete, lower_visible]);
 
-        let (_, _, has_visible_value) = overlay.storage_overlay_layers(hashed_address);
+        let (_, _, has_visible_value) = storage_overlay_snapshot(&overlay, hashed_address);
         assert!(!has_visible_value);
     }
 
@@ -733,7 +882,7 @@ mod tests {
         let mut overlay = HashedPostStateOverlay::new(vec![lower_visible]);
         overlay.prepend_layer(top_delete);
 
-        let (_, _, has_visible_value) = overlay.storage_overlay_layers(hashed_address);
+        let (_, _, has_visible_value) = storage_overlay_snapshot(&overlay, hashed_address);
         assert!(!has_visible_value);
     }
 

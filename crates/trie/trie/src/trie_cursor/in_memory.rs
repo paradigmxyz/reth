@@ -297,8 +297,8 @@ impl<C: TrieStorageCursor> TrieStorageCursor for InMemoryTrieCursor<'_, C> {
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.reset();
         self.cursor.set_hashed_address(hashed_address);
-        let (layers, db_wiped) = self.trie_updates.storage_overlay_layers(hashed_address);
-        self.in_memory_cursor.retarget(layers);
+        let db_wiped =
+            self.trie_updates.retarget_storage_overlay(&mut self.in_memory_cursor, hashed_address);
         self.db_cursor_state = DbCursorState::new(db_wiped);
     }
 }
@@ -307,7 +307,7 @@ impl<C: TrieStorageCursor> TrieStorageCursor for InMemoryTrieCursor<'_, C> {
 #[derive(Clone, Debug, Default)]
 pub struct TrieUpdatesOverlay {
     account_overlay: Arc<Vec<TrieOverlayLayer>>,
-    storage_overlays: Arc<B256Map<TrieStorageOverlay>>,
+    storage_overlays: TrieStorageOverlays,
     layer_capacity: usize,
 }
 
@@ -335,9 +335,11 @@ impl TrieUpdatesOverlay {
         )
     }
 
-    fn build_storage_overlays(
-        updates: &[Arc<TrieUpdatesSorted>],
-    ) -> Arc<B256Map<TrieStorageOverlay>> {
+    fn build_storage_overlays(updates: &[Arc<TrieUpdatesSorted>]) -> TrieStorageOverlays {
+        if let [update] = updates {
+            return TrieStorageOverlays::Single(Arc::clone(update))
+        }
+
         let storage_overlay_capacity =
             updates.iter().map(|update| update.storage_tries_ref().len()).sum();
         let mut overlays: B256Map<TrieStorageOverlay> =
@@ -347,7 +349,7 @@ impl TrieUpdatesOverlay {
             Self::push_storage_layer(&mut overlays, update);
         }
 
-        Arc::new(overlays)
+        TrieStorageOverlays::Indexed(Arc::new(overlays))
     }
 
     /// Add a trie updates layer at the end of the precedence stack.
@@ -357,7 +359,7 @@ impl TrieUpdatesOverlay {
             Arc::make_mut(&mut self.account_overlay)
                 .push(TrieOverlayLayer::new(Arc::clone(&update), update.account_nodes_ref()));
         }
-        Self::push_storage_layer(Arc::make_mut(&mut self.storage_overlays), &update);
+        self.storage_overlays.push_layer(update);
     }
 
     fn push_storage_layer(
@@ -387,16 +389,52 @@ impl TrieUpdatesOverlay {
     }
 
     fn storage_overlay(&self, hashed_address: B256) -> (OverlayCursor<'_>, bool) {
-        let (layers, db_wiped) = self.storage_overlay_layers(hashed_address);
-        (OverlayCursor::with_capacity(layers, self.layer_capacity), db_wiped)
+        match &self.storage_overlays {
+            TrieStorageOverlays::Single(update) => {
+                let Some(storage) = update.storage_tries_ref().get(&hashed_address) else {
+                    return (OverlayCursor::with_entries(&[], self.layer_capacity), false)
+                };
+                (
+                    OverlayCursor::with_entries(storage.storage_nodes_ref(), self.layer_capacity),
+                    storage.is_deleted(),
+                )
+            }
+            TrieStorageOverlays::Indexed(overlays) => {
+                let Some(overlay) = overlays.get(&hashed_address) else {
+                    return (OverlayCursor::with_entries(&[], self.layer_capacity), false)
+                };
+
+                (
+                    OverlayCursor::with_capacity(overlay.layers.as_slice(), self.layer_capacity),
+                    overlay.db_wiped,
+                )
+            }
+        }
     }
 
-    fn storage_overlay_layers(&self, hashed_address: B256) -> (&[TrieOverlayLayer], bool) {
-        let Some(overlay) = self.storage_overlays.get(&hashed_address) else {
-            return (&[], false);
-        };
-
-        (overlay.layers.as_slice(), overlay.db_wiped)
+    fn retarget_storage_overlay<'a>(
+        &'a self,
+        cursor: &mut OverlayCursor<'a>,
+        hashed_address: B256,
+    ) -> bool {
+        match &self.storage_overlays {
+            TrieStorageOverlays::Single(update) => {
+                let Some(storage) = update.storage_tries_ref().get(&hashed_address) else {
+                    cursor.retarget_entries(&[]);
+                    return false
+                };
+                cursor.retarget_entries(storage.storage_nodes_ref());
+                storage.is_deleted()
+            }
+            TrieStorageOverlays::Indexed(overlays) => {
+                let Some(overlay) = overlays.get(&hashed_address) else {
+                    cursor.retarget_entries(&[]);
+                    return false
+                };
+                cursor.retarget(overlay.layers.as_slice());
+                overlay.db_wiped
+            }
+        }
     }
 }
 
@@ -410,6 +448,44 @@ impl AsRef<Self> for TrieUpdatesOverlay {
 struct TrieStorageOverlay {
     layers: Vec<TrieOverlayLayer>,
     db_wiped: bool,
+}
+
+#[derive(Clone, Debug)]
+enum TrieStorageOverlays {
+    Single(Arc<TrieUpdatesSorted>),
+    Indexed(Arc<B256Map<TrieStorageOverlay>>),
+}
+
+impl Default for TrieStorageOverlays {
+    fn default() -> Self {
+        Self::Indexed(Default::default())
+    }
+}
+
+impl TrieStorageOverlays {
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::Single(update) => update.storage_tries_ref().is_empty(),
+            Self::Indexed(overlays) => overlays.is_empty(),
+        }
+    }
+
+    fn push_layer(&mut self, update: Arc<TrieUpdatesSorted>) {
+        match self {
+            Self::Single(existing) => {
+                let storage_overlay_capacity =
+                    existing.storage_tries_ref().len() + update.storage_tries_ref().len();
+                let mut overlays: B256Map<TrieStorageOverlay> =
+                    B256Map::with_capacity_and_hasher(storage_overlay_capacity, Default::default());
+                TrieUpdatesOverlay::push_storage_layer(&mut overlays, existing);
+                TrieUpdatesOverlay::push_storage_layer(&mut overlays, &update);
+                *self = Self::Indexed(Arc::new(overlays));
+            }
+            Self::Indexed(overlays) => {
+                TrieUpdatesOverlay::push_storage_layer(Arc::make_mut(overlays), &update);
+            }
+        }
+    }
 }
 
 type OverlayCursor<'a> = PositionedOverlayCursor<'a, Nibbles, Option<BranchNodeCompact>>;
@@ -497,8 +573,26 @@ mod tests {
         overlay: &TrieUpdatesOverlay,
         hashed_address: B256,
     ) -> (Vec<Vec<(Nibbles, Option<BranchNodeCompact>)>>, bool) {
-        let (layers, db_wiped) = overlay.storage_overlay_layers(hashed_address);
-        (layers.iter().map(|layer| layer.entries().to_vec()).collect(), db_wiped)
+        match &overlay.storage_overlays {
+            TrieStorageOverlays::Single(update) => {
+                let Some(storage) = update.storage_tries_ref().get(&hashed_address) else {
+                    return (Vec::new(), false)
+                };
+                let layers = (!storage.storage_nodes_ref().is_empty())
+                    .then(|| vec![storage.storage_nodes_ref().to_vec()])
+                    .unwrap_or_default();
+                (layers, storage.is_deleted())
+            }
+            TrieStorageOverlays::Indexed(overlays) => {
+                let Some(overlay) = overlays.get(&hashed_address) else {
+                    return (Vec::new(), false)
+                };
+                (
+                    overlay.layers.iter().map(|layer| layer.entries().to_vec()).collect(),
+                    overlay.db_wiped,
+                )
+            }
+        }
     }
 
     #[test]

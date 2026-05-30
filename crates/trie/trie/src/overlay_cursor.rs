@@ -91,6 +91,14 @@ impl<'a, K, V> PositionedOverlayCursor<'a, K, V> {
         this
     }
 
+    pub(crate) fn with_entries(entries: &'a [(K, V)], capacity: usize) -> Self {
+        let mut cursors = Vec::with_capacity(capacity.max(usize::from(!entries.is_empty())));
+        if !entries.is_empty() {
+            cursors.push(PositionedOverlayLayerCursor::from_entries(entries));
+        }
+        Self { cursors }
+    }
+
     pub(crate) fn reset(&mut self) {
         for cursor in &mut self.cursors {
             cursor.reset();
@@ -101,6 +109,14 @@ impl<'a, K, V> PositionedOverlayCursor<'a, K, V> {
         debug_assert!(self.cursors.capacity() >= layers.len());
         self.cursors.clear();
         self.cursors.extend(layers.iter().map(PositionedOverlayLayerCursor::new));
+    }
+
+    pub(crate) fn retarget_entries(&mut self, entries: &'a [(K, V)]) {
+        debug_assert!(self.cursors.capacity() >= usize::from(!entries.is_empty()));
+        self.cursors.clear();
+        if !entries.is_empty() {
+            self.cursors.push(PositionedOverlayLayerCursor::from_entries(entries));
+        }
     }
 }
 
@@ -175,7 +191,11 @@ struct PositionedOverlayLayerCursor<'a, K, V> {
 
 impl<'a, K, V> PositionedOverlayLayerCursor<'a, K, V> {
     fn new<O>(layer: &'a OverlayLayer<O, K, V>) -> Self {
-        Self { entries: layer.entries(), position: 0 }
+        Self::from_entries(layer.entries())
+    }
+
+    fn from_entries(entries: &'a [(K, V)]) -> Self {
+        Self { entries, position: 0 }
     }
 
     #[inline(always)]
