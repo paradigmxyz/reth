@@ -1086,7 +1086,7 @@ where
 
             // Determine all child nibbles which are set in the cached branch but not the
             // under-construction branch.
-            let mut next_child_nibbles = curr_state_mask ^ cached_state_mask;
+            let mut next_child_nibbles = cached_state_mask & !curr_state_mask;
 
             // Also include child nibbles indicated by the prefix set. The prefix set can
             // indicate children that need recalculation from leaves (e.g. new keys inserted
