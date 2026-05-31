@@ -77,7 +77,7 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
                 .with_bundle_update()
                 .build();
             let evm = evm_config.evm_with_env(&mut worker_state, evm_env);
-            let mut executor = evm_config.create_executor_with_state(evm, ctx.clone());
+            let mut executor = evm_config.create_executor_with_state(evm, ctx);
 
             loop {
                 let (index, tx) = crossbeam_channel::select_biased! {

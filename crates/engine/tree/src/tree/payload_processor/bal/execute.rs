@@ -122,12 +122,33 @@ where
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
         let (abort_guard, abort_rx) = AbortGuard::new();
 
-        for _ in 0..worker_count {
+        let mut txs = Some(txs);
+        let mut abort_rx = Some(abort_rx);
+        let mut result_tx = Some(result_tx);
+
+        for worker_idx in 0..worker_count {
+            let is_last_worker = worker_idx + 1 == worker_count;
+            let worker_txs = if is_last_worker {
+                txs.take().expect("last BAL worker takes transaction receiver")
+            } else {
+                txs.as_ref().expect("transaction receiver available").clone()
+            };
+            let worker_abort_rx = if is_last_worker {
+                abort_rx.take().expect("last BAL worker takes abort receiver")
+            } else {
+                abort_rx.as_ref().expect("abort receiver available").clone()
+            };
+            let worker_result_tx = if is_last_worker {
+                result_tx.take().expect("last BAL worker takes result sender")
+            } else {
+                result_tx.as_ref().expect("result sender available").clone()
+            };
+
             worker::spawn_worker(
                 scope,
-                txs.clone(),
-                abort_rx.clone(),
-                result_tx.clone(),
+                worker_txs,
+                worker_abort_rx,
+                worker_result_tx,
                 evm_config,
                 make_db,
                 Arc::clone(&input_bal_revm),
@@ -140,7 +161,7 @@ where
         let mut gas_tracker =
             BlockGasTracker::new(block_gas_limit, enable_amsterdam_eip8037, tx_gas_limit_cap);
         let evm = evm_config.evm_with_env(&mut canonical_state, evm_env);
-        let mut canonical_executor = evm_config.create_executor_with_state(evm, ctx.clone());
+        let mut canonical_executor = evm_config.create_executor_with_state(evm, ctx);
 
         canonical_executor.apply_pre_execution_changes()?;
         let mut senders = Vec::with_capacity(transaction_count);
