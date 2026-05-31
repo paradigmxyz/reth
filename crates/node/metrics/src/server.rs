@@ -15,7 +15,13 @@ use metrics_process::Collector;
 use reqwest::Client;
 use reth_metrics::metrics::Unit;
 use reth_tasks::TaskExecutor;
-use std::{convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    convert::Infallible,
+    net::SocketAddr,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 /// Configuration for the [`MetricServer`]
 #[derive(Debug)]
@@ -72,6 +78,42 @@ impl MetricServerConfig {
 #[derive(Debug)]
 pub struct MetricServer {
     config: MetricServerConfig,
+}
+
+const METRICS_RENDER_CACHE_TTL: Duration = Duration::from_millis(250);
+
+#[derive(Clone, Debug, Default)]
+struct RenderedMetricsCache {
+    inner: Arc<Mutex<RenderedMetricsCacheInner>>,
+}
+
+#[derive(Debug, Default)]
+struct RenderedMetricsCacheInner {
+    rendered_at: Option<Instant>,
+    body: Bytes,
+}
+
+impl RenderedMetricsCache {
+    fn render(
+        &self,
+        hook: impl Fn(),
+        handle: &crate::recorder::PrometheusRecorder,
+    ) -> Bytes {
+        let now = Instant::now();
+        let mut inner = self.inner.lock().expect("metrics render cache lock poisoned");
+        if inner
+            .rendered_at
+            .is_some_and(|rendered_at| now.duration_since(rendered_at) <= METRICS_RENDER_CACHE_TTL)
+        {
+            return inner.body.clone();
+        }
+
+        hook();
+        let body = Bytes::from(handle.handle().render());
+        inner.rendered_at = Some(now);
+        inner.body = body.clone();
+        body
+    }
 }
 
 impl MetricServer {
@@ -145,6 +187,7 @@ impl MetricServer {
 
         tracing::info!(target: "reth::cli", "Starting metrics endpoint at {}", listener.local_addr().unwrap());
 
+        let metrics_cache = RenderedMetricsCache::default();
         task_executor.spawn_with_graceful_shutdown_signal(async move |mut signal| loop {
             let io = tokio::select! {
                 _ = &mut signal => break,
@@ -162,12 +205,20 @@ impl MetricServer {
             let handle = install_prometheus_recorder();
             let hook = hook.clone();
             let pprof_dump_dir = pprof_dump_dir.clone();
+            let metrics_cache = metrics_cache.clone();
             let service = tower::service_fn(move |req: Request<_>| {
                 let hook = hook.clone();
                 let pprof_dump_dir = pprof_dump_dir.clone();
+                let metrics_cache = metrics_cache.clone();
                 async move {
-                    let response =
-                        handle_request(req.uri().path(), &*hook, handle, &pprof_dump_dir).await;
+                    let response = handle_request(
+                        req.uri().path(),
+                        &*hook,
+                        handle,
+                        &pprof_dump_dir,
+                        &metrics_cache,
+                    )
+                    .await;
                     Ok::<_, Infallible>(response)
                 }
             });
@@ -332,14 +383,14 @@ async fn handle_request(
     hook: impl Fn(),
     handle: &crate::recorder::PrometheusRecorder,
     pprof_dump_dir: &PathBuf,
+    metrics_cache: &RenderedMetricsCache,
 ) -> Response<Full<Bytes>> {
     match path {
         "/debug/pprof/heap" => handle_pprof_heap(pprof_dump_dir),
         "/debug/tokio/dump" => handle_tokio_dump().await,
         _ => {
-            hook();
-            let metrics = handle.handle().render();
-            let mut response = Response::new(Full::new(Bytes::from(metrics)));
+            let metrics = metrics_cache.render(hook, handle);
+            let mut response = Response::new(Full::new(metrics));
             response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
             response
         }
