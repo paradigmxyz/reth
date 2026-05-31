@@ -6,6 +6,7 @@ use alloy_evm::{
     eth::EthEvmContext,
     precompiles::PrecompilesMap,
     revm::{
+        context::DBErrorMarker,
         handler::EthPrecompiles,
         precompile::{Precompile, PrecompileId},
     },
@@ -22,7 +23,7 @@ use reth_ethereum::{
             context_interface::result::{EVMError, HaltReason},
             inspector::{Inspector, NoOpInspector},
             interpreter::interpreter::EthInterpreter,
-            precompile::{PrecompileOutput, PrecompileResult, Precompiles},
+            precompile::{PrecompileOutput, Precompiles},
             primitives::hardfork::SpecId,
             MainBuilder, MainContext,
         },
@@ -50,7 +51,7 @@ impl EvmFactory for MyEvmFactory {
     type Evm<DB: Database, I: Inspector<EthEvmContext<DB>, EthInterpreter>> =
         EthEvm<DB, I, Self::Precompiles>;
     type Tx = TxEnv;
-    type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
+    type Error<DBError: DBErrorMarker> = EVMError<DBError>;
     type HaltReason = HaltReason;
     type Context<DB: Database> = EthEvmContext<DB>;
     type Spec = SpecId;
@@ -110,7 +111,7 @@ pub fn prague_custom() -> &'static Precompiles {
         let precompile = Precompile::new(
             PrecompileId::custom("custom"),
             address!("0x0000000000000000000000000000000000000999"),
-            |_, _| PrecompileResult::Ok(PrecompileOutput::new(0, Bytes::new())),
+            |_, _, _| Ok(PrecompileOutput::new(0, Bytes::new(), 0)),
         );
         precompiles.extend([precompile]);
         precompiles

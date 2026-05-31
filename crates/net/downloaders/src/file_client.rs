@@ -126,7 +126,7 @@ impl<B: FullBlock> FileClient<B> {
         let mut reader = vec![];
         file.read_to_end(&mut reader).await?;
 
-        Ok(FileClientBuilder { consensus, parent_header: None }
+        Ok(FileClientBuilder { consensus, parent_header: None, skip_invalid_blocks: false }
             .build(&reader[..], file_len)
             .await?
             .file_client)
@@ -216,6 +216,7 @@ impl<B: FullBlock> FileClient<B> {
 struct FileClientBuilder<B: Block> {
     pub consensus: Arc<dyn Consensus<B>>,
     pub parent_header: Option<SealedHeader<B::Header>>,
+    pub skip_invalid_blocks: bool,
 }
 
 impl<B: FullBlock<Header: reth_primitives_traits::BlockHeader>> FromReader
@@ -272,15 +273,33 @@ impl<B: FullBlock<Header: reth_primitives_traits::BlockHeader>> FromReader
 
                 let block = SealedBlock::seal_slow(block);
 
-                // Validate standalone header
-                self.consensus.validate_header(block.sealed_header())?;
-                if let Some(parent) = &parent_header {
-                    self.consensus.validate_header_against_parent(block.sealed_header(), parent)?;
+                // Run consensus pre-checks. An invalid block here (e.g. mid-file in a
+                // BlockchainTest sequence that intentionally interleaves invalid block proposals
+                // with the valid chain) is not a hard failure: skip the block and keep decoding
+                // so the pipeline can still apply the valid prefix.
+                let validation =
+                    self.consensus.validate_header(block.sealed_header()).and_then(|_| {
+                        if let Some(parent) = &parent_header {
+                            self.consensus
+                                .validate_header_against_parent(block.sealed_header(), parent)?;
+                        }
+                        self.consensus.validate_block_pre_execution(&block)
+                    });
+                if let Err(err) = validation {
+                    if !self.skip_invalid_blocks {
+                        return Err(err.into())
+                    }
+                    warn!(target: "downloaders::file",
+                        block_number = block.number(),
+                        block_hash = %block.hash(),
+                        %err,
+                        "skipping invalid block while decoding file"
+                    );
+                    continue
+                }
+                if parent_header.is_some() {
                     parent_header = Some(block.sealed_header().clone());
                 }
-
-                // Validate block against header
-                self.consensus.validate_block_pre_execution(&block)?;
 
                 // add to the internal maps
                 let block_hash = block.hash();
@@ -579,11 +598,21 @@ impl ChunkedFileReader {
         consensus: Arc<dyn Consensus<B>>,
         parent_header: Option<SealedHeader<B::Header>>,
     ) -> Result<Option<FileClient<B>>, FileClientError> {
+        self.next_chunk_with_invalid_block_handling(consensus, parent_header, false).await
+    }
+
+    /// Read next chunk from file, optionally skipping blocks that fail consensus pre-checks.
+    pub async fn next_chunk_with_invalid_block_handling<B: FullBlock>(
+        &mut self,
+        consensus: Arc<dyn Consensus<B>>,
+        parent_header: Option<SealedHeader<B::Header>>,
+        skip_invalid_blocks: bool,
+    ) -> Result<Option<FileClient<B>>, FileClientError> {
         let Some(chunk_len) = self.read_next_chunk().await? else { return Ok(None) };
 
         // make new file client from chunk
         let DecodedFileChunk { file_client, remaining_bytes, .. } =
-            FileClientBuilder { consensus, parent_header }
+            FileClientBuilder { consensus, parent_header, skip_invalid_blocks }
                 .build(&self.chunk[..], chunk_len)
                 .await?;
 
@@ -668,7 +697,7 @@ mod tests {
     use async_compression::tokio::write::GzipEncoder;
     use futures_util::stream::StreamExt;
     use rand::Rng;
-    use reth_consensus::{noop::NoopConsensus, test_utils::TestConsensus};
+    use reth_consensus::{noop::NoopConsensus, test_utils::TestConsensus, ConsensusError};
     use reth_ethereum_primitives::Block;
     use reth_network_p2p::{
         bodies::downloader::BodyDownloader,
@@ -795,6 +824,37 @@ mod tests {
             downloader.next().await,
             Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter(), &mut bodies))
         );
+    }
+
+    #[tokio::test]
+    async fn strict_chunk_decode_fails_on_invalid_block() {
+        let (file, _, _) = generate_bodies_file(0..=2).await;
+        let chunk_byte_len = file.metadata().await.unwrap().len();
+        let mut reader = ChunkedFileReader::from_file(file, chunk_byte_len, false).await.unwrap();
+        let consensus = Arc::new(TestConsensus::default());
+        consensus.set_fail_validation(true);
+
+        let err = reader.next_chunk::<Block>(consensus, None).await.unwrap_err();
+
+        assert_matches!(err, FileClientError::Consensus(ConsensusError::BaseFeeMissing));
+    }
+
+    #[tokio::test]
+    async fn lenient_chunk_decode_skips_invalid_blocks() {
+        let (file, _, _) = generate_bodies_file(0..=2).await;
+        let chunk_byte_len = file.metadata().await.unwrap().len();
+        let mut reader = ChunkedFileReader::from_file(file, chunk_byte_len, false).await.unwrap();
+        let consensus = Arc::new(TestConsensus::default());
+        consensus.set_fail_validation(true);
+
+        let client = reader
+            .next_chunk_with_invalid_block_handling::<Block>(consensus, None, true)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(client.headers_len(), 0);
+        assert!(client.tip().is_none());
     }
 
     #[tokio::test]

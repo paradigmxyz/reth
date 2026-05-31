@@ -165,11 +165,7 @@ mod tests {
         let hash = B256::from([1u8; 32]);
 
         cache.update_with_guard(|slot| {
-            *slot = Some(SavedCache::new(
-                hash,
-                ExecutionCache::new(1_000),
-                CachedStateMetrics::zeroed(),
-            ))
+            *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
         });
 
         let first = cache.get_cache_for(hash);
@@ -185,11 +181,7 @@ mod tests {
         let hash = B256::from([2u8; 32]);
 
         cache.update_with_guard(|slot| {
-            *slot = Some(SavedCache::new(
-                hash,
-                ExecutionCache::new(1_000),
-                CachedStateMetrics::zeroed(),
-            ))
+            *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
         });
 
         let checked_out = cache.get_cache_for(hash);
@@ -207,11 +199,7 @@ mod tests {
         let hash_b = B256::from([0xBB; 32]);
 
         cache.update_with_guard(|slot| {
-            *slot = Some(SavedCache::new(
-                hash_a,
-                ExecutionCache::new(1_000),
-                CachedStateMetrics::zeroed(),
-            ))
+            *slot = Some(SavedCache::new(hash_a, ExecutionCache::new(1_000)))
         });
 
         let checked_out = cache.get_cache_for(hash_b);

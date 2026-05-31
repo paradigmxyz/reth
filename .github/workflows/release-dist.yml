@@ -7,12 +7,15 @@ on:
   release:
     types: [published]
 
+permissions: {}
+
 jobs:
   release-homebrew:
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
       - name: Update Homebrew formula
-        uses: dawidd6/action-homebrew-bump-formula@v7
+        uses: dawidd6/action-homebrew-bump-formula@1446dca236b0440c6f02723a3f14f13be2c04ab0 # v7
         with:
           token: ${{ secrets.HOMEBREW }}
           no_fork: true

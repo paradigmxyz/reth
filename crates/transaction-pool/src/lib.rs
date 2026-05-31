@@ -276,6 +276,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+pub use imbl::OrdMap;
+
 pub use crate::{
     batcher::{BatchTxProcessor, BatchTxRequest},
     blobstore::{BlobStore, BlobStoreError},
@@ -301,10 +303,10 @@ pub use crate::{
 };
 use crate::{identifier::TransactionId, pool::PoolInner};
 use alloy_eips::{
-    eip4844::{BlobAndProofV1, BlobAndProofV2},
+    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7594::BlobTransactionSidecarVariant,
 };
-use alloy_primitives::{map::AddressSet, Address, TxHash, B256, U256};
+use alloy_primitives::{map::AddressSet, Address, TxHash, B128, B256, U256};
 use aquamarine as _;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_eth_wire_types::HandleMempoolData;
@@ -468,7 +470,7 @@ where
     V: TransactionValidator,
     <V as TransactionValidator>::Transaction: EthPoolTransaction,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
-    S: BlobStore,
+    S: BlobStore + Clone,
 {
     type Transaction = T::Transaction;
 
@@ -680,6 +682,13 @@ where
         self.pool.retain_unknown(announcement)
     }
 
+    fn retain_contains<A>(&self, announcement: &mut A)
+    where
+        A: HandleMempoolData,
+    {
+        self.pool.retain_contains(announcement)
+    }
+
     fn get(&self, tx_hash: &TxHash) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.inner().get(tx_hash)
     }
@@ -806,6 +815,18 @@ where
     ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError> {
         self.pool.blob_store().get_by_versioned_hashes_v3(versioned_hashes)
     }
+
+    fn get_blobs_for_versioned_hashes_v4(
+        &self,
+        versioned_hashes: &[B256],
+        indices_bitarray: B128,
+    ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError> {
+        self.pool.blob_store().get_by_versioned_hashes_v4(versioned_hashes, indices_bitarray)
+    }
+
+    fn blob_store(&self) -> Box<dyn BlobStore> {
+        Box::new(self.pool.blob_store().clone())
+    }
 }
 
 impl<V, T, S> TransactionPoolExt for Pool<V, T, S>
@@ -813,7 +834,7 @@ where
     V: TransactionValidator,
     <V as TransactionValidator>::Transaction: EthPoolTransaction,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
-    S: BlobStore,
+    S: BlobStore + Clone,
 {
     type Block = V::Block;
 

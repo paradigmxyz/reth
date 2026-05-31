@@ -1303,6 +1303,7 @@ where
         &self,
         _input: TrieInput,
         _target: HashedPostState,
+        _mode: reth_trie::ExecutionWitnessMode,
     ) -> Result<Vec<alloy_primitives::Bytes>, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }

@@ -15,11 +15,15 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
+permissions: {}
+
 jobs:
   sync:
     if: github.repository == 'paradigmxyz/reth'
     name: sync (${{ matrix.chain.bin }})
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
+    permissions:
+      contents: read
     env:
       RUST_LOG: info,sync=error
       RUST_BACKTRACE: 1
@@ -34,11 +38,13 @@ jobs:
             block: 100000
             unwind-target: "0x52e0509d33a988ef807058e2980099ee3070187f7333aae12b64d4d675f34c5a"
     steps:
-      - uses: actions/checkout@v6
-      - uses: rui314/setup-mold@v1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
       - uses: dtolnay/rust-toolchain@stable
-      - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           cache-on-failure: true
       - name: Build ${{ matrix.chain.bin }}

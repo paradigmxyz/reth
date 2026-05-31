@@ -20,7 +20,9 @@ use reth_eth_wire_types::message::MAX_MESSAGE_SIZE;
 use reth_ethereum_forks::{ForkFilter, Head};
 use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
 use reth_network_types::{PeersConfig, SessionsConfig};
-use reth_storage_api::{noop::NoopProvider, BlockNumReader, BlockReader, HeaderProvider};
+use reth_storage_api::{
+    noop::NoopProvider, BalProvider, BlockNumReader, BlockReader, HeaderProvider,
+};
 use reth_tasks::Runtime;
 use secp256k1::SECP256K1;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
@@ -157,7 +159,8 @@ where
 impl<C, N> NetworkConfig<C, N>
 where
     N: NetworkPrimitives,
-    C: BlockReader<Block = N::Block, Receipt = N::Receipt, Header = N::BlockHeader>
+    C: BalProvider
+        + BlockReader<Block = N::Block, Receipt = N::Receipt, Header = N::BlockHeader>
         + HeaderProvider
         + Clone
         + Unpin
@@ -654,16 +657,24 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             total_difficulty: chain_spec.genesis().difficulty,
         });
 
+        let listener_addr = listener_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS);
+        // Static NAT addresses (`extip`/`extaddr`) tell peers which IP to dial, but that IP may
+        // not exist on a local interface. Keep binding to `listener_addr` and use the NAT IP only
+        // as the ENR address.
+        let advertised_ip = nat.clone().and_then(|nat| nat.as_external_ip(listener_addr.port()));
+
         discovery_v5_builder = discovery_v5_builder.map(|mut builder| {
             if let Some(network_stack_id) = NetworkStackId::id(&chain_spec) {
                 let fork_id = chain_spec.fork_id(&head);
                 builder = builder.fork(network_stack_id, fork_id)
             }
 
+            if let Some(ip) = advertised_ip {
+                builder = builder.advertised_ip(ip);
+            }
+
             builder
         });
-
-        let listener_addr = listener_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS);
 
         let mut hello_message =
             hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());

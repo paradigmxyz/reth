@@ -5,10 +5,11 @@ use alloy_consensus::{
 };
 use alloy_eips::{eip4895::Withdrawals, merge::BEACON_NONCE};
 use alloy_evm::{block::BlockExecutorFactory, eth::EthBlockExecutionCtx};
+use alloy_primitives::{Bloom, B256};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::execute::{BlockAssembler, BlockAssemblerInput, BlockExecutionError};
 use reth_execution_types::BlockExecutionResult;
-use reth_primitives_traits::{logs_bloom, Receipt, SignedTransaction};
+use reth_primitives_traits::{logs_bloom as calculate_logs_bloom, Receipt, SignedTransaction};
 use revm::context::Block as _;
 
 /// Block builder for Ethereum.
@@ -25,21 +26,23 @@ impl<ChainSpec> EthBlockAssembler<ChainSpec> {
     }
 }
 
-impl<F, ChainSpec> BlockAssembler<F> for EthBlockAssembler<ChainSpec>
-where
-    F: for<'a> BlockExecutorFactory<
-        ExecutionCtx<'a> = EthBlockExecutionCtx<'a>,
-        Transaction: SignedTransaction,
-        Receipt: Receipt,
-    >,
-    ChainSpec: EthChainSpec + EthereumHardforks,
-{
-    type Block = Block<F::Transaction>;
-
-    fn assemble_block(
+impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
+    /// Assembles a block. Accepts optional precomputed transaction root, receipt root, and logs
+    /// bloom.
+    pub fn assemble_block<F>(
         &self,
         input: BlockAssemblerInput<'_, '_, F>,
-    ) -> Result<Self::Block, BlockExecutionError> {
+        transactions_root: Option<B256>,
+        receipts_root: Option<B256>,
+        logs_bloom: Option<Bloom>,
+    ) -> Result<Block<F::Transaction>, BlockExecutionError>
+    where
+        F: for<'a> BlockExecutorFactory<
+            ExecutionCtx<'a> = EthBlockExecutionCtx<'a>,
+            Transaction: SignedTransaction,
+            Receipt: Receipt,
+        >,
+    {
         let BlockAssemblerInput {
             evm_env,
             execution_ctx: ctx,
@@ -47,16 +50,19 @@ where
             transactions,
             output: BlockExecutionResult { receipts, requests, gas_used, blob_gas_used },
             state_root,
+            block_access_list_hash,
             ..
         } = input;
 
         let timestamp = evm_env.block_env.timestamp().saturating_to();
 
-        let transactions_root = proofs::calculate_transaction_root(&transactions);
-        let receipts_root = calculate_receipt_root(
-            &receipts.iter().map(|r| r.with_bloom_ref()).collect::<Vec<_>>(),
-        );
-        let logs_bloom = logs_bloom(receipts.iter().flat_map(|r| r.logs()));
+        let transactions_root =
+            transactions_root.unwrap_or_else(|| proofs::calculate_transaction_root(&transactions));
+        let receipts_root = receipts_root.unwrap_or_else(|| {
+            calculate_receipt_root(&receipts.iter().map(|r| r.with_bloom_ref()).collect::<Vec<_>>())
+        });
+        let logs_bloom = logs_bloom
+            .unwrap_or_else(|| calculate_logs_bloom(receipts.iter().flat_map(|r| r.logs())));
 
         let withdrawals = self
             .chain_spec
@@ -112,11 +118,32 @@ where
             blob_gas_used: block_blob_gas_used,
             excess_blob_gas,
             requests_hash,
+            block_access_list_hash,
+            slot_number: ctx.slot_number,
         };
 
         Ok(Block {
             header,
             body: BlockBody { transactions, ommers: Default::default(), withdrawals },
         })
+    }
+}
+
+impl<F, ChainSpec> BlockAssembler<F> for EthBlockAssembler<ChainSpec>
+where
+    F: for<'a> BlockExecutorFactory<
+        ExecutionCtx<'a> = EthBlockExecutionCtx<'a>,
+        Transaction: SignedTransaction,
+        Receipt: Receipt,
+    >,
+    ChainSpec: EthChainSpec + EthereumHardforks,
+{
+    type Block = Block<F::Transaction>;
+
+    fn assemble_block(
+        &self,
+        input: BlockAssemblerInput<'_, '_, F>,
+    ) -> Result<Self::Block, BlockExecutionError> {
+        self.assemble_block(input, None, None, None)
     }
 }

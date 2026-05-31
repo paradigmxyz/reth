@@ -33,23 +33,24 @@ use crate::{
     },
     cache::LruCache,
     duration_metered_exec, metered_poll_nested_stream_with_budget,
-    metrics::{
-        AnnouncedTxTypesMetrics, TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE,
-    },
+    metrics::{AnnouncedTxTypesMetrics, TransactionsManagerMetrics},
     transactions::config::{StrictEthAnnouncementFilter, TransactionPropagationKind},
     NetworkHandle, TxTypesCounter,
 };
-use alloy_primitives::{TxHash, B256};
+use alloy_primitives::{
+    map::{B256Map, B256Set, FbBuildHasher},
+    TxHash, B256,
+};
 use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
     DedupPayload, EthNetworkPrimitives, EthVersion, GetPooledTransactions, HandleMempoolData,
     HandleVersionedMempoolData, NetworkPrimitives, NewPooledTransactionHashes,
-    NewPooledTransactionHashes66, NewPooledTransactionHashes68, PooledTransactions,
-    RequestTxHashes, Transactions, ValidAnnouncementData,
+    NewPooledTransactionHashes66, NewPooledTransactionHashes68, NewPooledTransactionHashes72,
+    PooledTransactions, RequestTxHashes, Transactions, ValidAnnouncementData,
 };
 use reth_ethereum_primitives::{TransactionSigned, TxType};
-use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
+use reth_metrics::common::mpsc::MemoryBoundedReceiver;
 use reth_network_api::{
     events::{PeerEvent, SessionInfo},
     NetworkEvent, NetworkEventListenerProvider, PeerKind, PeerRequest, PeerRequestSender, Peers,
@@ -60,7 +61,7 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
     error::{PoolError, PoolResult},
@@ -186,7 +187,7 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
     pub async fn get_transaction_hashes(
         &self,
         peers: Vec<PeerId>,
-    ) -> Result<HashMap<PeerId, HashSet<TxHash>>, RecvError> {
+    ) -> Result<HashMap<PeerId, B256Set>, RecvError> {
         if peers.is_empty() {
             return Ok(Default::default())
         }
@@ -196,10 +197,7 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
     }
 
     /// Request the transaction hashes known by a specific peer.
-    pub async fn get_peer_transaction_hashes(
-        &self,
-        peer: PeerId,
-    ) -> Result<HashSet<TxHash>, RecvError> {
+    pub async fn get_peer_transaction_hashes(&self, peer: PeerId) -> Result<B256Set, RecvError> {
         let res = self.get_transaction_hashes(vec![peer]).await?;
         Ok(res.into_values().next().unwrap_or_default())
     }
@@ -295,7 +293,7 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     ///
     /// This way we can track incoming transactions and prevent multiple pool imports for the same
     /// transaction
-    transactions_by_peers: HashMap<TxHash, HashSet<PeerId>>,
+    transactions_by_peers: B256Map<HashSet<PeerId>>,
     /// Transactions that are currently imported into the `Pool`.
     ///
     /// The import process includes:
@@ -311,7 +309,7 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     /// Stats on pending pool imports that help the node self-monitor.
     pending_pool_imports_info: PendingPoolImportsInfo,
     /// Bad imports.
-    bad_imports: LruCache<TxHash>,
+    bad_imports: LruCache<TxHash, FbBuildHasher<32>>,
     /// All the connected peers.
     peers: HashMap<PeerId, PeerMetadata<N>>,
     /// Send half for the command channel.
@@ -333,7 +331,7 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     ///   - account has enough balance to cover the transaction's gas
     pending_transactions: mpsc::Receiver<TxHash>,
     /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
-    transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent<N>>,
+    transaction_events: MemoryBoundedReceiver<NetworkTransactionEvent<N>>,
     /// How the `TransactionsManager` is configured.
     config: TransactionsManagerConfig,
     /// Network Policies
@@ -351,7 +349,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     pub fn new(
         network: NetworkHandle<N>,
         pool: Pool,
-        from_network: mpsc::UnboundedReceiver<NetworkTransactionEvent<N>>,
+        from_network: MemoryBoundedReceiver<NetworkTransactionEvent<N>>,
         transactions_manager_config: TransactionsManagerConfig,
     ) -> Self {
         Self::with_policy(
@@ -374,7 +372,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     pub fn with_policy(
         network: NetworkHandle<N>,
         pool: Pool,
-        from_network: mpsc::UnboundedReceiver<NetworkTransactionEvent<N>>,
+        from_network: MemoryBoundedReceiver<NetworkTransactionEvent<N>>,
         transactions_manager_config: TransactionsManagerConfig,
         policies: NetworkPolicies<N>,
     ) -> Self {
@@ -404,15 +402,12 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             transactions_by_peers: Default::default(),
             pool_imports: Default::default(),
             pending_pool_imports_info,
-            bad_imports: LruCache::new(DEFAULT_MAX_COUNT_BAD_IMPORTS),
+            bad_imports: LruCache::with_hasher(DEFAULT_MAX_COUNT_BAD_IMPORTS, Default::default()),
             peers: Default::default(),
             command_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
             pending_transactions: pending,
-            transaction_events: UnboundedMeteredReceiver::new(
-                from_network,
-                NETWORK_POOL_TRANSACTIONS_SCOPE,
-            ),
+            transaction_events: from_network,
             config: transactions_manager_config,
             policies,
             metrics,
@@ -678,21 +673,21 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         let mut should_report_peer = false;
         let mut tx_types_counter = TxTypesCounter::default();
 
-        let is_eth68_message = partially_valid_msg
+        let has_eth68_metadata = partially_valid_msg
             .msg_version()
             .expect("partially valid announcement should have a version")
-            .is_eth68();
+            .has_eth68_metadata();
 
         partially_valid_msg.retain(|tx_hash, metadata_ref_mut| {
             let (ty_byte, size_val) = match *metadata_ref_mut {
                 Some((ty, size)) => {
-                    if !is_eth68_message {
+                    if !has_eth68_metadata {
                         should_report_peer = true;
                     }
                     (ty, size)
                 }
                 None => {
-                    if is_eth68_message {
+                    if has_eth68_metadata {
                         should_report_peer = true;
                         return false;
                     }
@@ -700,11 +695,11 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
                 }
             };
 
-            if is_eth68_message &&
-                let Some((actual_ty_byte, _)) = *metadata_ref_mut &&
-                let Ok(parsed_tx_type) = TxType::try_from(actual_ty_byte)
-            {
-                tx_types_counter.increase_by_tx_type(parsed_tx_type);
+            if has_eth68_metadata && let Some((actual_ty_byte, _)) = *metadata_ref_mut {
+                match TxType::try_from(actual_ty_byte) {
+                    Ok(parsed_tx_type) => tx_types_counter.increase_by_tx_type(parsed_tx_type),
+                    Err(_) => tx_types_counter.increase_other(),
+                }
             }
 
             let decision = self
@@ -724,7 +719,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             }
         });
 
-        if is_eth68_message {
+        if has_eth68_metadata {
             self.announced_tx_types_metrics.update_eth68_announcement_metrics(tx_types_counter);
         }
 
@@ -1197,7 +1192,7 @@ where
                     let hashes = self
                         .peers
                         .get(&peer_id)
-                        .map(|peer| peer.seen_transactions.iter().copied().collect::<HashSet<_>>())
+                        .map(|peer| peer.seen_transactions.iter().copied().collect::<B256Set>())
                         .unwrap_or_default();
                     res.insert(peer_id, hashes);
                 }
@@ -1626,7 +1621,7 @@ where
             "Network transaction events stream",
             DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
             this.transaction_events.poll_next_unpin(cx),
-            |event| this.on_network_tx_event(event),
+            |event: NetworkTransactionEvent<N>| this.on_network_tx_event(event),
         );
 
         // Advance inflight fetch requests (flush transaction fetcher and queue for
@@ -1921,6 +1916,7 @@ impl<T: SignedTransaction> FullTransactionsBuilder<T> {
 enum PooledTransactionsHashesBuilder {
     Eth66(NewPooledTransactionHashes66),
     Eth68(NewPooledTransactionHashes68),
+    Eth72(NewPooledTransactionHashes72),
 }
 
 // === impl PooledTransactionsHashesBuilder ===
@@ -1935,6 +1931,11 @@ impl PooledTransactionsHashesBuilder {
                 msg.sizes.push(pooled_tx.encoded_length());
                 msg.types.push(pooled_tx.transaction.ty());
             }
+            Self::Eth72(msg) => {
+                msg.hashes.push(*pooled_tx.hash());
+                msg.sizes.push(pooled_tx.encoded_length());
+                msg.types.push(pooled_tx.transaction.ty());
+            }
         }
     }
 
@@ -1943,6 +1944,7 @@ impl PooledTransactionsHashesBuilder {
         match self {
             Self::Eth66(hashes) => hashes.is_empty(),
             Self::Eth68(hashes) => hashes.is_empty(),
+            Self::Eth72(hashes) => hashes.is_empty(),
         }
     }
 
@@ -1951,6 +1953,7 @@ impl PooledTransactionsHashesBuilder {
         match self {
             Self::Eth66(hashes) => hashes.len(),
             Self::Eth68(hashes) => hashes.len(),
+            Self::Eth72(hashes) => hashes.len(),
         }
     }
 
@@ -1972,6 +1975,11 @@ impl PooledTransactionsHashesBuilder {
                 msg.sizes.push(tx.size);
                 msg.types.push(tx.transaction.ty());
             }
+            Self::Eth72(msg) => {
+                msg.hashes.push(*tx.tx_hash());
+                msg.sizes.push(tx.size);
+                msg.types.push(tx.transaction.ty());
+            }
         }
     }
 
@@ -1982,6 +1990,7 @@ impl PooledTransactionsHashesBuilder {
             EthVersion::Eth68 | EthVersion::Eth69 | EthVersion::Eth70 | EthVersion::Eth71 => {
                 Self::Eth68(Default::default())
             }
+            EthVersion::Eth72 => Self::Eth72(Default::default()),
         }
     }
 
@@ -1992,6 +2001,10 @@ impl PooledTransactionsHashesBuilder {
                 msg.into()
             }
             Self::Eth68(mut msg) => {
+                msg.shrink_to_fit();
+                msg.into()
+            }
+            Self::Eth72(mut msg) => {
                 msg.shrink_to_fit();
                 msg.into()
             }
@@ -2022,7 +2035,7 @@ pub struct PeerMetadata<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Optimistically keeps track of transactions that we know the peer has seen. Optimistic, in
     /// the sense that transactions are preemptively marked as seen by peer when they are sent to
     /// the peer.
-    seen_transactions: LruCache<TxHash>,
+    seen_transactions: LruCache<TxHash, FbBuildHasher<32>>,
     /// A communication channel directly to the peer's session task.
     request_tx: PeerRequestSender<PeerRequest<N>>,
     /// negotiated version of the session.
@@ -2043,7 +2056,10 @@ impl<N: NetworkPrimitives> PeerMetadata<N> {
         peer_kind: PeerKind,
     ) -> Self {
         Self {
-            seen_transactions: LruCache::new(max_transactions_seen_by_peer),
+            seen_transactions: LruCache::with_hasher(
+                max_transactions_seen_by_peer,
+                Default::default(),
+            ),
             request_tx,
             version,
             client_version,
@@ -2057,7 +2073,7 @@ impl<N: NetworkPrimitives> PeerMetadata<N> {
     }
 
     /// Returns a mutable reference to the seen transactions LRU cache.
-    pub const fn seen_transactions_mut(&mut self) -> &mut LruCache<TxHash> {
+    pub const fn seen_transactions_mut(&mut self) -> &mut LruCache<TxHash, FbBuildHasher<32>> {
         &mut self.seen_transactions
     }
 
@@ -2093,10 +2109,7 @@ enum TransactionsCommand<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Propagate a collection of broadcastable transactions in full to all peers.
     BroadcastTransactions(Vec<PropagateTransaction<N::BroadcastedTransaction>>),
     /// Request transaction hashes known by specific peers from the [`TransactionsManager`].
-    GetTransactionHashes {
-        peers: Vec<PeerId>,
-        tx: oneshot::Sender<HashMap<PeerId, HashSet<TxHash>>>,
-    },
+    GetTransactionHashes { peers: Vec<PeerId>, tx: oneshot::Sender<HashMap<PeerId, B256Set>> },
     /// Requests a clone of the sender channel to the peer.
     GetPeerSender {
         peer_id: PeerId,
@@ -2172,6 +2185,28 @@ struct TxManagerPollDurations {
     acc_fetch_events: Duration,
     acc_pending_fetch: Duration,
     acc_cmds: Duration,
+}
+
+impl<N: NetworkPrimitives> InMemorySize for NetworkTransactionEvent<N> {
+    // `N::BroadcastedTransaction` and `N::PooledTransaction` already implement
+    // `InMemorySize` via `SignedTransaction: InMemorySize`, so no extra bound is needed.
+    fn size(&self) -> usize {
+        match self {
+            Self::IncomingTransactions { peer_id, msg } => {
+                core::mem::size_of_val(peer_id) +
+                    msg.0.iter().map(InMemorySize::size).sum::<usize>()
+            }
+            Self::IncomingPooledTransactionHashes { peer_id, msg } => {
+                core::mem::size_of_val(peer_id) + msg.size()
+            }
+            Self::GetPooledTransactions { peer_id, request, response } => {
+                core::mem::size_of_val(peer_id) +
+                    request.0.len() * core::mem::size_of::<TxHash>() +
+                    core::mem::size_of_val(response)
+            }
+            Self::GetTransactionsHandle(_) => 0,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2876,9 +2911,9 @@ mod tests {
         let PeerRequest::GetPooledTransactions { request, response } = req else { unreachable!() };
         let GetPooledTransactions(hashes) = request;
 
-        let hashes = hashes.into_iter().collect::<HashSet<_>>();
+        let hashes = hashes.into_iter().collect::<B256Set>();
 
-        assert_eq!(hashes, seen_hashes.into_iter().collect::<HashSet<_>>());
+        assert_eq!(hashes, seen_hashes.into_iter().collect::<B256Set>());
 
         // fail request to peer_1
         response
@@ -3106,7 +3141,12 @@ mod tests {
 
         let mut network_manager = NetworkManager::new(network_config).await.unwrap();
         let (to_tx_manager_tx, from_network_rx) =
-            mpsc::unbounded_channel::<NetworkTransactionEvent<EthNetworkPrimitives>>();
+            reth_metrics::common::mpsc::memory_bounded_channel::<
+                NetworkTransactionEvent<EthNetworkPrimitives>,
+            >(
+                crate::transactions::constants::tx_manager::DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
+                "test_tx_channel",
+            );
         network_manager.set_transactions(to_tx_manager_tx);
         let network_handle = network_manager.handle().clone();
         let network_service_handle = tokio::spawn(network_manager);
@@ -3151,7 +3191,7 @@ mod tests {
         })
         .await;
 
-        let mut requested_hashes_in_getpooled = HashSet::new();
+        let mut requested_hashes_in_getpooled = B256Set::default();
         let mut unexpected_request_received = false;
 
         match tokio::time::timeout(std::time::Duration::from_millis(200), mock_session_rx.recv())

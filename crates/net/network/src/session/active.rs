@@ -79,6 +79,9 @@ const TIMEOUT_SCALING: u32 = 3;
 /// before reading any more messages from the remote peer, throttling the peer.
 const MAX_QUEUED_OUTGOING_RESPONSES: usize = 4;
 
+/// Minimum capacity to retain for buffered incoming requests from the remote peer.
+const MIN_RECEIVED_REQUESTS_CAPACITY: usize = 1;
+
 /// Soft limit for the total number of buffered outgoing broadcast items (e.g. transaction hashes).
 ///
 /// Many small broadcast messages carrying a single tx hash each are equivalent in cost to one
@@ -204,8 +207,8 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
 
     /// Shrinks the capacity of the internal buffers.
     pub fn shrink_to_fit(&mut self) {
-        self.received_requests_from_remote.shrink_to_fit();
-        self.queued_outgoing.shrink_to_fit();
+        self.received_requests_from_remote.shrink_to(MIN_RECEIVED_REQUESTS_CAPACITY);
+        self.queued_outgoing.shrink_to(MAX_QUEUED_OUTGOING_RESPONSES);
     }
 
     /// Returns how many responses we've currently queued up.
@@ -291,6 +294,9 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             EthMessage::NewPooledTransactionHashes68(msg) => {
                 self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
             }
+            EthMessage::NewPooledTransactionHashes72(msg) => {
+                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
+            }
             EthMessage::GetBlockHeaders(req) => {
                 on_request!(req, BlockHeaders, GetBlockHeaders)
             }
@@ -340,6 +346,9 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             EthMessage::BlockAccessLists(resp) => {
                 on_response!(resp, GetBlockAccessLists)
             }
+            EthMessage::Cells(resp) => {
+                on_response!(resp, GetCells)
+            }
             EthMessage::BlockRangeUpdate(msg) => {
                 // Validate that earliest <= latest according to the spec
                 if msg.earliest > msg.latest {
@@ -367,6 +376,9 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 }
 
                 OnIncomingMessageOutcome::Ok
+            }
+            EthMessage::GetCells(resp) => {
+                on_request!(resp, Cells, GetCells)
             }
             EthMessage::Other(bytes) => self.try_emit_broadcast(PeerMessage::Other(bytes)).into(),
         }
@@ -980,6 +992,7 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
                 EthMessage::NewBlockHashes(h) => h.len(),
                 EthMessage::NewPooledTransactionHashes66(h) => h.len(),
                 EthMessage::NewPooledTransactionHashes68(h) => h.hashes.len(),
+                EthMessage::NewPooledTransactionHashes72(h) => h.hashes.len(),
                 _ => 0,
             },
             Self::Broadcast(msg) => match msg {
@@ -1008,6 +1021,15 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
             (
                 EthMessage::NewPooledTransactionHashes68(existing),
                 NewPooledTransactionHashes::Eth68(inc),
+            ) => {
+                existing.hashes.extend(inc.hashes);
+                existing.sizes.extend(inc.sizes);
+                existing.types.extend(inc.types);
+                None
+            }
+            (
+                EthMessage::NewPooledTransactionHashes72(existing),
+                NewPooledTransactionHashes::Eth72(inc),
             ) => {
                 existing.hashes.extend(inc.hashes);
                 existing.sizes.extend(inc.sizes);
@@ -1076,7 +1098,7 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
     }
 
     /// Pushes a pooled transaction hash announcement, merging into the last queued message if
-    /// it is the same variant (eth66 or eth68).
+    /// it is the same variant (eth66, eth68, or eth72).
     pub(crate) fn push_pooled_hashes(&mut self, msg: NewPooledTransactionHashes) {
         let msg = if let Some(last) = self.messages.back_mut() {
             match last.try_merge_hashes(msg) {
@@ -1090,8 +1112,8 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
         self.count.increment(1);
     }
 
-    pub(crate) fn shrink_to_fit(&mut self) {
-        self.messages.shrink_to_fit();
+    pub(crate) fn shrink_to(&mut self, min_capacity: usize) {
+        self.messages.shrink_to(min_capacity);
     }
 }
 
@@ -1117,7 +1139,9 @@ mod tests {
         GetBlockBodies, HelloMessageWithProtocols, P2PStream, StatusBuilder, UnauthedEthStream,
         UnauthedP2PStream, UnifiedStatus,
     };
-    use reth_eth_wire_types::{message::MAX_MESSAGE_SIZE, EthMessageID, RawCapabilityMessage};
+    use reth_eth_wire_types::{
+        message::MAX_MESSAGE_SIZE, EthMessageID, NewPooledTransactionHashes72, RawCapabilityMessage,
+    };
     use reth_ethereum_forks::EthereumHardfork;
     use reth_network_peers::pk2id;
     use reth_network_types::session::config::PROTOCOL_BREACH_REQUEST_TIMEOUT;
@@ -1455,6 +1479,22 @@ mod tests {
             ActiveSessionMessage::ProtocolBreach { .. } => {}
             ev => unreachable!("{ev:?}"),
         }
+    }
+
+    #[test]
+    fn eth72_pooled_hashes_count_broadcast_items() {
+        let hashes =
+            vec![alloy_primitives::B256::repeat_byte(1), alloy_primitives::B256::repeat_byte(2)];
+        let msg: OutgoingMessage<EthNetworkPrimitives> =
+            EthMessage::NewPooledTransactionHashes72(NewPooledTransactionHashes72 {
+                types: vec![0; hashes.len()],
+                sizes: vec![1; hashes.len()],
+                hashes,
+                cell_mask: None,
+            })
+            .into();
+
+        assert_eq!(2, msg.broadcast_item_count());
     }
 
     #[test]

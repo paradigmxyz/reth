@@ -29,6 +29,8 @@ on:
         type: boolean
         default: false
 
+permissions: {}
+
 jobs:
   build:
     if: github.repository == 'paradigmxyz/reth'
@@ -39,13 +41,15 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Set up Depot CLI
-        uses: depot/setup-action@v1
+        uses: depot/setup-action@15c09a5f77a0840ad4bce955686522a257853461 # v1.7.1
 
       - name: Log in to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -60,10 +64,13 @@ jobs:
 
       - name: Determine build parameters
         id: params
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BUILD_TYPE: ${{ inputs.build_type }}
         run: |
           REGISTRY="ghcr.io/${{ github.repository_owner }}"
 
-          if [[ "${{ github.event_name }}" == "push" ]]; then
+          if [[ "${EVENT_NAME}" == "push" ]]; then
             VERSION="${GITHUB_REF#refs/tags/}"
             echo "targets=ethereum" >> "$GITHUB_OUTPUT"
 
@@ -81,7 +88,7 @@ jobs:
               echo "ethereum_set=ethereum.tags=${REGISTRY}/reth:${VERSION}" >> "$GITHUB_OUTPUT"
             fi
 
-          elif [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ inputs.build_type }}" == "nightly" ]]; then
+          elif [[ "${EVENT_NAME}" == "schedule" ]] || [[ "${BUILD_TYPE}" == "nightly" ]]; then
             echo "targets=nightly" >> "$GITHUB_OUTPUT"
             echo "ethereum_tags=${REGISTRY}/reth:nightly" >> "$GITHUB_OUTPUT"
             echo "ethereum_set=ethereum.tags=${REGISTRY}/reth:nightly" >> "$GITHUB_OUTPUT"
@@ -94,7 +101,7 @@ jobs:
           fi
 
       - name: Build and push images
-        uses: depot/bake-action@v1
+        uses: depot/bake-action@1d58c2668346981089b088b7ef36755b206b20e9 # v1.13.0
         env:
           VERGEN_GIT_SHA: ${{ steps.git.outputs.sha }}
           VERGEN_GIT_DESCRIBE: ${{ steps.git.outputs.describe }}
@@ -105,6 +112,8 @@ jobs:
           files: docker-bake.hcl
           targets: ${{ steps.params.outputs.targets }}
           push: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+          save: false
+          load: false
           set: |
             ${{ steps.params.outputs.ethereum_set }}
 
@@ -124,7 +133,7 @@ jobs:
     if: failure() && github.event_name == 'schedule'
     steps:
       - name: Slack Webhook Action
-        uses: rtCamp/action-slack-notify@v2
+        uses: rtCamp/action-slack-notify@e31e87e03dd19038e411e38ae27cbad084a90661 # v2.3.3
         env:
           SLACK_COLOR: danger
           SLACK_ICON_EMOJI: ":rotating_light:"

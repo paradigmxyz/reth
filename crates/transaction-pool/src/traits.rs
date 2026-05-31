@@ -51,7 +51,7 @@
 //! - Conversion from consensus to pooled always fails
 
 use crate::{
-    blobstore::BlobStoreError,
+    blobstore::{BlobStore, BlobStoreError},
     error::{InvalidPoolTransactionError, PoolError, PoolResult},
     pool::{
         state::SubPool, BestTransactionFilter, NewTransactionEvent, TransactionEvents,
@@ -65,12 +65,16 @@ use alloy_eips::{
     eip2718::{Encodable2718, WithEncoded},
     eip2930::AccessList,
     eip4844::{
-        env_settings::KzgSettings, BlobAndProofV1, BlobAndProofV2, BlobTransactionValidationError,
+        env_settings::KzgSettings, BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1,
+        BlobTransactionValidationError,
     },
     eip7594::BlobTransactionSidecarVariant,
     eip7702::SignedAuthorization,
 };
-use alloy_primitives::{map::AddressSet, Address, Bytes, TxHash, TxKind, B256, U256};
+use alloy_primitives::{
+    map::{AddressSet, B256Map},
+    Address, Bytes, TxHash, TxKind, B128, B256, U256,
+};
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
@@ -78,7 +82,6 @@ use reth_execution_types::ChangedAccount;
 use reth_primitives_traits::{Block, InMemorySize, Recovered, SealedBlock, SignedTransaction};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
     fmt,
     fmt::Debug,
     future::Future,
@@ -547,11 +550,22 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Retains only those hashes that are unknown to the pool.
+    ///
     /// In other words, removes all transactions from the given set that are currently present in
-    /// the pool. Returns hashes already known to the pool.
+    /// the pool.
     ///
     /// Consumer: P2P
     fn retain_unknown<A>(&self, announcement: &mut A)
+    where
+        A: HandleMempoolData;
+
+    /// Retains only those hashes that are known to the pool.
+    ///
+    /// In other words, removes all transactions from the given set that are not currently present
+    /// in the pool.
+    ///
+    /// Consumer: P2P
+    fn retain_contains<A>(&self, announcement: &mut A)
     where
         A: HandleMempoolData;
 
@@ -563,9 +577,9 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     /// Returns the transaction for the given hash.
     fn get(&self, tx_hash: &TxHash) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
-    /// Returns all transactions objects for the given hashes.
+    /// Returns all transaction objects for the given hashes.
     ///
-    /// Caution: This in case of blob transactions, this does not include the sidecar.
+    /// Caution: In case of blob transactions, this does not include the sidecar.
     fn get_all(&self, txs: Vec<TxHash>) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Notify the pool about transactions that are propagated to peers.
@@ -722,6 +736,20 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError>;
+
+    /// Return the [`BlobCellsAndProofsV1`]s for a list of blob versioned hashes and requested cell
+    /// indices.
+    ///
+    /// The response is always the same length as the request. Missing or older-version blobs are
+    /// returned as `None` elements.
+    fn get_blobs_for_versioned_hashes_v4(
+        &self,
+        versioned_hashes: &[B256],
+        indices_bitarray: B128,
+    ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError>;
+
+    /// Returns the blob store used by the pool.
+    fn blob_store(&self) -> Box<dyn BlobStore>;
 }
 
 /// Extension for [`TransactionPool`] trait that allows to set the current block info.
@@ -782,6 +810,11 @@ impl<T: PoolTransaction> AllPoolTransactions<T> {
         self.pending.len() + self.queued.len()
     }
 
+    /// Returns an iterator over all pending and queued transactions.
+    pub fn iter(&self) -> impl Iterator<Item = &Arc<ValidPoolTransaction<T>>> + '_ {
+        self.pending.iter().chain(self.queued.iter())
+    }
+
     /// Returns an iterator over all pending [`Recovered`] transactions.
     pub fn pending_recovered(&self) -> impl Iterator<Item = Recovered<T::Consensus>> + '_ {
         self.pending.iter().map(|tx| tx.to_consensus())
@@ -818,7 +851,7 @@ impl<T: PoolTransaction> IntoIterator for AllPoolTransactions<T> {
 
 /// Represents transactions that were propagated over the network.
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
-pub struct PropagatedTransactions(pub HashMap<TxHash, Vec<PropagateKind>>);
+pub struct PropagatedTransactions(pub B256Map<Vec<PropagateKind>>);
 
 impl PropagatedTransactions {
     /// Records a propagation of a transaction to a peer.
@@ -844,7 +877,7 @@ impl PropagatedTransactions {
 
 impl IntoIterator for PropagatedTransactions {
     type Item = (TxHash, Vec<PropagateKind>);
-    type IntoIter = std::collections::hash_map::IntoIter<TxHash, Vec<PropagateKind>>;
+    type IntoIter = alloy_primitives::map::hash_map::IntoIter<TxHash, Vec<PropagateKind>>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
@@ -1045,7 +1078,7 @@ pub trait BestTransactions: Iterator + Send {
     /// Implementers must ensure all subsequent transaction _don't_ depend on this transaction.
     /// In other words, this must remove the given transaction _and_ drain all transaction that
     /// depend on it.
-    fn mark_invalid(&mut self, transaction: &Self::Item, kind: &InvalidPoolTransactionError);
+    fn mark_invalid(&mut self, transaction: &Self::Item, kind: InvalidPoolTransactionError);
 
     /// An iterator may be able to receive additional pending transactions that weren't present it
     /// the pool when it was created.
@@ -1107,7 +1140,7 @@ impl<T> BestTransactions for Box<T>
 where
     T: BestTransactions + ?Sized,
 {
-    fn mark_invalid(&mut self, transaction: &Self::Item, kind: &InvalidPoolTransactionError) {
+    fn mark_invalid(&mut self, transaction: &Self::Item, kind: InvalidPoolTransactionError) {
         (**self).mark_invalid(transaction, kind)
     }
 
@@ -1126,7 +1159,7 @@ where
 
 /// A no-op implementation that yields no transactions.
 impl<T> BestTransactions for std::iter::Empty<T> {
-    fn mark_invalid(&mut self, _tx: &T, _kind: &InvalidPoolTransactionError) {}
+    fn mark_invalid(&mut self, _tx: &T, _kind: InvalidPoolTransactionError) {}
 
     fn no_updates(&mut self) {}
 
@@ -1435,7 +1468,7 @@ pub struct EthPooledTransaction<T = TransactionSigned> {
 impl<T: SignedTransaction> EthPooledTransaction<T> {
     /// Create new instance of [Self].
     ///
-    /// Caution: In case of blob transactions, this does marks the blob sidecar as
+    /// Caution: In case of blob transactions, this marks the blob sidecar as
     /// [`EthBlobTransactionSidecar::Missing`]
     pub fn new(transaction: Recovered<T>, encoded_length: usize) -> Self {
         let mut blob_sidecar = EthBlobTransactionSidecar::None;
@@ -1801,13 +1834,9 @@ impl<Tx: PoolTransaction> NewSubpoolTransactionStream<Tx> {
         &mut self,
     ) -> Result<NewTransactionEvent<Tx>, tokio::sync::mpsc::error::TryRecvError> {
         loop {
-            match self.st.try_recv() {
-                Ok(event) => {
-                    if event.subpool == self.subpool {
-                        return Ok(event)
-                    }
-                }
-                Err(e) => return Err(e),
+            let event = self.st.try_recv()?;
+            if event.subpool == self.subpool {
+                return Ok(event)
             }
         }
     }

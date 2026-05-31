@@ -6,8 +6,8 @@ use crate::{
     to_range, BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider,
     TransactionsProvider,
 };
-use alloy_consensus::transaction::TransactionMeta;
-use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
+use alloy_consensus::transaction::{TransactionMeta, TxHashRef};
+use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use reth_chainspec::ChainInfo;
 use reth_db::static_file::{
@@ -17,7 +17,7 @@ use reth_db::static_file::{
 use reth_db_api::table::{Decompress, Value};
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::{SealedHeader, SignedTransaction};
-use reth_static_file_types::{ChangesetOffset, ChangesetOffsetReader};
+use reth_static_file_types::ChangesetOffset;
 use reth_storage_api::range_size_hint;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
@@ -111,15 +111,11 @@ impl<'a, N: NodePrimitives> StaticFileJarProvider<'a, N> {
             return Ok(None);
         };
 
-        let csoff_path = self.data_path().with_extension("csoff");
-        if !csoff_path.exists() {
-            return Ok(None);
+        if let Some(reader) = self.jar.value().csoff_reader() {
+            reader.get(index).map_err(ProviderError::other)
+        } else {
+            Ok(None)
         }
-
-        let len = header.changeset_offsets_len();
-        let mut reader =
-            ChangesetOffsetReader::new(&csoff_path, len).map_err(ProviderError::other)?;
-        reader.get(index).map_err(ProviderError::other)
     }
 
     /// Reads all changeset offsets from the sidecar file.
@@ -138,15 +134,12 @@ impl<'a, N: NodePrimitives> StaticFileJarProvider<'a, N> {
             return Ok(Some(Vec::new()));
         }
 
-        let csoff_path = self.data_path().with_extension("csoff");
-        if !csoff_path.exists() {
-            return Ok(None);
+        if let Some(reader) = self.jar.value().csoff_reader() {
+            let offsets = reader.get_range(0, len).map_err(ProviderError::other)?;
+            Ok(Some(offsets))
+        } else {
+            Ok(None)
         }
-
-        let mut reader =
-            ChangesetOffsetReader::new(&csoff_path, len).map_err(ProviderError::other)?;
-        let offsets = reader.get_range(0, len).map_err(ProviderError::other)?;
-        Ok(Some(offsets))
     }
 }
 
@@ -271,7 +264,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
 
         Ok(cursor
             .get_one::<TransactionMask<Self::Transaction>>((&hash).into())?
-            .and_then(|res| (res.trie_hash() == hash).then(|| cursor.number()).flatten()))
+            .and_then(|res| (*res.tx_hash() == hash).then(|| cursor.number()).flatten()))
     }
 
     fn transaction_by_id(&self, num: TxNumber) -> ProviderResult<Option<Self::Transaction>> {

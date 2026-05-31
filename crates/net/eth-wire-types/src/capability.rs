@@ -1,6 +1,6 @@
 //! All capability related types
 
-use crate::{EthMessageID, EthVersion};
+use crate::{EthMessageID, EthVersion, SnapVersion};
 use alloc::{borrow::Cow, string::String, vec::Vec};
 use alloy_primitives::bytes::Bytes;
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
@@ -85,6 +85,11 @@ impl Capability {
         Self::new_static("eth", version as usize)
     }
 
+    /// Returns the corresponding snap capability for the given version.
+    pub const fn snap(version: SnapVersion) -> Self {
+        Self::new_static("snap", version as usize)
+    }
+
     /// Returns the [`EthVersion::Eth66`] capability.
     pub const fn eth_66() -> Self {
         Self::eth(EthVersion::Eth66)
@@ -113,6 +118,21 @@ impl Capability {
     /// Returns the [`EthVersion::Eth71`] capability.
     pub const fn eth_71() -> Self {
         Self::eth(EthVersion::Eth71)
+    }
+
+    /// Returns the [`EthVersion::Eth72`] capability.
+    pub const fn eth_72() -> Self {
+        Self::eth(EthVersion::Eth72)
+    }
+
+    /// Returns the `snap/1` capability.
+    pub const fn snap_1() -> Self {
+        Self::snap(SnapVersion::V1)
+    }
+
+    /// Returns the `snap/2` capability.
+    pub const fn snap_2() -> Self {
+        Self::snap(SnapVersion::V2)
     }
 
     /// Whether this is eth v66 protocol.
@@ -151,6 +171,12 @@ impl Capability {
         self.name == "eth" && self.version == 71
     }
 
+    /// Whether this is eth v72.
+    #[inline]
+    pub fn is_eth_v72(&self) -> bool {
+        self.name == "eth" && self.version == 72
+    }
+
     /// Whether this is any eth version.
     #[inline]
     pub fn is_eth(&self) -> bool {
@@ -159,7 +185,8 @@ impl Capability {
             self.is_eth_v68() ||
             self.is_eth_v69() ||
             self.is_eth_v70() ||
-            self.is_eth_v71()
+            self.is_eth_v71() ||
+            self.is_eth_v72()
     }
 }
 
@@ -196,6 +223,7 @@ pub struct Capabilities {
     eth_69: bool,
     eth_70: bool,
     eth_71: bool,
+    eth_72: bool,
 }
 
 impl Capabilities {
@@ -208,6 +236,7 @@ impl Capabilities {
             eth_69: value.iter().any(Capability::is_eth_v69),
             eth_70: value.iter().any(Capability::is_eth_v70),
             eth_71: value.iter().any(Capability::is_eth_v71),
+            eth_72: value.iter().any(Capability::is_eth_v72),
             inner: value,
         }
     }
@@ -229,15 +258,24 @@ impl Capabilities {
                     self.eth_68 ||
                     self.eth_69 ||
                     self.eth_70 ||
-                    self.eth_71
+                    self.eth_71 ||
+                    self.eth_72
             }
             EthVersion::Eth67 => {
-                self.eth_67 || self.eth_68 || self.eth_69 || self.eth_70 || self.eth_71
+                self.eth_67 ||
+                    self.eth_68 ||
+                    self.eth_69 ||
+                    self.eth_70 ||
+                    self.eth_71 ||
+                    self.eth_72
             }
-            EthVersion::Eth68 => self.eth_68 || self.eth_69 || self.eth_70 || self.eth_71,
-            EthVersion::Eth69 => self.eth_69 || self.eth_70 || self.eth_71,
-            EthVersion::Eth70 => self.eth_70 || self.eth_71,
-            EthVersion::Eth71 => self.eth_71,
+            EthVersion::Eth68 => {
+                self.eth_68 || self.eth_69 || self.eth_70 || self.eth_71 || self.eth_72
+            }
+            EthVersion::Eth69 => self.eth_69 || self.eth_70 || self.eth_71 || self.eth_72,
+            EthVersion::Eth70 => self.eth_70 || self.eth_71 || self.eth_72,
+            EthVersion::Eth71 => self.eth_71 || self.eth_72,
+            EthVersion::Eth72 => self.eth_72,
         }
     }
 
@@ -256,7 +294,13 @@ impl Capabilities {
     /// Whether the peer supports `eth` sub-protocol.
     #[inline]
     pub const fn supports_eth(&self) -> bool {
-        self.eth_71 || self.eth_70 || self.eth_69 || self.eth_68 || self.eth_67 || self.eth_66
+        self.eth_72 ||
+            self.eth_71 ||
+            self.eth_70 ||
+            self.eth_69 ||
+            self.eth_68 ||
+            self.eth_67 ||
+            self.eth_66
     }
 
     /// Whether this peer supports eth v66 protocol.
@@ -319,6 +363,7 @@ impl Decodable for Capabilities {
             eth_69: inner.iter().any(Capability::is_eth_v69),
             eth_70: inner.iter().any(Capability::is_eth_v70),
             eth_71: inner.iter().any(Capability::is_eth_v71),
+            eth_72: inner.iter().any(Capability::is_eth_v72),
             inner,
         })
     }

@@ -87,14 +87,16 @@ Networking:
       --disable-discv4-discovery
           Disable Discv4 discovery
 
-      --enable-discv5-discovery
-          Enable Discv5 discovery
+      --disable-discv5-discovery
+          Disable Discv5 discovery
 
       --disable-nat
           Disable Nat discovery
 
       --discovery.addr <DISCOVERY_ADDR>
-          The UDP address to use for devp2p peer discovery version 4
+          The UDP address to use for devp2p peer discovery version 4.
+
+          If unset and `--net-if.experimental` is used, discv4 binds to the resolved interface address.
 
           [default: 0.0.0.0]
 
@@ -115,7 +117,9 @@ Networking:
           [default: 9200]
 
       --discovery.v5.port.ipv6 <DISCOVERY_V5_PORT_IPV6>
-          The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv6, or `--discovery.addr.ipv6` is set
+          The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv6, or `--discovery.addr.ipv6` is set.
+
+          If not provided, discovery V5 defaults to same port as discovery V4 (--discovery.port).
 
           [default: 9200]
 
@@ -249,10 +253,20 @@ Networking:
 
           [default: 25600]
 
+      --tx-channel-memory-limit <BYTES>
+          Memory limit (in bytes) for the channel that buffers transaction events flowing
+          from the network manager to the transactions manager.
+
+          When the budget is exhausted, new events are dropped (see metric
+          `total_dropped_tx_events_at_full_capacity`). Acts as a backstop against unbounded
+          memory growth under sustained P2P transaction flooding.
+
+          [default: 1073741824]
+
       --net-if.experimental <IF_NAME>
           Name of network interface used to communicate with peers.
 
-          If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
+          If flag is set, but no value is passed, the default interface for docker `eth0` is tried. If `--discovery.addr` is left at its default, discv4 will also bind to the resolved interface address.
 
       --tx-propagation-policy <TX_PROPAGATION_POLICY>
           Transaction Propagation Policy
@@ -504,6 +518,11 @@ RPC State Cache:
 
           [default: 1000]
 
+      --rpc-cache.max-bals <MAX_BALS>
+          Max number of revm block access lists in cache
+
+          [default: 1000]
+
       --rpc-cache.max-concurrent-db-requests <MAX_CONCURRENT_DB_REQUESTS>
           Max number of concurrent database requests
 
@@ -555,7 +574,7 @@ Gas Price Oracle:
 
 TxPool:
       --txpool.pending-max-count <PENDING_MAX_COUNT>
-          Max number of transaction in the pending sub-pool
+          Max number of transactions in the pending sub-pool
 
           [default: 10000]
 
@@ -565,7 +584,7 @@ TxPool:
           [default: 20]
 
       --txpool.basefee-max-count <BASEFEE_MAX_COUNT>
-          Max number of transaction in the basefee sub-pool
+          Max number of transactions in the basefee sub-pool
 
           [default: 10000]
 
@@ -575,7 +594,7 @@ TxPool:
           [default: 20]
 
       --txpool.queued-max-count <QUEUED_MAX_COUNT>
-          Max number of transaction in the queued sub-pool
+          Max number of transactions in the queued sub-pool
 
           [default: 10000]
 
@@ -585,7 +604,7 @@ TxPool:
           [default: 20]
 
       --txpool.blobpool-max-count <BLOBPOOL_MAX_COUNT>
-          Max number of transaction in the blobpool
+          Max number of transactions in the blobpool
 
           [default: 10000]
 
@@ -741,6 +760,9 @@ Debug:
       --debug.skip-new-payload <SKIP_NEW_PAYLOAD>
           If provided, the engine will skip `n` consecutive new payloads
 
+      --debug.skip-genesis-validation
+          If set, bypasses genesis hash validation during init. Intended for tools that direct-write the database (e.g. snapshot importers, state-actor) and want reth to trust the DB-resident genesis state instead of recomputing it from the chainspec's alloc. When the bypass fires, a structured `tracing::warn!` is emitted so the divergence stays observable in operator logs
+
       --debug.reorg-frequency <REORG_FREQUENCY>
           If provided, the chain will be reorged at specified frequency
 
@@ -821,6 +843,14 @@ Database:
       --db.sync-mode <SYNC_MODE>
           Controls how aggressively the database synchronizes data to disk
 
+      --db.rocksdb-block-cache-size <ROCKSDB_BLOCK_CACHE_SIZE>
+          `RocksDB` block cache size (e.g., 512MB, 4GB).
+
+          Controls the size of the in-memory LRU cache for decompressed `RocksDB` blocks. A larger cache reduces repeated decompression of hot blocks, improving read performance for history lookups.
+
+      --db.balstore-cache-size <BALSTORE_CACHE_SIZE>
+          Number of recent blocks to keep in the in-memory BAL store cache
+
 Dev testnet:
       --dev
           Start the node in dev mode
@@ -839,6 +869,16 @@ Dev testnet:
 
           Parses strings using [`humantime::parse_duration`]
           --dev.block-time 12s
+
+      --dev.payload-wait-time <PAYLOAD_WAIT_TIME>
+          Time to wait after initiating payload building before resolving.
+
+          Introduces a sleep between `fork_choice_updated` and `resolve_kind` in the
+          local miner, giving the payload job time for multiple rebuild attempts with
+          new transactions from the pool.
+
+          Parses strings using [`humantime::parse_duration`]
+          --dev.payload-wait-time 450ms
 
       --dev.mnemonic <MNEMONIC>
           Derive dev accounts from a fixed mnemonic instead of random ones.
@@ -931,14 +971,21 @@ Engine:
       --engine.persistence-backpressure-threshold <PERSISTENCE_BACKPRESSURE_THRESHOLD>
           Configure the maximum canonical-minus-persisted gap before engine API processing stalls.
 
-          This value must be greater than `--engine.persistence-threshold`.
+          If omitted, this defaults to the larger of the default backpressure threshold and twice `--engine.persistence-threshold`.
 
-          [default: 16]
+          This value must be greater than `--engine.persistence-threshold`.
 
       --engine.memory-block-buffer-target <MEMORY_BLOCK_BUFFER_TARGET>
           Configure the target number of blocks to keep in memory
 
           [default: 0]
+
+      --engine.invalid-header-cache-hit-eviction-threshold <INVALID_HEADER_HIT_EVICTION_THRESHOLD>
+          Configure how many cache hits an invalid header can accumulate before it is evicted and reprocessed.
+
+          Set to `0` to effectively disable the cache because entries are evicted on the first lookup.
+
+          [default: 128]
 
       --engine.legacy-state-root
           Enable legacy state root
@@ -1024,11 +1071,11 @@ Engine:
       --engine.state-root-task-timeout <STATE_ROOT_TASK_TIMEOUT>
           Configure the timeout for the state root task before spawning a sequential fallback. If the state root task takes longer than this, a sequential computation starts in parallel and whichever finishes first is used.
 
-          --engine.state-root-task-timeout 1s --engine.state-root-task-timeout 400ms
+          --engine.state-root-task-timeout 4s --engine.state-root-task-timeout 400ms
 
           Set to 0s to disable.
 
-          [default: 1s]
+          [default: 4s]
 
       --engine.share-execution-cache-with-payload-builder
           Whether to share execution cache with the payload builder.
@@ -1045,6 +1092,20 @@ Engine:
           The engine and payload builder contend for the same trie — if a builder task is still running when `newPayload` arrives, the engine will block until the trie is stored back.
 
           The builder also anchors the trie at the built block's state root, so if the next `newPayload` is not on top of that block, the trie cache is invalidated and cleared.
+
+      --engine.suppress-persistence-during-build
+          Suppress persistence while building a payload.
+
+          When enabled, persistence cycles are deferred from the moment an FCU with payload attributes arrives until the next FCU clears the build. Useful on chains with short block times where persistence I/O can interfere with block building latency.
+
+      --engine.disable-bal-parallel-execution
+          Disable BAL (Block Access List, EIP-7928) based parallel execution
+
+      --engine.disable-bal-parallel-state-root
+          Disable BAL-driven parallel state root computation. This is only valid together with `--engine.disable-bal-parallel-execution`
+
+      --engine.disable-bal-batch-io
+          Disable BAL (Block Access List) storage prefetch IO during prewarming. When set, BAL storage slots are not read into the execution cache
 
 ERA:
       --era.enable

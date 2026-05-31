@@ -9,7 +9,7 @@ use std::net::{IpAddr, SocketAddr};
 use crate::{
     events::{NetworkPeersEvents, PeerEventStream},
     test_utils::{PeersHandle, PeersHandleProvider},
-    BlockDownloaderProvider, DiscoveryEvent, NetworkError, NetworkEvent,
+    BlockDownloaderProvider, CellCustody, DiscoveryEvent, NetworkError, NetworkEvent,
     NetworkEventListenerProvider, NetworkInfo, NetworkStatus, PeerId, PeerInfo, PeerRequest, Peers,
     PeersInfo,
 };
@@ -33,6 +33,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 pub struct NoopNetwork<Net = EthNetworkPrimitives> {
     chain_id: u64,
     peers_handle: PeersHandle,
+    cell_custody: CellCustody,
     _marker: PhantomData<Net>,
 }
 
@@ -44,6 +45,7 @@ impl<Net> NoopNetwork<Net> {
         Self {
             chain_id: 1, // mainnet
             peers_handle: PeersHandle::new(tx),
+            cell_custody: CellCustody::default(),
             _marker: PhantomData,
         }
     }
@@ -89,6 +91,10 @@ where
         self.chain_id
     }
 
+    fn cell_custody(&self) -> &CellCustody {
+        &self.cell_custody
+    }
+
     fn is_syncing(&self) -> bool {
         false
     }
@@ -125,7 +131,7 @@ where
     fn add_peer_kind(
         &self,
         _peer: PeerId,
-        _kind: PeerKind,
+        _kind: Option<PeerKind>,
         _tcp_addr: SocketAddr,
         _udp_addr: Option<SocketAddr>,
     ) {

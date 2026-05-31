@@ -6,7 +6,8 @@
 use crate::ChangesetOffset;
 use std::{
     fs::{File, OpenOptions},
-    io::{self, Read, Seek, SeekFrom, Write},
+    io::{self, Write},
+    os::unix::fs::FileExt,
     path::Path,
 };
 
@@ -177,16 +178,14 @@ impl ChangesetOffsetReader {
 
     /// Reads a single changeset offset by block index.
     /// Returns None if index is out of bounds.
-    pub fn get(&mut self, block_index: u64) -> io::Result<Option<ChangesetOffset>> {
+    pub fn get(&self, block_index: u64) -> io::Result<Option<ChangesetOffset>> {
         if block_index >= self.len {
             return Ok(None);
         }
 
         let byte_pos = block_index * Self::RECORD_SIZE as u64;
-        self.file.seek(SeekFrom::Start(byte_pos))?;
-
         let mut buf = [0u8; Self::RECORD_SIZE];
-        self.file.read_exact(&mut buf)?;
+        self.file.read_exact_at(&mut buf, byte_pos)?;
 
         let offset = u64::from_le_bytes(buf[..8].try_into().unwrap());
         let num_changes = u64::from_le_bytes(buf[8..].try_into().unwrap());
@@ -195,7 +194,7 @@ impl ChangesetOffsetReader {
     }
 
     /// Reads a range of changeset offsets.
-    pub fn get_range(&mut self, start: u64, end: u64) -> io::Result<Vec<ChangesetOffset>> {
+    pub fn get_range(&self, start: u64, end: u64) -> io::Result<Vec<ChangesetOffset>> {
         let end = end.min(self.len);
         if start >= end {
             return Ok(Vec::new());
@@ -203,13 +202,13 @@ impl ChangesetOffsetReader {
 
         let count = (end - start) as usize;
         let byte_pos = start * Self::RECORD_SIZE as u64;
-        self.file.seek(SeekFrom::Start(byte_pos))?;
 
         let mut result = Vec::with_capacity(count);
         let mut buf = [0u8; Self::RECORD_SIZE];
 
-        for _ in 0..count {
-            self.file.read_exact(&mut buf)?;
+        for i in 0..count {
+            let pos = byte_pos + (i as u64) * Self::RECORD_SIZE as u64;
+            self.file.read_exact_at(&mut buf, pos)?;
             let offset = u64::from_le_bytes(buf[..8].try_into().unwrap());
             let num_changes = u64::from_le_bytes(buf[8..].try_into().unwrap());
             result.push(ChangesetOffset::new(offset, num_changes));
@@ -251,7 +250,7 @@ mod tests {
 
         // Read
         {
-            let mut reader = ChangesetOffsetReader::new(&path, 3).unwrap();
+            let reader = ChangesetOffsetReader::new(&path, 3).unwrap();
             assert_eq!(reader.len(), 3);
 
             let entry = reader.get(0).unwrap().unwrap();
@@ -284,7 +283,7 @@ mod tests {
         writer.truncate(2).unwrap();
         assert_eq!(writer.len(), 2);
 
-        let mut reader = ChangesetOffsetReader::new(&path, 2).unwrap();
+        let reader = ChangesetOffsetReader::new(&path, 2).unwrap();
         assert_eq!(reader.len(), 2);
         assert!(reader.get(2).unwrap().is_none());
     }
@@ -317,7 +316,7 @@ mod tests {
         assert_eq!(std::fs::metadata(&path).unwrap().len(), 16);
 
         // Verify the complete record is readable
-        let mut reader = ChangesetOffsetReader::new(&path, 1).unwrap();
+        let reader = ChangesetOffsetReader::new(&path, 1).unwrap();
         assert_eq!(reader.len(), 1);
         let entry = reader.get(0).unwrap().unwrap();
         assert_eq!(entry.offset(), 100);
@@ -340,7 +339,7 @@ mod tests {
         }
 
         // Open with len=2, ignoring the 3rd record
-        let mut reader = ChangesetOffsetReader::new(&path, 2).unwrap();
+        let reader = ChangesetOffsetReader::new(&path, 2).unwrap();
         assert_eq!(reader.len(), 2);
 
         // First two records should be readable
@@ -397,7 +396,7 @@ mod tests {
 
         // Verify the records are correct
         {
-            let mut reader = ChangesetOffsetReader::new(&path, 3).unwrap();
+            let reader = ChangesetOffsetReader::new(&path, 3).unwrap();
             assert_eq!(reader.len(), 3);
 
             let entry0 = reader.get(0).unwrap().unwrap();

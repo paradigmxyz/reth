@@ -1,15 +1,14 @@
-use alloy_eip7928::BlockAccessList;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256, U64};
 use alloy_rpc_types_debug::ExecutionWitness;
-use alloy_rpc_types_eth::{Bundle, StateContext};
+use alloy_rpc_types_eth::{Account, AccountInfo, Bundle, Index, StateContext};
 use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_trie_common::{updates::TrieUpdates, HashedPostState};
+use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostState};
 
 /// Debug rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
@@ -140,32 +139,48 @@ pub trait DebugApi<TxReq: RpcObject> {
     /// to their preimages that were required during the execution of the block, including during
     /// state root recomputation.
     ///
-    /// The first argument is the block number or tag.
+    /// The first argument is the block number or tag. The optional second argument selects the
+    /// witness generation mode and defaults to `legacy`.
     #[method(name = "executionWitness")]
-    async fn debug_execution_witness(&self, block: BlockNumberOrTag)
-        -> RpcResult<ExecutionWitness>;
+    async fn debug_execution_witness(
+        &self,
+        block: BlockNumberOrTag,
+        mode: Option<ExecutionWitnessMode>,
+    ) -> RpcResult<ExecutionWitness>;
 
     /// The `debug_executionWitnessByBlockHash` method allows for re-execution of a block with the
     /// purpose of generating an execution witness. The witness comprises of a map of all hashed
     /// trie nodes to their preimages that were required during the execution of the block,
     /// including during state root recomputation.
     ///
-    /// The first argument is the block hash.
+    /// The first argument is the block hash. The optional second argument selects the witness
+    /// generation mode and defaults to `legacy`.
     #[method(name = "executionWitnessByBlockHash")]
     async fn debug_execution_witness_by_block_hash(
         &self,
         hash: B256,
+        mode: Option<ExecutionWitnessMode>,
     ) -> RpcResult<ExecutionWitness>;
 
-    /// Re-executes a block and returns the Block Access List (BAL) as defined in EIP-7928.
-    #[method(name = "getBlockAccessList")]
-    async fn debug_get_block_access_list(&self, block_id: BlockId) -> RpcResult<BlockAccessList>;
+    /// Returns account information, including the storage root, at the state after executing the
+    /// transaction with the given index in the block.
+    #[method(name = "accountAt")]
+    async fn debug_account_at(
+        &self,
+        block_id: BlockId,
+        tx_index: Index,
+        address: Address,
+    ) -> RpcResult<Option<Account>>;
 
-    /// Sets the logging backtrace location. When a backtrace location is set and a log message is
-    /// emitted at that location, the stack of the goroutine executing the log statement will
-    /// be printed to stderr.
-    #[method(name = "backtraceAt")]
-    async fn debug_backtrace_at(&self, location: &str) -> RpcResult<()>;
+    /// Returns account information at the state after executing the transaction with the given
+    /// index in the block.
+    #[method(name = "accountInfoAt")]
+    async fn debug_account_info_at(
+        &self,
+        block_id: BlockId,
+        tx_index: Index,
+        address: Address,
+    ) -> RpcResult<Option<AccountInfo>>;
 
     /// Enumerates all accounts at a given block with paging capability. `maxResults` are returned
     /// in the page and the items have keys that come after the `start` key (hashed address).
@@ -182,12 +197,6 @@ pub trait DebugApi<TxReq: RpcObject> {
         nostorage: bool,
         incompletes: bool,
     ) -> RpcResult<()>;
-
-    /// Turns on block profiling for the given duration and writes profile data to disk. It uses a
-    /// profile rate of 1 for most accurate information. If a different rate is desired, set the
-    /// rate and write the profile manually using `debug_writeBlockProfile`.
-    #[method(name = "blockProfile")]
-    async fn debug_block_profile(&self, file: String, seconds: u64) -> RpcResult<()>;
 
     /// Flattens the entire key-value database into a single level, removing all unused slots and
     /// merging all keys.
@@ -211,10 +220,6 @@ pub trait DebugApi<TxReq: RpcObject> {
         block_id: Option<BlockId>,
     ) -> RpcResult<Option<Bytes>>;
 
-    /// Turns on CPU profiling for the given duration and writes profile data to disk.
-    #[method(name = "cpuProfile")]
-    async fn debug_cpu_profile(&self, file: String, seconds: u64) -> RpcResult<()>;
-
     /// Retrieves an ancient binary blob from the freezer. The freezer is a collection of
     /// append-only immutable files. The first argument `kind` specifies which table to look up data
     /// from. The list of all table kinds are as follows:
@@ -237,10 +242,6 @@ pub trait DebugApi<TxReq: RpcObject> {
     /// Forces garbage collection.
     #[method(name = "freeOSMemory")]
     async fn debug_free_os_memory(&self) -> RpcResult<()>;
-
-    /// Forces a temporary client freeze, normally when the server is overloaded.
-    #[method(name = "freezeClient")]
-    async fn debug_freeze_client(&self, node: String) -> RpcResult<()>;
 
     /// Returns garbage collection statistics.
     #[method(name = "gcStats")]
@@ -277,10 +278,6 @@ pub trait DebugApi<TxReq: RpcObject> {
         end_number: u64,
     ) -> RpcResult<()>;
 
-    /// Turns on Go runtime tracing for the given duration and writes trace data to disk.
-    #[method(name = "goTrace")]
-    async fn debug_go_trace(&self, file: String, seconds: u64) -> RpcResult<()>;
-
     /// Executes a block (bad- or canon- or side-), and returns a list of intermediate roots: the
     /// stateroot after each transaction.
     #[method(name = "intermediateRoots")]
@@ -294,12 +291,6 @@ pub trait DebugApi<TxReq: RpcObject> {
     #[method(name = "memStats")]
     async fn debug_mem_stats(&self) -> RpcResult<()>;
 
-    /// Turns on mutex profiling for `nsec` seconds and writes profile data to file. It uses a
-    /// profile rate of 1 for most accurate information. If a different rate is desired, set the
-    /// rate and write the profile manually.
-    #[method(name = "mutexProfile")]
-    async fn debug_mutex_profile(&self, file: String, nsec: u64) -> RpcResult<()>;
-
     /// Returns the preimage for a sha3 hash, if known.
     #[method(name = "preimage")]
     async fn debug_preimage(&self, hash: B256) -> RpcResult<()>;
@@ -312,12 +303,6 @@ pub trait DebugApi<TxReq: RpcObject> {
     #[method(name = "seedHash")]
     async fn debug_seed_hash(&self, number: u64) -> RpcResult<B256>;
 
-    /// Sets the rate (in samples/sec) of goroutine block profile data collection. A non-zero rate
-    /// enables block profiling, setting it to zero stops the profile. Collected profile data can be
-    /// written using `debug_writeBlockProfile`.
-    #[method(name = "setBlockProfileRate")]
-    async fn debug_set_block_profile_rate(&self, rate: u64) -> RpcResult<()>;
-
     /// Sets the garbage collection target percentage. A negative value disables garbage collection.
     #[method(name = "setGCPercent")]
     async fn debug_set_gc_percent(&self, v: i32) -> RpcResult<()>;
@@ -327,19 +312,11 @@ pub trait DebugApi<TxReq: RpcObject> {
     #[method(name = "setHead")]
     async fn debug_set_head(&self, number: U64) -> RpcResult<()>;
 
-    /// Sets the rate of mutex profiling.
-    #[method(name = "setMutexProfileFraction")]
-    async fn debug_set_mutex_profile_fraction(&self, rate: i32) -> RpcResult<()>;
-
     /// Configures how often in-memory state tries are persisted to disk. The interval needs to be
     /// in a format parsable by a time.Duration. Note that the interval is not wall-clock time.
     /// Rather it is accumulated block processing time after which the state should be flushed.
     #[method(name = "setTrieFlushInterval")]
     async fn debug_set_trie_flush_interval(&self, interval: String) -> RpcResult<()>;
-
-    /// Returns a printed representation of the stacks of all goroutines.
-    #[method(name = "stacks")]
-    async fn debug_stacks(&self) -> RpcResult<()>;
 
     /// Used to obtain info about a block.
     #[method(name = "standardTraceBadBlockToFile")]
@@ -358,14 +335,6 @@ pub trait DebugApi<TxReq: RpcObject> {
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<()>;
 
-    /// Turns on CPU profiling indefinitely, writing to the given file.
-    #[method(name = "startCPUProfile")]
-    async fn debug_start_cpu_profile(&self, file: String) -> RpcResult<()>;
-
-    /// Starts writing a Go runtime trace to the given file.
-    #[method(name = "startGoTrace")]
-    async fn debug_start_go_trace(&self, file: String) -> RpcResult<()>;
-
     /// Returns the state root of the `HashedPostState` on top of the state for the given block with
     /// trie updates.
     #[method(name = "stateRootWithUpdates")]
@@ -374,14 +343,6 @@ pub trait DebugApi<TxReq: RpcObject> {
         hashed_state: HashedPostState,
         block_id: Option<BlockId>,
     ) -> RpcResult<(B256, TrieUpdates)>;
-
-    /// Stops an ongoing CPU profile.
-    #[method(name = "stopCPUProfile")]
-    async fn debug_stop_cpu_profile(&self) -> RpcResult<()>;
-
-    /// Stops writing the Go runtime trace.
-    #[method(name = "stopGoTrace")]
-    async fn debug_stop_go_trace(&self) -> RpcResult<()>;
 
     /// Returns the storage at the given block height and transaction index. The result can be
     /// paged by providing a `maxResult` to cap the number of storage slots returned as well as
@@ -405,48 +366,4 @@ pub trait DebugApi<TxReq: RpcObject> {
         block_hash: B256,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<TraceResult>>;
-
-    /// Sets the logging verbosity ceiling. Log messages with level up to and including the given
-    /// level will be printed.
-    #[method(name = "verbosity")]
-    async fn debug_verbosity(&self, level: usize) -> RpcResult<()>;
-
-    /// Sets the logging verbosity pattern.
-    #[method(name = "vmodule")]
-    async fn debug_vmodule(&self, pattern: String) -> RpcResult<()>;
-
-    /// Writes a goroutine blocking profile to the given file.
-    #[method(name = "writeBlockProfile")]
-    async fn debug_write_block_profile(&self, file: String) -> RpcResult<()>;
-
-    /// Writes an allocation profile to the given file.
-    #[method(name = "writeMemProfile")]
-    async fn debug_write_mem_profile(&self, file: String) -> RpcResult<()>;
-
-    /// Writes a goroutine blocking profile to the given file.
-    #[method(name = "writeMutexProfile")]
-    async fn debug_write_mutex_profile(&self, file: String) -> RpcResult<()>;
-}
-
-/// An extension to the `debug_` namespace that provides additional methods for retrieving
-/// witnesses.
-///
-/// This is separate from the regular `debug_` api, because this depends on the network specific
-/// params. For optimism this will expect the optimism specific payload attributes
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "debug"))]
-pub trait DebugExecutionWitnessApi<Attributes> {
-    /// The `debug_executePayload` method allows for re-execution of a group of transactions with
-    /// the purpose of generating an execution witness. The witness comprises of a map of all
-    /// hashed trie nodes to their preimages that were required during the execution of the block,
-    /// including during state root recomputation.
-    ///
-    /// The first argument is the parent block hash. The second argument is the payload
-    /// attributes for the new block.
-    #[method(name = "executePayload")]
-    async fn execute_payload(
-        &self,
-        parent_block_hash: B256,
-        attributes: Attributes,
-    ) -> RpcResult<ExecutionWitness>;
 }

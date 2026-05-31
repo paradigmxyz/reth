@@ -6,9 +6,12 @@ use super::{
     DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
-use crate::transactions::constants::tx_fetcher::{
-    DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
-    DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
+use crate::transactions::constants::{
+    tx_fetcher::{
+        DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
+        DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
+    },
+    tx_manager::DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
 };
 use alloy_eips::eip2718::IsTyped2718;
 use alloy_primitives::B256;
@@ -30,6 +33,17 @@ pub struct TransactionsManagerConfig {
     /// Which peers we accept incoming transactions or announcements from.
     #[cfg_attr(feature = "serde", serde(default))]
     pub ingress_policy: TransactionIngressPolicy,
+    /// Memory limit (in bytes) for the channel that carries
+    /// `NetworkTransactionEvent`s from the `NetworkManager` to the `TransactionsManager`.
+    ///
+    /// When the budget is exhausted, new events are dropped.
+    #[cfg_attr(feature = "serde", serde(default = "default_tx_channel_memory_limit_bytes"))]
+    pub tx_channel_memory_limit_bytes: usize,
+}
+
+#[cfg(feature = "serde")]
+const fn default_tx_channel_memory_limit_bytes() -> usize {
+    DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES
 }
 
 impl Default for TransactionsManagerConfig {
@@ -39,6 +53,7 @@ impl Default for TransactionsManagerConfig {
             max_transactions_seen_by_peer_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             propagation_mode: TransactionPropagationMode::default(),
             ingress_policy: TransactionIngressPolicy::default(),
+            tx_channel_memory_limit_bytes: DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
         }
     }
 }

@@ -120,7 +120,13 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 EngineObjectValidationError::PayloadAttributes(
                     VersionSpecificValidationError::WithdrawalsNotSupportedInV1 |
                     VersionSpecificValidationError::NoWithdrawalsPostShanghai |
-                    VersionSpecificValidationError::HasWithdrawalsPreShanghai,
+                    VersionSpecificValidationError::HasWithdrawalsPreShanghai |
+                    VersionSpecificValidationError::BlockAccessListNotSupported |
+                    VersionSpecificValidationError::HasBlockAccessListPreAmsterdam |
+                    VersionSpecificValidationError::NoBlockAccessListPostAmsterdam |
+                    VersionSpecificValidationError::HasSlotNumberPreAmsterdam |
+                    VersionSpecificValidationError::NoSlotNumberPostAmsterdam |
+                    VersionSpecificValidationError::SlotNumberNotSupported,
                 ),
             ) |
             EngineApiError::UnexpectedRequestsHash => {
@@ -188,6 +194,15 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                             INVALID_FORK_CHOICE_STATE_ERROR_MSG,
                             None::<()>,
                         )
+                    }
+                    // Map future alloy forkchoice errors as internal until handled.
+                    #[allow(unreachable_patterns, clippy::needless_return)]
+                    _ => {
+                        return jsonrpsee_types::error::ErrorObject::owned(
+                            INTERNAL_ERROR_CODE,
+                            SERVER_ERROR_MSG,
+                            Some(ErrorData::new(error)),
+                        );
                     }
                 },
                 BeaconForkChoiceUpdateError::EngineUnavailable |

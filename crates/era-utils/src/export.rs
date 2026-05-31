@@ -2,8 +2,8 @@
 //! and injecting them into erae files with `EraEWriter`.
 
 use crate::calculate_td_by_number;
-use alloy_consensus::BlockHeader;
-use alloy_primitives::{BlockNumber, B256, U256};
+use alloy_consensus::{BlockHeader, Sealable, TxReceipt};
+use alloy_primitives::{BlockNumber, U256};
 use eyre::{eyre, Result};
 use reth_era::{
     common::file_ops::{EraFileId, StreamWriter},
@@ -138,14 +138,18 @@ where
 
         let headers = provider.headers_range(start_block..=end_block)?;
 
-        // Extract first 4 bytes of last block's state root as historical identifier
-        let historical_root = headers
-            .last()
-            .map(|header| {
-                let state_root = header.state_root();
-                [state_root[0], state_root[1], state_root[2], state_root[3]]
+        // Pre-compute accumulator from headers to determine filename
+        let mut precompute_td = total_difficulty;
+        let header_records: Vec<HeaderRecord> = headers
+            .iter()
+            .map(|h| {
+                precompute_td += h.difficulty();
+                HeaderRecord { block_hash: h.hash_slow(), total_difficulty: precompute_td }
             })
-            .unwrap_or([0u8; 4]);
+            .collect();
+        let accumulator = Accumulator::from_header_records(&header_records)
+            .map_err(|e| eyre!("Failed to compute accumulator: {e}"))?;
+        let file_hash: [u8; 4] = accumulator.root[..4].try_into().unwrap();
 
         let erae_id = EraEId::new(&config.network, start_block, block_count as u32)
             .with_hash(historical_root);
@@ -166,7 +170,6 @@ where
         let mut offsets = Vec::<i64>::with_capacity(block_count * component_count as usize);
         let mut position = VERSION_ENTRY_SIZE as i64;
         let mut blocks_written = 0;
-        let mut final_header_data = Vec::new();
 
         for (i, header) in headers.into_iter().enumerate() {
             let expected_block_number = start_block + i as u64;
@@ -177,11 +180,6 @@ where
                 expected_block_number,
                 &mut total_difficulty,
             )?;
-
-            // Save last block's header data for accumulator
-            if expected_block_number == end_block {
-                final_header_data = compressed_header.data.clone();
-            }
 
             let difficulty = TotalDifficulty::new(total_difficulty);
 

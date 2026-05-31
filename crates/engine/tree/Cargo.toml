@@ -41,13 +41,14 @@ reth-trie-db.workspace = true
 alloy-evm.workspace = true
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
-alloy-eip7928.workspace = true
+alloy-eip7928 = { workspace = true, features = ["rlp"] }
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 revm.workspace = true
 revm-primitives.workspace = true
+revm-state.workspace = true
 
 # common
 futures.workspace = true
@@ -60,6 +61,7 @@ metrics.workspace = true
 reth-metrics = { workspace = true, features = ["common"] }
 
 # misc
+indexmap.workspace = true
 schnellru.workspace = true
 rayon.workspace = true
 tracing.workspace = true
@@ -94,8 +96,7 @@ reth-tracing.workspace = true
 reth-node-ethereum.workspace = true
 reth-e2e-test-utils.workspace = true
 
-# revm
-revm-state.workspace = true
+revm-database-interface.workspace = true
 
 assert_matches.workspace = true
 eyre.workspace = true
@@ -130,9 +131,9 @@ test-utils = [
     "reth-trie-parallel/test-utils",
     "reth-ethereum-primitives/test-utils",
     "reth-node-ethereum/test-utils",
-    "reth-evm-ethereum/test-utils",
     "reth-tasks/test-utils",
     "reth-execution-cache/test-utils",
+    "reth-evm-ethereum/test-utils",
 ]
 trie-debug = [
     "reth-trie-sparse/trie-debug",

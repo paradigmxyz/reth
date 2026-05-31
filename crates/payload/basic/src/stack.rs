@@ -3,7 +3,7 @@ use crate::{
     PayloadConfig,
 };
 
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{Bytes, B256, U256};
 use reth_payload_builder::PayloadId;
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes};
 use reth_primitives_traits::{NodePrimitives, SealedBlock};
@@ -79,6 +79,13 @@ where
             Self::Right(r) => r.withdrawals(),
         }
     }
+
+    fn slot_number(&self) -> Option<u64> {
+        match self {
+            Self::Left(l) => l.slot_number(),
+            Self::Right(r) => r.slot_number(),
+        }
+    }
 }
 
 /// this structure enables the chaining of multiple `PayloadBuilder` implementations,
@@ -125,6 +132,13 @@ where
         match self {
             Self::Left(l) => l.fees(),
             Self::Right(r) => r.fees(),
+        }
+    }
+
+    fn block_access_list(&self) -> Option<&Bytes> {
+        match self {
+            Self::Left(l) => l.block_access_list(),
+            Self::Right(r) => r.block_access_list(),
         }
     }
 

@@ -16,12 +16,12 @@ use reth_ethereum_forks::Head;
 use reth_network_api::{
     events::{NetworkPeersEvents, PeerEvent, PeerEventStream},
     test_utils::{PeersHandle, PeersHandleProvider},
-    BlockDownloaderProvider, DiscoveryEvent, NetworkError, NetworkEvent,
+    BlockDownloaderProvider, CellCustody, DiscoveryEvent, NetworkError, NetworkEvent,
     NetworkEventListenerProvider, NetworkInfo, NetworkStatus, PeerInfo, PeerRequest, Peers,
     PeersInfo,
 };
 use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
-use reth_network_peers::{NodeRecord, PeerId};
+use reth_network_peers::{NodeRecord, PeerId, TrustedPeer};
 use reth_network_types::{PeerAddr, PeerKind, Reputation, ReputationChangeKind};
 use reth_tokio_util::{EventSender, EventStream};
 use secp256k1::SecretKey;
@@ -78,6 +78,7 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
             is_syncing: Arc::new(AtomicBool::new(false)),
             initial_sync_done: Arc::new(AtomicBool::new(false)),
             chain_id,
+            cell_custody: CellCustody::default(),
             tx_gossip_disabled,
             discv4,
             discv5,
@@ -189,6 +190,16 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
     /// Returns the secret key used for authenticating sessions.
     pub fn secret_key(&self) -> &SecretKey {
         &self.inner.secret_key
+    }
+
+    /// Returns the [`Discv4`] handle if discv4 is enabled.
+    pub fn discv4(&self) -> Option<&Discv4> {
+        self.inner.discv4.as_ref()
+    }
+
+    /// Returns the [`Discv5`] handle if discv5 is enabled.
+    pub fn discv5(&self) -> Option<&Discv5> {
+        self.inner.discv5.as_ref()
     }
 }
 
@@ -310,12 +321,16 @@ impl<N: NetworkPrimitives> Peers for NetworkHandle<N> {
         self.send_message(NetworkHandleMessage::AddTrustedPeerId(peer));
     }
 
+    fn add_trusted_peer_node(&self, peer: TrustedPeer) {
+        self.send_message(NetworkHandleMessage::AddTrustedPeerNode(peer));
+    }
+
     /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a peer to the known
     /// set, with the given kind.
     fn add_peer_kind(
         &self,
         peer: PeerId,
-        kind: PeerKind,
+        kind: Option<PeerKind>,
         tcp_addr: SocketAddr,
         udp_addr: Option<SocketAddr>,
     ) {
@@ -417,6 +432,10 @@ impl<N: NetworkPrimitives> NetworkInfo for NetworkHandle<N> {
         self.inner.chain_id.load(Ordering::Relaxed)
     }
 
+    fn cell_custody(&self) -> &CellCustody {
+        &self.inner.cell_custody
+    }
+
     fn is_syncing(&self) -> bool {
         SyncStateProvider::is_syncing(self)
     }
@@ -492,6 +511,8 @@ struct NetworkInner<N: NetworkPrimitives = EthNetworkPrimitives> {
     initial_sync_done: Arc<AtomicBool>,
     /// The chain id
     chain_id: Arc<AtomicU64>,
+    /// Shared blob cell custody bitmap.
+    cell_custody: CellCustody,
     /// Whether to disable transaction gossip
     tx_gossip_disabled: bool,
     /// The instance of the discv4 service
@@ -515,8 +536,10 @@ pub trait NetworkProtocols: Send + Sync {
 pub(crate) enum NetworkHandleMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Marks a peer as trusted.
     AddTrustedPeerId(PeerId),
+    /// Adds a trusted peer that may use a hostname, registering it for periodic DNS re-resolution.
+    AddTrustedPeerNode(TrustedPeer),
     /// Adds an address for a peer, including its ID, kind, and socket address.
-    AddPeerAddress(PeerId, PeerKind, PeerAddr),
+    AddPeerAddress(PeerId, Option<PeerKind>, PeerAddr),
     /// Removes a peer from the peerset corresponding to the given kind.
     RemovePeer(PeerId, PeerKind),
     /// Disconnects a connection to a peer if it exists, optionally providing a disconnect reason.

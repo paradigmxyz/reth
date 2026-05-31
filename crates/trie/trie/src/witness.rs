@@ -15,7 +15,8 @@ use alloy_rlp::{Encodable, EMPTY_STRING_CODE};
 use alloy_trie::{nodes::BranchNodeRef, EMPTY_ROOT_HASH};
 use reth_execution_errors::{SparseStateTrieErrorKind, StateProofError, TrieWitnessError};
 use reth_trie_common::{
-    DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, ProofV2Target, TrieNodeV2,
+    DecodedMultiProofV2, ExecutionWitnessMode, HashedPostState, MultiProofTargetsV2, ProofV2Target,
+    TrieNodeV2,
 };
 use reth_trie_sparse::{LeafUpdate, SparseStateTrie, SparseTrie as _};
 
@@ -33,6 +34,8 @@ pub struct TrieWitness<T, H> {
     /// parent state root.
     /// Set to `false` by default.
     always_include_root_node: bool,
+    /// Controls how the witness is generated.
+    mode: ExecutionWitnessMode,
     /// Recorded witness.
     witness: B256Map<Bytes>,
 }
@@ -45,6 +48,7 @@ impl<T, H> TrieWitness<T, H> {
             hashed_cursor_factory,
             prefix_sets: TriePrefixSetsMut::default(),
             always_include_root_node: false,
+            mode: ExecutionWitnessMode::Legacy,
             witness: HashMap::default(),
         }
     }
@@ -56,6 +60,7 @@ impl<T, H> TrieWitness<T, H> {
             hashed_cursor_factory: self.hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
             always_include_root_node: self.always_include_root_node,
+            mode: self.mode,
             witness: self.witness,
         }
     }
@@ -67,6 +72,7 @@ impl<T, H> TrieWitness<T, H> {
             hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
             always_include_root_node: self.always_include_root_node,
+            mode: self.mode,
             witness: self.witness,
         }
     }
@@ -82,6 +88,12 @@ impl<T, H> TrieWitness<T, H> {
     /// parent state root.
     pub const fn always_include_root_node(mut self) -> Self {
         self.always_include_root_node = true;
+        self
+    }
+
+    /// Set the execution witness generation mode.
+    pub const fn with_execution_witness_mode(mut self, mode: ExecutionWitnessMode) -> Self {
+        self.mode = mode;
         self
     }
 }
@@ -146,11 +158,11 @@ where
         sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
 
         // Build storage leaf updates for all accounts with storage changes, split into
-        // removals and upserts. Removals must be applied first so that branch collapse
-        // detection fires correctly: if a removal and an insertion target siblings under
-        // the same branch, processing the removal first may reduce the branch to a single
-        // blinded child, triggering a proof fetch for the sibling. Processing the insertion
-        // first would add a new child that keeps the count above one, masking the need.
+        // removals and upserts. Legacy mode applies removals first to preserve the
+        // historical witness shape expected by existing consumers: a removal can collapse
+        // a branch and force proof fetches that some consumers still rely on. Canonical
+        // mode applies upserts first to avoid those compatibility-only nodes and emit
+        // the minimized draft-spec witness.
         let mut storage_removals: B256Map<B256Map<LeafUpdate>> = B256Map::default();
         let mut storage_upserts: B256Map<B256Map<LeafUpdate>> = B256Map::default();
         for (hashed_address, storage) in &state.storages {
@@ -169,8 +181,14 @@ where
             }
         }
 
-        // Apply storage removals first, then upserts, fetching additional proofs as needed.
-        for storage_updates in [&mut storage_removals, &mut storage_upserts] {
+        let storage_update_sets = if self.mode.is_canonical() {
+            [&mut storage_upserts, &mut storage_removals]
+        } else {
+            [&mut storage_removals, &mut storage_upserts]
+        };
+
+        // Apply storage updates in mode-specific order, fetching additional proofs as needed.
+        for storage_updates in storage_update_sets {
             loop {
                 let mut targets = MultiProofTargetsV2::default();
 
@@ -212,8 +230,10 @@ where
             }
         }
 
-        // Build account leaf updates, split into removals and upserts (same reasoning
-        // as for storage updates above).
+        // Build account leaf updates, split into removals and upserts. Legacy mode keeps
+        // removals-first for the same compatibility reason as storage updates, while
+        // canonical mode uses upserts-first so account updates follow the minimized
+        // draft-spec witness order.
         let mut account_removals: B256Map<LeafUpdate> = B256Map::default();
         let mut account_upserts: B256Map<LeafUpdate> = B256Map::default();
         for &hashed_address in state.accounts.keys().chain(state.storages.keys()) {
@@ -233,7 +253,12 @@ where
                 if let Some(storage_trie) = sparse_trie.storage_trie_mut(&hashed_address) {
                     storage_trie.root()
                 } else {
-                    self.account_storage_root(hashed_address)?
+                    let record_root_node = !self.mode.is_canonical() ||
+                        state
+                            .storages
+                            .get(&hashed_address)
+                            .is_some_and(|storage| !storage.storage.is_empty());
+                    self.account_storage_root(hashed_address, record_root_node)?
                 };
 
             if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
@@ -245,8 +270,14 @@ where
             }
         }
 
-        // Apply account removals first, then upserts, fetching additional proofs as needed.
-        for account_updates in [&mut account_removals, &mut account_upserts] {
+        let account_update_sets = if self.mode.is_canonical() {
+            [&mut account_upserts, &mut account_removals]
+        } else {
+            [&mut account_removals, &mut account_upserts]
+        };
+
+        // Apply account updates in mode-specific order, fetching additional proofs as needed.
+        for account_updates in account_update_sets {
             loop {
                 let mut targets = MultiProofTargetsV2::default();
 
@@ -270,6 +301,12 @@ where
                 self.record_multiproof_nodes(&multiproof);
                 sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
             }
+        }
+
+        if self.mode.is_canonical() {
+            // Empty trie nodes carry no useful witness information and are trivially
+            // reconstructible from the empty root hash.
+            self.witness.retain(|_, value| value.as_ref() != [EMPTY_STRING_CODE]);
         }
 
         Ok(self.witness)
@@ -306,8 +343,12 @@ where
     }
 
     /// Compute the storage root for an account by walking the storage trie using the cursor
-    /// factories and trie input prefix sets. Records the root node in the witness.
-    fn account_storage_root(&mut self, hashed_address: B256) -> Result<B256, TrieWitnessError> {
+    /// factories and trie input prefix sets. Records the root node in the witness when requested.
+    fn account_storage_root(
+        &mut self,
+        hashed_address: B256,
+        record_root_node: bool,
+    ) -> Result<B256, TrieWitnessError> {
         let storage_trie_cursor = self
             .trie_cursor_factory
             .storage_trie_cursor(hashed_address)
@@ -328,8 +369,10 @@ where
             .compute_root_hash(core::slice::from_ref(&root_node))?
             .unwrap_or(EMPTY_ROOT_HASH);
         drop(calculator);
-        let mut encoded = Vec::new();
-        self.record_witness_node(&root_node.node, &mut encoded);
+        if record_root_node {
+            let mut encoded = Vec::new();
+            self.record_witness_node(&root_node.node, &mut encoded);
+        }
         Ok(root_hash)
     }
 
