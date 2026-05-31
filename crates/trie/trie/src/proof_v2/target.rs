@@ -62,9 +62,7 @@ pub(crate) fn iter_sub_trie_targets(
     // First sort by the sub-trie prefix of each target, falling back to the `min_len` in cases
     // where the sub-trie prefixes are equal (to differentiate targets which match the root node and
     // those which don't).
-    targets.sort_unstable_by(|a, b| {
-        sub_trie_prefix(a).cmp(&sub_trie_prefix(b)).then_with(|| a.min_len.cmp(&b.min_len))
-    });
+    targets.sort_by_cached_key(|target| (sub_trie_prefix(target), target.min_len));
 
     // We now chunk targets, such that each chunk contains all targets belonging to the same
     // sub-trie. We are taking advantage of the following properties:
