@@ -2,7 +2,7 @@
 //! and injecting them into erae files with `EraEWriter`.
 
 use crate::calculate_td_by_number;
-use alloy_consensus::{BlockHeader, Sealable, TxReceipt};
+use alloy_consensus::{BlockHeader, Sealable};
 use alloy_primitives::{BlockNumber, U256};
 use eyre::{eyre, Result};
 use reth_era::{
@@ -12,7 +12,7 @@ use reth_era::{
         types::{
             execution::{
                 Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedSlimReceipts,
-                TotalDifficulty, MAX_BLOCKS_PER_ERAE,
+                TotalDifficulty, MAX_BLOCKS_PER_ERAE, HeaderRecord
             },
             group::{BlockIndex, EraEId},
         },
@@ -151,8 +151,8 @@ where
             .map_err(|e| eyre!("Failed to compute accumulator: {e}"))?;
         let file_hash: [u8; 4] = accumulator.root[..4].try_into().unwrap();
 
-        let erae_id = EraEId::new(&config.network, start_block, block_count as u32)
-            .with_hash(historical_root);
+        let erae_id =
+            EraEId::new(&config.network, start_block, block_count as u32).with_hash(file_hash);
 
         let erae_id = if config.max_blocks_per_file == MAX_BLOCKS_PER_ERAE as u64 {
             erae_id
@@ -219,14 +219,9 @@ where
             }
         }
         if blocks_written > 0 {
-            let accumulator_hash =
-                B256::from_slice(&final_header_data[0..32.min(final_header_data.len())]);
-            let accumulator = Some(Accumulator::new(accumulator_hash));
             let block_index = BlockIndex::new(start_block, component_count, offsets);
 
-            if let Some(ref acc) = accumulator {
-                writer.write_accumulator(acc)?;
-            }
+            writer.write_accumulator(&accumulator)?;
             writer.write_block_index(&block_index)?;
             writer.flush()?;
 

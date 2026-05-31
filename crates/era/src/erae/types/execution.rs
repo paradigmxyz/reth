@@ -555,13 +555,13 @@ impl Accumulator {
     ///
     /// Implements `hash_tree_root(List[HeaderRecord, 8192])` per the ERA1 spec:
     /// - Each leaf is `sha256(block_hash || total_difficulty_le_bytes32)`
-    /// - Leaves are padded to `MAX_BLOCKS_PER_ERA1` (8192) with zero hashes
+    /// - Leaves are padded to `MAX_BLOCKS_PER_ERAE` (8192) with zero hashes
     /// - Binary Merkle tree is computed bottom-up
     /// - Final root is `sha256(merkle_root || le_bytes32(actual_count))`
     ///
-    /// Returns `Err` if `records` exceeds [`MAX_BLOCKS_PER_ERA1`].
+    /// Returns `Err` if `records` exceeds [`MAX_BLOCKS_PER_ERAE`].
     pub fn from_header_records(records: &[HeaderRecord]) -> Result<Self, E2sError> {
-        let capacity = MAX_BLOCKS_PER_ERA1;
+        let capacity = MAX_BLOCKS_PER_ERAE;
 
         if records.len() > capacity {
             return Err(E2sError::Ssz(format!(
@@ -848,7 +848,7 @@ mod tests {
     fn test_accumulator_rejects_oversized_input() {
         let records = vec![
             HeaderRecord { block_hash: B256::ZERO, total_difficulty: U256::ZERO };
-            MAX_BLOCKS_PER_ERA1 + 1
+            MAX_BLOCKS_PER_ERAE + 1
         ];
         assert!(Accumulator::from_header_records(&records).is_err());
     }
