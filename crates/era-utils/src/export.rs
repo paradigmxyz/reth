@@ -12,7 +12,7 @@ use reth_era::{
         types::{
             execution::{
                 Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedSlimReceipts,
-                TotalDifficulty, MAX_BLOCKS_PER_ERAE, HeaderRecord
+                HeaderRecord, TotalDifficulty, MAX_BLOCKS_PER_ERAE,
             },
             group::{BlockIndex, EraEId},
         },
