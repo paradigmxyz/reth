@@ -322,14 +322,16 @@ where
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let subkey = A::StorageSubKey::from(key);
-        Ok(self
-            .cursor
-            .seek_by_key_subkey(self.hashed_address, subkey.clone())?
-            .filter(|e| *e.nibbles() == subkey)
-            .map(|value| {
-                let (subkey, node) = value.into_parts();
-                (A::subkey_to_nibbles(&subkey), node)
-            }))
+        let Some(value) = self.cursor.seek_by_key_subkey(self.hashed_address, subkey.clone())? else {
+            return Ok(None)
+        };
+
+        if *value.nibbles() != subkey {
+            return Ok(None)
+        }
+
+        let (_, node) = value.into_parts();
+        Ok(Some((key, node)))
     }
 
     fn seek(
