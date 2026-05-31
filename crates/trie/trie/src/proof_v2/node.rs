@@ -1,4 +1,4 @@
-use crate::proof_v2::DeferredValueEncoder;
+use crate::proof_v2::{rlp_node_from_rlp_uncached, DeferredValueEncoder};
 use alloy_rlp::Encodable;
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
@@ -57,11 +57,11 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
 
                 // Encode the leaf into the right side of the split buffer, and return the RlpNode.
                 LeafNodeRef::new(&short_key, value_buf).encode(&mut leaf_buf);
-                Ok((RlpNode::from_rlp(&buf[value_enc_len..]), None))
+                Ok((rlp_node_from_rlp_uncached(&buf[value_enc_len..]), None))
             }
             Self::Branch { node: branch_node, .. } => {
                 branch_node.encode(buf);
-                Ok((RlpNode::from_rlp(buf), Some(branch_node.stack)))
+                Ok((rlp_node_from_rlp_uncached(buf), Some(branch_node.stack)))
             }
             Self::RlpNode(rlp_node) => Ok((rlp_node, None)),
         }

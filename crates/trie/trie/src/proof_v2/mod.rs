@@ -11,7 +11,7 @@ use crate::{
     hashed_cursor::{HashedCursor, HashedStorageCursor},
     trie_cursor::{depth_first, TrieCursor, TrieStorageCursor},
 };
-use alloy_primitives::{keccak256, B256, U256};
+use alloy_primitives::{keccak256, keccak256_uncached, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::trie::StateProofError;
@@ -36,6 +36,15 @@ static TRACE_TARGET: &str = "trie::proof_v2";
 
 /// Number of bytes to pre-allocate for [`ProofCalculator`]'s `rlp_encode_buf` field.
 const RLP_ENCODE_BUF_SIZE: usize = 1024;
+
+#[inline]
+pub(crate) fn rlp_node_from_rlp_uncached(rlp: &[u8]) -> RlpNode {
+    if rlp.len() < 32 {
+        RlpNode::from_raw(rlp).expect("short RLP node must fit")
+    } else {
+        RlpNode::word_rlp(&keccak256_uncached(rlp))
+    }
+}
 
 /// A proof calculator that generates merkle proofs using only leaf data.
 ///
@@ -296,7 +305,7 @@ where
             proof_node.node.encode(&mut self.rlp_encode_buf);
 
             self.retained_proofs.push(proof_node);
-            return Ok(RlpNode::from_rlp(&self.rlp_encode_buf));
+            return Ok(rlp_node_from_rlp_uncached(&self.rlp_encode_buf));
         }
 
         // If the child path is not being retained then we convert directly to an `RlpNode`
@@ -572,7 +581,7 @@ where
         } else {
             self.rlp_encode_buf.clear();
             BranchNodeRef::new(&rlp_nodes_buf, branch.state_mask).encode(&mut self.rlp_encode_buf);
-            Some(RlpNode::from_rlp(&self.rlp_encode_buf))
+            Some(rlp_node_from_rlp_uncached(&self.rlp_encode_buf))
         };
 
         // Wrap the `BranchNodeV2` so it can be pushed onto the child stack.
