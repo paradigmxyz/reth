@@ -310,7 +310,7 @@ mod tests {
     use crate::{
         hashed_cursor::{
             mock::MockHashedCursorFactory, noop::NoopHashedCursor, HashedCursorFactory,
-            HashedPostStateCursor, HashedPostStateOverlay,
+            HashedPostStateCursor,
         },
         mock::{KeyVisit, KeyVisitType},
         trie_cursor::{
@@ -331,7 +331,7 @@ mod tests {
         prefix_set::PrefixSetMut, updates::TrieUpdates, BranchNode, HashedPostState, LeafNode,
         RlpNode,
     };
-    use std::{collections::BTreeMap, sync::Arc};
+    use std::collections::BTreeMap;
 
     /// Calculate the branch node stored in the database by feeding the provided state to the hash
     /// builder and taking the trie updates.
@@ -349,13 +349,12 @@ mod tests {
                 (nibbles.pack().into_inner().unwrap().into(), Some(account))
             }))
             .into_sorted();
-        let hashed_post_state = HashedPostStateOverlay::new(vec![Arc::new(hashed_post_state)]);
 
         let mut node_iter = TrieNodeIter::state_trie(
             walker,
             HashedPostStateCursor::new_account(
                 NoopHashedCursor::<Account>::default(),
-                &hashed_post_state,
+                [&hashed_post_state],
             ),
         );
 

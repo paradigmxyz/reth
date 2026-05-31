@@ -8,17 +8,12 @@ use reth_db_api::{database::Database, transaction::DbTxMut};
 use reth_primitives_traits::{Account, StorageEntry};
 use reth_trie::{
     hashed_cursor::{
-        HashedCursor, HashedCursorFactory, HashedPostStateCursorFactory, HashedPostStateOverlay,
-        HashedStorageCursor,
+        HashedCursor, HashedCursorFactory, HashedPostStateCursorFactory, HashedStorageCursor,
     },
-    HashedPostState, HashedPostStateSorted, HashedStorage,
+    HashedPostState, HashedStorage,
 };
 use reth_trie_db::DatabaseHashedCursorFactory;
-use std::{collections::BTreeMap, sync::Arc};
-
-fn post_state_overlay(sorted: &HashedPostStateSorted) -> HashedPostStateOverlay {
-    HashedPostStateOverlay::new(vec![Arc::new(sorted.clone())])
-}
+use std::collections::BTreeMap;
 
 fn assert_account_cursor_order(
     factory: &impl HashedCursorFactory,
@@ -71,10 +66,8 @@ fn post_state_only_accounts() {
 
     let sorted = hashed_post_state.into_sorted();
     let tx = db.tx().unwrap();
-    let factory = HashedPostStateCursorFactory::new(
-        DatabaseHashedCursorFactory::new(&tx),
-        post_state_overlay(&sorted),
-    );
+    let factory =
+        HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), [&sorted]);
     assert_account_cursor_order(&factory, accounts.into_iter());
 }
 
@@ -95,7 +88,7 @@ fn db_only_accounts() {
     let tx = db.tx().unwrap();
     let factory = HashedPostStateCursorFactory::new(
         DatabaseHashedCursorFactory::new(&tx),
-        post_state_overlay(&sorted_post_state),
+        [&sorted_post_state],
     );
     assert_account_cursor_order(&factory, accounts.into_iter());
 }
@@ -121,10 +114,8 @@ fn account_cursor_correct_order() {
 
     let sorted = hashed_post_state.into_sorted();
     let tx = db.tx().unwrap();
-    let factory = HashedPostStateCursorFactory::new(
-        DatabaseHashedCursorFactory::new(&tx),
-        post_state_overlay(&sorted),
-    );
+    let factory =
+        HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), [&sorted]);
     assert_account_cursor_order(&factory, accounts.into_iter());
 }
 
@@ -154,10 +145,8 @@ fn removed_accounts_are_discarded() {
 
     let sorted = hashed_post_state.into_sorted();
     let tx = db.tx().unwrap();
-    let factory = HashedPostStateCursorFactory::new(
-        DatabaseHashedCursorFactory::new(&tx),
-        post_state_overlay(&sorted),
-    );
+    let factory =
+        HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), [&sorted]);
     let expected = accounts.into_iter().filter(|x| !removed_keys.contains(&x.0));
     assert_account_cursor_order(&factory, expected);
 }
@@ -184,10 +173,8 @@ fn post_state_accounts_take_precedence() {
 
     let sorted = hashed_post_state.into_sorted();
     let tx = db.tx().unwrap();
-    let factory = HashedPostStateCursorFactory::new(
-        DatabaseHashedCursorFactory::new(&tx),
-        post_state_overlay(&sorted),
-    );
+    let factory =
+        HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), [&sorted]);
     assert_account_cursor_order(&factory, accounts.into_iter());
 }
 
@@ -219,7 +206,7 @@ fn fuzz_hashed_account_cursor() {
 
             let sorted = hashed_post_state.into_sorted();
             let tx = db.tx().unwrap();
-            let factory = HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), post_state_overlay(&sorted));
+            let factory = HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), [&sorted]);
             assert_account_cursor_order(&factory, expected.into_iter());
         }
     );
@@ -246,10 +233,8 @@ fn storage_is_empty() {
     {
         let sorted = HashedPostState::default().into_sorted();
         let tx = db.tx().unwrap();
-        let factory = HashedPostStateCursorFactory::new(
-            DatabaseHashedCursorFactory::new(&tx),
-            post_state_overlay(&sorted),
-        );
+        let factory =
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), [&sorted]);
         let mut cursor = factory.hashed_storage_cursor(address).unwrap();
         assert!(cursor.is_storage_empty().unwrap());
     }
@@ -269,10 +254,8 @@ fn storage_is_empty() {
     {
         let sorted = HashedPostState::default().into_sorted();
         let tx = db.tx().unwrap();
-        let factory = HashedPostStateCursorFactory::new(
-            DatabaseHashedCursorFactory::new(&tx),
-            post_state_overlay(&sorted),
-        );
+        let factory =
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), [&sorted]);
         let mut cursor = factory.hashed_storage_cursor(address).unwrap();
         assert!(!cursor.is_storage_empty().unwrap());
     }
@@ -288,10 +271,8 @@ fn storage_is_empty() {
 
         let sorted = hashed_post_state.into_sorted();
         let tx = db.tx().unwrap();
-        let factory = HashedPostStateCursorFactory::new(
-            DatabaseHashedCursorFactory::new(&tx),
-            post_state_overlay(&sorted),
-        );
+        let factory =
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), [&sorted]);
         let mut cursor = factory.hashed_storage_cursor(address).unwrap();
         assert!(!cursor.is_storage_empty().unwrap());
     }
@@ -306,10 +287,8 @@ fn storage_is_empty() {
 
         let sorted = hashed_post_state.into_sorted();
         let tx = db.tx().unwrap();
-        let factory = HashedPostStateCursorFactory::new(
-            DatabaseHashedCursorFactory::new(&tx),
-            post_state_overlay(&sorted),
-        );
+        let factory =
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), [&sorted]);
         let mut cursor = factory.hashed_storage_cursor(address).unwrap();
         assert!(cursor.is_storage_empty().unwrap());
     }
@@ -325,10 +304,8 @@ fn storage_is_empty() {
 
         let sorted = hashed_post_state.into_sorted();
         let tx = db.tx().unwrap();
-        let factory = HashedPostStateCursorFactory::new(
-            DatabaseHashedCursorFactory::new(&tx),
-            post_state_overlay(&sorted),
-        );
+        let factory =
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), [&sorted]);
         let mut cursor = factory.hashed_storage_cursor(address).unwrap();
         assert!(cursor.is_storage_empty().unwrap());
     }
@@ -344,10 +321,8 @@ fn storage_is_empty() {
 
         let sorted = hashed_post_state.into_sorted();
         let tx = db.tx().unwrap();
-        let factory = HashedPostStateCursorFactory::new(
-            DatabaseHashedCursorFactory::new(&tx),
-            post_state_overlay(&sorted),
-        );
+        let factory =
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), [&sorted]);
         let mut cursor = factory.hashed_storage_cursor(address).unwrap();
         assert!(!cursor.is_storage_empty().unwrap());
     }
@@ -383,10 +358,8 @@ fn storage_cursor_correct_order() {
 
     let sorted = hashed_post_state.into_sorted();
     let tx = db.tx().unwrap();
-    let factory = HashedPostStateCursorFactory::new(
-        DatabaseHashedCursorFactory::new(&tx),
-        post_state_overlay(&sorted),
-    );
+    let factory =
+        HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), [&sorted]);
     let expected =
         std::iter::once((address, db_storage.into_iter().chain(post_state_storage).collect()));
     assert_storage_cursor_order(&factory, expected);
@@ -426,10 +399,8 @@ fn zero_value_storage_entries_are_discarded() {
 
     let sorted = hashed_post_state.into_sorted();
     let tx = db.tx().unwrap();
-    let factory = HashedPostStateCursorFactory::new(
-        DatabaseHashedCursorFactory::new(&tx),
-        post_state_overlay(&sorted),
-    );
+    let factory =
+        HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), [&sorted]);
     let expected = std::iter::once((
         address,
         post_state_storage.into_iter().filter(|(_, value)| *value > U256::ZERO).collect(),
@@ -466,10 +437,8 @@ fn wiped_storage_is_discarded() {
 
     let sorted = hashed_post_state.into_sorted();
     let tx = db.tx().unwrap();
-    let factory = HashedPostStateCursorFactory::new(
-        DatabaseHashedCursorFactory::new(&tx),
-        post_state_overlay(&sorted),
-    );
+    let factory =
+        HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), [&sorted]);
     let expected = std::iter::once((address, post_state_storage));
     assert_storage_cursor_order(&factory, expected);
 }
@@ -504,10 +473,8 @@ fn post_state_storages_take_precedence() {
 
     let sorted = hashed_post_state.into_sorted();
     let tx = db.tx().unwrap();
-    let factory = HashedPostStateCursorFactory::new(
-        DatabaseHashedCursorFactory::new(&tx),
-        post_state_overlay(&sorted),
-    );
+    let factory =
+        HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), [&sorted]);
     let expected = std::iter::once((address, storage));
     assert_storage_cursor_order(&factory, expected);
 }
@@ -554,7 +521,7 @@ fn fuzz_hashed_storage_cursor() {
 
         let sorted = hashed_post_state.into_sorted();
         let tx = db.tx().unwrap();
-        let factory = HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), post_state_overlay(&sorted));
+        let factory = HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), [&sorted]);
         assert_storage_cursor_order(&factory, expected.into_iter());
     });
 }
@@ -601,10 +568,8 @@ fn all_storage_slots_deleted_not_wiped_exact_keys() {
 
     let sorted = hashed_post_state.into_sorted();
     let tx = db.tx().unwrap();
-    let factory = HashedPostStateCursorFactory::new(
-        DatabaseHashedCursorFactory::new(&tx),
-        post_state_overlay(&sorted),
-    );
+    let factory =
+        HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(&tx), [&sorted]);
 
     let mut cursor = factory.hashed_storage_cursor(address).unwrap();
 

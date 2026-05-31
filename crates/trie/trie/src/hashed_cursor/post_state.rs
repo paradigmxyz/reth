@@ -1,10 +1,9 @@
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
-use crate::overlay_cursor::{DbCursorState, OverlayLayer, PositionedOverlayCursor};
-use alloy_primitives::{map::B256Map, B256, U256};
+use alloy_primitives::{B256, U256};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::HashedPostStateSorted;
-use std::{marker::PhantomData, sync::Arc};
+use std::marker::PhantomData;
 
 /// The hashed cursor factory for the post state.
 #[derive(Clone, Debug)]
@@ -24,20 +23,20 @@ impl<'overlay, CF, T> HashedPostStateCursorFactory<'overlay, CF, T> {
 impl<'overlay, CF, T> HashedCursorFactory for HashedPostStateCursorFactory<'overlay, CF, T>
 where
     CF: HashedCursorFactory + 'overlay,
-    T: AsRef<HashedPostStateOverlay>,
+    T: AsRef<[&'overlay HashedPostStateSorted]>,
 {
     type AccountCursor<'cursor>
-        = HashedPostStateCursor<'cursor, CF::AccountCursor<'cursor>, Option<Account>>
+        = HashedPostStateCursor<'overlay, CF::AccountCursor<'cursor>, Option<Account>>
     where
         Self: 'cursor;
     type StorageCursor<'cursor>
-        = HashedPostStateCursor<'cursor, CF::StorageCursor<'cursor>, U256>
+        = HashedPostStateCursor<'overlay, CF::StorageCursor<'cursor>, U256>
     where
         Self: 'cursor;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
         let cursor = self.cursor_factory.hashed_account_cursor()?;
-        Ok(HashedPostStateCursor::new_account(cursor, self.post_state.as_ref()))
+        Ok(HashedPostStateCursor::new_account(cursor, self.post_state.as_ref().iter().copied()))
     }
 
     fn hashed_storage_cursor(
@@ -45,7 +44,11 @@ where
         hashed_address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
         let cursor = self.cursor_factory.hashed_storage_cursor(hashed_address)?;
-        Ok(HashedPostStateCursor::new_storage(cursor, self.post_state.as_ref(), hashed_address))
+        Ok(HashedPostStateCursor::new_storage(
+            cursor,
+            self.post_state.as_ref().iter().copied(),
+            hashed_address,
+        ))
     }
 }
 
@@ -94,7 +97,7 @@ where
     /// The underlying cursor.
     cursor: C,
     /// The current DB cursor state.
-    db_cursor_state: DbCursorState<B256, V::NonZero>,
+    db_cursor_state: DbCursorState<V::NonZero>,
     /// In-memory cursors over post state overlays.
     post_state_cursor: PostStateOverlayCursor<'a, V>,
     /// Lower-priority overlays that still need positioning after a lazy exact overlay hit.
@@ -105,17 +108,189 @@ where
     #[cfg(debug_assertions)]
     /// Tracks whether `seek` has been called.
     seeked: bool,
-    /// Source of post-state overlays.
-    post_states: &'a HashedPostStateOverlay,
+    /// Reference to the full post state.
+    post_states: Vec<&'a HashedPostStateSorted>,
+}
+
+#[derive(Debug)]
+enum DbCursorState<V> {
+    Active(Option<(B256, V)>),
+    Wiped,
+}
+
+impl<V> DbCursorState<V> {
+    const fn new(cursor_wiped: bool) -> Self {
+        if cursor_wiped {
+            Self::Wiped
+        } else {
+            Self::Active(None)
+        }
+    }
+
+    const fn is_wiped(&self) -> bool {
+        matches!(self, Self::Wiped)
+    }
+
+    const fn entry(&self) -> Option<&(B256, V)> {
+        match self {
+            Self::Active(entry) => entry.as_ref(),
+            Self::Wiped => None,
+        }
+    }
+
+    fn set_entry(&mut self, entry: Option<(B256, V)>) {
+        if let Self::Active(current) = self {
+            *current = entry;
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PostStateOverlayCursor<'a, V> {
+    cursors: Vec<SeekablePostStateCursor<'a, V>>,
+}
+
+impl<'a> PostStateOverlayCursor<'a, Option<Account>> {
+    fn account(post_states: &[&'a HashedPostStateSorted]) -> Self {
+        Self {
+            cursors: post_states
+                .iter()
+                .map(|post_state| SeekablePostStateCursor::new(post_state.accounts.as_slice()))
+                .collect(),
+        }
+    }
+}
+
+impl<'a> PostStateOverlayCursor<'a, U256> {
+    fn storage(post_states: &[&'a HashedPostStateSorted], hashed_address: B256) -> (Self, bool) {
+        let mut cursors = Vec::new();
+        let mut db_wiped = false;
+
+        for post_state in post_states {
+            if let Some(storage) = post_state.storages.get(&hashed_address) {
+                cursors.push(SeekablePostStateCursor::new(storage.storage_slots_ref()));
+                if storage.is_wiped() {
+                    db_wiped = true;
+                    break;
+                }
+            }
+        }
+
+        (Self { cursors }, db_wiped)
+    }
+}
+
+impl<'a, V> PostStateOverlayCursor<'a, V>
+where
+    V: HashedPostStateCursorValue,
+{
+    fn seek_from(&mut self, start: usize, key: &B256) {
+        for cursor in self.cursors.iter_mut().skip(start) {
+            cursor.seek(key);
+        }
+    }
+
+    fn seek_until_exact(&mut self, key: &B256) -> Option<(usize, Option<V::NonZero>)> {
+        for (idx, cursor) in self.cursors.iter_mut().enumerate() {
+            if let Some((cursor_key, value)) = cursor.seek(key) &&
+                cursor_key == key
+            {
+                return Some((idx, value.into_option()))
+            }
+        }
+        None
+    }
+
+    fn first_after(&mut self, key: &B256) {
+        for cursor in &mut self.cursors {
+            cursor.first_after(key);
+        }
+    }
+
+    fn reset(&mut self) {
+        for cursor in &mut self.cursors {
+            cursor.reset();
+        }
+    }
+
+    fn min_current_key(&self) -> Option<B256> {
+        self.cursors.iter().filter_map(|cursor| cursor.current().map(|(key, _)| *key)).min()
+    }
+
+    fn highest_priority_value_at(&self, key: &B256) -> Option<Option<V::NonZero>> {
+        self.cursors.iter().find_map(|cursor| {
+            let (cursor_key, value) = cursor.current()?;
+            (cursor_key == key).then(|| value.into_option())
+        })
+    }
+
+    fn advance_key(&mut self, key: &B256) {
+        for cursor in &mut self.cursors {
+            if cursor.current().is_some_and(|(cursor_key, _)| cursor_key == key) {
+                cursor.first_after(key);
+            }
+        }
+    }
+
+    fn has_visible_value(&self) -> bool {
+        let mut cursor = self.clone();
+        cursor.reset();
+        while let Some(key) = cursor.min_current_key() {
+            if cursor.highest_priority_value_at(&key).flatten().is_some() {
+                return true
+            }
+            cursor.advance_key(&key);
+        }
+        false
+    }
+}
+
+#[derive(Clone, Debug)]
+struct SeekablePostStateCursor<'a, V> {
+    entries: &'a [(B256, V)],
+    idx: usize,
+}
+
+impl<'a, V> SeekablePostStateCursor<'a, V> {
+    const fn new(entries: &'a [(B256, V)]) -> Self {
+        Self { entries, idx: 0 }
+    }
+
+    fn current(&self) -> Option<&'a (B256, V)> {
+        self.entries.get(self.idx)
+    }
+
+    const fn reset(&mut self) {
+        self.idx = 0;
+    }
+
+    fn seek(&mut self, key: &B256) -> Option<&'a (B256, V)> {
+        self.idx = self.entries.partition_point(|(entry_key, _)| entry_key < key);
+        self.current()
+    }
+
+    fn first_after(&mut self, key: &B256) -> Option<&'a (B256, V)> {
+        if self.current().is_some_and(|(entry_key, _)| entry_key > key) {
+            return self.current()
+        }
+
+        let remaining = &self.entries[self.idx..];
+        self.idx += remaining.partition_point(|(entry_key, _)| entry_key <= key);
+        self.current()
+    }
 }
 
 impl<'a, C> HashedPostStateCursor<'a, C, Option<Account>>
 where
     C: HashedCursor<Value = Account>,
 {
-    /// Create new account cursor from an indexed hashed post-state overlay.
-    pub fn new_account(cursor: C, post_states: &'a HashedPostStateOverlay) -> Self {
-        let post_state_cursor = post_states.account_overlay();
+    /// Create new account cursor which combines a DB cursor and the post state.
+    pub fn new_account(
+        cursor: C,
+        post_states: impl IntoIterator<Item = &'a HashedPostStateSorted>,
+    ) -> Self {
+        let post_states = post_states.into_iter().collect::<Vec<_>>();
+        let post_state_cursor = PostStateOverlayCursor::account(&post_states);
         Self {
             cursor,
             db_cursor_state: DbCursorState::new(false),
@@ -133,13 +308,16 @@ impl<'a, C> HashedPostStateCursor<'a, C, U256>
 where
     C: HashedStorageCursor<Value = U256>,
 {
-    /// Create new storage cursor from an indexed hashed post-state overlay.
+    /// Create new storage cursor with full post state reference.
+    /// This allows the cursor to switch between storage tries when `set_hashed_address` is called.
     pub fn new_storage(
         cursor: C,
-        post_states: &'a HashedPostStateOverlay,
+        post_states: impl IntoIterator<Item = &'a HashedPostStateSorted>,
         hashed_address: B256,
     ) -> Self {
-        let (post_state_cursor, cursor_wiped) = post_states.storage_overlay(hashed_address);
+        let post_states = post_states.into_iter().collect::<Vec<_>>();
+        let (post_state_cursor, cursor_wiped) =
+            Self::get_storage_overlay(&post_states, hashed_address);
         Self {
             cursor,
             db_cursor_state: DbCursorState::new(cursor_wiped),
@@ -150,6 +328,14 @@ where
             seeked: false,
             post_states,
         }
+    }
+
+    /// Returns the storage overlay for `hashed_address` and whether it was wiped.
+    fn get_storage_overlay(
+        post_states: &[&'a HashedPostStateSorted],
+        hashed_address: B256,
+    ) -> (PostStateOverlayCursor<'a, U256>, bool) {
+        PostStateOverlayCursor::storage(post_states, hashed_address)
     }
 }
 
@@ -169,10 +355,6 @@ where
 
     /// Positions the DB cursor state using the underlying cursor.
     fn cursor_seek(&mut self, key: B256) -> Result<(), DatabaseError> {
-        if !self.db_cursor_state.should_seek(&key) {
-            return Ok(())
-        }
-
         let entry = self.get_cursor_mut().map(|c| c.seek(key)).transpose()?.flatten();
         self.db_cursor_state.set_entry(entry);
         Ok(())
@@ -203,18 +385,13 @@ where
     /// Performs a k-way merge over the positioned overlay cursors and the DB cursor.
     fn choose_next_entry(&mut self) -> Result<Option<(B256, V::NonZero)>, DatabaseError> {
         loop {
-            let mem_entry = self.post_state_cursor.min_current_entry();
-            let db_entry = self.db_cursor_state.entry();
-            let next_key = match (mem_entry, db_entry) {
-                (Some((mem_key, _)), Some((db_key, _))) => mem_key.min(*db_key),
-                (Some((mem_key, _)), None) => mem_key,
-                (None, Some((db_key, _))) => *db_key,
-                (None, None) => return Ok(None),
+            let mem_key = self.post_state_cursor.min_current_key();
+            let db_key = self.db_cursor_state.entry().map(|(key, _)| *key);
+            let Some(next_key) = mem_key.into_iter().chain(db_key).min() else {
+                return Ok(None);
             };
 
-            if let Some((mem_key, mem_value)) = mem_entry &&
-                mem_key == next_key
-            {
+            if let Some(mem_value) = self.post_state_cursor.highest_priority_value_at(&next_key) {
                 if let Some(value) = mem_value {
                     return Ok(Some((next_key, value)))
                 }
@@ -257,8 +434,8 @@ where
         self.deferred_overlay_seek_start = None;
         match self.post_state_cursor.seek_until_exact(&key) {
             Some((idx, Some(value))) => {
-                self.deferred_overlay_seek_start = Some(idx + 1);
                 let entry = Some((key, value));
+                self.deferred_overlay_seek_start = Some(idx + 1);
                 self.set_last_key(&entry);
                 return Ok(entry)
             }
@@ -297,10 +474,10 @@ where
         }
         self.post_state_cursor.first_after(&last_key);
 
-        match self.db_cursor_state.entry().map(|(db_key, _)| *db_key) {
-            Some(db_key) if db_key == last_key => self.cursor_next()?,
-            Some(db_key) if db_key > last_key => {}
-            _ => self.cursor_first_after(last_key)?,
+        if self.db_cursor_state.entry().is_some_and(|(db_key, _)| db_key == &last_key) {
+            self.cursor_next()?;
+        } else {
+            self.cursor_first_after(last_key)?;
         }
 
         let entry = self.choose_next_entry()?;
@@ -310,9 +487,9 @@ where
 
     fn reset(&mut self) {
         self.cursor.reset();
-
-        self.db_cursor_state.reset_position();
         self.post_state_cursor.reset();
+
+        self.db_cursor_state.set_entry(None);
         self.deferred_overlay_seek_start = None;
         self.last_key = None;
         #[cfg(debug_assertions)]
@@ -346,390 +523,20 @@ where
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.reset();
         self.cursor.set_hashed_address(hashed_address);
-        let cursor_wiped =
-            self.post_states.retarget_storage_overlay(&mut self.post_state_cursor, hashed_address);
+        let (post_state_cursor, cursor_wiped) =
+            HashedPostStateCursor::<C, U256>::get_storage_overlay(
+                &self.post_states,
+                hashed_address,
+            );
+        self.post_state_cursor = post_state_cursor;
         self.db_cursor_state = DbCursorState::new(cursor_wiped);
     }
-}
-
-/// Hashed post-state overlays ordered from highest to lowest precedence.
-#[derive(Clone, Debug, Default)]
-pub struct HashedPostStateOverlay {
-    account_overlay: Arc<Vec<PostStateOverlayLayer<Option<Account>>>>,
-    storage_overlays: HashedStorageOverlays,
-    layer_capacity: usize,
-}
-
-impl HashedPostStateOverlay {
-    /// Create a new indexed hashed post-state overlay stack.
-    pub fn new(states: Vec<Arc<HashedPostStateSorted>>) -> Self {
-        let layer_capacity = states.len();
-        let account_overlay = Self::build_account_overlay(&states);
-        let storage_overlays = Self::build_storage_overlays(&states);
-        Self { account_overlay, storage_overlays, layer_capacity }
-    }
-
-    /// Returns `true` if the overlay does not contain any hashed post-state updates.
-    pub fn is_empty(&self) -> bool {
-        self.account_overlay.is_empty() && self.storage_overlays.is_empty()
-    }
-
-    fn build_account_overlay(
-        states: &[Arc<HashedPostStateSorted>],
-    ) -> Arc<Vec<PostStateOverlayLayer<Option<Account>>>> {
-        Arc::new(
-            states
-                .iter()
-                .filter(|state| !state.accounts.is_empty())
-                .map(|state| {
-                    PostStateOverlayLayer::new(Arc::clone(state), state.accounts.as_slice())
-                })
-                .collect(),
-        )
-    }
-
-    fn build_storage_overlays(states: &[Arc<HashedPostStateSorted>]) -> HashedStorageOverlays {
-        if let [state] = states {
-            return HashedStorageOverlays::Single(Arc::clone(state))
-        }
-
-        let storage_overlay_capacity = states.iter().map(|state| state.storages.len()).sum();
-        let mut overlays: B256Map<HashedStorageOverlay> =
-            B256Map::with_capacity_and_hasher(storage_overlay_capacity, Default::default());
-
-        for state in states {
-            Self::push_storage_layer(&mut overlays, state);
-        }
-
-        HashedStorageOverlays::Indexed(Arc::new(overlays))
-    }
-
-    /// Add a hashed post-state layer at the end of the precedence stack.
-    pub fn push_layer(&mut self, state: Arc<HashedPostStateSorted>) {
-        self.layer_capacity += 1;
-        if !state.accounts.is_empty() {
-            Arc::make_mut(&mut self.account_overlay)
-                .push(PostStateOverlayLayer::new(Arc::clone(&state), state.accounts.as_slice()));
-        }
-        self.storage_overlays.push_layer(state);
-    }
-
-    /// Add a hashed post-state layer at the beginning of the precedence stack.
-    pub fn prepend_layer(&mut self, state: Arc<HashedPostStateSorted>) {
-        self.layer_capacity += 1;
-        if !state.accounts.is_empty() {
-            Arc::make_mut(&mut self.account_overlay).insert(
-                0,
-                PostStateOverlayLayer::new(Arc::clone(&state), state.accounts.as_slice()),
-            );
-        }
-
-        self.storage_overlays.prepend_layer(state);
-    }
-
-    fn push_storage_layer(
-        overlays: &mut B256Map<HashedStorageOverlay>,
-        state: &Arc<HashedPostStateSorted>,
-    ) {
-        for (hashed_address, storage) in &state.storages {
-            let overlay = overlays.entry(*hashed_address).or_default();
-            if overlay.db_wiped {
-                continue;
-            }
-
-            let storage_slots = storage.storage_slots_ref();
-            if !storage_slots.is_empty() {
-                if !overlay.has_visible_value &&
-                    layer_has_visible_storage_value(storage_slots, &overlay.layers)
-                {
-                    overlay.has_visible_value = true;
-                }
-                overlay.layers.push(PostStateOverlayLayer::new(Arc::clone(state), storage_slots));
-            }
-
-            if storage.is_wiped() {
-                overlay.db_wiped = true;
-            }
-        }
-    }
-
-    fn prepend_storage_layer(
-        overlays: &mut B256Map<HashedStorageOverlay>,
-        state: &Arc<HashedPostStateSorted>,
-    ) {
-        for (hashed_address, storage) in &state.storages {
-            let overlay = overlays.entry(*hashed_address).or_default();
-            let storage_slots = storage.storage_slots_ref();
-
-            if storage.is_wiped() {
-                overlay.layers.clear();
-                overlay.db_wiped = true;
-                overlay.has_visible_value = false;
-            }
-
-            if !storage_slots.is_empty() {
-                let has_nonzero_slot = storage_slots.iter().any(|(_, value)| !value.is_zero());
-                let recompute_after_insert = !has_nonzero_slot && overlay.has_visible_value;
-
-                overlay
-                    .layers
-                    .insert(0, PostStateOverlayLayer::new(Arc::clone(state), storage_slots));
-
-                overlay.has_visible_value = has_nonzero_slot ||
-                    (recompute_after_insert && has_visible_storage_value(&overlay.layers));
-            }
-        }
-    }
-
-    fn account_overlay(&self) -> PostStateOverlayCursor<'_, Option<Account>> {
-        PostStateOverlayCursor::new(self.account_overlay.as_slice(), false, self.layer_capacity)
-    }
-
-    fn storage_overlay(&self, hashed_address: B256) -> (PostStateOverlayCursor<'_, U256>, bool) {
-        match &self.storage_overlays {
-            HashedStorageOverlays::Single(state) => {
-                let Some(storage) = state.storages.get(&hashed_address) else {
-                    return (PostStateOverlayCursor::with_capacity(self.layer_capacity), false)
-                };
-                let storage_slots = storage.storage_slots_ref();
-                let has_visible_value = storage_slots.iter().any(|(_, value)| !value.is_zero());
-                (
-                    PostStateOverlayCursor::from_entries(
-                        storage_slots,
-                        has_visible_value,
-                        self.layer_capacity,
-                    ),
-                    storage.is_wiped(),
-                )
-            }
-            HashedStorageOverlays::Indexed(overlays) => {
-                let Some(overlay) = overlays.get(&hashed_address) else {
-                    return (PostStateOverlayCursor::with_capacity(self.layer_capacity), false)
-                };
-
-                (
-                    PostStateOverlayCursor::new(
-                        overlay.layers.as_slice(),
-                        overlay.has_visible_value,
-                        self.layer_capacity,
-                    ),
-                    overlay.db_wiped,
-                )
-            }
-        }
-    }
-
-    fn retarget_storage_overlay<'a>(
-        &'a self,
-        cursor: &mut PostStateOverlayCursor<'a, U256>,
-        hashed_address: B256,
-    ) -> bool {
-        match &self.storage_overlays {
-            HashedStorageOverlays::Single(state) => {
-                let Some(storage) = state.storages.get(&hashed_address) else {
-                    cursor.retarget_entries(&[], false);
-                    return false
-                };
-                let storage_slots = storage.storage_slots_ref();
-                let has_visible_value = storage_slots.iter().any(|(_, value)| !value.is_zero());
-                cursor.retarget_entries(storage_slots, has_visible_value);
-                storage.is_wiped()
-            }
-            HashedStorageOverlays::Indexed(overlays) => {
-                let Some(overlay) = overlays.get(&hashed_address) else {
-                    cursor.retarget(&[], false);
-                    return false
-                };
-                cursor.retarget(overlay.layers.as_slice(), overlay.has_visible_value);
-                overlay.db_wiped
-            }
-        }
-    }
-}
-
-impl AsRef<Self> for HashedPostStateOverlay {
-    fn as_ref(&self) -> &Self {
-        self
-    }
-}
-
-#[derive(Debug)]
-struct PostStateOverlayCursor<'a, V> {
-    cursor: PositionedOverlayCursor<'a, B256, V>,
-    has_visible_value: bool,
-}
-
-impl<V> Default for PostStateOverlayCursor<'_, V> {
-    fn default() -> Self {
-        Self::new(&[], false, 0)
-    }
-}
-
-impl<'a, V> PostStateOverlayCursor<'a, V> {
-    fn new(
-        layers: &'a [PostStateOverlayLayer<V>],
-        has_visible_value: bool,
-        layer_capacity: usize,
-    ) -> Self {
-        Self {
-            cursor: PositionedOverlayCursor::with_capacity(layers, layer_capacity),
-            has_visible_value,
-        }
-    }
-
-    fn reset(&mut self) {
-        self.cursor.reset();
-    }
-
-    fn with_capacity(layer_capacity: usize) -> Self {
-        Self {
-            cursor: PositionedOverlayCursor::with_entries(&[], layer_capacity),
-            has_visible_value: false,
-        }
-    }
-
-    fn from_entries(
-        entries: &'a [(B256, V)],
-        has_visible_value: bool,
-        layer_capacity: usize,
-    ) -> Self {
-        Self {
-            cursor: PositionedOverlayCursor::with_entries(entries, layer_capacity),
-            has_visible_value,
-        }
-    }
-
-    fn retarget(&mut self, layers: &'a [PostStateOverlayLayer<V>], has_visible_value: bool) {
-        self.cursor.retarget(layers);
-        self.has_visible_value = has_visible_value;
-    }
-
-    fn retarget_entries(&mut self, entries: &'a [(B256, V)], has_visible_value: bool) {
-        self.cursor.retarget_entries(entries);
-        self.has_visible_value = has_visible_value;
-    }
-}
-
-impl<'a, V> PostStateOverlayCursor<'a, V>
-where
-    V: HashedPostStateCursorValue,
-{
-    fn seek_from(&mut self, start: usize, key: &B256) {
-        self.cursor.seek_from(start, key);
-    }
-
-    fn seek_until_exact(&mut self, key: &B256) -> Option<(usize, Option<V::NonZero>)> {
-        self.cursor.seek_until_exact(key).map(|(idx, value)| (idx, (*value).into_option()))
-    }
-
-    fn first_after(&mut self, key: &B256) {
-        self.cursor.first_after(key);
-    }
-
-    fn min_current_entry(&self) -> Option<(B256, Option<V::NonZero>)> {
-        self.cursor.min_current_entry().map(|(key, value)| (key, (*value).into_option()))
-    }
-
-    fn advance_key(&mut self, key: &B256) {
-        self.cursor.advance_key(key);
-    }
-
-    const fn has_visible_value(&self) -> bool {
-        self.has_visible_value
-    }
-}
-
-#[derive(Clone, Debug, Default)]
-struct HashedStorageOverlay {
-    layers: Vec<PostStateOverlayLayer<U256>>,
-    db_wiped: bool,
-    has_visible_value: bool,
-}
-
-#[derive(Clone, Debug)]
-enum HashedStorageOverlays {
-    Single(Arc<HashedPostStateSorted>),
-    Indexed(Arc<B256Map<HashedStorageOverlay>>),
-}
-
-impl Default for HashedStorageOverlays {
-    fn default() -> Self {
-        Self::Indexed(Default::default())
-    }
-}
-
-impl HashedStorageOverlays {
-    fn is_empty(&self) -> bool {
-        match self {
-            Self::Single(state) => state.storages.is_empty(),
-            Self::Indexed(overlays) => overlays.is_empty(),
-        }
-    }
-
-    fn push_layer(&mut self, state: Arc<HashedPostStateSorted>) {
-        match self {
-            Self::Single(existing) => {
-                let storage_overlay_capacity = existing.storages.len() + state.storages.len();
-                let mut overlays: B256Map<HashedStorageOverlay> =
-                    B256Map::with_capacity_and_hasher(storage_overlay_capacity, Default::default());
-                HashedPostStateOverlay::push_storage_layer(&mut overlays, existing);
-                HashedPostStateOverlay::push_storage_layer(&mut overlays, &state);
-                *self = Self::Indexed(Arc::new(overlays));
-            }
-            Self::Indexed(overlays) => {
-                HashedPostStateOverlay::push_storage_layer(Arc::make_mut(overlays), &state);
-            }
-        }
-    }
-
-    fn prepend_layer(&mut self, state: Arc<HashedPostStateSorted>) {
-        match self {
-            Self::Single(existing) => {
-                let storage_overlay_capacity = existing.storages.len() + state.storages.len();
-                let mut overlays: B256Map<HashedStorageOverlay> =
-                    B256Map::with_capacity_and_hasher(storage_overlay_capacity, Default::default());
-                HashedPostStateOverlay::push_storage_layer(&mut overlays, &state);
-                HashedPostStateOverlay::push_storage_layer(&mut overlays, existing);
-                *self = Self::Indexed(Arc::new(overlays));
-            }
-            Self::Indexed(overlays) => {
-                HashedPostStateOverlay::prepend_storage_layer(Arc::make_mut(overlays), &state);
-            }
-        }
-    }
-}
-
-type PostStateOverlayLayer<V> = OverlayLayer<HashedPostStateSorted, B256, V>;
-
-fn layer_has_visible_storage_value(
-    entries: &[(B256, U256)],
-    higher_priority_layers: &[PostStateOverlayLayer<U256>],
-) -> bool {
-    entries.iter().any(|(key, value)| {
-        !value.is_zero() &&
-            !higher_priority_layers.iter().any(|higher_layer| {
-                higher_layer
-                    .entries()
-                    .binary_search_by_key(key, |(entry_key, _)| *entry_key)
-                    .is_ok()
-            })
-    })
-}
-
-fn has_visible_storage_value(layers: &[PostStateOverlayLayer<U256>]) -> bool {
-    for (layer_idx, layer) in layers.iter().enumerate() {
-        if layer_has_visible_storage_value(layer.entries(), &layers[..layer_idx]) {
-            return true
-        }
-    }
-    false
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::hashed_cursor::mock::MockHashedCursor;
-    use alloy_primitives::map::B256Map;
     use parking_lot::Mutex;
     use std::{collections::BTreeMap, sync::Arc};
 
@@ -737,153 +544,18 @@ mod tests {
         B256::repeat_byte(byte)
     }
 
-    fn account(nonce: u64) -> Account {
-        Account { nonce, balance: U256::from(nonce), bytecode_hash: None }
-    }
-
     fn storage_post_state(storage_slots: Vec<(B256, U256)>) -> HashedPostStateSorted {
-        storage_post_state_for_address(B256::ZERO, storage_slots)
+        storage_post_state_with_wipe(storage_slots, false)
     }
 
     fn storage_post_state_with_wipe(
         storage_slots: Vec<(B256, U256)>,
         wiped: bool,
     ) -> HashedPostStateSorted {
-        storage_post_state_with_wipe_for_address(B256::ZERO, storage_slots, wiped)
-    }
-
-    fn storage_post_state_for_address(
-        hashed_address: B256,
-        storage_slots: Vec<(B256, U256)>,
-    ) -> HashedPostStateSorted {
-        storage_post_state_with_wipe_for_address(hashed_address, storage_slots, false)
-    }
-
-    fn storage_post_state_with_wipe_for_address(
-        hashed_address: B256,
-        storage_slots: Vec<(B256, U256)>,
-        wiped: bool,
-    ) -> HashedPostStateSorted {
         let storage_sorted = reth_trie_common::HashedStorageSorted { storage_slots, wiped };
         let mut storages = alloy_primitives::map::B256Map::default();
-        storages.insert(hashed_address, storage_sorted);
+        storages.insert(B256::ZERO, storage_sorted);
         HashedPostStateSorted::new(Vec::new(), storages)
-    }
-
-    fn storage_cursor<'a>(
-        cursor: MockHashedCursor<U256>,
-        overlay: &'a HashedPostStateOverlay,
-        hashed_address: B256,
-    ) -> HashedPostStateCursor<'a, MockHashedCursor<U256>, U256> {
-        HashedPostStateCursor::new_storage(cursor, overlay, hashed_address)
-    }
-
-    fn storage_overlay_snapshot(
-        overlay: &HashedPostStateOverlay,
-        hashed_address: B256,
-    ) -> (Vec<Vec<(B256, U256)>>, bool, bool) {
-        match &overlay.storage_overlays {
-            HashedStorageOverlays::Single(state) => {
-                let Some(storage) = state.storages.get(&hashed_address) else {
-                    return (Vec::new(), false, false)
-                };
-                let storage_slots = storage.storage_slots_ref();
-                let layers = (!storage_slots.is_empty())
-                    .then(|| vec![storage_slots.to_vec()])
-                    .unwrap_or_default();
-                let has_visible_value = storage_slots.iter().any(|(_, value)| !value.is_zero());
-                (layers, storage.is_wiped(), has_visible_value)
-            }
-            HashedStorageOverlays::Indexed(overlays) => {
-                let Some(overlay) = overlays.get(&hashed_address) else {
-                    return (Vec::new(), false, false)
-                };
-                (
-                    overlay.layers.iter().map(|layer| layer.entries().to_vec()).collect(),
-                    overlay.db_wiped,
-                    overlay.has_visible_value,
-                )
-            }
-        }
-    }
-
-    #[test]
-    fn test_incremental_storage_push_matches_rebuilt_overlay() {
-        let hashed_address = key(0x01);
-        let top = Arc::new(storage_post_state_for_address(
-            hashed_address,
-            vec![(key(0x10), U256::from(1))],
-        ));
-        let lower = Arc::new(storage_post_state_with_wipe_for_address(
-            hashed_address,
-            vec![(key(0x20), U256::from(2))],
-            true,
-        ));
-
-        let mut incremental = HashedPostStateOverlay::new(vec![Arc::clone(&top)]);
-        incremental.push_layer(Arc::clone(&lower));
-        let rebuilt = HashedPostStateOverlay::new(vec![top, lower]);
-
-        assert_eq!(
-            storage_overlay_snapshot(&incremental, hashed_address),
-            storage_overlay_snapshot(&rebuilt, hashed_address)
-        );
-    }
-
-    #[test]
-    fn test_incremental_storage_prepend_matches_rebuilt_overlay() {
-        let hashed_address = key(0x01);
-        let lower = Arc::new(storage_post_state_with_wipe_for_address(
-            hashed_address,
-            vec![(key(0x10), U256::from(1))],
-            true,
-        ));
-        let top = Arc::new(storage_post_state_for_address(
-            hashed_address,
-            vec![(key(0x10), U256::ZERO), (key(0x20), U256::from(2))],
-        ));
-
-        let mut incremental = HashedPostStateOverlay::new(vec![Arc::clone(&lower)]);
-        incremental.prepend_layer(Arc::clone(&top));
-        let rebuilt = HashedPostStateOverlay::new(vec![top, lower]);
-
-        assert_eq!(
-            storage_overlay_snapshot(&incremental, hashed_address),
-            storage_overlay_snapshot(&rebuilt, hashed_address)
-        );
-    }
-
-    #[test]
-    fn test_storage_visible_value_tracks_shadowed_lower_layers() {
-        let hashed_address = key(0x01);
-        let top_delete =
-            Arc::new(storage_post_state_for_address(hashed_address, vec![(key(0x10), U256::ZERO)]));
-        let lower_visible = Arc::new(storage_post_state_for_address(
-            hashed_address,
-            vec![(key(0x10), U256::from(1))],
-        ));
-
-        let overlay = HashedPostStateOverlay::new(vec![top_delete, lower_visible]);
-
-        let (_, _, has_visible_value) = storage_overlay_snapshot(&overlay, hashed_address);
-        assert!(!has_visible_value);
-    }
-
-    #[test]
-    fn test_storage_visible_value_tracks_shadowing_prepend() {
-        let hashed_address = key(0x01);
-        let lower_visible = Arc::new(storage_post_state_for_address(
-            hashed_address,
-            vec![(key(0x10), U256::from(1))],
-        ));
-        let top_delete =
-            Arc::new(storage_post_state_for_address(hashed_address, vec![(key(0x10), U256::ZERO)]));
-
-        let mut overlay = HashedPostStateOverlay::new(vec![lower_visible]);
-        overlay.prepend_layer(top_delete);
-
-        let (_, _, has_visible_value) = storage_overlay_snapshot(&overlay, hashed_address);
-        assert!(!has_visible_value);
     }
 
     #[test]
@@ -897,8 +569,7 @@ mod tests {
         let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys.clone());
 
         let post_state = storage_post_state(post_state_nodes);
-        let overlay = HashedPostStateOverlay::new(vec![Arc::new(post_state)]);
-        let mut cursor = storage_cursor(mock_cursor, &overlay, B256::ZERO);
+        let mut cursor = HashedPostStateCursor::new_storage(mock_cursor, [&post_state], B256::ZERO);
 
         let result = cursor.seek(key(0x02)).unwrap();
         assert_eq!(result, Some((key(0x02), U256::from(42))));
@@ -920,8 +591,7 @@ mod tests {
         let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys.clone());
 
         let post_state = storage_post_state(post_state_nodes);
-        let overlay = HashedPostStateOverlay::new(vec![Arc::new(post_state)]);
-        let mut cursor = storage_cursor(mock_cursor, &overlay, B256::ZERO);
+        let mut cursor = HashedPostStateCursor::new_storage(mock_cursor, [&post_state], B256::ZERO);
 
         let result = cursor.seek(key(0x01)).unwrap();
         assert_eq!(result, Some((key(0x01), U256::from(1))));
@@ -946,8 +616,7 @@ mod tests {
         let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys.clone());
 
         let post_state = storage_post_state(post_state_nodes);
-        let overlay = HashedPostStateOverlay::new(vec![Arc::new(post_state)]);
-        let mut cursor = storage_cursor(mock_cursor, &overlay, B256::ZERO);
+        let mut cursor = HashedPostStateCursor::new_storage(mock_cursor, [&post_state], B256::ZERO);
 
         let result = cursor.seek(key(0x02)).unwrap();
         assert_eq!(result, Some((key(0x03), U256::from(3))));
@@ -966,15 +635,20 @@ mod tests {
         let exact_hit = storage_post_state(vec![(key(0x05), U256::from(5))]);
         let lower_priority =
             storage_post_state(vec![(key(0x01), U256::from(10)), (key(0x07), U256::from(7))]);
-        let overlay = HashedPostStateOverlay::new(vec![
-            Arc::new(higher_priority),
-            Arc::new(exact_hit),
-            Arc::new(lower_priority),
-        ]);
-        let mut cursor = storage_cursor(mock_cursor, &overlay, B256::ZERO);
+        let mut cursor = HashedPostStateCursor::new_storage(
+            mock_cursor,
+            [&higher_priority, &exact_hit, &lower_priority],
+            B256::ZERO,
+        );
 
         let result = cursor.seek(key(0x05)).unwrap();
         assert_eq!(result, Some((key(0x05), U256::from(5))));
+        assert_eq!(cursor.post_state_cursor.cursors[0].idx, 1);
+        assert_eq!(cursor.post_state_cursor.cursors[1].idx, 0);
+        assert_eq!(
+            cursor.post_state_cursor.cursors[2].idx, 0,
+            "lower-priority overlay should not be sought after an exact overlay hit"
+        );
         assert!(visited_keys.lock().is_empty(), "exact overlay hit should not touch the DB cursor");
 
         let result = cursor.next().unwrap();
@@ -983,57 +657,18 @@ mod tests {
     }
 
     #[test]
-    fn test_seek_reuses_exact_db_position() {
-        let db_nodes = BTreeMap::from([(key(0x01), account(1)), (key(0x02), account(2))]);
+    fn test_seek_can_move_backwards() {
+        let db_nodes = BTreeMap::from([(key(0x01), U256::from(1)), (key(0x03), U256::from(3))]);
         let db_nodes_arc = Arc::new(db_nodes);
         let visited_keys = Arc::new(Mutex::new(Vec::new()));
-        let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys.clone());
+        let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys);
 
-        let overlay = HashedPostStateOverlay::default();
-        let mut cursor = HashedPostStateCursor::new_account(mock_cursor, &overlay);
+        let post_state = storage_post_state(vec![(key(0x02), U256::from(2))]);
+        let mut cursor = HashedPostStateCursor::new_storage(mock_cursor, [&post_state], B256::ZERO);
 
-        assert_eq!(cursor.seek(key(0x01)).unwrap(), Some((key(0x01), account(1))));
-        assert_eq!(visited_keys.lock().len(), 1);
-
-        assert_eq!(cursor.next().unwrap(), Some((key(0x02), account(2))));
-        assert_eq!(visited_keys.lock().len(), 2);
-
-        assert_eq!(cursor.seek(key(0x02)).unwrap(), Some((key(0x02), account(2))));
-        assert_eq!(visited_keys.lock().len(), 2, "seek should reuse the exact DB position");
-    }
-
-    #[test]
-    fn test_seek_reuses_ahead_db_position() {
-        let db_nodes = BTreeMap::from([(key(0x03), account(3))]);
-        let db_nodes_arc = Arc::new(db_nodes);
-        let visited_keys = Arc::new(Mutex::new(Vec::new()));
-        let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys.clone());
-
-        let overlay = HashedPostStateOverlay::default();
-        let mut cursor = HashedPostStateCursor::new_account(mock_cursor, &overlay);
-
-        assert_eq!(cursor.seek(key(0x02)).unwrap(), Some((key(0x03), account(3))));
-        assert_eq!(visited_keys.lock().len(), 1);
-
-        assert_eq!(cursor.seek(key(0x02)).unwrap(), Some((key(0x03), account(3))));
-        assert_eq!(visited_keys.lock().len(), 1, "seek should reuse an ahead DB position");
-    }
-
-    #[test]
-    fn test_seek_does_not_reseek_exhausted_db() {
-        let db_nodes = BTreeMap::from([(key(0x01), account(1))]);
-        let db_nodes_arc = Arc::new(db_nodes);
-        let visited_keys = Arc::new(Mutex::new(Vec::new()));
-        let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys.clone());
-
-        let overlay = HashedPostStateOverlay::default();
-        let mut cursor = HashedPostStateCursor::new_account(mock_cursor, &overlay);
-
-        assert_eq!(cursor.seek(key(0x02)).unwrap(), None);
-        assert_eq!(visited_keys.lock().len(), 1);
-
-        assert_eq!(cursor.seek(key(0x03)).unwrap(), None);
-        assert_eq!(visited_keys.lock().len(), 1, "exhausted DB cursor should stay exhausted");
+        assert_eq!(cursor.seek(key(0x03)).unwrap(), Some((key(0x03), U256::from(3))));
+        assert_eq!(cursor.seek(key(0x01)).unwrap(), Some((key(0x01), U256::from(1))));
+        assert_eq!(cursor.next().unwrap(), Some((key(0x02), U256::from(2))));
     }
 
     #[test]
@@ -1053,8 +688,8 @@ mod tests {
             (key(0x02), U256::from(20)),
             (key(0x03), U256::from(3)),
         ]);
-        let overlay = HashedPostStateOverlay::new(vec![Arc::new(newest), Arc::new(oldest)]);
-        let mut cursor = storage_cursor(mock_cursor, &overlay, B256::ZERO);
+        let mut cursor =
+            HashedPostStateCursor::new_storage(mock_cursor, [&newest, &oldest], B256::ZERO);
 
         let mut results = Vec::new();
         if let Some(entry) = cursor.seek(B256::ZERO).unwrap() {
@@ -1075,35 +710,6 @@ mod tests {
     }
 
     #[test]
-    fn test_indexed_account_overlay_resolves_by_precedence() {
-        let db_nodes = BTreeMap::from([(key(0x01), account(1)), (key(0x03), account(3))]);
-        let db_nodes_arc = Arc::new(db_nodes);
-        let visited_keys = Arc::new(Mutex::new(Vec::new()));
-        let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys);
-
-        let newest = HashedPostStateSorted::new(
-            vec![(key(0x01), None), (key(0x02), Some(account(20)))],
-            Default::default(),
-        );
-        let oldest = HashedPostStateSorted::new(
-            vec![(key(0x01), Some(account(10))), (key(0x03), Some(account(30)))],
-            Default::default(),
-        );
-        let overlay = HashedPostStateOverlay::new(vec![Arc::new(newest), Arc::new(oldest)]);
-        let mut cursor = HashedPostStateCursor::new_account(mock_cursor, &overlay);
-
-        let mut results = Vec::new();
-        if let Some(entry) = cursor.seek(B256::ZERO).unwrap() {
-            results.push(entry);
-            while let Some(entry) = cursor.next().unwrap() {
-                results.push(entry);
-            }
-        }
-
-        assert_eq!(results, vec![(key(0x02), account(20)), (key(0x03), account(30))]);
-    }
-
-    #[test]
     fn test_storage_wipe_overlay_hides_lower_precedence_sources() {
         let db_nodes = BTreeMap::from([(key(0x04), U256::from(4))]);
         let db_nodes_arc = Arc::new(db_nodes);
@@ -1113,94 +719,15 @@ mod tests {
         let newest = storage_post_state(vec![(key(0x02), U256::from(2))]);
         let wiping = storage_post_state_with_wipe(vec![(key(0x01), U256::from(1))], true);
         let hidden = storage_post_state(vec![(key(0x03), U256::from(3))]);
-        let overlay =
-            HashedPostStateOverlay::new(vec![Arc::new(newest), Arc::new(wiping), Arc::new(hidden)]);
-        let mut cursor = storage_cursor(mock_cursor, &overlay, B256::ZERO);
+        let mut cursor = HashedPostStateCursor::new_storage(
+            mock_cursor,
+            [&newest, &wiping, &hidden],
+            B256::ZERO,
+        );
 
         assert_eq!(cursor.seek(B256::ZERO).unwrap(), Some((key(0x01), U256::from(1))));
         assert_eq!(cursor.next().unwrap(), Some((key(0x02), U256::from(2))));
         assert_eq!(cursor.next().unwrap(), None);
-    }
-
-    #[test]
-    fn test_indexed_storage_wipe_overlay_hides_lower_precedence_sources() {
-        let db_nodes = BTreeMap::from([(key(0x04), U256::from(4))]);
-        let db_nodes_arc = Arc::new(db_nodes);
-        let visited_keys = Arc::new(Mutex::new(Vec::new()));
-        let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys);
-
-        let newest = storage_post_state(vec![(key(0x02), U256::from(2))]);
-        let wiping = storage_post_state_with_wipe(vec![(key(0x01), U256::from(1))], true);
-        let hidden = storage_post_state(vec![(key(0x03), U256::from(3))]);
-        let overlay =
-            HashedPostStateOverlay::new(vec![Arc::new(newest), Arc::new(wiping), Arc::new(hidden)]);
-        let mut cursor = HashedPostStateCursor::new_storage(mock_cursor, &overlay, B256::ZERO);
-
-        assert_eq!(cursor.seek(B256::ZERO).unwrap(), Some((key(0x01), U256::from(1))));
-        assert_eq!(cursor.next().unwrap(), Some((key(0x02), U256::from(2))));
-        assert_eq!(cursor.next().unwrap(), None);
-    }
-
-    #[test]
-    fn test_indexed_storage_overlay_switches_hashed_address() {
-        let first_address = B256::with_last_byte(1);
-        let second_address = B256::with_last_byte(2);
-        let mut db_storage = B256Map::default();
-        db_storage.insert(first_address, BTreeMap::from([(key(0x04), U256::from(4))]));
-        db_storage.insert(second_address, BTreeMap::from([(key(0x05), U256::from(5))]));
-        let visited_keys =
-            Arc::new(db_storage.keys().map(|key| (*key, Default::default())).collect());
-        let mock_cursor =
-            MockHashedCursor::new_storage(Arc::new(db_storage), visited_keys, first_address)
-                .unwrap();
-
-        let first_overlay =
-            storage_post_state_for_address(first_address, vec![(key(0x01), U256::from(1))]);
-        let second_overlay =
-            storage_post_state_for_address(second_address, vec![(key(0x02), U256::from(2))]);
-        let overlay =
-            HashedPostStateOverlay::new(vec![Arc::new(first_overlay), Arc::new(second_overlay)]);
-        let mut cursor = HashedPostStateCursor::new_storage(mock_cursor, &overlay, first_address);
-
-        assert_eq!(cursor.seek(B256::ZERO).unwrap(), Some((key(0x01), U256::from(1))));
-        assert_eq!(cursor.next().unwrap(), Some((key(0x04), U256::from(4))));
-
-        cursor.set_hashed_address(second_address);
-
-        assert_eq!(cursor.seek(B256::ZERO).unwrap(), Some((key(0x02), U256::from(2))));
-        assert_eq!(cursor.next().unwrap(), Some((key(0x05), U256::from(5))));
-        assert_eq!(cursor.next().unwrap(), None);
-    }
-
-    #[test]
-    fn test_storage_empty_respects_layer_precedence() {
-        let mut db_storage = B256Map::default();
-        db_storage.insert(B256::ZERO, BTreeMap::new());
-        let visited_keys =
-            Arc::new(db_storage.keys().map(|key| (*key, Default::default())).collect());
-        let mock_cursor =
-            MockHashedCursor::new_storage(Arc::new(db_storage), visited_keys, B256::ZERO).unwrap();
-
-        let newest = storage_post_state(vec![(key(0x01), U256::ZERO)]);
-        let hidden = storage_post_state(vec![(key(0x01), U256::from(1))]);
-        let overlay = HashedPostStateOverlay::new(vec![Arc::new(newest), Arc::new(hidden)]);
-        let mut cursor = HashedPostStateCursor::new_storage(mock_cursor, &overlay, B256::ZERO);
-
-        assert!(cursor.is_storage_empty().unwrap());
-
-        let mut db_storage = B256Map::default();
-        db_storage.insert(B256::ZERO, BTreeMap::new());
-        let visited_keys =
-            Arc::new(db_storage.keys().map(|key| (*key, Default::default())).collect());
-        let mock_cursor =
-            MockHashedCursor::new_storage(Arc::new(db_storage), visited_keys, B256::ZERO).unwrap();
-
-        let newest = storage_post_state(vec![(key(0x01), U256::ZERO)]);
-        let visible = storage_post_state(vec![(key(0x02), U256::from(2))]);
-        let overlay = HashedPostStateOverlay::new(vec![Arc::new(newest), Arc::new(visible)]);
-        let mut cursor = HashedPostStateCursor::new_storage(mock_cursor, &overlay, B256::ZERO);
-
-        assert!(!cursor.is_storage_empty().unwrap());
     }
 
     mod proptest_tests {
@@ -1218,7 +745,7 @@ mod tests {
             db_nodes: &[(B256, U256)],
             overlays: &[Vec<(B256, U256)>],
         ) -> Vec<(B256, U256)> {
-            let mut merged: BTreeMap<B256, U256> = db_nodes.iter().copied().collect();
+            let mut merged: BTreeMap<B256, U256> = db_nodes.iter().cloned().collect();
 
             for overlay in overlays.iter().rev() {
                 for (key, value) in overlay {
@@ -1252,7 +779,9 @@ mod tests {
             entries: &[(B256, U256)],
             position: &mut Option<usize>,
         ) -> Option<(B256, U256)> {
-            let next_idx = position.and_then(|idx| idx.checked_add(1))?;
+            let Some(next_idx) = position.and_then(|idx| idx.checked_add(1)) else {
+                return None;
+            };
 
             if next_idx < entries.len() {
                 *position = Some(next_idx);
@@ -1337,19 +866,16 @@ mod tests {
                 let mut reference_position = None;
 
                 // Create the HashedPostStateCursor being tested
-                let db_nodes_map: BTreeMap<B256, U256> = db_nodes.iter().copied().collect();
+                let db_nodes_map: BTreeMap<B256, U256> = db_nodes.iter().cloned().collect();
                 let db_nodes_arc = Arc::new(db_nodes_map);
                 let visited_keys = Arc::new(Mutex::new(Vec::new()));
                 let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys);
 
                 let hashed_address = B256::ZERO;
-                let post_states = overlays
-                    .into_iter()
-                    .map(storage_post_state)
-                    .map(Arc::new)
-                    .collect::<Vec<_>>();
-                let overlay = HashedPostStateOverlay::new(post_states);
-                let mut test_cursor = storage_cursor(mock_cursor, &overlay, hashed_address);
+                let post_states =
+                    overlays.into_iter().map(storage_post_state).collect::<Vec<_>>();
+                let mut test_cursor =
+                    HashedPostStateCursor::new_storage(mock_cursor, post_states.iter(), hashed_address);
 
                 // Test: seek to the beginning first
                 let control_first =
@@ -1361,14 +887,9 @@ mod tests {
                     "Initial seek returned",
                 );
                 assert_eq!(control_first, test_first, "Initial seek mismatch");
-                let mut seek_floor = control_first.as_ref().map(|(key, _)| *key);
 
                 // Execute a sequence of random operations
                 for op in ops {
-                    if reference_position.is_none() {
-                        break
-                    }
-
                     match op {
                         CursorOp::Next => {
                             let control_result =
@@ -1380,11 +901,8 @@ mod tests {
                                 "Next returned",
                             );
                             assert_eq!(control_result, test_result, "Next operation mismatch");
-                            let Some((key, _)) = control_result else { break };
-                            seek_floor = Some(key);
                         }
                         CursorOp::Seek(key) => {
-                            let key = seek_floor.map_or(key, |floor| key.max(floor));
                             let control_result =
                                 reference_seek(&expected_combined, &mut reference_position, key);
                             let test_result = test_cursor.seek(key).unwrap();
@@ -1395,8 +913,6 @@ mod tests {
                                 "Seek returned",
                             );
                             assert_eq!(control_result, test_result, "Seek operation mismatch for key {:?}", key);
-                            let Some((key, _)) = control_result else { break };
-                            seek_floor = Some(key);
                         }
                     }
                 }

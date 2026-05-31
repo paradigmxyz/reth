@@ -3,13 +3,12 @@ use alloy_primitives::{keccak256, map::HashMap, Address, B256};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::StateProofError;
 use reth_trie::{
-    hashed_cursor::{HashedPostStateCursorFactory, HashedPostStateOverlay},
+    hashed_cursor::HashedPostStateCursorFactory,
     proof::{Proof, StorageProof},
-    trie_cursor::{InMemoryTrieCursorFactory, TrieUpdatesOverlay},
+    trie_cursor::InMemoryTrieCursorFactory,
     AccountProof, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets,
     StorageMultiProof, TrieInput,
 };
-use std::sync::Arc;
 
 /// Extends [`Proof`] with operations specific for working with a database transaction.
 pub trait DatabaseProof<'a> {
@@ -49,11 +48,14 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseProof<'a>
         address: Address,
         slots: &[B256],
     ) -> Result<AccountProof, StateProofError> {
-        let nodes_overlay = TrieUpdatesOverlay::new(vec![Arc::new(input.nodes.into_sorted())]);
-        let state_overlay = HashedPostStateOverlay::new(vec![Arc::new(input.state.into_sorted())]);
+        let nodes_sorted = input.nodes.into_sorted();
+        let state_sorted = input.state.into_sorted();
         Proof::new(
-            InMemoryTrieCursorFactory::new(self.trie_cursor_factory().clone(), &nodes_overlay),
-            HashedPostStateCursorFactory::new(self.hashed_cursor_factory().clone(), &state_overlay),
+            InMemoryTrieCursorFactory::new(self.trie_cursor_factory().clone(), [&nodes_sorted]),
+            HashedPostStateCursorFactory::new(
+                self.hashed_cursor_factory().clone(),
+                [&state_sorted],
+            ),
         )
         .with_prefix_sets_mut(input.prefix_sets)
         .account_proof(address, slots)
@@ -64,11 +66,14 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseProof<'a>
         input: TrieInput,
         targets: MultiProofTargets,
     ) -> Result<MultiProof, StateProofError> {
-        let nodes_overlay = TrieUpdatesOverlay::new(vec![Arc::new(input.nodes.into_sorted())]);
-        let state_overlay = HashedPostStateOverlay::new(vec![Arc::new(input.state.into_sorted())]);
+        let nodes_sorted = input.nodes.into_sorted();
+        let state_sorted = input.state.into_sorted();
         Proof::new(
-            InMemoryTrieCursorFactory::new(self.trie_cursor_factory().clone(), &nodes_overlay),
-            HashedPostStateCursorFactory::new(self.hashed_cursor_factory().clone(), &state_overlay),
+            InMemoryTrieCursorFactory::new(self.trie_cursor_factory().clone(), [&nodes_sorted]),
+            HashedPostStateCursorFactory::new(
+                self.hashed_cursor_factory().clone(),
+                [&state_sorted],
+            ),
         )
         .with_prefix_sets_mut(input.prefix_sets)
         .multiproof(targets)
@@ -124,10 +129,12 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageProof<'a, TX>
             Default::default(),
             HashMap::from_iter([(hashed_address, storage.into_sorted())]),
         );
-        let state_overlay = HashedPostStateOverlay::new(vec![Arc::new(state_sorted)]);
         StorageProof::new(
             DatabaseTrieCursorFactory::<_, A>::new(tx),
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_overlay),
+            HashedPostStateCursorFactory::new(
+                DatabaseHashedCursorFactory::new(tx),
+                [&state_sorted],
+            ),
             address,
         )
         .with_prefix_set_mut(prefix_set)
@@ -147,10 +154,12 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageProof<'a, TX>
             Default::default(),
             HashMap::from_iter([(hashed_address, storage.into_sorted())]),
         );
-        let state_overlay = HashedPostStateOverlay::new(vec![Arc::new(state_sorted)]);
         StorageProof::new(
             DatabaseTrieCursorFactory::<_, A>::new(tx),
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_overlay),
+            HashedPostStateCursorFactory::new(
+                DatabaseHashedCursorFactory::new(tx),
+                [&state_sorted],
+            ),
             address,
         )
         .with_prefix_set_mut(prefix_set)

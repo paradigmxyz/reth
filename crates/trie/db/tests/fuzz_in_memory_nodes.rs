@@ -12,14 +12,14 @@ use reth_provider::test_utils::create_test_provider_factory;
 use reth_storage_api::StorageSettingsCache;
 use reth_trie::{
     test_utils::{state_root_prehashed, storage_root_prehashed},
-    trie_cursor::{InMemoryTrieCursorFactory, TrieUpdatesOverlay},
+    trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates,
     HashedPostState, HashedStorage, StateRoot, StorageRoot,
 };
 use reth_trie_db::{
     DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieCursorFactory,
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 
 type DbStateRoot<'a, TX, A> =
     StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
@@ -65,13 +65,11 @@ proptest! {
                 }
 
                 // Compute root with in-memory trie nodes overlay
-                let trie_overlay =
-                    TrieUpdatesOverlay::new(vec![Arc::new(trie_nodes.clone().into_sorted())]);
                 let (state_root, trie_updates) = DbStateRoot::<_, A>::from_tx(provider.tx_ref())
                     .with_prefix_sets(hashed_state.construct_prefix_sets().freeze())
                     .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(
                         DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref()),
-                        trie_overlay,
+                        [&trie_nodes.clone().into_sorted()],
                     ))
                     .root_with_updates()
                     .unwrap();
@@ -124,13 +122,12 @@ proptest! {
                 // Compute root with in-memory trie nodes overlay
                 let mut trie_nodes = TrieUpdates::default();
                 trie_nodes.insert_storage_updates(hashed_address, storage_trie_nodes.clone());
-                let trie_overlay = TrieUpdatesOverlay::new(vec![Arc::new(trie_nodes.into_sorted())]);
                 let (storage_root, _, trie_updates) =
                     DbStorageRoot::<_, A>::from_tx_hashed(provider.tx_ref(), hashed_address)
                         .with_prefix_set(hashed_storage.construct_prefix_set().freeze())
                         .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(
                             DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref()),
-                            trie_overlay,
+                            [&trie_nodes.into_sorted()],
                         ))
                         .root_with_updates()
                         .unwrap();

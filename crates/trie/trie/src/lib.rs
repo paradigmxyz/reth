@@ -14,7 +14,8 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-mod overlay_cursor;
+/// The implementation of forward-only in-memory cursor.
+pub mod forward_cursor;
 
 /// The cursor implementations for navigating account and storage tries.
 pub mod trie_cursor;

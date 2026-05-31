@@ -5,10 +5,8 @@ use reth_execution_errors::StorageRootError;
 use reth_storage_api::{BlockNumReader, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    hashed_cursor::{HashedPostStateCursorFactory, HashedPostStateOverlay},
-    HashedPostState, HashedStorage, StorageRoot,
+    hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StorageRoot,
 };
-use std::sync::Arc;
 
 #[cfg(feature = "metrics")]
 use reth_trie::metrics::TrieRootMetrics;
@@ -92,10 +90,12 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageRoot<'a, TX>
         let prefix_set = hashed_storage.construct_prefix_set().freeze();
         let state_sorted =
             HashedPostState::from_hashed_storage(keccak256(address), hashed_storage).into_sorted();
-        let state_overlay = HashedPostStateOverlay::new(vec![Arc::new(state_sorted)]);
         StorageRoot::new(
             DatabaseTrieCursorFactory::<_, A>::new(tx),
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_overlay),
+            HashedPostStateCursorFactory::new(
+                DatabaseHashedCursorFactory::new(tx),
+                [&state_sorted],
+            ),
             address,
             prefix_set,
             #[cfg(feature = "metrics")]

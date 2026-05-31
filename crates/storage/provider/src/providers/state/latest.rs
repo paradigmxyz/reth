@@ -9,9 +9,9 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
-    hashed_cursor::{HashedPostStateCursorFactory, HashedPostStateOverlay},
+    hashed_cursor::HashedPostStateCursorFactory,
     proof::{Proof, StorageProof},
-    trie_cursor::{InMemoryTrieCursorFactory, TrieUpdatesOverlay},
+    trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates,
     witness::TrieWitness,
     AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage, KeccakKeyHasher,
@@ -19,7 +19,6 @@ use reth_trie::{
     TrieInputSorted,
 };
 use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot};
-use std::sync::Arc;
 
 type DbStateRoot<'a, TX, A> = StateRoot<
     reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
@@ -227,17 +226,16 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
         mode: ExecutionWitnessMode,
     ) -> ProviderResult<Vec<Bytes>> {
         reth_trie_db::with_adapter!(self.0, |A| {
-            let nodes_overlay = TrieUpdatesOverlay::new(vec![Arc::new(input.nodes.into_sorted())]);
-            let state_overlay =
-                HashedPostStateOverlay::new(vec![Arc::new(input.state.into_sorted())]);
+            let nodes_sorted = input.nodes.into_sorted();
+            let state_sorted = input.state.into_sorted();
             let witness = TrieWitness::new(
                 InMemoryTrieCursorFactory::new(
                     reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
-                    &nodes_overlay,
+                    [&nodes_sorted],
                 ),
                 HashedPostStateCursorFactory::new(
                     reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
-                    &state_overlay,
+                    [&state_sorted],
                 ),
             )
             .with_prefix_sets_mut(input.prefix_sets)

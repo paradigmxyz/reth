@@ -1,4 +1,4 @@
-use super::overlay::{OverlayBuilder, OverlaySource};
+use super::overlay::{Overlay, OverlayBuilder, OverlaySource};
 use crate::{
     AccountReader, BlockHashReader, ChangeSetReader, EitherReader, HashedPostStateProvider,
     ProviderError, RocksDBProviderFactory, StateProvider, StateRootProvider,
@@ -20,9 +20,9 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    hashed_cursor::{HashedPostStateCursorFactory, HashedPostStateOverlay},
+    hashed_cursor::HashedPostStateCursorFactory,
     proof::{Proof, StorageProof},
-    trie_cursor::{InMemoryTrieCursorFactory, TrieUpdatesOverlay},
+    trie_cursor::InMemoryTrieCursorFactory,
     updates::{TrieUpdates, TrieUpdatesSorted},
     witness::TrieWitness,
     AccountProof, ExecutionWitnessMode, HashedPostState, HashedPostStateSorted, HashedStorage,
@@ -311,8 +311,8 @@ where
         let TrieInputSorted { nodes, state, prefix_sets } = input;
         let overlay_builder = OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
             .with_overlay_source(Some(OverlaySource::Immediate { trie: nodes, state }));
-        let overlay = overlay_builder.build_overlay(self.provider)?;
-        let (trie_updates, hashed_post_state) = overlay.into_layers();
+        let Overlay { trie_updates, hashed_post_state } =
+            overlay_builder.build_overlay(self.provider)?;
 
         Ok(TrieInputSorted::new(
             TrieUpdatesSorted::merge_batch(trie_updates),
@@ -617,16 +617,14 @@ where
         reth_trie_db::with_adapter!(self.provider, |A| {
             let TrieInputSorted { nodes, state, prefix_sets } =
                 self.build_overlay(TrieInputSorted::from_unsorted(input))?;
-            let nodes_overlay = TrieUpdatesOverlay::new(vec![nodes]);
-            let state_overlay = HashedPostStateOverlay::new(vec![state]);
             let witness = TrieWitness::new(
                 InMemoryTrieCursorFactory::new(
                     reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
-                    &nodes_overlay,
+                    [nodes.as_ref()],
                 ),
                 HashedPostStateCursorFactory::new(
                     reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
-                    &state_overlay,
+                    [state.as_ref()],
                 ),
             )
             .with_prefix_sets_mut(prefix_sets)
