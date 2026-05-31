@@ -229,6 +229,11 @@ impl<N: NodePrimitives> Chain<N> {
         self.blocks_iter().zip(self.block_receipts_iter())
     }
 
+    /// Consumes the chain and returns its blocks and per-block receipts in block order.
+    pub fn into_blocks_and_receipts(self) -> (Vec<RecoveredBlock<N::Block>>, Vec<Vec<N::Receipt>>) {
+        (self.blocks.into_values().collect(), self.execution_outcome.receipts)
+    }
+
     /// Finds a transaction by hash and returns it along with its corresponding receipt data.
     ///
     /// Returns `None` if the transaction is not found in this chain.

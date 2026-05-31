@@ -804,6 +804,29 @@ impl<B: Block, R: Clone> ChainChange<B, R> {
     where
         N: NodePrimitives<Block = B, Receipt = R>,
     {
+        match Arc::try_unwrap(chain) {
+            Ok(chain) => Self::from_owned_chain(chain),
+            Err(chain) => Self::from_shared_chain(&chain),
+        }
+    }
+
+    fn from_owned_chain<N>(chain: Chain<N>) -> Self
+    where
+        N: NodePrimitives<Block = B, Receipt = R>,
+    {
+        let (blocks, receipts_by_block) = chain.into_blocks_and_receipts();
+        let receipts = blocks
+            .iter()
+            .zip(receipts_by_block)
+            .map(|(block, receipts)| BlockReceipts { block_hash: block.hash(), receipts })
+            .collect();
+        Self { blocks, receipts }
+    }
+
+    fn from_shared_chain<N>(chain: &Chain<N>) -> Self
+    where
+        N: NodePrimitives<Block = B, Receipt = R>,
+    {
         let (blocks, receipts): (Vec<_>, Vec<_>) = chain
             .blocks_and_receipts()
             .map(|(block, receipts)| {
@@ -909,17 +932,25 @@ pub async fn cache_new_blocks_task<St, N: NodePrimitives>(
     St: Stream<Item = CanonStateNotification<N>> + Unpin + 'static,
 {
     while let Some(event) = events.next().await {
-        if let Some(reverted) = event.reverted() {
-            let chain_change = ChainChange::new(reverted);
+        match event {
+            CanonStateNotification::Commit { new } => {
+                let chain_change = ChainChange::new(new);
+                let _ = eth_state_cache
+                    .to_service
+                    .send(CacheAction::CacheNewCanonicalChain { chain_change });
+            }
+            CanonStateNotification::Reorg { old, new } => {
+                let chain_change = ChainChange::new(old);
+                let _ = eth_state_cache
+                    .to_service
+                    .send(CacheAction::RemoveReorgedChain { chain_change });
 
-            let _ =
-                eth_state_cache.to_service.send(CacheAction::RemoveReorgedChain { chain_change });
+                let chain_change = ChainChange::new(new);
+                let _ = eth_state_cache
+                    .to_service
+                    .send(CacheAction::CacheNewCanonicalChain { chain_change });
+            }
         }
-
-        let chain_change = ChainChange::new(event.committed());
-
-        let _ =
-            eth_state_cache.to_service.send(CacheAction::CacheNewCanonicalChain { chain_change });
     }
 }
 
