@@ -42,14 +42,14 @@ use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     multiproof::{StateRootComputeOutcome, StateRootHandle},
-    payload_processor::PayloadProcessor,
+    payload_processor::{bal::execute::BuiltBlockAccessList, PayloadProcessor},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
+use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{map::B256Set, B256};
@@ -1020,7 +1020,7 @@ where
             BlockExecutionOutput<N::Receipt>,
             Vec<Address>,
             ReceiptRootReceiver,
-            Option<BlockAccessList>,
+            Option<BuiltBlockAccessList>,
         ),
         InsertBlockErrorKind,
     >
@@ -1103,7 +1103,11 @@ where
         debug_span!(target: "engine::tree", "merge_transitions")
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
 
-        let built_bal = if has_bal { db.take_built_alloy_bal() } else { None };
+        let built_bal = if has_bal {
+            db.take_built_alloy_bal().map(BuiltBlockAccessList::new)
+        } else {
+            None
+        };
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
 
         let execution_duration = execution_start.elapsed();
@@ -1157,7 +1161,7 @@ where
             BlockExecutionOutput<N::Receipt>,
             Vec<Address>,
             ReceiptRootReceiver,
-            Option<BlockAccessList>,
+            Option<BuiltBlockAccessList>,
         ),
         InsertBlockErrorKind,
     >
@@ -1604,7 +1608,7 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
         ctx: &mut TreeCtx<'_, N>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
-        built_bal: Option<BlockAccessList>,
+        built_bal: Option<BuiltBlockAccessList>,
     ) -> Result<(), InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
@@ -1617,8 +1621,7 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
-        let block_access_list_hash =
-            built_bal.as_ref().map(|bal| compute_block_access_list_hash(bal));
+        let block_access_list_hash = built_bal.as_ref().map(BuiltBlockAccessList::hash);
 
         if let Err(err) = self.consensus.validate_block_post_execution(
             block,

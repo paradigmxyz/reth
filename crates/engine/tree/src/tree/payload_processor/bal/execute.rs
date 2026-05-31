@@ -23,7 +23,7 @@ use alloy_evm::{
     block::{BlockExecutionError, BlockExecutor, BlockValidationError, TxResult},
     Evm,
 };
-use alloy_primitives::Address;
+use alloy_primitives::{Address, B256};
 use crossbeam_channel::{Receiver, Sender};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
 use reth_primitives_traits::ReceiptTy;
@@ -39,6 +39,36 @@ use std::sync::Arc;
 
 use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
 
+/// Rebuilt block access list with an optional precomputed hash.
+#[derive(Debug)]
+pub struct BuiltBlockAccessList {
+    access_list: BlockAccessList,
+    hash: Option<B256>,
+}
+
+impl BuiltBlockAccessList {
+    /// Creates a rebuilt BAL without a reusable hash.
+    pub const fn new(access_list: BlockAccessList) -> Self {
+        Self { access_list, hash: None }
+    }
+
+    /// Creates a rebuilt BAL whose hash is known to match the access list.
+    pub const fn with_hash(access_list: BlockAccessList, hash: B256) -> Self {
+        Self { access_list, hash: Some(hash) }
+    }
+
+    /// Returns the rebuilt BAL hash, computing it only when no reusable hash was supplied.
+    pub fn hash(&self) -> B256 {
+        self.hash.unwrap_or_else(|| compute_block_access_list_hash(&self.access_list))
+    }
+
+    /// Consumes the wrapper and returns the rebuilt BAL.
+    #[cfg(test)]
+    fn into_access_list(self) -> BlockAccessList {
+        self.access_list
+    }
+}
+
 /// Executes one block on the BAL path using the runtime's persistent BAL worker pool.
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
@@ -52,7 +82,7 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
 ) -> Result<
-    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
+    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BuiltBlockAccessList),
     BalExecutionError,
 >
 where
@@ -95,7 +125,7 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
     worker_count: usize,
 ) -> Result<
-    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
+    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BuiltBlockAccessList),
     BalExecutionError,
 >
 where
@@ -171,7 +201,7 @@ where
         (block_result, senders)
     };
 
-    let built_bal = take_built_bal_and_log_divergence(&mut canonical_state, bal);
+    let built_bal = take_built_bal_and_log_divergence(&mut canonical_state, &input_bal);
 
     canonical_state.merge_transitions(BundleRetention::Reverts);
     Ok((
@@ -206,18 +236,20 @@ fn convert_alloy_to_revm_bal(bal: &AlloyBal) -> Result<Arc<RevmBal>, BalExecutio
 
 fn take_built_bal_and_log_divergence<DB>(
     canonical_state: &mut State<DB>,
-    received_bal: &AlloyBal,
-) -> BlockAccessList
+    received_bal: &DecodedBal,
+) -> BuiltBlockAccessList
 where
     DB: Database,
 {
     let built_bal = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
+    let received_bal_inner = received_bal.as_bal();
+    let matches_received = built_bal.as_slice() == received_bal_inner.as_slice();
     if tracing::enabled!(target: "engine::tree::payload_processor::bal", tracing::Level::DEBUG) &&
-        built_bal.as_slice() != received_bal.as_slice()
+        !matches_received
     {
         let rebuilt = compute_block_access_list_hash(built_bal.as_slice());
-        let expected = compute_block_access_list_hash(received_bal.as_slice());
-        let div = received_bal.diff(built_bal.as_slice());
+        let expected = received_bal.hash();
+        let div = received_bal_inner.diff(built_bal.as_slice());
         tracing::debug!(
             target: "engine::tree::payload_processor::bal",
             %rebuilt,
@@ -227,7 +259,11 @@ where
         );
     }
 
-    built_bal
+    if matches_received {
+        BuiltBlockAccessList::with_hash(built_bal, received_bal.hash())
+    } else {
+        BuiltBlockAccessList::new(built_bal)
+    }
 }
 
 /// Closes the abort channel on drop, waking scoped workers before the scope exits.
@@ -513,7 +549,7 @@ mod tests {
             tx_stream(txs),
             receipt_tx,
         )
-        .map(|(output, _, built_bal)| (output, built_bal))
+        .map(|(output, _, built_bal)| (output, built_bal.into_access_list()))
     }
 
     /// Inserts `AccountInfo { nonce: 0, balance }` for `addr` into the canonical DB.
