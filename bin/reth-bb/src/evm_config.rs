@@ -300,7 +300,7 @@ where
         let transactions = payload
             .env_switches
             .iter()
-            .flat_map(|exec_data| exec_data.payload.transactions().clone())
+            .flat_map(|exec_data| exec_data.payload.transactions().iter().cloned())
             .collect::<Vec<_>>();
 
         let convert = |tx: Bytes| {
