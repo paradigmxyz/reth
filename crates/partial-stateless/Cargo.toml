@@ -10,6 +10,7 @@ alloy-primitives = { workspace = true, features = ["std", "map-foldhash", "serde
 revm-database = { workspace = true, features = ["std"] }
 revm-state = { workspace = true, features = ["std"] }
 revm-primitives = { workspace = true, features = ["std"] }
+reth-trie-common = { workspace = true }
 
 # serialization
 serde = { workspace = true, features = ["derive"] }

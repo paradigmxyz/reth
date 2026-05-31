@@ -8,10 +8,14 @@
 //! 1. Extracts `BlockAccessedState` from each block's `BundleState`
 //! 2. Updates the `NetworkStateCache` with the accessed state
 //! 3. Computes and logs cache miss ratio (= witness requirement)
+//! 4. Computes actual Merkle proof (witness) size for cache-missed state
 
 use futures::TryStreamExt;
 use partial_stateless::{
-    accessed_state::BlockAccessedState, network_cache::NetworkStateCache, policy::LastNBlocksPolicy,
+    accessed_state::BlockAccessedState,
+    network_cache::NetworkStateCache,
+    policy::LastNBlocksPolicy,
+    witness::{measure_multiproof_size, miss_to_proof_targets},
 };
 use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},
@@ -20,8 +24,12 @@ use reth_ethereum::{
         builder::NodeHandleFor,
         EthereumNode,
     },
+    provider::StateProviderFactory,
+    storage::StateProofProvider,
     EthPrimitives,
 };
+use reth_trie_common::TrieInput;
+use std::time::Instant;
 use tracing::{info, warn};
 
 /// Configuration for the partial statelessness cache.
@@ -34,7 +42,7 @@ struct CacheConfig {
 
 impl Default for CacheConfig {
     fn default() -> Self {
-        Self { account_window: 20, storage_window: 10 }
+        Self { account_window: 60, storage_window: 30 }
     }
 }
 
@@ -103,6 +111,81 @@ async fn partial_stateless_exex<
                     total_missed = miss.total_missed,
                     "Witness requirement (cache miss)"
                 );
+
+                // === Phase 2: Compute actual witness (Merkle proof) size ===
+                if miss.total_missed > 0 {
+                    // Convert miss result to proof targets (hashed addresses/slots)
+                    let targets = miss_to_proof_targets(&miss);
+                    let target_accounts = targets.len();
+                    let target_slots: usize = targets.values().map(|slots| slots.len()).sum();
+
+                    // Get state provider for the parent block (proof against pre-execution state)
+                    // We use tip_block - 1 because the witness proves state BEFORE this block
+                    let witness_result = if tip_block > 0 {
+                        let start = Instant::now();
+                        match ctx.provider().history_by_block_number(tip_block - 1) {
+                            Ok(state_provider) => {
+                                // Compute multiproof with empty TrieInput (proof against DB state)
+                                match state_provider.multiproof(TrieInput::default(), targets) {
+                                    Ok(proof) => {
+                                        let elapsed_ms = start.elapsed().as_millis() as u64;
+                                        let mut result = measure_multiproof_size(&proof);
+                                        result.computation_time_ms = Some(elapsed_ms);
+                                        result.target_accounts = target_accounts;
+                                        result.target_storage_slots = target_slots;
+                                        Some(result)
+                                    }
+                                    Err(e) => {
+                                        warn!(
+                                            target: "partial_stateless",
+                                            block = tip_block,
+                                            error = %e,
+                                            "Failed to compute multiproof"
+                                        );
+                                        None
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                warn!(
+                                    target: "partial_stateless",
+                                    block = tip_block,
+                                    error = %e,
+                                    "Failed to get state provider for witness computation"
+                                );
+                                None
+                            }
+                        }
+                    } else {
+                        None
+                    };
+
+                    if let Some(witness) = witness_result {
+                        info!(
+                            target: "partial_stateless",
+                            block = tip_block,
+                            witness_total_bytes = witness.total_size_bytes,
+                            witness_total = format_bytes(witness.total_size_bytes),
+                            account_proof_bytes = witness.account_proof_bytes,
+                            account_proof = format_bytes(witness.account_proof_bytes),
+                            storage_proof_bytes = witness.storage_proof_bytes,
+                            storage_proof = format_bytes(witness.storage_proof_bytes),
+                            account_proof_nodes = witness.account_proof_nodes,
+                            storage_proof_nodes = witness.storage_proof_nodes,
+                            target_accounts = witness.target_accounts,
+                            target_storage_slots = witness.target_storage_slots,
+                            computation_time_ms = witness.computation_time_ms.unwrap_or(0),
+                            "Witness size (Merkle proof)"
+                        );
+                    }
+                } else {
+                    info!(
+                        target: "partial_stateless",
+                        block = tip_block,
+                        "No witness needed (100% cache hit)"
+                    );
+                }
+
                 info!(
                     target: "partial_stateless",
                     block = tip_block,
@@ -119,16 +202,16 @@ async fn partial_stateless_exex<
                     "Cache state after update"
                 );
 
-                // Log some sample missed accounts for inspection
-                if !miss.missed_accounts.is_empty() {
-                    let sample: Vec<_> = miss.missed_accounts.iter().take(5).collect();
-                    info!(
-                        target: "partial_stateless",
-                        block = tip_block,
-                        sample_missed_accounts = ?sample,
-                        "Sample missed accounts (first 5)"
-                    );
-                }
+                // // Log some sample missed accounts for inspection
+                // if !miss.missed_accounts.is_empty() {
+                //     let sample: Vec<_> = miss.missed_accounts.iter().take(5).collect();
+                //     info!(
+                //         target: "partial_stateless",
+                //         block = tip_block,
+                //         sample_missed_accounts = ?sample,
+                //         "Sample missed accounts (first 5)"
+                //     );
+                // }
             }
             ExExNotification::ChainReorged { old, new } => {
                 warn!(

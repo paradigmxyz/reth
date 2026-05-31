@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 # reth
 reth-ethereum = { workspace = true, features = ["full", "cli"] }
+reth-trie-common = { workspace = true }
 
 # our cache crate
 partial-stateless = { path = "../partial-stateless" }
