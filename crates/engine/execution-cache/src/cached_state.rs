@@ -837,7 +837,12 @@ impl ExecutionCache {
 
     /// Insert storage value into cache.
     pub fn insert_storage(&self, address: Address, key: StorageKey, value: Option<StorageValue>) {
-        self.0.storage_cache.insert((address, key), value.unwrap_or_default());
+        self.insert_storage_value(address, key, value.unwrap_or_default());
+    }
+
+    /// Insert a concrete storage value into cache.
+    pub fn insert_storage_value(&self, address: Address, key: StorageKey, value: StorageValue) {
+        self.0.storage_cache.insert((address, key), value);
     }
 
     /// Insert code into cache.
@@ -932,7 +937,7 @@ impl ExecutionCache {
 
             // Now we iterate over all storage and make updates to the cached storage values
             for (key, slot) in &account.storage {
-                self.insert_storage(*addr, (*key).into(), Some(slot.present_value));
+                self.insert_storage_value(*addr, (*key).into(), slot.present_value);
             }
 
             // Insert will update if present, so we just use the new account info as the new value
