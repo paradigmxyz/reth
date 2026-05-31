@@ -15,6 +15,18 @@ use tokio::sync::oneshot;
 use tracing::debug_span;
 
 const RECEIPT_ENCODE_BUF_INITIAL_CAPACITY: usize = 512;
+const RECEIPT_ENCODE_BUF_LARGE_BLOCK_CAPACITY: usize = 1024;
+const RECEIPT_ENCODE_BUF_LARGE_BLOCK_THRESHOLD: usize = 1024;
+
+#[inline]
+const fn receipt_encode_buf_capacity(receipts_len: Option<usize>) -> usize {
+    match receipts_len {
+        Some(len) if len >= RECEIPT_ENCODE_BUF_LARGE_BLOCK_THRESHOLD => {
+            RECEIPT_ENCODE_BUF_LARGE_BLOCK_CAPACITY
+        }
+        _ => RECEIPT_ENCODE_BUF_INITIAL_CAPACITY,
+    }
+}
 
 /// Receipt with index, ready to be sent to the background task for encoding and trie building.
 #[derive(Debug, Clone)]
@@ -79,7 +91,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
 
         let mut builder = OrderedTrieRootEncodedBuilder::new();
         let mut aggregated_bloom = Bloom::ZERO;
-        let mut encode_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
+        let mut encode_buf = Vec::with_capacity(receipt_encode_buf_capacity(receipts_len));
         let mut next = 0usize;
         let mut pending = HashMap::new();
 
