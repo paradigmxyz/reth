@@ -23,7 +23,7 @@ use parking_lot::Mutex;
 use reth_metrics::Metrics;
 use reth_primitives_traits::FastInstant as Instant;
 use std::{sync::Arc, time::Duration};
-use tracing::{debug, instrument, warn};
+use tracing::{debug, instrument, trace, warn};
 
 /// A guarded, thread-safe cache of execution state that tracks the most recent block's caches.
 ///
@@ -52,7 +52,7 @@ impl PayloadExecutionCache {
     /// A cache is considered available when:
     /// - It exists and matches the requested parent hash
     /// - No other tasks are currently using it (checked via Arc reference count)
-    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip(self))]
+    #[instrument(level = "trace", target = "engine::tree::payload_processor", skip(self))]
     pub fn get_cache_for(&self, parent_hash: B256) -> Option<SavedCache> {
         let start = Instant::now();
         let mut cache = self.inner.lock();
@@ -73,7 +73,7 @@ impl PayloadExecutionCache {
             let available = c.is_available();
             let usage_count = c.usage_count();
 
-            debug!(
+            trace!(
                 target: "engine::caching",
                 %cached_hash,
                 %parent_hash,
@@ -95,7 +95,7 @@ impl PayloadExecutionCache {
                 self.metrics.execution_cache_in_use.increment(1);
             }
         } else {
-            debug!(target: "engine::caching", %parent_hash, "No cache found");
+            trace!(target: "engine::caching", %parent_hash, "No cache found");
         }
 
         None
