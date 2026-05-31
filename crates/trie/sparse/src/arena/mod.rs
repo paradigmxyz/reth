@@ -50,8 +50,13 @@ fn prefix_range(
     start: usize,
     prefix: &Nibbles,
 ) -> core::ops::Range<usize> {
+    let tail = &sorted_keys[start..];
+    if prefix.is_empty() {
+        return start..sorted_keys.len();
+    }
+
     // Advance past entries before `prefix`.
-    let begin = start + sorted_keys[start..].partition_point(|p| p < prefix);
+    let begin = start + tail.partition_point(|p| p < prefix);
     // Find the end of entries that start with `prefix`.
     let mut end = begin;
     while end < sorted_keys.len() && sorted_keys[end].starts_with(prefix) {
