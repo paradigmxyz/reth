@@ -359,18 +359,24 @@ where
         target = TRACE_TARGET,
         level = "trace",
         skip_all,
-        fields(child_path = ?self.last_child_path()),
+        fields(child_path),
     )]
     fn commit_last_child<'a>(
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
     ) -> Result<(), StateProofError> {
+        if self.child_stack.is_empty() {
+            trace!(target: TRACE_TARGET, "No child to commit, leaving stack unchanged");
+            return Ok(())
+        }
+
         if matches!(self.child_stack.last(), Some(ProofTrieBranchChild::RlpNode(_))) {
             trace!(target: TRACE_TARGET, "Last child already committed, leaving stack unchanged");
             return Ok(())
         }
 
         let Some(child_path) = self.last_child_path() else { return Ok(()) };
+        tracing::Span::current().record("child_path", tracing::field::debug(&child_path));
         let child =
             self.child_stack.pop().expect("child_stack can't be empty if there's a child path");
 
