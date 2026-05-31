@@ -119,7 +119,7 @@ where
         .build();
 
     let (block_result, senders) = {
-        let (result_tx, result_rx) = crossbeam_channel::unbounded();
+        let (result_tx, result_rx) = crossbeam_channel::bounded(worker_count);
         let (abort_guard, abort_rx) = AbortGuard::new();
 
         for _ in 0..worker_count {
