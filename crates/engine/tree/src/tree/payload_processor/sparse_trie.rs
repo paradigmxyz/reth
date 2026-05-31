@@ -445,23 +445,34 @@ where
     )]
     fn on_prewarm_targets(&mut self, targets: MultiProofTargetsV2) {
         for target in targets.account_targets {
+            let account = target.key();
             // Only touch accounts that are not yet present in the updates set.
-            self.new_account_updates.entry(target.key()).or_insert(LeafUpdate::Touched);
+            if !self.account_updates.contains_key(&account) {
+                self.new_account_updates.entry(account).or_insert(LeafUpdate::Touched);
+            }
         }
 
         for (address, slots) in targets.storage_targets {
             if !slots.is_empty() {
                 // Look up outer map once per address instead of once per slot.
+                let existing_updates = self.storage_updates.get(&address);
                 let new_updates = self.new_storage_updates.entry(address).or_default();
                 for slot in slots {
+                    let slot = slot.key();
+                    if existing_updates.is_some_and(|updates| updates.contains_key(&slot)) {
+                        continue;
+                    }
+
                     // Only touch storages that are not yet present in the updates set.
-                    new_updates.entry(slot.key()).or_insert(LeafUpdate::Touched);
+                    new_updates.entry(slot).or_insert(LeafUpdate::Touched);
                 }
             }
 
             // Touch corresponding account leaf to make sure its revealed in accounts trie for
             // storage root update.
-            self.new_account_updates.entry(address).or_insert(LeafUpdate::Touched);
+            if !self.account_updates.contains_key(&address) {
+                self.new_account_updates.entry(address).or_insert(LeafUpdate::Touched);
+            }
         }
     }
 
