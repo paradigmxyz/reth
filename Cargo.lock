@@ -6472,6 +6472,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "partial-stateless-exex"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "eyre",
+ "futures",
+ "partial-stateless",
+ "reth-ethereum",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
