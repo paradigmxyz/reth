@@ -480,6 +480,13 @@ impl ArenaSparseSubtrie {
     }
 }
 
+#[inline]
+fn sort_proof_nodes_by_path(nodes: &mut [ProofTrieNodeV2]) {
+    if nodes.len() > 1 && !nodes.windows(2).all(|pair| pair[0].path <= pair[1].path) {
+        nodes.sort_unstable_by_key(|node| node.path);
+    }
+}
+
 /// Tracks the net change in leaf counters caused by a trie mutation (upsert or removal).
 /// Returned alongside [`UpsertLeafResult`] / [`RemoveLeafResult`] so the caller can maintain
 /// aggregate counters on [`ArenaSparseSubtrie`] without scanning the arena.
@@ -2302,8 +2309,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return Ok(());
         }
 
-        // Sort nodes lexicographically by path.
-        nodes.sort_unstable_by_key(|n| n.path);
+        // Proof-v2 generation usually emits nodes in path order already. Keep the existing
+        // fallback sort for unsorted callers, but avoid the O(n log n) nibble comparisons on the
+        // common ordered stream.
+        sort_proof_nodes_by_path(nodes);
 
         let threshold = self.parallelism_thresholds.min_revealed_nodes;
 
