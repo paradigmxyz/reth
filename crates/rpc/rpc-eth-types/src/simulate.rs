@@ -578,7 +578,7 @@ where
     Ok(SimulatedBlock { inner: block, calls })
 }
 
-fn validate_simulate_tx_nonce(tx: u64, state: u64) -> Result<(), EthApiError> {
+const fn validate_simulate_tx_nonce(tx: u64, state: u64) -> Result<(), EthApiError> {
     if tx < state {
         return Err(EthApiError::InvalidTransaction(RpcInvalidTransactionError::NonceTooLow {
             tx,
