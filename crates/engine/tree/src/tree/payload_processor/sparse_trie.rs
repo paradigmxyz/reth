@@ -475,7 +475,16 @@ where
         for (&address, storage) in &hashed_state_update.storages {
             if !storage.storage.is_empty() {
                 // Look up outer maps once per address instead of once per slot.
-                let new_updates = self.new_storage_updates.entry(address).or_default();
+                let new_updates = match self.new_storage_updates.entry(address) {
+                    Entry::Occupied(mut entry) => {
+                        entry.get_mut().reserve(storage.storage.len());
+                        entry.into_mut()
+                    }
+                    Entry::Vacant(entry) => entry.insert(B256Map::with_capacity_and_hasher(
+                        storage.storage.len(),
+                        Default::default(),
+                    )),
+                };
                 let mut existing_updates = self.storage_updates.get_mut(&address);
 
                 for (&slot, &value) in &storage.storage {
@@ -600,7 +609,16 @@ where
             let _enter = trace_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_trie_leaf_updates", a=%address).entered();
 
             let trie = self.trie.get_or_create_storage_trie_mut(*address);
-            let fetched = self.fetched_storage_targets.entry(*address).or_default();
+            let fetched = match self.fetched_storage_targets.entry(*address) {
+                Entry::Occupied(mut entry) => {
+                    entry.get_mut().reserve(updates.len());
+                    entry.into_mut()
+                }
+                Entry::Vacant(entry) => entry.insert(B256Map::with_capacity_and_hasher(
+                    updates.len(),
+                    Default::default(),
+                )),
+            };
             let mut targets = Vec::new();
 
             let updates_len_before = updates.len();
