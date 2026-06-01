@@ -48,10 +48,21 @@ impl<T> SnappyRlpCodec<T> {
 
 impl<T: Decodable> SnappyRlpCodec<T> {
     /// Decode compressed data into the target type.
+    ///
+    /// A record holds exactly one RLP value, so any bytes left after it are treated as corruption
+    /// and rejected rather than silently ignored.
     pub fn decode(&self, compressed_data: &[u8]) -> Result<T, E2sError> {
         let decompressed = snappy_decompress(compressed_data)?;
         let mut slice = decompressed.as_slice();
-        T::decode(&mut slice).map_err(|e| E2sError::Rlp(format!("Failed to decode RLP data: {e}")))
+        let value = T::decode(&mut slice)
+            .map_err(|e| E2sError::Rlp(format!("Failed to decode RLP data: {e}")))?;
+        if !slice.is_empty() {
+            return Err(E2sError::Rlp(format!(
+                "Trailing bytes after RLP value: {} byte(s) remain",
+                slice.len()
+            )));
+        }
+        Ok(value)
     }
 }
 
