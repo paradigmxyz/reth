@@ -2171,6 +2171,11 @@ where
         self.payload_processor.executor().spawn_blocking_named(
             "payload-builder-sparse-trie-bridge",
             move || {
+                // Keep the active handle alive until the sparse-trie task delivers its outputs.
+                // The handle owns an updates sender; dropping the last sender after forwarding
+                // FinishedStateUpdates can race proof-result draining and surface as a channel
+                // disconnect before state-root calculation completes.
+                let _active_handle = active_handle;
                 let bridge_start = Instant::now();
                 let mut forwarded_updates = 0usize;
                 let mut finished = false;
@@ -2193,7 +2198,6 @@ where
                         break
                     }
                 }
-                drop(active_updates_tx);
 
                 if !finished {
                     debug!(
