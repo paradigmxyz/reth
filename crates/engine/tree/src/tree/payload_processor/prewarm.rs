@@ -374,18 +374,17 @@ where
                 let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
 
-                stream_bal.as_bal().par_iter().for_each(|account_changes| {
-                    WorkerPool::with_worker_mut(|worker| {
-                        let provider =
-                            worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
+                stream_bal.as_bal().par_iter().for_each_init(
+                    || None::<Box<dyn AccountReader>>,
+                    |provider, account_changes| {
                         ctx.send_bal_hashed_state(
                             &parent_span,
                             provider,
                             account_changes,
                             &to_sparse_trie_task,
                         );
-                    });
-                });
+                    },
+                );
 
                 let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
                 let _ = stream_tx.send(());
@@ -405,16 +404,15 @@ where
                 let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
 
-                prefetch_bal.as_bal().par_iter().for_each(|account| {
-                    if ctx.should_stop() {
-                        return;
-                    }
-                    WorkerPool::with_worker_mut(|worker| {
-                        let provider = worker
-                            .get_or_init::<Option<CachedStateProvider<StateProviderBox>>>(|| None);
+                prefetch_bal.as_bal().par_iter().for_each_init(
+                    || None::<CachedStateProvider<StateProviderBox>>,
+                    |provider, account| {
+                        if ctx.should_stop() {
+                            return;
+                        }
                         ctx.prefetch_bal_storage(&parent_span, provider, account);
-                    });
-                });
+                    },
+                );
 
                 let _ = prefetch_tx.send(());
             });
