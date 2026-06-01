@@ -312,6 +312,7 @@ pub fn create_chain_config(
         prague_time: timestamp(EthereumHardfork::Prague),
         osaka_time: timestamp(EthereumHardfork::Osaka),
         amsterdam_time: timestamp(EthereumHardfork::Amsterdam),
+        bogota_time: timestamp(EthereumHardfork::Bogota),
         bpo1_time: timestamp(EthereumHardfork::Bpo1),
         bpo2_time: timestamp(EthereumHardfork::Bpo2),
         bpo3_time: timestamp(EthereumHardfork::Bpo3),
@@ -896,6 +897,7 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::Bpo4.boxed(), genesis.config.bpo4_time),
             (EthereumHardfork::Bpo5.boxed(), genesis.config.bpo5_time),
             (EthereumHardfork::Amsterdam.boxed(), genesis.config.amsterdam_time),
+            (EthereumHardfork::Bogota.boxed(), genesis.config.bogota_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -1212,6 +1214,19 @@ impl ChainSpecBuilder {
     /// Enable Amsterdam at the given timestamp.
     pub fn with_amsterdam_at(mut self, timestamp: u64) -> Self {
         self.hardforks.insert(EthereumHardfork::Amsterdam, ForkCondition::Timestamp(timestamp));
+        self
+    }
+
+    /// Enable Bogota at genesis.
+    pub fn bogota_activated(mut self) -> Self {
+        self = self.amsterdam_activated();
+        self.hardforks.insert(EthereumHardfork::Bogota, ForkCondition::Timestamp(0));
+        self
+    }
+
+    /// Enable Bogota at the given timestamp.
+    pub fn with_bogota_at(mut self, timestamp: u64) -> Self {
+        self.hardforks.insert(EthereumHardfork::Bogota, ForkCondition::Timestamp(timestamp));
         self
     }
 
