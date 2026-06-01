@@ -40,7 +40,7 @@ use reth_trie_sparse::{
 use std::{
     ops::Not,
     sync::{
-        atomic::{AtomicBool, AtomicUsize},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::{self, channel},
         Arc,
     },
@@ -522,6 +522,7 @@ where
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
+        let terminate_execution = Arc::new(AtomicBool::new(false));
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
@@ -531,7 +532,7 @@ where
             metrics: PrewarmMetrics::default(),
             cache_metrics: self.cache_metrics.clone(),
             cache_state_metrics: self.cache_state_metrics.clone(),
-            terminate_execution: Arc::new(AtomicBool::new(false)),
+            terminate_execution: Arc::clone(&terminate_execution),
             executed_tx_index: Arc::clone(&executed_tx_index),
             precompile_cache_disabled: self.precompile_cache_disabled,
             precompile_cache_map: self.precompile_cache_map.clone(),
@@ -555,6 +556,7 @@ where
         CacheTaskHandle {
             saved_cache,
             to_prewarm_task: Some(to_prewarm_task),
+            terminate_execution,
             executed_tx_index,
             cache_metrics: self.cache_metrics.clone(),
         }
@@ -918,6 +920,8 @@ pub struct CacheTaskHandle<R> {
     saved_cache: Option<SavedCache>,
     /// Channel to the spawned prewarm task if any
     to_prewarm_task: Option<std::sync::mpsc::Sender<PrewarmTaskEvent<R>>>,
+    /// Immediate stop flag shared with prewarm workers.
+    terminate_execution: Arc<AtomicBool>,
     /// Shared counter tracking the next transaction index to be executed by the main execution
     /// loop. Prewarm workers skip transactions below this index.
     executed_tx_index: Arc<AtomicUsize>,
@@ -930,6 +934,7 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
     ///
     /// Note: This does not terminate the task yet.
     pub fn stop_prewarming_execution(&self) {
+        self.terminate_execution.store(true, Ordering::Relaxed);
         self.to_prewarm_task
             .as_ref()
             .map(|tx| tx.send(PrewarmTaskEvent::TerminateTransactionExecution).ok());
