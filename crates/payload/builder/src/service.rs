@@ -15,7 +15,7 @@ use reth_chain_state::CanonStateNotification;
 use reth_execution_cache::SavedCache;
 use reth_payload_builder_primitives::{Events, PayloadBuilderError, PayloadEvents};
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind, PayloadTypes};
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives, SealedHeader};
 use reth_storage_api::{errors::provider::ProviderResult, StateProviderBox};
 use reth_trie_parallel::state_root_task::StateRootHandle;
 use std::{
@@ -37,6 +37,12 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, debug_span, info, trace, warn, Span};
 
 type PayloadFuture<P> = Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send>>;
+
+/// Header type used by a built payload.
+pub type HeaderForPayload<P> = <<P as BuiltPayload>::Primitives as NodePrimitives>::BlockHeader;
+
+/// Sealed parent header type used by a built payload.
+pub type PayloadParentHeader<P> = SealedHeader<HeaderForPayload<P>>;
 
 /// A communication channel to the [`PayloadBuilderService`] that can retrieve payloads.
 ///
@@ -150,6 +156,29 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
         let (tx, rx) = oneshot::channel();
         let span = debug_span!(parent: Span::current(), "payload_job");
         let input = BuildNewPayloadWithState::new(input, state_anchor);
+        let _ = self.to_service.send(PayloadServiceCommand::BuildNewPayloadWithState(
+            input.into(),
+            span,
+            tx,
+        ));
+        rx
+    }
+
+    /// Sends a message to start building a payload against an explicit state anchor and parent
+    /// header.
+    ///
+    /// This is intended for speculative payload builds whose parent state is supplied explicitly
+    /// before the parent block has been inserted into the provider.
+    pub fn send_new_payload_with_state_anchor_and_parent_header(
+        &self,
+        input: BuildNewPayload<T::PayloadAttributes>,
+        state_anchor: PayloadStateAnchor,
+        parent_header: Arc<PayloadParentHeader<T::BuiltPayload>>,
+    ) -> Receiver<Result<PayloadId, PayloadBuilderError>> {
+        let (tx, rx) = oneshot::channel();
+        let span = debug_span!(parent: Span::current(), "payload_job");
+        let input =
+            BuildNewPayloadWithState::new(input, state_anchor).with_parent_header(parent_header);
         let _ = self.to_service.send(PayloadServiceCommand::BuildNewPayloadWithState(
             input.into(),
             span,
@@ -342,8 +371,8 @@ where
         let start = Instant::now();
         debug!(target: "payload_builder", %id, "resolving payload job");
 
-        if let Some((cached, _, payload)) = &*self.cached_payload_rx.borrow() &&
-            *cached == id
+        if let Some((cached, _, payload)) = &*self.cached_payload_rx.borrow()
+            && *cached == id
         {
             self.metrics.resolve_duration_seconds.record(start.elapsed());
             return Some(Box::pin(core::future::ready(Ok(payload.clone()))));
@@ -387,8 +416,8 @@ where
 
     /// Returns the payload timestamp for the given payload.
     fn payload_timestamp(&self, id: PayloadId) -> Option<Result<u64, PayloadBuilderError>> {
-        if let Some((cached_id, timestamp, _)) = *self.cached_payload_rx.borrow() &&
-            cached_id == id
+        if let Some((cached_id, timestamp, _)) = *self.cached_payload_rx.borrow()
+            && cached_id == id
         {
             return Some(Ok(timestamp));
         }
@@ -415,7 +444,8 @@ where
     <Gen as PayloadJobGenerator>::Job: Unpin + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
     Gen::Job: PayloadJob<PayloadAttributes = T::PayloadAttributes>,
-    <Gen::Job as PayloadJob>::BuiltPayload: Into<T::BuiltPayload>,
+    <Gen::Job as PayloadJob>::BuiltPayload: BuiltPayload<Primitives = <T::BuiltPayload as BuiltPayload>::Primitives>
+        + Into<T::BuiltPayload>,
 {
     type Output = ();
 
@@ -594,7 +624,7 @@ pub enum PayloadServiceCommand<T: PayloadTypes> {
     ),
     /// Start building a new payload against an explicit state anchor.
     BuildNewPayloadWithState(
-        Box<BuildNewPayloadWithState<T::PayloadAttributes>>,
+        Box<BuildNewPayloadWithState<T::PayloadAttributes, HeaderForPayload<T::BuiltPayload>>>,
         Span,
         oneshot::Sender<Result<PayloadId, PayloadBuilderError>>,
     ),
@@ -636,17 +666,26 @@ impl<T: PayloadAttributes> BuildNewPayload<T> {
 
 /// A request to build a new payload against an explicit state anchor.
 #[derive(Debug)]
-pub struct BuildNewPayloadWithState<T> {
+pub struct BuildNewPayloadWithState<T, Header = alloy_consensus::Header> {
     /// The original payload build request.
     pub payload: BuildNewPayload<T>,
     /// State anchor to use for the payload build.
     pub state_anchor: PayloadStateAnchor,
+    /// Optional parent header for state-anchored jobs whose parent is not yet visible through the
+    /// provider.
+    pub parent_header: Option<Arc<SealedHeader<Header>>>,
 }
 
-impl<T> BuildNewPayloadWithState<T> {
+impl<T, Header> BuildNewPayloadWithState<T, Header> {
     /// Creates a new anchored payload build request.
     pub const fn new(payload: BuildNewPayload<T>, state_anchor: PayloadStateAnchor) -> Self {
-        Self { payload, state_anchor }
+        Self { payload, state_anchor, parent_header: None }
+    }
+
+    /// Sets the parent header for this state-anchored payload build.
+    pub fn with_parent_header(mut self, parent_header: Arc<SealedHeader<Header>>) -> Self {
+        self.parent_header = Some(parent_header);
+        self
     }
 
     /// Returns the parent hash of the new payload.
@@ -655,7 +694,7 @@ impl<T> BuildNewPayloadWithState<T> {
     }
 }
 
-impl<T: PayloadAttributes> BuildNewPayloadWithState<T> {
+impl<T: PayloadAttributes, Header> BuildNewPayloadWithState<T, Header> {
     /// Returns the payload id for the new payload.
     pub fn payload_id(&self) -> PayloadId {
         self.payload.payload_id()
@@ -825,10 +864,12 @@ pub enum PayloadValidityStatus {
 mod tests {
     use super::*;
     use crate::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};
+    use alloy_consensus::Header;
     use alloy_primitives::{Address, B256};
     use reth_chain_state::CanonStateNotification;
     use reth_ethereum_engine_primitives::{EthBuiltPayload, EthEngineTypes, EthPayloadAttributes};
     use reth_payload_primitives::PayloadKind;
+    use reth_primitives_traits::SealedHeader;
     use std::{
         sync::{Arc, Mutex},
         task::Poll,
@@ -837,6 +878,7 @@ mod tests {
     #[derive(Debug)]
     struct CapturingGenerator {
         captured_anchor: Arc<Mutex<Option<PayloadStateAnchor>>>,
+        captured_parent_header: Arc<Mutex<Option<B256>>>,
     }
 
     impl PayloadJobGenerator for CapturingGenerator {
@@ -852,10 +894,15 @@ mod tests {
 
         fn new_payload_job_with_state(
             &self,
-            input: BuildNewPayloadWithState<EthPayloadAttributes>,
+            input: BuildNewPayloadWithState<
+                EthPayloadAttributes,
+                HeaderForPayload<EthBuiltPayload>,
+            >,
             _id: PayloadId,
         ) -> Result<Self::Job, PayloadBuilderError> {
             *self.captured_anchor.lock().unwrap() = Some(input.state_anchor);
+            *self.captured_parent_header.lock().unwrap() =
+                input.parent_header.as_ref().map(|header| header.hash());
             Ok(CapturingJob { attributes: input.payload.attributes })
         }
     }
@@ -918,7 +965,11 @@ mod tests {
         let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
         rt.block_on(async {
             let captured_anchor = Arc::new(Mutex::new(None));
-            let generator = CapturingGenerator { captured_anchor: captured_anchor.clone() };
+            let captured_parent_header = Arc::new(Mutex::new(None));
+            let generator = CapturingGenerator {
+                captured_anchor: captured_anchor.clone(),
+                captured_parent_header: captured_parent_header.clone(),
+            };
             let (service, handle) = PayloadBuilderService::<_, _, EthEngineTypes>::new(
                 generator,
                 futures_util::stream::empty::<CanonStateNotification>(),
@@ -954,9 +1005,53 @@ mod tests {
             let captured_token = captured.validity_dependency().unwrap();
             assert_eq!(captured_token.parent_hash(), parent_hash);
             assert_eq!(captured.state_provider().unwrap().label(), "test-overlay");
+            assert!(captured_parent_header.lock().unwrap().is_none());
 
             token.mark_invalid();
             assert!(captured_token.should_discard());
+
+            service_task.abort();
+        });
+    }
+
+    #[test]
+    fn send_new_payload_with_parent_header_reaches_generator() {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        rt.block_on(async {
+            let captured_anchor = Arc::new(Mutex::new(None));
+            let captured_parent_header = Arc::new(Mutex::new(None));
+            let generator = CapturingGenerator {
+                captured_anchor,
+                captured_parent_header: captured_parent_header.clone(),
+            };
+            let (service, handle) = PayloadBuilderService::<_, _, EthEngineTypes>::new(
+                generator,
+                futures_util::stream::empty::<CanonStateNotification>(),
+            );
+            let service_task = tokio::spawn(service);
+
+            let parent_hash = B256::from([0x24; 32]);
+            let token = PayloadValidityToken::pending(parent_hash);
+            let state_anchor = PayloadStateAnchor::Speculative(SpeculativePayloadState::new(token));
+            let input = BuildNewPayload {
+                attributes: test_attributes(),
+                parent_hash,
+                cache: None,
+                trie_handle: None,
+            };
+            let parent_header = Arc::new(SealedHeader::new(Header::default(), parent_hash));
+
+            handle
+                .send_new_payload_with_state_anchor_and_parent_header(
+                    input,
+                    state_anchor,
+                    parent_header,
+                )
+                .await
+                .unwrap()
+                .unwrap();
+
+            assert_eq!(*captured_parent_header.lock().unwrap(), Some(parent_hash));
 
             service_task.abort();
         });

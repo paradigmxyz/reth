@@ -7,7 +7,7 @@ use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
 use reth_primitives_traits::NodePrimitives;
 use std::future::Future;
 
-use crate::service::{BuildNewPayload, BuildNewPayloadWithState};
+use crate::service::{BuildNewPayload, BuildNewPayloadWithState, HeaderForPayload};
 
 /// A type that can build a payload.
 ///
@@ -121,7 +121,10 @@ pub trait PayloadJobGenerator {
     /// which preserves the canonical parent-hash behavior.
     fn new_payload_job_with_state(
         &self,
-        input: BuildNewPayloadWithState<<Self::Job as PayloadJob>::PayloadAttributes>,
+        input: BuildNewPayloadWithState<
+            <Self::Job as PayloadJob>::PayloadAttributes,
+            HeaderForPayload<<Self::Job as PayloadJob>::BuiltPayload>,
+        >,
         id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError> {
         self.new_payload_job(input.payload, id)

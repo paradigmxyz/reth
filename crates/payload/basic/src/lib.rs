@@ -146,24 +146,35 @@ where
         input: BuildNewPayload<Builder::Attributes>,
         id: PayloadId,
         state_anchor: PayloadStateAnchor,
+        parent_header: Option<Arc<SealedHeader<HeaderForPayload<Builder::BuiltPayload>>>>,
     ) -> Result<BasicPayloadJob<Builder>, PayloadBuilderError> {
-        let parent_header = if input.parent_hash.is_zero() {
+        let parent_header = if let Some(parent_header) = parent_header {
+            if parent_header.hash() != input.parent_hash {
+                return Err(PayloadBuilderError::MissingParentHeader(input.parent_hash));
+            }
+
+            parent_header
+        } else if input.parent_hash.is_zero() {
             // Use latest header for genesis block case
-            self.client
-                .latest_header()
-                .map_err(PayloadBuilderError::from)?
-                .ok_or_else(|| PayloadBuilderError::MissingParentHeader(B256::ZERO))?
+            Arc::new(
+                self.client
+                    .latest_header()
+                    .map_err(PayloadBuilderError::from)?
+                    .ok_or_else(|| PayloadBuilderError::MissingParentHeader(B256::ZERO))?,
+            )
         } else {
             // Fetch specific header by hash
-            self.client
-                .sealed_header_by_hash(input.parent_hash)
-                .map_err(PayloadBuilderError::from)?
-                .ok_or_else(|| PayloadBuilderError::MissingParentHeader(input.parent_hash))?
+            Arc::new(
+                self.client
+                    .sealed_header_by_hash(input.parent_hash)
+                    .map_err(PayloadBuilderError::from)?
+                    .ok_or_else(|| PayloadBuilderError::MissingParentHeader(input.parent_hash))?,
+            )
         };
 
         let cached_reads = self.maybe_pre_cached(parent_header.hash());
 
-        let config = PayloadConfig::new(Arc::new(parent_header), input.attributes, id);
+        let config = PayloadConfig::new(parent_header, input.attributes, id);
 
         let until = self.job_deadline(config.attributes.timestamp());
         let deadline = Box::pin(tokio::time::sleep_until(until));
@@ -212,15 +223,18 @@ where
         input: BuildNewPayload<Builder::Attributes>,
         id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError> {
-        self.new_payload_job_with_anchor(input, id, PayloadStateAnchor::Canonical)
+        self.new_payload_job_with_anchor(input, id, PayloadStateAnchor::Canonical, None)
     }
 
     fn new_payload_job_with_state(
         &self,
-        input: BuildNewPayloadWithState<Builder::Attributes>,
+        input: BuildNewPayloadWithState<
+            Builder::Attributes,
+            HeaderForPayload<Builder::BuiltPayload>,
+        >,
         id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError> {
-        self.new_payload_job_with_anchor(input.payload, id, input.state_anchor)
+        self.new_payload_job_with_anchor(input.payload, id, input.state_anchor, input.parent_header)
     }
 
     fn on_new_state<N: NodePrimitives>(&mut self, new_state: CanonStateNotification<N>) {
@@ -440,13 +454,13 @@ where
                 id=%this.config.payload_id(),
                 "speculative payload parent invalidated, stopping job"
             );
-            return Poll::Ready(Ok(()))
+            return Poll::Ready(Ok(()));
         }
 
         // check if the deadline is reached
         if this.deadline.as_mut().poll(cx).is_ready() {
             trace!(target: "payload_builder", "payload building deadline reached");
-            return Poll::Ready(Ok(()))
+            return Poll::Ready(Ok(()));
         }
 
         loop {
@@ -477,7 +491,7 @@ where
                                 id=%this.config.payload_id(),
                                 "payload build cancelled"
                             );
-                            return Poll::Ready(Ok(()))
+                            return Poll::Ready(Ok(()));
                         }
                     },
                     Poll::Ready(Err(error)) => {
@@ -487,13 +501,13 @@ where
                     }
                     Poll::Pending => {
                         this.pending_block = Some(fut);
-                        return Poll::Pending
+                        return Poll::Pending;
                     }
                 }
             }
 
             if this.best_payload.is_frozen() {
-                return Poll::Pending
+                return Poll::Pending;
             }
 
             // Wait for the next build interval tick.
@@ -519,7 +533,7 @@ where
 
     fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         if self.state_anchor.should_discard() {
-            return Err(PayloadBuilderError::MissingPayload)
+            return Err(PayloadBuilderError::MissingPayload);
         }
 
         if let Some(payload) = self.best_payload.payload() {
@@ -555,7 +569,7 @@ where
             return (
                 ResolveBestPayload { best_payload: None, maybe_better: None, empty_payload: None },
                 KeepPayloadJobAlive::No,
-            )
+            );
         }
 
         let best_payload = self.best_payload.payload().cloned();
@@ -693,25 +707,25 @@ where
         let this = self.get_mut();
 
         // check if there is a better payload before returning the best payload
-        if let Some(fut) = Pin::new(&mut this.maybe_better).as_pin_mut() &&
-            let Poll::Ready(res) = fut.poll(cx)
+        if let Some(fut) = Pin::new(&mut this.maybe_better).as_pin_mut()
+            && let Poll::Ready(res) = fut.poll(cx)
         {
             this.maybe_better = None;
             if let Ok(Some(payload)) = res.map(|out| out.into_payload()).inspect_err(
                 |err| warn!(target: "payload_builder", %err, "failed to resolve pending payload"),
             ) {
                 debug!(target: "payload_builder", "resolving better payload");
-                return Poll::Ready(Ok(payload))
+                return Poll::Ready(Ok(payload));
             }
         }
 
         if let Some(best) = this.best_payload.take() {
             debug!(target: "payload_builder", "resolving best payload");
-            return Poll::Ready(Ok(best))
+            return Poll::Ready(Ok(best));
         }
 
-        if let Some(fut) = Pin::new(&mut this.empty_payload).as_pin_mut() &&
-            let Poll::Ready(res) = fut.poll(cx)
+        if let Some(fut) = Pin::new(&mut this.empty_payload).as_pin_mut()
+            && let Poll::Ready(res) = fut.poll(cx)
         {
             this.empty_payload = None;
             return match res {
@@ -724,11 +738,11 @@ where
                     Poll::Ready(res)
                 }
                 Err(err) => Poll::Ready(Err(err.into())),
-            }
+            };
         }
 
         if this.is_empty() {
-            return Poll::Ready(Err(PayloadBuilderError::MissingPayload))
+            return Poll::Ready(Err(PayloadBuilderError::MissingPayload));
         }
 
         Poll::Pending
