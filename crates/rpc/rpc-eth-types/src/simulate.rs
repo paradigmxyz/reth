@@ -7,7 +7,10 @@ use crate::{
 use alloy_chains::Chain;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_eips::eip2718::WithEncoded;
-use alloy_evm::{block::TxResult, precompiles::PrecompilesMap};
+use alloy_evm::{
+    block::TxResult,
+    precompiles::{DynPrecompile, PrecompilesMap},
+};
 use alloy_network::{NetworkTransactionBuilder, TransactionBuilder};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimCallResult, SimulateError, SimulatedBlock},
@@ -31,6 +34,7 @@ use revm::{
     primitives::{Address, Bytes, TxKind, U256},
     Database,
 };
+use std::collections::HashMap;
 
 /// Fallback seconds added between simulated block timestamps when neither the user nor the chain
 /// hint provides a value.
@@ -268,11 +272,25 @@ pub fn apply_precompile_overrides(
         }
     }
 
-    precompiles.move_precompiles(moves).map_err(
-        |alloy_evm::precompiles::MovePrecompileError::NotAPrecompile(addr)| {
-            EthSimulateError::NotAPrecompile(addr)
-        },
-    )?;
+    let mut moved_precompiles = HashMap::with_capacity(moves.len());
+    for (source, dest) in moves {
+        let mut moved_precompile = None;
+        precompiles.apply_precompile(&source, |existing| {
+            moved_precompile = existing;
+            None
+        });
+
+        let Some(precompile) = moved_precompile else {
+            return Err(EthSimulateError::NotAPrecompile(source))
+        };
+        moved_precompiles.insert(dest, precompile);
+    }
+
+    if !moved_precompiles.is_empty() {
+        precompiles.set_precompile_lookup(move |address: &Address| -> Option<DynPrecompile> {
+            moved_precompiles.get(address).cloned()
+        });
+    }
 
     Ok(())
 }
@@ -612,7 +630,7 @@ mod tests {
     }
 
     #[test]
-    fn moved_precompile_is_callable() {
+    fn moved_precompile_is_callable_but_not_warm() {
         let source = address!("0000000000000000000000000000000000000001");
         let dest = address!("0000000000000000000000000000000000123456");
         let mut state_overrides = StateOverride::default();
@@ -626,6 +644,7 @@ mod tests {
 
         assert!(precompiles.get(&source).is_none());
         assert!(precompiles.get(&dest).is_some());
+        assert!(!precompiles.addresses().any(|address| address == &dest));
     }
 
     #[test]
