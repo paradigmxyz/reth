@@ -18,13 +18,13 @@ use reth_era::{
         types::{
             execution::{
                 BlockTuple, CompressedBody, CompressedHeader, CompressedSlimReceipts, Proof,
-                ProofType, TotalDifficulty,
+                ProofType, SlimReceipt, TotalDifficulty,
             },
             group::{EraEGroup, EraEId},
         },
     },
 };
-use reth_ethereum_primitives::{Receipt, TransactionSigned};
+use reth_ethereum_primitives::TransactionSigned;
 use std::io::Cursor;
 
 use crate::{EraTestDownloader, MAINNET, SEPOLIA};
@@ -151,59 +151,28 @@ async fn test_erae_file_roundtrip(
             "Ommers count should match after roundtrip"
         );
 
-        // TODO: replace with `alloy_consensus::Receipt<Log>` once
-        // https://github.com/alloy-rs/alloy/pull/3880 is released.
-        // That adds Encodable/Decodable to Receipt, handling pre-Byzantium
-        // PostState root via Eip658Value and removing this if let guard.
-        if let (Ok(original_receipts_decoded), Ok(roundtrip_receipts_decoded)) = (
-            original_block.receipts.decode::<Vec<Receipt>>(),
-            roundtrip_block.receipts.decode::<Vec<Receipt>>(),
-        ) {
-            assert_eq!(
-                original_receipts_decoded.len(),
-                roundtrip_receipts_decoded.len(),
-                "Block {block_number} receipt count should match after roundtrip"
-            );
+        // `SlimReceipt` uses `Eip658Value`, so it decodes both pre-Byzantium post-state-root
+        // receipts and post-Byzantium status receipts — no fork-dependent guard needed.
+        let original_receipts_decoded: Vec<SlimReceipt> = original_block.receipts.decode()?;
+        let roundtrip_receipts_decoded: Vec<SlimReceipt> = roundtrip_block.receipts.decode()?;
 
-            for (i, (orig, rt)) in
-                original_receipts_decoded.iter().zip(roundtrip_receipts_decoded.iter()).enumerate()
-            {
-                assert_eq!(
-                    orig.tx_type, rt.tx_type,
-                    "Block {block_number} receipt {i} tx_type mismatch"
-                );
-                assert_eq!(
-                    orig.success, rt.success,
-                    "Block {block_number} receipt {i} status mismatch"
-                );
-                assert_eq!(
-                    orig.cumulative_gas_used, rt.cumulative_gas_used,
-                    "Block {block_number} receipt {i} cumulative_gas mismatch"
-                );
-                assert_eq!(
-                    orig.logs.len(),
-                    rt.logs.len(),
-                    "Block {block_number} receipt {i} log count mismatch"
-                );
-            }
+        assert_eq!(
+            original_receipts_decoded, roundtrip_receipts_decoded,
+            "Block {block_number} receipts should match after roundtrip"
+        );
 
-            // Full decode -> encode -> decode cycle
-            let re_encoded =
-                CompressedSlimReceipts::from_encodable_list(&original_receipts_decoded)?;
-            let re_decoded: Vec<Receipt> = re_encoded.decode()?;
-            assert_eq!(
-                original_receipts_decoded.len(),
-                re_decoded.len(),
-                "Block {block_number} receipts should survive decode/encode/decode cycle"
-            );
+        // Full decode -> encode -> decode cycle
+        let re_encoded = CompressedSlimReceipts::from_receipts(&original_receipts_decoded)?;
+        let re_decoded: Vec<SlimReceipt> = re_encoded.decode_receipts()?;
+        assert_eq!(
+            original_receipts_decoded, re_decoded,
+            "Block {block_number} receipts should survive decode/encode/decode cycle"
+        );
 
-            println!(
-                "Block {block_number}: decoded and re-encoded {} slim receipts",
-                original_receipts_decoded.len()
-            );
-        } else {
-            println!("Block {block_number}: pre-Byzantium receipts (raw bytes verified)");
-        }
+        println!(
+            "Block {block_number}: decoded and re-encoded {} slim receipts",
+            original_receipts_decoded.len()
+        );
 
         // Check withdrawals presence/absence matches
         assert_eq!(
@@ -326,7 +295,7 @@ async fn test_slim_receipts_and_proofs_from_real_file() -> eyre::Result<()> {
         assert!(!decompressed.is_empty(), "Block {block_number} receipts should not be empty");
 
         // Decode as slim receipts (no bloom)
-        let receipts: Vec<Receipt> = block.receipts.decode()?;
+        let receipts: Vec<SlimReceipt> = block.receipts.decode()?;
         println!(
             "Block {block_number}: {} receipts, cumulative_gas={}",
             receipts.len(),
@@ -352,8 +321,8 @@ async fn test_slim_receipts_and_proofs_from_real_file() -> eyre::Result<()> {
         }
 
         // Re-encode and verify roundtrip
-        let recompressed = CompressedSlimReceipts::from_encodable_list(&receipts)?;
-        let re_decoded: Vec<Receipt> = recompressed.decode()?;
+        let recompressed = CompressedSlimReceipts::from_receipts(&receipts)?;
+        let re_decoded: Vec<SlimReceipt> = recompressed.decode_receipts()?;
         assert_eq!(receipts, re_decoded, "Receipts should survive decode/encode/decode cycle");
     }
 
