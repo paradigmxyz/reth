@@ -77,6 +77,21 @@ impl BalStateOverlay {
         self.accounts.is_empty() && self.bytecodes.is_empty()
     }
 
+    /// Returns the number of accounts with final writes in this overlay.
+    pub fn account_count(&self) -> usize {
+        self.accounts.len()
+    }
+
+    /// Returns the number of storage slots with final writes in this overlay.
+    pub fn storage_slot_count(&self) -> usize {
+        self.accounts.values().map(|account| account.storage.len()).sum()
+    }
+
+    /// Returns the number of bytecode entries carried by this overlay.
+    pub fn bytecode_count(&self) -> usize {
+        self.bytecodes.len()
+    }
+
     /// Deletes an account in the overlay.
     ///
     /// Storage reads for a deleted account return zero because the account's storage trie is wiped.
@@ -107,7 +122,7 @@ impl BalStateOverlay {
     ) -> Result<B256, BytecodeDecodeError> {
         if bytecode.is_empty() {
             self.set_empty_code(address);
-            return Ok(KECCAK_EMPTY)
+            return Ok(KECCAK_EMPTY);
         }
 
         let hash = keccak256(&bytecode);
@@ -193,7 +208,12 @@ impl<S: StateProvider> BalOverlayStateProvider<S> {
         }
     }
 
-    fn hashed_overlay_state(&self) -> ProviderResult<HashedPostState> {
+    /// Returns the hashed post-state represented by the BAL overlay over its fallback provider.
+    ///
+    /// Field-only account updates are materialized by reading the fallback account and applying
+    /// the overlaid fields, so the returned state is suitable for comparing against trie data
+    /// produced while validating the same BAL parent.
+    pub fn hashed_overlay_state(&self) -> ProviderResult<HashedPostState> {
         let mut state = HashedPostState::with_capacity(self.overlay.accounts.len());
 
         for (address, account_overlay) in &self.overlay.accounts {
@@ -267,10 +287,10 @@ impl<S: StateProvider> AccountReader for BalOverlayStateProvider<S> {
 impl<S: StateProvider> BytecodeReader for BalOverlayStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         if *code_hash == KECCAK_EMPTY {
-            return Ok(None)
+            return Ok(None);
         }
         if let Some(bytecode) = self.overlay.bytecodes.get(code_hash) {
-            return Ok(Some(bytecode.clone()))
+            return Ok(Some(bytecode.clone()));
         }
         self.fallback.bytecode_by_hash(code_hash)
     }
@@ -373,11 +393,11 @@ impl<S: StateProvider> StateProvider for BalOverlayStateProvider<S> {
         };
 
         if matches!(account_overlay.account, AccountOverlay::Deleted) {
-            return Ok(Some(StorageValue::ZERO))
+            return Ok(Some(StorageValue::ZERO));
         }
 
         if let Some(value) = account_overlay.storage.get(&storage_key) {
-            return Ok(Some(*value))
+            return Ok(Some(*value));
         }
 
         self.fallback.storage(account, storage_key)
@@ -609,6 +629,7 @@ mod tests {
     fn bal_overlay_handles_code_creation_deletion_zero_and_repeated_writes() {
         let address = Address::from([0x33; 20]);
         let deleted = Address::from([0x44; 20]);
+        let empty = Address::from([0x45; 20]);
         let slot = StorageKey::from(U256::from(1));
         let repeated_slot = StorageKey::from(U256::from(2));
         let parent = MockProvider::default()
@@ -626,6 +647,7 @@ mod tests {
         overlay.set_storage(address, repeated_slot, U256::from(1));
         overlay.set_storage(address, repeated_slot, U256::from(2));
         overlay.delete_account(deleted);
+        overlay.set_account(empty, Account::default());
 
         let provider = overlay.provider(parent);
         let created = provider.basic_account(&address).unwrap().unwrap();
@@ -637,6 +659,11 @@ mod tests {
         assert_eq!(provider.storage(address, repeated_slot).unwrap(), Some(U256::from(2)));
         assert_eq!(provider.basic_account(&deleted).unwrap(), None);
         assert_eq!(provider.storage(deleted, slot).unwrap(), Some(U256::ZERO));
+        assert_eq!(provider.basic_account(&empty).unwrap(), Some(Account::default()));
+
+        let hashed_overlay = provider.hashed_overlay_state().unwrap();
+        assert_eq!(hashed_overlay.accounts.len(), 3);
+        assert_eq!(hashed_overlay.storages.len(), 2);
     }
 
     #[test]

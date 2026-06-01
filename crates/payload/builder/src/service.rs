@@ -574,7 +574,7 @@ where
             }
 
             if !new_job {
-                return Poll::Pending
+                return Poll::Pending;
             }
         }
     }
@@ -698,6 +698,11 @@ impl PayloadStateAnchor {
             Self::Canonical => None,
             Self::Speculative(state) => state.validity_dependency.as_ref(),
         }
+    }
+
+    /// Returns `true` if this anchor's validity dependency has been invalidated.
+    pub fn should_discard(&self) -> bool {
+        self.validity_dependency().is_some_and(PayloadValidityToken::should_discard)
     }
 }
 

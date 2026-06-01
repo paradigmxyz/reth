@@ -2,7 +2,10 @@ use super::*;
 use crate::{
     persistence::PersistenceAction,
     tree::{
-        payload_validator::{BasicEngineValidator, TreeCtx, ValidationOutcome},
+        payload_validator::{
+            BasicEngineValidator, SpeculativeBalPayloadBuildFallbackReason,
+            SpeculativeBalPayloadBuildRequest, TreeCtx, ValidationOutcome,
+        },
         persistence_state::CurrentPersistenceAction,
         PersistTarget, TreeConfig,
     },
@@ -11,8 +14,9 @@ use reth_trie_db::ChangesetCache;
 
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::{
+    keccak256,
     map::{B256Map, B256Set},
-    Bytes, B256,
+    Address, Bytes, StorageKey, B256, U256,
 };
 use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::{
@@ -20,7 +24,8 @@ use alloy_rpc_types_engine::{
 };
 use assert_matches::assert_matches;
 use reth_chain_state::{
-    test_utils::TestBlockBuilder, BlockState, ComputedTrieData, StateTrieOverlayManager,
+    test_utils::TestBlockBuilder, BalStateOverlay, BlockState, ComputedTrieData,
+    StateTrieOverlayManager,
 };
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
@@ -28,9 +33,11 @@ use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
-use reth_primitives_traits::Block as _;
+use reth_payload_builder::PayloadValidityToken;
+use reth_primitives_traits::{Account, Block as _};
 use reth_provider::test_utils::MockEthProvider;
 use reth_tasks::spawn_os_thread;
+use reth_trie::{updates::TrieUpdatesSorted, HashedPostState, HashedStorage};
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -2506,6 +2513,158 @@ fn test_on_disconnected_downloaded_block_eth_zero_finalized_targets_head() {
         }
         other => panic!("Expected BackfillAction(Start), got: {other:?}"),
     }
+}
+
+fn basic_validator_with_config(
+    config: TreeConfig,
+) -> BasicEngineValidator<MockEthProvider, MockEvmConfig, MockEngineValidator> {
+    BasicEngineValidator::new(
+        MockEthProvider::default(),
+        Arc::new(EthBeaconConsensus::new(MAINNET.clone())),
+        MockEvmConfig::default(),
+        MockEngineValidator,
+        config,
+        Box::new(NoopInvalidBlockHook::default()),
+        ChangesetCache::new(),
+        reth_tasks::Runtime::test(),
+    )
+}
+
+fn speculative_bal_request(
+    parent_hash: B256,
+    parent_state_root: B256,
+    parent_state_anchor: B256,
+    account: Address,
+    account_value: Account,
+    slot: StorageKey,
+    storage_value: U256,
+) -> SpeculativeBalPayloadBuildRequest {
+    let mut bal_overlay = BalStateOverlay::default();
+    bal_overlay.set_account(account, account_value);
+    bal_overlay.set_storage(account, slot, storage_value);
+
+    let hashed_account = keccak256(account);
+    let hashed_state = HashedPostState::default()
+        .with_accounts([(hashed_account, Some(account_value))])
+        .with_storages([(
+            hashed_account,
+            HashedStorage::from_iter(false, [(keccak256(slot), storage_value)]),
+        )])
+        .into_sorted();
+
+    SpeculativeBalPayloadBuildRequest {
+        parent_hash,
+        parent_state_root,
+        validated_parent_state_root: parent_state_root,
+        parent_state_anchor,
+        bal_overlay,
+        parent_trie_data: ComputedTrieData::new(
+            Arc::new(hashed_state),
+            Arc::new(TrieUpdatesSorted::default()),
+        ),
+        validity_dependency: Some(PayloadValidityToken::pending(parent_hash)),
+    }
+}
+
+#[test]
+fn speculative_bal_payload_build_resources_return_cache_anchor_and_trie_handle() {
+    let config = TreeConfig::default()
+        .with_share_execution_cache_with_payload_builder(true)
+        .with_share_sparse_trie_with_payload_builder(true);
+    let validator = basic_validator_with_config(config);
+    let parent_hash = B256::with_last_byte(0xB0);
+    let parent_state_root = B256::with_last_byte(0xB1);
+    let parent_state_anchor = B256::with_last_byte(0xA0);
+    let account = Address::repeat_byte(0x11);
+    let slot = StorageKey::from(U256::from(1));
+    let storage_value = U256::from(2);
+    let account_value = Account { balance: U256::from(3), nonce: 4, bytecode_hash: None };
+    let request = speculative_bal_request(
+        parent_hash,
+        parent_state_root,
+        parent_state_anchor,
+        account,
+        account_value,
+        slot,
+        storage_value,
+    );
+
+    let resources = validator.speculative_bal_payload_build_resources(request).unwrap();
+
+    assert!(resources.cache.is_some());
+    assert_eq!(resources.trie_handle.cached_trie_state_root(), parent_state_root);
+    assert!(resources.state_anchor.is_speculative());
+    let token = resources.state_anchor.validity_dependency().unwrap();
+    assert_eq!(token.parent_hash(), parent_hash);
+
+    let state_provider = resources.state_anchor.state_provider().unwrap().open().unwrap();
+    assert_eq!(state_provider.basic_account(&account).unwrap(), Some(account_value));
+    assert_eq!(state_provider.storage(account, slot).unwrap(), Some(storage_value));
+}
+
+#[test]
+fn speculative_bal_payload_build_resources_obey_sparse_trie_config_gate() {
+    let validator = basic_validator_with_config(TreeConfig::default());
+    let request = speculative_bal_request(
+        B256::with_last_byte(0xB0),
+        B256::with_last_byte(0xB1),
+        B256::with_last_byte(0xA0),
+        Address::repeat_byte(0x11),
+        Account { balance: U256::from(3), nonce: 4, bytecode_hash: None },
+        StorageKey::from(U256::from(1)),
+        U256::from(2),
+    );
+
+    let err = validator.speculative_bal_payload_build_resources(request).unwrap_err();
+
+    assert_eq!(err.reason(), SpeculativeBalPayloadBuildFallbackReason::SparseTrieSharingDisabled);
+}
+
+#[test]
+fn speculative_bal_payload_build_resources_reject_mismatched_bal_trie_data() {
+    let config = TreeConfig::default().with_share_sparse_trie_with_payload_builder(true);
+    let validator = basic_validator_with_config(config);
+    let parent_hash = B256::with_last_byte(0xB0);
+    let mut request = speculative_bal_request(
+        parent_hash,
+        B256::with_last_byte(0xB1),
+        B256::with_last_byte(0xA0),
+        Address::repeat_byte(0x11),
+        Account { balance: U256::from(3), nonce: 4, bytecode_hash: None },
+        StorageKey::from(U256::from(1)),
+        U256::from(2),
+    );
+    request.parent_trie_data = ComputedTrieData::default();
+
+    let err = validator.speculative_bal_payload_build_resources(request).unwrap_err();
+
+    assert!(matches!(
+        err.reason(),
+        SpeculativeBalPayloadBuildFallbackReason::BalHashedStateMismatch { .. }
+    ));
+}
+
+#[test]
+fn speculative_bal_payload_build_resources_reject_invalid_parent_dependency() {
+    let config = TreeConfig::default().with_share_sparse_trie_with_payload_builder(true);
+    let validator = basic_validator_with_config(config);
+    let parent_hash = B256::with_last_byte(0xB0);
+    let mut request = speculative_bal_request(
+        parent_hash,
+        B256::with_last_byte(0xB1),
+        B256::with_last_byte(0xA0),
+        Address::repeat_byte(0x11),
+        Account { balance: U256::from(3), nonce: 4, bytecode_hash: None },
+        StorageKey::from(U256::from(1)),
+        U256::from(2),
+    );
+    let token = PayloadValidityToken::pending(parent_hash);
+    token.mark_invalid();
+    request.validity_dependency = Some(token);
+
+    let err = validator.speculative_bal_payload_build_resources(request).unwrap_err();
+
+    assert_eq!(err.reason(), SpeculativeBalPayloadBuildFallbackReason::ParentAlreadyInvalid);
 }
 
 /// Verifies that the post-backfill recheck path in `on_backfill_sync_finished` retriggers a

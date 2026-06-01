@@ -434,6 +434,15 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
+        if this.state_anchor.should_discard() {
+            debug!(
+                target: "payload_builder",
+                id=%this.config.payload_id(),
+                "speculative payload parent invalidated, stopping job"
+            );
+            return Poll::Ready(Ok(()))
+        }
+
         // check if the deadline is reached
         if this.deadline.as_mut().poll(cx).is_ready() {
             trace!(target: "payload_builder", "payload building deadline reached");
@@ -463,7 +472,12 @@ where
                             trace!(target: "payload_builder", worse_fees = %fees, "skipped payload build of worse block");
                         }
                         BuildOutcome::Cancelled => {
-                            unreachable!("the cancel signal never fired")
+                            debug!(
+                                target: "payload_builder",
+                                id=%this.config.payload_id(),
+                                "payload build cancelled"
+                            );
+                            return Poll::Ready(Ok(()))
                         }
                     },
                     Poll::Ready(Err(error)) => {
@@ -504,6 +518,10 @@ where
     type BuiltPayload = Builder::BuiltPayload;
 
     fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError> {
+        if self.state_anchor.should_discard() {
+            return Err(PayloadBuilderError::MissingPayload)
+        }
+
         if let Some(payload) = self.best_payload.payload() {
             Ok(payload.clone())
         } else {
@@ -533,6 +551,13 @@ where
         &mut self,
         kind: PayloadKind,
     ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+        if self.state_anchor.should_discard() {
+            return (
+                ResolveBestPayload { best_payload: None, maybe_better: None, empty_payload: None },
+                KeepPayloadJobAlive::No,
+            )
+        }
+
         let best_payload = self.best_payload.payload().cloned();
         if best_payload.is_none() && self.pending_block.is_none() {
             // ensure we have a job scheduled if we don't have a best payload yet and none is active

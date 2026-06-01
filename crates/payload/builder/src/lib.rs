@@ -123,6 +123,10 @@ pub mod noop;
 pub mod test_utils;
 
 pub use alloy_rpc_types::engine::PayloadId;
+pub use metrics::{
+    record_payload_builder_sparse_trie_wait, record_payload_builder_state_root_mode,
+    record_payload_builder_sync_state_root, PayloadBuilderStateRootMode,
+};
 pub use reth_payload_builder_primitives::PayloadBuilderError;
 pub use reth_payload_primitives::PayloadKind;
 pub use service::{

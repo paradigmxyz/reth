@@ -153,6 +153,20 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self
     }
 
+    /// Set an immediate trie and hashed-state overlay.
+    ///
+    /// This is used when the caller already has validated in-memory trie data for the logical
+    /// parent state and needs proof/hash cursors to expose that state without relying on the
+    /// in-memory canonical tree manager.
+    pub fn with_trie_state_overlay(
+        mut self,
+        trie: Arc<TrieUpdatesSorted>,
+        state: Arc<HashedPostStateSorted>,
+    ) -> Self {
+        self.overlay_source = Some(OverlaySource::Immediate { trie, state });
+        self
+    }
+
     /// Extends the existing hashed state overlay with the given [`HashedPostStateSorted`].
     ///
     /// If no overlay exists, creates an immediate overlay with the given state.
@@ -202,7 +216,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     return Err(ProviderError::other(std::io::Error::other(format!(
                         "anchor_hash {anchor_hash} doesn't match OverlayBuilder's configured parent ({})",
                         self.parent_hash
-                    ))))
+                    ))));
                 }
                 Ok((Arc::clone(trie), Arc::clone(state)))
             }
@@ -249,7 +263,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     {
         // If the anchor is the DB tip then there won't be any reverts necessary.
         if db_tip_block.hash == anchor_hash {
-            return Ok(None)
+            return Ok(None);
         }
 
         let anchor_number = provider

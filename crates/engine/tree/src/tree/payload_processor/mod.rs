@@ -1025,6 +1025,7 @@ mod tests {
     };
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
     use rand::Rng;
+    use reth_chain_state::BalStateOverlay;
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
@@ -1035,12 +1036,13 @@ mod tests {
     use reth_provider::{
         providers::{BlockchainProvider, OverlayBuilder, OverlayStateProviderFactory},
         test_utils::create_test_provider_factory_with_chain_spec,
-        ChainSpecProvider, HashingWriter,
+        ChainSpecProvider, HashingWriter, StateRootProvider,
     };
     use reth_revm::db::BundleState;
     use reth_testing_utils::generators;
-    use reth_trie::{test_utils::state_root, HashedPostState};
+    use reth_trie::{test_utils::state_root, HashedPostState, HashedStorage};
     use reth_trie_db::ChangesetCache;
+    use reth_trie_parallel::state_root_task::StateRootMessage;
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
     use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
     use std::sync::Arc;
@@ -1382,6 +1384,78 @@ mod tests {
             root_from_task, root_from_regular,
             "State root mismatch: task={root_from_task}, base={root_from_regular}"
         );
+    }
+
+    #[test]
+    fn speculative_bal_overlay_sparse_root_matches_sync_root() {
+        reth_tracing::init_test_tracing();
+
+        let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+        let genesis_hash = init_genesis(&factory).unwrap();
+
+        let parent_address = Address::repeat_byte(0x11);
+        let parent_slot = B256::from(U256::from(1));
+        let parent_storage_value = U256::from(2);
+        let parent_account = Account { balance: U256::from(3), nonce: 4, bytecode_hash: None };
+        let hashed_parent_address = alloy_primitives::keccak256(parent_address);
+        let parent_hashed_state = HashedPostState::default()
+            .with_accounts([(hashed_parent_address, Some(parent_account))])
+            .with_storages([(
+                hashed_parent_address,
+                HashedStorage::from_iter(
+                    false,
+                    [(alloy_primitives::keccak256(parent_slot), parent_storage_value)],
+                ),
+            )]);
+
+        let parent_provider = factory.history_by_block_hash(genesis_hash).unwrap();
+        let (parent_root, parent_trie_updates) = parent_provider
+            .state_root_with_updates(parent_hashed_state.clone())
+            .expect("parent BAL root should compute");
+
+        let child_address = Address::repeat_byte(0x22);
+        let child_account = Account { balance: U256::from(5), nonce: 6, bytecode_hash: None };
+        let child_hashed_state = HashedPostState::default()
+            .with_accounts([(alloy_primitives::keccak256(child_address), Some(child_account))]);
+
+        let mut bal_overlay = BalStateOverlay::default();
+        bal_overlay.set_account(parent_address, parent_account);
+        bal_overlay.set_storage(parent_address, parent_slot, parent_storage_value);
+        let sync_parent_provider =
+            bal_overlay.provider(factory.history_by_block_hash(genesis_hash).unwrap());
+        let (sync_child_root, _) = sync_parent_provider
+            .state_root_with_updates(child_hashed_state.clone())
+            .expect("child root over BAL parent should compute");
+
+        let provider = BlockchainProvider::new(factory).unwrap();
+        let overlay_factory = OverlayStateProviderFactory::new(
+            provider,
+            OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new())
+                .with_trie_state_overlay(
+                    Arc::new(parent_trie_updates.clone_into_sorted()),
+                    Arc::new(parent_hashed_state.clone_into_sorted()),
+                ),
+        );
+        let payload_processor = PayloadProcessor::new(
+            reth_tasks::Runtime::test(),
+            EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            &TreeConfig::default(),
+            PrecompileCacheMap::default(),
+        );
+
+        let mut handle = payload_processor.spawn_state_root(
+            overlay_factory,
+            parent_root,
+            false,
+            &TreeConfig::default(),
+        );
+        handle.updates_tx().send(StateRootMessage::HashedStateUpdate(child_hashed_state)).unwrap();
+        handle.updates_tx().send(StateRootMessage::FinishedStateUpdates).unwrap();
+
+        let sparse_child_root =
+            handle.state_root().expect("sparse trie task should finish").state_root;
+
+        assert_eq!(sparse_child_root, sync_child_root);
     }
 
     /// Tests the full prewarm lifecycle for a fork block:

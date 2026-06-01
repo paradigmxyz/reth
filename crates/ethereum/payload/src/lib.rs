@@ -27,7 +27,11 @@ use reth_evm::{
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_cache::{CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider};
-use reth_payload_builder::{BlobSidecars, EthBuiltPayload, PayloadStateAnchor};
+use reth_payload_builder::{
+    record_payload_builder_sparse_trie_wait, record_payload_builder_state_root_mode,
+    record_payload_builder_sync_state_root, BlobSidecars, EthBuiltPayload,
+    PayloadBuilderStateRootMode, PayloadStateAnchor,
+};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadAttributes;
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
@@ -39,7 +43,7 @@ use reth_transaction_pool::{
     ValidPoolTransaction,
 };
 use revm::context_interface::{Block as _, Cfg as _};
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 use tracing::{debug, trace, warn};
 
 mod config;
@@ -214,8 +218,31 @@ where
     } = args;
     let PayloadConfig { parent_header, attributes, payload_id } = config;
 
+    let state_root_mode = match (trie_handle.is_some(), state_anchor.is_speculative()) {
+        (true, true) => PayloadBuilderStateRootMode::SpeculativeSparseTrie,
+        (true, false) => PayloadBuilderStateRootMode::SharedSparseTrie,
+        (false, _) => PayloadBuilderStateRootMode::SyncFallback,
+    };
+    record_payload_builder_state_root_mode(state_root_mode);
+
     if state_anchor.validity_dependency().is_some_and(|token| token.should_discard()) {
         return Ok(BuildOutcome::Cancelled)
+    }
+
+    if state_anchor.is_speculative() && trie_handle.is_none() {
+        record_payload_builder_sync_state_root(
+            PayloadBuilderStateRootMode::SyncFallback,
+            "missing_trie_handle",
+            Default::default(),
+        );
+        warn!(
+            target: "payload_builder",
+            id=%payload_id,
+            "refusing speculative payload build without sparse trie handle"
+        );
+        return Err(PayloadBuilderError::other(std::io::Error::other(
+            "speculative payload build missing sparse trie handle",
+        )))
     }
 
     let mut state_provider = if let Some(provider) = state_anchor.state_provider() {
@@ -500,6 +527,10 @@ where
         }
     }
 
+    if state_anchor.validity_dependency().is_some_and(|token| token.should_discard()) {
+        return Ok(BuildOutcome::Cancelled)
+    }
+
     // check if we have a better block
     if !is_better_payload(best_payload.as_ref(), total_fees) {
         // Release db
@@ -518,23 +549,69 @@ where
 
         // The sparse trie has been computing incrementally alongside tx execution.
         // This recv() waits for the final root hash — most work is already done.
-        // Fall back to sync state root if the trie pipeline fails.
+        // Canonical builds fall back to sync state root if the trie pipeline fails. Speculative
+        // builds fail explicitly because the caller requested a sparse-trie-backed parent state.
+        let wait_started = Instant::now();
         match handle.state_root() {
             Ok(outcome) => {
-                debug!(target: "payload_builder", id=%payload_id, state_root=?outcome.state_root, "received state root from sparse trie");
+                record_payload_builder_sparse_trie_wait(state_root_mode, wait_started.elapsed());
+                debug!(
+                    target: "payload_builder",
+                    id=%payload_id,
+                    mode = state_root_mode.as_str(),
+                    state_root=?outcome.state_root,
+                    "received state root from sparse trie"
+                );
                 builder.finish(
                     state_provider.as_ref(),
                     Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates))),
                 )?
             }
             Err(err) => {
+                let wait_duration = wait_started.elapsed();
+                record_payload_builder_sparse_trie_wait(state_root_mode, wait_duration);
+                if state_anchor.is_speculative() {
+                    record_payload_builder_sync_state_root(
+                        state_root_mode,
+                        "sparse_trie_error",
+                        Default::default(),
+                    );
+                    warn!(
+                        target: "payload_builder",
+                        id=%payload_id,
+                        %err,
+                        "sparse trie failed for speculative payload build"
+                    );
+                    return Err(PayloadBuilderError::other(std::io::Error::other(format!(
+                        "speculative payload sparse trie failed: {err}"
+                    ))))
+                }
+
                 warn!(target: "payload_builder", id=%payload_id, %err, "sparse trie failed, falling back to sync state root");
-                builder.finish(state_provider.as_ref(), None)?
+                let finish_started = Instant::now();
+                let outcome = builder.finish(state_provider.as_ref(), None)?;
+                record_payload_builder_sync_state_root(
+                    state_root_mode,
+                    "sparse_trie_error",
+                    finish_started.elapsed(),
+                );
+                outcome
             }
         }
     } else {
-        builder.finish(state_provider.as_ref(), None)?
+        let finish_started = Instant::now();
+        let outcome = builder.finish(state_provider.as_ref(), None)?;
+        record_payload_builder_sync_state_root(
+            PayloadBuilderStateRootMode::SyncFallback,
+            "missing_trie_handle",
+            finish_started.elapsed(),
+        );
+        outcome
     };
+
+    if state_anchor.validity_dependency().is_some_and(|token| token.should_discard()) {
+        return Ok(BuildOutcome::Cancelled)
+    }
 
     let requests = chain_spec
         .is_prague_active_at_timestamp(attributes.timestamp)

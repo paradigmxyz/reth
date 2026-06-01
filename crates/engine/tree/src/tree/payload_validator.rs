@@ -59,7 +59,8 @@ use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
 use reth_chain_state::{
-    CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats,
+    BalStateOverlay, CanonicalInMemoryState, ComputedTrieData, DeferredTrieData, ExecutedBlock,
+    ExecutionTimingStats,
 };
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -71,6 +72,13 @@ use reth_evm::{
     OnStateHook, SpecFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
+use reth_metrics::{
+    metrics::{Counter, Histogram},
+    Metrics,
+};
+use reth_payload_builder::{
+    PayloadStateAnchor, PayloadValidityToken, SpeculativePayloadState, SpeculativeStateProvider,
+};
 use reth_payload_primitives::{
     BuiltPayload, BuiltPayloadExecutedBlock, InvalidPayloadAttributesError, NewPayloadError,
     PayloadTypes,
@@ -93,11 +101,12 @@ use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::{Address, KECCAK_EMPTY};
 use std::{
     collections::HashMap,
+    fmt,
     panic::{self, AssertUnwindSafe},
     sync::{
         atomic::{AtomicUsize, Ordering},
         mpsc::RecvTimeoutError,
-        Arc,
+        Arc, LazyLock,
     },
     time::Duration,
 };
@@ -208,6 +217,181 @@ where
     custom_state_root: Option<CustomStateRoot<Evm::Primitives>>,
 }
 
+/// Request for sparse-trie-backed payload build resources over an uncanonicalized BAL parent.
+#[derive(Clone, Debug)]
+pub struct SpeculativeBalPayloadBuildRequest {
+    /// Hash of the candidate parent block `B`.
+    pub parent_hash: B256,
+    /// State root from `B`'s header.
+    pub parent_state_root: B256,
+    /// State root computed while validating `B`.
+    ///
+    /// This must match `parent_state_root`, otherwise the request is rejected before
+    /// spawning speculative payload resources.
+    pub validated_parent_state_root: B256,
+    /// Canonical or otherwise available state anchor `A` that `B_BAL` applies on top of.
+    pub parent_state_anchor: B256,
+    /// Final-write BAL overlay for parent `B`.
+    pub bal_overlay: BalStateOverlay,
+    /// Validated trie data for parent `B`, sorted and ready to expose through trie/hash cursors.
+    pub parent_trie_data: ComputedTrieData,
+    /// Optional parent-validity dependency for downstream cancellation.
+    pub validity_dependency: Option<PayloadValidityToken>,
+}
+
+/// Sparse-trie-backed resources for building a speculative child payload.
+#[derive(Debug)]
+pub struct SpeculativePayloadBuildResources {
+    /// State anchor that opens reads over `A + B_BAL`.
+    pub state_anchor: PayloadStateAnchor,
+    /// Execution cache keyed by speculative parent `B`, if cache sharing is enabled.
+    pub cache: Option<SavedCache>,
+    /// Sparse-trie task rooted at `B.header.state_root`.
+    pub trie_handle: StateRootHandle,
+}
+
+impl SpeculativePayloadBuildResources {
+    /// Converts resources into the payload-builder fields used by
+    /// [`reth_payload_builder::BuildNewPayload`].
+    pub fn into_payload_builder_parts(
+        self,
+    ) -> (PayloadStateAnchor, Option<SavedCache>, Option<StateRootHandle>) {
+        (self.state_anchor, self.cache, Some(self.trie_handle))
+    }
+}
+
+/// Explicit reason a speculative BAL payload build must fall back or fail.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpeculativeBalPayloadBuildFallbackReason {
+    /// Sparse-trie sharing with the payload builder is disabled by configuration.
+    SparseTrieSharingDisabled,
+    /// The provided validity token guards a different parent hash.
+    ParentValidityTokenMismatch,
+    /// The parent-validity dependency has already been invalidated.
+    ParentAlreadyInvalid,
+    /// The state root validated for `B` does not match `B.header.state_root`.
+    ParentStateRootMismatch {
+        /// State root from `B`'s header.
+        expected: B256,
+        /// State root produced during validation.
+        got: B256,
+    },
+    /// The BAL overlay does not match the validated hashed post-state for `B`.
+    BalHashedStateMismatch {
+        /// Number of updates in the validated parent trie data.
+        expected_updates: usize,
+        /// Number of updates materialized from the BAL overlay.
+        got_updates: usize,
+    },
+    /// The state anchor `A` could not be opened.
+    StateAnchorUnavailable,
+}
+
+impl SpeculativeBalPayloadBuildFallbackReason {
+    /// Stable metric label for the fallback reason.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SparseTrieSharingDisabled => "sparse_trie_sharing_disabled",
+            Self::ParentValidityTokenMismatch => "parent_validity_token_mismatch",
+            Self::ParentAlreadyInvalid => "parent_already_invalid",
+            Self::ParentStateRootMismatch { .. } => "parent_state_root_mismatch",
+            Self::BalHashedStateMismatch { .. } => "bal_hashed_state_mismatch",
+            Self::StateAnchorUnavailable => "state_anchor_unavailable",
+        }
+    }
+}
+
+impl fmt::Display for SpeculativeBalPayloadBuildFallbackReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Error returned when speculative BAL payload resources cannot be created safely.
+#[derive(Debug)]
+pub struct SpeculativeBalPayloadBuildError {
+    reason: SpeculativeBalPayloadBuildFallbackReason,
+    source: Option<ProviderError>,
+}
+
+impl SpeculativeBalPayloadBuildError {
+    fn new(reason: SpeculativeBalPayloadBuildFallbackReason) -> Self {
+        SPECULATIVE_BAL_PAYLOAD_BUILD_METRICS.record_failure(reason);
+        Self { reason, source: None }
+    }
+
+    fn with_source(
+        reason: SpeculativeBalPayloadBuildFallbackReason,
+        source: ProviderError,
+    ) -> Self {
+        SPECULATIVE_BAL_PAYLOAD_BUILD_METRICS.record_failure(reason);
+        Self { reason, source: Some(source) }
+    }
+
+    /// Returns the explicit fallback reason.
+    pub const fn reason(&self) -> SpeculativeBalPayloadBuildFallbackReason {
+        self.reason
+    }
+}
+
+impl fmt::Display for SpeculativeBalPayloadBuildError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "failed to create speculative BAL payload build resources: {}", self.reason)
+    }
+}
+
+impl std::error::Error for SpeculativeBalPayloadBuildError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source.as_ref().map(|err| err as &(dyn std::error::Error + 'static))
+    }
+}
+
+/// Metrics for speculative BAL payload build resource creation.
+#[derive(Metrics)]
+#[metrics(scope = "engine.speculative_bal_payload_build")]
+struct SpeculativeBalPayloadBuildMetrics {
+    /// Total sparse-trie resource creation attempts.
+    sparse_trie_handle_creation_attempts: Counter,
+    /// Total successful sparse-trie resource creations.
+    sparse_trie_handle_creation_success: Counter,
+    /// Total failed sparse-trie resource creations.
+    sparse_trie_handle_creation_failure: Counter,
+    /// Number of BAL overlay account entries.
+    bal_overlay_accounts: Histogram,
+    /// Number of BAL overlay storage slot entries.
+    bal_overlay_storage_slots: Histogram,
+    /// Number of BAL overlay bytecode entries.
+    bal_overlay_bytecodes: Histogram,
+    /// Time spent constructing and validating the BAL hashed overlay.
+    bal_hashed_overlay_construct_duration_seconds: Histogram,
+}
+
+impl SpeculativeBalPayloadBuildMetrics {
+    fn record_attempt(&self) {
+        self.sparse_trie_handle_creation_attempts.increment(1);
+    }
+
+    fn record_success(&self, overlay: &BalStateOverlay, overlay_duration: Duration) {
+        self.sparse_trie_handle_creation_success.increment(1);
+        self.bal_overlay_accounts.record(overlay.account_count() as f64);
+        self.bal_overlay_storage_slots.record(overlay.storage_slot_count() as f64);
+        self.bal_overlay_bytecodes.record(overlay.bytecode_count() as f64);
+        self.bal_hashed_overlay_construct_duration_seconds.record(overlay_duration.as_secs_f64());
+    }
+
+    fn record_failure(&self, reason: SpeculativeBalPayloadBuildFallbackReason) {
+        self.sparse_trie_handle_creation_failure.increment(1);
+        metrics::counter!(
+            "engine_speculative_bal_payload_build_fallback_total",
+            "reason" => reason.as_str()
+        )
+        .increment(1);
+    }
+}
+
+static SPECULATIVE_BAL_PAYLOAD_BUILD_METRICS: LazyLock<SpeculativeBalPayloadBuildMetrics> =
+    LazyLock::new(SpeculativeBalPayloadBuildMetrics::default);
+
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
 where
     N: NodePrimitives,
@@ -269,6 +453,128 @@ where
     pub fn with_custom_state_root(mut self, custom_state_root: CustomStateRoot<N>) -> Self {
         self.custom_state_root = Some(custom_state_root);
         self
+    }
+
+    /// Creates payload-builder resources for a speculative child built on uncanonicalized BAL
+    /// parent `B`.
+    ///
+    /// The returned state anchor opens execution reads over `A + B_BAL`, while the returned
+    /// [`StateRootHandle`] is rooted at `B.header.state_root` and expects the child payload's
+    /// execution updates to be streamed through its state hook.
+    #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all, fields(parent = ?request.parent_hash, anchor = ?request.parent_state_anchor))]
+    pub fn speculative_bal_payload_build_resources(
+        &self,
+        request: SpeculativeBalPayloadBuildRequest,
+    ) -> Result<SpeculativePayloadBuildResources, SpeculativeBalPayloadBuildError> {
+        SPECULATIVE_BAL_PAYLOAD_BUILD_METRICS.record_attempt();
+
+        if !self.config.share_sparse_trie_with_payload_builder() {
+            return Err(SpeculativeBalPayloadBuildError::new(
+                SpeculativeBalPayloadBuildFallbackReason::SparseTrieSharingDisabled,
+            ));
+        }
+
+        if let Some(token) = &request.validity_dependency {
+            if token.parent_hash() != request.parent_hash {
+                return Err(SpeculativeBalPayloadBuildError::new(
+                    SpeculativeBalPayloadBuildFallbackReason::ParentValidityTokenMismatch,
+                ));
+            }
+
+            if token.should_discard() {
+                return Err(SpeculativeBalPayloadBuildError::new(
+                    SpeculativeBalPayloadBuildFallbackReason::ParentAlreadyInvalid,
+                ));
+            }
+        }
+
+        if request.validated_parent_state_root != request.parent_state_root {
+            return Err(SpeculativeBalPayloadBuildError::new(
+                SpeculativeBalPayloadBuildFallbackReason::ParentStateRootMismatch {
+                    expected: request.parent_state_root,
+                    got: request.validated_parent_state_root,
+                },
+            ));
+        }
+
+        let overlay_start = Instant::now();
+        let fallback =
+            self.provider.state_by_block_hash(request.parent_state_anchor).map_err(|err| {
+                SpeculativeBalPayloadBuildError::with_source(
+                    SpeculativeBalPayloadBuildFallbackReason::StateAnchorUnavailable,
+                    err,
+                )
+            })?;
+        let actual_hashed_overlay = request
+            .bal_overlay
+            .clone()
+            .provider(fallback)
+            .hashed_overlay_state()
+            .map_err(|err| {
+                SpeculativeBalPayloadBuildError::with_source(
+                    SpeculativeBalPayloadBuildFallbackReason::StateAnchorUnavailable,
+                    err,
+                )
+            })?
+            .into_sorted();
+        let overlay_duration = overlay_start.elapsed();
+
+        if actual_hashed_overlay != *request.parent_trie_data.hashed_state {
+            return Err(SpeculativeBalPayloadBuildError::new(
+                SpeculativeBalPayloadBuildFallbackReason::BalHashedStateMismatch {
+                    expected_updates: request.parent_trie_data.hashed_state.total_len(),
+                    got_updates: actual_hashed_overlay.total_len(),
+                },
+            ));
+        }
+
+        let provider_factory = self.provider.clone();
+        let parent_state_anchor = request.parent_state_anchor;
+        let bal_overlay = request.bal_overlay.clone();
+        let state_provider = SpeculativeStateProvider::new(
+            format!("bal-overlay:{}", request.parent_hash),
+            move || {
+                let fallback = provider_factory.state_by_block_hash(parent_state_anchor)?;
+                Ok(Box::new(bal_overlay.clone().provider(fallback)) as StateProviderBox)
+            },
+        );
+        let state_anchor = PayloadStateAnchor::Speculative(SpeculativePayloadState {
+            validity_dependency: request.validity_dependency.clone(),
+            state_provider: Some(state_provider),
+        });
+
+        let overlay_builder =
+            OverlayBuilder::<N>::new(request.parent_state_anchor, self.changeset_cache.clone())
+                .with_trie_state_overlay(
+                    request.parent_trie_data.trie_updates.clone(),
+                    request.parent_trie_data.hashed_state.clone(),
+                );
+        let overlay_factory =
+            OverlayStateProviderFactory::new(self.provider.clone(), overlay_builder);
+        let trie_handle = self.payload_processor.spawn_state_root(
+            overlay_factory,
+            request.parent_state_root,
+            // Full proof workers — tx count unknown when a downstream caller requests resources.
+            false,
+            &self.config,
+        );
+        let cache = self
+            .config
+            .share_execution_cache_with_payload_builder()
+            .then(|| self.payload_processor.cache_for(request.parent_hash));
+
+        SPECULATIVE_BAL_PAYLOAD_BUILD_METRICS
+            .record_success(&request.bal_overlay, overlay_duration);
+        debug!(
+            target: "engine::tree::payload_validator",
+            parent = ?request.parent_hash,
+            parent_state_root = ?request.parent_state_root,
+            anchor = ?request.parent_state_anchor,
+            cache = cache.is_some(),
+            "created speculative BAL payload build resources"
+        );
+
+        Ok(SpeculativePayloadBuildResources { state_anchor, cache, trie_handle })
     }
 
     /// Converts a [`BlockOrPayload`] to a recovered block.
@@ -397,7 +703,7 @@ where
                     Ok(val) => val,
                     Err(e) => {
                         let block = validated_block.try_into_inner().expect("sole handle")?;
-                        return Err(InsertBlockError::new(block, e.into()).into())
+                        return Err(InsertBlockError::new(block, e.into()).into());
                     }
                 }
             };
@@ -425,7 +731,7 @@ where
                 return Err(validated_block
                     .try_into_inner()
                     .expect("sole handle")
-                    .expect_err("Err result checked"))
+                    .expect_err("Err result checked"));
             }
         }
 
@@ -440,7 +746,7 @@ where
                 validated_block.try_into_inner().expect("sole handle")?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
-            .into())
+            .into());
         };
         drop(_enter);
 
@@ -834,7 +1140,7 @@ where
         if let Err(err) = hashed_state_validate_result {
             // call post-block hook
             self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
-            return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into())
+            return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into());
         }
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
@@ -863,7 +1169,7 @@ where
                 )
                 .into(),
             )
-            .into())
+            .into());
         }
 
         let timing_stats = state_provider_stats.filter(|_| slow_block_enabled).map(|stats| {
@@ -1628,7 +1934,7 @@ where
         ) {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
-            return Err(err.into())
+            return Err(err.into());
         }
         drop(_enter);
 
@@ -1734,7 +2040,7 @@ where
                 self.provider.clone(),
                 historical,
                 Some(blocks),
-            )))
+            )));
         }
 
         // Check if the block is persisted
@@ -1742,7 +2048,7 @@ where
             debug!(target: "engine::tree::payload_validator", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
             // For persisted blocks, we create a builder that will fetch state directly from the
             // database
-            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)))
+            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)));
         }
 
         debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
@@ -1776,7 +2082,7 @@ where
     ) {
         if state.invalid_headers.get(&block.hash()).is_some() {
             // we already marked this block as invalid
-            return
+            return;
         }
         self.invalid_block_hook.on_invalid_block(parent_header, block, output, trie_updates);
     }
