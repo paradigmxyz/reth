@@ -212,13 +212,13 @@ where
     DB: Database,
 {
     let built_bal = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
-    if tracing::enabled!(target: "engine::tree::payload_processor::bal", tracing::Level::DEBUG) &&
+    if tracing::enabled!(target: "engine::tree::payload_processor::bal", tracing::Level::TRACE) &&
         built_bal.as_slice() != received_bal.as_slice()
     {
         let rebuilt = compute_block_access_list_hash(built_bal.as_slice());
         let expected = compute_block_access_list_hash(received_bal.as_slice());
         let div = received_bal.diff(built_bal.as_slice());
-        tracing::debug!(
+        tracing::trace!(
             target: "engine::tree::payload_processor::bal",
             %rebuilt,
             %expected,
