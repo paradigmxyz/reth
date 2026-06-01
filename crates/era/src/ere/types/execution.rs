@@ -43,8 +43,8 @@ pub const TOTAL_DIFFICULTY: [u8; 2] = [0x06, 0x00];
 /// `Accumulator` record type
 pub const ACCUMULATOR: [u8; 2] = [0x07, 0x00];
 
-/// Maximum number of blocks in an `ERE` file, limited by accumulator size
-pub const MAX_BLOCKS_PER_ERE: usize = 8192;
+/// Maximum number of blocks in an `ERE` file, limited by accumulator size.
+pub const MAX_BLOCKS_PER_ERE: usize = crate::common::MAX_ENTRIES_PER_ERA as usize;
 
 /// Compressed block header using `snappyFramed(rlp(header))`
 #[derive(Debug, Clone)]
@@ -337,13 +337,28 @@ impl Proof {
             return Err(E2sError::Rlp("Expected RLP list for Proof entry".to_string()));
         }
 
-        let proof_type_byte = u8::decode(&mut buf)
+        // A proof is exactly the two-item list `[proof-type, ssz(proof-object)]`. Pin decoding to
+        // the list's own payload so nothing outside it slips through: bytes after the list end, or
+        // a third item inside it, both fail instead of being silently dropped.
+        if buf.len() != header.payload_length {
+            return Err(E2sError::Rlp(format!(
+                "Trailing bytes after Proof list: {} byte(s) beyond the list payload",
+                buf.len().saturating_sub(header.payload_length)
+            )));
+        }
+        let mut payload = &buf[..header.payload_length];
+
+        let proof_type_byte = u8::decode(&mut payload)
             .map_err(|e| E2sError::Rlp(format!("Failed to decode proof type: {e}")))?;
         let proof_type = ProofType::from_byte(proof_type_byte)
             .ok_or_else(|| E2sError::Rlp(format!("Unknown proof type: {proof_type_byte}")))?;
 
-        let ssz_bytes = alloy_primitives::Bytes::decode(&mut buf)
+        let ssz_bytes = alloy_primitives::Bytes::decode(&mut payload)
             .map_err(|e| E2sError::Rlp(format!("Failed to decode proof SSZ bytes: {e}")))?;
+
+        if !payload.is_empty() {
+            return Err(E2sError::Rlp("Unexpected extra items in Proof list".to_string()));
+        }
 
         Ok((proof_type, ssz_bytes.to_vec()))
     }
@@ -826,6 +841,40 @@ mod tests {
     fn test_from_entry_rejects_wrong_type() {
         let entry = Entry::new(COMPRESSED_BODY, vec![1, 2, 3]);
         assert!(CompressedHeader::from_entry(&entry).is_err());
+    }
+
+    #[test]
+    fn test_decode_rejects_trailing_bytes() {
+        // A record is exactly `snappyFramed(rlp(...))`; an extra byte after the RLP value
+        // must be rejected, not silently ignored.
+        let mut rlp = Vec::new();
+        7u64.encode(&mut rlp);
+        rlp.push(0xff);
+        let compressed = CompressedHeader::from_rlp(&rlp).unwrap();
+        assert!(compressed.decode::<u64>().is_err());
+    }
+
+    #[test]
+    fn test_proof_decode_rejects_trailing_bytes() {
+        let valid = Proof::encode(ProofType::BlockProofHistoricalRoots, &[1, 2, 3]).unwrap();
+        let mut raw = snappy_decompress(&valid.data).unwrap();
+        raw.push(0xff); // byte beyond the RLP list
+        let tampered = Proof::new(snappy_compress(&raw).unwrap());
+        assert!(tampered.decode().is_err());
+    }
+
+    #[test]
+    fn test_proof_decode_rejects_extra_list_item() {
+        // Build rlp([proof-type, ssz, extra]) — a third item must be rejected.
+        let mut payload = Vec::new();
+        0u8.encode(&mut payload);
+        alloy_primitives::Bytes::from(vec![1, 2, 3]).encode(&mut payload);
+        99u8.encode(&mut payload);
+        let mut rlp = Vec::new();
+        alloy_rlp::Header { list: true, payload_length: payload.len() }.encode(&mut rlp);
+        rlp.extend_from_slice(&payload);
+        let proof = Proof::new(snappy_compress(&rlp).unwrap());
+        assert!(proof.decode().is_err());
     }
 
     #[test]
