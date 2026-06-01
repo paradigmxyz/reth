@@ -20,6 +20,9 @@ pub use deferred_trie::*;
 mod state_trie_overlay;
 pub use state_trie_overlay::*;
 
+mod bal_overlay;
+pub use bal_overlay::{BalOverlayStateProvider, BalStateOverlay};
+
 mod noop;
 
 mod chain_info;

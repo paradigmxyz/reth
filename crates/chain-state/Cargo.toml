@@ -25,8 +25,10 @@ reth-trie.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
+alloy-eip7928.workspace = true
 alloy-primitives = { workspace = true, features = ["std"] }
 alloy-consensus.workspace = true
+revm-bytecode.workspace = true
 revm-database.workspace = true
 revm-state = { workspace = true, optional = true }
 

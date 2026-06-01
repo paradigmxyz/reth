@@ -22,7 +22,7 @@ use std::{
     fmt,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
-        Arc,
+        Arc, Weak,
     },
     time::Duration,
 };
@@ -706,6 +706,9 @@ pub struct ExecutionCache(Arc<ExecutionCacheInner>);
 /// Inner state of the [`ExecutionCache`], wrapped in a single [`Arc`].
 #[derive(Debug)]
 struct ExecutionCacheInner {
+    /// Original total cache size used to derive fixed-cache capacities.
+    total_cache_size: usize,
+
     /// Cache for contract bytecode, keyed by code hash.
     code_cache: FixedCache<B256, Option<Bytecode>, FbBuildHasher<32>>,
 
@@ -764,6 +767,7 @@ impl ExecutionCache {
         let account_stats = Arc::new(CacheStatsHandler::new(account_capacity));
 
         Self(Arc::new(ExecutionCacheInner {
+            total_cache_size,
             code_cache: FixedCache::new(code_capacity, FbBuildHasher::<32>::default())
                 .with_stats(Some(Stats::new(code_stats.clone()))),
             storage_cache: FixedCache::new(storage_capacity, DefaultHashBuilder::default())
@@ -775,6 +779,11 @@ impl ExecutionCache {
             account_stats,
             selfdestruct_encountered: Once::new(),
         }))
+    }
+
+    /// Creates a fresh cache with the same size budget as this cache.
+    pub fn new_like(&self) -> Self {
+        Self::new(self.0.total_cache_size)
     }
 
     /// Gets code from cache, or inserts using the provided function.
@@ -982,6 +991,9 @@ pub struct SavedCache {
     /// The hash of the block these caches were used to execute.
     hash: B256,
 
+    /// Monotonic generation assigned by [`crate::PayloadExecutionCache`].
+    generation: u64,
+
     /// The caches used for the provider.
     caches: ExecutionCache,
 
@@ -993,12 +1005,27 @@ pub struct SavedCache {
 impl SavedCache {
     /// Creates a new instance with the internals
     pub fn new(hash: B256, caches: ExecutionCache) -> Self {
-        Self { hash, caches, usage_guard: Arc::new(()) }
+        Self { hash, generation: 0, caches, usage_guard: Arc::new(()) }
     }
 
     /// Returns the hash for this cache
     pub const fn executed_block_hash(&self) -> B256 {
         self.hash
+    }
+
+    /// Returns the cache generation.
+    pub const fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub(crate) const fn set_generation(&mut self, generation: u64) {
+        self.generation = generation;
+    }
+
+    /// Returns a copy of this cache tagged with the given generation.
+    pub fn with_generation(mut self, generation: u64) -> Self {
+        self.set_generation(generation);
+        self
     }
 
     /// Returns true if the cache is available for use (no other tasks are currently using it).
@@ -1009,6 +1036,11 @@ impl SavedCache {
     /// Returns the current strong count of the usage guard.
     pub fn usage_count(&self) -> usize {
         Arc::strong_count(&self.usage_guard)
+    }
+
+    /// Returns a weak lease tracker for this cache generation.
+    pub fn lease_tracker(&self) -> CacheLeaseTracker {
+        CacheLeaseTracker { usage_guard: Arc::downgrade(&self.usage_guard) }
     }
 
     /// Returns the [`ExecutionCache`] belonging to the tracked hash.
@@ -1028,6 +1060,29 @@ impl SavedCache {
     pub fn clear_with_hash(&mut self, hash: B256) {
         self.hash = hash;
         self.caches.clear();
+    }
+
+    /// Creates a fresh cache with the same capacity as this cache and a new executed block hash.
+    pub fn fork_empty_with_hash(&self, hash: B256) -> Self {
+        Self::new(hash, self.caches.new_like())
+    }
+}
+
+/// Weak tracker for active leases of a saved execution-cache generation.
+#[derive(Clone, Debug)]
+pub struct CacheLeaseTracker {
+    usage_guard: Weak<()>,
+}
+
+impl CacheLeaseTracker {
+    /// Returns the number of active checked-out leases, excluding the cache manager's stored copy.
+    pub fn active_leases(&self) -> usize {
+        self.usage_guard.strong_count().saturating_sub(1)
+    }
+
+    /// Returns true if at least one checked-out lease is still active.
+    pub fn has_active_leases(&self) -> bool {
+        self.active_leases() > 0
     }
 }
 

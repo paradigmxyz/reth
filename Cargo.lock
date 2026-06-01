@@ -7620,6 +7620,7 @@ name = "reth-chain-state"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eip7928 0.4.1",
  "alloy-eips",
  "alloy-primitives",
  "alloy-signer",
@@ -7640,6 +7641,7 @@ dependencies = [
  "reth-tasks",
  "reth-testing-utils",
  "reth-trie",
+ "revm-bytecode",
  "revm-database",
  "revm-state",
  "serde",
@@ -9459,6 +9461,7 @@ dependencies = [
  "reth-payload-builder-primitives",
  "reth-payload-primitives",
  "reth-primitives-traits",
+ "reth-storage-api",
  "reth-trie-parallel",
  "tokio",
  "tokio-stream",

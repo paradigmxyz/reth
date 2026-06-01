@@ -48,6 +48,9 @@ where
                 PayloadServiceCommand::BuildNewPayload(input, _, tx) => {
                     tx.send(Ok(input.payload_id())).ok()
                 }
+                PayloadServiceCommand::BuildNewPayloadWithState(input, _, tx) => {
+                    tx.send(Ok(input.payload_id())).ok()
+                }
                 PayloadServiceCommand::BestPayload(_, tx) => tx.send(None).ok(),
                 PayloadServiceCommand::PayloadTimestamp(_, tx) => tx.send(None).ok(),
                 PayloadServiceCommand::Resolve(_, _, tx) => tx.send(None).ok(),

@@ -1051,7 +1051,7 @@ mod tests {
     }
 
     #[test]
-    fn execution_cache_allows_single_checkout() {
+    fn execution_cache_allows_overlapping_checkouts() {
         let execution_cache = PayloadExecutionCache::default();
         let hash = B256::from([1u8; 32]);
 
@@ -1061,9 +1061,10 @@ mod tests {
         assert!(first.is_some(), "expected initial checkout to succeed");
 
         let second = execution_cache.get_cache_for(hash);
-        assert!(second.is_none(), "second checkout should be blocked while guard is active");
+        assert!(second.is_some(), "matching hash checkouts should be allowed to overlap");
 
         drop(first);
+        drop(second);
 
         let third = execution_cache.get_cache_for(hash);
         assert!(third.is_some(), "third checkout should succeed after guard is dropped");
@@ -1087,24 +1088,18 @@ mod tests {
     }
 
     #[test]
-    fn execution_cache_mismatch_parent_clears_and_returns() {
+    fn execution_cache_mismatch_parent_returns_none_without_retagging() {
         let execution_cache = PayloadExecutionCache::default();
         let hash = B256::from([3u8; 32]);
 
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
 
-        // When the parent hash doesn't match (fork block), the cache is cleared,
-        // hash updated on the original, and clone returned for reuse
         let different_hash = B256::from([4u8; 32]);
         let cache = execution_cache.get_cache_for(different_hash);
-        assert!(cache.is_some(), "cache should be returned for reuse after clearing");
+        assert!(cache.is_none(), "mismatched parent should use an isolated cache");
 
-        drop(cache);
-
-        // The stored cache now has the fork block's parent hash.
-        // Canonical chain looking for original hash sees a mismatch → clears and reuses.
         let original = execution_cache.get_cache_for(hash);
-        assert!(original.is_some(), "canonical chain gets cache back via mismatch+clear");
+        assert!(original.is_some(), "canonical generation should remain available");
     }
 
     #[test]
@@ -1392,12 +1387,10 @@ mod tests {
     /// Tests the full prewarm lifecycle for a fork block:
     ///
     /// 1. Cache is at canonical block 4.
-    /// 2. Fork block (parent = block 2) checks out the cache via `get_cache_for`, simulating what
-    ///    `PrewarmCacheTask` does when it receives a `SavedCache`.
-    /// 3. Prewarm populates the shared cache with fork-specific state.
-    /// 4. While the prewarm clone is alive, the cache is unavailable (`usage_guard` > 1).
-    /// 5. Prewarm drops without calling `save_cache` (fork block was invalid).
-    /// 6. Canonical block 5 (parent = block 4) must get a cache with correct hash and no stale fork
+    /// 2. Fork block (parent = block 2) gets an isolated cache because the current generation does
+    ///    not match.
+    /// 3. Prewarm populates the isolated fork cache with fork-specific state.
+    /// 4. Canonical block 5 (parent = block 4) must get a cache with correct hash and no stale fork
     ///    data.
     #[test]
     fn fork_prewarm_dropped_without_save_does_not_corrupt_cache() {
@@ -1407,33 +1400,30 @@ mod tests {
         let block4_hash = B256::from([4u8; 32]);
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(block4_hash)));
 
-        // Fork block arrives with parent = block 2. Prewarm task checks out the cache.
-        // This simulates PrewarmCacheTask receiving a SavedCache clone from get_cache_for.
+        // Fork block arrives with parent = block 2. Prewarm task gets an isolated cache because
+        // the published generation is anchored at block 4.
         let fork_parent = B256::from([2u8; 32]);
-        let prewarm_cache = execution_cache.get_cache_for(fork_parent);
-        assert!(prewarm_cache.is_some(), "prewarm should obtain cache for fork block");
-        let prewarm_cache = prewarm_cache.unwrap();
+        let prewarm_cache = execution_cache
+            .get_cache_for(fork_parent)
+            .unwrap_or_else(|| make_saved_cache(fork_parent));
         assert_eq!(prewarm_cache.executed_block_hash(), fork_parent);
 
-        // Prewarm populates cache with fork-specific state (ancestor data for block 2).
-        // Since ExecutionCache uses Arc<Inner>, this data is shared with the stored original.
+        // Prewarm populates the isolated cache with fork-specific state.
         let fork_addr = Address::from([0xBB; 20]);
         let fork_key = B256::from([0xCC; 32]);
         prewarm_cache.cache().insert_storage(fork_addr, fork_key, Some(U256::from(999)));
 
-        // While prewarm holds the clone, the usage_guard count > 1 → cache is in use.
+        // The canonical generation remains available while fork prewarm owns its isolated cache.
         let during_prewarm = execution_cache.get_cache_for(block4_hash);
         assert!(
-            during_prewarm.is_none(),
-            "cache must be unavailable while prewarm holds a reference"
+            during_prewarm.is_some(),
+            "canonical cache remains available while isolated fork prewarm runs"
         );
 
         // Fork block fails — prewarm task drops without calling save_cache/update_with_guard.
         drop(prewarm_cache);
 
         // Canonical block 5 arrives (parent = block 4).
-        // Stored hash = fork_parent (our fix), so get_cache_for sees a mismatch,
-        // clears the stale fork data, and returns a cache with hash = block4_hash.
         let block5_cache = execution_cache.get_cache_for(block4_hash);
         assert!(
             block5_cache.is_some(),
@@ -1444,5 +1434,11 @@ mod tests {
             block4_hash,
             "cache must carry the canonical parent hash, not the fork parent"
         );
+        let fork_storage = block5_cache
+            .unwrap()
+            .cache()
+            .get_or_try_insert_storage_with(fork_addr, fork_key, || Ok::<_, ()>(U256::ZERO))
+            .expect("cache read should succeed");
+        assert_eq!(fork_storage, CachedStatus::NotCached(U256::ZERO));
     }
 }

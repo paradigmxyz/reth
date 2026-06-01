@@ -16,7 +16,8 @@ use futures_util::FutureExt;
 use reth_chain_state::CanonStateNotification;
 use reth_execution_cache::SavedCache;
 use reth_payload_builder::{
-    BuildNewPayload, KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator,
+    BuildNewPayload, BuildNewPayloadWithState, KeepPayloadJobAlive, PayloadId, PayloadJob,
+    PayloadJobGenerator, PayloadStateAnchor,
 };
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
@@ -129,9 +130,7 @@ impl<Client, Builder> BasicPayloadJobGenerator<Client, Builder> {
     }
 }
 
-// === impl BasicPayloadJobGenerator ===
-
-impl<Client, Builder> PayloadJobGenerator for BasicPayloadJobGenerator<Client, Builder>
+impl<Client, Builder> BasicPayloadJobGenerator<Client, Builder>
 where
     Client: StateProviderFactory
         + BlockReaderIdExt<Header = HeaderForPayload<Builder::BuiltPayload>>
@@ -142,13 +141,12 @@ where
     Builder::Attributes: Unpin + Clone,
     Builder::BuiltPayload: Unpin + Clone,
 {
-    type Job = BasicPayloadJob<Builder>;
-
-    fn new_payload_job(
+    fn new_payload_job_with_anchor(
         &self,
         input: BuildNewPayload<Builder::Attributes>,
         id: PayloadId,
-    ) -> Result<Self::Job, PayloadBuilderError> {
+        state_anchor: PayloadStateAnchor,
+    ) -> Result<BasicPayloadJob<Builder>, PayloadBuilderError> {
         let parent_header = if input.parent_hash.is_zero() {
             // Use latest header for genesis block case
             self.client
@@ -172,6 +170,7 @@ where
 
         let mut job = BasicPayloadJob {
             config,
+            state_anchor,
             executor: self.executor.clone(),
             deadline,
             // ticks immediately
@@ -190,6 +189,38 @@ where
         job.spawn_build_job();
 
         Ok(job)
+    }
+}
+
+// === impl BasicPayloadJobGenerator ===
+
+impl<Client, Builder> PayloadJobGenerator for BasicPayloadJobGenerator<Client, Builder>
+where
+    Client: StateProviderFactory
+        + BlockReaderIdExt<Header = HeaderForPayload<Builder::BuiltPayload>>
+        + Clone
+        + Unpin
+        + 'static,
+    Builder: PayloadBuilder + Unpin + 'static,
+    Builder::Attributes: Unpin + Clone,
+    Builder::BuiltPayload: Unpin + Clone,
+{
+    type Job = BasicPayloadJob<Builder>;
+
+    fn new_payload_job(
+        &self,
+        input: BuildNewPayload<Builder::Attributes>,
+        id: PayloadId,
+    ) -> Result<Self::Job, PayloadBuilderError> {
+        self.new_payload_job_with_anchor(input, id, PayloadStateAnchor::Canonical)
+    }
+
+    fn new_payload_job_with_state(
+        &self,
+        input: BuildNewPayloadWithState<Builder::Attributes>,
+        id: PayloadId,
+    ) -> Result<Self::Job, PayloadBuilderError> {
+        self.new_payload_job_with_anchor(input.payload, id, input.state_anchor)
     }
 
     fn on_new_state<N: NodePrimitives>(&mut self, new_state: CanonStateNotification<N>) {
@@ -317,6 +348,8 @@ where
 {
     /// The configuration for how the payload will be created.
     config: PayloadConfig<Builder::Attributes, HeaderForPayload<Builder::BuiltPayload>>,
+    /// State anchor selected for this payload job.
+    state_anchor: PayloadStateAnchor,
     /// How to spawn building tasks
     executor: Runtime,
     /// The deadline when this job should resolve.
@@ -365,6 +398,7 @@ where
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let execution_cache = self.execution_cache.clone();
         let trie_handle = self.trie_handle.take();
+        let state_anchor = self.state_anchor.clone();
         let builder = self.builder.clone();
         let executor = self.executor.clone();
         self.executor.spawn_task(async move {
@@ -380,7 +414,7 @@ where
                     cancel,
                     best_payload,
                 };
-                let result = builder.try_build(args);
+                let result = builder.try_build_with_state_anchor(args, state_anchor);
                 let _ = tx.send(result);
             });
         });
@@ -480,7 +514,10 @@ where
             // started right away and the first full block should have been
             // built by the time CL is requesting the payload.
             self.metrics.inc_requested_empty_payload();
-            self.builder.build_empty_payload(self.config.clone())
+            self.builder.build_empty_payload_with_state_anchor(
+                self.config.clone(),
+                self.state_anchor.clone(),
+            )
         }
     }
 
@@ -517,7 +554,8 @@ where
                 best_payload: None,
             };
 
-            match self.builder.on_missing_payload(args) {
+            match self.builder.on_missing_payload_with_state_anchor(args, self.state_anchor.clone())
+            {
                 MissingPayloadBehaviour::AwaitInProgress => {
                     debug!(target: "payload_builder", id=%self.config.payload_id(), "awaiting in progress payload build job");
                 }
@@ -529,11 +567,13 @@ where
                     // no payload built yet, so we need to return an empty payload
                     let (tx, rx) = oneshot::channel();
                     let config = self.config.clone();
+                    let state_anchor = self.state_anchor.clone();
                     let builder = self.builder.clone();
                     self.executor.spawn_blocking_named_or_tokio(
                         PAYLOAD_BUILDER_THREAD_NAME,
                         move || {
-                            let res = builder.build_empty_payload(config);
+                            let res =
+                                builder.build_empty_payload_with_state_anchor(config, state_anchor);
                             let _ = tx.send(res);
                         },
                     );
@@ -907,6 +947,19 @@ pub trait PayloadBuilder: Send + Sync + Clone {
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError>;
 
+    /// Tries to build a payload against an explicit state anchor.
+    ///
+    /// The default implementation preserves canonical parent-hash behavior for builders that do
+    /// not opt in to speculative state.
+    fn try_build_with_state_anchor(
+        &self,
+        args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
+        state_anchor: PayloadStateAnchor,
+    ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
+        let _ = state_anchor;
+        self.try_build(args)
+    }
+
     /// Invoked when the payload job is being resolved and there is no payload yet.
     ///
     /// This can happen if the CL requests a payload before the first payload has been built.
@@ -917,11 +970,31 @@ pub trait PayloadBuilder: Send + Sync + Clone {
         MissingPayloadBehaviour::RaceEmptyPayload
     }
 
+    /// Invoked when resolving a state-anchored payload job without a built payload yet.
+    fn on_missing_payload_with_state_anchor(
+        &self,
+        args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
+        state_anchor: PayloadStateAnchor,
+    ) -> MissingPayloadBehaviour<Self::BuiltPayload> {
+        let _ = state_anchor;
+        self.on_missing_payload(args)
+    }
+
     /// Builds an empty payload without any transaction.
     fn build_empty_payload(
         &self,
         config: PayloadConfig<Self::Attributes, HeaderForPayload<Self::BuiltPayload>>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError>;
+
+    /// Builds an empty payload against an explicit state anchor.
+    fn build_empty_payload_with_state_anchor(
+        &self,
+        config: PayloadConfig<Self::Attributes, HeaderForPayload<Self::BuiltPayload>>,
+        state_anchor: PayloadStateAnchor,
+    ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
+        let _ = state_anchor;
+        self.build_empty_payload(config)
+    }
 }
 
 /// Tells the payload builder how to react to payload request if there's no payload available yet.

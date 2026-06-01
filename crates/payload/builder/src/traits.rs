@@ -7,7 +7,7 @@ use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
 use reth_primitives_traits::NodePrimitives;
 use std::future::Future;
 
-use crate::service::BuildNewPayload;
+use crate::service::{BuildNewPayload, BuildNewPayloadWithState};
 
 /// A type that can build a payload.
 ///
@@ -114,6 +114,18 @@ pub trait PayloadJobGenerator {
         input: BuildNewPayload<<Self::Job as PayloadJob>::PayloadAttributes>,
         id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError>;
+
+    /// Creates a payload job with an explicit state anchor.
+    ///
+    /// Implementors that do not support speculative state can rely on the default implementation,
+    /// which preserves the canonical parent-hash behavior.
+    fn new_payload_job_with_state(
+        &self,
+        input: BuildNewPayloadWithState<<Self::Job as PayloadJob>::PayloadAttributes>,
+        id: PayloadId,
+    ) -> Result<Self::Job, PayloadBuilderError> {
+        self.new_payload_job(input.payload, id)
+    }
 
     /// Handles new chain state events
     ///

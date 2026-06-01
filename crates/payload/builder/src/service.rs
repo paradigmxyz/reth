@@ -16,11 +16,16 @@ use reth_execution_cache::SavedCache;
 use reth_payload_builder_primitives::{Events, PayloadBuilderError, PayloadEvents};
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind, PayloadTypes};
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_storage_api::{errors::provider::ProviderResult, StateProviderBox};
 use reth_trie_parallel::state_root_task::StateRootHandle;
 use std::{
+    fmt,
     future::Future,
     pin::Pin,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU8, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
 };
 use tokio::sync::{
@@ -130,6 +135,26 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
         let span = debug_span!(parent: Span::current(), "payload_job");
         let _ =
             self.to_service.send(PayloadServiceCommand::BuildNewPayload(input.into(), span, tx));
+        rx
+    }
+
+    /// Sends a message to the service to start building a payload against an explicit state anchor.
+    ///
+    /// This is intended for opt-in downstream builders that need to build against a supplied
+    /// speculative state provider while making the parent validity dependency explicit.
+    pub fn send_new_payload_with_state_anchor(
+        &self,
+        input: BuildNewPayload<T::PayloadAttributes>,
+        state_anchor: PayloadStateAnchor,
+    ) -> Receiver<Result<PayloadId, PayloadBuilderError>> {
+        let (tx, rx) = oneshot::channel();
+        let span = debug_span!(parent: Span::current(), "payload_job");
+        let input = BuildNewPayloadWithState::new(input, state_anchor);
+        let _ = self.to_service.send(PayloadServiceCommand::BuildNewPayloadWithState(
+            input.into(),
+            span,
+            tx,
+        ));
         rx
     }
 
@@ -483,6 +508,54 @@ where
 
                         let _ = tx.send(res);
                     }
+                    PayloadServiceCommand::BuildNewPayloadWithState(input, job_span, tx) => {
+                        let id = input.payload_id();
+                        let mut res = Ok(id);
+                        let parent = input.parent_hash();
+
+                        if this.contains_payload(id) {
+                            debug!(target: "payload_builder", %id, %parent, "Payload job already in progress, ignoring.");
+                        } else {
+                            let start = Instant::now();
+                            let attributes = input.payload.attributes.clone();
+                            let job_result = {
+                                let _entered = job_span.enter();
+                                this.generator.new_payload_job_with_state(*input, id)
+                            };
+
+                            match job_result {
+                                Ok(job) => {
+                                    this.metrics.new_job_duration_seconds.record(start.elapsed());
+                                    info!(target: "payload_builder", %id, %parent, "New payload job created");
+                                    this.metrics.inc_initiated_jobs();
+                                    new_job = true;
+                                    this.payload_jobs.push((job, id, job_span));
+                                    this.payload_events.send(Events::Attributes(attributes)).ok();
+
+                                    // Clear stale cached payload for this id so resolve() never
+                                    // returns an outdated result from a previous job with the same
+                                    // id.
+                                    if this
+                                        .cached_payload_rx
+                                        .borrow()
+                                        .as_ref()
+                                        .is_some_and(|(cached_id, _, _)| *cached_id == id)
+                                    {
+                                        trace!(target: "payload_builder", %id, "clearing stale cached payload for reused payload id");
+                                        let _ = this.cached_payload_tx.send(None);
+                                    }
+                                }
+                                Err(err) => {
+                                    this.metrics.new_job_duration_seconds.record(start.elapsed());
+                                    this.metrics.inc_failed_jobs();
+                                    warn!(target: "payload_builder", %err, %id, "Failed to create payload builder job");
+                                    res = Err(err);
+                                }
+                            }
+                        }
+
+                        let _ = tx.send(res);
+                    }
                     PayloadServiceCommand::BestPayload(id, tx) => {
                         let _ = tx.send(this.best_payload(id));
                     }
@@ -519,6 +592,12 @@ pub enum PayloadServiceCommand<T: PayloadTypes> {
         Span,
         oneshot::Sender<Result<PayloadId, PayloadBuilderError>>,
     ),
+    /// Start building a new payload against an explicit state anchor.
+    BuildNewPayloadWithState(
+        Box<BuildNewPayloadWithState<T::PayloadAttributes>>,
+        Span,
+        oneshot::Sender<Result<PayloadId, PayloadBuilderError>>,
+    ),
     /// Get the best payload so far
     BestPayload(PayloadId, oneshot::Sender<Option<Result<T::BuiltPayload, PayloadBuilderError>>>),
     /// Get the payload timestamp for the given payload
@@ -552,5 +631,329 @@ impl<T: PayloadAttributes> BuildNewPayload<T> {
     /// Returns the payload id for the new payload.
     pub fn payload_id(&self) -> PayloadId {
         self.attributes.payload_id(&self.parent_hash)
+    }
+}
+
+/// A request to build a new payload against an explicit state anchor.
+#[derive(Debug)]
+pub struct BuildNewPayloadWithState<T> {
+    /// The original payload build request.
+    pub payload: BuildNewPayload<T>,
+    /// State anchor to use for the payload build.
+    pub state_anchor: PayloadStateAnchor,
+}
+
+impl<T> BuildNewPayloadWithState<T> {
+    /// Creates a new anchored payload build request.
+    pub const fn new(payload: BuildNewPayload<T>, state_anchor: PayloadStateAnchor) -> Self {
+        Self { payload, state_anchor }
+    }
+
+    /// Returns the parent hash of the new payload.
+    pub const fn parent_hash(&self) -> B256 {
+        self.payload.parent_hash
+    }
+}
+
+impl<T: PayloadAttributes> BuildNewPayloadWithState<T> {
+    /// Returns the payload id for the new payload.
+    pub fn payload_id(&self) -> PayloadId {
+        self.payload.payload_id()
+    }
+}
+
+impl<T> From<BuildNewPayload<T>> for BuildNewPayloadWithState<T> {
+    fn from(payload: BuildNewPayload<T>) -> Self {
+        Self::new(payload, PayloadStateAnchor::Canonical)
+    }
+}
+
+/// State anchor used by an opt-in payload build.
+#[derive(Clone, Debug, Default)]
+pub enum PayloadStateAnchor {
+    /// Build against the canonical provider selected by the parent hash.
+    #[default]
+    Canonical,
+    /// Build against an explicitly supplied speculative state.
+    Speculative(SpeculativePayloadState),
+}
+
+impl PayloadStateAnchor {
+    /// Returns `true` if this anchor is speculative.
+    pub const fn is_speculative(&self) -> bool {
+        matches!(self, Self::Speculative(_))
+    }
+
+    /// Returns the speculative state provider factory, if one was supplied.
+    pub fn state_provider(&self) -> Option<&SpeculativeStateProvider> {
+        match self {
+            Self::Canonical => None,
+            Self::Speculative(state) => state.state_provider.as_ref(),
+        }
+    }
+
+    /// Returns the validity dependency for this state anchor.
+    pub fn validity_dependency(&self) -> Option<&PayloadValidityToken> {
+        match self {
+            Self::Canonical => None,
+            Self::Speculative(state) => state.validity_dependency.as_ref(),
+        }
+    }
+}
+
+/// Speculative parent state for an opt-in payload build.
+#[derive(Clone, Debug)]
+pub struct SpeculativePayloadState {
+    /// Validity dependency that must resolve before the result is treated as publishable.
+    pub validity_dependency: Option<PayloadValidityToken>,
+    /// Factory for constructing the state provider used by each build attempt.
+    pub state_provider: Option<SpeculativeStateProvider>,
+}
+
+impl SpeculativePayloadState {
+    /// Creates a speculative state anchor with a parent validity dependency.
+    pub const fn new(validity_dependency: PayloadValidityToken) -> Self {
+        Self { validity_dependency: Some(validity_dependency), state_provider: None }
+    }
+
+    /// Attaches a state provider factory.
+    pub fn with_state_provider(mut self, state_provider: SpeculativeStateProvider) -> Self {
+        self.state_provider = Some(state_provider);
+        self
+    }
+}
+
+/// Factory for opening a state provider for a speculative payload build.
+#[derive(Clone)]
+pub struct SpeculativeStateProvider {
+    label: Arc<str>,
+    factory: Arc<dyn Fn() -> ProviderResult<StateProviderBox> + Send + Sync>,
+}
+
+impl SpeculativeStateProvider {
+    /// Creates a new speculative state provider factory.
+    pub fn new(
+        label: impl Into<Arc<str>>,
+        factory: impl Fn() -> ProviderResult<StateProviderBox> + Send + Sync + 'static,
+    ) -> Self {
+        Self { label: label.into(), factory: Arc::new(factory) }
+    }
+
+    /// Returns a human-readable label for diagnostics.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// Opens a new state provider.
+    pub fn open(&self) -> ProviderResult<StateProviderBox> {
+        (self.factory)()
+    }
+}
+
+impl fmt::Debug for SpeculativeStateProvider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SpeculativeStateProvider")
+            .field("label", &self.label)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Shared validity token for a speculative payload parent.
+#[derive(Clone, Debug)]
+pub struct PayloadValidityToken {
+    parent_hash: B256,
+    status: Arc<AtomicU8>,
+}
+
+impl PayloadValidityToken {
+    const PENDING: u8 = 0;
+    const VALID: u8 = 1;
+    const INVALID: u8 = 2;
+
+    /// Creates a pending validity token for a speculative parent.
+    pub fn pending(parent_hash: B256) -> Self {
+        Self { parent_hash, status: Arc::new(AtomicU8::new(Self::PENDING)) }
+    }
+
+    /// Returns the parent hash guarded by this token.
+    pub const fn parent_hash(&self) -> B256 {
+        self.parent_hash
+    }
+
+    /// Marks the parent as valid.
+    pub fn mark_valid(&self) {
+        self.status.store(Self::VALID, Ordering::Release);
+    }
+
+    /// Marks the parent as invalid.
+    pub fn mark_invalid(&self) {
+        self.status.store(Self::INVALID, Ordering::Release);
+    }
+
+    /// Returns the current validity status.
+    pub fn status(&self) -> PayloadValidityStatus {
+        match self.status.load(Ordering::Acquire) {
+            Self::VALID => PayloadValidityStatus::Valid,
+            Self::INVALID => PayloadValidityStatus::Invalid,
+            _ => PayloadValidityStatus::Pending,
+        }
+    }
+
+    /// Returns `true` if speculative work guarded by this token should be discarded.
+    pub fn should_discard(&self) -> bool {
+        matches!(self.status(), PayloadValidityStatus::Invalid)
+    }
+}
+
+/// Current status of a speculative parent validity dependency.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PayloadValidityStatus {
+    /// Parent validation has not resolved yet.
+    Pending,
+    /// Parent validation succeeded.
+    Valid,
+    /// Parent validation failed.
+    Invalid,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};
+    use alloy_primitives::{Address, B256};
+    use reth_chain_state::CanonStateNotification;
+    use reth_ethereum_engine_primitives::{EthBuiltPayload, EthEngineTypes, EthPayloadAttributes};
+    use reth_payload_primitives::PayloadKind;
+    use std::{
+        sync::{Arc, Mutex},
+        task::Poll,
+    };
+
+    #[derive(Debug)]
+    struct CapturingGenerator {
+        captured_anchor: Arc<Mutex<Option<PayloadStateAnchor>>>,
+    }
+
+    impl PayloadJobGenerator for CapturingGenerator {
+        type Job = CapturingJob;
+
+        fn new_payload_job(
+            &self,
+            input: BuildNewPayload<EthPayloadAttributes>,
+            id: PayloadId,
+        ) -> Result<Self::Job, PayloadBuilderError> {
+            self.new_payload_job_with_state(input.into(), id)
+        }
+
+        fn new_payload_job_with_state(
+            &self,
+            input: BuildNewPayloadWithState<EthPayloadAttributes>,
+            _id: PayloadId,
+        ) -> Result<Self::Job, PayloadBuilderError> {
+            *self.captured_anchor.lock().unwrap() = Some(input.state_anchor);
+            Ok(CapturingJob { attributes: input.payload.attributes })
+        }
+    }
+
+    #[derive(Debug)]
+    struct CapturingJob {
+        attributes: EthPayloadAttributes,
+    }
+
+    impl Future for CapturingJob {
+        type Output = Result<(), PayloadBuilderError>;
+
+        fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+            Poll::Pending
+        }
+    }
+
+    impl PayloadJob for CapturingJob {
+        type PayloadAttributes = EthPayloadAttributes;
+        type ResolvePayloadFuture =
+            futures_util::future::Ready<Result<EthBuiltPayload, PayloadBuilderError>>;
+        type BuiltPayload = EthBuiltPayload;
+
+        fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError> {
+            Err(PayloadBuilderError::MissingPayload)
+        }
+
+        fn payload_attributes(&self) -> Result<Self::PayloadAttributes, PayloadBuilderError> {
+            Ok(self.attributes.clone())
+        }
+
+        fn payload_timestamp(&self) -> Result<u64, PayloadBuilderError> {
+            Ok(self.attributes.timestamp)
+        }
+
+        fn resolve_kind(
+            &mut self,
+            _kind: PayloadKind,
+        ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+            (
+                futures_util::future::ready(Err(PayloadBuilderError::MissingPayload)),
+                KeepPayloadJobAlive::No,
+            )
+        }
+    }
+
+    fn test_attributes() -> EthPayloadAttributes {
+        EthPayloadAttributes {
+            timestamp: 1,
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: Address::ZERO,
+            withdrawals: None,
+            parent_beacon_block_root: None,
+            slot_number: None,
+        }
+    }
+
+    #[test]
+    fn send_new_payload_with_state_anchor_reaches_generator() {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        rt.block_on(async {
+            let captured_anchor = Arc::new(Mutex::new(None));
+            let generator = CapturingGenerator { captured_anchor: captured_anchor.clone() };
+            let (service, handle) = PayloadBuilderService::<_, _, EthEngineTypes>::new(
+                generator,
+                futures_util::stream::empty::<CanonStateNotification>(),
+            );
+            let service_task = tokio::spawn(service);
+
+            let parent_hash = B256::from([0x42; 32]);
+            let token = PayloadValidityToken::pending(parent_hash);
+            let state_anchor = PayloadStateAnchor::Speculative(
+                SpeculativePayloadState::new(token.clone()).with_state_provider(
+                    SpeculativeStateProvider::new("test-overlay", || {
+                        panic!("test should not open the provider")
+                    }),
+                ),
+            );
+            let input = BuildNewPayload {
+                attributes: test_attributes(),
+                parent_hash,
+                cache: None,
+                trie_handle: None,
+            };
+            let expected_payload_id = input.payload_id();
+
+            let payload_id = handle
+                .send_new_payload_with_state_anchor(input, state_anchor)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(payload_id, expected_payload_id);
+
+            let captured = captured_anchor.lock().unwrap().take().unwrap();
+            assert!(captured.is_speculative());
+            let captured_token = captured.validity_dependency().unwrap();
+            assert_eq!(captured_token.parent_hash(), parent_hash);
+            assert_eq!(captured.state_provider().unwrap().label(), "test-overlay");
+
+            token.mark_invalid();
+            assert!(captured_token.should_discard());
+
+            service_task.abort();
+        });
     }
 }

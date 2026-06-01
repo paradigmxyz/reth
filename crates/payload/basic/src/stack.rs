@@ -4,7 +4,7 @@ use crate::{
 };
 
 use alloy_primitives::{Bytes, B256, U256};
-use reth_payload_builder::PayloadId;
+use reth_payload_builder::{PayloadId, PayloadStateAnchor};
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes};
 use reth_primitives_traits::{NodePrimitives, SealedBlock};
 
@@ -167,6 +167,14 @@ where
         &self,
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
+        self.try_build_with_state_anchor(args, PayloadStateAnchor::Canonical)
+    }
+
+    fn try_build_with_state_anchor(
+        &self,
+        args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
+        state_anchor: PayloadStateAnchor,
+    ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
         let BuildArguments {
             cached_reads,
             execution_cache,
@@ -193,7 +201,9 @@ where
                         }
                     }),
                 };
-                self.left.try_build(left_args).map(|out| out.map_payload(Either::Left))
+                self.left
+                    .try_build_with_state_anchor(left_args, state_anchor)
+                    .map(|out| out.map_payload(Either::Left))
             }
             Either::Right(right_attr) => {
                 let right_args = BuildArguments {
@@ -210,7 +220,9 @@ where
                         }
                     }),
                 };
-                self.right.try_build(right_args).map(|out| out.map_payload(Either::Right))
+                self.right
+                    .try_build_with_state_anchor(right_args, state_anchor)
+                    .map(|out| out.map_payload(Either::Right))
             }
         }
     }
@@ -219,16 +231,28 @@ where
         &self,
         config: PayloadConfig<Self::Attributes, HeaderForPayload<Self::BuiltPayload>>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
+        self.build_empty_payload_with_state_anchor(config, PayloadStateAnchor::Canonical)
+    }
+
+    fn build_empty_payload_with_state_anchor(
+        &self,
+        config: PayloadConfig<Self::Attributes, HeaderForPayload<Self::BuiltPayload>>,
+        state_anchor: PayloadStateAnchor,
+    ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         match config {
             PayloadConfig { parent_header, attributes: Either::Left(left_attr), payload_id } => {
                 let left_config =
                     PayloadConfig { parent_header, attributes: left_attr, payload_id };
-                self.left.build_empty_payload(left_config).map(Either::Left)
+                self.left
+                    .build_empty_payload_with_state_anchor(left_config, state_anchor)
+                    .map(Either::Left)
             }
             PayloadConfig { parent_header, attributes: Either::Right(right_attr), payload_id } => {
                 let right_config =
                     PayloadConfig { parent_header, attributes: right_attr, payload_id };
-                self.right.build_empty_payload(right_config).map(Either::Right)
+                self.right
+                    .build_empty_payload_with_state_anchor(right_config, state_anchor)
+                    .map(Either::Right)
             }
         }
     }

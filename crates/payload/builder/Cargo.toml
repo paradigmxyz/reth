@@ -20,6 +20,7 @@ reth-payload-builder-primitives.workspace = true
 reth-payload-primitives.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-trie-parallel.workspace = true
+reth-storage-api.workspace = true
 
 # alloy
 alloy-consensus.workspace = true

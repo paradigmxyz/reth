@@ -27,7 +27,7 @@ use reth_evm::{
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_cache::{CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider};
-use reth_payload_builder::{BlobSidecars, EthBuiltPayload};
+use reth_payload_builder::{BlobSidecars, EthBuiltPayload, PayloadStateAnchor};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadAttributes;
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
@@ -91,12 +91,21 @@ where
         &self,
         args: BuildArguments<EthPayloadAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
-        default_ethereum_payload(
+        self.try_build_with_state_anchor(args, PayloadStateAnchor::Canonical)
+    }
+
+    fn try_build_with_state_anchor(
+        &self,
+        args: BuildArguments<EthPayloadAttributes, EthBuiltPayload>,
+        state_anchor: PayloadStateAnchor,
+    ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
+        default_ethereum_payload_with_state_anchor(
             self.evm_config.clone(),
             self.client.clone(),
             self.pool.clone(),
             self.builder_config.clone(),
             args,
+            state_anchor,
             |attributes| self.pool.best_transactions_with_attributes(attributes),
         )
     }
@@ -116,6 +125,14 @@ where
         &self,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<EthBuiltPayload, PayloadBuilderError> {
+        self.build_empty_payload_with_state_anchor(config, PayloadStateAnchor::Canonical)
+    }
+
+    fn build_empty_payload_with_state_anchor(
+        &self,
+        config: PayloadConfig<Self::Attributes>,
+        state_anchor: PayloadStateAnchor,
+    ) -> Result<EthBuiltPayload, PayloadBuilderError> {
         let args = BuildArguments::new(
             Default::default(),
             Default::default(),
@@ -125,12 +142,13 @@ where
             None,
         );
 
-        default_ethereum_payload(
+        default_ethereum_payload_with_state_anchor(
             self.evm_config.clone(),
             self.client.clone(),
             self.pool.clone(),
             self.builder_config.clone(),
             args,
+            state_anchor,
             |_| -> BestTransactionsIter<Pool> { Box::new(std::iter::empty()) },
         )?
         .into_payload()
@@ -158,6 +176,34 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
+    default_ethereum_payload_with_state_anchor(
+        evm_config,
+        client,
+        pool,
+        builder_config,
+        args,
+        PayloadStateAnchor::Canonical,
+        best_txs,
+    )
+}
+
+/// Constructs an Ethereum transaction payload against an explicit state anchor.
+#[inline]
+pub fn default_ethereum_payload_with_state_anchor<EvmConfig, Client, Pool, F>(
+    evm_config: EvmConfig,
+    client: Client,
+    pool: Pool,
+    builder_config: EthereumBuilderConfig,
+    args: BuildArguments<EthPayloadAttributes, EthBuiltPayload>,
+    state_anchor: PayloadStateAnchor,
+    best_txs: F,
+) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
+where
+    EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
+    F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
+{
     let BuildArguments {
         mut cached_reads,
         execution_cache,
@@ -168,7 +214,21 @@ where
     } = args;
     let PayloadConfig { parent_header, attributes, payload_id } = config;
 
-    let mut state_provider = client.state_by_block_hash(parent_header.hash())?;
+    if state_anchor.validity_dependency().is_some_and(|token| token.should_discard()) {
+        return Ok(BuildOutcome::Cancelled)
+    }
+
+    let mut state_provider = if let Some(provider) = state_anchor.state_provider() {
+        trace!(
+            target: "payload_builder",
+            id=%payload_id,
+            label=%provider.label(),
+            "opening speculative payload state provider"
+        );
+        provider.open()?
+    } else {
+        client.state_by_block_hash(parent_header.hash())?
+    };
     if let Some(execution_cache) = execution_cache {
         state_provider = Box::new(CachedStateProvider::new(
             state_provider,
@@ -287,7 +347,9 @@ where
         }
 
         // check if the job was cancelled, if so we can exit early
-        if cancel.is_cancelled() {
+        if cancel.is_cancelled() ||
+            state_anchor.validity_dependency().is_some_and(|token| token.should_discard())
+        {
             return Ok(BuildOutcome::Cancelled)
         }
 

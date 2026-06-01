@@ -258,17 +258,11 @@ where
         });
     }
 
-    /// This method calls `ExecutionCache::update_with_guard` which requires exclusive access.
-    /// It should only be called after ensuring that:
-    /// 1. All prewarming tasks have completed execution
-    /// 2. No other concurrent operations are accessing the cache
+    /// Saves a post-execution cache generation after prewarming completes.
     ///
-    /// Saves the warmed caches back into the shared slot after prewarming completes.
-    ///
-    /// This consumes the `SavedCache` held by the task, which releases its usage guard and allows
-    /// the new, warmed cache to be inserted.
-    ///
-    /// This method is called from `run()` only after all execution tasks are complete.
+    /// The final block state is inserted into a fresh cache generation so active users of the
+    /// parent generation are not affected. Publication waits for block validity and for old leases
+    /// to be released.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn save_cache(
         self,
@@ -286,37 +280,25 @@ where
 
         if let Some(saved_cache) = saved_cache {
             debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
-            execution_cache.update_with_guard(|cached| {
-                // consumes the `SavedCache` held by the prewarming task, which releases its usage
-                // guard
-                let caches = saved_cache.cache().clone();
-                let new_cache = SavedCache::new(hash, caches);
+            let previous_generation = saved_cache.lease_tracker();
+            let new_cache = saved_cache.fork_empty_with_hash(hash);
+            drop(saved_cache);
 
-                // Insert state into cache while holding the lock
-                // Access the BundleState through the shared ExecutionOutcome
-                if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
-                    // Clear the cache on error to prevent having a polluted cache
-                    *cached = None;
-                    debug!(target: "engine::caching", "cleared execution cache on update error");
-                    return;
-                }
+            if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
+                debug!(target: "engine::caching", "discarded execution cache update after inconsistent state");
+                return;
+            }
 
-                new_cache.update_metrics(cache_state_metrics.as_ref());
+            new_cache.update_metrics(cache_state_metrics.as_ref());
 
-                if valid_block_rx.recv().is_ok() {
-                    // Replace the shared cache with the new one; the previous cache (if any) is
-                    // dropped.
-                    *cached = Some(new_cache);
-                } else {
-                    // Block was invalid; caches were already mutated by insert_state above,
-                    // so we must clear to prevent using polluted state
-                    *cached = None;
-                    debug!(target: "engine::caching", "cleared execution cache on invalid block");
-                }
-            });
+            let outcome = execution_cache.publish_cache_update(
+                new_cache,
+                Some(previous_generation),
+                Some(valid_block_rx),
+            );
 
             let elapsed = start.elapsed();
-            debug!(target: "engine::caching", parent_hash=?hash, elapsed=?elapsed, "Updated execution cache");
+            debug!(target: "engine::caching", parent_hash=?hash, ?outcome, elapsed=?elapsed, "Finished execution cache update");
 
             metrics.cache_saving_duration.set(elapsed.as_secs_f64());
         }
