@@ -13,9 +13,35 @@ where
     K: Ord + Clone + 'a,
     V: Clone + 'a,
 {
-    slices
-        .into_iter()
-        .filter(|s| !s.is_empty())
+    let mut slices = slices.into_iter().filter(|s| !s.is_empty());
+    let Some(first) = slices.next() else {
+        return Vec::new();
+    };
+    let Some(second) = slices.next() else {
+        return first.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    };
+
+    let Some(third) = slices.next() else {
+        if let Some(merged) = merge_disjoint_slices(first, second) {
+            return merged;
+        }
+
+        return core::iter::once(first)
+            .chain(core::iter::once(second))
+            .enumerate()
+            // Merge by reference: (priority, &K, &V) - avoids cloning all elements upfront
+            .map(|(i, s)| s.iter().map(move |(k, v)| (i, k, v)))
+            .kmerge_by(|(i1, k1, _), (i2, k2, _)| (k1, i1) < (k2, i2))
+            .dedup_by(|(_, k1, _), (_, k2, _)| *k1 == *k2)
+            // Clone only surviving elements after dedup
+            .map(|(_, k, v)| (k.clone(), v.clone()))
+            .collect();
+    };
+
+    core::iter::once(first)
+        .chain(core::iter::once(second))
+        .chain(core::iter::once(third))
+        .chain(slices)
         .enumerate()
         // Merge by reference: (priority, &K, &V) - avoids cloning all elements upfront
         .map(|(i, s)| s.iter().map(move |(k, v)| (i, k, v)))
@@ -24,6 +50,28 @@ where
         // Clone only surviving elements after dedup
         .map(|(_, k, v)| (k.clone(), v.clone()))
         .collect()
+}
+
+fn merge_disjoint_slices<K, V>(first: &[(K, V)], second: &[(K, V)]) -> Option<Vec<(K, V)>>
+where
+    K: Ord + Clone,
+    V: Clone,
+{
+    debug_assert!(!first.is_empty());
+    debug_assert!(!second.is_empty());
+
+    let mut out = Vec::with_capacity(first.len() + second.len());
+    if first.last().map(|(k, _)| k) < second.first().map(|(k, _)| k) {
+        out.extend(first.iter().cloned());
+        out.extend(second.iter().cloned());
+        Some(out)
+    } else if second.last().map(|(k, _)| k) < first.first().map(|(k, _)| k) {
+        out.extend(second.iter().cloned());
+        out.extend(first.iter().cloned());
+        Some(out)
+    } else {
+        None
+    }
 }
 
 /// Extend a sorted vector with another sorted vector using 2 pointer merge.
@@ -176,6 +224,24 @@ mod tests {
         let slice = vec![(1, "a"), (2, "b"), (3, "c")];
         let result = kway_merge_sorted([slice.as_slice()]);
         assert_eq!(result, vec![(1, "a"), (2, "b"), (3, "c")]);
+    }
+
+    #[test]
+    fn test_kway_merge_sorted_disjoint_slices() {
+        let slice1 = vec![(1, "a"), (2, "b")];
+        let slice2 = vec![(5, "e"), (6, "f")];
+
+        let result = kway_merge_sorted([slice1.as_slice(), slice2.as_slice()]);
+        assert_eq!(result, vec![(1, "a"), (2, "b"), (5, "e"), (6, "f")]);
+    }
+
+    #[test]
+    fn test_kway_merge_sorted_reversed_disjoint_slices() {
+        let slice1 = vec![(5, "e"), (6, "f")];
+        let slice2 = vec![(1, "a"), (2, "b")];
+
+        let result = kway_merge_sorted([slice1.as_slice(), slice2.as_slice()]);
+        assert_eq!(result, vec![(1, "a"), (2, "b"), (5, "e"), (6, "f")]);
     }
 
     #[test]
