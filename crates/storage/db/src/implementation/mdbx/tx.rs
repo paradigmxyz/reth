@@ -11,7 +11,7 @@ use reth_db_api::{
 };
 use reth_libmdbx::{ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
 use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
-use reth_tracing::tracing::{debug, instrument, trace, warn};
+use reth_tracing::tracing::{instrument, trace, warn};
 use std::{
     backtrace::Backtrace,
     collections::HashMap,
@@ -119,7 +119,7 @@ impl<K: TransactionKind> Tx<K> {
             let total_duration = start.elapsed();
 
             if outcome.is_commit() {
-                debug!(
+                trace!(
                     target: "storage::db::mdbx",
                     ?total_duration,
                     ?commit_latency,
