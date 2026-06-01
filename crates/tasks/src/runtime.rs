@@ -10,7 +10,7 @@
 use crate::pool::{build_pool_with_panic_handler, BlockingTaskGuard, BlockingTaskPool, WorkerPool};
 use crate::{
     metrics::{IncCounterOnDrop, TaskExecutorMetrics},
-    shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown},
+    shutdown::{signal, GracefulShutdown, GracefulShutdownGuard, Shutdown, Signal},
     worker_map::WorkerMap,
     PanickedTaskError, TaskEvent, TaskManager,
 };
@@ -302,6 +302,61 @@ struct RuntimeInner {
     /// The task monitors critical tasks for panics and fires the shutdown signal.
     /// Can be taken via [`Runtime::take_task_manager_handle`] to poll for panic errors.
     task_manager_handle: Mutex<Option<JoinHandle<Result<(), PanickedTaskError>>>>,
+    /// Runtime-scoped shutdown signal, fired in [`RuntimeInner::drop`]. Independent of the
+    /// panic-driven `on_shutdown` owned by [`TaskManager`]; used so OS threads spawned via
+    /// [`Runtime::spawn_critical_os_thread`] can be woken and joined before the tokio runtime
+    /// tears down its drivers.
+    runtime_shutdown_signal: Mutex<Option<Signal>>,
+    /// Receiver paired with `runtime_shutdown_signal`. Cloned into every OS thread future so
+    /// the thread exits its `block_on` when [`RuntimeInner::drop`] runs.
+    runtime_shutdown: Shutdown,
+    /// Handles for OS threads spawned via [`Runtime::spawn_critical_os_thread`].
+    /// Joined in [`RuntimeInner::drop`] before the owned tokio runtime drops, so each thread's
+    /// `Handle::block_on` returns while tokio's drivers are still alive.
+    os_thread_handles: Mutex<Vec<thread::JoinHandle<()>>>,
+}
+
+impl Drop for RuntimeInner {
+    fn drop(&mut self) {
+        // Fire the runtime-scoped shutdown signal so OS threads exit their `block_on`. This is
+        // independent of the panic-driven shutdown owned by `TaskManager`; we cannot rely on
+        // that one because `TaskManager` runs as a tokio task that may already be aborted by
+        // the time `RuntimeInner` drops at `#[tokio::test]` teardown. Recover from a poisoned
+        // mutex — failing to fire here would turn the join below into an unbounded hang.
+        drop(self.runtime_shutdown_signal.lock().unwrap_or_else(|e| e.into_inner()).take());
+
+        let handles =
+            std::mem::take(&mut *self.os_thread_handles.lock().unwrap_or_else(|e| e.into_inner()));
+
+        // A spawned future can capture a `Runtime`/`TaskExecutor` clone (e.g. the payload
+        // service keeps one in its job generator), so the last `Arc<RuntimeInner>` may be
+        // dropped by one of these OS threads itself — running this `drop` *on* that thread.
+        // There we can neither join our own handle (`JoinHandle::join` panics with EDEADLK) nor
+        // drop the owned tokio runtime (it panics with "Cannot drop a runtime in a context where
+        // blocking is not allowed", since the thread is inside `Handle::block_on`). Hand both
+        // off to a detached reaper thread: it joins every OS thread — including this one, once
+        // it unwinds out of `block_on` after we return — before dropping the runtime.
+        let current = thread::current().id();
+        if handles.iter().any(|handle| handle.thread().id() == current) {
+            let tokio_runtime = self._tokio_runtime.take();
+            let _ = thread::Builder::new().name("runtime-reaper".to_string()).spawn(move || {
+                for handle in handles {
+                    let _ = handle.join();
+                }
+                drop(tokio_runtime);
+            });
+            return;
+        }
+
+        // Common path: `RuntimeInner` drops on an external thread (e.g. the dedicated
+        // `rt-shutdown` thread, or a test thread). Join all OS threads while the tokio runtime is
+        // still alive, so each thread's `block_on` returns before the runtime (the first field)
+        // drops when fields drop in declaration order. The join is unbounded by design — a hung
+        // thread here is preferable to letting it touch tokio internals during teardown.
+        for handle in handles {
+            let _ = handle.join();
+        }
+    }
 }
 
 // ── Runtime ───────────────────────────────────────────────────────────
@@ -666,22 +721,29 @@ impl Runtime {
     }
 
     /// This spawns a critical task onto a dedicated named OS thread.
-    /// The given future resolves as soon as the [`Shutdown`] signal is received.
+    /// The given future resolves as soon as the [`Shutdown`] signal is received, or when the
+    /// owning [`Runtime`] is dropped — whichever happens first.
     ///
     /// If this task panics, the [`TaskManager`] is notified.
+    ///
+    /// The thread's [`thread::JoinHandle`] is stored on the [`Runtime`] and joined when the
+    /// [`Runtime`] drops, before the tokio runtime is allowed to drop, preventing the OS
+    /// thread from racing tokio's driver/worker teardown. Callers should not need a handle
+    /// of their own; if you do need to observe completion, send a signal from inside the
+    /// spawned future.
     pub fn spawn_critical_os_thread<F>(
         &self,
         thread_name: &'static str,
         task_name: &'static str,
         fut: F,
-    ) -> thread::JoinHandle<()>
-    where
+    ) where
         F: Future<Output = ()> + Send + 'static,
     {
         self.0.metrics.inc_critical_tasks();
         let handle = self.0.handle.clone();
         let panicked_tasks_tx = self.0.task_events_tx.clone();
         let on_shutdown = self.0.on_shutdown.clone();
+        let runtime_shutdown = self.0.runtime_shutdown.clone();
 
         let task = std::panic::AssertUnwindSafe(fut)
             .catch_unwind()
@@ -697,16 +759,24 @@ impl Runtime {
         let task = async move {
             let _inc_counter_on_drop = IncCounterOnDrop::new(finished_critical_tasks_total_metrics);
             let task = pin!(task);
-            let _ = select(on_shutdown, task).await;
+            let shutdown = async {
+                let on_shutdown = pin!(on_shutdown);
+                let runtime_shutdown = pin!(runtime_shutdown);
+                let _ = select(on_shutdown, runtime_shutdown).await;
+            };
+            let shutdown = pin!(shutdown);
+            let _ = select(shutdown, task).await;
         };
 
-        thread::Builder::new()
+        let join_handle = thread::Builder::new()
             .name(thread_name.to_string())
             .spawn(move || {
                 let _guard = handle.enter();
                 handle.block_on(task);
             })
-            .unwrap_or_else(|e| panic!("failed to spawn critical OS thread {thread_name:?}: {e}"))
+            .unwrap_or_else(|e| panic!("failed to spawn critical OS thread {thread_name:?}: {e}"));
+
+        self.0.os_thread_handles.lock().unwrap_or_else(|e| e.into_inner()).push(join_handle);
     }
 
     /// This spawns a critical task onto the runtime.
@@ -884,6 +954,8 @@ impl RuntimeBuilder {
         let (task_manager, on_shutdown, task_events_tx, graceful_tasks) =
             TaskManager::new_parts(handle.clone());
 
+        let (runtime_shutdown_signal, runtime_shutdown) = signal();
+
         #[cfg(feature = "rayon")]
         let (
             cpu_pool,
@@ -1007,6 +1079,9 @@ impl RuntimeBuilder {
             state_trie_overlay_worker_pool,
             worker_map: WorkerMap::new(),
             task_manager_handle: Mutex::new(Some(task_manager_handle)),
+            runtime_shutdown_signal: Mutex::new(Some(runtime_shutdown_signal)),
+            runtime_shutdown,
+            os_thread_handles: Mutex::new(Vec::new()),
         };
 
         Ok(Runtime(Arc::new(inner)))
@@ -1053,7 +1128,7 @@ mod tests {
         let runtime = Runtime::test();
         let (tx, rx) = std::sync::mpsc::channel();
 
-        let handle = runtime.spawn_critical_os_thread(
+        runtime.spawn_critical_os_thread(
             "critical-os-test",
             "critical os thread test",
             async move {
@@ -1064,7 +1139,83 @@ mod tests {
 
         let name = rx.recv_timeout(Duration::from_secs(5)).unwrap();
         assert_eq!(name, "critical-os-test");
-        handle.join().unwrap();
+        // Runtime drop at end of scope joins the OS thread.
+    }
+
+    #[test]
+    fn critical_os_thread_joined_on_runtime_drop() {
+        // Regression test: OS threads spawned via spawn_critical_os_thread used to leak past
+        // the owning Runtime's drop, racing tokio's driver/worker teardown and SIGSEGVing on
+        // `#[tokio::test]` runtime drop. Verify the runtime now joins them in its Drop.
+        //
+        // We loop to give the race a chance to manifest if the join logic regresses, and
+        // assert via an exit marker that every spawned future actually ran its destructors
+        // before `drop(runtime)` returned.
+        struct ExitMarker(Arc<AtomicUsize>);
+        impl Drop for ExitMarker {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        for _ in 0..20 {
+            let runtime = Runtime::test();
+            let exited = Arc::new(AtomicUsize::new(0));
+            let spawned = 4usize;
+
+            for _ in 0..spawned {
+                let marker = ExitMarker(exited.clone());
+                runtime.spawn_critical_os_thread(
+                    "drop-join-test",
+                    "drop join test task",
+                    async move {
+                        let _marker = marker;
+                        // Park on tokio internals so block_on depends on the runtime being
+                        // alive. Only the shutdown signal can resolve this future.
+                        tokio::time::sleep(Duration::from_secs(60)).await;
+                    },
+                );
+            }
+
+            drop(runtime);
+            assert_eq!(
+                exited.load(Ordering::SeqCst),
+                spawned,
+                "Runtime drop did not join all OS threads before returning"
+            );
+        }
+    }
+
+    #[test]
+    fn os_thread_dropping_last_arc_completes_cleanly() {
+        // An OS-thread future may capture a `Runtime`/`TaskExecutor` clone (the payload service
+        // does). If that thread drops the *last* `Arc<RuntimeInner>`, `RuntimeInner::drop` runs
+        // on that very thread, where joining its own handle panics with EDEADLK and dropping the
+        // owned tokio runtime panics ("drop a runtime in an async context"). Both must be handed
+        // off so the drop completes cleanly; otherwise `done_tx` below is never sent.
+        let runtime = Runtime::test();
+        let (proceed_tx, proceed_rx) = std::sync::mpsc::channel::<()>();
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+
+        let captured = runtime.clone();
+        runtime.spawn_critical_os_thread("self-join-test", "self join test task", async move {
+            // Hold an `Arc<RuntimeInner>` for the life of this future.
+            let captured = captured;
+            // Wait until the test thread has dropped its own `Runtime` handle.
+            let _ = proceed_rx.recv();
+            // Dropping the last `Arc` here runs `RuntimeInner::drop` on *this* OS thread.
+            drop(captured);
+            // Only reached if that drop returned cleanly (no self-join panic / deadlock).
+            let _ = done_tx.send(());
+        });
+
+        // Test thread releases its handle first, so the OS thread now holds the last `Arc`.
+        drop(runtime);
+        proceed_tx.send(()).unwrap();
+
+        done_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("RuntimeInner::drop on its own OS thread did not complete cleanly");
     }
 
     #[test]
@@ -1072,7 +1223,7 @@ mod tests {
         let runtime = Runtime::test();
         let manager_handle = runtime.take_task_manager_handle().unwrap();
 
-        let handle = runtime.spawn_critical_os_thread(
+        runtime.spawn_critical_os_thread(
             "critical-os-panic",
             "critical os thread panic test",
             async { panic!("critical os thread panic") },
@@ -1082,7 +1233,7 @@ mod tests {
             runtime.handle().block_on(async move { manager_handle.await.unwrap().unwrap_err() });
         assert_eq!(err.task_name, "critical os thread panic test");
         assert_eq!(err.error, Some("critical os thread panic".to_string()));
-        handle.join().unwrap();
+        // Runtime drop at end of scope joins the OS thread.
     }
 
     #[cfg(feature = "rayon")]
