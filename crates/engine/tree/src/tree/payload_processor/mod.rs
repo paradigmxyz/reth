@@ -390,9 +390,11 @@ where
 
     /// Spawns a state-root computation pipeline backed by a private sparse-trie copy.
     ///
-    /// The shared preserved trie is cloned synchronously and advanced with `base_trie_updates`.
-    /// Validation keeps using the original preserved trie, while this handle can build on top of
-    /// `parent_state_root` without mutating the shared sparse-trie cache.
+    /// The shared preserved trie is cloned synchronously when it can already represent
+    /// `parent_state_root`. Validation keeps using the original preserved trie, while this handle
+    /// can build on top of `parent_state_root` without mutating the shared sparse-trie cache. If
+    /// the parent has trie updates that require leaf post-state, this falls back to a fresh sparse
+    /// trie handle instead of cloning stale state.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     pub fn spawn_state_root_with_updated_sparse_trie_snapshot<F>(
         &self,

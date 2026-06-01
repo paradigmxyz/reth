@@ -121,11 +121,15 @@ impl PreservedSparseTrie {
         Self::Cleared { trie }
     }
 
-    /// Clones this preserved trie and applies the provided trie updates to the clone.
+    /// Clones this preserved trie if it can safely represent the updated root.
     ///
     /// This is used by speculative payload building: validation keeps ownership of the shared
-    /// preserved trie while the builder receives a private copy advanced to the speculative parent
-    /// root.
+    /// preserved trie while the builder receives a private copy for the speculative parent root.
+    ///
+    /// Trie updates only describe intermediate trie node changes, not account/storage leaf
+    /// post-state. Applying non-empty updates to a cloned sparse trie would make the clone appear
+    /// anchored at `updated_state_root` while still containing `base_state_root` leaf values.
+    /// Likewise, a changed root cannot be represented safely without applying that post-state.
     fn clone_with_updates(
         &self,
         base_state_root: B256,
@@ -134,9 +138,24 @@ impl PreservedSparseTrie {
     ) -> Option<Self> {
         match self {
             Self::Anchored { trie, state_root } if *state_root == base_state_root => {
-                let mut trie = trie.clone_for_reuse();
-                trie.commit_updates(trie_updates);
-                Some(Self::Anchored { trie, state_root: updated_state_root })
+                if updated_state_root != base_state_root || !trie_updates.is_empty() {
+                    debug!(
+                        target: "engine::tree::payload_processor",
+                        %base_state_root,
+                        %updated_state_root,
+                        root_changed = updated_state_root != base_state_root,
+                        account_nodes = trie_updates.account_nodes.len(),
+                        removed_nodes = trie_updates.removed_nodes.len(),
+                        storage_tries = trie_updates.storage_tries.len(),
+                        "not cloning preserved sparse trie because parent update requires leaf post-state"
+                    );
+                    return None;
+                }
+
+                Some(Self::Anchored {
+                    trie: trie.clone_for_reuse(),
+                    state_root: updated_state_root,
+                })
             }
             Self::Anchored { state_root, .. } => {
                 debug!(
@@ -186,5 +205,51 @@ impl PreservedSparseTrie {
                 trie
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_trie_common::Nibbles;
+
+    #[test]
+    fn clone_with_updates_reuses_anchored_trie_for_empty_updates() {
+        let base_state_root = B256::with_last_byte(1);
+        let updated_state_root = base_state_root;
+        let preserved = PreservedSparseTrie::anchored(SparseTrie::default(), base_state_root);
+
+        let cloned = preserved
+            .clone_with_updates(base_state_root, updated_state_root, &TrieUpdates::default())
+            .expect("empty updates can reuse anchored sparse trie");
+
+        assert!(matches!(
+            cloned,
+            PreservedSparseTrie::Anchored { state_root, .. } if state_root == updated_state_root
+        ));
+    }
+
+    #[test]
+    fn clone_with_updates_rejects_changed_root_without_updates_for_anchored_trie() {
+        let base_state_root = B256::with_last_byte(1);
+        let updated_state_root = B256::with_last_byte(2);
+        let preserved = PreservedSparseTrie::anchored(SparseTrie::default(), base_state_root);
+
+        assert!(preserved
+            .clone_with_updates(base_state_root, updated_state_root, &TrieUpdates::default())
+            .is_none());
+    }
+
+    #[test]
+    fn clone_with_updates_rejects_non_empty_updates_for_anchored_trie() {
+        let base_state_root = B256::with_last_byte(1);
+        let updated_state_root = B256::with_last_byte(2);
+        let preserved = PreservedSparseTrie::anchored(SparseTrie::default(), base_state_root);
+        let mut trie_updates = TrieUpdates::default();
+        trie_updates.removed_nodes.insert(Nibbles::from_nibbles_unchecked([0x01]));
+
+        assert!(preserved
+            .clone_with_updates(base_state_root, updated_state_root, &trie_updates)
+            .is_none());
     }
 }
