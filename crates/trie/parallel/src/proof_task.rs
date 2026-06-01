@@ -988,6 +988,12 @@ where
             v2_storage_calculator,
         );
 
+        if account_targets.is_empty() {
+            let (storage_proofs, value_encoder_stats) = value_encoder.finalize()?;
+            let proof = DecodedMultiProofV2 { account_proofs: Vec::new(), storage_proofs };
+            return Ok((proof, value_encoder_stats));
+        }
+
         let account_proofs =
             v2_account_calculator.proof(&mut value_encoder, &mut account_targets)?;
 
