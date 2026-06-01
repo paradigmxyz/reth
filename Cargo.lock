@@ -6463,6 +6463,7 @@ version = "0.1.0"
 dependencies = [
  "alloy-primitives",
  "bincode",
+ "reth-trie-common",
  "revm-database",
  "revm-primitives",
  "revm-state",
@@ -6480,6 +6481,7 @@ dependencies = [
  "futures",
  "partial-stateless",
  "reth-ethereum",
+ "reth-trie-common",
  "serde_json",
  "tokio",
  "tracing",

@@ -14,10 +14,12 @@ use futures::TryStreamExt;
 use partial_stateless::{
     accessed_state::BlockAccessedState,
     network_cache::NetworkStateCache,
+    persistence::{load_from_file, save_to_file},
     policy::LastNBlocksPolicy,
     witness::{measure_multiproof_size, miss_to_proof_targets},
 };
 use reth_ethereum::{
+    chainspec::EthChainSpec,
     exex::{ExExContext, ExExEvent, ExExNotification},
     node::{
         api::{FullNodeComponents, NodeTypes},
@@ -53,15 +55,78 @@ async fn partial_stateless_exex<
     mut ctx: ExExContext<Node>,
     config: CacheConfig,
 ) -> eyre::Result<()> {
-    let mut cache = NetworkStateCache::new(
-        Box::new(LastNBlocksPolicy::new(config.account_window)),
-        Box::new(LastNBlocksPolicy::new(config.storage_window)),
-    );
+    // Resolve the cache file path: datadir/partial_stateless_cache.bin
+    let cache_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.chain());
+    let cache_path = cache_dir.as_ref().join("partial_stateless_cache.bin");
+
+    // Cache coherence guarantee: the LastNBlocksPolicy is fully deterministic —
+    // given the same canonical chain and window parameters, all peers converge
+    // to the same cache state. Loading from disk and replaying missed blocks
+    // during sync produces an identical result to continuous operation.
+    let mut cache = if cache_path.exists() {
+        match load_from_file(
+            &cache_path,
+            Box::new(LastNBlocksPolicy::new(config.account_window)),
+            Box::new(LastNBlocksPolicy::new(config.storage_window)),
+        ) {
+            Ok(loaded_cache) => {
+                let cache_block = loaded_cache.current_block();
+                let head_block = ctx.head.number;
+
+                // Validation: Gap Tolerance based on config.account_window
+                let max_allowed_gap = config.account_window;
+                if cache_block <= head_block && head_block - cache_block <= max_allowed_gap {
+                    info!(
+                        target: "partial_stateless",
+                        cache_block = cache_block,
+                        head_block = head_block,
+                        gap = head_block - cache_block,
+                        "Warm state cache loaded successfully from disk. Continuing sync..."
+                    );
+                    loaded_cache
+                } else {
+                    warn!(
+                        target: "partial_stateless",
+                        cache_block = cache_block,
+                        head_block = head_block,
+                        max_allowed_gap = max_allowed_gap,
+                        "Cache file block state is too far from head block or in the future. Starting with cold cache."
+                    );
+                    NetworkStateCache::new(
+                        Box::new(LastNBlocksPolicy::new(config.account_window)),
+                        Box::new(LastNBlocksPolicy::new(config.storage_window)),
+                    )
+                }
+            }
+            Err(e) => {
+                warn!(
+                    target: "partial_stateless",
+                    error = %e,
+                    "Failed to load cache file from disk. Starting with cold cache."
+                );
+                NetworkStateCache::new(
+                    Box::new(LastNBlocksPolicy::new(config.account_window)),
+                    Box::new(LastNBlocksPolicy::new(config.storage_window)),
+                )
+            }
+        }
+    } else {
+        info!(
+            target: "partial_stateless",
+            "No existing cache file found at {}. Starting with cold cache.",
+            cache_path.display()
+        );
+        NetworkStateCache::new(
+            Box::new(LastNBlocksPolicy::new(config.account_window)),
+            Box::new(LastNBlocksPolicy::new(config.storage_window)),
+        )
+    };
 
     info!(
         target: "partial_stateless",
         account_window = config.account_window,
         storage_window = config.storage_window,
+        cache_path = %cache_path.display(),
         "Partial Stateless ExEx started — monitoring cache state per block"
     );
 
@@ -201,6 +266,16 @@ async fn partial_stateless_exex<
                     storage_evicted = stats.storage_evicted,
                     "Cache state after update"
                 );
+
+                // Save updated cache state to file
+                if let Err(e) = save_to_file(&cache, &cache_path) {
+                    warn!(
+                        target: "partial_stateless",
+                        block = tip_block,
+                        error = %e,
+                        "Failed to save cache state to disk"
+                    );
+                }
 
                 // // Log some sample missed accounts for inspection
                 // if !miss.missed_accounts.is_empty() {
