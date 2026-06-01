@@ -48,7 +48,7 @@ impl<'a, K, V> ForwardInMemoryCursor<'a, K, V> {
 
 /// Threshold for remaining entries above which binary search is used instead of linear scan.
 /// For small slices, linear scan has better cache locality and lower overhead.
-const BINARY_SEARCH_THRESHOLD: usize = 128;
+const BINARY_SEARCH_THRESHOLD: usize = 512;
 
 impl<K: Ord, V> ForwardInMemoryCursor<'_, K, V> {
     /// Returns the first entry from the current cursor position that's greater or equal to the
