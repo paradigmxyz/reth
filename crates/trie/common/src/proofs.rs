@@ -618,6 +618,11 @@ impl StorageMultiProof {
     pub fn storage_proof(&self, slot: B256) -> Result<StorageProof, alloy_rlp::Error> {
         let nibbles = Nibbles::unpack(keccak256(slot));
 
+        // Empty trie has no nodes to prove — return empty proof (geth compat).
+        if self.root == EMPTY_ROOT_HASH {
+            return Ok(StorageProof { key: slot, nibbles, value: U256::ZERO, proof: vec![] });
+        }
+
         // Retrieve the storage proof.
         let proof = self
             .subtree
@@ -667,6 +672,11 @@ impl DecodedStorageMultiProof {
     /// Return storage proofs for the target storage slot (unhashed).
     pub fn storage_proof(&self, slot: B256) -> Result<DecodedStorageProof, alloy_rlp::Error> {
         let nibbles = Nibbles::unpack(keccak256(slot));
+
+        // Empty trie has no nodes to prove — return empty proof (geth compat).
+        if self.root == EMPTY_ROOT_HASH {
+            return Ok(DecodedStorageProof { key: slot, nibbles, value: U256::ZERO, proof: vec![] });
+        }
 
         // Retrieve the storage proof.
         let proof = self
@@ -1357,5 +1367,75 @@ mod tests {
                 chunking_length, size
             );
         }
+    }
+
+    #[test]
+    fn test_empty_storage_trie_returns_empty_proof() {
+        let multiproof = StorageMultiProof::empty();
+        assert_eq!(multiproof.root, EMPTY_ROOT_HASH);
+
+        let slot = B256::with_last_byte(1);
+        let proof = multiproof.storage_proof(slot).unwrap();
+        assert_eq!(proof.key, slot);
+        assert_eq!(proof.value, U256::ZERO);
+        assert!(
+            proof.proof.is_empty(),
+            "empty trie must return empty proof vec, got {:?}",
+            proof.proof
+        );
+    }
+
+    #[test]
+    fn test_empty_storage_trie_multiple_slots_all_empty() {
+        let multiproof = StorageMultiProof::empty();
+
+        for i in 0..5u8 {
+            let slot = B256::with_last_byte(i);
+            let proof = multiproof.storage_proof(slot).unwrap();
+            assert_eq!(proof.value, U256::ZERO);
+            assert!(proof.proof.is_empty(), "slot {i}: expected empty proof");
+        }
+    }
+
+    #[test]
+    fn test_decoded_empty_storage_trie_returns_empty_proof() {
+        let multiproof = DecodedStorageMultiProof::empty();
+        assert_eq!(multiproof.root, EMPTY_ROOT_HASH);
+
+        let slot = B256::with_last_byte(42);
+        let proof = multiproof.storage_proof(slot).unwrap();
+        assert_eq!(proof.key, slot);
+        assert_eq!(proof.value, U256::ZERO);
+        assert!(
+            proof.proof.is_empty(),
+            "decoded empty trie must return empty proof vec, got {:?}",
+            proof.proof
+        );
+    }
+
+    #[test]
+    fn test_nonempty_storage_trie_returns_nonempty_proof() {
+        let slot = B256::with_last_byte(1);
+        let nibbles = Nibbles::unpack(keccak256(slot));
+        let value = U256::from(999);
+        let leaf = alloy_trie::nodes::LeafNode::new(
+            nibbles.clone(),
+            encode_fixed_size(&value).to_vec(),
+        );
+        let mut encoded = vec![];
+        alloy_rlp::Encodable::encode(&leaf, &mut encoded);
+
+        let mut subtree = ProofNodes::default();
+        subtree.insert(nibbles.clone(), encoded.into());
+
+        let multiproof = StorageMultiProof {
+            root: B256::with_last_byte(0xFF),
+            subtree,
+            branch_node_masks: BranchNodeMasksMap::default(),
+        };
+
+        let proof = multiproof.storage_proof(slot).unwrap();
+        assert!(!proof.proof.is_empty(), "non-empty trie must return non-empty proof");
+        assert_eq!(proof.value, value);
     }
 }
