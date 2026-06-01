@@ -1170,6 +1170,7 @@ where
             // determine the child's full path.
             let child_nibble = next_child_nibbles.trailing_zeros() as u8;
             let child_path = self.child_path_at(child_nibble);
+            let mut child_in_prefix_set = None;
 
             // If the previous child was a cached branch with a short key (extension), then the new
             // uncalculated_lower_bound will be the increment of that branch's path. If there are
@@ -1192,47 +1193,52 @@ where
             //
             // If the child's path is in the prefix set then the cached hash is stale and must
             // not be used.
-            if cached_branch.hash_mask.is_bit_set(child_nibble) &&
-                !self.prefix_set.contains(&child_path)
-            {
-                // Commit the last child. We do this here for two reasons:
-                // - `commit_last_child` will check if the last child needs to be retained. We need
-                //   to check that before the subsequent `should_retain` call here to prevent
-                //   `targets` from being moved beyond the last child before it is checked.
-                // - If we do end up using the cached hash value, then we will need to commit the
-                //   last child before pushing a new one onto the stack anyway.
-                self.commit_last_child(targets)?;
+            if cached_branch.hash_mask.is_bit_set(child_nibble) {
+                let child_in_prefix_set_value = *child_in_prefix_set
+                    .get_or_insert_with(|| self.prefix_set.contains(&child_path));
+                if !child_in_prefix_set_value {
+                    // Commit the last child. We do this here for two reasons:
+                    // - `commit_last_child` will check if the last child needs to be retained. We
+                    //   need to check that before the subsequent `should_retain` call here to
+                    //   prevent `targets` from being moved beyond the last child before it is
+                    //   checked.
+                    // - If we do end up using the cached hash value, then we will need to commit
+                    //   the last child before pushing a new one onto the stack anyway.
+                    self.commit_last_child(targets)?;
 
-                if !self.should_retain(targets, &child_path, false) {
-                    // Pull this child's hash out of the cached branch node. The hash index
-                    // is the number of hash_mask bits set below this child's nibble.
-                    let lower_bits = TrieMask::new((1u16 << child_nibble) - 1);
-                    let hash_idx = (cached_branch.hash_mask & lower_bits).count_ones() as usize;
-                    let hash = cached_branch.hashes[hash_idx];
+                    if !self.should_retain(targets, &child_path, false) {
+                        // Pull this child's hash out of the cached branch node. The hash index
+                        // is the number of hash_mask bits set below this child's nibble.
+                        let lower_bits = TrieMask::new((1u16 << child_nibble) - 1);
+                        let hash_idx =
+                            (cached_branch.hash_mask & lower_bits).count_ones() as usize;
+                        let hash = cached_branch.hashes[hash_idx];
 
-                    trace!(
-                        target: TRACE_TARGET,
-                        ?child_path,
-                        ?hash_idx,
-                        ?hash,
-                        "Using cached hash for child",
-                    );
+                        trace!(
+                            target: TRACE_TARGET,
+                            ?child_path,
+                            ?hash_idx,
+                            ?hash,
+                            "Using cached hash for child",
+                        );
 
-                    self.child_stack.push(ProofTrieBranchChild::RlpNode(RlpNode::word_rlp(&hash)));
-                    self.branch_stack
-                        .last_mut()
-                        .expect("already asserted there is a last branch")
-                        .state_mask
-                        .set_bit(child_nibble);
+                        self.child_stack
+                            .push(ProofTrieBranchChild::RlpNode(RlpNode::word_rlp(&hash)));
+                        self.branch_stack
+                            .last_mut()
+                            .expect("already asserted there is a last branch")
+                            .state_mask
+                            .set_bit(child_nibble);
 
-                    // Update the `uncalculated_lower_bound` to indicate that the child whose bit
-                    // was just set is completely processed.
-                    uncalculated_lower_bound = child_path.next_without_prefix();
+                        // Update the `uncalculated_lower_bound` to indicate that the child whose
+                        // bit was just set is completely processed.
+                        uncalculated_lower_bound = child_path.next_without_prefix();
 
-                    // Push the current cached branch back onto the stack before looping.
-                    self.cached_branch_stack.push((cached_path, cached_branch));
+                        // Push the current cached branch back onto the stack before looping.
+                        self.cached_branch_stack.push((cached_path, cached_branch));
 
-                    continue
+                        continue
+                    }
                 }
             }
 
@@ -1261,7 +1267,9 @@ where
                 // there are dirty leaves which would split the cached branch's extension node (if
                 // there is one). In that case we return the range those leaves would potentially be
                 // in to calculate them.
-                if self.prefix_set.contains(&child_path) {
+                let child_in_prefix_set_value = *child_in_prefix_set
+                    .get_or_insert_with(|| self.prefix_set.contains(&child_path));
+                if child_in_prefix_set_value {
                     let gap_upper = Some(*next_cached_path);
                     self.cached_branch_stack.push(trie_cursor_state.take());
                     return Ok(Some((*uncalculated_lower_bound_ref, gap_upper)));
