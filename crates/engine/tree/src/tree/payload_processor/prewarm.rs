@@ -187,8 +187,8 @@ where
                 }
             });
 
-            // All tasks are done — clear per-thread EVM state for the next block.
-            pool.clear();
+            // All transaction prewarm tasks are done; drop only this task's per-thread EVM state.
+            pool.clear_type::<PrewarmEvmState<Evm>>();
 
             let _ = actions_tx
                 .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: tx_count });
@@ -429,9 +429,9 @@ where
             .blocking_recv()
             .expect("BAL hashed-state streaming task dropped without signaling completion");
 
-        // Drop the per-thread providers
-        executor.bal_streaming_pool().clear();
-        executor.prewarming_pool().clear();
+        // Drop only the per-thread providers owned by this BAL prewarm path.
+        executor.bal_streaming_pool().clear_type::<Option<Box<dyn AccountReader>>>();
+        executor.prewarming_pool().clear_type::<Option<CachedStateProvider<StateProviderBox>>>();
 
         let _ = actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
     }

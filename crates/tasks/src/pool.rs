@@ -1,7 +1,7 @@
 //! Additional helpers for executing tracing calls
 
 use std::{
-    any::Any,
+    any::{Any, TypeId},
     cell::RefCell,
     future::Future,
     panic::{catch_unwind, AssertUnwindSafe},
@@ -251,10 +251,17 @@ impl WorkerPool {
         }
     }
 
-    /// Clears the state on every thread in the pool.
+    /// Clears all state on every thread in the pool.
     pub fn clear(&self) {
         self.pool().broadcast(|_| {
             WORKER.with_borrow_mut(Worker::clear);
+        });
+    }
+
+    /// Clears state of type `T` on every thread in the pool.
+    pub fn clear_type<T: 'static>(&self) {
+        self.pool().broadcast(|_| {
+            WORKER.with_borrow_mut(Worker::clear_type::<T>);
         });
     }
 
@@ -313,17 +320,23 @@ pub fn build_pool_with_panic_handler(
 
 /// Per-thread state container for a [`WorkerPool`].
 ///
-/// Holds a type-erased `Box<dyn Any>` that can be initialized and accessed with concrete types
-/// via [`init`](Self::init) and [`get`](Self::get).
+/// Holds type-erased state entries that can be initialized and accessed with concrete types via
+/// [`init`](Self::init) and [`get`](Self::get). Different state types may coexist on the same
+/// worker thread, which lets independent pool users share the pool without clobbering each other.
 #[derive(Debug, Default)]
 pub struct Worker {
-    state: Option<Box<dyn Any>>,
+    states: Vec<(TypeId, Box<dyn Any>)>,
 }
 
 impl Worker {
     /// Creates a new empty `Worker`.
     const fn new() -> Self {
-        Self { state: None }
+        Self { states: Vec::new() }
+    }
+
+    fn state_index<T: 'static>(&self) -> Option<usize> {
+        let type_id = TypeId::of::<T>();
+        self.states.iter().position(|(id, _)| *id == type_id)
     }
 
     /// Initializes the worker state.
@@ -331,19 +344,12 @@ impl Worker {
     /// If state of type `T` already exists, passes `Some(&mut T)` to the closure so resources
     /// can be reused. On first init, passes `None`.
     pub fn init<T: 'static>(&mut self, f: impl FnOnce(Option<&mut T>) -> T) {
-        let existing =
-            self.state.take().and_then(|mut b| b.downcast_mut::<T>().is_some().then_some(b));
-
-        let new_state = match existing {
-            Some(mut boxed) => {
-                let r = boxed.downcast_mut::<T>().expect("type checked above");
-                *r = f(Some(r));
-                boxed
-            }
-            None => Box::new(f(None)),
-        };
-
-        self.state = Some(new_state);
+        if let Some(index) = self.state_index::<T>() {
+            let state = self.states[index].1.downcast_mut::<T>().expect("type checked above");
+            *state = f(Some(state));
+        } else {
+            self.states.push((TypeId::of::<T>(), Box::new(f(None))));
+        }
     }
 
     /// Returns a reference to the state, downcasted to `T`.
@@ -352,11 +358,9 @@ impl Worker {
     ///
     /// Panics if the worker has not been initialized or if the type does not match.
     pub fn get<T: 'static>(&self) -> &T {
-        self.state
-            .as_ref()
+        self.state_index::<T>()
+            .and_then(|index| self.states[index].1.downcast_ref::<T>())
             .expect("worker not initialized")
-            .downcast_ref::<T>()
-            .expect("worker state type mismatch")
     }
 
     /// Returns a mutable reference to the state, downcasted to `T`.
@@ -365,11 +369,8 @@ impl Worker {
     ///
     /// Panics if the worker has not been initialized or if the type does not match.
     pub fn get_mut<T: 'static>(&mut self) -> &mut T {
-        self.state
-            .as_mut()
-            .expect("worker not initialized")
-            .downcast_mut::<T>()
-            .expect("worker state type mismatch")
+        let index = self.state_index::<T>().expect("worker not initialized");
+        self.states[index].1.downcast_mut::<T>().expect("worker not initialized")
     }
 
     /// Returns a mutable reference to the state, initializing it with `f` on first access.
@@ -378,15 +379,29 @@ impl Worker {
     ///
     /// Panics if the state was previously initialized with a different type.
     pub fn get_or_init<T: 'static>(&mut self, f: impl FnOnce() -> T) -> &mut T {
-        self.state
-            .get_or_insert_with(|| Box::new(f()))
-            .downcast_mut::<T>()
-            .expect("worker state type mismatch")
+        if let Some(index) = self.state_index::<T>() {
+            self.states[index].1.downcast_mut::<T>().expect("type checked above")
+        } else {
+            self.states.push((TypeId::of::<T>(), Box::new(f())));
+            self.states
+                .last_mut()
+                .expect("state pushed")
+                .1
+                .downcast_mut::<T>()
+                .expect("type inserted above")
+        }
     }
 
-    /// Clears the worker state, dropping the contained value.
+    /// Clears all worker state, dropping the contained values.
     pub fn clear(&mut self) {
-        self.state = None;
+        self.states.clear();
+    }
+
+    /// Clears worker state for `T`, dropping the contained value.
+    pub fn clear_type<T: 'static>(&mut self) {
+        if let Some(index) = self.state_index::<T>() {
+            self.states.swap_remove(index);
+        }
     }
 }
 
@@ -472,6 +487,44 @@ mod tests {
         });
         let val = pool.install(|worker| worker.get::<String>().clone());
         assert_eq!(val, "hello");
+
+        pool.clear();
+    }
+
+    #[test]
+    fn worker_pool_keeps_independent_typed_state_slots() {
+        let pool = WorkerPool::new(1, "test");
+
+        pool.broadcast(1, |worker| {
+            worker.init::<Vec<u8>>(|_| vec![1, 2, 3]);
+            worker.get_or_init::<String>(|| "hello".to_string()).push_str(" world");
+        });
+
+        let (len, text) =
+            pool.install(|worker| (worker.get::<Vec<u8>>().len(), worker.get::<String>().clone()));
+        assert_eq!(len, 3);
+        assert_eq!(text, "hello world");
+
+        pool.clear();
+    }
+
+    #[test]
+    fn worker_pool_clear_type_keeps_other_state_slots() {
+        let pool = WorkerPool::new(1, "test");
+
+        pool.broadcast(1, |worker| {
+            worker.init::<Vec<u8>>(|_| vec![1, 2, 3]);
+            worker.init::<String>(|_| "hello".to_string());
+        });
+
+        pool.clear_type::<String>();
+
+        let len = pool.install(|worker| worker.get::<Vec<u8>>().len());
+        assert_eq!(len, 3);
+
+        pool.broadcast(1, |worker| {
+            assert_eq!(worker.get_or_init::<String>(|| "new".to_string()).as_str(), "new");
+        });
 
         pool.clear();
     }
