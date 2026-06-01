@@ -30,7 +30,7 @@ use std::{
     ops::RangeInclusive,
     sync::{Arc, OnceLock},
 };
-use tracing::{debug, debug_span, warn};
+use tracing::{debug, debug_span, trace, warn};
 
 #[cfg(feature = "metrics")]
 use reth_metrics::{
@@ -536,7 +536,7 @@ impl ChangesetCache {
         // Store in cache (with write lock)
         self.insert(block_hash, block_number, Arc::clone(&changesets));
 
-        debug!(
+        trace!(
             target: "trie::changeset_cache",
             ?block_hash,
             block_number,
@@ -812,7 +812,7 @@ impl ChangesetCacheInner {
     }
 
     fn insert(&mut self, block_hash: B256, block_number: u64, changesets: Arc<TrieUpdatesSorted>) {
-        debug!(
+        trace!(
             target: "trie::changeset_cache",
             ?block_hash,
             block_number,
@@ -840,7 +840,7 @@ impl ChangesetCacheInner {
     }
 
     fn evict(&mut self, up_to_block: BlockNumber) {
-        debug!(
+        trace!(
             target: "trie::changeset_cache",
             up_to_block,
             cache_size_before = self.entries.len(),
@@ -859,7 +859,7 @@ impl ChangesetCacheInner {
 
         for block_number in &blocks_to_evict {
             if let Some(hashes) = self.block_numbers.remove(block_number) {
-                debug!(
+                trace!(
                     target: "trie::changeset_cache",
                     block_number,
                     num_hashes = hashes.len(),
@@ -873,7 +873,7 @@ impl ChangesetCacheInner {
             }
         }
 
-        debug!(
+        trace!(
             target: "trie::changeset_cache",
             up_to_block,
             evicted_count,
