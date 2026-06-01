@@ -5,7 +5,7 @@ use alloy_primitives::{
     Bytes,
 };
 use moka::policy::EvictionPolicy;
-use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput};
+use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput, PrecompilesMap};
 use reth_primitives_traits::dashmap::DashMap;
 use revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
 use revm_primitives::Address;
@@ -36,6 +36,61 @@ where
         // This should be very rare as caches for all precompiles will be initialized as soon as
         // first EVM is created.
         self.0.entry(address).or_default().clone()
+    }
+}
+
+/// Shared metrics handles for cached precompiles.
+#[derive(Debug, Clone, Default)]
+pub struct PrecompileCacheMetricsMap(
+    Arc<DashMap<Address, CachedPrecompileMetrics, FbBuildHasher<20>>>,
+);
+
+impl PrecompileCacheMetricsMap {
+    /// Returns the metrics handle for a precompile address.
+    pub(crate) fn metrics_for_address(&self, address: Address) -> CachedPrecompileMetrics {
+        if let Some(metrics) = self.0.get(&address) {
+            return metrics.clone();
+        }
+
+        self.0
+            .entry(address)
+            .or_insert_with(|| CachedPrecompileMetrics::new_with_address(address))
+            .clone()
+    }
+}
+
+/// Shared precompile cache setup for an EVM instance.
+#[derive(Debug, Clone)]
+pub struct PrecompileCacheConfig<S>
+where
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+{
+    cache_map: PrecompileCacheMap<S>,
+    metrics: Option<PrecompileCacheMetricsMap>,
+}
+
+impl<S> PrecompileCacheConfig<S>
+where
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+{
+    /// Creates a precompile cache setup with optional metrics.
+    pub const fn new(
+        cache_map: PrecompileCacheMap<S>,
+        metrics: Option<PrecompileCacheMetricsMap>,
+    ) -> Self {
+        Self { cache_map, metrics }
+    }
+
+    /// Wraps all cacheable precompiles on the given EVM precompile map.
+    pub fn install(&self, precompiles: &mut PrecompilesMap, spec_id: S) {
+        precompiles.map_cacheable_precompiles(|address, precompile| {
+            CachedPrecompile::wrap(
+                precompile,
+                self.cache_map.cache_for_address(*address),
+                spec_id.clone(),
+                self.metrics.as_ref().map(|metrics| metrics.metrics_for_address(*address)),
+            )
+        });
     }
 }
 

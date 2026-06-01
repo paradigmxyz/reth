@@ -43,7 +43,7 @@ use crate::tree::{
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     multiproof::{StateRootComputeOutcome, StateRootHandle},
     payload_processor::PayloadProcessor,
-    precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
+    precompile_cache::{PrecompileCacheConfig, PrecompileCacheMap, PrecompileCacheMetricsMap},
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
@@ -92,7 +92,6 @@ use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::{Address, KECCAK_EMPTY};
 use std::{
-    collections::HashMap,
     panic::{self, AssertUnwindSafe},
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -192,7 +191,7 @@ where
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// Precompile cache metrics.
-    precompile_cache_metrics: HashMap<alloy_primitives::Address, CachedPrecompileMetrics>,
+    precompile_cache_metrics: PrecompileCacheMetricsMap,
     /// Hook to call when invalid blocks are encountered.
     #[debug(skip)]
     invalid_block_hook: Box<dyn InvalidBlockHook<Evm::Primitives>>,
@@ -254,7 +253,7 @@ where
             evm_config,
             payload_processor,
             precompile_cache_map,
-            precompile_cache_metrics: HashMap::new(),
+            precompile_cache_metrics: PrecompileCacheMetricsMap::default(),
             config,
             invalid_block_hook,
             metrics: EngineApiMetrics::default(),
@@ -1055,21 +1054,11 @@ where
 
         if !self.config.precompile_cache_disabled() {
             let _span = debug_span!(target: "engine::tree", "setup_precompile_cache").entered();
-            executor.evm_mut().precompiles_mut().map_cacheable_precompiles(
-                |address, precompile| {
-                    let metrics = self
-                        .precompile_cache_metrics
-                        .entry(*address)
-                        .or_insert_with(|| CachedPrecompileMetrics::new_with_address(*address))
-                        .clone();
-                    CachedPrecompile::wrap(
-                        precompile,
-                        self.precompile_cache_map.cache_for_address(*address),
-                        spec_id,
-                        Some(metrics),
-                    )
-                },
-            );
+            PrecompileCacheConfig::new(
+                self.precompile_cache_map.clone(),
+                Some(self.precompile_cache_metrics.clone()),
+            )
+            .install(executor.evm_mut().precompiles_mut(), spec_id);
         }
 
         let transaction_count = input.transaction_count();
@@ -1184,11 +1173,18 @@ where
         let execution_start = Instant::now();
         let ctx =
             self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
+        let precompile_cache = (!self.config.precompile_cache_disabled()).then(|| {
+            PrecompileCacheConfig::new(
+                self.precompile_cache_map.clone(),
+                Some(self.precompile_cache_metrics.clone()),
+            )
+        });
         let (output, senders, built_bal) = crate::tree::payload_processor::bal::execute_block(
             &self.runtime,
             &self.evm_config,
             &make_db,
             input_bal,
+            precompile_cache,
             env.evm_env,
             ctx,
             env.transaction_count,

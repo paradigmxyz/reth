@@ -25,7 +25,9 @@ use alloy_evm::{
 };
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
+use reth_evm::{
+    execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor, SpecFor,
+};
 use reth_primitives_traits::ReceiptTy;
 use reth_provider::BlockExecutionOutput;
 use reth_tasks::Runtime;
@@ -37,7 +39,9 @@ use revm::{
 use revm_state::bal::Bal as RevmBal;
 use std::sync::Arc;
 
-use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
+use crate::tree::{
+    payload_processor::receipt_root_task::IndexedReceipt, precompile_cache::PrecompileCacheConfig,
+};
 
 /// Executes one block on the BAL path using the runtime's persistent BAL worker pool.
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
@@ -46,6 +50,7 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     evm_config: &'a Evm,
     make_db: &'a MakeDb,
     input_bal: Arc<DecodedBal>,
+    precompile_cache: Option<PrecompileCacheConfig<SpecFor<Evm>>>,
     evm_env: EvmEnvFor<Evm>,
     ctx: ExecutionCtxFor<'a, Evm>,
     transaction_count: usize,
@@ -72,6 +77,7 @@ where
             evm_config,
             make_db,
             input_bal,
+            precompile_cache,
             evm_env,
             ctx,
             transaction_count,
@@ -88,6 +94,7 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     evm_config: &'scope Evm,
     make_db: &'scope MakeDb,
     input_bal: Arc<DecodedBal>,
+    precompile_cache: Option<PrecompileCacheConfig<SpecFor<Evm>>>,
     evm_env: EvmEnvFor<Evm>,
     ctx: ExecutionCtxFor<'scope, Evm>,
     transaction_count: usize,
@@ -112,6 +119,7 @@ where
     let block_gas_limit = evm_env.block_env.gas_limit();
     let enable_amsterdam_eip8037 = evm_env.cfg_env.enable_amsterdam_eip8037;
     let tx_gas_limit_cap = evm_env.cfg_env.tx_gas_limit_cap;
+    let spec_id = *evm_env.spec_id();
     let mut canonical_state = State::builder()
         .with_database(make_db(false)?)
         .with_bundle_update()
@@ -131,6 +139,7 @@ where
                 evm_config,
                 make_db,
                 Arc::clone(&input_bal_revm),
+                precompile_cache.clone(),
                 evm_env.clone(),
                 ctx.clone(),
             );
@@ -139,7 +148,10 @@ where
 
         let mut gas_tracker =
             BlockGasTracker::new(block_gas_limit, enable_amsterdam_eip8037, tx_gas_limit_cap);
-        let evm = evm_config.evm_with_env(&mut canonical_state, evm_env);
+        let mut evm = evm_config.evm_with_env(&mut canonical_state, evm_env);
+        if let Some(precompile_cache) = &precompile_cache {
+            precompile_cache.install(evm.precompiles_mut(), spec_id);
+        }
         let mut canonical_executor = evm_config.create_executor_with_state(evm, ctx.clone());
 
         canonical_executor.apply_pre_execution_changes()?;
@@ -507,6 +519,7 @@ mod tests {
             &evm_config,
             &make_db,
             input_bal,
+            None,
             evm_env,
             execution_ctx,
             transaction_count,
@@ -1134,6 +1147,7 @@ mod tests {
             &evm_config,
             &make_db,
             to_arc_decoded(BlockAccessList::default()),
+            None,
             evm_env,
             execution_ctx,
             1, // transaction_count = 1 → exactly one worker spawned

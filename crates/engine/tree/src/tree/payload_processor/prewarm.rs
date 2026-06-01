@@ -13,7 +13,7 @@
 
 use crate::tree::{
     payload_processor::multiproof::StateRootMessage,
-    precompile_cache::{CachedPrecompile, PrecompileCacheMap},
+    precompile_cache::{PrecompileCacheConfig, PrecompileCacheMap},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
     PayloadExecutionCache, SavedCache, StateProviderBuilder,
 };
@@ -596,15 +596,8 @@ where
         let mut evm = self.evm_config.evm_with_env(state_provider, evm_env);
 
         if !self.precompile_cache_disabled {
-            // Only cache pure precompiles to avoid issues with stateful precompiles
-            evm.precompiles_mut().map_cacheable_precompiles(|address, precompile| {
-                CachedPrecompile::wrap(
-                    precompile,
-                    self.precompile_cache_map.cache_for_address(*address),
-                    spec_id,
-                    None, // No metrics for prewarm
-                )
-            });
+            PrecompileCacheConfig::new(self.precompile_cache_map.clone(), None)
+                .install(evm.precompiles_mut(), spec_id);
         }
 
         Some(evm)

@@ -7,10 +7,14 @@ use alloy_evm::{
 };
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
+use reth_evm::{
+    execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor, SpecFor,
+};
 use revm::database::State;
 use revm_state::bal::Bal as RevmBal;
 use std::sync::Arc;
+
+use crate::tree::precompile_cache::PrecompileCacheConfig;
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum BalWorkerError {
@@ -57,6 +61,7 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
     evm_config: &'scope Evm,
     make_db: &'scope MakeDb,
     received_bal_revm: Arc<RevmBal>,
+    precompile_cache: Option<PrecompileCacheConfig<SpecFor<Evm>>>,
     evm_env: EvmEnvFor<Evm>,
     ctx: ExecutionCtxFor<'scope, Evm>,
 ) where
@@ -76,7 +81,11 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
                 .with_bal(received_bal_revm)
                 .with_bundle_update()
                 .build();
-            let evm = evm_config.evm_with_env(&mut worker_state, evm_env);
+            let spec_id = *evm_env.spec_id();
+            let mut evm = evm_config.evm_with_env(&mut worker_state, evm_env);
+            if let Some(precompile_cache) = &precompile_cache {
+                precompile_cache.install(evm.precompiles_mut(), spec_id);
+            }
             let mut executor = evm_config.create_executor_with_state(evm, ctx.clone());
 
             loop {
