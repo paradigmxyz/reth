@@ -641,16 +641,17 @@ where
         }
         let address = account_changes.address;
         let mut hashed_address = None;
+        let has_storage_updates =
+            account_changes.storage_changes.iter().any(|slot| !slot.changes.is_empty());
 
-        if !account_changes.storage_changes.is_empty() {
+        if has_storage_updates {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
             let mut storage_map = reth_trie::HashedStorage::new(false);
 
             for slot_changes in &account_changes.storage_changes {
+                let Some(last_change) = slot_changes.changes.last() else { continue };
                 let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
-                if let Some(last_change) = slot_changes.changes.last() {
-                    storage_map.storage.insert(hashed_slot, last_change.new_value);
-                }
+                storage_map.storage.insert(hashed_slot, last_change.new_value);
             }
 
             let mut hashed_state = reth_trie::HashedPostState::default();
@@ -705,7 +706,7 @@ where
         if balance.is_none() &&
             nonce.is_none() &&
             code_hash.is_none() &&
-            account_changes.storage_changes.is_empty()
+            !has_storage_updates
         {
             return;
         }
@@ -749,9 +750,9 @@ where
         provider: &mut Option<CachedStateProvider<reth_provider::StateProviderBox>>,
         account: &alloy_eip7928::AccountChanges,
     ) {
-        if self.disable_bal_batch_io ||
-            (account.storage_changes.is_empty() && account.storage_reads.is_empty())
-        {
+        let has_storage_changes =
+            account.storage_changes.iter().any(|slot| !slot.changes.is_empty());
+        if self.disable_bal_batch_io || (!has_storage_changes && account.storage_reads.is_empty()) {
             return;
         }
 
@@ -785,7 +786,7 @@ where
 
         let start = Instant::now();
 
-        for slot in &account.storage_changes {
+        for slot in account.storage_changes.iter().filter(|slot| !slot.changes.is_empty()) {
             let _ = state_provider.storage(account.address, StorageKey::from(slot.slot));
         }
         for &slot in &account.storage_reads {
