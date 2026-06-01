@@ -967,7 +967,11 @@ where
     where
         Provider: TrieCursorFactory + HashedCursorFactory + 'a,
     {
-        let MultiProofTargetsV2 { mut account_targets, storage_targets } = targets;
+        let MultiProofTargetsV2 { mut account_targets, mut storage_targets } = targets;
+
+        storage_targets.retain(|hashed_address, targets| {
+            !targets.is_empty() || !self.cached_storage_roots.contains_key(hashed_address)
+        });
 
         let span = debug_span!(
             target: "trie::proof_task",
