@@ -213,6 +213,8 @@ where
 pub(crate) struct AsyncAccountValueEncoder<TC, HC> {
     /// Storage proof jobs which were dispatched ahead of time.
     dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
+    /// Whether there are still dispatched proof receivers that need to be probed.
+    has_dispatched: bool,
     /// Storage roots which have already been computed. This can be used only if a storage proof
     /// wasn't dispatched for an account, otherwise we must consume the proof result.
     cached_storage_roots: Arc<DashMap<B256, B256>>,
@@ -239,8 +241,10 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
         cached_storage_roots: Arc<DashMap<B256, B256>>,
         storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
     ) -> Self {
+        let has_dispatched = !dispatched.is_empty();
         Self {
             dispatched,
+            has_dispatched,
             cached_storage_roots,
             storage_proof_results: Default::default(),
             storage_calculator,
@@ -304,16 +308,19 @@ where
     ) -> Self::DeferredEncoder {
         // If the proof job has already been dispatched for this account then it's not necessary to
         // dispatch another.
-        if let Some(rx) = self.dispatched.remove(&hashed_address) {
-            self.stats.borrow_mut().dispatched_count += 1;
-            return AsyncAccountDeferredValueEncoder::Dispatched {
-                hashed_address,
-                account,
-                proof_result_rx: Some(Ok(rx)),
-                storage_proof_results: self.storage_proof_results.clone(),
-                stats: self.stats.clone(),
-                storage_calculator: self.storage_calculator.clone(),
-                cached_storage_roots: self.cached_storage_roots.clone(),
+        if self.has_dispatched {
+            if let Some(rx) = self.dispatched.remove(&hashed_address) {
+                self.has_dispatched = !self.dispatched.is_empty();
+                self.stats.borrow_mut().dispatched_count += 1;
+                return AsyncAccountDeferredValueEncoder::Dispatched {
+                    hashed_address,
+                    account,
+                    proof_result_rx: Some(Ok(rx)),
+                    storage_proof_results: self.storage_proof_results.clone(),
+                    stats: self.stats.clone(),
+                    storage_calculator: self.storage_calculator.clone(),
+                    cached_storage_roots: self.cached_storage_roots.clone(),
+                }
             }
         }
 
