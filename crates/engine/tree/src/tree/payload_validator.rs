@@ -787,7 +787,7 @@ where
                 }
             }
             StateRootStrategy::Synchronous => {}
-            StateRootStrategy::Custom(custom) => {
+            StateRootStrategy::Custom(ref custom) => {
                 let (state_root, trie_updates) = ensure_ok_post_block!(
                     custom(CustomStateRootInput {
                         block: &block,
@@ -810,11 +810,17 @@ where
             maybe_state_root
         } else {
             // fallback is to compute the state root regularly in sync
-            if self.config.state_root_fallback() {
-                debug!(target: "engine::tree::payload_validator", "Using state root fallback for testing");
-            } else {
-                warn!(target: "engine::tree::payload_validator", "Failed to compute state root in parallel");
-                self.metrics.block_validation.state_root_parallel_fallback_total.increment(1);
+            match strategy {
+                StateRootStrategy::Synchronous => {
+                    debug!(target: "engine::tree::payload_validator", "Computing state root synchronously");
+                }
+                _ if self.config.state_root_fallback() => {
+                    debug!(target: "engine::tree::payload_validator", "Using state root fallback for testing");
+                }
+                _ => {
+                    warn!(target: "engine::tree::payload_validator", "Failed to compute state root in parallel");
+                    self.metrics.block_validation.state_root_parallel_fallback_total.increment(1);
+                }
             }
 
             let (root, updates) = ensure_ok_post_block!(
