@@ -73,7 +73,7 @@ use crate::{
     common::decode::DecodeCompressedRlp,
     e2s::{error::E2sError, types::Entry},
 };
-use alloy_consensus::{Block, BlockBody, Header};
+use alloy_consensus::{Block, BlockBody, EthereumReceipt, Header};
 use alloy_primitives::{B256, U256};
 use alloy_rlp::{Decodable, Encodable};
 use sha2::{Digest, Sha256};
@@ -332,6 +332,19 @@ impl CompressedSlimReceipts {
         let mut rlp_data = Vec::new();
         alloy_rlp::encode_list(receipts, &mut rlp_data);
         Self::from_rlp(&rlp_data)
+    }
+
+    /// Compress a block's slim receipts.
+    ///
+    /// [`EthereumReceipt`] is the canonical slim receipt: its RLP encoding is
+    /// `[tx-type, status, cumulative-gas, logs]`, with no bloom filter, matching the spec.
+    pub fn from_receipts(receipts: &[EthereumReceipt]) -> Result<Self, E2sError> {
+        Self::from_encodable_list(receipts)
+    }
+
+    /// Decompress and decode this entry into a block's slim receipts.
+    pub fn decode_receipts(&self) -> Result<Vec<EthereumReceipt>, E2sError> {
+        self.decode()
     }
 }
 
@@ -813,6 +826,43 @@ mod tests {
             assert_eq!(decoded_log.address, original_log.address);
             assert_eq!(decoded_log.data.topics(), original_log.data.topics());
         }
+    }
+
+    #[test]
+    fn test_slim_receipt_matches_spec_rlp() {
+        // Spec: CompressedSlimReceipts.data = snappyFramed(rlp([tx-type, status, cumulative-gas,
+        // logs])), with no bloom filter. Prove the inner RLP of `EthereumReceipt` is exactly that
+        // 4-element list, byte for byte.
+        let receipt = create_test_receipt(TxType::Eip1559, true, 21000, 2);
+
+        let compressed = CompressedSlimReceipts::from_encodable(&receipt).unwrap();
+        let actual_rlp = compressed.decompress().unwrap();
+
+        // Hand-build rlp([tx-type, status, cumulative-gas, logs]) in spec field order.
+        let mut fields = Vec::new();
+        (receipt.tx_type as u8).encode(&mut fields);
+        receipt.success.encode(&mut fields);
+        receipt.cumulative_gas_used.encode(&mut fields);
+        receipt.logs.encode(&mut fields);
+        let mut expected = Vec::new();
+        alloy_rlp::Header { list: true, payload_length: fields.len() }.encode(&mut expected);
+        expected.extend_from_slice(&fields);
+
+        assert_eq!(
+            actual_rlp, expected,
+            "slim receipt RLP must be the 4-element list [tx-type, status, cumulative-gas, logs]"
+        );
+    }
+
+    #[test]
+    fn test_slim_receipts_typed_helpers() {
+        // `create_test_receipts` returns `Vec<EthereumReceipt<TxType>>`, the canonical slim type.
+        let receipts = create_test_receipts();
+
+        let compressed = CompressedSlimReceipts::from_receipts(&receipts).unwrap();
+        let decoded = compressed.decode_receipts().unwrap();
+
+        assert_eq!(decoded, receipts);
     }
 
     #[test]
