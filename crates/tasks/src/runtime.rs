@@ -209,10 +209,10 @@ impl RayonConfig {
 
     /// Compute the default number of threads based on available parallelism.
     fn default_thread_count(&self) -> usize {
-        // TODO: reserved_cpu_cores is currently ignored because subtracting from thread pool
-        // sizes doesn't actually reserve CPU cores for other processes.
-        let _ = self.reserved_cpu_cores;
-        self.cpu_threads.unwrap_or_else(|| available_parallelism().map_or(1, NonZeroUsize::get))
+        self.cpu_threads.unwrap_or_else(|| {
+            let available = available_parallelism().map_or(1, NonZeroUsize::get);
+            available.saturating_sub(self.reserved_cpu_cores).max(1)
+        })
     }
 }
 
@@ -1037,6 +1037,21 @@ mod tests {
         let config = RayonConfig::default();
         let count = config.default_thread_count();
         assert!(count >= 1);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn rayon_config_thread_count_never_falls_below_one() {
+        let config = RayonConfig::default().with_reserved_cpu_cores(usize::MAX);
+        assert_eq!(config.default_thread_count(), 1);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn rayon_config_explicit_cpu_threads_override_reserved_cores() {
+        let mut config = RayonConfig::default().with_reserved_cpu_cores(usize::MAX);
+        config.cpu_threads = Some(4);
+        assert_eq!(config.default_thread_count(), 4);
     }
 
     #[test]
