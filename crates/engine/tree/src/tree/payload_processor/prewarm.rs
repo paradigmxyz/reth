@@ -20,7 +20,7 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, StorageKey, B256};
+use alloy_primitives::{keccak256, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
@@ -28,8 +28,7 @@ use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx,
 use reth_metrics::Metrics;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
-    AccountReader, BlockExecutionOutput, BlockReader, StateProvider, StateProviderBox,
-    StateProviderFactory, StateReader,
+    AccountReader, BlockExecutionOutput, BlockReader, StateProviderFactory, StateReader,
 };
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
 use reth_tasks::{pool::WorkerPool, Runtime};
@@ -355,7 +354,6 @@ where
         let to_sparse_trie_task = self.to_sparse_trie_task.clone();
         let executor = self.executor.clone();
         let parent_span = Span::current();
-        let prefetch_parent_span = parent_span.clone();
         let stream_parent_span = parent_span;
         let prefetch_bal = Arc::clone(&decoded_bal);
         let stream_bal = Arc::clone(&decoded_bal);
@@ -395,29 +393,44 @@ where
         }
 
         if ctx.saved_cache.is_some() && !ctx.disable_bal_batch_io {
-            executor.prewarming_pool().spawn(move || {
-                let branch_span = debug_span!(
-                    target: "engine::tree::payload_processor::prewarm",
-                    parent: &prefetch_parent_span,
-                    "bal_prefetch_storage",
-                    bal_accounts = prefetch_bal.as_bal().len(),
-                );
-                let parent_span = branch_span.clone();
-                let _span = branch_span.entered();
+            // Warm the full BAL read-set (account + code + storage) into the shared cache via the
+            // long-lived blocking prewarm pool, fire-and-forget: warming proceeds in the background
+            // while the block executor runs.
+            //
+            // We do not use the rayon prewarming pool here: rayon is a CPU work-stealing scheduler
+            // whose idle workers spin (`sched_yield`) rather than sleep, and this work is
+            // blocking-I/O-bound (MDBX reads), so most workers sit idle and spin — burning CPU that
+            // contends with the executor's threads. The dedicated pool's threads block when idle.
+            let caches = ctx.saved_cache.as_ref().expect("checked above").cache().clone();
+            let pool = super::bal_prewarm_pool::global();
+            let epoch = pool.next_epoch();
+            // Per-block provider builder, type-erased so the pool stays non-generic. Threads call
+            // it once per block (on epoch change) and cache the resulting provider.
+            let provider_builder = ctx.provider.clone();
+            let build = Arc::new(move || provider_builder.build());
 
-                prefetch_bal.as_bal().par_iter().for_each(|account| {
-                    if ctx.should_stop() {
-                        return;
-                    }
-                    WorkerPool::with_worker_mut(|worker| {
-                        let provider = worker
-                            .get_or_init::<Option<CachedStateProvider<StateProviderBox>>>(|| None);
-                        ctx.prefetch_bal_storage(&parent_span, provider, account);
-                    });
-                });
-
-                let _ = prefetch_tx.send(());
-            });
+            for account in prefetch_bal.as_bal() {
+                pool.warm_account(epoch, build.clone(), caches.clone(), account.address);
+                for change in &account.storage_changes {
+                    pool.warm_storage(
+                        epoch,
+                        build.clone(),
+                        caches.clone(),
+                        account.address,
+                        change.slot.into(),
+                    );
+                }
+                for &slot in &account.storage_reads {
+                    pool.warm_storage(
+                        epoch,
+                        build.clone(),
+                        caches.clone(),
+                        account.address,
+                        slot.into(),
+                    );
+                }
+            }
+            let _ = prefetch_tx.send(());
         } else {
             let _ = prefetch_tx.send(());
         }
@@ -735,66 +748,8 @@ where
         let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
     }
 
-    /// Prefetches storage slots for a single BAL account into the cache.
-    ///
-    /// Account reads are handled separately by [`Self::send_bal_hashed_state`], so this method
-    /// only
-    /// warms storage.
-    ///
-    /// The `provider` is lazily initialized on first call and reused across accounts on the same
-    /// thread.
-    fn prefetch_bal_storage(
-        &self,
-        parent_span: &Span,
-        provider: &mut Option<CachedStateProvider<reth_provider::StateProviderBox>>,
-        account: &alloy_eip7928::AccountChanges,
-    ) {
-        if self.disable_bal_batch_io ||
-            (account.storage_changes.is_empty() && account.storage_reads.is_empty())
-        {
-            return;
-        }
-
-        let state_provider = match provider {
-            Some(p) => p,
-            slot @ None => {
-                let _span = debug_span!(
-                    target: "engine::tree::payload_processor::prewarm",
-                    parent: parent_span,
-                    "bal_prefetch_provider_init",
-                )
-                .entered();
-
-                let built = match self.provider.build() {
-                    Ok(p) => p,
-                    Err(err) => {
-                        trace!(
-                            target: "engine::tree::payload_processor::prewarm",
-                            %err,
-                            "Failed to build state provider in BAL prewarm thread"
-                        );
-                        return;
-                    }
-                };
-                let saved_cache =
-                    self.saved_cache.as_ref().expect("BAL prewarm should only run with cache");
-                let caches = saved_cache.cache().clone();
-                slot.insert(CachedStateProvider::new_prewarm(built, caches))
-            }
-        };
-
-        let start = Instant::now();
-
-        for slot in &account.storage_changes {
-            let _ = state_provider.storage(account.address, StorageKey::from(slot.slot));
-        }
-        for &slot in &account.storage_reads {
-            let _ = state_provider.storage(account.address, StorageKey::from(slot));
-        }
-
-        self.metrics.bal_slot_iteration_duration.record(start.elapsed().as_secs_f64());
-    }
 }
+
 
 /// Returns a set of [`MultiProofTargetsV2`] and the total amount of storage targets, based on the
 /// given state.

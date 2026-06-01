@@ -48,6 +48,7 @@ use std::{
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
 pub mod bal;
+pub(crate) mod bal_prewarm_pool;
 pub mod multiproof;
 mod preserved_sparse_trie;
 pub mod prewarm;
