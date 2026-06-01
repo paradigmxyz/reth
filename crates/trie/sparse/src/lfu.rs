@@ -30,6 +30,17 @@ pub(crate) struct BucketedLfu<K> {
     min_freq: u16,
 }
 
+impl<K: Clone> Clone for BucketedLfu<K> {
+    fn clone(&self) -> Self {
+        Self {
+            capacity: self.capacity,
+            entries: self.entries.clone(),
+            buckets: self.buckets.clone(),
+            min_freq: self.min_freq,
+        }
+    }
+}
+
 impl<K> Default for BucketedLfu<K> {
     fn default() -> Self {
         Self::new(0)

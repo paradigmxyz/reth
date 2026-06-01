@@ -14,10 +14,13 @@ use core::{
     task::{ready, Context, Poll},
 };
 use futures::{future::Either, FutureExt, TryFutureExt};
-use reth_errors::RethResult;
+use reth_errors::{RethError, RethResult};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadTypes;
-use std::time::{Duration, Instant};
+use std::{
+    any::Any,
+    time::{Duration, Instant},
+};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 /// Type alias for backwards compat
@@ -164,6 +167,43 @@ pub struct NewPayloadTimings {
     pub sparse_trie_wait: Option<Duration>,
 }
 
+/// Type-erased private sparse-trie state-root handle prepared by the engine tree for payload
+/// building.
+///
+/// The concrete handle type lives in the engine-tree dependency graph. Keeping this wrapper opaque
+/// lets the consensus handle request the handle without making engine primitives depend on trie
+/// worker internals.
+pub struct PayloadBuilderSparseTrieHandle(Box<dyn Any + Send>);
+
+impl PayloadBuilderSparseTrieHandle {
+    /// Creates an opaque sparse-trie handle from the concrete engine-tree handle type.
+    pub fn new<H>(handle: H) -> Self
+    where
+        H: Any + Send,
+    {
+        Self(Box::new(handle))
+    }
+
+    /// Downcasts the opaque handle into the concrete handle type expected by the caller.
+    pub fn into_typed<H>(self) -> RethResult<H>
+    where
+        H: Any + Send,
+    {
+        self.0.downcast::<H>().map(|handle| *handle).map_err(|_| {
+            RethError::msg(format!(
+                "payload-builder sparse trie handle had unexpected type `{}`",
+                core::any::type_name::<H>()
+            ))
+        })
+    }
+}
+
+impl fmt::Debug for PayloadBuilderSparseTrieHandle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PayloadBuilderSparseTrieHandle").finish_non_exhaustive()
+    }
+}
+
 /// Additional data for big block payloads that merge multiple real blocks.
 ///
 /// This is used by the `reth_newPayload` endpoint to pass environment switches
@@ -271,6 +311,17 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
         /// The sender for returning forkchoice updated result.
         tx: oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
     },
+    /// Request a private sparse-trie state-root handle for building on an unvalidated parent.
+    ///
+    /// The engine tree can clone its current preserved sparse trie and overlay graph before the
+    /// caller submits the parent through `newPayload`, allowing speculative builders to run without
+    /// mutating validation caches.
+    PreparePayloadBuilderSparseTrie {
+        /// The unvalidated parent payload the builder will build on top of.
+        parent_payload: Payload::ExecutionData,
+        /// The sender for returning the state-root handle.
+        tx: oneshot::Sender<RethResult<PayloadBuilderSparseTrieHandle>>,
+    },
 }
 
 impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
@@ -301,6 +352,15 @@ impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
                     f,
                     "ForkchoiceUpdated {{ state: {state:?}, has_payload_attributes: {} }}",
                     payload_attrs.is_some()
+                )
+            }
+            Self::PreparePayloadBuilderSparseTrie { parent_payload, .. } => {
+                write!(
+                    f,
+                    "PreparePayloadBuilderSparseTrie(parent: {}, number: {}, hash: {})",
+                    parent_payload.parent_hash(),
+                    parent_payload.block_number(),
+                    parent_payload.block_hash()
                 )
             }
         }
@@ -376,6 +436,22 @@ where
             .await?
             .map_err(BeaconForkChoiceUpdateError::internal)?
             .await?)
+    }
+
+    /// Requests a private sparse-trie state-root handle for building on `parent_payload`.
+    pub async fn payload_builder_sparse_trie_handle<H>(
+        &self,
+        parent_payload: Payload::ExecutionData,
+    ) -> RethResult<H>
+    where
+        H: Any + Send,
+    {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .to_engine
+            .send(BeaconEngineMessage::PreparePayloadBuilderSparseTrie { parent_payload, tx });
+        let handle = rx.await.map_err(|_| RethError::msg("consensus engine unavailable"))??;
+        handle.into_typed()
     }
 
     /// Sends a forkchoice update message to the beacon consensus engine and returns the receiver to

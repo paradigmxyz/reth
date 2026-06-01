@@ -19,7 +19,8 @@ use reth_chain_state::{
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, ConsensusEngineEvent, ExecutionPayload,
-    ForkchoiceStateTracker, NewPayloadTimings, OnForkChoiceUpdated, SlowBlockInfo,
+    ForkchoiceStateTracker, NewPayloadTimings, OnForkChoiceUpdated, PayloadBuilderSparseTrieHandle,
+    SlowBlockInfo,
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
@@ -1746,6 +1747,28 @@ where
                                 }
 
                                 self.on_maybe_tree_event(maybe_event)?;
+                            }
+                            BeaconEngineMessage::PreparePayloadBuilderSparseTrie {
+                                parent_payload,
+                                tx,
+                            } => {
+                                let parent_hash = parent_payload.block_hash();
+                                let parent_number = parent_payload.block_number();
+                                let start = Instant::now();
+                                let result = self
+                                    .payload_validator
+                                    .payload_builder_sparse_trie_handle(parent_payload, &self.state)
+                                    .map(PayloadBuilderSparseTrieHandle::new);
+
+                                if let Err(err) = tx.send(result) {
+                                    warn!(
+                                        target: "engine::tree",
+                                        %parent_hash,
+                                        parent_number,
+                                        elapsed = ?start.elapsed(),
+                                        "Failed to deliver payload-builder sparse trie handle, receiver dropped: {err:?}"
+                                    );
+                                }
                             }
                         }
                     }

@@ -74,6 +74,32 @@ where
     }
 }
 
+impl<A, S> SparseStateTrie<A, S>
+where
+    A: Clone,
+    S: Clone,
+{
+    /// Clones the trie for isolated reuse.
+    ///
+    /// Deferred drops are intentionally not copied: they only hold temporary buffers whose drops
+    /// were delayed until after a state-root calculation released its locks. The cloned trie gets a
+    /// fresh metrics handle and reusable RLP buffer while preserving revealed trie data, retained
+    /// updates configuration, storage tries, and hot-cache LFU state.
+    pub fn clone_for_reuse(&self) -> Self {
+        Self {
+            state: self.state.clone(),
+            storage: self.storage.clone(),
+            retain_updates: self.retain_updates,
+            account_rlp_buf: Vec::with_capacity(self.account_rlp_buf.capacity()),
+            deferred_drops: DeferredDrops::default(),
+            hot_slots_lfu: self.hot_slots_lfu.clone(),
+            hot_accounts_lfu: self.hot_accounts_lfu.clone(),
+            #[cfg(feature = "metrics")]
+            metrics: Default::default(),
+        }
+    }
+}
+
 #[cfg(test)]
 impl SparseStateTrie {
     /// Create state trie from state trie.
@@ -798,7 +824,7 @@ where
 
 /// The fields of [`SparseStateTrie`] related to storage tries. This is kept separate from the rest
 /// of [`SparseStateTrie`] to help enforce allocation re-use.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct StorageTries<S = ParallelSparseTrie> {
     /// Sparse storage tries.
     tries: B256Map<RevealableSparseTrie<S>>,

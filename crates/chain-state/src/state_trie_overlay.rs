@@ -161,6 +161,37 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         }
     }
 
+    /// Returns a detached snapshot of the current overlay graph and cached flattened overlays.
+    ///
+    /// The snapshot shares immutable executed block and trie input data through their internal
+    /// `Arc`s, but uses fresh maps. Callers can insert speculative blocks and fill overlay-cache
+    /// entries without mutating the live manager.
+    pub fn detached_snapshot(&self) -> Self {
+        let snapshot = Self {
+            blocks: Default::default(),
+            overlays: Default::default(),
+            #[cfg(feature = "rayon")]
+            worker_pool: self.worker_pool.clone(),
+            metrics: self.metrics.clone(),
+        };
+
+        for entry in self.blocks.iter() {
+            snapshot.blocks.insert(*entry.key(), entry.value().clone());
+        }
+        for entry in self.overlays.iter() {
+            snapshot.overlays.insert(*entry.key(), Arc::clone(entry.value()));
+        }
+
+        debug!(
+            target: "chain_state::state_trie_overlay",
+            blocks = snapshot.blocks.len(),
+            overlays = snapshot.overlays.len(),
+            "created detached state trie overlay manager snapshot"
+        );
+
+        snapshot
+    }
+
     /// Removes blocks from the live block graph and prunes cached overlays that can no longer be
     /// built from the remaining blocks.
     #[tracing::instrument(

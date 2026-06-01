@@ -28,7 +28,8 @@ use reth_provider::{
 use reth_revm::db::BundleState;
 use reth_tasks::{utils::increase_thread_priority, ForEachOrdered, Runtime};
 use reth_trie::{
-    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, HashedPostState,
+    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
+    HashedPostState,
 };
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
@@ -378,6 +379,77 @@ where
             + Sync
             + 'static,
     {
+        self.spawn_state_root_with_preserved_sparse_trie(
+            multiproof_provider_factory,
+            parent_state_root,
+            halve_workers,
+            config,
+            self.sparse_state_trie.clone(),
+        )
+    }
+
+    /// Spawns a state-root computation pipeline backed by a private sparse-trie copy.
+    ///
+    /// The shared preserved trie is cloned synchronously and advanced with `base_trie_updates`.
+    /// Validation keeps using the original preserved trie, while this handle can build on top of
+    /// `parent_state_root` without mutating the shared sparse-trie cache.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
+    pub fn spawn_state_root_with_updated_sparse_trie_snapshot<F>(
+        &self,
+        multiproof_provider_factory: F,
+        base_state_root: B256,
+        parent_state_root: B256,
+        base_trie_updates: &TrieUpdates,
+        halve_workers: bool,
+        config: &TreeConfig,
+    ) -> StateRootHandle
+    where
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
+        let clone_start = Instant::now();
+        let preserved = self.sparse_state_trie.clone_with_updates(
+            base_state_root,
+            parent_state_root,
+            base_trie_updates,
+        );
+        let clone_elapsed = clone_start.elapsed();
+        debug!(
+            target: "engine::tree::payload_processor",
+            %base_state_root,
+            %parent_state_root,
+            cloned = preserved.is_some(),
+            ?clone_elapsed,
+            "prepared private sparse-trie snapshot for payload builder"
+        );
+
+        self.spawn_state_root_with_preserved_sparse_trie(
+            multiproof_provider_factory,
+            parent_state_root,
+            halve_workers,
+            config,
+            SharedPreservedSparseTrie::new(preserved),
+        )
+    }
+
+    fn spawn_state_root_with_preserved_sparse_trie<F>(
+        &self,
+        multiproof_provider_factory: F,
+        parent_state_root: B256,
+        halve_workers: bool,
+        config: &TreeConfig,
+        sparse_state_trie: SharedPreservedSparseTrie,
+    ) -> StateRootHandle
+    where
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
         let (updates_tx, from_multi_proof) = crossbeam_channel::unbounded();
 
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
@@ -395,6 +467,7 @@ where
             from_multi_proof,
             parent_state_root,
             config.multiproof_chunk_size(),
+            sparse_state_trie,
         );
 
         StateRootHandle::new(parent_state_root, updates_tx, state_root_rx, hashed_state_rx)
@@ -591,8 +664,8 @@ where
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
         parent_state_root: B256,
         chunk_size: usize,
+        preserved_sparse_trie: SharedPreservedSparseTrie,
     ) {
-        let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
         let max_hot_slots = self.sparse_trie_max_hot_slots;
         let max_hot_accounts = self.sparse_trie_max_hot_accounts;

@@ -3,6 +3,7 @@
 use alloy_primitives::B256;
 use parking_lot::Mutex;
 use reth_primitives_traits::FastInstant as Instant;
+use reth_trie::updates::TrieUpdates;
 use reth_trie_sparse::{ConfigurableSparseTrie, SparseStateTrie};
 use std::sync::Arc;
 use tracing::debug;
@@ -18,9 +19,29 @@ pub(super) type SparseTrie = SparseStateTrie<ConfigurableSparseTrie, Configurabl
 pub(super) struct SharedPreservedSparseTrie(Arc<Mutex<Option<PreservedSparseTrie>>>);
 
 impl SharedPreservedSparseTrie {
+    /// Creates a shared preserved trie handle initialized with the provided trie.
+    pub(super) fn new(preserved: Option<PreservedSparseTrie>) -> Self {
+        Self(Arc::new(Mutex::new(preserved)))
+    }
+
     /// Takes the preserved trie if present, leaving `None` in its place.
     pub(super) fn take(&self) -> Option<PreservedSparseTrie> {
         self.0.lock().take()
+    }
+
+    /// Clones the preserved trie into a private handle with trie updates applied.
+    ///
+    /// If the preserved trie is not anchored at `base_state_root`, this returns `None` so callers
+    /// can fall back to a fresh sparse trie rather than cloning unrelated state.
+    pub(super) fn clone_with_updates(
+        &self,
+        base_state_root: B256,
+        updated_state_root: B256,
+        trie_updates: &TrieUpdates,
+    ) -> Option<PreservedSparseTrie> {
+        self.0.lock().as_ref().and_then(|preserved| {
+            preserved.clone_with_updates(base_state_root, updated_state_root, trie_updates)
+        })
     }
 
     /// Acquires a guard that blocks `take()` until dropped.
@@ -98,6 +119,37 @@ impl PreservedSparseTrie {
     /// Creates a cleared preserved trie (allocations preserved, data cleared).
     pub(super) const fn cleared(trie: SparseTrie) -> Self {
         Self::Cleared { trie }
+    }
+
+    /// Clones this preserved trie and applies the provided trie updates to the clone.
+    ///
+    /// This is used by speculative payload building: validation keeps ownership of the shared
+    /// preserved trie while the builder receives a private copy advanced to the speculative parent
+    /// root.
+    fn clone_with_updates(
+        &self,
+        base_state_root: B256,
+        updated_state_root: B256,
+        trie_updates: &TrieUpdates,
+    ) -> Option<Self> {
+        match self {
+            Self::Anchored { trie, state_root } if *state_root == base_state_root => {
+                let mut trie = trie.clone_for_reuse();
+                trie.commit_updates(trie_updates);
+                Some(Self::Anchored { trie, state_root: updated_state_root })
+            }
+            Self::Anchored { state_root, .. } => {
+                debug!(
+                    target: "engine::tree::payload_processor",
+                    anchor_root = %state_root,
+                    %base_state_root,
+                    %updated_state_root,
+                    "not cloning preserved sparse trie because anchor root does not match update base"
+                );
+                None
+            }
+            Self::Cleared { trie } => Some(Self::Cleared { trie: trie.clone_for_reuse() }),
+        }
     }
 
     /// Consumes self and returns the trie for reuse.
