@@ -31,7 +31,10 @@ use alloy_eips::{
     eip7892::BlobScheduleBlobParams, eip7928::EMPTY_BLOCK_ACCESS_LIST_HASH,
 };
 use alloy_genesis::{ChainConfig, Genesis};
+#[cfg(feature = "lattice-state-root")]
+use alloy_primitives::keccak256;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
+#[cfg(not(feature = "lattice-state-root"))]
 use alloy_trie::root::state_root_ref_unhashed;
 use core::fmt::Debug;
 use derive_more::From;
@@ -40,7 +43,11 @@ use reth_ethereum_forks::{
     ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Hardforks, Head, DEV_HARDFORKS,
 };
 use reth_network_peers::{holesky_nodes, hoodi_nodes, mainnet_nodes, sepolia_nodes, NodeRecord};
+#[cfg(feature = "lattice-state-root")]
+use reth_primitives_traits::Account;
 use reth_primitives_traits::{sync::LazyLock, BlockHeader, SealedHeader};
+#[cfg(feature = "lattice-state-root")]
+use reth_trie_common::lattice::{LatticeStateRoot, LatticeStorageRoot};
 
 /// Helper method building a [`Header`] given [`Genesis`] and [`ChainHardforks`].
 pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Header {
@@ -95,7 +102,7 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
         difficulty: genesis.difficulty,
         nonce: genesis.nonce.into(),
         extra_data: genesis.extra_data.clone(),
-        state_root: state_root_ref_unhashed(&genesis.alloc),
+        state_root: genesis_state_root(genesis),
         timestamp: genesis.timestamp,
         mix_hash: genesis.mix_hash,
         beneficiary: genesis.coinbase,
@@ -109,6 +116,35 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
         slot_number,
         ..Default::default()
     }
+}
+
+#[cfg(not(feature = "lattice-state-root"))]
+fn genesis_state_root(genesis: &Genesis) -> B256 {
+    state_root_ref_unhashed(&genesis.alloc)
+}
+
+#[cfg(feature = "lattice-state-root")]
+fn genesis_state_root(genesis: &Genesis) -> B256 {
+    let mut state_root = LatticeStateRoot::default();
+
+    for (address, genesis_account) in &genesis.alloc {
+        let mut storage_root = LatticeStorageRoot::default();
+        if let Some(storage) = &genesis_account.storage {
+            for (slot, value) in storage {
+                if !value.is_zero() {
+                    storage_root.add_slot(keccak256(slot), U256::from_be_bytes(value.0));
+                }
+            }
+        }
+
+        state_root.add_account(
+            keccak256(address),
+            Account::from(genesis_account),
+            storage_root.root(),
+        );
+    }
+
+    state_root.root()
 }
 
 /// The Ethereum mainnet spec

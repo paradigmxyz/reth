@@ -1150,6 +1150,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-ed-on-bls12-381-bandersnatch"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1786b2e3832f6f0f7c8d62d5d5a282f6952a1ab99981c54cd52b6ac1d8f02df5"
+dependencies = [
+ "ark-bls12-381",
+ "ark-ec",
+ "ark-ff 0.5.0",
+ "ark-r1cs-std",
+ "ark-std 0.5.0",
+]
+
+[[package]]
 name = "ark-ff"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1407,6 +1420,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 dependencies = [
  "serde",
+ "zeroize",
 ]
 
 [[package]]
@@ -1724,6 +1738,7 @@ dependencies = [
  "cfg-if",
  "constant_time_eq",
  "cpufeatures 0.3.0",
+ "zeroize",
 ]
 
 [[package]]
@@ -2166,6 +2181,17 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "chacha20"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3613f74bd2eac03dad61bd53dbe620703d4371614fe0bc3b9f04dd36fe4e818"
+dependencies = [
+ "cfg-if",
+ "cipher",
+ "cpufeatures 0.2.17",
+]
+
+[[package]]
+name = "chacha20"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6f8d983286843e49675a4b7a2d174efe136dc93a18d69130dd18198a6c167601"
@@ -2173,6 +2199,19 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.3.0",
  "rand_core 0.10.1",
+]
+
+[[package]]
+name = "chacha20poly1305"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10cd79432192d1c0f4e1a0fef9527696cc039165d729fb41b3f4f4f354c2dc35"
+dependencies = [
+ "aead",
+ "chacha20 0.9.1",
+ "cipher",
+ "poly1305",
+ "zeroize",
 ]
 
 [[package]]
@@ -2224,6 +2263,7 @@ checksum = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad"
 dependencies = [
  "crypto-common 0.1.7",
  "inout",
+ "zeroize",
 ]
 
 [[package]]
@@ -2285,6 +2325,12 @@ checksum = "c0f78a02292a74a88ac736019ab962ece0bc380e3f977bf72e376c5d78ff0678"
 dependencies = [
  "cc",
 ]
+
+[[package]]
+name = "cmov"
+version = "0.5.0-pre.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5417da527aa9bf6a1e10a781231effd1edd3ee82f27d5f8529ac9b279babce96"
 
 [[package]]
 name = "cobs"
@@ -2439,6 +2485,193 @@ dependencies = [
  "crossterm",
  "unicode-segmentation",
  "unicode-width",
+]
+
+[[package]]
+name = "commonware-codec"
+version = "2026.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a771439216c7b5813e743937cb9b8dd700bce435c47fc73cd9aae1492f8696ce"
+dependencies = [
+ "arbitrary",
+ "bytes",
+ "cfg-if",
+ "commonware-conformance",
+ "commonware-macros",
+ "paste",
+ "rand 0.8.6",
+ "rand_chacha 0.3.1",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "commonware-conformance"
+version = "2026.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1072e14595f5c8a8efd1465077f3072bf631021b2b40a56aa66cf7ddb3e25f53"
+dependencies = [
+ "commonware-conformance-macros",
+ "commonware-formatting",
+ "commonware-macros",
+ "futures",
+ "serde",
+ "sha2",
+ "toml",
+]
+
+[[package]]
+name = "commonware-conformance-macros"
+version = "2026.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15c0f470c2eb1bfd978883156bc4f2c811e329d5c2c5dc2bab74f8defadb076b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "commonware-cryptography"
+version = "2026.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b13a9a7f8870ed9b65f387aedd56c3859a487317871cdb5d0baf8b0f7f99d37"
+dependencies = [
+ "anyhow",
+ "arbitrary",
+ "ark-ec",
+ "ark-ed-on-bls12-381-bandersnatch",
+ "ark-ff 0.5.0",
+ "ark-r1cs-std",
+ "ark-relations",
+ "ark-serialize 0.5.0",
+ "aws-lc-rs",
+ "blake3",
+ "blst",
+ "bytes",
+ "cfg-if",
+ "chacha20poly1305",
+ "commonware-codec",
+ "commonware-formatting",
+ "commonware-macros",
+ "commonware-math",
+ "commonware-parallel",
+ "commonware-utils",
+ "crc-fast",
+ "ctutils",
+ "curve25519-dalek",
+ "ecdsa",
+ "getrandom 0.2.17",
+ "num-rational",
+ "num-traits",
+ "p256",
+ "rand 0.8.6",
+ "rand_chacha 0.3.1",
+ "rand_core 0.6.4",
+ "sha2",
+ "thiserror 2.0.18",
+ "x25519-dalek",
+ "zeroize",
+]
+
+[[package]]
+name = "commonware-formatting"
+version = "2026.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c134e31411b32f337a60bb19e5bb0397fafa0a92b7c156cb0643b729e7135b49"
+dependencies = [
+ "commonware-macros",
+ "const-hex",
+]
+
+[[package]]
+name = "commonware-invariants"
+version = "2026.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba9277faee9193157b9910a6f96ff13d13bd9fb94671b7b8b83780b17578d323"
+dependencies = [
+ "arbitrary",
+ "commonware-formatting",
+ "commonware-macros",
+ "rand 0.8.6",
+ "rand_chacha 0.3.1",
+ "rand_core 0.6.4",
+]
+
+[[package]]
+name = "commonware-macros"
+version = "2026.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5419e6eb2c4c9e56517cfc07062a984b882dabf573d53191a73b98358cd9782a"
+dependencies = [
+ "commonware-macros-impl",
+ "tokio",
+]
+
+[[package]]
+name = "commonware-macros-impl"
+version = "2026.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82dd7062336fc7d2107e9a63312ef1b9811d06bfe56dfd56f97e6ce5d4aa0565"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+ "toml",
+]
+
+[[package]]
+name = "commonware-math"
+version = "2026.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d94e682199bad2c4b18a6704711b3e8fd7e6dbd5b7b87224882d8be350e3f7a2"
+dependencies = [
+ "arbitrary",
+ "bytes",
+ "commonware-codec",
+ "commonware-invariants",
+ "commonware-macros",
+ "commonware-parallel",
+ "commonware-utils",
+ "rand_core 0.6.4",
+]
+
+[[package]]
+name = "commonware-parallel"
+version = "2026.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d6a412b4c868174963b38ff2dad6686c573ec56834d9b39d20b73437c6d9726"
+dependencies = [
+ "cfg-if",
+ "commonware-macros",
+ "rayon",
+]
+
+[[package]]
+name = "commonware-utils"
+version = "2026.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dfad44dd2c8e97d55dbe271802740e919d2ce8839277ea53d958381caab92a44"
+dependencies = [
+ "arbitrary",
+ "bytes",
+ "cfg-if",
+ "commonware-codec",
+ "commonware-formatting",
+ "commonware-macros",
+ "futures",
+ "getrandom 0.2.17",
+ "hashbrown 0.16.1",
+ "num-bigint",
+ "num-integer",
+ "num-rational",
+ "num-traits",
+ "parking_lot",
+ "pin-project",
+ "rand 0.8.6",
+ "thiserror 2.0.18",
+ "tokio",
+ "zeroize",
 ]
 
 [[package]]
@@ -2633,6 +2866,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19d374276b40fb8bbdee95aef7c7fa6b5316ec764510eb64b8dd0e2ed0d7e7f5"
 
 [[package]]
+name = "crc-fast"
+version = "1.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e75b2483e97a5a7da73ac68a05b629f9c53cff58d8ed1c77866079e18b00dba5"
+dependencies = [
+ "digest 0.10.7",
+ "spin 0.10.0",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2772,6 +3015,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0369ee1ad671834580515889b80f2ea915f23b8be8d0daa4bbaf2ac5c7590835"
 dependencies = [
  "cipher",
+]
+
+[[package]]
+name = "ctutils"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "758e5ed90be3c8abff7f9a6f37ab7f6d8c59c2210d448b81f3f508134aec84e4"
+dependencies = [
+ "cmov",
 ]
 
 [[package]]
@@ -4479,7 +4731,7 @@ dependencies = [
  "hash32",
  "rustc_version 0.4.1",
  "serde",
- "spin",
+ "spin 0.9.8",
  "stable_deref_trait",
 ]
 
@@ -6193,6 +6445,7 @@ version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a5e44f723f1133c9deac646763579fdb3ac745e418f2a7af9cd0c431da1f20b9"
 dependencies = [
+ "arbitrary",
  "num-integer",
  "num-traits",
  "serde",
@@ -6740,6 +6993,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "poly1305"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8159bd90725d2df49889a078b54f4f79e87f1f8a8444194cdca81d38f5393abf"
+dependencies = [
+ "cpufeatures 0.2.17",
+ "opaque-debug",
+ "universal-hash",
+]
+
+[[package]]
 name = "polyval"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7139,7 +7403,7 @@ version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2e8e8bcc7961af1fdac401278c6a831614941f6164ee3bf4ce61b7edb162207"
 dependencies = [
- "chacha20",
+ "chacha20 0.10.0",
  "getrandom 0.4.2",
  "rand_core 0.10.1",
 ]
@@ -7665,6 +7929,7 @@ dependencies = [
  "reth-ethereum-forks",
  "reth-network-peers",
  "reth-primitives-traits",
+ "reth-trie-common",
  "serde_json",
 ]
 
@@ -10492,6 +10757,7 @@ dependencies = [
  "arrayvec",
  "bincode",
  "bytes",
+ "commonware-cryptography",
  "derive_more",
  "hash-db",
  "itertools 0.14.0",
@@ -11759,6 +12025,12 @@ checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
 dependencies = [
  "lock_api",
 ]
+
+[[package]]
+name = "spin"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5fe4ccb98d9c292d56fec89a5e07da7fc4cf0dc11e156b41793132775d3e591"
 
 [[package]]
 name = "spki"
@@ -13816,6 +14088,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05f360fc0b24296329c78fda852a1e9ae82de9cf7b27dae4b7f62f118f77b9ed"
 dependencies = [
  "tap",
+]
+
+[[package]]
+name = "x25519-dalek"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7e468321c81fb07fa7f4c636c3972b9100f0346e5b6a9f2bd0603a52f7ed277"
+dependencies = [
+ "curve25519-dalek",
+ "rand_core 0.6.4",
+ "serde",
+ "zeroize",
 ]
 
 [[package]]

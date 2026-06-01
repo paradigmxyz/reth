@@ -67,6 +67,7 @@ rand.workspace = true
 
 [features]
 metrics = ["reth-metrics", "dep:metrics"]
+lattice-state-root = ["reth-trie-common/lattice-state-root"]
 serde = [
     "alloy-primitives/serde",
     "alloy-consensus/serde",
