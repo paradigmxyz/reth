@@ -282,12 +282,17 @@ pub fn apply_precompile_overrides(
 ///
 /// Returns all executed transactions and the result of the execution.
 ///
+/// For each call without an explicit `gas` field, the remaining block gas is used as the default.
+/// The RPC gas cap is tracked as a request-wide remaining budget and caps each call before
+/// execution. This matches the spec rule `"gasLimit: blockGasLimit - soFarUsedGasInBlock"` and
+/// geth's per-call `sanitizeCall` behavior.
+///
 /// [`TransactionRequest`]: alloy_rpc_types_eth::TransactionRequest
 #[expect(clippy::type_complexity)]
 pub fn execute_transactions<S, T>(
     mut builder: S,
     calls: Vec<RpcTxReq<T::Network>>,
-    default_gas_limit: u64,
+    remaining_call_gas_limit: &mut Option<u64>,
     chain_id: u64,
     converter: &T,
 ) -> Result<
@@ -304,7 +309,48 @@ where
     builder.apply_pre_execution_changes()?;
 
     let mut results = Vec::with_capacity(calls.len());
-    for call in calls {
+    let mut cumulative_tx_gas_used: u64 = 0;
+    let mut block_regular_gas_used: u64 = 0;
+    let mut block_state_gas_used: u64 = 0;
+    let block_gas_limit = builder.evm().block().gas_limit();
+    let is_amsterdam = builder.evm().cfg_env().enable_amsterdam_eip8037;
+    let tx_gas_limit_cap = builder.evm().cfg_env().tx_gas_limit_cap.unwrap_or(u64::MAX);
+    for mut call in calls {
+        let block_gas_remaining = if is_amsterdam {
+            block_gas_limit
+                .saturating_sub(block_regular_gas_used)
+                .min(block_gas_limit.saturating_sub(block_state_gas_used))
+        } else {
+            block_gas_limit.saturating_sub(cumulative_tx_gas_used)
+        };
+        let mut default_gas_limit = block_gas_remaining;
+
+        if let Some(gas_limit) = call.as_ref().gas_limit() {
+            let exceeds_gas_limit = if is_amsterdam {
+                let regular_available_gas = block_gas_limit.saturating_sub(block_regular_gas_used);
+                let state_available_gas = block_gas_limit.saturating_sub(block_state_gas_used);
+                let regular_tx_gas_limit = gas_limit.min(tx_gas_limit_cap);
+
+                regular_tx_gas_limit > regular_available_gas || gas_limit > state_available_gas
+            } else {
+                gas_limit > block_gas_remaining
+            };
+
+            if exceeds_gas_limit {
+                return Err(EthApiError::other(EthSimulateError::BlockGasLimitExceeded))
+            }
+        }
+
+        if let Some(remaining_call_gas_limit) = *remaining_call_gas_limit {
+            if let Some(gas_limit) = call.as_ref().gas_limit() {
+                if gas_limit > remaining_call_gas_limit {
+                    call.as_mut().set_gas_limit(remaining_call_gas_limit);
+                }
+            } else {
+                default_gas_limit = default_gas_limit.min(remaining_call_gas_limit);
+            }
+        }
+
         // Resolve transaction, populate missing fields and enforce calls
         // correctness.
         let tx = resolve_transaction(
@@ -319,9 +365,23 @@ where
         // The effect for a layer-2 execution client is that it does not charge L1 cost.
         let tx = WithEncoded::new(Default::default(), tx);
 
-        builder.execute_transaction_with_result_closure(tx, |result| {
+        let mut tx_regular_gas_used = 0;
+        let gas_output = builder.execute_transaction_with_result_closure(tx, |result| {
+            tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
             results.push(result.result().result.clone())
         })?;
+
+        let gas_used = gas_output.tx_gas_used();
+        if let Some(remaining_call_gas_limit) = remaining_call_gas_limit.as_mut() {
+            if gas_used > *remaining_call_gas_limit {
+                return Err(EthApiError::other(EthSimulateError::GasLimitReached))
+            }
+            *remaining_call_gas_limit -= gas_used;
+        }
+
+        cumulative_tx_gas_used = cumulative_tx_gas_used.saturating_add(gas_used);
+        block_regular_gas_used = block_regular_gas_used.saturating_add(tx_regular_gas_used);
+        block_state_gas_used = block_state_gas_used.saturating_add(gas_output.state_gas_used());
     }
 
     // Pass noop provider to skip state root calculations.
