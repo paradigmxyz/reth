@@ -17,6 +17,9 @@ function fmtChange(ch) {
   const details = [];
   if (ch.ci_pct) details.push(`±${ch.ci_pct.toFixed(2)}%`);
   if (ch.floor_pct) details.push(`floor ${ch.floor_pct.toFixed(2)}%`);
+  if (ch.materiality?.threshold_ms) {
+    details.push(`materiality ${ch.materiality.threshold_ms.toFixed(2)}ms`);
+  }
   if (ch.informational) details.push('informational');
   const detailStr = details.length ? ` (${details.join(', ')})` : '';
   const sig = ch.informational ? 'neutral' : ch.sig;
@@ -31,6 +34,11 @@ function verdict(changes) {
   if (hasBad) return { emoji: '❌', label: 'Regression' };
   if (hasGood) return { emoji: '✅', label: 'Improvement' };
   return { emoji: '⚪', label: 'No Difference' };
+}
+
+function isWin(changes) {
+  const vals = Object.values(changes || {}).filter(v => !v.informational);
+  return vals.some(v => v.sig === 'good') && !vals.some(v => v.sig === 'bad');
 }
 
 function loadSamplyUrls(workDir) {
@@ -122,6 +130,7 @@ module.exports = {
   fmtS,
   fmtChange,
   verdict,
+  isWin,
   loadSamplyUrls,
   blocksLabel,
   metricRows,

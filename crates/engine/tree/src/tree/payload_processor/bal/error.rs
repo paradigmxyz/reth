@@ -1,43 +1,32 @@
 //! Errors for the BAL execution path.
 
 use alloy_evm::block::BlockExecutionError;
-use alloy_primitives::B256;
+use reth_consensus::ConsensusError;
 use reth_provider::ProviderError;
 
 /// Errors surfaced by `execute_block`.
 #[derive(Debug, thiserror::Error)]
 pub enum BalExecutionError {
-    /// BAL-specific rejection.
-    #[error("BAL rejection: {0:?}")]
-    Reject(RejectReason),
+    /// Block violated consensus rules while running the BAL path.
+    #[error(transparent)]
+    Consensus(#[from] ConsensusError),
     /// Worker or canonical EVM failure.
-    ///
-    /// This includes revm `BalError` for undeclared accesses. Revm does not yet report the
-    /// offending address or storage slot here.
     #[error("evm execution failed: {0}")]
-    Evm(#[from] BlockExecutionError),
+    Execution(#[from] BlockExecutionError),
     /// Provider setup failed before EVM execution could start.
     #[error("provider setup failed: {0}")]
     Provider(#[from] ProviderError),
-    /// The received BAL could not be converted from alloy-format to revm-format.
-    #[error("alloy→revm BAL conversion failed: {0}")]
-    BalConversion(String),
+    /// BAL execution failed before it reached EVM execution.
+    #[error(transparent)]
+    Other(#[from] Box<dyn core::error::Error + Send + Sync + 'static>),
 }
 
-impl From<RejectReason> for BalExecutionError {
-    fn from(r: RejectReason) -> Self {
-        Self::Reject(r)
+impl BalExecutionError {
+    /// Create an [`Self::Other`] error from any boxed-error-compatible value.
+    pub(crate) fn other<E>(error: E) -> Self
+    where
+        E: Into<Box<dyn core::error::Error + Send + Sync + 'static>>,
+    {
+        Self::Other(error.into())
     }
-}
-
-/// Reasons a block may be rejected on the BAL execution path.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RejectReason {
-    /// The rebuilt BAL disagrees with the received BAL at end-of-block.
-    FinalHashMismatch {
-        /// Hash of the rebuilt BAL.
-        rebuilt: B256,
-        /// Hash of the received BAL.
-        expected: B256,
-    },
 }

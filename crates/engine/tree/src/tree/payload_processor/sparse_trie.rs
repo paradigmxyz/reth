@@ -45,6 +45,8 @@ pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = Configurab
     proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
     /// Receives updates from execution and prewarming.
     updates: CrossbeamReceiver<SparseTrieTaskMessage>,
+    /// Sender half for the channel to send final hashed state to.
+    final_hashed_state_tx: Option<std::sync::mpsc::Sender<HashedPostState>>,
     /// `SparseStateTrie` used for computing the state root.
     trie: SparseStateTrie<A, S>,
     /// The parent block's state root.
@@ -106,6 +108,12 @@ pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = Configurab
     /// Number of pending execution/prewarming updates received but not yet passed to
     /// `update_leaves`.
     pending_updates: usize,
+    /// Combined final hashed state.
+    ///
+    /// Sparse trie task observes and hashes all state updates, allowing it to cheaply construct a
+    /// final [`HashedPostState`] and share it with main engine thread without requiring any extra
+    /// hashing work.
+    final_hashed_state: HashedPostState,
 
     /// Metrics for the sparse trie.
     metrics: MultiProofTaskMetrics,
@@ -117,9 +125,11 @@ where
     S: SparseTrie + Default + Clone,
 {
     /// Creates a new sparse trie, pre-populating with an existing [`SparseStateTrie`].
+    #[expect(clippy::too_many_arguments)]
     pub(super) fn new_with_trie(
         executor: &Runtime,
         updates: CrossbeamReceiver<StateRootMessage>,
+        final_hashed_state_tx: std::sync::mpsc::Sender<HashedPostState>,
         proof_worker_handle: ProofWorkerHandle,
         metrics: MultiProofTaskMetrics,
         trie: SparseStateTrie<A, S>,
@@ -141,6 +151,7 @@ where
             proof_result_rx,
             updates: hashed_state_rx,
             proof_worker_handle,
+            final_hashed_state_tx: Some(final_hashed_state_tx),
             trie,
             parent_state_root,
             chunk_size,
@@ -160,6 +171,7 @@ where
             storage_cache_misses: 0,
             pending_targets: Default::default(),
             pending_updates: Default::default(),
+            final_hashed_state: Default::default(),
             metrics,
         }
     }
@@ -181,7 +193,7 @@ where
                 StateRootMessage::PrefetchProofs(targets) => {
                     SparseTrieTaskMessage::PrefetchProofs(targets)
                 }
-                StateRootMessage::StateUpdate(_, state) => {
+                StateRootMessage::StateUpdate(state) => {
                     let _span = trace_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_update", n = state.len()).entered();
                     let hashed = evm_state_to_hashed_post_state(state);
                     SparseTrieTaskMessage::HashedState(hashed)
@@ -415,7 +427,14 @@ where
             SparseTrieTaskMessage::HashedState(hashed_state) => {
                 self.on_hashed_state_update(hashed_state)
             }
-            SparseTrieTaskMessage::FinishedStateUpdates => self.finished_state_updates = true,
+            SparseTrieTaskMessage::FinishedStateUpdates => {
+                let _ = self
+                    .final_hashed_state_tx
+                    .take()
+                    .unwrap()
+                    .send(core::mem::take(&mut self.final_hashed_state));
+                self.finished_state_updates = true
+            }
         }
     }
 
@@ -453,13 +472,13 @@ where
         skip_all
     )]
     fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
-        for (address, storage) in hashed_state_update.storages {
+        for (&address, storage) in &hashed_state_update.storages {
             if !storage.storage.is_empty() {
                 // Look up outer maps once per address instead of once per slot.
                 let new_updates = self.new_storage_updates.entry(address).or_default();
                 let mut existing_updates = self.storage_updates.get_mut(&address);
 
-                for (slot, value) in storage.storage {
+                for (&slot, &value) in &storage.storage {
                     self.trie.record_slot_touch(address, slot);
 
                     let encoded = if value.is_zero() {
@@ -485,7 +504,7 @@ where
             self.pending_account_updates.entry(address).or_insert(None);
         }
 
-        for (address, account) in hashed_state_update.accounts {
+        for (&address, &account) in &hashed_state_update.accounts {
             self.trie.record_account_touch(address);
 
             // Track account as touched.
@@ -498,6 +517,8 @@ where
             // it will be updated in the accounts trie.
             self.pending_account_updates.insert(address, Some(account));
         }
+
+        self.final_hashed_state.extend(hashed_state_update);
     }
 
     fn on_proof_result(
@@ -1128,6 +1149,7 @@ mod tests {
         let mut task = SparseTrieCacheTask::new_with_trie(
             &runtime,
             updates_rx,
+            std::sync::mpsc::channel().0,
             proof_worker_handle,
             MultiProofTaskMetrics::default(),
             trie,

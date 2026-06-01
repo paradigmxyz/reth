@@ -330,6 +330,14 @@ pub enum ConsensusError {
     #[error("missing requests hash")]
     RequestsHashMissing,
 
+    /// Error when the block access list hash is missing.
+    #[error("missing block access list hash")]
+    BlockAccessListHashMissing,
+
+    /// Error when the slot number is missing.
+    #[error("missing slot number")]
+    SlotNumberMissing,
+
     /// Error when an unexpected withdrawals root is encountered.
     #[error("unexpected withdrawals root")]
     WithdrawalsRootUnexpected,
@@ -337,6 +345,14 @@ pub enum ConsensusError {
     /// Error when an unexpected requests hash is encountered.
     #[error("unexpected requests hash")]
     RequestsHashUnexpected,
+
+    /// Error when an unexpected block access list hash is encountered.
+    #[error("unexpected block access list hash")]
+    BlockAccessListHashUnexpected,
+
+    /// Error when an unexpected slot number is encountered.
+    #[error("unexpected slot number")]
+    SlotNumberUnexpected,
 
     /// Error when withdrawals are missing.
     #[error("missing withdrawals")]
@@ -476,12 +492,15 @@ pub enum ConsensusError {
     /// EIP-7825: Transaction gas limit exceeds maximum allowed
     #[error(transparent)]
     TransactionGasLimitTooHigh(Box<TxGasLimitTooHighErr>),
-    /// Error when an unexpected block access list cost is encountered.
+    /// EIP-7928: Error when an unexpected block access list cost is encountered.
     #[error(transparent)]
     BlockAccessListCostMoreThanGasLimit(Box<BlockAccessListGasError>),
-    /// Error when the block access list hash doesn't match the expected value.
+    /// EIP-7928: Error when the block access list hash doesn't match the expected value.
     #[error("block access list hash mismatch: {0}")]
     BlockAccessListHashMismatch(GotExpectedBoxed<B256>),
+    /// EIP-7928: Error when the block access list cannot be decoded or converted.
+    #[error("invalid block access list: {0}")]
+    BlockAccessListInvalid(String),
     /// Any additional consensus error, for example L2-specific errors.
     #[error(transparent)]
     Other(#[from] Arc<dyn Error + Send + Sync>),

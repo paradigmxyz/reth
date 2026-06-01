@@ -232,7 +232,7 @@ impl EngineApiKind {
         matches!(self, Self::Ethereum)
     }
 
-    /// Returns true if this is the ethereum variant
+    /// Returns true if this is the opstack variant
     pub const fn is_opstack(&self) -> bool {
         matches!(self, Self::OpStack)
     }

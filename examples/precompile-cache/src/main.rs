@@ -5,7 +5,7 @@
 use alloy_evm::{
     eth::EthEvmContext,
     precompiles::{DynPrecompile, Precompile, PrecompileInput, PrecompilesMap},
-    revm::{handler::EthPrecompiles, precompile::PrecompileId},
+    revm::{context::DBErrorMarker, handler::EthPrecompiles, precompile::PrecompileId},
     Evm, EvmFactory,
 };
 use alloy_genesis::Genesis;
@@ -65,7 +65,7 @@ impl EvmFactory for MyEvmFactory {
     type Evm<DB: Database, I: Inspector<EthEvmContext<DB>, EthInterpreter>> =
         EthEvm<DB, I, PrecompilesMap>;
     type Tx = TxEnv;
-    type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
+    type Error<DBError: DBErrorMarker> = EVMError<DBError>;
     type HaltReason = HaltReason;
     type Context<DB: Database> = EthEvmContext<DB>;
     type Spec = SpecId;

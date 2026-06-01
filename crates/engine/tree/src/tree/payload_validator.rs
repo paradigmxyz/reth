@@ -40,7 +40,7 @@
 
 use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
-    instrumented_state::{InstrumentedStateProvider, StateProviderStats},
+    instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     multiproof::{StateRootComputeOutcome, StateRootHandle},
     payload_processor::PayloadProcessor,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
@@ -49,7 +49,7 @@ use crate::tree::{
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::bal::DecodedBal;
+use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{map::B256Set, B256};
@@ -70,7 +70,7 @@ use reth_evm::{
     block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
     OnStateHook, SpecFor,
 };
-use reth_execution_cache::{CacheStats, SavedCache};
+use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
 use reth_payload_primitives::{
     BuiltPayload, BuiltPayloadExecutedBlock, InvalidPayloadAttributesError, NewPayloadError,
     PayloadTypes,
@@ -442,7 +442,6 @@ where
             )
             .into())
         };
-        let mut state_provider = ensure_ok!(provider_builder.build());
         drop(_enter);
 
         let evm_env = debug_span!(target: "engine::tree::payload_validator", "evm_env")
@@ -452,8 +451,12 @@ where
         // Extract the decoded BAL, if valid and available.
         let decoded_bal = ensure_ok!(input
             .try_decoded_access_list()
-            .map_err(|err| { Box::<dyn std::error::Error + Send + Sync>::from(err) }))
+            .map_err(|err| ConsensusError::BlockAccessListInvalid(err.to_string())))
         .map(Arc::new);
+
+        if let Some(decoded_bal) = decoded_bal.as_deref() {
+            ensure_ok!(Self::validate_received_bal_gas(decoded_bal, input.gas_limit()));
+        }
 
         let env = ExecutionEnv {
             evm_env,
@@ -490,10 +493,7 @@ where
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
         let changeset_provider = self.spawn_changeset_provider_task(overlay_factory.clone());
 
-        // BAL execute path eligibility. Computed up front because the BAL arm needs a clone of
-        // `provider_builder` (consumed by `spawn_payload_processor` below).
-        let bal_eligible = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
-        let bal_provider_builder = bal_eligible.then(|| provider_builder.clone());
+        let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
 
         // Spawn the appropriate processor based on strategy
         let mut handle = ensure_ok!(self.spawn_payload_processor(
@@ -502,51 +502,92 @@ where
             provider_builder.clone(),
             overlay_factory,
             &strategy,
+            parallel_bal_execution,
         ));
 
         // Create optional cache stats for detailed block logging
         let slow_block_enabled = self.config.slow_block_threshold().is_some();
         let cache_stats = slow_block_enabled.then(|| Arc::new(CacheStats::default()));
+        let instrument_state_provider = slow_block_enabled || self.config.state_provider_metrics();
+        let state_provider_metrics =
+            instrument_state_provider.then(|| StateProviderMetrics::with_source("engine"));
+        let state_provider_stats =
+            instrument_state_provider.then(|| Arc::new(StateProviderStats::default()));
+        let execution_cache = handle.caches().map(|caches| (caches, handle.cache_metrics()));
 
-        // Use cached state provider before executing, used in execution after prewarming threads
-        // complete
-        if let Some((caches, cache_metrics)) = handle.caches().zip(handle.cache_metrics()) {
-            state_provider = Box::new(
-                CachedStateProvider::new(state_provider, caches, cache_metrics)
-                    .with_cache_stats(cache_stats.clone()),
-            );
-        };
+        // This state provider factory is parametrized by:
+        //
+        // 1. fill_on_miss?
+        // 2. instrument_state_provider?
+        //
+        // `fill_on_miss` controls whether the loaded value after a cache miss will be inserted
+        // back into the cache. On a glance it seems to be always useful to do this. However,
+        // in practice, for the serial/non-BAL execution, it's not needed and is net negative:
+        //
+        // - It's not necessary because the revm machinery provides layer of caching itself. That
+        //   means a value for a miss will be recorded in revm's cache.
+        // - Inserting back into the cache is not free.
+        // - After execution, the execution post-state will be dumped into the execution cache as
+        //   whole anyway.
+        //
+        // Therefore, there `fill_on_miss` is going to be false for those paths.
+        //
+        // The second parameter `instrument_state_provider` controls whether we should
+        // instrument the state provider with metrics.
+        let make_state_provider = |fill_on_miss: bool| -> ProviderResult<StateProviderBox> {
+            let provider = provider_builder.build()?;
+            let mut provider = if let Some((caches, cache_metrics)) = &execution_cache {
+                let fill_mode = if fill_on_miss {
+                    CacheFillMode::FillOnMiss
+                } else {
+                    CacheFillMode::LookupOnly
+                };
+                Box::new(CachedStateProvider::new_with_mode(
+                    provider,
+                    caches.clone(),
+                    fill_mode,
+                    cache_metrics.clone(),
+                    cache_stats.clone(),
+                )) as StateProviderBox
+            } else {
+                provider
+            };
 
-        let state_provider_stats = if slow_block_enabled || self.config.state_provider_metrics() {
-            let instrumented_state_provider =
-                InstrumentedStateProvider::new(state_provider, "engine");
-            let stats = slow_block_enabled.then(|| instrumented_state_provider.stats());
-            state_provider = Box::new(instrumented_state_provider);
-            stats
-        } else {
-            None
+            if instrument_state_provider {
+                let stats = state_provider_stats
+                    .as_ref()
+                    .expect("instrumented state provider requires shared stats");
+                let metrics = state_provider_metrics
+                    .as_ref()
+                    .expect("instrumented state provider requires metrics");
+                provider = Box::new(InstrumentedStateProvider::with_stats(
+                    provider,
+                    metrics.clone(),
+                    Arc::clone(stats),
+                ));
+            }
+
+            Ok(provider)
         };
 
         // Execute the block and handle any execution errors.
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
         let execute_block_start = Instant::now();
-        let decoded_bal = env.decoded_bal.clone();
-        let (output, senders, receipt_root_rx) = if bal_eligible {
-            let provider_builder =
-                bal_provider_builder.expect("eligibility implies builder was cloned");
-            ensure_ok!(self.execute_block_bal(
-                state_provider,
-                env,
-                &input,
-                &handle,
-                provider_builder
-            ))
+        let execution_result = if parallel_bal_execution {
+            self.execute_block_bal(env, &input, &handle, &make_state_provider)
         } else {
-            ensure_ok!(self.execute_block(state_provider, env, &input, &mut handle))
+            let state_provider = make_state_provider(false);
+            match state_provider {
+                Ok(state_provider) => self.execute_block(state_provider, env, &input, &mut handle),
+                Err(err) => Err(err.into()),
+            }
         };
-        let block_access_list_hash = decoded_bal.as_ref().map(|decoded_bal| decoded_bal.hash());
         let execution_duration = execute_block_start.elapsed();
+        if let (Some(metrics), Some(stats)) = (&state_provider_metrics, &state_provider_stats) {
+            metrics.record_totals(stats);
+        }
+        let (output, senders, receipt_root_rx, built_bal) = ensure_ok!(execution_result);
 
         // After executing the block we can stop prewarming transactions
         handle.stop_prewarming_execution();
@@ -565,14 +606,20 @@ where
         // (keccak256 hashing of all changed addresses and storage slots).
         let hashed_state_output = output.clone();
         let hashed_state_provider = self.provider.clone();
-        let hashed_state: LazyHashedPostState =
+        let mut hashed_state_rx = handle.take_hashed_state_rx();
+        let mut hashed_state: LazyHashedPostState =
             self.payload_processor.executor().spawn_blocking_named("hash-post-state", move || {
                 let _span = debug_span!(
                     target: "engine::tree::payload_validator",
                     "hashed_post_state",
                 )
                 .entered();
-                Arc::new(hashed_state_provider.hashed_post_state(&hashed_state_output.state))
+                let state = if let Some(Ok(state)) = hashed_state_rx.as_mut().map(|rx| rx.recv()) {
+                    state
+                } else {
+                    hashed_state_provider.hashed_post_state(&hashed_state_output.state)
+                };
+                Arc::new(state)
             });
 
         let block = validated_block.try_into_inner().expect("sole handle")?;
@@ -597,18 +644,29 @@ where
                 .ok()
         };
 
-        let hashed_state = ensure_ok_post_block!(
+        ensure_ok_post_block!(
             self.validate_post_execution(
                 &block,
                 &parent_block,
                 &output,
                 &mut ctx,
                 receipt_root_bloom,
-                hashed_state,
-                block_access_list_hash
+                built_bal
             ),
             block
         );
+
+        // Run the hashed state validation hook but don't propagate the error yet. If the state root
+        // task fails, we might need to re-run this check against a fallback state.
+        let mut hashed_state_validate_result = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").in_scope(|| {
+            // Wait for the background keccak256 hashing task to complete. This blocks until
+            // all changed addresses and storage slots have been hashed.
+            let hashed_state_ref =
+                debug_span!(target: "engine::tree::payload_validator", "wait_hashed_post_state")
+                    .in_scope(|| hashed_state.get());
+
+            self.validator.validate_block_post_execution_with_hashed_state(hashed_state_ref, &block)
+        });
 
         let root_time = Instant::now();
         let mut maybe_state_root = None;
@@ -624,18 +682,21 @@ where
                     self.await_state_root_with_timeout(
                         &mut handle,
                         provider_builder.clone(),
-                        &hashed_state,
+                        output.clone(),
                     ),
                     block
                 );
 
-                match task_result {
-                    Ok(StateRootComputeOutcome {
-                        state_root,
-                        trie_updates,
-                        #[cfg(feature = "trie-debug")]
-                        debug_recorders,
-                    }) => {
+                let maybe_new_hashed_state = match task_result {
+                    Ok((
+                        StateRootComputeOutcome {
+                            state_root,
+                            trie_updates,
+                            #[cfg(feature = "trie-debug")]
+                            debug_recorders,
+                        },
+                        maybe_new_hashed_state,
+                    )) => {
                         let elapsed = root_time.elapsed();
                         info!(target: "engine::tree::payload_validator", ?state_root, ?elapsed, "State root task finished");
 
@@ -650,7 +711,7 @@ where
                                 provider_builder.clone(),
                                 provider_factory,
                                 overlay_builder,
-                                &hashed_state,
+                                &output,
                                 trie_updates.as_ref().clone(),
                             );
                             #[cfg(feature = "trie-debug")]
@@ -679,11 +740,28 @@ where
                             );
                             state_root_task_failed = true;
                         }
+
+                        maybe_new_hashed_state
                     }
                     Err(error) => {
                         debug!(target: "engine::tree::payload_validator", %error, "State root task failed");
                         state_root_task_failed = true;
+                        None
                     }
+                };
+
+                // If the state root task failed or we got a new hashed state from the fallback that
+                // won the race, we need to replace the hashed state handle and re-run the
+                // validation.
+                if maybe_new_hashed_state.is_some() || state_root_task_failed {
+                    hashed_state = maybe_new_hashed_state.unwrap_or_else(|| {
+                        LazyHandle::ready(Arc::new(self.provider.hashed_post_state(&output.state)))
+                    });
+                    hashed_state_validate_result =
+                        self.validator.validate_block_post_execution_with_hashed_state(
+                            hashed_state.get(),
+                            &block,
+                        );
                 }
             }
             StateRootStrategy::Parallel => {
@@ -753,6 +831,12 @@ where
             (root, Arc::new(updates), root_time.elapsed())
         };
 
+        if let Err(err) = hashed_state_validate_result {
+            // call post-block hook
+            self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
+            return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into())
+        }
+
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
         self.metrics
             .record_state_root_gas_bucket(block.header().gas_used(), root_elapsed.as_secs_f64());
@@ -782,7 +866,7 @@ where
             .into())
         }
 
-        let timing_stats = state_provider_stats.map(|stats| {
+        let timing_stats = state_provider_stats.filter(|_| slow_block_enabled).map(|stats| {
             self.calculate_timing_stats(
                 &block,
                 stats,
@@ -909,6 +993,13 @@ where
         }
     }
 
+    fn validate_received_bal_gas(
+        decoded_bal: &DecodedBal,
+        gas_limit: u64,
+    ) -> Result<(), ConsensusError> {
+        decoded_bal.as_bal().validate_gas_limit(gas_limit).map_err(ConsensusError::from)
+    }
+
     /// Executes a block with the given state provider.
     ///
     /// This method orchestrates block execution:
@@ -925,7 +1016,12 @@ where
         input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
     ) -> Result<
-        (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver),
+        (
+            BlockExecutionOutput<N::Receipt>,
+            Vec<Address>,
+            ReceiptRootReceiver,
+            Option<BlockAccessList>,
+        ),
         InsertBlockErrorKind,
     >
     where
@@ -936,16 +1032,6 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
-
-        if let Some(decoded_bal) = &env.decoded_bal {
-            decoded_bal
-                .as_bal()
-                .validate_gas_limit(input.gas_limit())
-                .map_err(|e| {
-                    debug!(target: "engine::tree::payload_validator", "BAL is invalid since it contains more items than the gas limit allows");
-                    InsertBlockErrorKind::Consensus(ConsensusError::from(e))
-                })?
-        }
 
         let has_bal = env.decoded_bal.is_some();
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
@@ -989,8 +1075,8 @@ where
         let transaction_count = input.transaction_count();
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
-        let executor = executor.with_state_hook(
-            handle.state_hook().map(|hook| Box::new(hook) as Box<dyn OnStateHook>),
+        executor.evm_mut().db_mut().set_state_hook(
+            handle.state_hook().map(|hook| Box::new(hook) as Box<dyn OnStateHook + 'static>),
         );
 
         let execution_start = Instant::now();
@@ -1013,17 +1099,11 @@ where
             .map(|(evm, result)| (evm.into_db(), result))?;
         self.metrics.record_post_execution(post_exec_start.elapsed());
 
-        if let Some(decoded_bal) = &env.decoded_bal {
-            // Regular execution still handles BAL payloads when the parallel BAL path is
-            // disabled. Prove that execution rebuilt the payload-provided BAL before
-            // post-execution validation uses `decoded_bal.hash()` as the header commitment.
-            crate::tree::payload_processor::bal::validate_bal(&mut db, decoded_bal)?;
-        }
-
         // Merge transitions into bundle state
         debug_span!(target: "engine::tree", "merge_transitions")
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
 
+        let built_bal = if has_bal { db.take_built_alloy_bal() } else { None };
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
 
         let execution_duration = execution_start.elapsed();
@@ -1031,7 +1111,7 @@ where
         self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
 
-        Ok((output, senders, result_rx))
+        Ok((output, senders, result_rx, built_bal))
     }
 
     /// Returns true when the BAL execute path should be used for this block.
@@ -1044,9 +1124,7 @@ where
     //     empirically once workers are parallel; meaningless while the commit loop is sequential.
     fn bal_path_eligible(&self, bal: Option<&DecodedBal>) -> Result<bool, InsertBlockErrorKind> {
         let has_bal = bal.is_some();
-        let parallel_execution = has_bal &&
-            !self.config.disable_state_cache() &&
-            !self.config.disable_bal_parallel_execution();
+        let parallel_execution = has_bal && !self.config.disable_bal_parallel_execution();
         if parallel_execution && self.config.disable_bal_parallel_state_root() {
             return Err(InsertBlockErrorKind::Other(
                 "disabling parallel state root is impossible when parallel execution is enabled"
@@ -1065,56 +1143,48 @@ where
     /// 2. Relies on BAL prewarm to stream sparse-trie updates and optional state prefetches.
     /// 3. Spawns the receipt-root task.
     /// 4. Calls [`crate::tree::payload_processor::bal::execute_block`].
-    /// 5. Adapts the BAL output to a [`BlockExecutionOutput`].
+    /// 5. Returns the rebuilt BAL for post-execution consensus validation.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     #[expect(clippy::type_complexity)]
-    fn execute_block_bal<S, Tx, Err, BalP, T>(
+    fn execute_block_bal<Tx, Err, MakeStateProvider, T>(
         &self,
-        _state_provider: S,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
         handle: &PayloadHandle<Tx, Err, N::Receipt>,
-        provider_builder: StateProviderBuilder<N, BalP>,
+        make_state_provider: &MakeStateProvider,
     ) -> Result<
-        (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver),
+        (
+            BlockExecutionOutput<N::Receipt>,
+            Vec<Address>,
+            ReceiptRootReceiver,
+            Option<BlockAccessList>,
+        ),
         InsertBlockErrorKind,
     >
     where
-        S: StateProvider + Send,
         Tx: ExecutableTxFor<Evm> + Send,
         Err: core::error::Error + Send + Sync + 'static,
-        BalP: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
+        MakeStateProvider: Fn(bool) -> ProviderResult<StateProviderBox> + Sync,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
         V: PayloadValidator<T, Block = N::Block>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block via BAL path");
 
-        let cache = handle.caches().ok_or_else(|| {
-            InsertBlockErrorKind::Other("BAL execute path: no execution cache available".into())
-        })?;
-        let cache_metrics = handle.cache_metrics().unwrap_or_default();
-        let saved_cache = SavedCache::new(env.parent_hash, cache);
-
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(env.transaction_count);
         let input_bal = env.decoded_bal.ok_or_else(|| {
             InsertBlockErrorKind::Other("BAL execute path: no decoded BAL available".into())
         })?;
 
-        let make_db = move || {
-            let provider = provider_builder
-                .build()
+        let make_db = |fill_on_miss| {
+            let provider = make_state_provider(fill_on_miss)
                 .map_err(crate::tree::payload_processor::bal::BalExecutionError::Provider)?;
-            Ok(StateProviderDatabase::new(CachedStateProvider::new_prewarm(
-                provider,
-                saved_cache.cache().clone(),
-                cache_metrics.clone(),
-            )))
+            Ok(StateProviderDatabase::new(provider))
         };
         let execution_start = Instant::now();
         let ctx =
             self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
-        let (output, senders) = crate::tree::payload_processor::bal::execute_block(
+        let (output, senders, built_bal) = crate::tree::payload_processor::bal::execute_block(
             &self.runtime,
             &self.evm_config,
             &make_db,
@@ -1135,7 +1205,7 @@ where
             "Executed block via BAL path",
         );
 
-        Ok((output, senders, result_rx))
+        Ok((output, senders, result_rx, Some(built_bal)))
     }
 
     fn spawn_receipt_root_task(
@@ -1314,16 +1384,18 @@ where
         &self,
         handle: &mut PayloadHandle<Tx, Err, R>,
         state_provider_builder: StateProviderBuilder<N, P>,
-        hashed_state: &LazyHashedPostState,
-    ) -> ProviderResult<Result<StateRootComputeOutcome, ParallelStateRootError>> {
+        output: Arc<BlockExecutionOutput<R>>,
+    ) -> ProviderResult<
+        Result<(StateRootComputeOutcome, Option<LazyHashedPostState>), ParallelStateRootError>,
+    > {
         let Some(timeout) = self.config.state_root_task_timeout() else {
-            return Ok(handle.state_root());
+            return Ok(handle.state_root().map(|outcome| (outcome, None)));
         };
 
         let task_rx = handle.take_state_root_rx();
 
         match task_rx.recv_timeout(timeout) {
-            Ok(result) => Ok(result),
+            Ok(result) => Ok(result.map(|outcome| (outcome, None))),
             Err(RecvTimeoutError::Disconnected) => {
                 Ok(Err(ParallelStateRootError::Other("sparse trie task dropped".to_string())))
             }
@@ -1335,13 +1407,16 @@ where
                 );
                 self.metrics.block_validation.state_root_task_timeout_total.increment(1);
 
-                let (seq_tx, seq_rx) =
-                    std::sync::mpsc::channel::<ProviderResult<(B256, TrieUpdates)>>();
+                let (seq_tx, seq_rx) = std::sync::mpsc::channel();
 
-                let seq_hashed_state = hashed_state.clone();
                 self.payload_processor.executor().spawn_blocking_named("serial-root", move || {
                     let result = state_provider_builder.build().and_then(|provider| {
-                        Self::compute_state_root_serial(provider, &seq_hashed_state)
+                        let hashed_state =
+                            LazyHandle::ready(Arc::new(provider.hashed_post_state(&output.state)));
+                        let (state_root, trie_updates) =
+                            Self::compute_state_root_serial(provider, &hashed_state)?;
+
+                        Ok((state_root, trie_updates, hashed_state))
                     });
                     let _ = seq_tx.send(result);
                 });
@@ -1356,7 +1431,7 @@ where
                                 source = "task",
                                 "State root timeout race won"
                             );
-                            return Ok(result);
+                            return Ok(result.map(|outcome| (outcome, None)));
                         }
                         Err(RecvTimeoutError::Disconnected) => {
                             debug!(
@@ -1368,13 +1443,16 @@ where
                                     "both state root computations failed",
                                 ))
                             })?;
-                            let (state_root, trie_updates) = result?;
-                            return Ok(Ok(StateRootComputeOutcome {
-                                state_root,
-                                trie_updates: Arc::new(trie_updates),
-                                #[cfg(feature = "trie-debug")]
-                                debug_recorders: Vec::new(),
-                            }));
+                            let (state_root, trie_updates, hashed_state) = result?;
+                            return Ok(Ok((
+                                StateRootComputeOutcome {
+                                    state_root,
+                                    trie_updates: Arc::new(trie_updates),
+                                    #[cfg(feature = "trie-debug")]
+                                    debug_recorders: Vec::new(),
+                                },
+                                Some(hashed_state),
+                            )));
                         }
                         Err(RecvTimeoutError::Timeout) => {}
                     }
@@ -1385,13 +1463,16 @@ where
                             source = "sequential",
                             "State root timeout race won"
                         );
-                        let (state_root, trie_updates) = result?;
-                        return Ok(Ok(StateRootComputeOutcome {
-                            state_root,
-                            trie_updates: Arc::new(trie_updates),
-                            #[cfg(feature = "trie-debug")]
-                            debug_recorders: Vec::new(),
-                        }));
+                        let (state_root, trie_updates, hashed_state) = result?;
+                        return Ok(Ok((
+                            StateRootComputeOutcome {
+                                state_root,
+                                trie_updates: Arc::new(trie_updates),
+                                #[cfg(feature = "trie-debug")]
+                                debug_recorders: Vec::new(),
+                            },
+                            Some(hashed_state),
+                        )));
                     }
                 }
             }
@@ -1409,15 +1490,15 @@ where
         state_provider_builder: StateProviderBuilder<N, P>,
         provider_factory: P,
         overlay_builder: OverlayBuilder<N>,
-        hashed_state: &LazyHashedPostState,
+        output: &BlockExecutionOutput<N::Receipt>,
         task_trie_updates: TrieUpdates,
     ) -> bool {
         debug!(target: "engine::tree::payload_validator", "Comparing trie updates with serial computation");
 
-        match state_provider_builder
-            .build()
-            .and_then(|provider| Self::compute_state_root_serial(provider, hashed_state))
-        {
+        match state_provider_builder.build().and_then(|provider| {
+            let hashed_state = Arc::new(provider.hashed_post_state(&output.state));
+            Self::compute_state_root_serial(provider, &LazyHandle::ready(hashed_state))
+        }) {
             Ok((serial_root, serial_trie_updates)) => {
                 debug!(
                     target: "engine::tree::payload_validator",
@@ -1516,7 +1597,6 @@ where
     ///
     /// The `hashed_state` handle wraps the background hashed post state computation.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
-    #[expect(clippy::too_many_arguments)]
     fn validate_post_execution<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         block: &RecoveredBlock<N::Block>,
@@ -1524,9 +1604,8 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
         ctx: &mut TreeCtx<'_, N>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
-        hashed_state: LazyHashedPostState,
-        block_access_list_hash: Option<B256>,
-    ) -> Result<LazyHashedPostState, InsertBlockErrorKind>
+        built_bal: Option<BlockAccessList>,
+    ) -> Result<(), InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
     {
@@ -1538,6 +1617,9 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
+        let block_access_list_hash =
+            built_bal.as_ref().map(|bal| compute_block_access_list_hash(bal));
+
         if let Err(err) = self.consensus.validate_block_post_execution(
             block,
             output,
@@ -1550,28 +1632,13 @@ where
         }
         drop(_enter);
 
-        // Wait for the background keccak256 hashing task to complete. This blocks until
-        // all changed addresses and storage slots have been hashed.
-        let hashed_state_ref =
-            debug_span!(target: "engine::tree::payload_validator", "wait_hashed_post_state")
-                .in_scope(|| hashed_state.get());
-
-        let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").entered();
-        if let Err(err) =
-            self.validator.validate_block_post_execution_with_hashed_state(hashed_state_ref, block)
-        {
-            // call post-block hook
-            self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
-            return Err(err.into())
-        }
-
         // record post-execution validation duration
         self.metrics
             .block_validation
             .post_execution_validation_duration
             .record(start.elapsed().as_secs_f64());
 
-        Ok(hashed_state)
+        Ok(())
     }
 
     /// Spawns a payload processor task based on the state root strategy.
@@ -1593,7 +1660,7 @@ where
         level = "debug",
         target = "engine::tree::payload_validator",
         skip_all,
-        fields(?strategy)
+        fields(?strategy, parallel_bal_execution)
     )]
     fn spawn_payload_processor<T: ExecutableTxIterator<Evm>>(
         &mut self,
@@ -1602,6 +1669,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         overlay_factory: OverlayStateProviderFactory<P, N>,
         strategy: &StateRootStrategy<N>,
+        parallel_bal_execution: bool,
     ) -> Result<
         PayloadHandle<
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
@@ -1621,6 +1689,7 @@ where
                     provider_builder,
                     overlay_factory,
                     &self.config,
+                    parallel_bal_execution,
                 );
 
                 // record prewarming initialization duration

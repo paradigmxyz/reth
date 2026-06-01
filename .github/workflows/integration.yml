@@ -54,7 +54,7 @@ jobs:
         run: |
           cargo nextest run \
             --no-fail-fast \
-            --locked --features "asm-keccak ${{ matrix.network }}" \
+            --locked --features "asm-keccak" \
             --workspace --exclude ef-tests \
             -E "kind(test) and not binary(e2e_testsuite)"
 
