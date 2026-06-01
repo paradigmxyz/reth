@@ -17,9 +17,9 @@ use crate::{
     },
     e2s::{error::E2sError, types::Entry},
 };
-use alloy_consensus::{Block, BlockBody, EthereumReceipt, Header};
-use alloy_primitives::{B256, U256};
-use alloy_rlp::{Decodable, Encodable};
+use alloy_consensus::{Block, BlockBody, Eip658Value, Header, TxType};
+use alloy_primitives::{Log, B256, U256};
+use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use sha2::{Digest, Sha256};
 
 // ERE-specific constants
@@ -222,14 +222,14 @@ impl CompressedSlimReceipts {
 
     /// Compress a block's slim receipts.
     ///
-    /// [`EthereumReceipt`] is the canonical slim receipt: its RLP encoding is
-    /// `[tx-type, status, cumulative-gas, logs]`, with no bloom filter, matching the spec.
-    pub fn from_receipts(receipts: &[EthereumReceipt]) -> Result<Self, E2sError> {
+    /// [`SlimReceipt`] is the canonical slim receipt: its RLP encoding is the 4-element list
+    /// `[tx-type, post-state-or-status, cumulative-gas, logs]`, with no bloom filter.
+    pub fn from_receipts(receipts: &[SlimReceipt]) -> Result<Self, E2sError> {
         Self::from_encodable_list(receipts)
     }
 
     /// Decompress and decode this entry into a block's slim receipts.
-    pub fn decode_receipts(&self) -> Result<Vec<EthereumReceipt>, E2sError> {
+    pub fn decode_receipts(&self) -> Result<Vec<SlimReceipt>, E2sError> {
         self.decode()
     }
 }
@@ -239,6 +239,25 @@ impl DecodeCompressedRlp for CompressedSlimReceipts {
         let decoder = SnappyRlpCodec::<T>::new();
         decoder.decode(&self.data)
     }
+}
+
+/// A slim execution receipt as stored in an `ERE` file.
+///
+/// Per the spec, the slim form is the 4-element RLP list
+/// `[tx-type, post-state-or-status, cumulative-gas, logs]` with **no bloom filter** (the bloom is
+/// recomputable from the logs). This is a thin wrapper over alloy's field types: [`Eip658Value`]
+/// captures both the pre-Byzantium 32-byte post-state root and the post-Byzantium boolean status,
+/// so a single type decodes receipts across every fork.
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+pub struct SlimReceipt {
+    /// Transaction type (EIP-2718).
+    pub tx_type: TxType,
+    /// Post-state root (pre-Byzantium) or success status (post-Byzantium).
+    pub status: Eip658Value,
+    /// Cumulative gas used in the block up to and including this transaction.
+    pub cumulative_gas_used: u64,
+    /// Logs emitted by the transaction.
+    pub logs: Vec<Log>,
 }
 
 /// Proof type discriminant used inside the Proof entry's RLP envelope.
@@ -714,8 +733,22 @@ mod tests {
 
     #[test]
     fn test_slim_receipts_typed_helpers() {
-        // `create_test_receipts` returns `Vec<EthereumReceipt<TxType>>`, the canonical slim type.
-        let receipts = create_test_receipts();
+        // Cover both status variants: post-Byzantium boolean status and a pre-Byzantium 32-byte
+        // post-state root, proving a single `SlimReceipt` type round-trips across forks.
+        let receipts = vec![
+            SlimReceipt {
+                tx_type: TxType::Eip1559,
+                status: Eip658Value::Eip658(true),
+                cumulative_gas_used: 21000,
+                logs: vec![],
+            },
+            SlimReceipt {
+                tx_type: TxType::Legacy,
+                status: Eip658Value::PostState(B256::repeat_byte(0xab)),
+                cumulative_gas_used: 42000,
+                logs: vec![],
+            },
+        ];
 
         let compressed = CompressedSlimReceipts::from_receipts(&receipts).unwrap();
         let decoded = compressed.decode_receipts().unwrap();
