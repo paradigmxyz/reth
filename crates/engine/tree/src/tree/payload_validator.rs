@@ -41,7 +41,7 @@
 use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
-    multiproof::{StateRootComputeOutcome, StateRootHandle},
+    multiproof::{StateRootComputeOutcome, StateRootHandle, StateRootMessage},
     payload_processor::PayloadProcessor,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     types::{InsertPayloadResult, ValidationOutput},
@@ -52,14 +52,14 @@ use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
-use alloy_primitives::{keccak256, map::B256Set, B256, U256};
+use alloy_primitives::{map::B256Set, B256};
 use reth_tasks::LazyHandle;
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
 use reth_chain_state::{
-    CanonicalInMemoryState, ComputedTrieData, DeferredTrieData, ExecutedBlock, ExecutionTimingStats,
+    CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats,
 };
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -76,8 +76,8 @@ use reth_payload_primitives::{
     PayloadTypes,
 };
 use reth_primitives_traits::{
-    Account, AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, GotExpected,
-    NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
+    AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives,
+    RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
     providers::{OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory},
@@ -87,9 +87,7 @@ use reth_provider::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_trie::{
-    trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState, HashedStorage,
-};
+use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::{Address, KECCAK_EMPTY};
@@ -99,7 +97,7 @@ use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
         mpsc::RecvTimeoutError,
-        Arc,
+        Arc, Mutex,
     },
     time::Duration,
 };
@@ -109,6 +107,57 @@ pub use crate::tree::types::ValidationOutcome;
 
 /// Handle to a [`HashedPostState`] computed on a background thread.
 type LazyHashedPostState = reth_tasks::LazyHandle<Arc<HashedPostState>>;
+
+type PendingPayloadBuilderSparseTrieMap =
+    Arc<Mutex<HashMap<B256, Vec<PendingPayloadBuilderSparseTrie>>>>;
+
+struct PendingPayloadBuilderSparseTrie {
+    updates_rx: crossbeam_channel::Receiver<StateRootMessage>,
+    state_root_tx:
+        std::sync::mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
+    hashed_state_tx: std::sync::mpsc::Sender<HashedPostState>,
+}
+
+struct PendingPayloadBuilderSparseTrieCancelGuard {
+    pending: PendingPayloadBuilderSparseTrieMap,
+    block_hash: B256,
+    active: bool,
+}
+
+impl PendingPayloadBuilderSparseTrieCancelGuard {
+    fn new(pending: PendingPayloadBuilderSparseTrieMap, block_hash: B256) -> Self {
+        Self { pending, block_hash, active: true }
+    }
+
+    fn disarm(&mut self) {
+        self.active = false;
+    }
+}
+
+impl Drop for PendingPayloadBuilderSparseTrieCancelGuard {
+    fn drop(&mut self) {
+        if !self.active {
+            return
+        }
+
+        let Some(waiters) = self
+            .pending
+            .lock()
+            .expect("pending payload-builder sparse trie mutex poisoned")
+            .remove(&self.block_hash)
+        else {
+            return
+        };
+
+        debug!(
+            target: "engine::tree::payload_validator",
+            block_hash = %self.block_hash,
+            pending_handles = waiters.len(),
+            "cancelled pending payload-builder sparse trie handles"
+        );
+        drop(waiters);
+    }
+}
 
 /// Multiplier over the parent's gas limit beyond which a block's claimed gas usage cannot be
 /// legitimate. Gas limit can change by at most 1/1024 per block, so anything over this is rejected
@@ -208,6 +257,9 @@ where
     runtime: reth_tasks::Runtime,
     /// Custom state root computation function.
     custom_state_root: Option<CustomStateRoot<Evm::Primitives>>,
+    /// Sparse-trie handles returned to payload builders before the parent block is validated.
+    #[debug(skip)]
+    pending_payload_builder_sparse_tries: PendingPayloadBuilderSparseTrieMap,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -264,6 +316,7 @@ where
             changeset_cache,
             runtime,
             custom_state_root: None,
+            pending_payload_builder_sparse_tries: Default::default(),
         }
     }
 
@@ -369,6 +422,11 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         let parent_hash = input.parent_hash();
+        let block_hash = input.hash();
+        let mut pending_sparse_trie_cancel = PendingPayloadBuilderSparseTrieCancelGuard::new(
+            Arc::clone(&self.pending_payload_builder_sparse_tries),
+            block_hash,
+        );
 
         // Fetch parent block. This goes to memory most of the time unless the parent block is
         // beyond the in-memory buffer.
@@ -891,13 +949,27 @@ where
             block
         );
 
+        let block_number = block.header().number();
+        let parent_state_root = block.header().state_root();
+        let base_state_root = parent_block.state_root();
         let executed_block = self.spawn_deferred_trie_task(
             Arc::new(block),
             output,
             hashed_state,
-            trie_output,
+            trie_output.clone(),
             changeset_provider,
         );
+        self.fulfill_pending_payload_builder_sparse_tries(
+            block_hash,
+            block_number,
+            base_state_root,
+            parent_state_root,
+            trie_output.as_ref(),
+            ctx.state(),
+            executed_block.clone(),
+        );
+        pending_sparse_trie_cancel.disarm();
+
         Ok(ValidationOutput::new(executed_block, timing_stats))
     }
 
@@ -1917,6 +1989,265 @@ where
         ExecutedBlock::with_deferred_trie_data(block, execution_outcome, deferred_trie_data)
     }
 
+    fn register_pending_payload_builder_sparse_trie(
+        &self,
+        parent_hash: B256,
+        parent_state_root: B256,
+    ) -> StateRootHandle {
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (state_root_tx, state_root_rx) = std::sync::mpsc::channel();
+        let (hashed_state_tx, hashed_state_rx) = std::sync::mpsc::channel();
+
+        let pending =
+            PendingPayloadBuilderSparseTrie { updates_rx, state_root_tx, hashed_state_tx };
+        let pending_count = {
+            let mut pending_sparse_tries = self
+                .pending_payload_builder_sparse_tries
+                .lock()
+                .expect("pending payload-builder sparse trie mutex poisoned");
+            let pending_for_parent = pending_sparse_tries.entry(parent_hash).or_default();
+            pending_for_parent.push(pending);
+            pending_for_parent.len()
+        };
+
+        debug!(
+            target: "engine::tree::payload_validator",
+            %parent_hash,
+            %parent_state_root,
+            pending_count,
+            "registered deferred payload-builder sparse trie handle"
+        );
+
+        StateRootHandle::new(parent_state_root, updates_tx, state_root_rx, hashed_state_rx)
+    }
+
+    fn payload_builder_sparse_trie_handle_for_validated_parent(
+        &self,
+        parent_hash: B256,
+        base_parent_hash: B256,
+        parent_state_root: B256,
+        state: &EngineApiTreeState<N>,
+    ) -> RethResult<Option<StateRootHandle>> {
+        let base_state_root = self.state_root_by_hash(base_parent_hash, state)?.ok_or_else(|| {
+            RethError::msg(format!(
+                "failed loading base parent `{base_parent_hash}` state root for payload-builder sparse trie"
+            ))
+        })?;
+
+        if let Some(executed_parent) = state.tree_state.executed_block_by_hash(parent_hash) {
+            let prepare_start = Instant::now();
+            let state_trie_overlays = state.tree_state.state_trie_overlays.detached_snapshot();
+            state_trie_overlays.insert_block(executed_parent.clone());
+            let computed_trie_data = executed_parent.trie_data();
+            let mut parent_trie_updates = TrieUpdates::default();
+            parent_trie_updates.extend_from_sorted(&computed_trie_data.trie_updates);
+
+            let overlay_builder = OverlayBuilder::new(parent_hash, self.changeset_cache.clone())
+                .with_state_trie_overlay_manager(state_trie_overlays);
+            let overlay_factory =
+                OverlayStateProviderFactory::new(self.provider.clone(), overlay_builder);
+            let handle = self.payload_processor.spawn_state_root_with_updated_sparse_trie_snapshot(
+                overlay_factory,
+                base_state_root,
+                parent_state_root,
+                &parent_trie_updates,
+                false,
+                &self.config,
+            );
+
+            info!(
+                target: "engine::tree::payload_validator",
+                %parent_hash,
+                %base_parent_hash,
+                %base_state_root,
+                %parent_state_root,
+                prepare_elapsed = ?prepare_start.elapsed(),
+                "prepared payload-builder sparse trie handle from validated in-memory parent"
+            );
+            return Ok(Some(handle))
+        }
+
+        let persisted_parent_state_root = self.state_root_by_hash(parent_hash, state)?;
+        if persisted_parent_state_root == Some(parent_state_root) {
+            let overlay_factory = OverlayStateProviderFactory::new(
+                self.provider.clone(),
+                Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone()),
+            );
+            let handle = self.payload_processor.spawn_state_root(
+                overlay_factory,
+                parent_state_root,
+                false,
+                &self.config,
+            );
+
+            info!(
+                target: "engine::tree::payload_validator",
+                %parent_hash,
+                %parent_state_root,
+                "prepared payload-builder sparse trie handle from persisted parent"
+            );
+            return Ok(Some(handle))
+        }
+
+        Ok(None)
+    }
+
+    #[expect(clippy::too_many_arguments)]
+    fn fulfill_pending_payload_builder_sparse_tries(
+        &self,
+        parent_hash: B256,
+        parent_number: u64,
+        base_state_root: B256,
+        parent_state_root: B256,
+        parent_trie_updates: &TrieUpdates,
+        state: &EngineApiTreeState<N>,
+        executed_parent: ExecutedBlock<N>,
+    ) {
+        let Some(pending_handles) = self
+            .pending_payload_builder_sparse_tries
+            .lock()
+            .expect("pending payload-builder sparse trie mutex poisoned")
+            .remove(&parent_hash)
+        else {
+            return
+        };
+
+        let pending_count = pending_handles.len();
+        let overlay_start = Instant::now();
+        let state_trie_overlays = state.tree_state.state_trie_overlays.detached_snapshot();
+        state_trie_overlays.insert_block(executed_parent);
+        let overlay_elapsed = overlay_start.elapsed();
+
+        for pending in pending_handles {
+            let overlay_builder = OverlayBuilder::new(parent_hash, self.changeset_cache.clone())
+                .with_state_trie_overlay_manager(state_trie_overlays.clone());
+            let overlay_factory =
+                OverlayStateProviderFactory::new(self.provider.clone(), overlay_builder);
+            let active_handle =
+                self.payload_processor.spawn_state_root_with_updated_sparse_trie_snapshot(
+                    overlay_factory,
+                    base_state_root,
+                    parent_state_root,
+                    parent_trie_updates,
+                    false,
+                    &self.config,
+                );
+            self.spawn_payload_builder_sparse_trie_bridge(
+                parent_hash,
+                parent_number,
+                pending,
+                active_handle,
+            );
+        }
+
+        info!(
+            target: "engine::tree::payload_validator",
+            %parent_hash,
+            parent_number,
+            %base_state_root,
+            %parent_state_root,
+            pending_count,
+            ?overlay_elapsed,
+            "fulfilled deferred payload-builder sparse trie handles from validated parent"
+        );
+    }
+
+    fn spawn_payload_builder_sparse_trie_bridge(
+        &self,
+        parent_hash: B256,
+        parent_number: u64,
+        pending: PendingPayloadBuilderSparseTrie,
+        mut active_handle: StateRootHandle,
+    ) {
+        let PendingPayloadBuilderSparseTrie {
+            updates_rx,
+            state_root_tx,
+            hashed_state_tx,
+        } = pending;
+        let active_updates_tx = active_handle.updates_tx().clone();
+        let active_state_root_rx = active_handle.take_state_root_rx();
+        let active_hashed_state_rx = active_handle.take_hashed_state_rx();
+
+        self.payload_processor.executor().spawn_blocking_named(
+            "payload-builder-sparse-trie-bridge",
+            move || {
+                let bridge_start = Instant::now();
+                let mut forwarded_updates = 0usize;
+                let mut finished = false;
+
+                while let Ok(message) = updates_rx.recv() {
+                    finished = matches!(message, StateRootMessage::FinishedStateUpdates);
+                    if active_updates_tx.send(message).is_err() {
+                        debug!(
+                            target: "engine::tree::payload_validator",
+                            %parent_hash,
+                            parent_number,
+                            forwarded_updates,
+                            "payload-builder sparse trie task dropped update receiver"
+                        );
+                        return
+                    }
+                    forwarded_updates += 1;
+
+                    if finished {
+                        break
+                    }
+                }
+                drop(active_updates_tx);
+
+                if !finished {
+                    debug!(
+                        target: "engine::tree::payload_validator",
+                        %parent_hash,
+                        parent_number,
+                        forwarded_updates,
+                        "payload-builder sparse trie update stream closed before finish"
+                    );
+                    return
+                }
+
+                let Ok(hashed_state) = active_hashed_state_rx.recv() else {
+                    debug!(
+                        target: "engine::tree::payload_validator",
+                        %parent_hash,
+                        parent_number,
+                        forwarded_updates,
+                        "payload-builder sparse trie task dropped hashed state sender"
+                    );
+                    return
+                };
+                if hashed_state_tx.send(hashed_state).is_err() {
+                    debug!(
+                        target: "engine::tree::payload_validator",
+                        %parent_hash,
+                        parent_number,
+                        forwarded_updates,
+                        "payload builder dropped deferred hashed state receiver"
+                    );
+                    return
+                }
+
+                let result = active_state_root_rx.recv().unwrap_or_else(|_| {
+                    Err(ParallelStateRootError::Other(
+                        "payload-builder sparse trie task dropped state root sender".to_string(),
+                    ))
+                });
+                let success = result.is_ok();
+                let _ = state_root_tx.send(result);
+
+                debug!(
+                    target: "engine::tree::payload_validator",
+                    %parent_hash,
+                    parent_number,
+                    forwarded_updates,
+                    success,
+                    elapsed = ?bridge_start.elapsed(),
+                    "completed payload-builder sparse trie bridge"
+                );
+            },
+        );
+    }
+
     fn calculate_timing_stats(
         &self,
         block: &RecoveredBlock<N::Block>,
@@ -2264,113 +2595,38 @@ where
         parent_payload: Types::ExecutionData,
         state: &EngineApiTreeState<N>,
     ) -> RethResult<StateRootHandle> {
-        let prepare_start = Instant::now();
-        let raw_bal = parent_payload
-            .block_access_list()
-            .cloned()
-            .ok_or_else(|| RethError::msg("payload-builder sparse trie parent has no BAL"))?;
-        let decoded_bal = DecodedBal::from_rlp_bytes(raw_bal).map_err(ProviderError::Rlp)?;
+        let register_start = Instant::now();
+        if parent_payload.block_access_list().is_none() {
+            return Err(RethError::msg("payload-builder sparse trie parent has no BAL"))
+        }
 
         let speculative_parent_block =
             self.validator.convert_payload_to_block(parent_payload).map_err(RethError::msg)?;
-        Self::validate_received_bal_gas(&decoded_bal, speculative_parent_block.gas_limit())?;
-
         let base_parent_hash = speculative_parent_block.parent_hash();
         let speculative_parent_hash = speculative_parent_block.hash();
         let speculative_parent_state_root = speculative_parent_block.state_root();
 
-        let base_parent_state_root = self
-            .state_root_by_hash(base_parent_hash, state)?
-            .ok_or_else(|| {
-                RethError::msg(format!(
-                    "failed loading base parent `{base_parent_hash}` state root for payload-builder sparse trie"
-                ))
-            })?;
-        let base_provider_builder = self
-            .state_provider_builder(base_parent_hash, state)?
-            .ok_or_else(|| {
-                RethError::msg(format!(
-                    "failed loading base parent `{base_parent_hash}` state for payload-builder sparse trie"
-                ))
-            })?;
-        let base_provider = base_provider_builder.build()?;
-
-        let decode_start = Instant::now();
-        let bal_post_state =
-            decoded_block_access_list_hashed_post_state(base_provider.as_ref(), &decoded_bal)?;
-        let decode_elapsed = decode_start.elapsed();
-
-        let bal_accounts = bal_post_state.accounts.len();
-        let bal_storage_accounts = bal_post_state.storages.len();
-        let bal_storage_slots: usize =
-            bal_post_state.storages.values().map(|storage| storage.storage.len()).sum();
-
-        let parent_state_root_start = Instant::now();
-        let (computed_parent_state_root, parent_trie_updates) =
-            base_provider.state_root_with_updates(bal_post_state.clone())?;
-        let parent_state_root_elapsed = parent_state_root_start.elapsed();
-        if computed_parent_state_root != speculative_parent_state_root {
-            return Err(RethError::msg(format!(
-                "BAL post-state root mismatch for payload-builder sparse trie parent `{speculative_parent_hash}`: computed `{computed_parent_state_root}`, header `{speculative_parent_state_root}`",
-            )));
+        if let Some(handle) = self.payload_builder_sparse_trie_handle_for_validated_parent(
+            speculative_parent_hash,
+            base_parent_hash,
+            speculative_parent_state_root,
+            state,
+        )? {
+            return Ok(handle)
         }
 
-        let parent_trie_updates_total = parent_trie_updates.account_nodes_ref().len()
-            + parent_trie_updates.removed_nodes_ref().len()
-            + parent_trie_updates
-                .storage_tries_ref()
-                .values()
-                .map(|storage| storage.len())
-                .sum::<usize>();
-
-        let overlay_snapshot_start = Instant::now();
-        let state_trie_overlays = state.tree_state.state_trie_overlays.detached_snapshot();
-        let trie_data = ComputedTrieData::new(
-            Arc::new(bal_post_state.into_sorted()),
-            Arc::new(parent_trie_updates.clone_into_sorted()),
-        );
-        let senders = speculative_parent_block
-            .body()
-            .transactions_iter()
-            .map(reth_primitives_traits::SignedTransaction::try_recover)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(RethError::msg)?;
-        state_trie_overlays.insert_block(ExecutedBlock::new(
-            Arc::new(RecoveredBlock::new_unhashed(speculative_parent_block.unseal(), senders)),
-            Arc::new(BlockExecutionOutput::<N::Receipt>::default()),
-            trie_data,
-        ));
-        let overlay_snapshot_elapsed = overlay_snapshot_start.elapsed();
-
-        let overlay_builder =
-            OverlayBuilder::new(speculative_parent_hash, self.changeset_cache.clone())
-                .with_state_trie_overlay_manager(state_trie_overlays);
-        let overlay_factory =
-            OverlayStateProviderFactory::new(self.provider.clone(), overlay_builder);
-        let handle = self.payload_processor.spawn_state_root_with_updated_sparse_trie_snapshot(
-            overlay_factory,
-            base_parent_state_root,
+        let handle = self.register_pending_payload_builder_sparse_trie(
+            speculative_parent_hash,
             speculative_parent_state_root,
-            &parent_trie_updates,
-            false,
-            &self.config,
         );
 
         info!(
             target: "engine::tree::payload_validator",
             %base_parent_hash,
-            %base_parent_state_root,
             %speculative_parent_hash,
             %speculative_parent_state_root,
-            bal_accounts,
-            bal_storage_accounts,
-            bal_storage_slots,
-            parent_trie_updates_total,
-            ?decode_elapsed,
-            ?parent_state_root_elapsed,
-            ?overlay_snapshot_elapsed,
-            prepare_elapsed = ?prepare_start.elapsed(),
-            "prepared payload-builder sparse trie handle from cloned Reth state"
+            register_elapsed = ?register_start.elapsed(),
+            "registered deferred payload-builder sparse trie handle"
         );
 
         Ok(handle)
@@ -2384,80 +2640,6 @@ where
     fn wait_for_caches(&self) -> CacheWaitDurations {
         self.payload_processor.wait_for_caches()
     }
-}
-
-fn decoded_block_access_list_hashed_post_state(
-    inner: &dyn StateProvider,
-    decoded: &DecodedBal,
-) -> ProviderResult<HashedPostState> {
-    let bal = decoded.as_bal();
-    let mut hashed_post_state = HashedPostState::with_capacity(bal.account_count());
-
-    for account_changes in bal {
-        apply_bal_account_changes(inner, account_changes, &mut hashed_post_state)?;
-    }
-
-    Ok(hashed_post_state)
-}
-
-fn apply_bal_account_changes(
-    inner: &dyn StateProvider,
-    account_changes: &alloy_eip7928::AccountChanges,
-    hashed_post_state: &mut HashedPostState,
-) -> ProviderResult<()> {
-    let address = account_changes.address;
-    let hashed_address = keccak256(address);
-
-    if !account_changes.storage_changes.is_empty() {
-        let hashed_storage = hashed_post_state
-            .storages
-            .entry(hashed_address)
-            .or_insert_with(|| HashedStorage::new(false));
-
-        for slot_changes in &account_changes.storage_changes {
-            let Some(last_change) = slot_changes.changes.last() else {
-                continue;
-            };
-            let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
-            hashed_storage.storage.insert(hashed_slot, last_change.new_value);
-        }
-    }
-
-    let balance = account_changes.balance_changes.last().map(|change| change.post_balance);
-    let nonce = account_changes.nonce_changes.last().map(|change| change.new_nonce);
-    let code_hash = account_changes.code_changes.last().map(|code_change| {
-        if code_change.new_code.is_empty() {
-            KECCAK_EMPTY
-        } else {
-            keccak256(&code_change.new_code)
-        }
-    });
-
-    if balance.is_none()
-        && nonce.is_none()
-        && code_hash.is_none()
-        && account_changes.storage_changes.is_empty()
-    {
-        return Ok(());
-    }
-
-    let existing_account = inner.basic_account(&address)?;
-    let account = Account {
-        balance: balance.unwrap_or_else(|| {
-            existing_account.as_ref().map(|account| account.balance).unwrap_or(U256::ZERO)
-        }),
-        nonce: nonce
-            .unwrap_or_else(|| existing_account.as_ref().map(|account| account.nonce).unwrap_or(0)),
-        bytecode_hash: code_hash.or_else(|| {
-            existing_account
-                .as_ref()
-                .and_then(|account| account.bytecode_hash)
-                .or(Some(KECCAK_EMPTY))
-        }),
-    };
-
-    hashed_post_state.accounts.insert(hashed_address, Some(account));
-    Ok(())
 }
 
 /// Enum representing either block or payload being validated.
