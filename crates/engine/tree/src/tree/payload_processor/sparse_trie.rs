@@ -882,9 +882,8 @@ where
                     None => self.trie.get_account_value(addr),
                 };
 
-                trie_account.map(|value| {
-                    TrieAccount::decode(&mut &value[..]).expect("invalid account RLP")
-                })
+                trie_account
+                    .map(|value| TrieAccount::decode(&mut &value[..]).expect("invalid account RLP"))
             };
 
             let with_state = if fetch_state.len() < 1000 {
