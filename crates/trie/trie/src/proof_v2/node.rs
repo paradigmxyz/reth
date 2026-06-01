@@ -148,8 +148,19 @@ pub(crate) struct ProofTrieBranch {
     /// A mask tracking which child nibbles are set on the branch so far. There will be a single
     /// child on the stack for each set bit.
     pub(crate) state_mask: TrieMask,
+    /// The highest child nibble that has been inserted into this branch so far.
+    pub(crate) last_child_nibble: Option<u8>,
     /// Bitmasks which are subsets of `state_mask`.
     pub(crate) masks: Option<BranchNodeMasks>,
+}
+
+impl ProofTrieBranch {
+    #[inline]
+    pub(crate) fn set_child_bit(&mut self, nibble: u8) {
+        self.state_mask.set_bit(nibble);
+        self.last_child_nibble =
+            Some(self.last_child_nibble.map_or(nibble, |last| last.max(nibble)));
+    }
 }
 
 /// Trims the first `len` nibbles from the head of the given `Nibbles`.

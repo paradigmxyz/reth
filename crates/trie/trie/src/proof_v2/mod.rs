@@ -342,8 +342,15 @@ where
             return Some(Nibbles::new());
         };
 
-        (!branch.state_mask.is_empty())
-            .then(|| self.child_path_at(Self::highest_set_nibble(branch.state_mask)))
+        if branch.state_mask.is_empty() {
+            None
+        } else {
+            let nibble = branch
+                .last_child_nibble
+                .expect("non-empty branch state mask must have last child nibble");
+            debug_assert_eq!(nibble, Self::highest_set_nibble(branch.state_mask));
+            Some(self.child_path_at(nibble))
+        }
     }
 
     /// Calls [`Self::commit_child`] on the last child of `child_stack`, replacing it with a
@@ -411,7 +418,7 @@ where
         let branch = self.branch_stack.last_mut().expect("branch_stack cannot be empty");
 
         debug_assert!(!branch.state_mask.is_bit_set(leaf_nibble));
-        branch.state_mask.set_bit(leaf_nibble);
+        branch.set_child_bit(leaf_nibble);
 
         self.child_stack
             .push(ProofTrieBranchChild::Leaf { short_key: leaf_short_key, value: leaf_val });
@@ -480,6 +487,7 @@ where
         self.branch_stack.push(ProofTrieBranch {
             ext_len: common_prefix_len as u8,
             state_mask: TrieMask::new(1 << first_child_nibble),
+            last_child_nibble: Some(first_child_nibble),
             masks: None,
         });
 
@@ -738,6 +746,7 @@ where
         ProofTrieBranch {
             ext_len,
             state_mask: TrieMask::new(0),
+            last_child_nibble: None,
             masks: Some(BranchNodeMasks {
                 tree_mask: cached_branch.tree_mask,
                 hash_mask: cached_branch.hash_mask,
@@ -816,7 +825,7 @@ where
         // When pushing a new branch we need to set its child nibble in the `state_mask` of
         // its parent, if there is one.
         if let Some(parent_branch) = self.branch_stack.last_mut() {
-            parent_branch.state_mask.set_bit(cached_branch_nibble);
+            parent_branch.set_child_bit(cached_branch_nibble);
         }
 
         // Finally update the `branch_path` and push the new branch.
@@ -1219,11 +1228,11 @@ where
                     );
 
                     self.child_stack.push(ProofTrieBranchChild::RlpNode(RlpNode::word_rlp(&hash)));
-                    self.branch_stack
+                    let branch = self
+                        .branch_stack
                         .last_mut()
-                        .expect("already asserted there is a last branch")
-                        .state_mask
-                        .set_bit(child_nibble);
+                        .expect("already asserted there is a last branch");
+                    branch.set_child_bit(child_nibble);
 
                     // Update the `uncalculated_lower_bound` to indicate that the child whose bit
                     // was just set is completely processed.
@@ -1973,11 +1982,13 @@ mod tests {
         proof_calculator.branch_stack.push(ProofTrieBranch {
             ext_len: 2,
             state_mask: TrieMask::new(0b1111),
+            last_child_nibble: Some(3),
             masks: None,
         });
         proof_calculator.branch_stack.push(ProofTrieBranch {
             ext_len: 0,
             state_mask: TrieMask::new(0b11),
+            last_child_nibble: Some(1),
             masks: None,
         });
         proof_calculator
