@@ -18,6 +18,8 @@ use alloy_rlp::{BufMut, Encodable};
 use alloy_trie::proof::AddedRemovedKeys;
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives_traits::Account;
+#[cfg(feature = "lattice-state-root")]
+use reth_trie_common::lattice::{LatticeStateRoot, LatticeStorageRoot};
 use tracing::{debug, instrument, trace, Span};
 
 /// The default updates after which root algorithms should return intermediate progress rather than
@@ -128,9 +130,22 @@ where
     ///
     /// The state root and the trie updates.
     pub fn root_with_updates(self) -> Result<(B256, TrieUpdates), StateRootError> {
-        match self.with_no_threshold().calculate(true)? {
-            StateRootProgress::Complete(root, _, updates) => Ok((root, updates)),
-            StateRootProgress::Progress(..) => unreachable!(), // unreachable threshold
+        #[cfg(feature = "lattice-state-root")]
+        {
+            let (lattice_root, _) = lattice_root(&self.hashed_cursor_factory)?;
+            let updates = match self.with_no_threshold().calculate(true)? {
+                StateRootProgress::Complete(_, _, updates) => updates,
+                StateRootProgress::Progress(..) => unreachable!(), // unreachable threshold
+            };
+            Ok((lattice_root, updates))
+        }
+
+        #[cfg(not(feature = "lattice-state-root"))]
+        {
+            match self.with_no_threshold().calculate(true)? {
+                StateRootProgress::Complete(root, _, updates) => Ok((root, updates)),
+                StateRootProgress::Progress(..) => unreachable!(), // unreachable threshold
+            }
         }
     }
 
@@ -141,9 +156,17 @@ where
     ///
     /// The state root hash.
     pub fn root(self) -> Result<B256, StateRootError> {
-        match self.calculate(false)? {
-            StateRootProgress::Complete(root, _, _) => Ok(root),
-            StateRootProgress::Progress(..) => unreachable!(), // update retention is disabled
+        #[cfg(feature = "lattice-state-root")]
+        {
+            lattice_root(&self.hashed_cursor_factory).map(|(root, _)| root)
+        }
+
+        #[cfg(not(feature = "lattice-state-root"))]
+        {
+            match self.calculate(false)? {
+                StateRootProgress::Complete(root, _, _) => Ok(root),
+                StateRootProgress::Progress(..) => unreachable!(), // update retention is disabled
+            }
         }
     }
 
@@ -154,7 +177,21 @@ where
     ///
     /// The intermediate progress of state root computation.
     pub fn root_with_progress(self) -> Result<StateRootProgress, StateRootError> {
-        self.calculate(true)
+        #[cfg(feature = "lattice-state-root")]
+        {
+            let (lattice_root, _) = lattice_root(&self.hashed_cursor_factory)?;
+            match self.with_no_threshold().calculate(true)? {
+                StateRootProgress::Complete(_, walked, updates) => {
+                    Ok(StateRootProgress::Complete(lattice_root, walked, updates))
+                }
+                StateRootProgress::Progress(..) => unreachable!(), // unreachable threshold
+            }
+        }
+
+        #[cfg(not(feature = "lattice-state-root"))]
+        {
+            self.calculate(true)
+        }
     }
 
     fn calculate(self, retain_updates: bool) -> Result<StateRootProgress, StateRootError> {
@@ -328,6 +365,37 @@ where
 
         Ok(StateRootProgress::Complete(root, hashed_entries_walked, trie_updates))
     }
+}
+
+#[cfg(feature = "lattice-state-root")]
+fn lattice_root<H>(hashed_cursor_factory: &H) -> Result<(B256, usize), StateRootError>
+where
+    H: HashedCursorFactory,
+{
+    let mut state_root = LatticeStateRoot::default();
+    let mut hashed_entries_walked = 0;
+
+    let mut account_cursor = hashed_cursor_factory.hashed_account_cursor()?;
+    let mut account_entry = account_cursor.seek(B256::ZERO)?;
+    while let Some((hashed_address, account)) = account_entry {
+        hashed_entries_walked += 1;
+
+        let mut storage_root = LatticeStorageRoot::default();
+        let mut storage_cursor = hashed_cursor_factory.hashed_storage_cursor(hashed_address)?;
+        let mut storage_entry = storage_cursor.seek(B256::ZERO)?;
+        while let Some((hashed_slot, value)) = storage_entry {
+            hashed_entries_walked += 1;
+            if !value.is_zero() {
+                storage_root.add_slot(hashed_slot, value);
+            }
+            storage_entry = storage_cursor.next()?;
+        }
+
+        state_root.add_account(hashed_address, account, storage_root.root());
+        account_entry = account_cursor.next()?;
+    }
+
+    Ok((state_root.root(), hashed_entries_walked))
 }
 
 /// Contains state mutated during state root calculation and storage root result handling.

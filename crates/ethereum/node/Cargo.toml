@@ -84,6 +84,11 @@ similar-asserts.workspace = true
 
 [features]
 default = []
+lattice-state-root = [
+    "reth-chainspec/lattice-state-root",
+    "reth-node-builder/lattice-state-root",
+    "reth-provider/lattice-state-root",
+]
 asm-keccak = [
     "alloy-primitives/asm-keccak",
     "reth-node-core/asm-keccak",

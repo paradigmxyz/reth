@@ -183,3 +183,11 @@ provider = ["storage-api", "tasks", "dep:reth-provider", "dep:reth-db", "dep:ret
 storage-api = ["dep:reth-storage-api"]
 trie = ["dep:reth-trie"]
 trie-db = ["trie", "dep:reth-trie-db"]
+lattice-state-root = [
+    "reth-chainspec/lattice-state-root",
+    "reth-node-builder?/lattice-state-root",
+    "reth-node-ethereum?/lattice-state-root",
+    "reth-provider?/lattice-state-root",
+    "reth-trie?/lattice-state-root",
+    "reth-trie-db?/lattice-state-root",
+]

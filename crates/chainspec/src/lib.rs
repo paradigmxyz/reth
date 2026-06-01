@@ -11,6 +11,9 @@
 
 extern crate alloc;
 
+#[cfg(feature = "lattice-state-root")]
+use alloy_trie as _;
+
 /// Chain specific constants
 mod constants;
 pub use constants::*;

@@ -485,6 +485,7 @@ alloy-transport-ipc = { version = "2.0.4", default-features = false }
 alloy-transport-ws = { version = "2.0.4", default-features = false }
 
 # misc
+commonware-cryptography = { version = "2026.5.0", default-features = false }
 either = { version = "1.15.0", default-features = false }
 arrayvec = { version = "0.7.6", default-features = false }
 aquamarine = "0.6"

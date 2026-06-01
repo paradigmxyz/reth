@@ -36,6 +36,10 @@ pub use constants::*;
 mod account;
 pub use account::TrieAccount;
 
+/// Lattice hash based state root utilities.
+#[cfg(feature = "lattice-state-root")]
+pub mod lattice;
+
 /// V2 proof targets and chunking.
 pub mod target_v2;
 pub use target_v2::{ChunkedMultiProofTargetsV2, MultiProofTargetsV2, ProofV2Target};

@@ -16,6 +16,7 @@ reth-ethereum-forks.workspace = true
 reth-network-peers.workspace = true
 alloy-trie = { workspace = true, features = ["ethereum"] }
 reth-primitives-traits.workspace = true
+reth-trie-common = { workspace = true, optional = true }
 
 # ethereum
 alloy-evm.workspace = true
@@ -52,6 +53,7 @@ std = [
     "reth-network-peers/std",
     "serde_json/std",
     "alloy-evm/std",
+    "reth-trie-common?/std",
 ]
 arbitrary = [
     "alloy-chains/arbitrary",
@@ -61,7 +63,10 @@ arbitrary = [
     "alloy-eips/arbitrary",
     "alloy-primitives/arbitrary",
     "alloy-trie/arbitrary",
+    "reth-trie-common?/arbitrary",
 ]
 test-utils = [
     "reth-primitives-traits/test-utils",
+    "reth-trie-common?/test-utils",
 ]
+lattice-state-root = ["dep:reth-trie-common", "reth-trie-common/lattice-state-root"]

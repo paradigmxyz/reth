@@ -1698,12 +1698,20 @@ where
     /// Note: Use state root task only if prefix sets are empty, otherwise proof generation is
     /// too expensive because it requires walking all paths in every proof.
     const fn plan_state_root_computation(&self) -> StateRootStrategy {
-        if self.config.state_root_fallback() {
+        #[cfg(feature = "lattice-state-root")]
+        {
             StateRootStrategy::Synchronous
-        } else if self.config.use_state_root_task() {
-            StateRootStrategy::StateRootTask
-        } else {
-            StateRootStrategy::Parallel
+        }
+
+        #[cfg(not(feature = "lattice-state-root"))]
+        {
+            if self.config.state_root_fallback() {
+                StateRootStrategy::Synchronous
+            } else if self.config.use_state_root_task() {
+                StateRootStrategy::StateRootTask
+            } else {
+                StateRootStrategy::Parallel
+            }
         }
     }
 
@@ -2040,6 +2048,7 @@ where
 
 /// Strategy describing how to compute the state root.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "lattice-state-root", allow(dead_code))]
 enum StateRootStrategy {
     /// Use the state root task (background sparse trie computation).
     StateRootTask,
@@ -2215,20 +2224,29 @@ where
         parent_state_root: B256,
         state: &EngineApiTreeState<N>,
     ) -> Option<StateRootHandle> {
-        let (lazy_overlay, anchor_hash) = Self::get_parent_lazy_overlay(parent_hash, state);
-        let overlay_factory = OverlayStateProviderFactory::new(
-            self.provider.clone(),
-            OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
-                .with_lazy_overlay(lazy_overlay),
-        );
+        #[cfg(feature = "lattice-state-root")]
+        {
+            let _ = (parent_hash, parent_state_root, state);
+            None
+        }
 
-        Some(self.payload_processor.spawn_state_root(
-            overlay_factory,
-            parent_state_root,
-            // Full proof workers — tx count unknown at FCU time (block built incrementally)
-            false,
-            &self.config,
-        ))
+        #[cfg(not(feature = "lattice-state-root"))]
+        {
+            let (lazy_overlay, anchor_hash) = Self::get_parent_lazy_overlay(parent_hash, state);
+            let overlay_factory = OverlayStateProviderFactory::new(
+                self.provider.clone(),
+                OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
+                    .with_lazy_overlay(lazy_overlay),
+            );
+
+            Some(self.payload_processor.spawn_state_root(
+                overlay_factory,
+                parent_state_root,
+                // Full proof workers — tx count unknown at FCU time (block built incrementally)
+                false,
+                &self.config,
+            ))
+        }
     }
 }
 

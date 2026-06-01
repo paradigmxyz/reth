@@ -95,6 +95,13 @@ reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
 
 [features]
 default = []
+lattice-state-root = [
+    "reth-chainspec/lattice-state-root",
+    "reth-engine-tree/lattice-state-root",
+    "reth-provider/lattice-state-root",
+    "reth-stages/lattice-state-root",
+    "reth-trie-db/lattice-state-root",
+]
 js-tracer = [
     "reth-rpc/js-tracer",
     "reth-node-ethereum/js-tracer",
