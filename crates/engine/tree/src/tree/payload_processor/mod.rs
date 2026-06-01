@@ -276,6 +276,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         multiproof_provider_factory: F,
         config: &TreeConfig,
+        parallel_bal_execution: bool,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -298,17 +299,10 @@ where
             halve_workers,
             config,
         );
-        // BAL blocks only bypass the normal execution state hook when the parallel BAL executor
-        // consumes the BAL. If parallel BAL execution is disabled, or if state caching is
-        // disabled so the BAL executor cannot use a shared cache, treat the BAL as absent here so
-        // the block follows today's sequential execution and transaction-prewarm path.
-        //
-        // In the parallel BAL path, prewarm owns BAL-derived sparse-trie updates and optional
-        // BAL state prefetching. `disable_bal_batch_io` controls the prefetch half inside
-        // prewarm, not this dispatch decision.
-        let parallel_bal_execution = !config.disable_state_cache() &&
-            !config.disable_bal_parallel_execution() &&
-            env.decoded_bal.is_some();
+        // BAL blocks bypass the normal execution state hook only when the parallel BAL executor
+        // consumes the BAL (`parallel_bal_execution`); otherwise the block follows the sequential
+        // execution and transaction-prewarm path. In the parallel BAL path, prewarm owns the
+        // BAL-derived sparse-trie updates and read-set warming.
         let install_state_hook = !parallel_bal_execution;
         let prewarm_handle = self.spawn_caching_with(
             env,
@@ -336,6 +330,7 @@ where
         env: ExecutionEnv<Evm>,
         transactions: I,
         provider_builder: StateProviderBuilder<N, P>,
+        parallel_bal_execution: bool,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -343,7 +338,7 @@ where
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count);
         let prewarm_handle =
-            self.spawn_caching_with(env, prewarm_rx, provider_builder, None, false);
+            self.spawn_caching_with(env, prewarm_rx, provider_builder, None, parallel_bal_execution);
         PayloadHandle {
             state_root_handle: None,
             install_state_hook: false,
@@ -1373,6 +1368,7 @@ mod tests {
                 OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
             ),
             &TreeConfig::default(),
+            false,
         );
 
         let mut state_hook = handle.state_hook().expect("state hook is None");

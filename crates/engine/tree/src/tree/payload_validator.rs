@@ -502,6 +502,7 @@ where
             provider_builder.clone(),
             overlay_factory,
             &strategy,
+            bal_eligible,
         ));
 
         // Create optional cache stats for detailed block logging
@@ -1664,6 +1665,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         overlay_factory: OverlayStateProviderFactory<P, N>,
         strategy: &StateRootStrategy<N>,
+        parallel_bal_execution: bool,
     ) -> Result<
         PayloadHandle<
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
@@ -1683,6 +1685,7 @@ where
                     provider_builder,
                     overlay_factory,
                     &self.config,
+                    parallel_bal_execution,
                 );
 
                 // record prewarming initialization duration
@@ -1697,8 +1700,12 @@ where
             StateRootStrategy::Synchronous |
             StateRootStrategy::Custom(_) => {
                 let start = Instant::now();
-                let handle =
-                    self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder);
+                let handle = self.payload_processor.spawn_cache_exclusive(
+                    env,
+                    txs,
+                    provider_builder,
+                    parallel_bal_execution,
+                );
 
                 // Record prewarming initialization duration
                 self.metrics
