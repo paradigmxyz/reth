@@ -141,10 +141,9 @@ where
     ) -> DynPrecompile {
         let precompile_id = precompile.precompile_id().clone();
         let wrapped = Self::new(precompile, cache, spec_id, metrics);
-        (precompile_id, move |input: PrecompileInput<'_>| -> PrecompileResult {
+        DynPrecompile::new(precompile_id, move |input: PrecompileInput<'_>| -> PrecompileResult {
             wrapped.call(input)
         })
-            .into()
     }
 
     fn increment_by_one_precompile_cache_hits(&self) {
