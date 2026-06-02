@@ -17,7 +17,7 @@ use revm as _;
 pub use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadTypes};
 
 pub mod evm;
-pub use evm::EthEvmConfig;
+pub use evm::{EthEvm2Config, EthEvmConfig};
 
 #[allow(deprecated)]
 pub use evm::EthExecutorProvider;

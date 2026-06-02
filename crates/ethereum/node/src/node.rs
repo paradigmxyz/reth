@@ -1,7 +1,7 @@
 //! Ethereum Node types config.
 
 pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
-use crate::{EthEngineTypes, EthEvmConfig};
+use crate::{EthEngineTypes, EthEvm2Config};
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
 use alloy_network::Ethereum;
 use alloy_rpc_types_engine::ExecutionData;
@@ -478,10 +478,10 @@ where
     >,
     Node: FullNodeTypes<Types = Types>,
 {
-    type EVM = EthEvmConfig<Types::ChainSpec>;
+    type EVM = EthEvm2Config<Types::ChainSpec>;
 
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
-        Ok(EthEvmConfig::new(ctx.chain_spec()))
+        Ok(EthEvm2Config::new(ctx.chain_spec()))
     }
 }
 
