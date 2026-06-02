@@ -701,8 +701,8 @@ vergen-git2 = "9.1.0"
 ipnet = "2.11"
 
 [patch.crates-io]
-revm-database = { git = "https://github.com/bluealloy/revm", rev = "4307186a" }
-revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "4307186a" }
-revm-state = { git = "https://github.com/bluealloy/revm", rev = "4307186a" }
-revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "4307186a" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "4307186a" }
+revm-database = { git = "https://github.com/bluealloy/revm", rev = "14e2c260f9e0cef2303a3e99dd34d5b8fc88d62d" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "14e2c260f9e0cef2303a3e99dd34d5b8fc88d62d" }
+revm-state = { git = "https://github.com/bluealloy/revm", rev = "14e2c260f9e0cef2303a3e99dd34d5b8fc88d62d" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "14e2c260f9e0cef2303a3e99dd34d5b8fc88d62d" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "14e2c260f9e0cef2303a3e99dd34d5b8fc88d62d" }
