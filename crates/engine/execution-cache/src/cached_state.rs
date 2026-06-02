@@ -13,7 +13,7 @@ use reth_provider::{
     AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
     StateProvider, StateRootProvider, StorageRootProvider,
 };
-use reth_revm::db::BundleState;
+use reth_revm::db::{states::CacheState, BundleState};
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
@@ -22,7 +22,7 @@ use std::{
     fmt,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
-        Arc,
+        Arc, OnceLock,
     },
     time::Duration,
 };
@@ -217,6 +217,37 @@ pub enum CachedStatus<T> {
     NotCached(T),
     /// The key exists in cache and has a specific value.
     Cached(T),
+}
+
+/// One-shot handoff for prewarmed state shared with the execution thread.
+#[derive(Clone, Default)]
+pub struct PrewarmStateLoader(Arc<OnceLock<Box<[CacheState]>>>);
+
+impl fmt::Debug for PrewarmStateLoader {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PrewarmStateLoader")
+            .field("has_state", &self.0.get().is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl PrewarmStateLoader {
+    /// Creates an empty loader.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the collected prewarm states.
+    pub fn set(&self, states: Vec<CacheState>) {
+        if !states.is_empty() {
+            let _ = self.0.set(states.into_boxed_slice());
+        }
+    }
+
+    /// Returns the installed prewarm state snapshots.
+    pub fn snapshot(&self) -> Option<&[CacheState]> {
+        self.0.get().map(AsRef::as_ref)
+    }
 }
 
 /// The source that is using the execution cache.
@@ -1089,6 +1120,23 @@ mod tests {
         let res = state_provider.storage(address, storage_key);
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), Some(storage_value));
+    }
+
+    #[test]
+    fn prewarm_state_loader_publishes_non_empty_cache() {
+        let address = Address::random();
+        let loader = PrewarmStateLoader::new();
+
+        loader.set(Vec::new());
+        assert!(loader.snapshot().is_none());
+
+        let mut cache = CacheState::default();
+        cache.insert_not_existing(address);
+        loader.set(vec![cache]);
+
+        let snapshot = loader.snapshot().expect("non-empty cache should be published");
+        assert_eq!(snapshot.len(), 1);
+        assert!(snapshot[0].accounts.contains_key(&address));
     }
 
     #[test]

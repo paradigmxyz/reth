@@ -73,7 +73,7 @@ pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 pub use reth_execution_cache::{
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider,
-    ExecutionCache, PayloadExecutionCache, SavedCache,
+    ExecutionCache, PayloadExecutionCache, PrewarmStateLoader, SavedCache,
 };
 pub use types::{ValidationOutcome, ValidationOutput};
 

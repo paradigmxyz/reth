@@ -15,7 +15,7 @@ use crate::tree::{
     payload_processor::multiproof::StateRootMessage,
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
-    PayloadExecutionCache, SavedCache, StateProviderBuilder,
+    PayloadExecutionCache, PrewarmStateLoader, SavedCache, StateProviderBuilder,
 };
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
@@ -31,8 +31,15 @@ use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockReader, StateProvider, StateProviderBox,
     StateProviderFactory, StateReader,
 };
-use reth_revm::{database::StateProviderDatabase, state::EvmState};
-use reth_tasks::{pool::WorkerPool, Runtime};
+use reth_revm::{
+    database::StateProviderDatabase,
+    db::{states::CacheState, State},
+    state::EvmState,
+};
+use reth_tasks::{
+    pool::{Worker, WorkerPool},
+    Runtime,
+};
 use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -186,6 +193,8 @@ where
                     let _ = to_sparse_trie_task.send(StateRootMessage::PrefetchProofs(targets));
                 }
             });
+
+            ctx.collect_transaction_prewarm_state(pool);
 
             // All tasks are done — clear per-thread EVM state for the next block.
             pool.clear();
@@ -395,6 +404,7 @@ where
         }
 
         if ctx.saved_cache.is_some() && !ctx.disable_bal_batch_io {
+            let prefetch_ctx = ctx.clone();
             executor.prewarming_pool().spawn(move || {
                 let branch_span = debug_span!(
                     target: "engine::tree::payload_processor::prewarm",
@@ -406,13 +416,13 @@ where
                 let _span = branch_span.entered();
 
                 prefetch_bal.as_bal().par_iter().for_each(|account| {
-                    if ctx.should_stop() {
+                    if prefetch_ctx.should_stop() {
                         return;
                     }
                     WorkerPool::with_worker_mut(|worker| {
                         let provider = worker
                             .get_or_init::<Option<CachedStateProvider<StateProviderBox>>>(|| None);
-                        ctx.prefetch_bal_storage(&parent_span, provider, account);
+                        prefetch_ctx.prefetch_bal_storage(&parent_span, provider, account);
                     });
                 });
 
@@ -523,6 +533,8 @@ where
     pub saved_cache: Option<SavedCache>,
     /// Provider to obtain the state
     pub provider: StateProviderBuilder<N, P>,
+    /// Completed state reads collected during prewarming.
+    pub prewarm_state_loader: PrewarmStateLoader,
     /// The metrics for the prewarm task.
     pub metrics: PrewarmMetrics,
     /// Metrics for the execution cache.
@@ -549,8 +561,8 @@ where
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
-type PrewarmEvmState<Evm> =
-    Option<EvmFor<Evm, StateProviderDatabase<reth_provider::StateProviderBox>>>;
+type PrewarmProvider = StateProviderBox;
+type PrewarmEvmState<Evm> = Option<EvmFor<Evm, State<StateProviderDatabase<PrewarmProvider>>>>;
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
@@ -578,8 +590,8 @@ where
             let caches = saved_cache.cache().clone();
             state_provider = Box::new(CachedStateProvider::new_prewarm(state_provider, caches));
         }
-
         let state_provider = StateProviderDatabase::new(state_provider);
+        let state_provider = State::builder().with_database(state_provider).build();
 
         let mut evm_env = self.env.evm_env.clone();
 
@@ -608,6 +620,35 @@ where
         }
 
         Some(evm)
+    }
+
+    /// Drains state reads from transaction prewarm workers and publishes them to execution.
+    fn collect_transaction_prewarm_state(&self, pool: &WorkerPool) {
+        let prewarm_state = Self::collect_prewarm_states_from_pool(pool, |worker| {
+            worker
+                .get_mut::<PrewarmEvmState<Evm>>()
+                .as_mut()
+                .map(|evm| std::mem::take(&mut evm.db_mut().cache))
+                .unwrap_or_default()
+        });
+        self.prewarm_state_loader.set(prewarm_state);
+    }
+
+    /// Collects one local state map from every worker after prewarming completes.
+    fn collect_prewarm_states_from_pool(
+        pool: &WorkerPool,
+        collect: impl Fn(&mut Worker) -> CacheState + Sync,
+    ) -> Vec<CacheState> {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        pool.broadcast(pool.current_num_threads(), |worker| {
+            let state = collect(worker);
+            if !state.accounts.is_empty() || !state.contracts.is_empty() {
+                let _ = tx.send(state);
+            }
+        });
+        drop(tx);
+
+        rx.into_iter().collect()
     }
 
     /// Returns `true` if prewarming should stop.

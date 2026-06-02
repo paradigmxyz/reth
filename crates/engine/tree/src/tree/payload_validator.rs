@@ -46,7 +46,8 @@ use crate::tree::{
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
-    PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
+    PayloadHandle, PrewarmStateLoader, StateProviderBuilder, StateProviderDatabase, TreeConfig,
+    WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
@@ -86,7 +87,10 @@ use reth_provider::{
     StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
     StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
+use reth_revm::db::{
+    states::{bundle_state::BundleRetention, CacheAccount, CacheState},
+    BundleAccount, State,
+};
 use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
@@ -514,6 +518,7 @@ where
         let state_provider_stats =
             instrument_state_provider.then(|| Arc::new(StateProviderStats::default()));
         let execution_cache = handle.caches().map(|caches| (caches, handle.cache_metrics()));
+        let prewarm_state_loader = handle.prewarm_state_loader();
 
         // This state provider factory is parametrized by:
         //
@@ -530,28 +535,33 @@ where
         // - After execution, the execution post-state will be dumped into the execution cache as
         //   whole anyway.
         //
-        // Therefore, there `fill_on_miss` is going to be false for those paths.
+        // Therefore, `fill_on_miss` is false for those paths. If transaction prewarming can hand
+        // execution a revm cache snapshot, serial execution skips the shared cache wrapper entirely
+        // so provider misses do not pay fixed-cache lookup costs.
         //
         // The second parameter `instrument_state_provider` controls whether we should
         // instrument the state provider with metrics.
         let make_state_provider = |fill_on_miss: bool| -> ProviderResult<StateProviderBox> {
             let provider = provider_builder.build()?;
-            let mut provider = if let Some((caches, cache_metrics)) = &execution_cache {
-                let fill_mode = if fill_on_miss {
-                    CacheFillMode::FillOnMiss
+            let use_execution_cache =
+                fill_on_miss || parallel_bal_execution || prewarm_state_loader.is_none();
+            let mut provider =
+                if use_execution_cache && let Some((caches, cache_metrics)) = &execution_cache {
+                    let fill_mode = if fill_on_miss {
+                        CacheFillMode::FillOnMiss
+                    } else {
+                        CacheFillMode::LookupOnly
+                    };
+                    Box::new(CachedStateProvider::new_with_mode(
+                        provider,
+                        caches.clone(),
+                        fill_mode,
+                        cache_metrics.clone(),
+                        cache_stats.clone(),
+                    )) as StateProviderBox
                 } else {
-                    CacheFillMode::LookupOnly
+                    provider
                 };
-                Box::new(CachedStateProvider::new_with_mode(
-                    provider,
-                    caches.clone(),
-                    fill_mode,
-                    cache_metrics.clone(),
-                    cache_stats.clone(),
-                )) as StateProviderBox
-            } else {
-                provider
-            };
 
             if instrument_state_provider {
                 let stats = state_provider_stats
@@ -579,7 +589,13 @@ where
         } else {
             let state_provider = make_state_provider(false);
             match state_provider {
-                Ok(state_provider) => self.execute_block(state_provider, env, &input, &mut handle),
+                Ok(state_provider) => self.execute_block(
+                    state_provider,
+                    env,
+                    &input,
+                    &mut handle,
+                    prewarm_state_loader,
+                ),
                 Err(err) => Err(err.into()),
             }
         };
@@ -1015,6 +1031,7 @@ where
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
+        prewarm_state_loader: Option<PrewarmStateLoader>,
     ) -> Result<
         (
             BlockExecutionOutput<N::Receipt>,
@@ -1080,6 +1097,12 @@ where
         );
 
         let execution_start = Instant::now();
+        let mut prewarm_state_loaded = false;
+        Self::maybe_preload_prewarm_state(
+            executor.evm_mut().db_mut(),
+            prewarm_state_loader.as_ref(),
+            &mut prewarm_state_loaded,
+        );
 
         // Execute all transactions and finalize
         let (executor, senders) = self.execute_transactions(
@@ -1089,6 +1112,8 @@ where
             &receipt_tx,
             &executed_tx_index,
             has_bal,
+            prewarm_state_loader.as_ref(),
+            &mut prewarm_state_loaded,
         )?;
         drop(receipt_tx);
 
@@ -1240,6 +1265,8 @@ where
         receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
         executed_tx_index: &AtomicUsize,
         has_bal: bool,
+        prewarm_state_loader: Option<&PrewarmStateLoader>,
+        prewarm_state_loaded: &mut bool,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
         E: BlockExecutor<Receipt = N::Receipt, Evm: alloy_evm::Evm<DB = &'a mut State<DB>>>,
@@ -1270,6 +1297,12 @@ where
         // receipt with the same index and can panic the ordered root builder.
         let mut last_sent_len = 0usize;
         loop {
+            Self::maybe_preload_prewarm_state(
+                executor.evm_mut().db_mut(),
+                prewarm_state_loader,
+                prewarm_state_loaded,
+            );
+
             // Measure time spent waiting for next transaction from iterator
             // (e.g., parallel signature recovery)
             let wait_start = Instant::now();
@@ -1318,6 +1351,64 @@ where
         drop(exec_span);
 
         Ok((executor, senders))
+    }
+
+    fn maybe_preload_prewarm_state<DB: revm::Database>(
+        state: &mut State<DB>,
+        prewarm_state_loader: Option<&PrewarmStateLoader>,
+        prewarm_state_loaded: &mut bool,
+    ) {
+        if *prewarm_state_loaded {
+            return;
+        }
+
+        let Some(prewarm_states) = prewarm_state_loader.and_then(PrewarmStateLoader::snapshot)
+        else {
+            return;
+        };
+
+        Self::preload_prewarm_states(state, prewarm_states);
+        *prewarm_state_loaded = true;
+    }
+
+    fn preload_prewarm_states<DB: revm::Database>(
+        state: &mut State<DB>,
+        prewarm_states: &[CacheState],
+    ) {
+        // Prewarm reads are parent-state values. Never overwrite accounts or slots already
+        // touched by execution because those may include earlier transaction effects.
+        for prewarm_state in prewarm_states {
+            for (code_hash, bytecode) in &prewarm_state.contracts {
+                state.cache.contracts.entry(*code_hash).or_insert_with(|| bytecode.clone());
+            }
+
+            for (address, prewarm_account) in &prewarm_state.accounts {
+                let Some(cache_account) = state.cache.accounts.get_mut(address) else {
+                    state.cache.accounts.insert(*address, prewarm_account.clone());
+                    continue;
+                };
+                Self::merge_prewarm_cache_account(cache_account, prewarm_account);
+            }
+        }
+    }
+
+    fn merge_prewarm_cache_account(
+        cache_account: &mut CacheAccount,
+        prewarm_account: &CacheAccount,
+    ) {
+        if !cache_account.status.is_not_modified() {
+            return;
+        }
+        let Some(prewarm_account) = prewarm_account.account.as_ref() else {
+            return;
+        };
+        let Some(cache_account) = cache_account.account.as_mut() else {
+            return;
+        };
+
+        for (storage_key, value) in &prewarm_account.storage {
+            cache_account.storage.entry(*storage_key).or_insert(*value);
+        }
     }
 
     /// Compute state root for the given hashed post state in parallel.

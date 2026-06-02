@@ -5,8 +5,8 @@ use crate::tree::{
     payload_processor::prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
     sparse_trie::SparseTrieCacheTask,
     CacheWaitDurations, CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource,
-    ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
-    WaitForCaches,
+    ExecutionCache, PayloadExecutionCache, PrewarmStateLoader, SavedCache, StateProviderBuilder,
+    TreeConfig, WaitForCaches,
 };
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
@@ -520,6 +520,10 @@ where
             PrewarmMode::Transactions(transactions)
         };
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
+        let prewarm_state_loader = match &mode {
+            PrewarmMode::Transactions(_) => Some(PrewarmStateLoader::new()),
+            _ => None,
+        };
 
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
         // configure prewarming
@@ -528,6 +532,7 @@ where
             evm_config: self.evm_config.clone(),
             saved_cache: saved_cache.clone(),
             provider: provider_builder,
+            prewarm_state_loader: prewarm_state_loader.clone().unwrap_or_default(),
             metrics: PrewarmMetrics::default(),
             cache_metrics: self.cache_metrics.clone(),
             cache_state_metrics: self.cache_state_metrics.clone(),
@@ -557,6 +562,7 @@ where
             to_prewarm_task: Some(to_prewarm_task),
             executed_tx_index,
             cache_metrics: self.cache_metrics.clone(),
+            prewarm_state_loader,
         }
     }
 
@@ -863,6 +869,11 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
         self.prewarm_handle.cache_metrics.clone()
     }
 
+    /// Returns the loader for state reads collected by prewarming.
+    pub fn prewarm_state_loader(&self) -> Option<PrewarmStateLoader> {
+        self.prewarm_handle.prewarm_state_loader.clone()
+    }
+
     /// Returns a reference to the shared executed transaction index counter.
     ///
     /// The main execution loop should store `index + 1` after executing each transaction so that
@@ -923,6 +934,8 @@ pub struct CacheTaskHandle<R> {
     executed_tx_index: Arc<AtomicUsize>,
     /// Metrics for the execution cache.
     cache_metrics: Option<CachedStateMetrics>,
+    /// Completed prewarm state used by execution as a read cache preload.
+    prewarm_state_loader: Option<PrewarmStateLoader>,
 }
 
 impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
