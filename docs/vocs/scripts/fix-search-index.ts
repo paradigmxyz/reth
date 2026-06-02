@@ -3,12 +3,27 @@ import { readdir, copyFile, readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
 
 async function fixSearchIndex() {
-  const distDir = 'docs/dist';
-  const vocsDir = join(distDir, '.vocs');
+  const distDir = 'docs/dist/public';
+  const legacyDistDir = 'docs/dist';
+  const vocsDir = join(legacyDistDir, '.vocs');
   
   try {
     // 1. Find the search index file
-    const files = await readdir(vocsDir);
+    let files: string[];
+    try {
+      files = await readdir(vocsDir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        const assetsDir = join(distDir, 'assets');
+        const assets = await readdir(assetsDir);
+        const searchIndexFile = assets.find(f => f.startsWith('search-index-') && f.endsWith('.json'));
+        if (searchIndexFile) {
+          console.log(`✅ Vocs 2 search index found at ${join(assetsDir, searchIndexFile)}; no legacy fix needed.`);
+          return;
+        }
+      }
+      throw error;
+    }
     const searchIndexFile = files.find(f => f.startsWith('search-index-') && f.endsWith('.json'));
     
     if (!searchIndexFile) {
@@ -21,13 +36,13 @@ async function fixSearchIndex() {
     
     // 2. Copy search index to root of dist
     const sourcePath = join(vocsDir, searchIndexFile);
-    const destPath = join(distDir, searchIndexFile);
+    const destPath = join(legacyDistDir, searchIndexFile);
     await copyFile(sourcePath, destPath);
     console.log(`✅ Copied search index to root: ${destPath}`);
     
     // 3. Find and update all HTML and JS files that reference the search index
-    const htmlFiles = await findFiles(distDir, '.html');
-    const jsFiles = await findFiles(distDir, '.js');
+    const htmlFiles = await findFiles(legacyDistDir, '.html');
+    const jsFiles = await findFiles(legacyDistDir, '.js');
     console.log(`📝 Found ${htmlFiles.length} HTML files and ${jsFiles.length} JS files to update`);
     
     // 4. Replace references in all files
