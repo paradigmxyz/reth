@@ -547,8 +547,13 @@ impl DecodedMultiProofV2 {
     ///
     /// This implementation does not deduplicate redundant proofs.
     pub fn extend(&mut self, other: Self) {
-        self.account_proofs.extend(other.account_proofs);
-        for (hashed_address, other_storage_proofs) in other.storage_proofs {
+        let Self { account_proofs, storage_proofs } = other;
+
+        self.account_proofs.reserve(account_proofs.len());
+        self.account_proofs.extend(account_proofs);
+        self.storage_proofs.reserve(storage_proofs.len());
+
+        for (hashed_address, other_storage_proofs) in storage_proofs {
             match self.storage_proofs.entry(hashed_address) {
                 hash_map::Entry::Vacant(entry) => {
                     entry.insert(other_storage_proofs);
