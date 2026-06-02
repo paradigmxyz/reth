@@ -63,15 +63,16 @@ impl<'a> BbEvmPlan<'a> {
         Self { segments, next_segment: 1, tx_counter: 0, block_hashes_to_seed }
     }
 
-    /// Returns the 256 block hashes relevant to a segment with the given block
-    /// number. BLOCKHASH can look back 256 blocks, so we select entries in
-    /// `[block_number - 256, block_number)`.
-    pub(crate) fn hashes_for_block(&self, block_number: u64) -> Vec<(u64, B256)> {
-        let min = block_number.saturating_sub(256);
+    /// Returns block hashes in `[start_block, end_block)`.
+    pub(crate) fn hashes_for_block_range(
+        &self,
+        start_block: u64,
+        end_block: u64,
+    ) -> Vec<(u64, B256)> {
         self.block_hashes_to_seed
             .iter()
             .copied()
-            .filter(|(n, _)| *n >= min && *n < block_number)
+            .filter(|(n, _)| *n >= start_block && *n < end_block)
             .collect()
     }
 
@@ -164,6 +165,8 @@ where
     /// [`Self::initialize`] to renumber a worker's incoming `bal_index` into
     /// the boundary-padded space.
     bal_index_setter: Option<BalIndexSetter<DB>>,
+    /// Exclusive upper block number already seeded into this executor's block-hash cache.
+    seeded_block_hash_upper_bound: Option<u64>,
     /// Whether the executor has selected its starting segment.
     initialized: bool,
 }
@@ -206,6 +209,7 @@ where
             bal_index_reader,
             bal_index_bumper,
             bal_index_setter,
+            seeded_block_hash_upper_bound: None,
             initialized: false,
         }
     }
@@ -281,8 +285,21 @@ where
 
     fn reseed_block_hashes_for(&mut self, block_number: u64) {
         let Some(seeder) = self.block_hash_seeder else { return };
-        let hashes = self.plan.hashes_for_block(block_number);
-        seeder(self.inner_mut().evm_mut().db_mut(), &hashes);
+        let min_block = block_number.saturating_sub(256);
+        let start_block = self
+            .seeded_block_hash_upper_bound
+            .filter(|upper_bound| *upper_bound <= block_number)
+            .map_or(min_block, |upper_bound| upper_bound.max(min_block));
+
+        if start_block < block_number {
+            let hashes = self.plan.hashes_for_block_range(start_block, block_number);
+            if !hashes.is_empty() {
+                seeder(self.inner_mut().evm_mut().db_mut(), &hashes);
+            }
+        }
+
+        self.seeded_block_hash_upper_bound =
+            Some(self.seeded_block_hash_upper_bound.unwrap_or(block_number).max(block_number));
     }
 
     fn apply_segment_boundary(&mut self) -> Result<(), BlockExecutionError> {
