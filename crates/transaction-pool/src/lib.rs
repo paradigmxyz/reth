@@ -470,7 +470,7 @@ where
     V: TransactionValidator,
     <V as TransactionValidator>::Transaction: EthPoolTransaction,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
-    S: BlobStore,
+    S: BlobStore + Clone,
 {
     type Transaction = T::Transaction;
 
@@ -682,6 +682,13 @@ where
         self.pool.retain_unknown(announcement)
     }
 
+    fn retain_contains<A>(&self, announcement: &mut A)
+    where
+        A: HandleMempoolData,
+    {
+        self.pool.retain_contains(announcement)
+    }
+
     fn get(&self, tx_hash: &TxHash) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.inner().get(tx_hash)
     }
@@ -816,6 +823,10 @@ where
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError> {
         self.pool.blob_store().get_by_versioned_hashes_v4(versioned_hashes, indices_bitarray)
     }
+
+    fn blob_store(&self) -> Box<dyn BlobStore> {
+        Box::new(self.pool.blob_store().clone())
+    }
 }
 
 impl<V, T, S> TransactionPoolExt for Pool<V, T, S>
@@ -823,7 +834,7 @@ where
     V: TransactionValidator,
     <V as TransactionValidator>::Transaction: EthPoolTransaction,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
-    S: BlobStore,
+    S: BlobStore + Clone,
 {
     type Block = V::Block;
 

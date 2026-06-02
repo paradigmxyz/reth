@@ -574,7 +574,7 @@ Gas Price Oracle:
 
 TxPool:
       --txpool.pending-max-count <PENDING_MAX_COUNT>
-          Max number of transaction in the pending sub-pool
+          Max number of transactions in the pending sub-pool
 
           [default: 10000]
 
@@ -584,7 +584,7 @@ TxPool:
           [default: 20]
 
       --txpool.basefee-max-count <BASEFEE_MAX_COUNT>
-          Max number of transaction in the basefee sub-pool
+          Max number of transactions in the basefee sub-pool
 
           [default: 10000]
 
@@ -594,7 +594,7 @@ TxPool:
           [default: 20]
 
       --txpool.queued-max-count <QUEUED_MAX_COUNT>
-          Max number of transaction in the queued sub-pool
+          Max number of transactions in the queued sub-pool
 
           [default: 10000]
 
@@ -604,7 +604,7 @@ TxPool:
           [default: 20]
 
       --txpool.blobpool-max-count <BLOBPOOL_MAX_COUNT>
-          Max number of transaction in the blobpool
+          Max number of transactions in the blobpool
 
           [default: 10000]
 
@@ -971,9 +971,9 @@ Engine:
       --engine.persistence-backpressure-threshold <PERSISTENCE_BACKPRESSURE_THRESHOLD>
           Configure the maximum canonical-minus-persisted gap before engine API processing stalls.
 
-          This value must be greater than `--engine.persistence-threshold`.
+          If omitted, this defaults to the larger of the default backpressure threshold and twice `--engine.persistence-threshold`.
 
-          [default: 16]
+          This value must be greater than `--engine.persistence-threshold`.
 
       --engine.memory-block-buffer-target <MEMORY_BLOCK_BUFFER_TARGET>
           Configure the target number of blocks to keep in memory

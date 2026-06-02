@@ -57,6 +57,11 @@ impl EthVersion {
         matches!(self, Self::Eth68)
     }
 
+    /// Returns true if the version carries eth/68 transaction announcement metadata.
+    pub const fn has_eth68_metadata(&self) -> bool {
+        matches!(self, Self::Eth68 | Self::Eth69 | Self::Eth70 | Self::Eth71 | Self::Eth72)
+    }
+
     /// Returns true if the version is eth/69
     pub const fn is_eth69(&self) -> bool {
         matches!(self, Self::Eth69)
@@ -72,7 +77,7 @@ impl EthVersion {
         matches!(self, Self::Eth71)
     }
 
-    /// Returns true if the version is eth/71
+    /// Returns true if the version is eth/72
     pub const fn is_eth72(&self) -> bool {
         matches!(self, Self::Eth72)
     }
@@ -254,6 +259,17 @@ mod tests {
         assert_eq!(EthVersion::Eth70, "70".parse().unwrap());
         assert_eq!(EthVersion::Eth71, "71".parse().unwrap());
         assert_eq!(EthVersion::Eth72, "72".parse().unwrap());
+    }
+
+    #[test]
+    fn test_has_eth68_metadata() {
+        assert!(!EthVersion::Eth66.has_eth68_metadata());
+        assert!(!EthVersion::Eth67.has_eth68_metadata());
+        assert!(EthVersion::Eth68.has_eth68_metadata());
+        assert!(EthVersion::Eth69.has_eth68_metadata());
+        assert!(EthVersion::Eth70.has_eth68_metadata());
+        assert!(EthVersion::Eth71.has_eth68_metadata());
+        assert!(EthVersion::Eth72.has_eth68_metadata());
     }
 
     #[test]

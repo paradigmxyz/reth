@@ -157,6 +157,16 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         LoadTransaction::transaction_by_hash(self, hash)
     }
 
+    /// Returns all transactions from the local pending pool.
+    fn pending_transactions(&self) -> Result<Vec<RpcTransaction<Self::NetworkTypes>>, Self::Error> {
+        self.pool()
+            .pending_transactions()
+            .into_iter()
+            .map(|tx| self.converter().fill_pending(tx.transaction.clone_into_consensus()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Self::Error::from)
+    }
+
     /// Get all transactions in the block with the given hash.
     ///
     /// Returns `None` if block does not exist.
