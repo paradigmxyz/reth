@@ -55,7 +55,7 @@ pub use alloy_evm::EthEvm;
 mod config;
 use alloy_evm::eth::spec::EthExecutorSpec;
 pub use config::{revm_spec, revm_spec_by_timestamp_and_block_number};
-use reth_ethereum_forks::Hardforks;
+use reth_ethereum_forks::{EthereumHardfork, Hardforks};
 
 /// Helper type with backwards compatible methods to obtain Ethereum executor
 /// providers.
@@ -141,7 +141,10 @@ impl EthEvm2Config {
     }
 }
 
-impl<ChainSpec> EthEvm2Config<ChainSpec> {
+impl<ChainSpec> EthEvm2Config<ChainSpec>
+where
+    ChainSpec: Hardforks,
+{
     /// Creates a new evm2 Ethereum EVM configuration with the given chain spec.
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self::ethereum(chain_spec)
@@ -153,16 +156,20 @@ impl<ChainSpec> EthEvm2Config<ChainSpec> {
     }
 }
 
-impl<ChainSpec, EvmFactory> EthEvm2Config<ChainSpec, EvmFactory> {
+impl<ChainSpec, EvmFactory> EthEvm2Config<ChainSpec, EvmFactory>
+where
+    ChainSpec: Hardforks,
+{
     /// Creates a new evm2 Ethereum EVM configuration with the given chain spec and EVM factory.
     pub fn new_with_evm_factory(chain_spec: Arc<ChainSpec>, evm_factory: EvmFactory) -> Self {
         Self {
             block_assembler: EthBlockAssembler::new(chain_spec.clone()),
             executor_factory: Evm2AlloyBlockExecutorFactory::new(
                 RethEvm2ReceiptBuilder,
-                chain_spec,
+                chain_spec.clone(),
                 evm_factory,
-            ),
+            )
+            .with_dao_fork_block(chain_spec.fork(EthereumHardfork::Dao).block_number()),
         }
     }
 

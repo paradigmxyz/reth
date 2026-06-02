@@ -19,7 +19,7 @@ use alloy_evm::{
         BlockExecutorFactory as AlloyBlockExecutorFactory, BlockValidationError, CommitChanges,
         ExecutableTx, GasOutput, StateDB, TxResult as AlloyTxResult,
     },
-    eth::EthBlockExecutionCtx,
+    eth::{dao_fork, EthBlockExecutionCtx},
     precompiles::PrecompilesMap,
     Evm as AlloyEvm, EvmFactory as AlloyEvmFactory, FromRecoveredTx, FromTxWithEncoded,
     RecoveredTx,
@@ -865,12 +865,20 @@ pub struct Evm2AlloyBlockExecutorFactory<R, Spec, EvmFactory> {
     spec: Spec,
     /// EVM factory used to create the carrier EVM.
     evm_factory: EvmFactory,
+    /// DAO hardfork activation block, if configured.
+    dao_fork_block: Option<u64>,
 }
 
 impl<R, Spec, EvmFactory> Evm2AlloyBlockExecutorFactory<R, Spec, EvmFactory> {
     /// Creates a new evm2-backed block executor factory.
     pub const fn new(receipt_builder: R, spec: Spec, evm_factory: EvmFactory) -> Self {
-        Self { receipt_builder, spec, evm_factory }
+        Self { receipt_builder, spec, evm_factory, dao_fork_block: None }
+    }
+
+    /// Sets the DAO hardfork activation block for this factory.
+    pub const fn with_dao_fork_block(mut self, dao_fork_block: Option<u64>) -> Self {
+        self.dao_fork_block = dao_fork_block;
+        self
     }
 
     /// Exposes the receipt builder.
@@ -920,7 +928,7 @@ where
         DB: StateDB,
         I: Inspector<EvmF::Context<DB>>,
     {
-        Evm2AlloyBlockExecutor::new(evm, ctx, self.receipt_builder.clone())
+        Evm2AlloyBlockExecutor::new(evm, ctx, self.receipt_builder.clone(), self.dao_fork_block)
     }
 }
 
@@ -951,6 +959,7 @@ pub struct Evm2AlloyBlockExecutor<'a, E, R: Evm2ReceiptBuilder> {
     evm2: Evm2TransactionExecutor<R>,
     evm: Box<E>,
     ctx: EthBlockExecutionCtx<'a>,
+    dao_fork_block: Option<u64>,
 }
 
 impl<E, R> fmt::Debug for Evm2AlloyBlockExecutor<'_, E, R>
@@ -973,13 +982,19 @@ where
     R: Evm2ReceiptBuilder + Clone,
 {
     /// Creates a new evm2-backed alloy block executor.
-    pub fn new(evm: E, ctx: EthBlockExecutionCtx<'a>, receipt_builder: R) -> Self {
+    pub fn new(
+        evm: E,
+        ctx: EthBlockExecutionCtx<'a>,
+        receipt_builder: R,
+        dao_fork_block: Option<u64>,
+    ) -> Self {
         let mut evm = Box::new(evm);
         let evm2 = create_evm2_from_alloy_evm(&mut *evm);
         Self {
             evm2: Evm2TransactionExecutor::with_receipt_builder(evm2, receipt_builder),
             evm,
             ctx,
+            dao_fork_block,
         }
     }
 }
@@ -1106,8 +1121,17 @@ where
         }
         self.evm2.apply_post_block_system_calls().map_err(evm2_block_error)?;
         let ommers = eth_ommers_to_evm2(self.ctx.ommers);
-        let balance_increments =
+        let mut balance_increments =
             self.evm2.post_block_balance_increments(&ommers, self.ctx.withdrawals.as_deref());
+        if self.dao_fork_block.is_some_and(|dao_fork_block| {
+            U256::from(dao_fork_block) == self.evm2.evm.block_env().number
+        }) {
+            let (drained_balance, drained_state) =
+                self.evm2.drain_balances(dao_fork::DAO_HARDFORK_ACCOUNTS)?;
+            self.evm.db_mut().commit(drained_state);
+            *balance_increments.entry(dao_fork::DAO_HARDFORK_BENEFICIARY).or_default() +=
+                drained_balance;
+        }
         if !balance_increments.is_empty() {
             self.evm
                 .db_mut()
@@ -1453,6 +1477,52 @@ where
 
         self.output.bundle.extend(BundleState { state, state_size, ..Default::default() });
         Ok(())
+    }
+
+    /// Drains balances from the given accounts and returns the total drained amount.
+    pub fn drain_balances(
+        &mut self,
+        accounts: impl IntoIterator<Item = Address>,
+    ) -> Result<(U256, EvmState), BlockExecutionError> {
+        let mut drained_balance = U256::ZERO;
+        let mut bundle_state = AddressMap::<BundleAccount>::default();
+        let mut evm_state = AddressMap::<RevmAccount>::default();
+        let mut state_size = 0;
+
+        for address in accounts {
+            let Some(original) = self.current_account_info(address).map_err(evm2_block_error)?
+            else {
+                continue;
+            };
+            if original.balance.is_zero() {
+                continue;
+            }
+
+            let mut present = original.clone();
+            present.balance = U256::ZERO;
+            drained_balance = drained_balance.saturating_add(original.balance);
+
+            let mut revm_account = RevmAccount::default();
+            revm_account.info = present.clone();
+            revm_account.mark_touch();
+            evm_state.insert(address, revm_account);
+
+            let account = BundleAccount::new(
+                Some(original),
+                Some(present),
+                StorageWithOriginalValues::default(),
+                AccountStatus::Changed,
+            );
+            state_size += account.size_hint();
+            bundle_state.insert(address, account);
+        }
+
+        self.output.bundle.extend(BundleState {
+            state: bundle_state,
+            state_size,
+            ..Default::default()
+        });
+        Ok((drained_balance, evm_state))
     }
 
     fn current_account_info(

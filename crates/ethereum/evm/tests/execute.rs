@@ -8,7 +8,7 @@ use alloy_eips::{
     eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     eip7685::EMPTY_REQUESTS_HASH,
 };
-use alloy_evm::block::BlockValidationError;
+use alloy_evm::{block::BlockValidationError, eth::dao_fork};
 use alloy_primitives::{b256, fixed_bytes, keccak256, Bytes, TxKind, B256, U256};
 use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, ForkCondition, MAINNET};
 use reth_ethereum_primitives::{Block, BlockBody, Transaction};
@@ -957,4 +957,41 @@ fn evm2_config_applies_pre_block_system_call_through_basic_executor() {
         state.storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index)).unwrap()
     });
     assert_eq!(parent_beacon_block_root_storage, U256::from(0x69));
+}
+
+#[test]
+fn evm2_config_applies_dao_hardfork_through_basic_executor() {
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::from(&*MAINNET)
+            .with_fork(EthereumHardfork::Dao, ForkCondition::Block(1))
+            .build(),
+    );
+    let dao_account = dao_fork::DAO_HARDFORK_ACCOUNTS[0];
+    let dao_balance = U256::from(7);
+
+    let mut db = CacheDB::new(EmptyDB::default());
+    db.insert_account_info(
+        dao_account,
+        AccountInfo { balance: dao_balance, nonce: 1, ..Default::default() },
+    );
+
+    let header = Header { number: 1, gas_limit: 30_000, ..Header::default() };
+    let provider = EthEvm2Config::new(chain_spec);
+    let mut executor = BasicBlockExecutor::new(provider, db);
+
+    executor
+        .execute_one(&RecoveredBlock::new_unhashed(
+            Block { header, body: Default::default() },
+            vec![],
+        ))
+        .expect("evm2 DAO hardfork block execution should succeed");
+
+    let drained_balance =
+        executor.with_state_mut(|state| state.basic(dao_account).unwrap().unwrap().balance);
+    assert_eq!(drained_balance, U256::ZERO);
+
+    let beneficiary_balance = executor.with_state_mut(|state| {
+        state.basic(dao_fork::DAO_HARDFORK_BENEFICIARY).unwrap().unwrap_or_default().balance
+    });
+    assert_eq!(beneficiary_balance, dao_balance);
 }
