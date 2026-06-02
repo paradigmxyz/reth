@@ -1771,7 +1771,7 @@ impl TrieCursorState {
     fn before(&self, path: &Nibbles) -> bool {
         match self {
             Self::Unseeked => true,
-            Self::Available(seeked_to, _) | Self::Taken(seeked_to) => path < seeked_to,
+            Self::Available(seeked_to, _) | Self::Taken(seeked_to) => seeked_to < path,
             Self::Exhausted => false,
         }
     }
@@ -1817,6 +1817,18 @@ mod tests {
     use itertools::Itertools;
     use reth_trie_common::{prefix_set::PrefixSetMut, ProofTrieNode, TrieNode};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn trie_cursor_state_before_tracks_forward_position() {
+        let low = Nibbles::from_nibbles([0x2]);
+        let high = Nibbles::from_nibbles([0x4]);
+
+        assert!(TrieCursorState::Unseeked.before(&low));
+        assert!(TrieCursorState::Taken(low).before(&high));
+        assert!(!TrieCursorState::Taken(high).before(&low));
+        assert!(!TrieCursorState::Taken(low).before(&low));
+        assert!(!TrieCursorState::Exhausted.before(&high));
+    }
 
     /// Converts legacy proofs to V2 proofs by combining extension nodes with their child branch
     /// nodes.
