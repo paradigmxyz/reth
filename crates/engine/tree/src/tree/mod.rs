@@ -19,8 +19,7 @@ use reth_chain_state::{
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, ConsensusEngineEvent, ExecutionPayload,
-    ForkchoiceStateTracker, NewPayloadTimings, OnForkChoiceUpdated, PayloadBuilderSparseTrieHandle,
-    SlowBlockInfo,
+    ForkchoiceStateTracker, NewPayloadTimings, OnForkChoiceUpdated, SlowBlockInfo,
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
@@ -1762,8 +1761,7 @@ where
                                 let start = Instant::now();
                                 let result = self
                                     .payload_validator
-                                    .payload_builder_sparse_trie_handle(parent_payload, &self.state)
-                                    .map(PayloadBuilderSparseTrieHandle::new);
+                                    .payload_builder_sparse_trie_handle(parent_payload, &self.state);
 
                                 if let Err(err) = tx.send(result) {
                                     warn!(

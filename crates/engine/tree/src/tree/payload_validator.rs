@@ -64,7 +64,8 @@ use reth_chain_state::{
 };
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
-    ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
+    ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook,
+    PayloadBuilderSparseTrieHandle, PayloadValidator,
 };
 use reth_errors::{BlockExecutionError, ProviderResult, RethError, RethResult};
 use reth_evm::{
@@ -2508,7 +2509,7 @@ pub trait EngineValidator<
         &self,
         _parent_payload: Types::ExecutionData,
         _state: &EngineApiTreeState<N>,
-    ) -> RethResult<StateRootHandle> {
+    ) -> RethResult<PayloadBuilderSparseTrieHandle> {
         Err(RethError::msg("payload-builder sparse trie handle is not supported by this validator"))
     }
 }
@@ -2625,7 +2626,7 @@ where
         &self,
         parent_payload: Types::ExecutionData,
         state: &EngineApiTreeState<N>,
-    ) -> RethResult<StateRootHandle> {
+    ) -> RethResult<PayloadBuilderSparseTrieHandle> {
         let register_start = Instant::now();
         if parent_payload.block_access_list().is_none() {
             return Err(RethError::msg("payload-builder sparse trie parent has no BAL"));
@@ -2636,6 +2637,7 @@ where
         let base_parent_hash = speculative_parent_block.parent_hash();
         let speculative_parent_hash = speculative_parent_block.hash();
         let speculative_parent_state_root = speculative_parent_block.state_root();
+        let cache = Some(self.payload_processor.shared_cache_for_payload_builder(base_parent_hash));
 
         if let Some(handle) = self.payload_builder_sparse_trie_handle_for_validated_parent(
             speculative_parent_hash,
@@ -2643,7 +2645,7 @@ where
             speculative_parent_state_root,
             state,
         )? {
-            return Ok(handle);
+            return Ok(PayloadBuilderSparseTrieHandle::new((handle, cache)));
         }
 
         let handle = self.register_pending_payload_builder_sparse_trie(
@@ -2660,7 +2662,7 @@ where
             "registered deferred payload-builder sparse trie handle"
         );
 
-        Ok(handle)
+        Ok(PayloadBuilderSparseTrieHandle::new((handle, cache)))
     }
 }
 

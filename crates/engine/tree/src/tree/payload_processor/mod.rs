@@ -631,6 +631,14 @@ where
         }
     }
 
+    /// Returns a non-exclusive shared cache view for a discardable payload builder.
+    ///
+    /// This shares the underlying cache storage without keeping the shared cache slot checked out,
+    /// so validation and prewarming can still publish the next block's cache state.
+    pub fn shared_cache_for_payload_builder(&self, parent_hash: B256) -> SavedCache {
+        self.cache_for(parent_hash).into_shared_view()
+    }
+
     /// Updates the execution cache with the post-execution state from an inserted block.
     ///
     /// This is used when blocks are inserted directly (e.g., locally built blocks by sequencers)

@@ -1011,6 +1011,16 @@ impl SavedCache {
         Arc::strong_count(&self.usage_guard)
     }
 
+    /// Converts this handle into a non-exclusive shared view of the same underlying cache.
+    ///
+    /// The returned handle shares the [`ExecutionCache`] storage, but it does not participate in
+    /// the original handle's availability tracking. Use this only for discardable consumers that
+    /// must not block the owner from publishing the cache for the next block.
+    pub fn into_shared_view(self) -> Self {
+        let Self { hash, caches, .. } = self;
+        Self { hash, caches, usage_guard: Arc::new(()) }
+    }
+
     /// Returns the [`ExecutionCache`] belonging to the tracked hash.
     pub const fn cache(&self) -> &ExecutionCache {
         &self.caches
@@ -1149,6 +1159,20 @@ mod tests {
 
         drop(guard3);
         assert!(cache.is_available());
+    }
+
+    #[test]
+    fn test_saved_cache_shared_view_does_not_hold_original_guard() {
+        let execution_cache = ExecutionCache::new(1000);
+        let cache = SavedCache::new(B256::from([3u8; 32]), execution_cache);
+
+        let checked_out = cache.clone();
+        assert!(!cache.is_available());
+
+        let shared = checked_out.into_shared_view();
+        assert!(cache.is_available());
+        assert!(shared.is_available());
+        assert_eq!(cache.executed_block_hash(), shared.executed_block_hash());
     }
 
     #[test]

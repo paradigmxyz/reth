@@ -167,12 +167,11 @@ pub struct NewPayloadTimings {
     pub sparse_trie_wait: Option<Duration>,
 }
 
-/// Type-erased private sparse-trie state-root handle prepared by the engine tree for payload
-/// building.
+/// Type-erased payload-builder sparse-trie preparation produced by the engine tree.
 ///
-/// The concrete handle type lives in the engine-tree dependency graph. Keeping this wrapper opaque
-/// lets the consensus handle request the handle without making engine primitives depend on trie
-/// worker internals.
+/// The concrete handle type lives in the engine-tree dependency graph and may bundle companion
+/// data, such as a shared execution-cache view. Keeping this wrapper opaque lets the consensus
+/// handle request the preparation without making engine primitives depend on trie worker internals.
 pub struct PayloadBuilderSparseTrieHandle(Box<dyn Any + Send>);
 
 impl PayloadBuilderSparseTrieHandle {
@@ -320,11 +319,12 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
     ///
     /// The engine tree can clone its current preserved sparse trie and overlay graph before the
     /// caller submits the parent through `newPayload`, allowing speculative builders to run without
-    /// mutating validation caches.
+    /// mutating validation sparse-trie caches. Implementations may also return companion data
+    /// needed by the payload builder, such as a shared execution-cache view.
     PreparePayloadBuilderSparseTrie {
         /// The unvalidated parent payload the builder will build on top of.
         parent_payload: Payload::ExecutionData,
-        /// The sender for returning the state-root handle.
+        /// The sender for returning the opaque payload-builder preparation.
         tx: oneshot::Sender<RethResult<PayloadBuilderSparseTrieHandle>>,
     },
 }
