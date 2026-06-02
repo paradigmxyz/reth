@@ -95,12 +95,12 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
             };
 
             let index = output.index;
-            assert!(
+            debug_assert!(
                 index < self.total,
                 "BAL worker returned out-of-bounds transaction index {index}; total={}",
                 self.total
             );
-            assert!(
+            debug_assert!(
                 index >= self.next && self.pending[index].is_none(),
                 "BAL worker returned duplicate transaction index {index}",
             );
