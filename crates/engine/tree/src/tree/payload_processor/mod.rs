@@ -156,6 +156,23 @@ where
     disable_bal_batch_io: bool,
 }
 
+#[derive(Clone)]
+pub(crate) struct StateRootSpawner {
+    /// The executor used by to spawn tasks.
+    executor: Runtime,
+    /// Metrics for trie operations
+    trie_metrics: MultiProofTaskMetrics,
+    /// A pruned `SparseStateTrie`, kept around as a cache of already revealed trie nodes and to
+    /// re-use allocated memory.
+    sparse_state_trie: SharedPreservedSparseTrie,
+    /// LFU hot-slot capacity: max storage slots retained across prune cycles.
+    sparse_trie_max_hot_slots: usize,
+    /// LFU hot-account capacity: max account addresses retained across prune cycles.
+    sparse_trie_max_hot_accounts: usize,
+    /// Whether sparse trie cache pruning is fully disabled.
+    disable_sparse_trie_cache_pruning: bool,
+}
+
 impl<N, Evm> PayloadProcessor<Evm>
 where
     N: NodePrimitives,
@@ -164,6 +181,18 @@ where
     /// Returns a reference to the workload executor driving payload tasks.
     pub const fn executor(&self) -> &Runtime {
         &self.executor
+    }
+
+    /// Returns a cloneable state-root spawner backed by this processor's sparse trie cache.
+    pub(crate) fn state_root_spawner(&self) -> StateRootSpawner {
+        StateRootSpawner {
+            executor: self.executor.clone(),
+            trie_metrics: self.trie_metrics.clone(),
+            sparse_state_trie: self.sparse_state_trie.clone(),
+            sparse_trie_max_hot_slots: self.sparse_trie_max_hot_slots,
+            sparse_trie_max_hot_accounts: self.sparse_trie_max_hot_accounts,
+            disable_sparse_trie_cache_pruning: self.disable_sparse_trie_cache_pruning,
+        }
     }
 
     /// Creates a new payload processor.
@@ -379,12 +408,11 @@ where
             + Sync
             + 'static,
     {
-        self.spawn_state_root_with_preserved_sparse_trie(
+        self.state_root_spawner().spawn_state_root(
             multiproof_provider_factory,
             parent_state_root,
             halve_workers,
             config,
-            self.sparse_state_trie.clone(),
         )
     }
 
@@ -412,67 +440,15 @@ where
             + Sync
             + 'static,
     {
-        let clone_start = Instant::now();
-        let preserved = self.sparse_state_trie.clone_with_updates(
-            base_state_root,
-            parent_state_root,
-            base_trie_updates,
-        );
-        let clone_elapsed = clone_start.elapsed();
-        debug!(
-            target: "engine::tree::payload_processor",
-            %base_state_root,
-            %parent_state_root,
-            cloned = preserved.is_some(),
-            ?clone_elapsed,
-            "prepared private sparse-trie snapshot for payload builder"
-        );
-
-        self.spawn_state_root_with_preserved_sparse_trie(
-            multiproof_provider_factory,
-            parent_state_root,
-            halve_workers,
-            config,
-            SharedPreservedSparseTrie::new(preserved),
-        )
-    }
-
-    fn spawn_state_root_with_preserved_sparse_trie<F>(
-        &self,
-        multiproof_provider_factory: F,
-        parent_state_root: B256,
-        halve_workers: bool,
-        config: &TreeConfig,
-        sparse_state_trie: SharedPreservedSparseTrie,
-    ) -> StateRootHandle
-    where
-        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-            + Clone
-            + Send
-            + Sync
-            + 'static,
-    {
-        let (updates_tx, from_multi_proof) = crossbeam_channel::unbounded();
-
-        let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
-        #[cfg(feature = "trie-debug")]
-        let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
-        let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers);
-
-        let (state_root_tx, state_root_rx) = channel();
-        let (hashed_state_tx, hashed_state_rx) = channel();
-
-        self.spawn_sparse_trie_task(
-            proof_handle,
-            state_root_tx,
-            hashed_state_tx,
-            from_multi_proof,
-            parent_state_root,
-            config.multiproof_chunk_size(),
-            sparse_state_trie,
-        );
-
-        StateRootHandle::new(parent_state_root, updates_tx, state_root_rx, hashed_state_rx)
+        self.state_root_spawner()
+            .spawn_state_root_with_updated_sparse_trie_snapshot(
+                multiproof_provider_factory,
+                base_state_root,
+                parent_state_root,
+                base_trie_updates,
+                halve_workers,
+                config,
+            )
     }
 
     /// Transaction count threshold below which proof workers are halved, since fewer transactions
@@ -655,7 +631,167 @@ where
         }
     }
 
-    /// Spawns the [`SparseTrieCacheTask`] for this payload processor.
+    /// Updates the execution cache with the post-execution state from an inserted block.
+    ///
+    /// This is used when blocks are inserted directly (e.g., locally built blocks by sequencers)
+    /// to ensure the cache remains warm for subsequent block execution.
+    ///
+    /// The cache enables subsequent blocks to reuse account, storage, and bytecode data without
+    /// hitting the database, maintaining performance consistency.
+    pub fn on_inserted_executed_block(
+        &self,
+        block_with_parent: BlockWithParent,
+        bundle_state: &BundleState,
+    ) {
+        let cache_state_metrics = self.cache_state_metrics.clone();
+        self.execution_cache.update_with_guard(|cached| {
+            if cached.as_ref().is_some_and(|c| c.executed_block_hash() != block_with_parent.parent) {
+                debug!(
+                    target: "engine::caching",
+                    parent_hash = %block_with_parent.parent,
+                    "Cannot find cache for parent hash, skip updating cache with new state for inserted executed block",
+                );
+                return
+            }
+
+            if let Some(cache) = cached.as_ref().filter(|cache| !cache.is_available()) {
+                debug!(
+                    target: "engine::caching",
+                    parent_hash = %block_with_parent.parent,
+                    usage_count = cache.usage_count(),
+                    "Execution cache is in use, skip updating cache with new state for inserted executed block",
+                );
+                return
+            }
+
+            // Take existing cache (if any) or create fresh caches
+            let caches = match cached.take() {
+                Some(existing) => existing.cache().clone(),
+                None => ExecutionCache::new(self.cross_block_cache_size),
+            };
+
+            // Insert the block's bundle state into cache
+            let new_cache = SavedCache::new(block_with_parent.block.hash, caches);
+            if new_cache.cache().insert_state(bundle_state).is_err() {
+                *cached = None;
+                debug!(target: "engine::caching", "cleared execution cache on update error");
+                return
+            }
+            new_cache.update_metrics(cache_state_metrics.as_ref());
+
+            // Replace with the updated cache
+            *cached = Some(new_cache);
+            debug!(target: "engine::caching", ?block_with_parent, "Updated execution cache for inserted block");
+        });
+    }
+}
+
+impl StateRootSpawner {
+    /// Spawns state root computation pipeline (multiproof + sparse trie tasks).
+    pub(crate) fn spawn_state_root<F>(
+        &self,
+        multiproof_provider_factory: F,
+        parent_state_root: B256,
+        halve_workers: bool,
+        config: &TreeConfig,
+    ) -> StateRootHandle
+    where
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.spawn_state_root_with_preserved_sparse_trie(
+            multiproof_provider_factory,
+            parent_state_root,
+            halve_workers,
+            config,
+            self.sparse_state_trie.clone(),
+        )
+    }
+
+    /// Spawns a state-root computation pipeline backed by a private sparse-trie copy.
+    pub(crate) fn spawn_state_root_with_updated_sparse_trie_snapshot<F>(
+        &self,
+        multiproof_provider_factory: F,
+        base_state_root: B256,
+        parent_state_root: B256,
+        base_trie_updates: &TrieUpdates,
+        halve_workers: bool,
+        config: &TreeConfig,
+    ) -> StateRootHandle
+    where
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
+        let clone_start = Instant::now();
+        let preserved = self.sparse_state_trie.clone_with_updates(
+            base_state_root,
+            parent_state_root,
+            base_trie_updates,
+        );
+        let clone_elapsed = clone_start.elapsed();
+        debug!(
+            target: "engine::tree::payload_processor",
+            %base_state_root,
+            %parent_state_root,
+            cloned = preserved.is_some(),
+            ?clone_elapsed,
+            "prepared private sparse-trie snapshot for payload builder"
+        );
+
+        self.spawn_state_root_with_preserved_sparse_trie(
+            multiproof_provider_factory,
+            parent_state_root,
+            halve_workers,
+            config,
+            SharedPreservedSparseTrie::new(preserved),
+        )
+    }
+
+    fn spawn_state_root_with_preserved_sparse_trie<F>(
+        &self,
+        multiproof_provider_factory: F,
+        parent_state_root: B256,
+        halve_workers: bool,
+        config: &TreeConfig,
+        sparse_state_trie: SharedPreservedSparseTrie,
+    ) -> StateRootHandle
+    where
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
+        let (updates_tx, from_multi_proof) = crossbeam_channel::unbounded();
+
+        let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
+        #[cfg(feature = "trie-debug")]
+        let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
+        let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers);
+
+        let (state_root_tx, state_root_rx) = channel();
+        let (hashed_state_tx, hashed_state_rx) = channel();
+
+        self.spawn_sparse_trie_task(
+            proof_handle,
+            state_root_tx,
+            hashed_state_tx,
+            from_multi_proof,
+            parent_state_root,
+            config.multiproof_chunk_size(),
+            sparse_state_trie,
+        );
+
+        StateRootHandle::new(parent_state_root, updates_tx, state_root_rx, hashed_state_rx)
+    }
+
+    /// Spawns the [`SparseTrieCacheTask`] for this state-root spawner.
     ///
     /// The trie is preserved when the new payload is a child of the previous one.
     fn spawn_sparse_trie_task(
@@ -786,60 +922,6 @@ where
             };
             drop(guard);
             executor.spawn_drop(deferred);
-        });
-    }
-
-    /// Updates the execution cache with the post-execution state from an inserted block.
-    ///
-    /// This is used when blocks are inserted directly (e.g., locally built blocks by sequencers)
-    /// to ensure the cache remains warm for subsequent block execution.
-    ///
-    /// The cache enables subsequent blocks to reuse account, storage, and bytecode data without
-    /// hitting the database, maintaining performance consistency.
-    pub fn on_inserted_executed_block(
-        &self,
-        block_with_parent: BlockWithParent,
-        bundle_state: &BundleState,
-    ) {
-        let cache_state_metrics = self.cache_state_metrics.clone();
-        self.execution_cache.update_with_guard(|cached| {
-            if cached.as_ref().is_some_and(|c| c.executed_block_hash() != block_with_parent.parent) {
-                debug!(
-                    target: "engine::caching",
-                    parent_hash = %block_with_parent.parent,
-                    "Cannot find cache for parent hash, skip updating cache with new state for inserted executed block",
-                );
-                return
-            }
-
-            if let Some(cache) = cached.as_ref().filter(|cache| !cache.is_available()) {
-                debug!(
-                    target: "engine::caching",
-                    parent_hash = %block_with_parent.parent,
-                    usage_count = cache.usage_count(),
-                    "Execution cache is in use, skip updating cache with new state for inserted executed block",
-                );
-                return
-            }
-
-            // Take existing cache (if any) or create fresh caches
-            let caches = match cached.take() {
-                Some(existing) => existing.cache().clone(),
-                None => ExecutionCache::new(self.cross_block_cache_size),
-            };
-
-            // Insert the block's bundle state into cache
-            let new_cache = SavedCache::new(block_with_parent.block.hash, caches);
-            if new_cache.cache().insert_state(bundle_state).is_err() {
-                *cached = None;
-                debug!(target: "engine::caching", "cleared execution cache on update error");
-                return
-            }
-            new_cache.update_metrics(cache_state_metrics.as_ref());
-
-            // Replace with the updated cache
-            *cached = Some(new_cache);
-            debug!(target: "engine::caching", ?block_with_parent, "Updated execution cache for inserted block");
         });
     }
 }
