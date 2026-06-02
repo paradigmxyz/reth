@@ -5,7 +5,7 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     models::{
         sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey,
-        AccountBeforeTx, AddressStorageKey, BlockNumberAddress, ShardedKey,
+        AccountBeforeTx, BlockNumberAddress, ShardedKey,
     },
     table::{Decode, Decompress, Table},
     transaction::DbTx,
@@ -179,12 +179,12 @@ where
     Provider: DBProvider + StorageChangeSetReader + StaticFileProviderFactory,
 {
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
-    let mut cache: HashMap<AddressStorageKey, Vec<u64>> = HashMap::default();
+    let mut cache: HashMap<(Address, B256), Vec<u64>> = HashMap::default();
 
-    let mut insert_fn = |key: AddressStorageKey, indices: Vec<u64>| {
+    let mut insert_fn = |(address, storage_key): (Address, B256), indices: Vec<u64>| {
         let last = indices.last().expect("qed");
         collector.insert(
-            StorageShardedKey::new(key.0 .0, key.0 .1, *last),
+            StorageShardedKey::new(address, storage_key, *last),
             BlockNumberList::new_pre_sorted(indices),
         )?;
         Ok::<(), StageError>(())
@@ -201,7 +201,7 @@ where
 
     for changeset_result in walker {
         let (BlockNumberAddress((block_number, address)), storage) = changeset_result?;
-        cache.entry(AddressStorageKey((address, storage.key))).or_default().push(block_number);
+        cache.entry((address, storage.key)).or_default().push(block_number);
 
         if block_number != current_block_number {
             current_block_number = block_number;
