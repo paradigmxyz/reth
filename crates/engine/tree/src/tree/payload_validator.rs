@@ -536,33 +536,30 @@ where
         // - After execution, the execution post-state will be dumped into the execution cache as
         //   whole anyway.
         //
-        // Therefore, `fill_on_miss` is false for those paths. If transaction prewarming can hand
-        // execution a read overlay, serial execution skips the shared cache wrapper entirely so
-        // provider misses do not pay fixed-cache lookup costs.
+        // Therefore, `fill_on_miss` is false for those paths. Transaction prewarming installs a
+        // read overlay above this provider, so overlay hits skip the fixed cache while overlay
+        // misses still fall back to it.
         //
         // The second parameter `instrument_state_provider` controls whether we should
         // instrument the state provider with metrics.
         let make_state_provider = |fill_on_miss: bool| -> ProviderResult<StateProviderBox> {
             let provider = provider_builder.build()?;
-            let use_execution_cache =
-                fill_on_miss || parallel_bal_execution || prewarm_state_loader.is_none();
-            let mut provider =
-                if use_execution_cache && let Some((caches, cache_metrics)) = &execution_cache {
-                    let fill_mode = if fill_on_miss {
-                        CacheFillMode::FillOnMiss
-                    } else {
-                        CacheFillMode::LookupOnly
-                    };
-                    Box::new(CachedStateProvider::new_with_mode(
-                        provider,
-                        caches.clone(),
-                        fill_mode,
-                        cache_metrics.clone(),
-                        cache_stats.clone(),
-                    )) as StateProviderBox
+            let mut provider = if let Some((caches, cache_metrics)) = &execution_cache {
+                let fill_mode = if fill_on_miss {
+                    CacheFillMode::FillOnMiss
                 } else {
-                    provider
+                    CacheFillMode::LookupOnly
                 };
+                Box::new(CachedStateProvider::new_with_mode(
+                    provider,
+                    caches.clone(),
+                    fill_mode,
+                    cache_metrics.clone(),
+                    cache_stats.clone(),
+                )) as StateProviderBox
+            } else {
+                provider
+            };
 
             if instrument_state_provider {
                 let stats = state_provider_stats
