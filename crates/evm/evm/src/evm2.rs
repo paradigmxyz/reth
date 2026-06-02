@@ -521,6 +521,7 @@ where
     let mut storage = changes.storage;
 
     for (address, account) in changes.accounts {
+        let is_created = account.original.is_none() && account.current.is_some();
         let mut revm_account = match account.current {
             Some(info) => {
                 let mut account = RevmAccount::default();
@@ -535,6 +536,9 @@ where
             }
         };
         revm_account.mark_touch();
+        if is_created {
+            revm_account.mark_created();
+        }
         if let Some(storage) = storage.remove(&address) {
             revm_account.storage = storage
                 .slots
@@ -2194,6 +2198,17 @@ mod tests {
             _non_exhaustive: (),
         };
         let mut output = Evm2ExecutionOutput::default();
+        let resurrection_changes = StateChanges {
+            accounts: core::iter::once((
+                address,
+                Tracked { original: None, current: Some(empty), _non_exhaustive: () },
+            ))
+            .collect(),
+            storage: Default::default(),
+            code: Default::default(),
+            logs: Vec::new(),
+            _non_exhaustive: (),
+        };
 
         output.merge_state_changes(StateChanges {
             accounts: core::iter::once((
@@ -2206,17 +2221,7 @@ mod tests {
             logs: Vec::new(),
             _non_exhaustive: (),
         });
-        output.merge_state_changes(StateChanges {
-            accounts: core::iter::once((
-                address,
-                Tracked { original: None, current: Some(empty), _non_exhaustive: () },
-            ))
-            .collect(),
-            storage: Default::default(),
-            code: Default::default(),
-            logs: Vec::new(),
-            _non_exhaustive: (),
-        });
+        output.merge_state_changes(resurrection_changes.clone());
 
         let account = output.bundle.account(&address).expect("account exists");
         assert_eq!(
@@ -2233,6 +2238,9 @@ mod tests {
         );
         let mut executor = Evm2TransactionExecutor::new(evm);
         executor.output = output;
+        let evm_state = evm_state_from_evm2_with_accounts(&mut executor, resurrection_changes)
+            .expect("evm state converts");
+        assert!(evm_state.get(&address).expect("account exists").is_created());
         assert_eq!(
             executor
                 .current_account_info(address)
