@@ -1,5 +1,6 @@
-import { SidebarItem } from "vocs";
 import { rethCliSidebar } from "./sidebar-cli-reth";
+import type { SidebarItem } from "./types";
+
 export const sidebar: SidebarItem[] = [
     {
         text: "Introduction",
