@@ -88,6 +88,7 @@ use reth_provider::{
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
+use reth_trie_common::EMPTY_ROOT_HASH;
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::{Address, KECCAK_EMPTY};
@@ -1212,6 +1213,14 @@ where
         &self,
         receipts_len: usize,
     ) -> (ReceiptRootSender<N>, ReceiptRootReceiver) {
+        if receipts_len == 0 {
+            let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
+            drop(receipt_rx);
+            let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+            let _ = result_tx.send((EMPTY_ROOT_HASH, alloy_primitives::Bloom::ZERO));
+            return (receipt_tx, result_rx)
+        }
+
         // Unbounded channel is used since tx count bounds capacity anyway.
         let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
