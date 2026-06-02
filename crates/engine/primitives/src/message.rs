@@ -16,7 +16,7 @@ use core::{
 use futures::{future::Either, FutureExt, TryFutureExt};
 use reth_errors::{RethError, RethResult};
 use reth_payload_builder_primitives::PayloadBuilderError;
-use reth_payload_primitives::PayloadTypes;
+use reth_payload_primitives::{BuiltPayload, BuiltPayloadExecutedBlock, PayloadTypes};
 use std::{
     any::Any,
     time::{Duration, Instant},
@@ -284,6 +284,11 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
         /// The sender for returning payload status result.
         tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
     },
+    /// Insert a locally built block that has already been executed by the payload builder.
+    InsertExecutedBlock {
+        /// The executed block emitted by the payload builder.
+        payload: BuiltPayloadExecutedBlock<<Payload::BuiltPayload as BuiltPayload>::Primitives>,
+    },
     /// Message with new payload used by `reth_newPayload` endpoint.
     ///
     /// Supports independent control over waiting for persistence and cache locks before
@@ -335,6 +340,9 @@ impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
                     payload.block_number(),
                     payload.block_hash()
                 )
+            }
+            Self::InsertExecutedBlock { payload } => {
+                write!(f, "InsertExecutedBlock({:?})", payload.recovered_block.num_hash())
             }
             Self::RethNewPayload { payload, .. } => {
                 write!(
@@ -397,6 +405,19 @@ where
         let (tx, rx) = oneshot::channel();
         let _ = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, tx });
         rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
+    }
+
+    /// Inserts a locally built block that already carries execution output.
+    ///
+    /// This skips re-execution when the caller has independently decided the block
+    /// should enter the engine tree.
+    pub fn insert_executed_block(
+        &self,
+        payload: BuiltPayloadExecutedBlock<<Payload::BuiltPayload as BuiltPayload>::Primitives>,
+    ) -> Result<(), BeaconOnNewPayloadError> {
+        self.to_engine
+            .send(BeaconEngineMessage::InsertExecutedBlock { payload })
+            .map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)
     }
 
     /// Sends a new payload message used by `reth_newPayload` endpoint.

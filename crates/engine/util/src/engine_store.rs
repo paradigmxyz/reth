@@ -82,7 +82,8 @@ impl EngineMessageStore {
                     })?,
                 )?;
             }
-            BeaconEngineMessage::PreparePayloadBuilderSparseTrie { .. } => {}
+            BeaconEngineMessage::InsertExecutedBlock { .. }
+            | BeaconEngineMessage::PreparePayloadBuilderSparseTrie { .. } => {}
         };
         Ok(())
     }

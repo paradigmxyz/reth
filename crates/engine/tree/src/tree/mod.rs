@@ -25,7 +25,9 @@ use reth_engine_primitives::{
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle};
-use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadTypes};
+use reth_payload_primitives::{
+    BuiltPayload, BuiltPayloadExecutedBlock, NewPayloadError, PayloadTypes,
+};
 use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
@@ -782,6 +784,44 @@ where
         self.metrics.block_validation.total_duration.record(start.elapsed().as_secs_f64());
 
         Ok(outcome)
+    }
+
+    /// Inserts a locally built block that already carries execution output.
+    fn on_insert_executed_block(&mut self, payload: BuiltPayloadExecutedBlock<N>) {
+        let block_num_hash = payload.recovered_block.num_hash();
+        if block_num_hash.number <= self.state.tree_state.canonical_block_number() {
+            // outdated block that can be skipped
+            return
+        }
+
+        if self.state.tree_state.contains_hash(&block_num_hash.hash) {
+            // block already known to the tree (e.g. delivered via newPayload first)
+            return
+        }
+
+        debug!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
+        let now = Instant::now();
+
+        let block = match self.payload_validator.on_inserted_executed_block(payload, &self.state) {
+            Ok(block) => block,
+            Err(err) => {
+                warn!(target: "engine::tree", %err, block=?block_num_hash, "Failed to insert already executed block");
+                return
+            }
+        };
+
+        // if the parent is the canonical head, we can insert the block as the
+        // pending block
+        if self.state.tree_state.canonical_block_hash() == block.recovered_block().parent_hash() {
+            debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
+            self.canonical_in_memory_state.set_pending_block(block.clone());
+        }
+
+        self.state.tree_state.insert_executed(block.clone());
+        self.metrics.engine.inserted_already_executed_blocks.increment(1);
+        self.emit_event(EngineApiEvent::BeaconConsensus(
+            ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
+        ));
     }
 
     /// Processes a payload during normal sync operation.
@@ -1546,48 +1586,13 @@ where
             FromEngine::Request(request) => {
                 match request {
                     EngineApiRequest::InsertExecutedBlock(payload) => {
-                        let block_num_hash = payload.recovered_block.num_hash();
-                        if block_num_hash.number <= self.state.tree_state.canonical_block_number() {
-                            // outdated block that can be skipped
-                            return Ok(ops::ControlFlow::Continue(()))
-                        }
-
-                        if self.state.tree_state.contains_hash(&block_num_hash.hash) {
-                            // block already known to the tree (e.g. delivered via newPayload first)
-                            return Ok(ops::ControlFlow::Continue(()))
-                        }
-
-                        debug!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
-                        let now = Instant::now();
-
-                        let block = match self
-                            .payload_validator
-                            .on_inserted_executed_block(payload, &self.state)
-                        {
-                            Ok(block) => block,
-                            Err(err) => {
-                                warn!(target: "engine::tree", %err, block=?block_num_hash, "Failed to insert already executed block");
-                                return Ok(ops::ControlFlow::Continue(()))
-                            }
-                        };
-
-                        // if the parent is the canonical head, we can insert the block as the
-                        // pending block
-                        if self.state.tree_state.canonical_block_hash() ==
-                            block.recovered_block().parent_hash()
-                        {
-                            debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
-                            self.canonical_in_memory_state.set_pending_block(block.clone());
-                        }
-
-                        self.state.tree_state.insert_executed(block.clone());
-                        self.metrics.engine.inserted_already_executed_blocks.increment(1);
-                        self.emit_event(EngineApiEvent::BeaconConsensus(
-                            ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
-                        ));
+                        self.on_insert_executed_block(payload);
                     }
                     EngineApiRequest::Beacon(request) => {
                         match request {
+                            BeaconEngineMessage::InsertExecutedBlock { payload } => {
+                                self.on_insert_executed_block(payload);
+                            }
                             BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
                                 let has_attrs = payload_attrs.is_some();
 
