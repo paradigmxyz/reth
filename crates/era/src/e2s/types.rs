@@ -136,6 +136,19 @@ impl Entry {
     pub fn is_slot_index(&self) -> bool {
         self.entry_type == SLOT_INDEX
     }
+
+    /// Ensure this entry carries the `expected` type id.
+    ///
+    /// `name` is the human-readable record name used in the error message.
+    pub fn ensure_type(&self, expected: [u8; 2], name: &str) -> Result<(), E2sError> {
+        if self.entry_type != expected {
+            return Err(E2sError::Ssz(format!(
+                "Invalid entry type for {name}: expected {:02x}{:02x}, got {:02x}{:02x}",
+                expected[0], expected[1], self.entry_type[0], self.entry_type[1]
+            )));
+        }
+        Ok(())
+    }
 }
 
 /// Serialize and deserialize index entries with format:
@@ -173,14 +186,7 @@ pub trait IndexEntry: Sized {
 
     /// Create from an [`Entry`]
     fn from_entry(entry: &Entry) -> Result<Self, E2sError> {
-        let expected_type = Self::entry_type();
-
-        if entry.entry_type != expected_type {
-            return Err(E2sError::Ssz(format!(
-                "Invalid entry type: expected {:02x}{:02x}, got {:02x}{:02x}",
-                expected_type[0], expected_type[1], entry.entry_type[0], entry.entry_type[1]
-            )));
-        }
+        entry.ensure_type(Self::entry_type(), "index")?;
 
         if entry.data.len() < 16 {
             return Err(E2sError::Ssz(
