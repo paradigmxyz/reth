@@ -60,6 +60,9 @@ impl TrieUpdates {
     /// Extends the trie updates.
     pub fn extend(&mut self, other: Self) {
         self.extend_common(&other);
+        self.account_nodes.reserve(other.account_nodes.len());
+        self.removed_nodes.reserve(other.removed_nodes.len());
+        self.storage_tries.reserve(other.storage_tries.len());
         self.account_nodes.extend(exclude_empty_from_pair(other.account_nodes));
         self.removed_nodes.extend(exclude_empty(other.removed_nodes));
         for (hashed_address, storage_trie) in other.storage_tries {
@@ -72,6 +75,9 @@ impl TrieUpdates {
     /// Slightly less efficient than [`Self::extend`], but preferred to `extend(other.clone())`.
     pub fn extend_ref(&mut self, other: &Self) {
         self.extend_common(other);
+        self.account_nodes.reserve(other.account_nodes.len());
+        self.removed_nodes.reserve(other.removed_nodes.len());
+        self.storage_tries.reserve(other.storage_tries.len());
         self.account_nodes.extend(exclude_empty_from_pair(
             other.account_nodes.iter().map(|(k, v)| (*k, v.clone())),
         ));
@@ -294,6 +300,8 @@ impl StorageTrieUpdates {
     /// Extends storage trie updates.
     pub fn extend(&mut self, other: Self) {
         self.extend_common(&other);
+        self.storage_nodes.reserve(other.storage_nodes.len());
+        self.removed_nodes.reserve(other.removed_nodes.len());
         self.storage_nodes.extend(exclude_empty_from_pair(other.storage_nodes));
         self.removed_nodes.extend(exclude_empty(other.removed_nodes));
     }
@@ -303,6 +311,8 @@ impl StorageTrieUpdates {
     /// Slightly less efficient than [`Self::extend`], but preferred to `extend(other.clone())`.
     pub fn extend_ref(&mut self, other: &Self) {
         self.extend_common(other);
+        self.storage_nodes.reserve(other.storage_nodes.len());
+        self.removed_nodes.reserve(other.removed_nodes.len());
         self.storage_nodes.extend(exclude_empty_from_pair(
             other.storage_nodes.iter().map(|(k, v)| (*k, v.clone())),
         ));
