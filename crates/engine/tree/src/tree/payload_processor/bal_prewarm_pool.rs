@@ -5,10 +5,14 @@
 //! BAL prewarming is blocking-I/O-bound (MDBX reads), so most workers sit idle and spin, burning
 //! CPU that contends with the block executor's threads and slows execution.
 //!
-//! This pool instead uses dedicated OS threads that **block** on a work queue when idle, so they
-//! cost nothing when there's no work and leave the cores for execution. Threads are long-lived
-//! (one set per process), cache the state provider across reads of the same block, and release the
-//! provider (and its MDBX read txn) when idle so a reader doesn't pin the freelist across blocks.
+//! This pool instead uses dedicated OS threads that **block** on a per-worker queue when idle, so
+//! they cost nothing when there's no work and leave the cores for execution. The per-block lifecycle
+//! is explicit: [`begin_block`](BalPrewarmPool::begin_block) hands every worker the provider builder
+//! so each opens its own MDBX read txn over the parent state; warm requests are distributed
+//! round-robin across the workers; [`end_block`](BalPrewarmPool::end_block) tells every worker to
+//! drop its provider once it has drained the warm requests ahead of it. A worker therefore holds a
+//! read txn only while it is warming the current block, never pinning MDBX's freelist across the
+//! inter-block gap.
 
 use alloy_primitives::{Address, StorageKey};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache};
@@ -17,16 +21,15 @@ use reth_provider::{
 };
 use std::{
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicUsize, Ordering},
         Arc,
     },
     thread::JoinHandle,
-    time::Duration,
 };
 use tracing::trace;
 
-/// Builds a fresh `StateProviderBox` over the block's parent state. Type-erased so the pool is
-/// not generic over the provider factory; a fresh one is passed per block.
+/// Builds a fresh `StateProviderBox` over the block's parent state. Type-erased so the pool is not
+/// generic over the provider factory; each worker builds its own per block.
 type BuildProviderFn = dyn Fn() -> ProviderResult<StateProviderBox> + Send + Sync;
 
 /// A single warm request: a whole account (basic account + its bytecode) or one storage slot.
@@ -35,20 +38,24 @@ enum PrewarmTarget {
     Storage(Address, StorageKey),
 }
 
-struct PrewarmOp {
-    /// Monotonic per-block tag. A thread (re)builds its provider when this changes, and skips ops
-    /// older than the block it's currently serving (stale leftovers from a finished block).
-    epoch: u64,
-    build: Arc<BuildProviderFn>,
-    caches: ExecutionCache,
-    target: PrewarmTarget,
+/// A message in a worker's queue. The per-block lifecycle is explicit and ordered (the queue is
+/// FIFO): one `BeginBlock`, then the worker's share of `Warm`s, then one `EndBlock`.
+enum PrewarmMsg {
+    /// Open a read txn for the new block: build a provider over the parent state and hold it.
+    BeginBlock { build: Arc<BuildProviderFn>, caches: ExecutionCache },
+    /// Warm one target into the held provider's cache. Ignored if no provider is held.
+    Warm(PrewarmTarget),
+    /// Drop the held provider (and its read txn).
+    EndBlock,
 }
 
 /// Long-lived pool of blocking threads that warm the BAL read-set into the shared execution cache.
 #[derive(Debug)]
 pub(crate) struct BalPrewarmPool {
-    tx: crossbeam_channel::Sender<PrewarmOp>,
-    epoch: AtomicU64,
+    /// One queue per worker. `BeginBlock`/`EndBlock` are broadcast to all; `Warm`s round-robin.
+    workers: Vec<crossbeam_channel::Sender<PrewarmMsg>>,
+    /// Round-robin cursor for distributing warm requests across workers.
+    next: AtomicUsize,
     _handles: Vec<JoinHandle<()>>,
 }
 
@@ -56,49 +63,52 @@ impl BalPrewarmPool {
     /// Spawns `num_threads` long-lived blocking worker threads. Owned by the
     /// [`PayloadProcessor`](super::PayloadProcessor); the threads exit when the pool is dropped.
     pub(crate) fn new(num_threads: usize) -> Arc<Self> {
-        let (tx, rx) = crossbeam_channel::unbounded::<PrewarmOp>();
-        let handles = (0..num_threads)
-            .map(|i| {
-                let rx = rx.clone();
+        let mut workers = Vec::with_capacity(num_threads);
+        let mut handles = Vec::with_capacity(num_threads);
+        for i in 0..num_threads {
+            let (tx, rx) = crossbeam_channel::unbounded::<PrewarmMsg>();
+            workers.push(tx);
+            handles.push(
                 std::thread::Builder::new()
                     .name(format!("bal-prewarm-{i}"))
                     .spawn(move || prewarm_loop(rx))
-                    .expect("spawn bal-prewarm thread")
-            })
-            .collect();
+                    .expect("spawn bal-prewarm thread"),
+            );
+        }
         trace!(target: "engine::tree::bal_prewarm_pool", num_threads, "BalPrewarmPool spawned");
-        Arc::new(Self { tx, epoch: AtomicU64::new(0), _handles: handles })
+        Arc::new(Self { workers, next: AtomicUsize::new(0), _handles: handles })
     }
 
-    /// Starts a new block's warming epoch. Pass the returned value to every `warm_*` call for the
-    /// block so threads rebuild their provider once and ignore stale ops from the previous block.
-    pub(crate) fn next_epoch(&self) -> u64 {
-        self.epoch.fetch_add(1, Ordering::Relaxed) + 1
+    /// Begins a block: hands every worker the provider builder and shared cache so each opens its
+    /// own read txn over the parent state. Pair with [`end_block`](Self::end_block).
+    pub(crate) fn begin_block(&self, build: Arc<BuildProviderFn>, caches: ExecutionCache) {
+        for worker in &self.workers {
+            let _ = worker
+                .send(PrewarmMsg::BeginBlock { build: build.clone(), caches: caches.clone() });
+        }
     }
 
-    /// Fire-and-forget: warm an account (basic account + bytecode) into `caches`.
-    pub(crate) fn warm_account(
-        &self,
-        epoch: u64,
-        build: Arc<BuildProviderFn>,
-        caches: ExecutionCache,
-        addr: Address,
-    ) {
-        let _ = self.tx.send(PrewarmOp { epoch, build, caches, target: PrewarmTarget::Account(addr) });
+    /// Fire-and-forget: warm an account (basic account + bytecode) on some worker.
+    pub(crate) fn warm_account(&self, addr: Address) {
+        self.send_warm(PrewarmTarget::Account(addr));
     }
 
-    /// Fire-and-forget: warm one storage slot into `caches`.
-    pub(crate) fn warm_storage(
-        &self,
-        epoch: u64,
-        build: Arc<BuildProviderFn>,
-        caches: ExecutionCache,
-        addr: Address,
-        slot: StorageKey,
-    ) {
-        let _ = self
-            .tx
-            .send(PrewarmOp { epoch, build, caches, target: PrewarmTarget::Storage(addr, slot) });
+    /// Fire-and-forget: warm one storage slot on some worker.
+    pub(crate) fn warm_storage(&self, addr: Address, slot: StorageKey) {
+        self.send_warm(PrewarmTarget::Storage(addr, slot));
+    }
+
+    /// Ends the block: every worker drops its provider (and read txn) once it has drained the warm
+    /// requests queued ahead of this message.
+    pub(crate) fn end_block(&self) {
+        for worker in &self.workers {
+            let _ = worker.send(PrewarmMsg::EndBlock);
+        }
+    }
+
+    fn send_warm(&self, target: PrewarmTarget) {
+        let i = self.next.fetch_add(1, Ordering::Relaxed) % self.workers.len();
+        let _ = self.workers[i].send(PrewarmMsg::Warm(target));
     }
 }
 
@@ -124,54 +134,42 @@ impl BalPrewarmPool {
 /// This should explain why this particular value is picked.
 pub(crate) const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
 
-fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmOp>) {
-    // Release the cached provider (and its MDBX read txn) after this long idle, so a reader doesn't
-    // pin MDBX's freelist across the inter-block gap. Within a block, ops arrive far more often.
-    const IDLE_RELEASE: Duration = Duration::from_millis(50);
+fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
+    // The provider (and its MDBX read txn) held for the current block, between `BeginBlock` and
+    // `EndBlock`. `None` while idle, so no read txn is pinned across the inter-block gap.
+    let mut provider: Option<CachedStateProvider<StateProviderBox>> = None;
 
-    let mut current: Option<(u64, CachedStateProvider<StateProviderBox>)> = None;
-    loop {
-        let op = match rx.recv_timeout(IDLE_RELEASE) {
-            Ok(op) => op,
-            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                current = None; // idle: drop the read txn, then block for the next block's work
-                continue;
+    // Blocks when idle; the channel disconnects (and the loop ends) when the pool is dropped.
+    while let Ok(msg) = rx.recv() {
+        match msg {
+            PrewarmMsg::BeginBlock { build, caches } => {
+                provider = match (build)() {
+                    Ok(inner) => Some(CachedStateProvider::new_prewarm(inner, caches)),
+                    Err(err) => {
+                        trace!(target: "engine::tree::bal_prewarm_pool", %err, "failed to build provider");
+                        None
+                    }
+                };
             }
-            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
-        };
-
-        // Skip ops from a block we've already moved past (avoids rebuilding the provider backwards).
-        if current.as_ref().is_some_and(|(e, _)| op.epoch < *e) {
-            continue;
-        }
-
-        // (Re)build the provider on a new block.
-        if current.as_ref().is_none_or(|(e, _)| *e != op.epoch) {
-            match (op.build)() {
-                Ok(inner) => {
-                    current = Some((op.epoch, CachedStateProvider::new_prewarm(inner, op.caches)));
-                }
-                Err(err) => {
-                    trace!(target: "engine::tree::bal_prewarm_pool", %err, "failed to build provider");
-                    current = None;
-                    continue;
-                }
-            }
-        }
-        let provider = &current.as_ref().expect("just set").1;
-
-        match op.target {
-            PrewarmTarget::Account(addr) => {
-                if let Ok(Some(account)) = provider.basic_account(&addr) {
-                    if let Some(code_hash) = account.bytecode_hash {
-                        if code_hash != alloy_consensus::constants::KECCAK_EMPTY {
-                            let _ = provider.bytecode_by_hash(&code_hash);
+            PrewarmMsg::Warm(target) => {
+                let Some(provider) = provider.as_ref() else { continue };
+                match target {
+                    PrewarmTarget::Account(addr) => {
+                        if let Ok(Some(account)) = provider.basic_account(&addr) {
+                            if let Some(code_hash) = account.bytecode_hash {
+                                if code_hash != alloy_consensus::constants::KECCAK_EMPTY {
+                                    let _ = provider.bytecode_by_hash(&code_hash);
+                                }
+                            }
                         }
+                    }
+                    PrewarmTarget::Storage(addr, slot) => {
+                        let _ = provider.storage(addr, slot);
                     }
                 }
             }
-            PrewarmTarget::Storage(addr, slot) => {
-                let _ = provider.storage(addr, slot);
+            PrewarmMsg::EndBlock => {
+                provider = None;
             }
         }
     }

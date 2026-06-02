@@ -405,33 +405,22 @@ where
             // blocking-I/O-bound (MDBX reads), so most workers sit idle and spin — burning CPU that
             // contends with the executor's threads. The dedicated pool's threads block when idle.
             let caches = saved_cache.cache().clone();
-            let epoch = pool.next_epoch();
-            // Per-block provider builder, type-erased so the pool stays non-generic. Threads call
-            // it once per block (on epoch change) and cache the resulting provider.
+            // Per-block provider builder, type-erased so the pool stays non-generic. Each worker
+            // calls it once on `begin_block` to open its own read txn over the parent state.
             let provider_builder = ctx.provider.clone();
             let build = Arc::new(move || provider_builder.build());
 
+            pool.begin_block(build, caches);
             for account in prefetch_bal.as_bal() {
-                pool.warm_account(epoch, build.clone(), caches.clone(), account.address);
+                pool.warm_account(account.address);
                 for change in &account.storage_changes {
-                    pool.warm_storage(
-                        epoch,
-                        build.clone(),
-                        caches.clone(),
-                        account.address,
-                        change.slot.into(),
-                    );
+                    pool.warm_storage(account.address, change.slot.into());
                 }
                 for &slot in &account.storage_reads {
-                    pool.warm_storage(
-                        epoch,
-                        build.clone(),
-                        caches.clone(),
-                        account.address,
-                        slot.into(),
-                    );
+                    pool.warm_storage(account.address, slot.into());
                 }
             }
+            pool.end_block();
             let _ = prefetch_tx.send(());
         } else {
             let _ = prefetch_tx.send(());
