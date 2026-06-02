@@ -404,6 +404,7 @@ where
                 );
                 let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
+                let start = Instant::now();
 
                 prefetch_bal.as_bal().par_iter().for_each(|account| {
                     if ctx.should_stop() {
@@ -416,6 +417,7 @@ where
                     });
                 });
 
+                ctx.metrics.bal_slot_iteration_duration.record(start.elapsed().as_secs_f64());
                 let _ = prefetch_tx.send(());
             });
         } else {
@@ -783,16 +785,12 @@ where
             }
         };
 
-        let start = Instant::now();
-
         for slot in &account.storage_changes {
             let _ = state_provider.storage(account.address, StorageKey::from(slot.slot));
         }
         for &slot in &account.storage_reads {
             let _ = state_provider.storage(account.address, StorageKey::from(slot));
         }
-
-        self.metrics.bal_slot_iteration_duration.record(start.elapsed().as_secs_f64());
     }
 }
 
@@ -897,6 +895,6 @@ pub struct PrewarmMetrics {
     pub(crate) cache_saving_duration: Gauge,
     /// Counter for transaction execution errors during prewarming
     pub(crate) transaction_errors: Counter,
-    /// A histogram of BAL slot iteration duration during prefetching
+    /// A histogram of total BAL slot iteration duration during prefetching
     pub(crate) bal_slot_iteration_duration: Histogram,
 }
