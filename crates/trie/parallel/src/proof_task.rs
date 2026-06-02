@@ -200,14 +200,16 @@ impl ProofWorkerHandle {
             "Spawning proof worker pools"
         );
 
-        // broadcast blocks until all workers exit (channel close), so run on
-        // tokio's blocking pool.
+        // `broadcast` blocks until all workers exit (channel close), so run these supervisors on
+        // tokio's blocking pool. They must not use a shared named worker: every state-root handle
+        // owns independent proof channels, and serializing those supervisors can leave validation
+        // waiting behind speculative builder proof work.
         let storage_rt = runtime.clone();
         let storage_task_ctx = task_ctx.clone();
         let storage_avail = storage_availability.clone();
         let storage_roots = cached_storage_roots.clone();
         let storage_parent_span = tracing::Span::current();
-        runtime.spawn_blocking_named("storage-workers", move || {
+        let _storage_workers = runtime.spawn_blocking(move || {
             let worker_id = AtomicUsize::new(0);
             storage_rt.proof_storage_worker_pool().broadcast(storage_worker_count, |_| {
                 let worker_id = worker_id.fetch_add(1, Ordering::Relaxed);
@@ -245,7 +247,7 @@ impl ProofWorkerHandle {
         let account_tx = storage_work_tx.clone();
         let account_avail = account_availability.clone();
         let account_parent_span = tracing::Span::current();
-        runtime.spawn_blocking_named("account-workers", move || {
+        let _account_workers = runtime.spawn_blocking(move || {
             let worker_id = AtomicUsize::new(0);
             account_rt.proof_account_worker_pool().broadcast(account_worker_count, |_| {
                 let worker_id = worker_id.fetch_add(1, Ordering::Relaxed);

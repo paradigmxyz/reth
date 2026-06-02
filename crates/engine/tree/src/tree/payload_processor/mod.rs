@@ -173,6 +173,9 @@ pub(crate) struct StateRootSpawner {
     disable_sparse_trie_cache_pruning: bool,
 }
 
+const VALIDATION_SPARSE_TRIE_WORKER_NAME: &str = "sparse-trie";
+const PAYLOAD_BUILDER_SPARSE_TRIE_WORKER_NAME: &str = "payload-builder-sparse-trie";
+
 impl<N, Evm> PayloadProcessor<Evm>
 where
     N: NodePrimitives,
@@ -715,6 +718,7 @@ impl StateRootSpawner {
             parent_state_root,
             halve_workers,
             config,
+            VALIDATION_SPARSE_TRIE_WORKER_NAME,
             self.sparse_state_trie.clone(),
         )
     }
@@ -757,6 +761,7 @@ impl StateRootSpawner {
             parent_state_root,
             halve_workers,
             config,
+            PAYLOAD_BUILDER_SPARSE_TRIE_WORKER_NAME,
             SharedPreservedSparseTrie::new(preserved),
         )
     }
@@ -767,6 +772,7 @@ impl StateRootSpawner {
         parent_state_root: B256,
         halve_workers: bool,
         config: &TreeConfig,
+        sparse_trie_worker_name: &'static str,
         sparse_state_trie: SharedPreservedSparseTrie,
     ) -> StateRootHandle
     where
@@ -793,6 +799,7 @@ impl StateRootSpawner {
             from_multi_proof,
             parent_state_root,
             config.multiproof_chunk_size(),
+            sparse_trie_worker_name,
             sparse_state_trie,
         );
 
@@ -810,6 +817,7 @@ impl StateRootSpawner {
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
         parent_state_root: B256,
         chunk_size: usize,
+        sparse_trie_worker_name: &'static str,
         preserved_sparse_trie: SharedPreservedSparseTrie,
     ) {
         let trie_metrics = self.trie_metrics.clone();
@@ -819,11 +827,16 @@ impl StateRootSpawner {
         let executor = self.executor.clone();
 
         let parent_span = Span::current();
-        self.executor.spawn_blocking_named("sparse-trie", move || {
+        self.executor.spawn_blocking_named(sparse_trie_worker_name, move || {
             reth_tasks::once!(increase_thread_priority);
 
-            let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "sparse_trie_task")
-                .entered();
+            let _enter = debug_span!(
+                target: "engine::tree::payload_processor",
+                parent: parent_span,
+                "sparse_trie_task",
+                worker = sparse_trie_worker_name
+            )
+            .entered();
 
             // Reuse a stored SparseStateTrie if available, applying continuation logic.
             // If this payload's parent state root matches the preserved trie's anchor,
