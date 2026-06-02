@@ -1532,11 +1532,11 @@ where
         address: Address,
     ) -> Result<Option<AccountInfo>, Evm2BlockExecutionError> {
         if let Some(account) = self.output.bundle.account(&address) {
-            if account.was_destroyed() {
-                return Ok(None);
-            }
             if account.info.is_some() {
                 return Ok(account.info.clone());
+            }
+            if account.was_destroyed() {
+                return Ok(None);
             }
         }
         if let Some(account) = self.evm.state().account_ref(&address) {
@@ -2174,6 +2174,72 @@ mod tests {
         assert_eq!(account.info.as_ref().map(|info| info.nonce), Some(1));
         assert_eq!(account.info.as_ref().map(|info| info.code_hash), Some(code_hash));
         assert!(state.bytecode(&code_hash).is_some());
+    }
+
+    #[test]
+    fn evm2_output_merges_destroy_then_pre_spurious_empty_resurrection() {
+        let address = address!("0x0000000000000000000000000000000000000014");
+        let destroyed = Evm2AccountInfo {
+            balance: U256::ZERO,
+            nonce: 0,
+            code_hash: B256::with_last_byte(1),
+            code: None,
+            _non_exhaustive: (),
+        };
+        let empty = Evm2AccountInfo {
+            balance: U256::ZERO,
+            nonce: 0,
+            code_hash: KECCAK256_EMPTY,
+            code: None,
+            _non_exhaustive: (),
+        };
+        let mut output = Evm2ExecutionOutput::default();
+
+        output.merge_state_changes(StateChanges {
+            accounts: core::iter::once((
+                address,
+                Tracked { original: Some(destroyed.clone()), current: None, _non_exhaustive: () },
+            ))
+            .collect(),
+            storage: Default::default(),
+            code: Default::default(),
+            logs: Vec::new(),
+            _non_exhaustive: (),
+        });
+        output.merge_state_changes(StateChanges {
+            accounts: core::iter::once((
+                address,
+                Tracked { original: None, current: Some(empty), _non_exhaustive: () },
+            ))
+            .collect(),
+            storage: Default::default(),
+            code: Default::default(),
+            logs: Vec::new(),
+            _non_exhaustive: (),
+        });
+
+        let account = output.bundle.account(&address).expect("account exists");
+        assert_eq!(
+            account.original_info.as_ref().map(|info| info.code_hash),
+            Some(destroyed.code_hash)
+        );
+        assert_eq!(account.info.as_ref().map(|info| info.code_hash), Some(KECCAK256_EMPTY));
+        assert_eq!(account.status, AccountStatus::DestroyedChanged);
+
+        let evm = create_evm2_from_revm_env(
+            EmptyDB::default(),
+            RevmSpecId::FRONTIER,
+            BlockEnv::default(),
+        );
+        let mut executor = Evm2TransactionExecutor::new(evm);
+        executor.output = output;
+        assert_eq!(
+            executor
+                .current_account_info(address)
+                .expect("current account loads")
+                .map(|info| info.code_hash),
+            Some(KECCAK256_EMPTY)
+        );
     }
 
     #[test]
