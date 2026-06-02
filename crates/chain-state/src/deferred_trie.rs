@@ -45,6 +45,10 @@ struct DeferredTrieMetrics {
 static DEFERRED_TRIE_METRICS: LazyLock<DeferredTrieMetrics> =
     LazyLock::new(DeferredTrieMetrics::default);
 
+/// Below this input size, sorting inline is cheaper than scheduling two rayon jobs.
+#[cfg(feature = "rayon")]
+const INLINE_SORT_INPUT_THRESHOLD: usize = 512;
+
 /// Internal state for deferred trie data.
 enum DeferredTrieDataInner {
     /// Data is not yet available; raw inputs stored for fallback computation.
@@ -102,30 +106,37 @@ impl DeferredTrieData {
         let _span = debug_span!(target: "engine::tree::deferred_trie", "sort_inputs").entered();
 
         #[cfg(feature = "rayon")]
-        let (sorted_hashed_state, sorted_trie_updates) = rayon::join(
-            || match Arc::try_unwrap(hashed_state) {
-                Ok(state) => state.into_sorted(),
-                Err(arc) => arc.clone_into_sorted(),
-            },
-            || match Arc::try_unwrap(trie_updates) {
-                Ok(updates) => updates.into_sorted(),
-                Err(arc) => arc.clone_into_sorted(),
-            },
-        );
+        let (sorted_hashed_state, sorted_trie_updates) =
+            if hashed_state.total_len() + trie_updates.total_len() <= INLINE_SORT_INPUT_THRESHOLD {
+                (Self::sort_hashed_state(hashed_state), Self::sort_trie_updates(trie_updates))
+            } else {
+                rayon::join(
+                    || Self::sort_hashed_state(hashed_state),
+                    || Self::sort_trie_updates(trie_updates),
+                )
+            };
 
         #[cfg(not(feature = "rayon"))]
         let (sorted_hashed_state, sorted_trie_updates) = (
-            match Arc::try_unwrap(hashed_state) {
-                Ok(state) => state.into_sorted(),
-                Err(arc) => arc.clone_into_sorted(),
-            },
-            match Arc::try_unwrap(trie_updates) {
-                Ok(updates) => updates.into_sorted(),
-                Err(arc) => arc.clone_into_sorted(),
-            },
+            Self::sort_hashed_state(hashed_state),
+            Self::sort_trie_updates(trie_updates),
         );
 
         ComputedTrieData::new(Arc::new(sorted_hashed_state), Arc::new(sorted_trie_updates))
+    }
+
+    fn sort_hashed_state(hashed_state: Arc<HashedPostState>) -> HashedPostStateSorted {
+        match Arc::try_unwrap(hashed_state) {
+            Ok(state) => state.into_sorted(),
+            Err(arc) => arc.clone_into_sorted(),
+        }
+    }
+
+    fn sort_trie_updates(trie_updates: Arc<TrieUpdates>) -> TrieUpdatesSorted {
+        match Arc::try_unwrap(trie_updates) {
+            Ok(updates) => updates.into_sorted(),
+            Err(arc) => arc.clone_into_sorted(),
+        }
     }
 
     /// Returns trie data, computing synchronously if the async task hasn't completed.

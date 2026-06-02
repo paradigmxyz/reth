@@ -99,6 +99,11 @@ impl HashedPostState {
         self.accounts.is_empty() && self.storages.is_empty()
     }
 
+    /// Returns the total number of account and storage slot updates.
+    pub fn total_len(&self) -> usize {
+        self.accounts.len() + self.storages.values().map(HashedStorage::len).sum::<usize>()
+    }
+
     /// Construct [`TriePrefixSetsMut`] from hashed post state.
     /// The prefix sets contain the hashed account and storage keys that have been changed in the
     /// post state.
@@ -436,6 +441,11 @@ impl HashedStorage {
     /// Check if self is empty.
     pub fn is_empty(&self) -> bool {
         !self.wiped && self.storage.is_empty()
+    }
+
+    /// Returns the total number of storage slot updates.
+    pub fn len(&self) -> usize {
+        self.storage.len()
     }
 
     /// Create new hashed storage from iterator.

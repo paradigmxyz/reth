@@ -42,6 +42,13 @@ impl TrieUpdates {
             self.storage_tries.is_empty()
     }
 
+    /// Returns the total number of account and storage trie updates.
+    pub fn total_len(&self) -> usize {
+        self.account_nodes.len() +
+            self.removed_nodes.len() +
+            self.storage_tries.values().map(StorageTrieUpdates::len).sum::<usize>()
+    }
+
     /// Returns reference to updated account nodes.
     pub const fn account_nodes_ref(&self) -> &HashMap<Nibbles, BranchNodeCompact> {
         &self.account_nodes
