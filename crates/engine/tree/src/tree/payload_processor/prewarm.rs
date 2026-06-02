@@ -392,7 +392,10 @@ where
             let _ = stream_tx.send(());
         }
 
-        if let Some(saved_cache) = ctx.saved_cache && !ctx.disable_bal_batch_io {
+        if let Some(saved_cache) = ctx.saved_cache &&
+            !ctx.disable_bal_batch_io &&
+            let Some(pool) = ctx.bal_prewarm_pool.as_ref()
+        {
             // Warm the full BAL read-set (account + code + storage) into the shared cache via the
             // long-lived blocking prewarm pool, fire-and-forget: warming proceeds in the background
             // while the block executor runs.
@@ -402,7 +405,6 @@ where
             // blocking-I/O-bound (MDBX reads), so most workers sit idle and spin — burning CPU that
             // contends with the executor's threads. The dedicated pool's threads block when idle.
             let caches = saved_cache.cache().clone();
-            let pool = super::bal_prewarm_pool::global();
             let epoch = pool.next_epoch();
             // Per-block provider builder, type-erased so the pool stays non-generic. Threads call
             // it once per block (on epoch change) and cache the resulting provider.
@@ -536,6 +538,9 @@ where
     pub saved_cache: Option<SavedCache>,
     /// Provider to obtain the state
     pub provider: StateProviderBuilder<N, P>,
+    /// Dedicated blocking pool for warming the BAL read-set. `Some` only on the BAL parallel
+    /// execution path; the pool is owned by the [`PayloadProcessor`](super::PayloadProcessor).
+    pub(crate) bal_prewarm_pool: Option<Arc<super::bal_prewarm_pool::BalPrewarmPool>>,
     /// The metrics for the prewarm task.
     pub metrics: PrewarmMetrics,
     /// Metrics for the execution cache.

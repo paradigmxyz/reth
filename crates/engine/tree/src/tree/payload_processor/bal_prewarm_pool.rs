@@ -18,7 +18,7 @@ use reth_provider::{
 use std::{
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, OnceLock,
+        Arc,
     },
     thread::JoinHandle,
     time::Duration,
@@ -45,6 +45,7 @@ struct PrewarmOp {
 }
 
 /// Long-lived pool of blocking threads that warm the BAL read-set into the shared execution cache.
+#[derive(Debug)]
 pub(crate) struct BalPrewarmPool {
     tx: crossbeam_channel::Sender<PrewarmOp>,
     epoch: AtomicU64,
@@ -52,7 +53,9 @@ pub(crate) struct BalPrewarmPool {
 }
 
 impl BalPrewarmPool {
-    fn new(num_threads: usize) -> Arc<Self> {
+    /// Spawns `num_threads` long-lived blocking worker threads. Owned by the
+    /// [`PayloadProcessor`](super::PayloadProcessor); the threads exit when the pool is dropped.
+    pub(crate) fn new(num_threads: usize) -> Arc<Self> {
         let (tx, rx) = crossbeam_channel::unbounded::<PrewarmOp>();
         let handles = (0..num_threads)
             .map(|i| {
@@ -99,22 +102,27 @@ impl BalPrewarmPool {
     }
 }
 
-/// Returns the process-global pool, spawning it on first use with [`bal_prewarm_threads`] threads.
-pub(crate) fn global() -> Arc<BalPrewarmPool> {
-    static POOL: OnceLock<Arc<BalPrewarmPool>> = OnceLock::new();
-    POOL.get_or_init(|| BalPrewarmPool::new(bal_prewarm_threads())).clone()
-}
-
-/// Number of warming threads, overridable via `RETH_BAL_PREWARM_THREADS`. Defaults to 2× available
-/// parallelism: the work is blocking-I/O-bound, so over-subscription raises in-flight SSD requests,
-/// and idle threads block (cost nothing) rather than spin.
-fn bal_prewarm_threads() -> usize {
-    std::env::var("RETH_BAL_PREWARM_THREADS")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .filter(|&n| n > 0)
-        .unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get() * 2).unwrap_or(16))
-}
+/// Number of warming threads.
+///
+/// The work performed on those threads boils down mostly to MDBX reads. An MDBX read consists of
+/// a tree traversal and major page faults causing I/O.
+///
+/// In order to utilize the parallelism of NVMe we have to give it enough work, or equally, maintain
+/// a high queue depth. Modern NVMe devices require in between 64-128 requests in-flight to achieve
+/// its peak performance. Ideally we don't grow past that but it's OK to do so, it just means that
+/// a request is going to wait in the NVMe queue rather than in memory.
+///
+/// MDBX piggy-backs on the OS page cache for its buffers. Oftentimes, the hit rate reaches 90-99%
+/// hit rate. At that point, the workload can be classified as CPU-bound. In that case, having
+/// a high number of threads is counterproductive due to the effects of context switching, core
+/// migration, contention, etc.
+///
+/// However, that overhead is considered negligible compared to the benefits of fully utilizing
+/// NVMe resources. For example, with request latency of 100µs, 100k IO requests the expected
+/// time to finish is 312.5ms at QD=32 and 156.26ms at QD=64.
+///
+/// This should explain why this particular value is picked.
+pub(crate) const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
 
 fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmOp>) {
     // Release the cached provider (and its MDBX read txn) after this long idle, so a reader doesn't
