@@ -508,7 +508,13 @@ pub fn bundle_state_from_evm2(changes: StateChanges) -> BundleState {
     BundleState { state, contracts, state_size, ..Default::default() }
 }
 
-fn evm_state_from_evm2(changes: StateChanges) -> EvmState {
+fn evm_state_from_evm2_with_accounts<R>(
+    executor: &mut Evm2TransactionExecutor<R>,
+    changes: StateChanges,
+) -> Result<EvmState, BlockExecutionError>
+where
+    R: Evm2ReceiptBuilder,
+{
     let mut state = AddressMap::<RevmAccount>::default();
     let mut storage = changes.storage;
 
@@ -548,6 +554,9 @@ fn evm_state_from_evm2(changes: StateChanges) -> EvmState {
 
     for (address, storage) in storage {
         let mut account = RevmAccount::default();
+        if let Some(info) = executor.current_account_info(address).map_err(evm2_block_error)? {
+            account.info = info;
+        }
         account.mark_touch();
         if storage.wipe {
             account.mark_selfdestruct();
@@ -562,7 +571,7 @@ fn evm_state_from_evm2(changes: StateChanges) -> EvmState {
         state.insert(address, account);
     }
 
-    state
+    Ok(state)
 }
 
 fn evm_state_from_balance_increments<R>(
@@ -920,6 +929,7 @@ where
 pub struct Evm2AlloyTxResult {
     result: ResultAndState<HaltReason>,
     evm2_result: Evm2TxResult,
+    evm_state: EvmState,
     blob_gas_used: u64,
     tx_type: TxType,
 }
@@ -996,8 +1006,12 @@ where
         self.evm2
             .apply_pre_block_system_calls(self.ctx.parent_hash, self.ctx.parent_beacon_block_root)
             .map_err(evm2_block_error)?;
-        for result in &self.evm2.result.pre_block_system_results[start..] {
-            self.evm.db_mut().commit(evm_state_from_evm2(result.state_changes.clone()));
+        let changes = self.evm2.result.pre_block_system_results[start..]
+            .iter()
+            .map(|result| result.state_changes.clone())
+            .collect::<Vec<_>>();
+        for changes in changes {
+            self.evm.db_mut().commit(evm_state_from_evm2_with_accounts(&mut self.evm2, changes)?);
         }
         Ok(())
     }
@@ -1029,11 +1043,14 @@ where
         let evm2_result = self.evm2.evm.transact(&evm2_tx).map_err(|err| {
             BlockExecutionError::msg(format_args!("evm2 transaction execution failed: {err}"))
         })?;
+        let evm_state =
+            evm_state_from_evm2_with_accounts(&mut self.evm2, evm2_result.state_changes.clone())?;
         let result = evm2_result_to_revm_result(&evm2_result);
 
         Ok(Evm2AlloyTxResult {
             result,
             evm2_result,
+            evm_state,
             blob_gas_used: blob_gas_used(tx.tx()),
             tx_type: tx.tx().tx_type(),
         })
@@ -1055,7 +1072,7 @@ where
     }
 
     fn commit_transaction(&mut self, output: Self::Result) -> GasOutput {
-        let Evm2AlloyTxResult { evm2_result, blob_gas_used, tx_type, .. } = output;
+        let Evm2AlloyTxResult { evm2_result, evm_state, blob_gas_used, tx_type, .. } = output;
         let gas_used = evm2_result.gas_used;
 
         self.evm2.result.cumulative_tx_gas_used =
@@ -1071,7 +1088,7 @@ where
             evm2_result.clone(),
             self.evm2.result.cumulative_tx_gas_used,
         );
-        self.evm.db_mut().commit(evm_state_from_evm2(evm2_result.state_changes.clone()));
+        self.evm.db_mut().commit(evm_state);
         self.evm2.output.merge_state_changes(evm2_result.state_changes.clone());
         self.evm2.result.transaction_results.push(evm2_result);
         self.evm2.result.receipts.push(receipt);
@@ -1100,8 +1117,15 @@ where
             .apply_post_block_balance_increments(&ommers, self.ctx.withdrawals.as_deref())
             .map_err(evm2_block_error)?;
 
-        for result in &self.evm2.result.post_block_system_results {
-            self.evm.db_mut().commit(evm_state_from_evm2(result.state_changes.clone()));
+        let changes = self
+            .evm2
+            .result
+            .post_block_system_results
+            .iter()
+            .map(|result| result.state_changes.clone())
+            .collect::<Vec<_>>();
+        for changes in changes {
+            self.evm.db_mut().commit(evm_state_from_evm2_with_accounts(&mut self.evm2, changes)?);
         }
 
         let (_, result) = self.evm2.finish_evm2();
@@ -1436,7 +1460,12 @@ where
         address: Address,
     ) -> Result<Option<AccountInfo>, Evm2BlockExecutionError> {
         if let Some(account) = self.output.bundle.account(&address) {
-            return Ok(account.info.clone());
+            if account.was_destroyed() {
+                return Ok(None);
+            }
+            if account.info.is_some() {
+                return Ok(account.info.clone());
+            }
         }
         if let Some(account) = self.evm.state().account_ref(&address) {
             return Ok(Some(account_info_from_evm2(account.info())));
@@ -1625,7 +1654,7 @@ const fn ommer_reward(base_block_reward: u128, block_number: u64, ommer_block_nu
 mod tests {
     use super::*;
     use alloy_consensus::{SignableTransaction, TxLegacy};
-    use alloy_eips::Typed2718;
+    use alloy_eips::{eip4788::BEACON_ROOTS_CODE, Typed2718};
     use alloy_primitives::{address, Address, Bytes, Signature, TxKind, KECCAK256_EMPTY};
     use evm2::{
         evm::{precompile::PrecompileProvider, Tracked},
@@ -2042,6 +2071,36 @@ mod tests {
         assert_eq!(result.pre_block_system_results.len(), 2);
         assert_eq!(result.post_block_system_results.len(), 2);
         assert!(result.requests.is_empty());
+    }
+
+    #[test]
+    fn direct_evm2_executor_applies_beacon_root_system_call() {
+        let mut db = CacheDB::new(EmptyDB::default());
+        db.insert_account_info(
+            BEACON_ROOTS_ADDRESS,
+            AccountInfo::default().with_code(Bytecode::new_raw(BEACON_ROOTS_CODE.clone())),
+        );
+        let block = BlockEnv { number: U256::ONE, timestamp: U256::ONE, ..Default::default() };
+        let evm = create_evm2_from_revm_env(db, RevmSpecId::CANCUN, block);
+        let mut executor = Evm2TransactionExecutor::new(evm);
+
+        executor
+            .apply_pre_block_system_calls(B256::ZERO, Some(B256::with_last_byte(0x69)))
+            .expect("beacon root system call executes");
+
+        let (state, _) = executor.finish_evm2();
+        assert_eq!(
+            state
+                .account(&BEACON_ROOTS_ADDRESS)
+                .and_then(|account| account.storage_slot(U256::ONE)),
+            Some(U256::ONE)
+        );
+        assert_eq!(
+            state
+                .account(&BEACON_ROOTS_ADDRESS)
+                .and_then(|account| account.storage_slot(U256::from(8192))),
+            Some(U256::from(0x69))
+        );
     }
 
     #[test]

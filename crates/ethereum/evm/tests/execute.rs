@@ -915,3 +915,46 @@ fn evm2_config_commits_withdrawals_through_basic_executor() {
     });
     assert_eq!(recipient_balance, initial_balance + U256::from(1_000_000_000));
 }
+
+#[test]
+fn evm2_config_applies_pre_block_system_call_through_basic_executor() {
+    let header = Header {
+        timestamp: 1,
+        number: 1,
+        gas_limit: 30_000,
+        parent_beacon_block_root: Some(B256::with_last_byte(0x69)),
+        excess_blob_gas: Some(0),
+        ..Header::default()
+    };
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::from(&*MAINNET)
+            .shanghai_activated()
+            .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(1))
+            .build(),
+    );
+    let provider = EthEvm2Config::new(chain_spec);
+    let mut executor =
+        BasicBlockExecutor::new(provider, create_database_with_beacon_root_contract());
+
+    executor
+        .execute_one(&RecoveredBlock::new_unhashed(
+            Block { header: header.clone(), body: Default::default() },
+            vec![],
+        ))
+        .expect("evm2 pre-block system call should succeed");
+
+    let history_buffer_length = 8191u64;
+    let timestamp_index = header.timestamp % history_buffer_length;
+    let parent_beacon_block_root_index =
+        timestamp_index % history_buffer_length + history_buffer_length;
+
+    let timestamp_storage = executor.with_state_mut(|state| {
+        state.storage(BEACON_ROOTS_ADDRESS, U256::from(timestamp_index)).unwrap()
+    });
+    assert_eq!(timestamp_storage, U256::from(header.timestamp));
+
+    let parent_beacon_block_root_storage = executor.with_state_mut(|state| {
+        state.storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index)).unwrap()
+    });
+    assert_eq!(parent_beacon_block_root_storage, U256::from(0x69));
+}
