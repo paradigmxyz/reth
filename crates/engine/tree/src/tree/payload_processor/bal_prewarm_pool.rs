@@ -30,7 +30,7 @@ use tracing::trace;
 type BuildProviderFn = dyn Fn() -> ProviderResult<StateProviderBox> + Send + Sync;
 
 /// A single warm request: a whole account (basic account + its bytecode) or one storage slot.
-enum PrewarmKind {
+enum PrewarmTarget {
     Account(Address),
     Storage(Address, StorageKey),
 }
@@ -41,7 +41,7 @@ struct PrewarmOp {
     epoch: u64,
     build: Arc<BuildProviderFn>,
     caches: ExecutionCache,
-    kind: PrewarmKind,
+    target: PrewarmTarget,
 }
 
 /// Long-lived pool of blocking threads that warm the BAL read-set into the shared execution cache.
@@ -81,7 +81,7 @@ impl BalPrewarmPool {
         caches: ExecutionCache,
         addr: Address,
     ) {
-        let _ = self.tx.send(PrewarmOp { epoch, build, caches, kind: PrewarmKind::Account(addr) });
+        let _ = self.tx.send(PrewarmOp { epoch, build, caches, target: PrewarmTarget::Account(addr) });
     }
 
     /// Fire-and-forget: warm one storage slot into `caches`.
@@ -95,7 +95,7 @@ impl BalPrewarmPool {
     ) {
         let _ = self
             .tx
-            .send(PrewarmOp { epoch, build, caches, kind: PrewarmKind::Storage(addr, slot) });
+            .send(PrewarmOp { epoch, build, caches, target: PrewarmTarget::Storage(addr, slot) });
     }
 }
 
@@ -152,8 +152,8 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmOp>) {
         }
         let provider = &current.as_ref().expect("just set").1;
 
-        match op.kind {
-            PrewarmKind::Account(addr) => {
+        match op.target {
+            PrewarmTarget::Account(addr) => {
                 if let Ok(Some(account)) = provider.basic_account(&addr) {
                     if let Some(code_hash) = account.bytecode_hash {
                         if code_hash != alloy_consensus::constants::KECCAK_EMPTY {
@@ -162,7 +162,7 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmOp>) {
                     }
                 }
             }
-            PrewarmKind::Storage(addr, slot) => {
+            PrewarmTarget::Storage(addr, slot) => {
                 let _ = provider.storage(addr, slot);
             }
         }

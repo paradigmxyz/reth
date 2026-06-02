@@ -392,7 +392,7 @@ where
             let _ = stream_tx.send(());
         }
 
-        if ctx.saved_cache.is_some() && !ctx.disable_bal_batch_io {
+        if let Some(saved_cache) = ctx.saved_cache && !ctx.disable_bal_batch_io {
             // Warm the full BAL read-set (account + code + storage) into the shared cache via the
             // long-lived blocking prewarm pool, fire-and-forget: warming proceeds in the background
             // while the block executor runs.
@@ -401,7 +401,7 @@ where
             // whose idle workers spin (`sched_yield`) rather than sleep, and this work is
             // blocking-I/O-bound (MDBX reads), so most workers sit idle and spin — burning CPU that
             // contends with the executor's threads. The dedicated pool's threads block when idle.
-            let caches = ctx.saved_cache.as_ref().expect("checked above").cache().clone();
+            let caches = saved_cache.cache().clone();
             let pool = super::bal_prewarm_pool::global();
             let epoch = pool.next_epoch();
             // Per-block provider builder, type-erased so the pool stays non-generic. Threads call
