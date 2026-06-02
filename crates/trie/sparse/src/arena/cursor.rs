@@ -264,19 +264,19 @@ impl ArenaCursor {
 
             let mut descended = false;
             for (branch_child_idx, nibble) in BranchChildIter::new(state_mask) {
-                if branch_child_idx.get() < start {
+                let dense_idx = branch_child_idx.get();
+                if dense_idx < start {
                     continue;
                 }
 
-                let child_idx = match &arena[head_idx].branch_ref().children[branch_child_idx] {
+                let child_idx = match &branch.children[branch_child_idx] {
                     ArenaSparseNodeBranchChild::Revealed(child_idx) => *child_idx,
                     ArenaSparseNodeBranchChild::Blinded(_) => continue,
                 };
 
                 if should_descend(child_depth, &arena[child_idx]) {
                     // Record where to resume iteration when we return to this entry.
-                    self.stack.last_mut().expect("head exists").next_dense_idx =
-                        branch_child_idx.get() + 1;
+                    self.stack.last_mut().expect("head exists").next_dense_idx = dense_idx + 1;
                     let path = self.child_path(arena, nibble);
                     self.push(arena, child_idx, path);
                     descended = true;
