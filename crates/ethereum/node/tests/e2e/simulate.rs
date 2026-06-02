@@ -126,8 +126,10 @@ async fn test_simulate_v1_blockhash_reads_prior_simulated_block() -> eyre::Resul
 
     let contract = Address::with_last_byte(0x42);
     let mut state_overrides = StateOverride::default();
-    state_overrides
-        .insert(contract, AccountOverride::default().with_code(bytes!("0x43600103405f5260205ff3")));
+    state_overrides.insert(
+        contract,
+        AccountOverride::default().with_code(bytes!("0x6004354303405f5260205ff3")),
+    );
     let input =
         bytes!("0xee82ac5e000000000000000000000000000000000000000000000000000000000000000f").into();
 
