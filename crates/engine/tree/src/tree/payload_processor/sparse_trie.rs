@@ -645,6 +645,10 @@ where
         let account_updates =
             if new { &mut self.new_account_updates } else { &mut self.account_updates };
 
+        if account_updates.is_empty() {
+            return Ok(false);
+        }
+
         let updates_len_before = account_updates.len();
 
         self.trie.trie_mut().update_leaves(account_updates, |target, min_len| {
