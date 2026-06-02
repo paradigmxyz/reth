@@ -3,7 +3,7 @@ import { writeFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
 import { redirects, basePath } from '../redirects.config'
 // Base path for the site
-const DIST_DIR = './docs/dist/public'
+const DIST_DIR = './docs/dist'
 
 function generateRedirectHtml(targetPath: string): string {
   return `<!DOCTYPE html>
