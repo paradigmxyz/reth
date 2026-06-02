@@ -172,8 +172,8 @@ fn compute_wiped_storage_changesets(
         all_nodes,
     )?;
 
-    // Collect into a Vec
-    let mut storage_changesets = Vec::new();
+    // Collect into a Vec. The changed nodes are a lower bound; wiped trie nodes can add more.
+    let mut storage_changesets = Vec::with_capacity(storage_updates.storage_nodes.len());
     for result in merged {
         storage_changesets.push(result?);
     }
