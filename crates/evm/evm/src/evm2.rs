@@ -16,8 +16,8 @@ use alloy_eips::{
 use alloy_evm::{
     block::{
         BlockExecutionError, BlockExecutor as AlloyBlockExecutor,
-        BlockExecutorFactory as AlloyBlockExecutorFactory, BlockValidationError, ExecutableTx,
-        GasOutput, StateDB, TxResult as AlloyTxResult,
+        BlockExecutorFactory as AlloyBlockExecutorFactory, BlockValidationError, CommitChanges,
+        ExecutableTx, GasOutput, StateDB, TxResult as AlloyTxResult,
     },
     eth::EthBlockExecutionCtx,
     precompiles::PrecompilesMap,
@@ -963,11 +963,12 @@ where
     R: Evm2ReceiptBuilder + Clone,
 {
     /// Creates a new evm2-backed alloy block executor.
-    pub fn new(mut evm: E, ctx: EthBlockExecutionCtx<'a>, receipt_builder: R) -> Self {
-        let evm2 = create_evm2_from_alloy_evm(&mut evm);
+    pub fn new(evm: E, ctx: EthBlockExecutionCtx<'a>, receipt_builder: R) -> Self {
+        let mut evm = Box::new(evm);
+        let evm2 = create_evm2_from_alloy_evm(&mut *evm);
         Self {
             evm2: Evm2TransactionExecutor::with_receipt_builder(evm2, receipt_builder),
-            evm: Box::new(evm),
+            evm,
             ctx,
         }
     }
@@ -1036,6 +1037,21 @@ where
             blob_gas_used: blob_gas_used(tx.tx()),
             tx_type: tx.tx().tx_type(),
         })
+    }
+
+    fn execute_transaction_with_commit_condition(
+        &mut self,
+        tx: impl ExecutableTx<Self>,
+        f: impl FnOnce(&Self::Result) -> CommitChanges,
+    ) -> Result<Option<GasOutput>, BlockExecutionError> {
+        let output = self.execute_transaction_without_commit(tx)?;
+        if !f(&output).should_commit() {
+            return Err(BlockExecutionError::msg(
+                "evm2 transaction output cannot be discarded after execution",
+            ));
+        }
+
+        Ok(Some(self.commit_transaction(output)))
     }
 
     fn commit_transaction(&mut self, output: Self::Result) -> GasOutput {

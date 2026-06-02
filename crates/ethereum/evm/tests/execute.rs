@@ -16,7 +16,7 @@ use reth_evm::{
     execute::{BasicBlockExecutor, Executor},
     ConfigureEvm,
 };
-use reth_evm_ethereum::EthEvmConfig;
+use reth_evm_ethereum::{EthEvm2Config, EthEvmConfig};
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{
     crypto::secp256k1::public_key_to_address, Block as _, RecoveredBlock,
@@ -828,4 +828,90 @@ fn test_balance_increment_not_duplicated() {
             "Final balance should match expected value after withdrawal"
         );
     }
+}
+
+#[test]
+fn evm2_config_executes_transaction_through_basic_executor() {
+    let chain_spec = Arc::new(ChainSpecBuilder::from(&*MAINNET).build());
+
+    let sender_key_pair = generators::generate_key(&mut generators::rng());
+    let sender_address = public_key_to_address(sender_key_pair.public_key());
+    let recipient = address!("0x2000000000000000000000000000000000000000");
+
+    let mut db = CacheDB::new(EmptyDB::default());
+    db.insert_account_info(
+        sender_address,
+        AccountInfo { balance: U256::from(ETH_TO_WEI), ..Default::default() },
+    );
+
+    let tx = sign_tx_with_key_pair(
+        sender_key_pair,
+        Transaction::Legacy(TxLegacy {
+            nonce: 0,
+            gas_price: 0,
+            gas_limit: 21_000,
+            to: TxKind::Call(recipient),
+            value: U256::from(7),
+            ..Default::default()
+        }),
+    );
+
+    let header = Header { number: 1, gas_limit: 30_000, ..Default::default() };
+    let provider = EthEvm2Config::new(chain_spec);
+    let mut executor = BasicBlockExecutor::new(provider, db);
+
+    let result = executor
+        .execute_one(
+            &Block { header, body: BlockBody { transactions: vec![tx], ..Default::default() } }
+                .try_into_recovered()
+                .unwrap(),
+        )
+        .expect("evm2 block execution should succeed");
+
+    assert_eq!(result.gas_used, 21_000);
+    assert_eq!(result.receipts.len(), 1);
+    assert!(result.receipts[0].success);
+
+    let recipient_balance = executor
+        .with_state_mut(|state| state.basic(recipient).unwrap().unwrap_or_default().balance);
+    assert_eq!(recipient_balance, U256::from(7));
+}
+
+#[test]
+fn evm2_config_commits_withdrawals_through_basic_executor() {
+    let chain_spec = Arc::new(ChainSpecBuilder::from(&*MAINNET).shanghai_activated().build());
+    let withdrawal_recipient = address!("0x3000000000000000000000000000000000000000");
+    let initial_balance = U256::from(100);
+
+    let mut db = CacheDB::new(EmptyDB::default());
+    db.insert_account_info(
+        withdrawal_recipient,
+        AccountInfo { balance: initial_balance, nonce: 1, ..Default::default() },
+    );
+
+    let withdrawal =
+        Withdrawal { index: 0, validator_index: 0, address: withdrawal_recipient, amount: 1 };
+    let header = Header { timestamp: 1, number: 1, gas_limit: 30_000, ..Default::default() };
+    let provider = EthEvm2Config::new(chain_spec);
+    let mut executor = BasicBlockExecutor::new(provider, db);
+
+    let result = executor
+        .execute_one(&RecoveredBlock::new_unhashed(
+            Block {
+                header,
+                body: BlockBody {
+                    transactions: vec![],
+                    ommers: vec![],
+                    withdrawals: Some(vec![withdrawal].into()),
+                },
+            },
+            vec![],
+        ))
+        .expect("evm2 withdrawal block execution should succeed");
+
+    assert_eq!(result.gas_used, 0);
+    let recipient_balance = executor.with_state_mut(|state| {
+        state.basic(withdrawal_recipient).unwrap().unwrap_or_default().balance
+    });
+    assert_eq!(recipient_balance, initial_balance + U256::from(1_000_000_000));
 }
