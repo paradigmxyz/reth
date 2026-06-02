@@ -39,6 +39,9 @@ use std::sync::Arc;
 
 use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
 
+const MIN_BAL_TXS_PER_WORKER: usize = 32;
+const MIN_BAL_WORKERS_FOR_NON_EMPTY_BLOCK: usize = 8;
+
 /// Executes one block on the BAL path using the runtime's persistent BAL worker pool.
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
@@ -64,7 +67,7 @@ where
     ReceiptTy<Evm::Primitives>: Clone,
 {
     let worker_pool = runtime.bal_streaming_pool();
-    let worker_count = worker_pool.current_num_threads().max(1).min(transaction_count);
+    let worker_count = bal_worker_count(worker_pool.current_num_threads(), transaction_count);
 
     worker_pool.in_place_scope(|scope| {
         execute_block_inner(
@@ -80,6 +83,22 @@ where
             worker_count,
         )
     })
+}
+
+fn bal_worker_count(pool_threads: usize, transaction_count: usize) -> usize {
+    if transaction_count == 0 {
+        return 0
+    }
+
+    let full_parallelism = pool_threads.max(1).min(transaction_count);
+    if transaction_count <= MIN_BAL_WORKERS_FOR_NON_EMPTY_BLOCK {
+        return full_parallelism
+    }
+
+    let tx_scaled = transaction_count
+        .div_ceil(MIN_BAL_TXS_PER_WORKER)
+        .max(MIN_BAL_WORKERS_FOR_NON_EMPTY_BLOCK);
+    full_parallelism.min(tx_scaled)
 }
 
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
@@ -1145,6 +1164,18 @@ mod tests {
             matches!(result, Err(BalExecutionError::Other(_))),
             "expected Other error from tx recovery failure, got {result:?}",
         );
+    }
+
+    #[test]
+    fn bal_worker_count_scales_by_transaction_count() {
+        assert_eq!(bal_worker_count(32, 0), 0);
+        assert_eq!(bal_worker_count(32, 1), 1);
+        assert_eq!(bal_worker_count(32, 8), 8);
+        assert_eq!(bal_worker_count(32, 9), 8);
+        assert_eq!(bal_worker_count(32, 228), 8);
+        assert_eq!(bal_worker_count(32, 404), 13);
+        assert_eq!(bal_worker_count(32, 8_221), 32);
+        assert_eq!(bal_worker_count(4, 404), 4);
     }
 
     #[test]
