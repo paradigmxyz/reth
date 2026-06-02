@@ -1281,8 +1281,8 @@ where
 
             senders.push(tx_signer);
 
-            let _enter = tracing::enabled!(target: "engine::tree", Level::DEBUG).then(|| {
-                debug_span!(
+            let _enter = tracing::enabled!(target: "engine::tree", Level::TRACE).then(|| {
+                trace_span!(
                     target: "engine::tree",
                     "execute tx",
                     tx_index = senders.len() - 1,
