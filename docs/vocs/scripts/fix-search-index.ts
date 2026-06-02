@@ -13,12 +13,19 @@ async function fixSearchIndex() {
       files = await readdir(vocsDir);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        const assetsDir = join(distDir, 'assets');
-        const assets = await readdir(assetsDir);
-        const searchIndexFile = assets.find(f => f.startsWith('search-index-') && f.endsWith('.json'));
-        if (searchIndexFile) {
-          console.log(`✅ Vocs 2 search index found at ${join(assetsDir, searchIndexFile)}; no legacy fix needed.`);
-          return;
+        for (const assetsDir of [join(distDir, 'assets'), join(distDir, 'public', 'assets')]) {
+          try {
+            const assets = await readdir(assetsDir);
+            const searchIndexFile = assets.find(f => f.startsWith('search-index-') && f.endsWith('.json'));
+            if (searchIndexFile) {
+              console.log(`✅ Vocs 2 search index found at ${join(assetsDir, searchIndexFile)}; no legacy fix needed.`);
+              return;
+            }
+          } catch (assetsError) {
+            if ((assetsError as NodeJS.ErrnoException).code !== 'ENOENT') {
+              throw assetsError;
+            }
+          }
         }
       }
       throw error;
