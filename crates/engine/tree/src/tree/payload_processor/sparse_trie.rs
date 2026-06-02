@@ -755,15 +755,23 @@ where
             // Now handle pending account updates that can be upgraded to a proper update.
             let account_rlp_buf = &mut self.account_rlp_buf;
             let mut num_promoted = 0;
+            let mut promoted_storage_updates = Vec::new();
             self.pending_account_updates.retain(|addr, account| {
-                if let Some(updates) = self.storage_updates.get(addr) {
-                    if !updates.is_empty() {
+                let has_drained_storage_updates = match self.storage_updates.get(addr) {
+                    Some(updates) if !updates.is_empty() => {
                         // If account has pending storage updates, it is still pending.
                         return true;
-                    } else if let Some(account) = account.take() {
+                    }
+                    Some(_) => true,
+                    None => false,
+                };
+
+                if has_drained_storage_updates {
+                    if let Some(account) = account.take() {
                         let storage_root = self.trie.storage_root(addr).expect("updates are drained, storage trie should be revealed by now");
                         let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
                         self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
+                        promoted_storage_updates.push(*addr);
                         num_promoted += 1;
                         return false;
                     }
@@ -795,10 +803,16 @@ where
 
                 let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
                 self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
+                if has_drained_storage_updates {
+                    promoted_storage_updates.push(*addr);
+                }
                 num_promoted += 1;
 
                 false
             });
+            for address in promoted_storage_updates {
+                self.storage_updates.remove(&address);
+            }
             span.record("promoted", num_promoted);
             drop(span);
 
