@@ -467,6 +467,8 @@ const fn account_status(
 ) -> AccountStatus {
     if present.is_none() && original.is_some() {
         AccountStatus::Destroyed
+    } else if original.is_none() && present.is_some() {
+        AccountStatus::InMemoryChange
     } else if storage_wiped {
         AccountStatus::DestroyedChanged
     } else {
@@ -2124,6 +2126,54 @@ mod tests {
         let account = state.account(&recipient).expect("recipient account exists");
         assert_eq!(account.original_info.as_ref().map(|info| info.balance), Some(U256::from(5)));
         assert_eq!(account.info.as_ref().map(|info| info.balance), Some(U256::from(1_000_000_007)));
+    }
+
+    #[test]
+    fn direct_evm2_executor_applies_withdrawal_to_created_account_output() {
+        let recipient = address!("0x0000000000000000000000000000000000000013");
+        let code = Evm2Bytecode::new_legacy(Bytes::from_static(&[0x60, 0x00, 0x00]));
+        let code_hash = code.hash_slow();
+        let evm = create_evm2_from_revm_env(
+            EmptyDB::default(),
+            RevmSpecId::SHANGHAI,
+            BlockEnv::default(),
+        );
+        let mut executor = Evm2TransactionExecutor::new(evm);
+        executor.output.merge_state_changes(StateChanges {
+            accounts: core::iter::once((
+                recipient,
+                Tracked {
+                    original: None,
+                    current: Some(Evm2AccountInfo {
+                        balance: U256::from(7),
+                        nonce: 1,
+                        code_hash,
+                        code: Some(code.clone()),
+                        _non_exhaustive: (),
+                    }),
+                    _non_exhaustive: (),
+                },
+            ))
+            .collect(),
+            storage: Default::default(),
+            code: core::iter::once((code_hash, code)).collect(),
+            logs: Vec::new(),
+            _non_exhaustive: (),
+        });
+        let withdrawal = Withdrawal { index: 0, validator_index: 0, address: recipient, amount: 1 };
+
+        executor
+            .apply_post_block_balance_increments(&[], Some(&[withdrawal]))
+            .expect("balance increments apply");
+
+        let (state, _) = executor.finish_evm2();
+        let account = state.account(&recipient).expect("recipient account exists");
+        assert_eq!(account.status, AccountStatus::InMemoryChange);
+        assert_eq!(account.original_info, None);
+        assert_eq!(account.info.as_ref().map(|info| info.balance), Some(U256::from(1_000_000_007)));
+        assert_eq!(account.info.as_ref().map(|info| info.nonce), Some(1));
+        assert_eq!(account.info.as_ref().map(|info| info.code_hash), Some(code_hash));
+        assert!(state.bytecode(&code_hash).is_some());
     }
 
     #[test]
