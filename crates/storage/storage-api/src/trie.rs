@@ -1,11 +1,15 @@
 use alloc::vec::Vec;
 use alloy_primitives::{Address, Bytes, B256};
 use reth_storage_errors::provider::ProviderResult;
+#[cfg(feature = "lattice-state-root")]
+use reth_trie_common::lattice::LatticeAccumulatorUpdates;
 use reth_trie_common::{
     updates::{StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
     AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
+#[cfg(feature = "lattice-state-root")]
+use revm_database::BundleState;
 
 /// A type that can compute the state root of a given post state.
 #[auto_impl::auto_impl(&, Box, Arc)]
@@ -30,6 +34,22 @@ pub trait StateRootProvider {
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)>;
+
+    /// Returns a lattice state root, MPT trie updates, and full lattice accumulator updates for
+    /// the provided EVM bundle state.
+    #[cfg(feature = "lattice-state-root")]
+    fn lattice_state_root_with_updates(
+        &self,
+        _bundle_state: &BundleState,
+        hashed_state: HashedPostState,
+        precomputed_trie_updates: Option<TrieUpdates>,
+    ) -> ProviderResult<(B256, TrieUpdates, LatticeAccumulatorUpdates)> {
+        let (root, trie_updates) = match precomputed_trie_updates {
+            Some(updates) => (self.state_root(hashed_state)?, updates),
+            None => self.state_root_with_updates(hashed_state)?,
+        };
+        Ok((root, trie_updates, Default::default()))
+    }
 
     /// Returns state root and trie updates.
     /// See [`StateRootProvider::state_root_from_nodes`] for more info.

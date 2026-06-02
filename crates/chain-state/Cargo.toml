@@ -59,6 +59,7 @@ rand.workspace = true
 revm-state.workspace = true
 
 [features]
+lattice-state-root = ["reth-trie/lattice-state-root"]
 serde = [
     "dep:serde",
     "alloy-consensus/serde",

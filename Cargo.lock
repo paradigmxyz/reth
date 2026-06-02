@@ -10751,6 +10751,7 @@ dependencies = [
  "arrayvec",
  "bincode",
  "bytes",
+ "commonware-codec",
  "commonware-cryptography",
  "derive_more",
  "hash-db",

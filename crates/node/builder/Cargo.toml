@@ -97,6 +97,7 @@ reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
 default = []
 lattice-state-root = [
     "reth-chainspec/lattice-state-root",
+    "reth-db-common/lattice-state-root",
     "reth-engine-tree/lattice-state-root",
     "reth-provider/lattice-state-root",
     "reth-stages/lattice-state-root",

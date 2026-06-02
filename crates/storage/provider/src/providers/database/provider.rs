@@ -736,6 +736,28 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     self.write_trie_updates_sorted(&merged_trie)?;
                 }
                 timings.write_trie_updates += start.elapsed();
+
+                #[cfg(feature = "lattice-state-root")]
+                {
+                    let start = Instant::now();
+                    let mut merged_lattice_updates =
+                        reth_trie::lattice::LatticeAccumulatorUpdates::default();
+                    for block in &blocks {
+                        let lattice_updates = block.trie_data().lattice_accumulator_updates;
+                        merged_lattice_updates.state = lattice_updates.state.clone();
+                        merged_lattice_updates.storage.extend(lattice_updates.storage.iter().map(
+                            |(hashed_address, storage_state)| {
+                                (*hashed_address, storage_state.clone())
+                            },
+                        ));
+                    }
+                    if merged_lattice_updates.is_empty() {
+                        self.rebuild_lattice_accumulators()?;
+                    } else {
+                        self.write_lattice_accumulator_updates(&merged_lattice_updates)?;
+                    }
+                    timings.write_trie_updates += start.elapsed();
+                }
             }
 
             // Full mode: update history indices
@@ -1395,6 +1417,40 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
+    #[cfg(feature = "lattice-state-root")]
+    fn write_lattice_accumulator_updates(
+        &self,
+        updates: &reth_trie::lattice::LatticeAccumulatorUpdates,
+    ) -> ProviderResult<()> {
+        self.tx_ref().put::<tables::LatticeStateAccumulator>(
+            crate::providers::state::lattice::lattice_state_accumulator_key(),
+            updates.state.clone().into_vec(),
+        )?;
+
+        let mut storage_cursor =
+            self.tx_ref().cursor_write::<tables::LatticeStorageAccumulators>()?;
+        for (hashed_address, storage_state) in &updates.storage {
+            if storage_cursor.seek_exact(*hashed_address)?.is_some() {
+                storage_cursor.delete_current()?;
+            }
+
+            if let Some(storage_state) = storage_state {
+                let encoded = storage_state.clone().into_vec();
+                storage_cursor.upsert(*hashed_address, &encoded)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "lattice-state-root")]
+    fn rebuild_lattice_accumulators(&self) -> ProviderResult<()> {
+        let updates =
+            crate::providers::state::lattice::rebuild_lattice_accumulators(self.tx_ref())?;
+        self.tx_ref().clear::<tables::LatticeStorageAccumulators>()?;
+        self.write_lattice_accumulator_updates(&updates)
+    }
+
     /// Insert history index to the database.
     ///
     /// For each updated partial key, this function retrieves the last shard from the database
@@ -2817,6 +2873,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     }
                 }
             }
+
+            #[cfg(feature = "lattice-state-root")]
+            self.rebuild_lattice_accumulators()?;
         } else {
             // This is not working for blocks that are not at tip. as plain state is not the last
             // state of end range. We should rename the functions or add support to access
@@ -2980,6 +3039,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     }
                 }
             }
+
+            #[cfg(feature = "lattice-state-root")]
+            self.rebuild_lattice_accumulators()?;
 
             (state, reverts)
         } else {
@@ -3730,6 +3792,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
 
         // insert hashes and intermediate merkle nodes
         self.write_hashed_state(&hashed_state)?;
+        #[cfg(feature = "lattice-state-root")]
+        self.rebuild_lattice_accumulators()?;
         durations_recorder.record_relative(metrics::Action::InsertHashes);
 
         // Use pre-computed transitions for history indices since static file

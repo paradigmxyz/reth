@@ -480,6 +480,18 @@ tables! {
         type SubKey = B256;
     }
 
+    /// Stores the full Commonware LtHash accumulator for the current lattice state root.
+    table LatticeStateAccumulator {
+        type Key = u8;
+        type Value = Vec<u8>;
+    }
+
+    /// Stores full Commonware LtHash accumulators for current per-account lattice storage roots.
+    table LatticeStorageAccumulators {
+        type Key = B256;
+        type Value = Vec<u8>;
+    }
+
     /// Stores the current state's Merkle Patricia Tree.
     table AccountsTrie {
         type Key = StoredNibbles;

@@ -68,6 +68,8 @@ db-api = [
     "dep:serde_json",
 ]
 
+lattice-state-root = ["reth-trie-common/lattice-state-root"]
+
 serde = [
     "reth-ethereum-primitives/serde",
     "reth-db-models/serde",

@@ -11,13 +11,13 @@ use reth_chainspec::EthChainSpec;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
 use reth_db_api::{
-    cursor::{DbCursorRW, DbDupCursorRW},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     models::{
         storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress, IntegerList,
         ShardedKey,
     },
     tables,
-    transaction::DbTxMut,
+    transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
 use reth_etl::Collector;
@@ -295,6 +295,8 @@ where
 
     // compute state root to populate trie tables
     compute_state_root(&provider_rw, None)?;
+    #[cfg(feature = "lattice-state-root")]
+    rebuild_lattice_accumulators(&provider_rw)?;
 
     // set stage checkpoint to genesis block number for all stages
     let checkpoint = StageCheckpoint::new(genesis_block_number);
@@ -1194,6 +1196,47 @@ where
     }
 }
 
+#[cfg(feature = "lattice-state-root")]
+fn rebuild_lattice_accumulators<Provider>(provider: &Provider) -> Result<(), InitStorageError>
+where
+    Provider: DBProvider<Tx: DbTx + DbTxMut>,
+{
+    use reth_trie::lattice::{LatticeStateRoot, LatticeStorageRoot};
+
+    let tx = provider.tx_ref();
+    let mut state_root = LatticeStateRoot::default();
+    let mut storage_updates = B256Map::default();
+
+    let mut account_cursor = tx.cursor_read::<tables::HashedAccounts>()?;
+    let mut account_entry = account_cursor.seek(B256::ZERO)?;
+    while let Some((hashed_address, account)) = account_entry {
+        let mut storage_root = LatticeStorageRoot::default();
+        let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorages>()?;
+        for entry in storage_cursor.walk_dup(Some(hashed_address), None)? {
+            let (_, StorageEntry { key, value }) = entry?;
+            if !value.is_zero() {
+                storage_root.add_slot(key, value);
+            }
+        }
+
+        state_root.add_account(hashed_address, account, storage_root.root());
+        if !storage_root.is_zero() {
+            storage_updates.insert(hashed_address, storage_root.state());
+        }
+
+        account_entry = account_cursor.next()?;
+    }
+
+    tx.clear::<tables::LatticeStorageAccumulators>()?;
+    tx.put::<tables::LatticeStateAccumulator>(0, state_root.state().into_vec())?;
+    let mut storage_write_cursor = tx.cursor_write::<tables::LatticeStorageAccumulators>()?;
+    for (hashed_address, storage_state) in storage_updates {
+        storage_write_cursor.upsert(hashed_address, &storage_state.into_vec())?;
+    }
+
+    Ok(())
+}
+
 /// Computes the state root (from scratch) with periodic commits to free MDBX dirty pages.
 ///
 /// Opens a fresh transaction each iteration to release dirty pages, preventing OOM on large
@@ -1257,6 +1300,9 @@ where
                     total_flushed_updates,
                     "State root computation complete"
                 );
+
+                #[cfg(feature = "lattice-state-root")]
+                rebuild_lattice_accumulators(&provider_rw)?;
 
                 provider_rw.commit().map_err(provider_db_err)?;
                 return Ok(root)

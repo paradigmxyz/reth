@@ -59,6 +59,10 @@ std = [
     "alloy-eip7928/std",
 ]
 metrics = ["std", "dep:metrics", "dep:reth-metrics"]
+lattice-state-root = [
+    "reth-storage-api/lattice-state-root",
+    "reth-trie-common/lattice-state-root",
+]
 test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",

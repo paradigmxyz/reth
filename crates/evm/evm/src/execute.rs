@@ -312,6 +312,9 @@ pub struct BlockBuilderOutcome<N: NodePrimitives> {
     pub hashed_state: HashedPostState,
     /// Trie updates collected during state root calculation.
     pub trie_updates: TrieUpdates,
+    /// Lattice accumulator updates collected during lattice state root calculation.
+    #[cfg(feature = "lattice-state-root")]
+    pub lattice_accumulator_updates: reth_trie_common::lattice::LatticeAccumulatorUpdates,
     /// The built block.
     pub block: RecoveredBlock<N::Block>,
     /// Block access list built during execution (EIP-7928, Amsterdam).
@@ -515,6 +518,15 @@ where
             block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal.as_slice()));
 
         let hashed_state = state.hashed_post_state(&db.bundle_state);
+        #[cfg(feature = "lattice-state-root")]
+        let (state_root, trie_updates, lattice_accumulator_updates) = state
+            .lattice_state_root_with_updates(
+                &db.bundle_state,
+                hashed_state.clone(),
+                state_root_precomputed.map(|(_, trie_updates)| trie_updates),
+            )
+            .map_err(BlockExecutionError::other)?;
+        #[cfg(not(feature = "lattice-state-root"))]
         let (state_root, trie_updates) = match state_root_precomputed {
             Some(precomputed) => precomputed,
             None => state
@@ -543,6 +555,8 @@ where
             execution_result: result,
             hashed_state,
             trie_updates,
+            #[cfg(feature = "lattice-state-root")]
+            lattice_accumulator_updates,
             block,
             block_access_list,
         })

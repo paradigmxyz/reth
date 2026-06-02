@@ -837,6 +837,25 @@ where
             (root, Arc::new(updates), root_time.elapsed())
         };
 
+        #[cfg(feature = "lattice-state-root")]
+        let _mpt_state_root = state_root;
+
+        #[cfg(feature = "lattice-state-root")]
+        let (state_root, trie_output, lattice_accumulator_updates) = ensure_ok_post_block!(
+            provider_builder.build().and_then(|provider| {
+                provider
+                    .lattice_state_root_with_updates(
+                        &output.state,
+                        hashed_state.get().as_ref().clone(),
+                        Some(trie_output.as_ref().clone()),
+                    )
+                    .map(|(root, updates, lattice_updates)| {
+                        (root, Arc::new(updates), Arc::new(lattice_updates))
+                    })
+            }),
+            block
+        );
+
         if let Err(err) = hashed_state_validate_result {
             // call post-block hook
             self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
@@ -900,6 +919,8 @@ where
             output,
             hashed_state,
             trie_output,
+            #[cfg(feature = "lattice-state-root")]
+            lattice_accumulator_updates,
             changeset_provider,
         );
         Ok(ValidationOutput::new(executed_block, timing_stats))
@@ -1824,6 +1845,9 @@ where
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         hashed_state: LazyHashedPostState,
         trie_output: Arc<TrieUpdates>,
+        #[cfg(feature = "lattice-state-root")] lattice_accumulator_updates: Arc<
+            reth_trie::lattice::LatticeAccumulatorUpdates,
+        >,
         changeset_provider: impl TrieCursorFactory + Send + 'static,
     ) -> ExecutedBlock<N> {
         // Create deferred handle with fallback inputs in case the background task hasn't completed.
@@ -1833,6 +1857,13 @@ where
             Ok(state) => state,
             Err(handle) => handle.get().clone(),
         };
+        #[cfg(feature = "lattice-state-root")]
+        let deferred_trie_data = DeferredTrieData::pending_with_lattice(
+            hashed_state,
+            trie_output,
+            lattice_accumulator_updates,
+        );
+        #[cfg(not(feature = "lattice-state-root"))]
         let deferred_trie_data = DeferredTrieData::pending(hashed_state, trie_output);
         let deferred_handle_task = deferred_trie_data.clone();
         let block_validation_metrics = self.metrics.block_validation.clone();
@@ -2218,6 +2249,8 @@ where
             block.execution_output,
             LazyHashedPostState::ready(block.hashed_state),
             block.trie_updates,
+            #[cfg(feature = "lattice-state-root")]
+            block.lattice_accumulator_updates,
             changeset_provider,
         ))
     }

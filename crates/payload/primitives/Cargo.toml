@@ -56,3 +56,4 @@ std = [
     "serde_json/std",
     "sha2/std",
 ]
+lattice-state-root = ["reth-trie-common/lattice-state-root"]
