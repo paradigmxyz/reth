@@ -20,7 +20,7 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, Address, StorageKey, B256};
+use alloy_primitives::{keccak256, StorageKey, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
@@ -31,18 +31,8 @@ use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockReader, StateProvider, StateProviderBox,
     StateProviderFactory, StateReader,
 };
-use reth_revm::{
-    database::StateProviderDatabase,
-    db::{
-        states::{CacheAccount, CacheState},
-        State,
-    },
-    state::EvmState,
-};
-use reth_tasks::{
-    pool::{Worker, WorkerPool},
-    Runtime,
-};
+use reth_revm::{database::StateProviderDatabase, db::State, state::EvmState};
+use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -197,8 +187,6 @@ where
                 }
             });
 
-            ctx.collect_transaction_prewarm_state(pool);
-
             // All tasks are done — clear per-thread EVM state for the next block.
             pool.clear();
 
@@ -259,12 +247,14 @@ where
             }
 
             if index > 0 {
-                let (targets, storage_targets) = multiproof_targets_from_state(res.state);
+                let (targets, storage_targets) = multiproof_targets_from_state(&res.state);
                 ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
                 if let Some(to_sparse_trie_task) = to_sparse_trie_task {
                     let _ = to_sparse_trie_task.send(StateRootMessage::PrefetchProofs(targets));
                 }
             }
+
+            ctx.prewarm_state_loader.set(index, res.state);
 
             ctx.metrics.total_runtime.record(start.elapsed());
         });
@@ -625,70 +615,6 @@ where
         Some(evm)
     }
 
-    /// Drains state reads from transaction prewarm workers and publishes them to execution.
-    fn collect_transaction_prewarm_state(&self, pool: &WorkerPool) {
-        let prewarm_state = Self::collect_prewarm_state_from_pool(pool, |worker| {
-            worker
-                .get_mut::<PrewarmEvmState<Evm>>()
-                .as_mut()
-                .map(|evm| std::mem::take(&mut evm.db_mut().cache))
-                .unwrap_or_default()
-        });
-        self.prewarm_state_loader.set(prewarm_state);
-    }
-
-    /// Collects and squashes local state maps from every worker after prewarming completes.
-    fn collect_prewarm_state_from_pool(
-        pool: &WorkerPool,
-        collect: impl Fn(&mut Worker) -> CacheState + Sync,
-    ) -> CacheState {
-        let (tx, rx) = crossbeam_channel::unbounded();
-        pool.broadcast(pool.current_num_threads(), |worker| {
-            let state = collect(worker);
-            if !state.accounts.is_empty() || !state.contracts.is_empty() {
-                let _ = tx.send(state);
-            }
-        });
-        drop(tx);
-
-        Self::squash_prewarm_states(rx)
-    }
-
-    fn squash_prewarm_states(states: impl IntoIterator<Item = CacheState>) -> CacheState {
-        let mut squashed = CacheState::default();
-
-        for state in states {
-            for (code_hash, bytecode) in state.contracts {
-                squashed.contracts.entry(code_hash).or_insert(bytecode);
-            }
-
-            for (address, account) in state.accounts {
-                Self::merge_prewarm_account(&mut squashed, address, account);
-            }
-        }
-
-        squashed
-    }
-
-    fn merge_prewarm_account(squashed: &mut CacheState, address: Address, account: CacheAccount) {
-        let Some(existing) = squashed.accounts.get_mut(&address) else {
-            squashed.accounts.insert(address, account);
-            return;
-        };
-
-        let Some(incoming_account) = account.account else {
-            return;
-        };
-
-        let Some(existing_account) = existing.account.as_mut() else {
-            existing.account = Some(incoming_account);
-            existing.status = account.status;
-            return;
-        };
-
-        existing_account.storage.extend(incoming_account.storage);
-    }
-
     /// Returns `true` if prewarming should stop.
     #[inline]
     pub fn should_stop(&self) -> bool {
@@ -877,7 +803,7 @@ where
 
 /// Returns a set of [`MultiProofTargetsV2`] and the total amount of storage targets, based on the
 /// given state.
-fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize) {
+fn multiproof_targets_from_state(state: &EvmState) -> (MultiProofTargetsV2, usize) {
     let mut targets = MultiProofTargetsV2::default();
     targets.account_targets.reserve(state.len());
     targets.storage_targets.reserve(state.len());
@@ -894,14 +820,14 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize
             continue
         }
 
-        let hashed_address = keccak256(addr);
+        let hashed_address = keccak256(*addr);
 
         if account.info != account.original_info() {
             targets.account_targets.push(hashed_address.into());
         }
 
         let mut storage_slots = Vec::with_capacity(account.storage.len());
-        for (key, slot) in account.storage {
+        for (key, slot) in &account.storage {
             // do nothing if unchanged
             if !slot.is_changed() {
                 continue

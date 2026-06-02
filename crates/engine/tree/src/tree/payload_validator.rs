@@ -87,9 +87,9 @@ use reth_provider::{
     StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
     StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_revm::db::{
-    states::{bundle_state::BundleRetention, CacheAccount, CacheState},
-    BundleAccount, State,
+use reth_revm::{
+    db::{states::bundle_state::BundleRetention, BundleAccount, State},
+    state::EvmState,
 };
 use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
 use reth_trie_db::ChangesetCache;
@@ -1097,12 +1097,6 @@ where
         );
 
         let execution_start = Instant::now();
-        let mut prewarm_state_loaded = false;
-        Self::maybe_install_prewarm_overlay(
-            executor.evm_mut().db_mut(),
-            prewarm_state_loader.as_ref(),
-            &mut prewarm_state_loaded,
-        );
 
         // Execute all transactions and finalize
         let (executor, senders) = self.execute_transactions(
@@ -1113,7 +1107,6 @@ where
             &executed_tx_index,
             has_bal,
             prewarm_state_loader.as_ref(),
-            &mut prewarm_state_loaded,
         )?;
         drop(receipt_tx);
 
@@ -1269,7 +1262,6 @@ where
         executed_tx_index: &AtomicUsize,
         has_bal: bool,
         prewarm_state_loader: Option<&'overlay PrewarmStateLoader>,
-        prewarm_state_loaded: &mut bool,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
         E: BlockExecutor<
@@ -1304,17 +1296,18 @@ where
         // receipt with the same index and can panic the ordered root builder.
         let mut last_sent_len = 0usize;
         loop {
-            Self::maybe_install_prewarm_overlay(
-                executor.evm_mut().db_mut(),
-                prewarm_state_loader,
-                prewarm_state_loaded,
-            );
-
             // Measure time spent waiting for next transaction from iterator
             // (e.g., parallel signature recovery)
             let wait_start = Instant::now();
             let Some(tx_result) = transactions.next() else { break };
             self.metrics.record_transaction_wait(wait_start.elapsed());
+
+            let tx_index = senders.len();
+            Self::install_prewarm_overlay(
+                executor.evm_mut().db_mut(),
+                prewarm_state_loader,
+                tx_index,
+            );
 
             let tx = tx_result.map_err(BlockExecutionError::other)?;
             let tx_signer = *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(&tx);
@@ -1325,7 +1318,7 @@ where
                 debug_span!(
                     target: "engine::tree",
                     "execute tx",
-                    tx_index = senders.len() - 1,
+                    tx_index,
                 )
                 .entered()
             });
@@ -1360,22 +1353,14 @@ where
         Ok((executor, senders))
     }
 
-    fn maybe_install_prewarm_overlay<'a, DB: revm::Database>(
+    fn install_prewarm_overlay<'a, DB: revm::Database>(
         state: &mut State<PrewarmStateDatabase<'a, DB>>,
         prewarm_state_loader: Option<&'a PrewarmStateLoader>,
-        prewarm_state_loaded: &mut bool,
+        tx_index: usize,
     ) {
-        if *prewarm_state_loaded {
-            return;
-        }
-
-        let Some(prewarm_state) = prewarm_state_loader.and_then(PrewarmStateLoader::snapshot)
-        else {
-            return;
-        };
-
-        state.database.set_prewarm_state(prewarm_state);
-        *prewarm_state_loaded = true;
+        state
+            .database
+            .set_prewarm_state(prewarm_state_loader.and_then(|loader| loader.snapshot(tx_index)));
     }
 
     /// Compute state root for the given hashed post state in parallel.
@@ -2111,7 +2096,7 @@ enum StateRootStrategy<N: NodePrimitives> {
 
 struct PrewarmStateDatabase<'a, DB> {
     database: DB,
-    prewarm_state: Option<&'a CacheState>,
+    prewarm_state: Option<&'a EvmState>,
 }
 
 impl<DB> PrewarmStateDatabase<'_, DB> {
@@ -2121,12 +2106,8 @@ impl<DB> PrewarmStateDatabase<'_, DB> {
 }
 
 impl<'a, DB> PrewarmStateDatabase<'a, DB> {
-    fn set_prewarm_state(&mut self, prewarm_state: &'a CacheState) {
-        self.prewarm_state = Some(prewarm_state);
-    }
-
-    fn prewarm_account(&self, address: &Address) -> Option<&CacheAccount> {
-        self.prewarm_state?.accounts.get(address)
+    fn set_prewarm_state(&mut self, prewarm_state: Option<&'a EvmState>) {
+        self.prewarm_state = prewarm_state;
     }
 }
 
@@ -2143,31 +2124,25 @@ impl<DB: revm::Database> revm::Database for PrewarmStateDatabase<'_, DB> {
     type Error = DB::Error;
 
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        if let Some(account) = self.prewarm_account(&address) {
-            return Ok(account.account_info());
+        if let Some(account) = self.prewarm_state.and_then(|state| state.get(&address)) {
+            if account.is_loaded_as_not_existing() {
+                return Ok(None);
+            }
+            return Ok(Some(account.original_info()));
         }
 
         self.database.basic(address)
     }
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        if let Some(bytecode) =
-            self.prewarm_state.and_then(|prewarm_state| prewarm_state.contracts.get(&code_hash))
-        {
-            return Ok(bytecode.clone());
-        }
-
         self.database.code_by_hash(code_hash)
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
         if let Some(prewarm_state) = self.prewarm_state {
-            if let Some(cache_account) = prewarm_state.accounts.get(&address) {
-                let Some(account) = cache_account.account.as_ref() else {
-                    return Ok(U256::ZERO);
-                };
+            if let Some(account) = prewarm_state.get(&address) {
                 if let Some(value) = account.storage.get(&index) {
-                    return Ok(*value);
+                    return Ok(value.original_value());
                 }
             }
         }

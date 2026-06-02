@@ -13,7 +13,7 @@ use reth_provider::{
     AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
     StateProvider, StateRootProvider, StorageRootProvider,
 };
-use reth_revm::db::{states::CacheState, BundleState};
+use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
@@ -221,32 +221,33 @@ pub enum CachedStatus<T> {
 
 /// One-shot handoff for prewarmed state shared with the execution thread.
 #[derive(Clone, Default)]
-pub struct PrewarmStateLoader(Arc<OnceLock<CacheState>>);
+pub struct PrewarmStateLoader(Arc<[OnceLock<EvmState>]>);
 
 impl fmt::Debug for PrewarmStateLoader {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PrewarmStateLoader")
-            .field("has_state", &self.0.get().is_some())
-            .finish_non_exhaustive()
+        f.debug_struct("PrewarmStateLoader").field("slots", &self.0.len()).finish_non_exhaustive()
     }
 }
 
 impl PrewarmStateLoader {
     /// Creates an empty loader.
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(len: usize) -> Self {
+        let slots: Vec<_> = (0..len).map(|_| OnceLock::new()).collect();
+        Self(Arc::from(slots.into_boxed_slice()))
     }
 
-    /// Sets the collected prewarm state.
-    pub fn set(&self, state: CacheState) {
-        if !state.accounts.is_empty() || !state.contracts.is_empty() {
-            let _ = self.0.set(state);
+    /// Sets the collected prewarm state for the given transaction index.
+    pub fn set(&self, index: usize, state: EvmState) {
+        if !state.is_empty() {
+            if let Some(slot) = self.0.get(index) {
+                let _ = slot.set(state);
+            }
         }
     }
 
-    /// Returns the installed prewarm state snapshot.
-    pub fn snapshot(&self) -> Option<&CacheState> {
-        self.0.get()
+    /// Returns the installed prewarm state snapshot for the given transaction index.
+    pub fn snapshot(&self, index: usize) -> Option<&EvmState> {
+        self.0.get(index).and_then(OnceLock::get)
     }
 }
 
@@ -1123,19 +1124,21 @@ mod tests {
     }
 
     #[test]
-    fn prewarm_state_loader_publishes_non_empty_cache() {
+    fn prewarm_state_loader_publishes_non_empty_state() {
+        use revm_state::Account;
+
         let address = Address::random();
-        let loader = PrewarmStateLoader::new();
+        let loader = PrewarmStateLoader::new(1);
 
-        loader.set(CacheState::default());
-        assert!(loader.snapshot().is_none());
+        loader.set(0, EvmState::default());
+        assert!(loader.snapshot(0).is_none());
 
-        let mut cache = CacheState::default();
-        cache.insert_not_existing(address);
-        loader.set(cache);
+        let mut state = EvmState::default();
+        state.insert(address, Account::default());
+        loader.set(0, state);
 
-        let snapshot = loader.snapshot().expect("non-empty cache should be published");
-        assert!(snapshot.accounts.contains_key(&address));
+        let snapshot = loader.snapshot(0).expect("non-empty cache should be published");
+        assert!(snapshot.contains_key(&address));
     }
 
     #[test]

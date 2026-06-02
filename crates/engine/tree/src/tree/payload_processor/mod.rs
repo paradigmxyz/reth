@@ -521,7 +521,7 @@ where
         };
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
         let prewarm_state_loader = match &mode {
-            PrewarmMode::Transactions(_) => Some(PrewarmStateLoader::new()),
+            PrewarmMode::Transactions(_) => Some(PrewarmStateLoader::new(env.transaction_count)),
             _ => None,
         };
 
