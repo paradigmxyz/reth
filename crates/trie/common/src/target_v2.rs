@@ -162,16 +162,12 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
         }
 
         // Process any remaining storage-only entries (accounts not in account_targets)
-        while let Some((account_addr, storage_slots)) = self.storage_targets.iter_mut().next() &&
+        while let Some(account_addr) = self.storage_targets.keys().next().copied() &&
             count < self.size
         {
-            let account_addr = *account_addr;
-            let storage_slots = core::mem::take(storage_slots);
+            let storage_slots =
+                self.storage_targets.remove(&account_addr).expect("key is from storage_targets");
             let remaining_capacity = self.size - count;
-
-            // Always remove from the map - if there are remaining slots they go to
-            // current_account_storage
-            self.storage_targets.remove(&account_addr);
 
             if storage_slots.len() <= remaining_capacity {
                 // Optimization: We can take all slots, just move the vec
