@@ -1,9 +1,13 @@
+#[cfg(test)]
+mod bench;
 mod branch_child_idx;
 mod cursor;
+mod node_arena;
 mod nodes;
 
 use branch_child_idx::{BranchChildIdx, BranchChildIter};
 use cursor::{ArenaCursor, NextResult, SeekResult};
+use node_arena::{Index, NodeArena};
 use nodes::{
     ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
 };
@@ -22,23 +26,36 @@ use reth_trie_common::{
     BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNodeV2,
     RlpNode, TrieNodeV2, EMPTY_ROOT_HASH,
 };
-use slotmap::{DefaultKey, SlotMap};
 use smallvec::SmallVec;
 use tracing::{instrument, trace};
 
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::{LeafUpdateRecord, ProofTrieNodeRecord, RecordedOp, TrieDebugRecorder};
 
-/// Alias for the slotmap key type used as node references throughout the arena trie.
-type Index = DefaultKey;
-/// Alias for the slotmap used as the node arena throughout the arena trie.
-type NodeArena = SlotMap<Index, ArenaSparseNode>;
-
 const TRACE_TARGET: &str = "trie::arena";
 
 /// The maximum path length (in nibbles) for nodes that live in the upper trie. Nodes at this
 /// depth or deeper belong to lower subtries.
 const UPPER_TRIE_MAX_DEPTH: usize = 2;
+
+/// Minimum contiguous touched updates in a lower subtrie before using interleaved read-only seeks.
+const INTERLEAVED_TOUCHED_SEEK_THRESHOLD: usize = 64;
+/// Number of in-flight read-only touched seeks.
+const INTERLEAVED_TOUCHED_SEEK_GROUP_SIZE: usize = 8;
+/// Minimum proof nodes in a lower subtrie before using interleaved reveal seeks.
+const INTERLEAVED_REVEAL_SEEK_THRESHOLD: usize = 64;
+/// Number of in-flight read-only reveal seeks.
+const INTERLEAVED_REVEAL_SEEK_GROUP_SIZE: usize = 16;
+/// Minimum contiguous non-empty changed updates before using interleaved leaf update seeks.
+const INTERLEAVED_CHANGED_SEEK_THRESHOLD: usize = 64;
+/// Number of in-flight changed leaf update seeks.
+const INTERLEAVED_CHANGED_SEEK_GROUP_SIZE: usize = 16;
+/// Minimum contiguous removals before trying interleaved no-collapse removal.
+const INTERLEAVED_REMOVAL_SEEK_THRESHOLD: usize = 64;
+/// Number of in-flight removal seeks.
+const INTERLEAVED_REMOVAL_SEEK_GROUP_SIZE: usize = 16;
+/// Number of in-flight read-only leaf value lookups.
+const INTERLEAVED_LEAF_VALUE_LOOKUP_GROUP_SIZE: usize = 8;
 
 /// Finds the sub-range of `sorted_keys[start..]` whose entries start with `prefix`.
 ///
@@ -60,23 +77,11 @@ fn prefix_range(
     begin..end
 }
 
-/// Returns the per-slot byte size used by `SlotMap<_, T>`. `SlotMap` wraps each value in a
-/// `Slot<T>` containing the value union + a 4-byte version field, with struct alignment.
-const fn slotmap_slot_size<T>() -> usize {
-    // Slot<T> = { u: SlotUnion<T>, version: u32 }
-    // SlotUnion<T> = union { value: ManuallyDrop<T>, next_free: u32 }
-    // size = max(size_of::<T>(), 4) + 4, rounded up to align_of::<T>() (or 4)
-    let union_size = if core::mem::size_of::<T>() > 4 { core::mem::size_of::<T>() } else { 4 };
-    let raw = union_size + 4;
-    let align = if core::mem::align_of::<T>() > 4 { core::mem::align_of::<T>() } else { 4 };
-    (raw + align - 1) & !(align - 1)
-}
-
-/// Compacts an arena by BFS-copying all reachable nodes into a fresh `SlotMap`, dropping
+/// Compacts an arena by BFS-copying all reachable nodes into a fresh [`NodeArena`], dropping
 /// unreachable (pruned) slots. Parents are stored before children for cache-friendly top-down
 /// traversal.
 fn compact_arena(arena: &mut NodeArena, root: &mut Index) {
-    let mut new_arena = SlotMap::with_capacity(arena.len());
+    let mut new_arena = NodeArena::with_capacity(arena.len());
     let mut queue = VecDeque::new();
 
     let root_node = arena.remove(*root).expect("root exists");
@@ -175,7 +180,7 @@ impl ArenaSparseSubtrie {
     /// [`ArenaSparseNode::EmptyRoot`]. The caller must overwrite `subtrie.arena[subtrie.root]`
     /// before use.
     fn new(record_updates: bool) -> Box<Self> {
-        let mut arena = SlotMap::new();
+        let mut arena = NodeArena::new();
         let root = arena.insert(ArenaSparseNode::EmptyRoot);
         let buffers = ArenaTrieBuffers {
             updates: record_updates.then(SparseTrieUpdates::default),
@@ -241,7 +246,7 @@ impl ArenaSparseSubtrie {
         // In a tree where every branch has ≥2 children, #branches ≤ #leaves − 1, so
         // total nodes ≤ 2N − 1. This is a reasonable upper-bound capacity hint that
         // avoids most reallocations without over-allocating when pruning is heavy.
-        let mut new_arena = SlotMap::with_capacity(retained_leaves.len() * 2);
+        let mut new_arena = NodeArena::with_capacity(retained_leaves.len() * 2);
         // Queue: (new_idx, path TO the node — excluding its own short_key)
         let mut queue: VecDeque<(Index, Nibbles)> = VecDeque::new();
         let mut new_num_leaves = 0u64;
@@ -320,8 +325,7 @@ impl ArenaSparseSubtrie {
         self.num_dirty_leaves = 0;
         self.arena = new_arena;
         self.root = new_root;
-        self.cached_memory_size =
-            self.arena.capacity() * slotmap_slot_size::<ArenaSparseNode>() + new_nodes_heap_size;
+        self.cached_memory_size = self.arena.memory_size() + new_nodes_heap_size;
 
         #[cfg(debug_assertions)]
         self.debug_assert_counters();
@@ -363,7 +367,64 @@ impl ArenaSparseSubtrie {
 
         self.buffers.cursor.reset(&self.arena, self.root, self.path);
 
-        for (idx, &(key, ref full_path, ref update)) in sorted_updates.iter().enumerate() {
+        let mut idx = 0;
+        while idx < sorted_updates.len() {
+            if matches!(&sorted_updates[idx].2, LeafUpdate::Changed(value) if !value.is_empty()) {
+                let start = idx;
+                while idx < sorted_updates.len() &&
+                    matches!(&sorted_updates[idx].2, LeafUpdate::Changed(value) if !value.is_empty())
+                {
+                    idx += 1;
+                }
+
+                if idx - start >= INTERLEAVED_CHANGED_SEEK_THRESHOLD {
+                    self.buffers.cursor.drain(&mut self.arena);
+                    self.update_changed_leaves_interleaved(sorted_updates, start..idx);
+                    self.buffers.cursor.reset(&self.arena, self.root, self.path);
+                } else {
+                    self.update_changed_leaves_scalar(sorted_updates, start..idx);
+                }
+
+                continue;
+            }
+
+            if matches!(&sorted_updates[idx].2, LeafUpdate::Changed(value) if value.is_empty()) {
+                let start = idx;
+                while idx < sorted_updates.len() &&
+                    matches!(&sorted_updates[idx].2, LeafUpdate::Changed(value) if value.is_empty())
+                {
+                    idx += 1;
+                }
+
+                if idx - start >= INTERLEAVED_REMOVAL_SEEK_THRESHOLD {
+                    self.buffers.cursor.drain(&mut self.arena);
+                    self.update_removed_leaves_interleaved(sorted_updates, start..idx);
+                    self.buffers.cursor.reset(&self.arena, self.root, self.path);
+                } else {
+                    self.update_removed_leaves_scalar(sorted_updates, start..idx);
+                }
+
+                continue;
+            }
+
+            if sorted_updates[idx].2.is_touched() {
+                let start = idx;
+                while idx < sorted_updates.len() && sorted_updates[idx].2.is_touched() {
+                    idx += 1;
+                }
+
+                if idx - start >= INTERLEAVED_TOUCHED_SEEK_THRESHOLD {
+                    self.buffers.cursor.drain(&mut self.arena);
+                    self.update_touched_leaves_interleaved(sorted_updates, start..idx);
+                    self.buffers.cursor.reset(&self.arena, self.root, self.path);
+                } else {
+                    self.update_touched_leaves_scalar(sorted_updates, start..idx);
+                }
+
+                continue;
+            }
+
+            let (key, ref full_path, ref update) = sorted_updates[idx];
             let find_result = self.buffers.cursor.seek(&mut self.arena, full_path);
 
             // If the path hits a blinded node, request a proof regardless of update type.
@@ -373,6 +434,7 @@ impl ArenaSparseSubtrie {
                     idx,
                     ArenaRequiredProof { key, min_len: (logical_len as u8 + 1).min(64) },
                 ));
+                idx += 1;
                 continue;
             }
 
@@ -413,6 +475,8 @@ impl ArenaSparseSubtrie {
                 }
                 LeafUpdate::Touched => {}
             }
+
+            idx += 1;
         }
 
         // Drain remaining cursor entries, propagating dirty state.
@@ -420,6 +484,363 @@ impl ArenaSparseSubtrie {
 
         #[cfg(debug_assertions)]
         self.debug_assert_counters();
+    }
+
+    /// Processes a contiguous run of non-empty changed updates with the reusable cursor.
+    fn update_changed_leaves_scalar(
+        &mut self,
+        sorted_updates: &[(B256, Nibbles, LeafUpdate)],
+        range: core::ops::Range<usize>,
+    ) {
+        for update_idx in range {
+            self.update_changed_leaf_scalar(sorted_updates, update_idx);
+        }
+    }
+
+    fn update_changed_leaf_scalar(
+        &mut self,
+        sorted_updates: &[(B256, Nibbles, LeafUpdate)],
+        update_idx: usize,
+    ) {
+        let (key, ref full_path, ref update) = sorted_updates[update_idx];
+        let find_result = self.buffers.cursor.seek(&mut self.arena, full_path);
+
+        if matches!(find_result, SeekResult::Blinded) {
+            let logical_len = self.buffers.cursor.head_logical_branch_path_len(&self.arena);
+            self.required_proofs.push((
+                update_idx,
+                ArenaRequiredProof { key, min_len: (logical_len as u8 + 1).min(64) },
+            ));
+            return;
+        }
+
+        let LeafUpdate::Changed(value) = update else {
+            unreachable!("update_changed_leaf_scalar called for non-changed update")
+        };
+        debug_assert!(!value.is_empty());
+
+        let (_result, deltas) = ArenaParallelSparseTrie::upsert_leaf(
+            &mut self.arena,
+            &mut self.buffers.cursor,
+            &mut self.root,
+            full_path,
+            value,
+            find_result,
+        );
+        self.num_leaves = (self.num_leaves as i64 + deltas.num_leaves_delta) as u64;
+        self.num_dirty_leaves =
+            (self.num_dirty_leaves as i64 + deltas.num_dirty_leaves_delta) as u64;
+    }
+
+    fn update_changed_leaves_interleaved(
+        &mut self,
+        sorted_updates: &[(B256, Nibbles, LeafUpdate)],
+        range: core::ops::Range<usize>,
+    ) {
+        let range_start = range.start;
+        let range_end = range.end;
+        let mut next = range_start;
+        let mut active = 0usize;
+        let mut slots = Vec::with_capacity(INTERLEAVED_CHANGED_SEEK_GROUP_SIZE);
+        let mut handled = vec![false; range_end - range_start];
+
+        for _ in 0..INTERLEAVED_CHANGED_SEEK_GROUP_SIZE {
+            let slot = (next < range_end).then(|| {
+                let (key, full_path, _) = &sorted_updates[next];
+                let task = ChangedSeekTask::new(next, *key, *full_path, self.root, self.path.len());
+                next += 1;
+                task
+            });
+            if slot.is_some() {
+                active += 1;
+            }
+            slots.push(slot);
+        }
+
+        while active > 0 {
+            for slot in &mut slots {
+                let Some(task) = slot.as_mut() else { continue };
+                match task.step(&self.arena) {
+                    ChangedSeekResult::Pending => continue,
+                    ChangedSeekResult::Proof(proof) => {
+                        self.required_proofs.push(proof);
+                        handled[task.target_idx - range_start] = true;
+                    }
+                    ChangedSeekResult::Fallback => {}
+                    ChangedSeekResult::Leaf { leaf_idx, ancestors } => {
+                        let LeafUpdate::Changed(value) = &sorted_updates[task.target_idx].2 else {
+                            unreachable!("changed seek task created for non-changed update")
+                        };
+                        let ArenaSparseNode::Leaf { value: leaf_value, state, .. } =
+                            &mut self.arena[leaf_idx]
+                        else {
+                            unreachable!("changed seek found non-leaf node")
+                        };
+                        leaf_value.clear();
+                        leaf_value.extend_from_slice(value);
+                        let was_clean = !matches!(state, ArenaSparseNodeState::Dirty);
+                        *state = ArenaSparseNodeState::Dirty;
+
+                        for ancestor in ancestors {
+                            let state = self.arena[ancestor].state_ref().unwrap().to_dirty();
+                            *self.arena[ancestor].state_mut() = state;
+                        }
+
+                        self.num_dirty_leaves += was_clean as u64;
+                        handled[task.target_idx - range_start] = true;
+                    }
+                }
+
+                if next < range_end {
+                    let (key, full_path, _) = &sorted_updates[next];
+                    *slot = Some(ChangedSeekTask::new(
+                        next,
+                        *key,
+                        *full_path,
+                        self.root,
+                        self.path.len(),
+                    ));
+                    next += 1;
+                } else {
+                    *slot = None;
+                    active -= 1;
+                }
+            }
+        }
+
+        if handled.iter().all(|handled| *handled) {
+            return;
+        }
+
+        self.buffers.cursor.reset(&self.arena, self.root, self.path);
+        for (offset, update_idx) in (range_start..range_end).enumerate() {
+            if !handled[offset] {
+                self.update_changed_leaf_scalar(sorted_updates, update_idx);
+            }
+        }
+        self.buffers.cursor.drain(&mut self.arena);
+    }
+
+    /// Processes a contiguous run of removals with the reusable cursor.
+    fn update_removed_leaves_scalar(
+        &mut self,
+        sorted_updates: &[(B256, Nibbles, LeafUpdate)],
+        range: core::ops::Range<usize>,
+    ) {
+        for update_idx in range {
+            self.update_removed_leaf_scalar(sorted_updates, update_idx);
+        }
+    }
+
+    fn update_removed_leaf_scalar(
+        &mut self,
+        sorted_updates: &[(B256, Nibbles, LeafUpdate)],
+        update_idx: usize,
+    ) {
+        let (key, ref full_path, _) = sorted_updates[update_idx];
+        let find_result = self.buffers.cursor.seek(&mut self.arena, full_path);
+
+        if matches!(find_result, SeekResult::Blinded) {
+            let logical_len = self.buffers.cursor.head_logical_branch_path_len(&self.arena);
+            self.required_proofs.push((
+                update_idx,
+                ArenaRequiredProof { key, min_len: (logical_len as u8 + 1).min(64) },
+            ));
+            return;
+        }
+
+        let (result, deltas) = ArenaParallelSparseTrie::remove_leaf(
+            &mut self.arena,
+            &mut self.buffers.cursor,
+            &mut self.root,
+            key,
+            full_path,
+            find_result,
+            &mut self.buffers.updates,
+        );
+        self.num_leaves = (self.num_leaves as i64 + deltas.num_leaves_delta) as u64;
+        self.num_dirty_leaves =
+            (self.num_dirty_leaves as i64 + deltas.num_dirty_leaves_delta) as u64;
+
+        if let RemoveLeafResult::NeedsProof { key, proof_key, min_len } = result {
+            self.required_proofs.push((update_idx, ArenaRequiredProof { key: proof_key, min_len }));
+            self.required_proofs.push((update_idx, ArenaRequiredProof { key, min_len }));
+        }
+    }
+
+    fn update_removed_leaves_interleaved(
+        &mut self,
+        sorted_updates: &[(B256, Nibbles, LeafUpdate)],
+        range: core::ops::Range<usize>,
+    ) {
+        let Some(targets) = self.find_removable_leaves_interleaved(sorted_updates, range.clone())
+        else {
+            self.update_removed_leaves_scalar_with_reset(sorted_updates, range);
+            return;
+        };
+
+        if !self.can_remove_without_collapse(&targets) {
+            self.update_removed_leaves_scalar_with_reset(sorted_updates, range);
+            return;
+        }
+
+        for target in targets {
+            let removed_was_dirty = matches!(
+                self.arena[target.leaf_idx].state_ref(),
+                Some(ArenaSparseNodeState::Dirty)
+            );
+
+            self.arena.remove(target.leaf_idx).expect("removal target must exist");
+            self.arena[target.parent_idx].branch_mut().remove_child(target.child_nibble);
+
+            for ancestor in target.ancestors {
+                let state = self.arena[ancestor].state_ref().unwrap().to_dirty();
+                *self.arena[ancestor].state_mut() = state;
+            }
+
+            self.num_leaves -= 1;
+            self.num_dirty_leaves -= removed_was_dirty as u64;
+        }
+    }
+
+    fn can_remove_without_collapse(&self, targets: &[RemovalSeekTarget]) -> bool {
+        let mut removals_by_parent = HashMap::<Index, usize>::default();
+        for target in targets {
+            *removals_by_parent.entry(target.parent_idx).or_default() += 1;
+        }
+
+        removals_by_parent.into_iter().all(|(parent_idx, removals)| {
+            let ArenaSparseNode::Branch(branch) = &self.arena[parent_idx] else {
+                return false;
+            };
+            branch.state_mask.count_bits() as usize > removals + 1
+        })
+    }
+
+    fn find_removable_leaves_interleaved(
+        &self,
+        sorted_updates: &[(B256, Nibbles, LeafUpdate)],
+        range: core::ops::Range<usize>,
+    ) -> Option<Vec<RemovalSeekTarget>> {
+        let range_start = range.start;
+        let range_end = range.end;
+        let mut next = range_start;
+        let mut active = 0usize;
+        let mut slots = Vec::with_capacity(INTERLEAVED_REMOVAL_SEEK_GROUP_SIZE);
+        let mut targets = Vec::with_capacity(range_end - range_start);
+
+        for _ in 0..INTERLEAVED_REMOVAL_SEEK_GROUP_SIZE {
+            let slot = (next < range_end).then(|| {
+                let (_, full_path, _) = &sorted_updates[next];
+                let task = RemovalSeekTask::new(*full_path, self.root, self.path.len());
+                next += 1;
+                task
+            });
+            if slot.is_some() {
+                active += 1;
+            }
+            slots.push(slot);
+        }
+
+        while active > 0 {
+            for slot in &mut slots {
+                let Some(task) = slot.as_mut() else { continue };
+                match task.step(&self.arena) {
+                    RemovalSeekResult::Pending => continue,
+                    RemovalSeekResult::Target(target) => targets.push(target),
+                    RemovalSeekResult::Fallback => return None,
+                }
+
+                if next < range_end {
+                    let (_, full_path, _) = &sorted_updates[next];
+                    *slot = Some(RemovalSeekTask::new(*full_path, self.root, self.path.len()));
+                    next += 1;
+                } else {
+                    *slot = None;
+                    active -= 1;
+                }
+            }
+        }
+
+        (targets.len() == range_end - range_start).then_some(targets)
+    }
+
+    fn update_removed_leaves_scalar_with_reset(
+        &mut self,
+        sorted_updates: &[(B256, Nibbles, LeafUpdate)],
+        range: core::ops::Range<usize>,
+    ) {
+        self.buffers.cursor.reset(&self.arena, self.root, self.path);
+        self.update_removed_leaves_scalar(sorted_updates, range);
+        self.buffers.cursor.drain(&mut self.arena);
+    }
+
+    /// Processes a contiguous run of touched updates with the reusable cursor.
+    fn update_touched_leaves_scalar(
+        &mut self,
+        sorted_updates: &[(B256, Nibbles, LeafUpdate)],
+        range: core::ops::Range<usize>,
+    ) {
+        for touched_idx in range {
+            let (key, ref full_path, _) = sorted_updates[touched_idx];
+            let find_result = self.buffers.cursor.seek(&mut self.arena, full_path);
+            if matches!(find_result, SeekResult::Blinded) {
+                let logical_len = self.buffers.cursor.head_logical_branch_path_len(&self.arena);
+                self.required_proofs.push((
+                    touched_idx,
+                    ArenaRequiredProof { key, min_len: (logical_len as u8 + 1).min(64) },
+                ));
+            }
+        }
+    }
+
+    /// Processes a contiguous run of touched updates with read-only interleaved seeks.
+    fn update_touched_leaves_interleaved(
+        &mut self,
+        sorted_updates: &[(B256, Nibbles, LeafUpdate)],
+        range: core::ops::Range<usize>,
+    ) {
+        let mut next = range.start;
+        let mut active = 0usize;
+        let mut slots = Vec::with_capacity(INTERLEAVED_TOUCHED_SEEK_GROUP_SIZE);
+
+        for _ in 0..INTERLEAVED_TOUCHED_SEEK_GROUP_SIZE {
+            let slot = (next < range.end).then(|| {
+                let (key, full_path, _) = &sorted_updates[next];
+                next += 1;
+                TouchedSeekTask::new(next - 1, *key, *full_path, self.root, self.path.len())
+            });
+            if slot.is_some() {
+                active += 1;
+            }
+            slots.push(slot);
+        }
+
+        while active > 0 {
+            for slot in &mut slots {
+                let Some(task) = slot.as_mut() else { continue };
+                match task.step(&self.arena) {
+                    TouchedSeekResult::Pending => continue,
+                    TouchedSeekResult::Done => {}
+                    TouchedSeekResult::Proof(proof) => self.required_proofs.push(proof),
+                }
+
+                if next < range.end {
+                    let (key, full_path, _) = &sorted_updates[next];
+                    *slot = Some(TouchedSeekTask::new(
+                        next,
+                        *key,
+                        *full_path,
+                        self.root,
+                        self.path.len(),
+                    ));
+                    next += 1;
+                } else {
+                    *slot = None;
+                    active -= 1;
+                }
+            }
+        }
     }
 
     /// Reveals nodes inside this subtrie. Uses [`ArenaCursor::seek`] to locate the ancestor
@@ -435,6 +856,19 @@ impl ArenaSparseSubtrie {
             "subtrie root must not be EmptyRoot in reveal_nodes"
         );
 
+        if nodes.len() >= INTERLEAVED_REVEAL_SEEK_THRESHOLD {
+            self.reveal_nodes_interleaved(nodes);
+        } else {
+            self.reveal_nodes_scalar(nodes);
+        }
+
+        #[cfg(debug_assertions)]
+        self.debug_assert_counters();
+
+        Ok(())
+    }
+
+    fn reveal_nodes_scalar(&mut self, nodes: &mut [ProofTrieNodeV2]) {
         self.buffers.cursor.reset(&self.arena, self.root, self.path);
 
         for node in nodes.iter_mut() {
@@ -453,11 +887,84 @@ impl ArenaSparseSubtrie {
 
         // Drain remaining cursor entries, propagating dirty state.
         self.buffers.cursor.drain(&mut self.arena);
+    }
 
-        #[cfg(debug_assertions)]
-        self.debug_assert_counters();
+    fn reveal_nodes_interleaved(&mut self, nodes: &mut [ProofTrieNodeV2]) {
+        let mut next = 0usize;
+        let mut active = 0usize;
+        let mut slots = Vec::with_capacity(INTERLEAVED_REVEAL_SEEK_GROUP_SIZE);
+        let mut targets = Vec::with_capacity(nodes.len());
 
-        Ok(())
+        for _ in 0..INTERLEAVED_REVEAL_SEEK_GROUP_SIZE {
+            let slot = nodes.get(next).map(|node| {
+                let task = RevealSeekTask::new(next, node.path, self.root, self.path.len());
+                next += 1;
+                task
+            });
+            if slot.is_some() {
+                active += 1;
+            }
+            slots.push(slot);
+        }
+
+        while active > 0 {
+            for slot in &mut slots {
+                let Some(task) = slot.as_mut() else { continue };
+                match task.step(&self.arena) {
+                    RevealSeekResult::Pending => continue,
+                    RevealSeekResult::Skip => {}
+                    RevealSeekResult::Target(target) => targets.push(target),
+                }
+
+                if let Some(node) = nodes.get(next) {
+                    *slot = Some(RevealSeekTask::new(next, node.path, self.root, self.path.len()));
+                    next += 1;
+                } else {
+                    *slot = None;
+                    active -= 1;
+                }
+            }
+        }
+
+        self.arena.reserve(targets.len());
+        let mut applied = vec![false; nodes.len()];
+        for target in targets {
+            if let Some(child_idx) = ArenaParallelSparseTrie::reveal_node_at_child(
+                &mut self.arena,
+                &mut nodes[target.target_idx],
+                target.parent_idx,
+                target.child_idx,
+            ) {
+                if matches!(self.arena[child_idx], ArenaSparseNode::Leaf { .. }) {
+                    self.num_leaves += 1;
+                }
+                applied[target.target_idx] = true;
+            }
+        }
+
+        if applied.iter().all(|applied| *applied) {
+            return;
+        }
+
+        self.buffers.cursor.reset(&self.arena, self.root, self.path);
+        for (idx, node) in nodes.iter_mut().enumerate() {
+            if applied[idx] {
+                continue;
+            }
+
+            let find_result = self.buffers.cursor.seek(&mut self.arena, &node.path);
+            if ArenaParallelSparseTrie::reveal_node(
+                &mut self.arena,
+                &self.buffers.cursor,
+                node,
+                find_result,
+            )
+            .is_some_and(|child_idx| matches!(self.arena[child_idx], ArenaSparseNode::Leaf { .. }))
+            {
+                self.num_leaves += 1;
+            }
+        }
+        self.buffers.cursor.drain(&mut self.arena);
     }
 
     /// Computes and caches `RlpNode` for all dirty nodes via iterative post-order DFS.
@@ -516,12 +1023,518 @@ enum RemoveLeafResult {
 }
 
 /// A proof request generated during leaf updates when a blinded node is encountered.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct ArenaRequiredProof {
     /// The key requiring a proof.
     key: B256,
     /// Minimum depth at which proof nodes should be returned.
     min_len: u8,
+}
+
+enum LeafValueLookupStep<'a> {
+    Pending,
+    Done { target_idx: usize, value: Option<&'a Vec<u8>> },
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LeafValueLookupTask<'a> {
+    target_idx: usize,
+    full_path: Nibbles,
+    arena: &'a NodeArena,
+    current: Index,
+    path_offset: usize,
+    phase: InterleavedSeekPhase,
+}
+
+impl<'a> LeafValueLookupTask<'a> {
+    const fn new(
+        target_idx: usize,
+        full_path: Nibbles,
+        arena: &'a NodeArena,
+        current: Index,
+    ) -> Self {
+        Self {
+            target_idx,
+            full_path,
+            arena,
+            current,
+            path_offset: 0,
+            phase: InterleavedSeekPhase::LoadCurrent,
+        }
+    }
+
+    fn step(&mut self) -> LeafValueLookupStep<'a> {
+        loop {
+            match self.phase {
+                InterleavedSeekPhase::LoadCurrent => match &self.arena[self.current] {
+                    ArenaSparseNode::EmptyRoot | ArenaSparseNode::TakenSubtrie => {
+                        return self.done(None);
+                    }
+                    ArenaSparseNode::Leaf { key, value, .. } => {
+                        let remaining = self.full_path.slice(self.path_offset..);
+                        return self.done((remaining == *key).then_some(value));
+                    }
+                    ArenaSparseNode::Branch(branch) => {
+                        let logical_end = self.path_offset + branch.short_key.len();
+                        if self.full_path.len() <= logical_end ||
+                            self.full_path.slice(self.path_offset..logical_end) !=
+                                branch.short_key
+                        {
+                            return self.done(None);
+                        }
+
+                        let child_nibble = self.full_path.get_unchecked(logical_end);
+                        let Some(child_idx) = BranchChildIdx::new(branch.state_mask, child_nibble)
+                        else {
+                            return self.done(None);
+                        };
+
+                        match &branch.children[child_idx] {
+                            ArenaSparseNodeBranchChild::Blinded(_) => return self.done(None),
+                            ArenaSparseNodeBranchChild::Revealed(child) => {
+                                let child = *child;
+                                self.arena.prefetch(child);
+                                self.phase = InterleavedSeekPhase::UsePrefetched {
+                                    child,
+                                    path_offset: logical_end + 1,
+                                };
+                                return LeafValueLookupStep::Pending;
+                            }
+                        }
+                    }
+                    ArenaSparseNode::Subtrie(subtrie) => {
+                        debug_assert_eq!(self.path_offset, subtrie.path.len());
+                        self.arena = &subtrie.arena;
+                        let child = subtrie.root;
+                        self.arena.prefetch(child);
+                        self.phase = InterleavedSeekPhase::UsePrefetched {
+                            child,
+                            path_offset: self.path_offset,
+                        };
+                        return LeafValueLookupStep::Pending;
+                    }
+                },
+                InterleavedSeekPhase::UsePrefetched { child, path_offset } => {
+                    self.current = child;
+                    self.path_offset = path_offset;
+                    self.phase = InterleavedSeekPhase::LoadCurrent;
+                }
+            }
+        }
+    }
+
+    fn done(&self, value: Option<&'a Vec<u8>>) -> LeafValueLookupStep<'a> {
+        LeafValueLookupStep::Done { target_idx: self.target_idx, value }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TouchedSeekResult {
+    Pending,
+    Done,
+    Proof((usize, ArenaRequiredProof)),
+}
+
+#[derive(Debug, Clone, Copy)]
+enum RevealSeekResult {
+    Pending,
+    Skip,
+    Target(RevealSeekTarget),
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RevealSeekTarget {
+    target_idx: usize,
+    parent_idx: Index,
+    child_idx: BranchChildIdx,
+}
+
+#[derive(Debug)]
+enum RemovalSeekResult {
+    Pending,
+    Target(RemovalSeekTarget),
+    Fallback,
+}
+
+#[derive(Debug, Clone)]
+struct RemovalSeekTarget {
+    parent_idx: Index,
+    leaf_idx: Index,
+    child_nibble: u8,
+    ancestors: SmallVec<[Index; 8]>,
+}
+
+#[derive(Debug)]
+enum ChangedSeekResult {
+    Pending,
+    Leaf { leaf_idx: Index, ancestors: SmallVec<[Index; 8]> },
+    Proof((usize, ArenaRequiredProof)),
+    Fallback,
+}
+
+/// Phase for one interleaved read-only trie seek.
+#[derive(Debug, Clone, Copy)]
+enum InterleavedSeekPhase {
+    LoadCurrent,
+    UsePrefetched { child: Index, path_offset: usize },
+}
+
+/// A read-only reveal seek that finds direct blinded children before mutation.
+#[derive(Debug, Clone, Copy)]
+struct RevealSeekTask {
+    target_idx: usize,
+    full_path: Nibbles,
+    current: Index,
+    path_offset: usize,
+    phase: InterleavedSeekPhase,
+}
+
+impl RevealSeekTask {
+    const fn new(
+        target_idx: usize,
+        full_path: Nibbles,
+        current: Index,
+        path_offset: usize,
+    ) -> Self {
+        Self {
+            target_idx,
+            full_path,
+            current,
+            path_offset,
+            phase: InterleavedSeekPhase::LoadCurrent,
+        }
+    }
+
+    fn step(&mut self, arena: &NodeArena) -> RevealSeekResult {
+        loop {
+            match self.phase {
+                InterleavedSeekPhase::LoadCurrent => match &arena[self.current] {
+                    ArenaSparseNode::EmptyRoot |
+                    ArenaSparseNode::Leaf { .. } |
+                    ArenaSparseNode::Subtrie(_) |
+                    ArenaSparseNode::TakenSubtrie => return RevealSeekResult::Skip,
+                    ArenaSparseNode::Branch(branch) => {
+                        let logical_end = self.path_offset + branch.short_key.len();
+                        if self.full_path.len() <= logical_end ||
+                            self.full_path.slice(self.path_offset..logical_end) !=
+                                branch.short_key
+                        {
+                            return RevealSeekResult::Skip;
+                        }
+
+                        let child_nibble = self.full_path.get_unchecked(logical_end);
+                        let Some(child_idx) = BranchChildIdx::new(branch.state_mask, child_nibble)
+                        else {
+                            return RevealSeekResult::Skip;
+                        };
+
+                        match &branch.children[child_idx] {
+                            ArenaSparseNodeBranchChild::Blinded(_) => {
+                                if self.full_path.len() != logical_end + 1 {
+                                    return RevealSeekResult::Skip;
+                                }
+
+                                return RevealSeekResult::Target(RevealSeekTarget {
+                                    target_idx: self.target_idx,
+                                    parent_idx: self.current,
+                                    child_idx,
+                                });
+                            }
+                            ArenaSparseNodeBranchChild::Revealed(child) => {
+                                let child = *child;
+                                arena.prefetch(child);
+                                self.phase = InterleavedSeekPhase::UsePrefetched {
+                                    child,
+                                    path_offset: logical_end + 1,
+                                };
+                                return RevealSeekResult::Pending;
+                            }
+                        }
+                    }
+                },
+                InterleavedSeekPhase::UsePrefetched { child, path_offset } => {
+                    self.current = child;
+                    self.path_offset = path_offset;
+                    self.phase = InterleavedSeekPhase::LoadCurrent;
+                }
+            }
+        }
+    }
+}
+
+/// A changed-update seek that can update an existing revealed leaf without structural mutation.
+#[derive(Debug, Clone)]
+struct ChangedSeekTask {
+    target_idx: usize,
+    key: B256,
+    full_path: Nibbles,
+    current: Index,
+    path_offset: usize,
+    phase: InterleavedSeekPhase,
+    ancestors: SmallVec<[Index; 8]>,
+}
+
+impl ChangedSeekTask {
+    fn new(
+        target_idx: usize,
+        key: B256,
+        full_path: Nibbles,
+        current: Index,
+        path_offset: usize,
+    ) -> Self {
+        Self {
+            target_idx,
+            key,
+            full_path,
+            current,
+            path_offset,
+            phase: InterleavedSeekPhase::LoadCurrent,
+            ancestors: SmallVec::new(),
+        }
+    }
+
+    fn step(&mut self, arena: &NodeArena) -> ChangedSeekResult {
+        loop {
+            match self.phase {
+                InterleavedSeekPhase::LoadCurrent => match &arena[self.current] {
+                    ArenaSparseNode::EmptyRoot |
+                    ArenaSparseNode::Subtrie(_) |
+                    ArenaSparseNode::TakenSubtrie => return ChangedSeekResult::Fallback,
+                    ArenaSparseNode::Leaf { key, .. } => {
+                        let remaining = self.full_path.slice(self.path_offset..);
+                        return if remaining == *key {
+                            ChangedSeekResult::Leaf {
+                                leaf_idx: self.current,
+                                ancestors: mem::take(&mut self.ancestors),
+                            }
+                        } else {
+                            ChangedSeekResult::Fallback
+                        };
+                    }
+                    ArenaSparseNode::Branch(branch) => {
+                        let logical_end = self.path_offset + branch.short_key.len();
+                        if self.full_path.len() <= logical_end ||
+                            self.full_path.slice(self.path_offset..logical_end) !=
+                                branch.short_key
+                        {
+                            return ChangedSeekResult::Fallback;
+                        }
+
+                        let child_nibble = self.full_path.get_unchecked(logical_end);
+                        let Some(child_idx) = BranchChildIdx::new(branch.state_mask, child_nibble)
+                        else {
+                            return ChangedSeekResult::Fallback;
+                        };
+
+                        match &branch.children[child_idx] {
+                            ArenaSparseNodeBranchChild::Blinded(_) => {
+                                return ChangedSeekResult::Proof((
+                                    self.target_idx,
+                                    ArenaRequiredProof {
+                                        key: self.key,
+                                        min_len: (logical_end as u8 + 1).min(64),
+                                    },
+                                ));
+                            }
+                            ArenaSparseNodeBranchChild::Revealed(child) => {
+                                let child = *child;
+                                self.ancestors.push(self.current);
+                                arena.prefetch(child);
+                                self.phase = InterleavedSeekPhase::UsePrefetched {
+                                    child,
+                                    path_offset: logical_end + 1,
+                                };
+                                return ChangedSeekResult::Pending;
+                            }
+                        }
+                    }
+                },
+                InterleavedSeekPhase::UsePrefetched { child, path_offset } => {
+                    self.current = child;
+                    self.path_offset = path_offset;
+                    self.phase = InterleavedSeekPhase::LoadCurrent;
+                }
+            }
+        }
+    }
+}
+
+/// A removal seek that only succeeds for existing leaves with a revealed parent branch.
+#[derive(Debug, Clone)]
+struct RemovalSeekTask {
+    full_path: Nibbles,
+    current: Index,
+    path_offset: usize,
+    phase: InterleavedSeekPhase,
+    ancestors: SmallVec<[Index; 8]>,
+    last_child_nibble: Option<u8>,
+}
+
+impl RemovalSeekTask {
+    fn new(full_path: Nibbles, current: Index, path_offset: usize) -> Self {
+        Self {
+            full_path,
+            current,
+            path_offset,
+            phase: InterleavedSeekPhase::LoadCurrent,
+            ancestors: SmallVec::new(),
+            last_child_nibble: None,
+        }
+    }
+
+    fn step(&mut self, arena: &NodeArena) -> RemovalSeekResult {
+        loop {
+            match self.phase {
+                InterleavedSeekPhase::LoadCurrent => match &arena[self.current] {
+                    ArenaSparseNode::EmptyRoot |
+                    ArenaSparseNode::Subtrie(_) |
+                    ArenaSparseNode::TakenSubtrie => return RemovalSeekResult::Fallback,
+                    ArenaSparseNode::Leaf { key, .. } => {
+                        let remaining = self.full_path.slice(self.path_offset..);
+                        if remaining != *key {
+                            return RemovalSeekResult::Fallback;
+                        }
+
+                        let Some(parent_idx) = self.ancestors.last().copied() else {
+                            return RemovalSeekResult::Fallback;
+                        };
+                        let child_nibble = self
+                            .last_child_nibble
+                            .expect("leaf with parent must have child nibble");
+
+                        return RemovalSeekResult::Target(RemovalSeekTarget {
+                            parent_idx,
+                            leaf_idx: self.current,
+                            child_nibble,
+                            ancestors: mem::take(&mut self.ancestors),
+                        });
+                    }
+                    ArenaSparseNode::Branch(branch) => {
+                        let logical_end = self.path_offset + branch.short_key.len();
+                        if self.full_path.len() <= logical_end ||
+                            self.full_path.slice(self.path_offset..logical_end) !=
+                                branch.short_key
+                        {
+                            return RemovalSeekResult::Fallback;
+                        }
+
+                        let child_nibble = self.full_path.get_unchecked(logical_end);
+                        let Some(child_idx) = BranchChildIdx::new(branch.state_mask, child_nibble)
+                        else {
+                            return RemovalSeekResult::Fallback;
+                        };
+
+                        match &branch.children[child_idx] {
+                            ArenaSparseNodeBranchChild::Blinded(_) => {
+                                return RemovalSeekResult::Fallback;
+                            }
+                            ArenaSparseNodeBranchChild::Revealed(child) => {
+                                let child = *child;
+                                self.ancestors.push(self.current);
+                                self.last_child_nibble = Some(child_nibble);
+                                arena.prefetch(child);
+                                self.phase = InterleavedSeekPhase::UsePrefetched {
+                                    child,
+                                    path_offset: logical_end + 1,
+                                };
+                                return RemovalSeekResult::Pending;
+                            }
+                        }
+                    }
+                },
+                InterleavedSeekPhase::UsePrefetched { child, path_offset } => {
+                    self.current = child;
+                    self.path_offset = path_offset;
+                    self.phase = InterleavedSeekPhase::LoadCurrent;
+                }
+            }
+        }
+    }
+}
+
+/// A read-only sparse trie seek that can yield after issuing a child prefetch.
+#[derive(Debug, Clone, Copy)]
+struct TouchedSeekTask {
+    target_idx: usize,
+    key: B256,
+    full_path: Nibbles,
+    current: Index,
+    path_offset: usize,
+    phase: InterleavedSeekPhase,
+}
+
+impl TouchedSeekTask {
+    const fn new(
+        target_idx: usize,
+        key: B256,
+        full_path: Nibbles,
+        current: Index,
+        path_offset: usize,
+    ) -> Self {
+        Self {
+            target_idx,
+            key,
+            full_path,
+            current,
+            path_offset,
+            phase: InterleavedSeekPhase::LoadCurrent,
+        }
+    }
+
+    fn step(&mut self, arena: &NodeArena) -> TouchedSeekResult {
+        loop {
+            match self.phase {
+                InterleavedSeekPhase::LoadCurrent => match &arena[self.current] {
+                    ArenaSparseNode::EmptyRoot |
+                    ArenaSparseNode::Leaf { .. } |
+                    ArenaSparseNode::Subtrie(_) |
+                    ArenaSparseNode::TakenSubtrie => return TouchedSeekResult::Done,
+                    ArenaSparseNode::Branch(branch) => {
+                        let logical_end = self.path_offset + branch.short_key.len();
+                        if self.full_path.len() <= logical_end ||
+                            self.full_path.slice(self.path_offset..logical_end) !=
+                                branch.short_key
+                        {
+                            return TouchedSeekResult::Done;
+                        }
+
+                        let child_nibble = self.full_path.get_unchecked(logical_end);
+                        let Some(branch_child_idx) =
+                            BranchChildIdx::new(branch.state_mask, child_nibble)
+                        else {
+                            return TouchedSeekResult::Done;
+                        };
+
+                        match &branch.children[branch_child_idx] {
+                            ArenaSparseNodeBranchChild::Blinded(_) => {
+                                return TouchedSeekResult::Proof((
+                                    self.target_idx,
+                                    ArenaRequiredProof {
+                                        key: self.key,
+                                        min_len: (logical_end as u8 + 1).min(64),
+                                    },
+                                ));
+                            }
+                            ArenaSparseNodeBranchChild::Revealed(child) => {
+                                let child = *child;
+                                arena.prefetch(child);
+                                self.phase = InterleavedSeekPhase::UsePrefetched {
+                                    child,
+                                    path_offset: logical_end + 1,
+                                };
+                                return TouchedSeekResult::Pending;
+                            }
+                        }
+                    }
+                },
+                InterleavedSeekPhase::UsePrefetched { child, path_offset } => {
+                    self.current = child;
+                    self.path_offset = path_offset;
+                    self.phase = InterleavedSeekPhase::LoadCurrent;
+                }
+            }
+        }
+    }
 }
 
 /// An arena-based parallel sparse trie.
@@ -563,7 +1576,7 @@ impl Default for ArenaParallelismThresholds {
 ///
 /// ## Structure
 ///
-/// Uses arena allocation ([`slotmap::SlotMap`]) for node storage with direct index-based child
+/// Uses arena allocation ([`NodeArena`]) for node storage with direct index-based child
 /// pointers, avoiding the per-node hashing overhead of a `HashMap`-based trie. The trie is split
 /// into two tiers:
 ///
@@ -640,6 +1653,61 @@ impl ArenaParallelSparseTrie {
     ) -> Self {
         self.parallelism_thresholds = thresholds;
         self
+    }
+
+    /// Retrieves leaf values for `full_paths`, preserving input order.
+    ///
+    /// This is the batched counterpart of [`SparseTrie::get_leaf_value`]. It interleaves
+    /// independent read-only traversals so cache misses from one path can overlap with useful
+    /// work on other paths.
+    pub fn get_leaf_values<'a>(&'a self, full_paths: &[Nibbles]) -> Vec<Option<&'a Vec<u8>>> {
+        if full_paths.is_empty() {
+            return Vec::new();
+        }
+
+        let mut next = 0usize;
+        let mut active = 0usize;
+        let mut slots = Vec::with_capacity(INTERLEAVED_LEAF_VALUE_LOOKUP_GROUP_SIZE);
+        let mut results = vec![None; full_paths.len()];
+
+        for _ in 0..INTERLEAVED_LEAF_VALUE_LOOKUP_GROUP_SIZE {
+            let slot = full_paths.get(next).copied().map(|full_path| {
+                let task = LeafValueLookupTask::new(next, full_path, &self.upper_arena, self.root);
+                next += 1;
+                task
+            });
+            if slot.is_some() {
+                active += 1;
+            }
+            slots.push(slot);
+        }
+
+        while active > 0 {
+            for slot in &mut slots {
+                let Some(task) = slot.as_mut() else { continue };
+                match task.step() {
+                    LeafValueLookupStep::Pending => continue,
+                    LeafValueLookupStep::Done { target_idx, value } => {
+                        results[target_idx] = value;
+                    }
+                }
+
+                if let Some(full_path) = full_paths.get(next).copied() {
+                    *slot = Some(LeafValueLookupTask::new(
+                        next,
+                        full_path,
+                        &self.upper_arena,
+                        self.root,
+                    ));
+                    next += 1;
+                } else {
+                    *slot = None;
+                    active -= 1;
+                }
+            }
+        }
+
+        results
     }
 
     /// Resets the debug recorder and records the current trie state as `SetRoot` + `RevealNodes`
@@ -2137,6 +3205,39 @@ impl ArenaParallelSparseTrie {
         Some(child_idx)
     }
 
+    /// Reveals a proof node at a branch child found by a prior read-only seek.
+    fn reveal_node_at_child(
+        arena: &mut NodeArena,
+        node: &mut ProofTrieNodeV2,
+        parent_idx: Index,
+        dense_child_idx: BranchChildIdx,
+    ) -> Option<Index> {
+        let head_branch = arena[parent_idx].branch_ref();
+        let cached_rlp = match &head_branch.children[dense_child_idx] {
+            ArenaSparseNodeBranchChild::Blinded(rlp) => rlp.clone(),
+            ArenaSparseNodeBranchChild::Revealed(_) => return None,
+        };
+
+        trace!(
+            target: TRACE_TARGET,
+            path = ?node.path,
+            rlp_node = ?cached_rlp,
+            "Revealing node",
+        );
+
+        let proof_node = mem::replace(node, ProofTrieNodeV2::empty());
+        let mut arena_node = ArenaSparseNode::from_proof_node(proof_node);
+
+        let state = arena_node.state_mut();
+        *state = ArenaSparseNodeState::Cached { rlp_node: cached_rlp };
+
+        let child_idx = arena.insert(arena_node);
+        arena[parent_idx].branch_mut().children[dense_child_idx] =
+            ArenaSparseNodeBranchChild::Revealed(child_idx);
+
+        Some(child_idx)
+    }
+
     #[cfg(debug_assertions)]
     fn collect_reachable_nodes(arena: &NodeArena, idx: Index, reachable: &mut HashSet<Index>) {
         if !reachable.insert(idx) {
@@ -2184,7 +3285,7 @@ impl Drop for ArenaParallelSparseTrie {
 
 impl Default for ArenaParallelSparseTrie {
     fn default() -> Self {
-        let mut upper_arena = SlotMap::new();
+        let mut upper_arena = NodeArena::new();
         let root = upper_arena.insert(ArenaSparseNode::EmptyRoot);
         Self {
             upper_arena,
@@ -2589,7 +3690,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         #[cfg(feature = "trie-debug")]
         self.debug_recorder.reset();
 
-        self.upper_arena = SlotMap::new();
+        self.upper_arena = NodeArena::new();
         self.root = self.upper_arena.insert(ArenaSparseNode::EmptyRoot);
         if let Some(updates) = self.updates.as_mut() {
             updates.clear()
@@ -2617,10 +3718,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn memory_size(&self) -> usize {
-        let slot_size = slotmap_slot_size::<ArenaSparseNode>();
-
-        // Upper arena: capacity × slot size.
-        let upper = self.upper_arena.capacity() * slot_size;
+        let upper = self.upper_arena.memory_size();
 
         // Active subtries: cached total memory from last prune.
         let subtrie_size: usize = self
@@ -3257,6 +4355,343 @@ mod tests {
             changeset.entry(key).or_insert(value);
         }
         changeset
+    }
+
+    #[test]
+    fn test_get_leaf_values_matches_scalar_lookup() {
+        let key_1 = B256::repeat_byte(0x11);
+        let key_2 = B256::repeat_byte(0x22);
+        let key_3 = B256::repeat_byte(0x33);
+        let missing = B256::repeat_byte(0x44);
+
+        let mut trie = ArenaParallelSparseTrie::default();
+        let mut updates = B256Map::from_iter([
+            (key_1, LeafUpdate::Changed(vec![0x01])),
+            (key_2, LeafUpdate::Changed(vec![0x02, 0x03])),
+            (key_3, LeafUpdate::Changed(vec![0x04, 0x05, 0x06])),
+        ]);
+        trie.update_leaves(&mut updates, |key, min_len| {
+            panic!("unexpected proof request for {key:?} at {min_len}")
+        })
+        .expect("updates should succeed");
+
+        let paths = vec![
+            Nibbles::unpack(key_2),
+            Nibbles::unpack(missing),
+            Nibbles::unpack(key_1),
+            Nibbles::unpack(key_3),
+            Nibbles::unpack(missing),
+        ];
+
+        let scalar =
+            paths.iter().map(|path| trie.get_leaf_value(path).cloned()).collect::<Vec<_>>();
+        let batched = trie
+            .get_leaf_values(&paths)
+            .into_iter()
+            .map(|value| value.cloned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(batched, scalar);
+    }
+
+    #[test]
+    fn test_reveal_nodes_interleaved_matches_scalar_subtrie() {
+        use super::{
+            ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeBranchChild,
+            ArenaSparseNodeState, ArenaSparseSubtrie, NodeArena,
+        };
+        use alloy_trie::TrieMask;
+        use reth_trie_common::{BranchNodeMasks, LeafNode, ProofTrieNodeV2, RlpNode, TrieNodeV2};
+        use smallvec::SmallVec;
+
+        let depth = 3;
+        let paths = (0..128)
+            .map(|idx| {
+                Nibbles::from_nibbles([
+                    ((idx >> 8) & 0x0f) as u8,
+                    ((idx >> 4) & 0x0f) as u8,
+                    (idx & 0x0f) as u8,
+                ])
+            })
+            .collect::<Vec<_>>();
+
+        let leaf = LeafNode::new(Nibbles::default(), vec![0x42]);
+        let leaf_rlp = RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap();
+
+        let mut arena = NodeArena::with_capacity(paths.len() * depth);
+        let mut current = paths
+            .iter()
+            .map(|path| (*path, ArenaSparseNodeBranchChild::Blinded(leaf_rlp.clone())))
+            .collect::<Vec<_>>();
+
+        for level in (0..depth).rev() {
+            let mut next = Vec::new();
+            let mut start = 0;
+            while start < current.len() {
+                let parent_prefix = current[start].0.slice(..level);
+                let mut end = start + 1;
+                while end < current.len() && current[end].0.starts_with(&parent_prefix) {
+                    end += 1;
+                }
+
+                let mut children = SmallVec::new();
+                let mut state_mask = TrieMask::default();
+                for (path, child) in &current[start..end] {
+                    let child_nibble = path.get_unchecked(level);
+                    state_mask.set_bit(child_nibble);
+                    children.push(child.clone());
+                }
+
+                let branch = ArenaSparseNodeBranch {
+                    state: ArenaSparseNodeState::Revealed,
+                    children,
+                    state_mask,
+                    short_key: Nibbles::default(),
+                    branch_masks: BranchNodeMasks::default(),
+                };
+                next.push((
+                    parent_prefix,
+                    ArenaSparseNodeBranchChild::Revealed(
+                        arena.insert(ArenaSparseNode::Branch(branch)),
+                    ),
+                ));
+                start = end;
+            }
+            current = next;
+        }
+
+        let (_, ArenaSparseNodeBranchChild::Revealed(root)) = current.pop().unwrap() else {
+            unreachable!()
+        };
+
+        let mut subtrie = ArenaSparseSubtrie::new(false);
+        subtrie.arena = arena;
+        subtrie.root = root;
+
+        let nodes = paths
+            .iter()
+            .map(|path| ProofTrieNodeV2 {
+                path: *path,
+                node: TrieNodeV2::Leaf(leaf.clone()),
+                masks: None,
+            })
+            .collect::<Vec<_>>();
+
+        let mut scalar_subtrie = subtrie.clone();
+        let mut scalar_nodes = nodes.clone();
+        scalar_subtrie.reveal_nodes_scalar(&mut scalar_nodes);
+
+        let mut interleaved_subtrie = subtrie;
+        let mut interleaved_nodes = nodes;
+        interleaved_subtrie.reveal_nodes_interleaved(&mut interleaved_nodes);
+
+        assert_eq!(scalar_subtrie.num_leaves, interleaved_subtrie.num_leaves);
+        for path in paths {
+            assert_eq!(
+                ArenaParallelSparseTrie::get_leaf_value_in_arena(
+                    &scalar_subtrie.arena,
+                    scalar_subtrie.root,
+                    &path,
+                    scalar_subtrie.path.len(),
+                ),
+                ArenaParallelSparseTrie::get_leaf_value_in_arena(
+                    &interleaved_subtrie.arena,
+                    interleaved_subtrie.root,
+                    &path,
+                    interleaved_subtrie.path.len(),
+                ),
+            );
+        }
+    }
+
+    #[test]
+    fn test_update_touched_leaves_interleaved_matches_scalar_subtrie() {
+        use super::{
+            ArenaRequiredProof, ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeBranchChild,
+            ArenaSparseNodeState, ArenaSparseSubtrie, NodeArena,
+        };
+        use alloy_trie::TrieMask;
+        use reth_trie_common::{BranchNodeMasks, RlpNode};
+        use smallvec::SmallVec;
+
+        let depth = 3;
+        let paths = (0..128)
+            .map(|idx| {
+                Nibbles::from_nibbles([
+                    ((idx >> 8) & 0x0f) as u8,
+                    ((idx >> 4) & 0x0f) as u8,
+                    (idx & 0x0f) as u8,
+                ])
+            })
+            .collect::<Vec<_>>();
+
+        let blinded = RlpNode::word_rlp(&B256::ZERO);
+        let mut arena = NodeArena::with_capacity(paths.len() * depth);
+        let mut current = paths
+            .iter()
+            .map(|path| (*path, ArenaSparseNodeBranchChild::Blinded(blinded.clone())))
+            .collect::<Vec<_>>();
+
+        for level in (0..depth).rev() {
+            let mut next = Vec::new();
+            let mut start = 0;
+            while start < current.len() {
+                let parent_prefix = current[start].0.slice(..level);
+                let mut end = start + 1;
+                while end < current.len() && current[end].0.starts_with(&parent_prefix) {
+                    end += 1;
+                }
+
+                let mut children = SmallVec::new();
+                let mut state_mask = TrieMask::default();
+                for (path, child) in &current[start..end] {
+                    let child_nibble = path.get_unchecked(level);
+                    state_mask.set_bit(child_nibble);
+                    children.push(child.clone());
+                }
+
+                let branch = ArenaSparseNodeBranch {
+                    state: ArenaSparseNodeState::Revealed,
+                    children,
+                    state_mask,
+                    short_key: Nibbles::default(),
+                    branch_masks: BranchNodeMasks::default(),
+                };
+                next.push((
+                    parent_prefix,
+                    ArenaSparseNodeBranchChild::Revealed(
+                        arena.insert(ArenaSparseNode::Branch(branch)),
+                    ),
+                ));
+                start = end;
+            }
+            current = next;
+        }
+
+        let (_, ArenaSparseNodeBranchChild::Revealed(root)) = current.pop().unwrap() else {
+            unreachable!()
+        };
+
+        let mut subtrie = ArenaSparseSubtrie::new(false);
+        subtrie.arena = arena;
+        subtrie.root = root;
+
+        let updates = paths
+            .into_iter()
+            .map(|path| {
+                (ArenaParallelSparseTrie::nibbles_to_padded_b256(&path), path, LeafUpdate::Touched)
+            })
+            .collect::<Vec<_>>();
+
+        let proof_key =
+            |(idx, proof): &(usize, ArenaRequiredProof)| (*idx, proof.key, proof.min_len);
+
+        let mut scalar_subtrie = subtrie.clone();
+        scalar_subtrie.buffers.cursor.reset(
+            &scalar_subtrie.arena,
+            scalar_subtrie.root,
+            scalar_subtrie.path,
+        );
+        scalar_subtrie.update_touched_leaves_scalar(&updates, 0..updates.len());
+        scalar_subtrie.buffers.cursor.drain(&mut scalar_subtrie.arena);
+
+        let mut interleaved_subtrie = subtrie;
+        interleaved_subtrie.update_touched_leaves_interleaved(&updates, 0..updates.len());
+
+        let scalar_proofs =
+            scalar_subtrie.required_proofs.iter().map(proof_key).collect::<Vec<_>>();
+        let interleaved_proofs =
+            interleaved_subtrie.required_proofs.iter().map(proof_key).collect::<Vec<_>>();
+        assert_eq!(scalar_proofs, interleaved_proofs);
+    }
+
+    #[test]
+    fn test_update_changed_leaves_interleaved_existing_leaves() {
+        let keys = (0..128)
+            .map(|idx| {
+                let mut bytes = [0u8; 32];
+                bytes[30] = (idx >> 8) as u8;
+                bytes[31] = idx as u8;
+                B256::from(bytes)
+            })
+            .collect::<Vec<_>>();
+
+        let mut trie = ArenaParallelSparseTrie::default();
+        let mut initial = keys
+            .iter()
+            .enumerate()
+            .map(|(idx, key)| (*key, LeafUpdate::Changed(vec![idx as u8])))
+            .collect::<B256Map<_>>();
+        trie.update_leaves(&mut initial, |key, min_len| {
+            panic!("unexpected proof request for {key:?} at {min_len}")
+        })
+        .expect("initial updates should succeed");
+        trie.root();
+
+        let mut updates = keys
+            .iter()
+            .enumerate()
+            .map(|(idx, key)| (*key, LeafUpdate::Changed(vec![(idx + 1) as u8])))
+            .collect::<B256Map<_>>();
+        trie.update_leaves(&mut updates, |key, min_len| {
+            panic!("unexpected proof request for {key:?} at {min_len}")
+        })
+        .expect("changed updates should succeed");
+
+        for (idx, key) in keys.iter().enumerate() {
+            assert_eq!(
+                trie.get_leaf_value(&Nibbles::unpack(*key)).map(Vec::as_slice),
+                Some([(idx + 1) as u8].as_slice())
+            );
+        }
+    }
+
+    #[test]
+    fn test_update_removed_leaves_interleaved_no_collapse() {
+        let mut keys = Vec::new();
+        let mut removed_keys = Vec::new();
+        for group in 0..128 {
+            for nibble in 0..16 {
+                let mut bytes = [0u8; 32];
+                bytes[29] = (group >> 8) as u8;
+                bytes[30] = group as u8;
+                bytes[31] = nibble;
+                let key = B256::from(bytes);
+                if nibble == 0 {
+                    removed_keys.push(key);
+                }
+                keys.push(key);
+            }
+        }
+
+        let mut trie = ArenaParallelSparseTrie::default();
+        let mut initial =
+            keys.iter().map(|key| (*key, LeafUpdate::Changed(vec![0x01]))).collect::<B256Map<_>>();
+        trie.update_leaves(&mut initial, |key, min_len| {
+            panic!("unexpected proof request for {key:?} at {min_len}")
+        })
+        .expect("initial updates should succeed");
+        trie.root();
+
+        let mut removals = removed_keys
+            .iter()
+            .map(|key| (*key, LeafUpdate::Changed(Vec::new())))
+            .collect::<B256Map<_>>();
+        trie.update_leaves(&mut removals, |key, min_len| {
+            panic!("unexpected proof request for {key:?} at {min_len}")
+        })
+        .expect("removals should succeed");
+
+        for key in &removed_keys {
+            assert!(trie.get_leaf_value(&Nibbles::unpack(*key)).is_none());
+        }
+
+        for key in keys.iter().filter(|key| !removed_keys.contains(key)) {
+            assert_eq!(
+                trie.get_leaf_value(&Nibbles::unpack(*key)).map(Vec::as_slice),
+                Some(&[0x01][..])
+            );
+        }
     }
 
     proptest! {
