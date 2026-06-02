@@ -239,10 +239,15 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
         cached_storage_roots: Arc<DashMap<B256, B256>>,
         storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
     ) -> Self {
+        let storage_proof_results = Rc::new(RefCell::new(B256Map::with_capacity_and_hasher(
+            dispatched.len(),
+            Default::default(),
+        )));
+
         Self {
             dispatched,
             cached_storage_roots,
-            storage_proof_results: Default::default(),
+            storage_proof_results,
             storage_calculator,
             stats: Default::default(),
         }
