@@ -7,7 +7,7 @@
 //! computed root.
 
 use alloy_eips::Encodable2718;
-use alloy_primitives::{map::HashMap, Bloom, B256};
+use alloy_primitives::{Bloom, B256};
 use crossbeam_channel::Receiver;
 use reth_primitives_traits::Receipt;
 use reth_trie_common::ordered_root::OrderedTrieRootEncodedBuilder;
@@ -81,7 +81,6 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
         let mut aggregated_bloom = Bloom::ZERO;
         let mut encode_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
         let mut next = 0usize;
-        let mut pending = HashMap::new();
 
         let mut push = |receipt: R| {
             let receipt_with_bloom = receipt.with_bloom_ref();
@@ -97,13 +96,14 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
             if indexed_receipt.index == next {
                 push(indexed_receipt.receipt);
                 next += 1;
-
-                while let Some(receipt) = pending.remove(&next) {
-                    push(receipt);
-                    next += 1;
-                }
             } else {
-                pending.insert(indexed_receipt.index, indexed_receipt.receipt);
+                tracing::error!(
+                    target: "engine::tree::payload_processor",
+                    expected = next,
+                    received = indexed_receipt.index,
+                    "Receipt root task received non-sequential receipt"
+                );
+                return;
             }
         }
 
@@ -113,16 +113,6 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
                 expected = receipts_len,
                 received = next,
                 "Receipt root task received incomplete receipts, execution likely aborted"
-            );
-            return;
-        }
-
-        if !pending.is_empty() {
-            tracing::error!(
-                target: "engine::tree::payload_processor",
-                received = next,
-                pending = pending.len(),
-                "Receipt root task received gapped receipts"
             );
             return;
         }
@@ -265,12 +255,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_receipt_root_task_out_of_order() {
+    async fn test_receipt_root_task_rejects_out_of_order_receipts() {
         let receipts: Vec<Receipt> = vec![Receipt::default(); 5];
-
-        // Calculate expected values first (before we move receipts)
-        let receipts_with_bloom: Vec<_> = receipts.iter().map(|r| r.with_bloom_ref()).collect();
-        let expected_root = calculate_receipt_root(&receipts_with_bloom);
 
         let (tx, rx) = bounded(4);
         let (result_tx, result_rx) = oneshot::channel();
@@ -281,13 +267,13 @@ mod tests {
 
         // Send in reverse order to test out-of-order handling
         for (i, receipt) in receipts.into_iter().enumerate().rev() {
-            tx.send(IndexedReceipt::new(i, receipt)).unwrap();
+            if tx.send(IndexedReceipt::new(i, receipt)).is_err() {
+                break;
+            }
         }
         drop(tx);
 
         join_handle.await.unwrap();
-        let (root, _bloom) = result_rx.await.unwrap();
-
-        assert_eq!(root, expected_root);
+        assert!(result_rx.await.is_err());
     }
 }
