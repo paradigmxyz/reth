@@ -25,6 +25,7 @@ use tracing::info;
 
 /// Number of blocks before pushing indices from cache to [`Collector`]
 const DEFAULT_CACHE_THRESHOLD: u64 = 100_000;
+const MAX_ACCOUNT_HISTORY_CACHE_PREALLOC: usize = 16_384;
 
 /// Collects all history (`H`) indices for a range of changesets (`CS`) and stores them in a
 /// [`Collector`].
@@ -123,7 +124,17 @@ where
     Provider: DBProvider + ChangeSetReader + StaticFileProviderFactory,
 {
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
-    let mut cache: AddressMap<Vec<u64>> = AddressMap::default();
+
+    // Convert range bounds to concrete range
+    let range = to_range(range);
+    let start_block = range.start;
+    let cache_capacity = range
+        .end
+        .saturating_sub(start_block)
+        .min(DEFAULT_CACHE_THRESHOLD)
+        .min(MAX_ACCOUNT_HISTORY_CACHE_PREALLOC as u64) as usize;
+    let mut cache: AddressMap<Vec<u64>> =
+        AddressMap::with_capacity_and_hasher(cache_capacity, Default::default());
 
     let mut insert_fn = |address: Address, indices: Vec<u64>| {
         let last = indices.last().expect("indices is non-empty");
@@ -131,10 +142,6 @@ where
             .insert(ShardedKey::new(address, *last), BlockNumberList::new_pre_sorted(indices))?;
         Ok(())
     };
-
-    // Convert range bounds to concrete range
-    let range = to_range(range);
-    let start_block = range.start;
 
     // Use the new walker for lazy iteration over static file changesets
     let static_file_provider = provider.static_file_provider();
