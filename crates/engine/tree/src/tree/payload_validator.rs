@@ -1372,12 +1372,12 @@ where
             return;
         }
 
-        let Some(prewarm_states) = prewarm_state_loader.and_then(PrewarmStateLoader::snapshot)
+        let Some(prewarm_state) = prewarm_state_loader.and_then(PrewarmStateLoader::snapshot)
         else {
             return;
         };
 
-        state.database.set_prewarm_states(prewarm_states);
+        state.database.set_prewarm_state(prewarm_state);
         *prewarm_state_loaded = true;
     }
 
@@ -2114,22 +2114,22 @@ enum StateRootStrategy<N: NodePrimitives> {
 
 struct PrewarmStateDatabase<'a, DB> {
     database: DB,
-    prewarm_states: Option<&'a [CacheState]>,
+    prewarm_state: Option<&'a CacheState>,
 }
 
 impl<DB> PrewarmStateDatabase<'_, DB> {
     const fn new(database: DB) -> Self {
-        Self { database, prewarm_states: None }
+        Self { database, prewarm_state: None }
     }
 }
 
 impl<'a, DB> PrewarmStateDatabase<'a, DB> {
-    fn set_prewarm_states(&mut self, prewarm_states: &'a [CacheState]) {
-        self.prewarm_states = Some(prewarm_states);
+    fn set_prewarm_state(&mut self, prewarm_state: &'a CacheState) {
+        self.prewarm_state = Some(prewarm_state);
     }
 
     fn prewarm_account(&self, address: &Address) -> Option<&CacheAccount> {
-        self.prewarm_states?.iter().find_map(|prewarm_state| prewarm_state.accounts.get(address))
+        self.prewarm_state?.accounts.get(address)
     }
 }
 
@@ -2137,7 +2137,7 @@ impl<DB: std::fmt::Debug> std::fmt::Debug for PrewarmStateDatabase<'_, DB> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PrewarmStateDatabase")
             .field("database", &self.database)
-            .field("has_prewarm_states", &self.prewarm_states.is_some())
+            .field("has_prewarm_state", &self.prewarm_state.is_some())
             .finish()
     }
 }
@@ -2154,9 +2154,9 @@ impl<DB: revm::Database> revm::Database for PrewarmStateDatabase<'_, DB> {
     }
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        if let Some(bytecode) = self.prewarm_states.and_then(|prewarm_states| {
-            prewarm_states.iter().find_map(|prewarm_state| prewarm_state.contracts.get(&code_hash))
-        }) {
+        if let Some(bytecode) =
+            self.prewarm_state.and_then(|prewarm_state| prewarm_state.contracts.get(&code_hash))
+        {
             return Ok(bytecode.clone());
         }
 
@@ -2164,11 +2164,8 @@ impl<DB: revm::Database> revm::Database for PrewarmStateDatabase<'_, DB> {
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        if let Some(prewarm_states) = self.prewarm_states {
-            for prewarm_state in prewarm_states {
-                let Some(cache_account) = prewarm_state.accounts.get(&address) else {
-                    continue;
-                };
+        if let Some(prewarm_state) = self.prewarm_state {
+            if let Some(cache_account) = prewarm_state.accounts.get(&address) {
                 let Some(account) = cache_account.account.as_ref() else {
                     return Ok(U256::ZERO);
                 };

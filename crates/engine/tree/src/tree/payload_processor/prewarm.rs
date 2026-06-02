@@ -20,7 +20,7 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, StorageKey, B256};
+use alloy_primitives::{keccak256, Address, StorageKey, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
@@ -33,7 +33,10 @@ use reth_provider::{
 };
 use reth_revm::{
     database::StateProviderDatabase,
-    db::{states::CacheState, State},
+    db::{
+        states::{CacheAccount, CacheState},
+        State,
+    },
     state::EvmState,
 };
 use reth_tasks::{
@@ -624,7 +627,7 @@ where
 
     /// Drains state reads from transaction prewarm workers and publishes them to execution.
     fn collect_transaction_prewarm_state(&self, pool: &WorkerPool) {
-        let prewarm_state = Self::collect_prewarm_states_from_pool(pool, |worker| {
+        let prewarm_state = Self::collect_prewarm_state_from_pool(pool, |worker| {
             worker
                 .get_mut::<PrewarmEvmState<Evm>>()
                 .as_mut()
@@ -634,11 +637,11 @@ where
         self.prewarm_state_loader.set(prewarm_state);
     }
 
-    /// Collects one local state map from every worker after prewarming completes.
-    fn collect_prewarm_states_from_pool(
+    /// Collects and squashes local state maps from every worker after prewarming completes.
+    fn collect_prewarm_state_from_pool(
         pool: &WorkerPool,
         collect: impl Fn(&mut Worker) -> CacheState + Sync,
-    ) -> Vec<CacheState> {
+    ) -> CacheState {
         let (tx, rx) = crossbeam_channel::unbounded();
         pool.broadcast(pool.current_num_threads(), |worker| {
             let state = collect(worker);
@@ -648,7 +651,42 @@ where
         });
         drop(tx);
 
-        rx.into_iter().collect()
+        Self::squash_prewarm_states(rx)
+    }
+
+    fn squash_prewarm_states(states: impl IntoIterator<Item = CacheState>) -> CacheState {
+        let mut squashed = CacheState::default();
+
+        for state in states {
+            for (code_hash, bytecode) in state.contracts {
+                squashed.contracts.entry(code_hash).or_insert(bytecode);
+            }
+
+            for (address, account) in state.accounts {
+                Self::merge_prewarm_account(&mut squashed, address, account);
+            }
+        }
+
+        squashed
+    }
+
+    fn merge_prewarm_account(squashed: &mut CacheState, address: Address, account: CacheAccount) {
+        let Some(existing) = squashed.accounts.get_mut(&address) else {
+            squashed.accounts.insert(address, account);
+            return;
+        };
+
+        let Some(incoming_account) = account.account else {
+            return;
+        };
+
+        let Some(existing_account) = existing.account.as_mut() else {
+            existing.account = Some(incoming_account);
+            existing.status = account.status;
+            return;
+        };
+
+        existing_account.storage.extend(incoming_account.storage);
     }
 
     /// Returns `true` if prewarming should stop.

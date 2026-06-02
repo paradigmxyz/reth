@@ -221,7 +221,7 @@ pub enum CachedStatus<T> {
 
 /// One-shot handoff for prewarmed state shared with the execution thread.
 #[derive(Clone, Default)]
-pub struct PrewarmStateLoader(Arc<OnceLock<Box<[CacheState]>>>);
+pub struct PrewarmStateLoader(Arc<OnceLock<CacheState>>);
 
 impl fmt::Debug for PrewarmStateLoader {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -237,16 +237,16 @@ impl PrewarmStateLoader {
         Self::default()
     }
 
-    /// Sets the collected prewarm states.
-    pub fn set(&self, states: Vec<CacheState>) {
-        if !states.is_empty() {
-            let _ = self.0.set(states.into_boxed_slice());
+    /// Sets the collected prewarm state.
+    pub fn set(&self, state: CacheState) {
+        if !state.accounts.is_empty() || !state.contracts.is_empty() {
+            let _ = self.0.set(state);
         }
     }
 
-    /// Returns the installed prewarm state snapshots.
-    pub fn snapshot(&self) -> Option<&[CacheState]> {
-        self.0.get().map(AsRef::as_ref)
+    /// Returns the installed prewarm state snapshot.
+    pub fn snapshot(&self) -> Option<&CacheState> {
+        self.0.get()
     }
 }
 
@@ -1127,16 +1127,15 @@ mod tests {
         let address = Address::random();
         let loader = PrewarmStateLoader::new();
 
-        loader.set(Vec::new());
+        loader.set(CacheState::default());
         assert!(loader.snapshot().is_none());
 
         let mut cache = CacheState::default();
         cache.insert_not_existing(address);
-        loader.set(vec![cache]);
+        loader.set(cache);
 
         let snapshot = loader.snapshot().expect("non-empty cache should be published");
-        assert_eq!(snapshot.len(), 1);
-        assert!(snapshot[0].accounts.contains_key(&address));
+        assert!(snapshot.accounts.contains_key(&address));
     }
 
     #[test]
