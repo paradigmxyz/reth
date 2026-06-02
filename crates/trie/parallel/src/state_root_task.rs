@@ -6,7 +6,10 @@ use alloy_primitives::{keccak256, B256};
 use derive_more::derive::Deref;
 use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2};
 use revm_state::EvmState;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use tracing::trace;
 
 /// Messages used internally by the multi proof task.
@@ -55,6 +58,8 @@ pub struct StateRootComputeOutcome {
 pub struct StateRootHandle {
     /// The state root that the cached sparse trie is anchored at (parent block's state root).
     cached_trie_state_root: B256,
+    /// Shared flag set while this handle is waiting for its parent sparse trie to become available.
+    deferred_parent_pending: Option<Arc<AtomicBool>>,
     /// Channel for streaming state updates and proof targets into the sparse trie pipeline.
     updates_tx: crossbeam_channel::Sender<StateRootMessage>,
     /// Receiver for the final state root result.
@@ -76,6 +81,29 @@ impl StateRootHandle {
     ) -> Self {
         Self {
             cached_trie_state_root,
+            deferred_parent_pending: None,
+            updates_tx,
+            state_root_rx: Some(state_root_rx),
+            hashed_state_rx: Some(hashed_state_rx),
+        }
+    }
+
+    /// Creates a new deferred [`StateRootHandle`].
+    ///
+    /// A deferred handle queues payload-builder updates until the parent block has been validated
+    /// and an active sparse-trie task can be rooted at the parent's post-state.
+    pub fn new_deferred(
+        cached_trie_state_root: B256,
+        updates_tx: crossbeam_channel::Sender<StateRootMessage>,
+        state_root_rx: std::sync::mpsc::Receiver<
+            Result<StateRootComputeOutcome, ParallelStateRootError>,
+        >,
+        hashed_state_rx: std::sync::mpsc::Receiver<HashedPostState>,
+        deferred_parent_pending: Arc<AtomicBool>,
+    ) -> Self {
+        Self {
+            cached_trie_state_root,
+            deferred_parent_pending: Some(deferred_parent_pending),
             updates_tx,
             state_root_rx: Some(state_root_rx),
             hashed_state_rx: Some(hashed_state_rx),
@@ -85,6 +113,18 @@ impl StateRootHandle {
     /// Returns the state root that the cached sparse trie is anchored at.
     pub const fn cached_trie_state_root(&self) -> B256 {
         self.cached_trie_state_root
+    }
+
+    /// Returns true if this handle is waiting for parent validation before sparse-trie work can run.
+    pub fn is_deferred(&self) -> bool {
+        self.deferred_parent_pending.is_some()
+    }
+
+    /// Returns true if this handle is still waiting for parent validation.
+    pub fn is_deferred_parent_pending(&self) -> bool {
+        self.deferred_parent_pending
+            .as_ref()
+            .is_some_and(|pending| pending.load(Ordering::Acquire))
     }
 
     /// Returns a reference to the updates sender channel.
@@ -101,6 +141,19 @@ impl StateRootHandle {
         move |state: &EvmState| {
             let _ = sender.send(StateRootMessage::StateUpdate(state.clone()));
         }
+    }
+
+    /// Returns a state hook that flattens updates only while a deferred parent is pending.
+    ///
+    /// Once parent validation fulfills the handle, any flattened updates are flushed and subsequent
+    /// updates use the same stream as [`Self::state_hook`].
+    pub fn state_hook_flatten_while_deferred(&self) -> impl alloy_evm::block::OnStateHook {
+        let mut hook = DeferredFlatteningStateHook::new(
+            self.updates_tx.clone(),
+            self.deferred_parent_pending.clone(),
+        );
+
+        move |state: &EvmState| hook.on_state(state)
     }
 
     /// Awaits the state root computation result.
@@ -159,6 +212,54 @@ impl Drop for StateHookSender {
     }
 }
 
+struct DeferredFlatteningStateHook {
+    sender: StateHookSender,
+    deferred_parent_pending: Option<Arc<AtomicBool>>,
+    flattened_state: HashedPostState,
+}
+
+impl DeferredFlatteningStateHook {
+    fn new(
+        sender: crossbeam_channel::Sender<StateRootMessage>,
+        deferred_parent_pending: Option<Arc<AtomicBool>>,
+    ) -> Self {
+        Self {
+            sender: StateHookSender::new(sender),
+            deferred_parent_pending,
+            flattened_state: HashedPostState::default(),
+        }
+    }
+
+    fn on_state(&mut self, state: &EvmState) {
+        if self
+            .deferred_parent_pending
+            .as_ref()
+            .is_some_and(|pending| pending.load(Ordering::Acquire))
+        {
+            self.flattened_state.extend(evm_state_to_hashed_post_state(state.clone()));
+            return
+        }
+
+        self.flush_flattened_state();
+        let _ = self.sender.send(StateRootMessage::StateUpdate(state.clone()));
+    }
+
+    fn flush_flattened_state(&mut self) {
+        if self.flattened_state.is_empty() {
+            return
+        }
+
+        let flattened_state = core::mem::take(&mut self.flattened_state);
+        let _ = self.sender.send(StateRootMessage::HashedStateUpdate(flattened_state));
+    }
+}
+
+impl Drop for DeferredFlatteningStateHook {
+    fn drop(&mut self) {
+        self.flush_flattened_state();
+    }
+}
+
 /// Converts [`EvmState`] to [`HashedPostState`] by keccak256-hashing addresses and storage slots.
 pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
     let mut hashed_state = HashedPostState::with_capacity(update.len());
@@ -192,4 +293,35 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
     }
 
     hashed_state
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn state_root_handle_tracks_deferred_parent() {
+        let (updates_tx, _updates_rx) = crossbeam_channel::unbounded();
+        let (_state_root_tx, state_root_rx) = std::sync::mpsc::channel();
+        let (_hashed_state_tx, hashed_state_rx) = std::sync::mpsc::channel();
+
+        let handle =
+            StateRootHandle::new(B256::ZERO, updates_tx, state_root_rx, hashed_state_rx);
+        assert!(!handle.is_deferred());
+
+        let (updates_tx, _updates_rx) = crossbeam_channel::unbounded();
+        let (_state_root_tx, state_root_rx) = std::sync::mpsc::channel();
+        let (_hashed_state_tx, hashed_state_rx) = std::sync::mpsc::channel();
+
+        let pending = Arc::new(AtomicBool::new(true));
+        let handle = StateRootHandle::new_deferred(
+            B256::ZERO,
+            updates_tx,
+            state_root_rx,
+            hashed_state_rx,
+            pending,
+        );
+        assert!(handle.is_deferred());
+        assert!(handle.is_deferred_parent_pending());
+    }
 }

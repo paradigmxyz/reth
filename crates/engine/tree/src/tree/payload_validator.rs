@@ -95,7 +95,7 @@ use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::RecvTimeoutError,
         Arc, Mutex,
     },
@@ -116,6 +116,7 @@ struct PendingPayloadBuilderSparseTrie {
     state_root_tx:
         std::sync::mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
     hashed_state_tx: std::sync::mpsc::Sender<HashedPostState>,
+    deferred_parent_pending: Arc<AtomicBool>,
 }
 
 struct PendingPayloadBuilderSparseTrieCancelGuard {
@@ -1997,9 +1998,14 @@ where
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
         let (state_root_tx, state_root_rx) = std::sync::mpsc::channel();
         let (hashed_state_tx, hashed_state_rx) = std::sync::mpsc::channel();
+        let deferred_parent_pending = Arc::new(AtomicBool::new(true));
 
-        let pending =
-            PendingPayloadBuilderSparseTrie { updates_rx, state_root_tx, hashed_state_tx };
+        let pending = PendingPayloadBuilderSparseTrie {
+            updates_rx,
+            state_root_tx,
+            hashed_state_tx,
+            deferred_parent_pending: Arc::clone(&deferred_parent_pending),
+        };
         let pending_count = {
             let mut pending_sparse_tries = self
                 .pending_payload_builder_sparse_tries
@@ -2018,7 +2024,13 @@ where
             "registered deferred payload-builder sparse trie handle"
         );
 
-        StateRootHandle::new(parent_state_root, updates_tx, state_root_rx, hashed_state_rx)
+        StateRootHandle::new_deferred(
+            parent_state_root,
+            updates_tx,
+            state_root_rx,
+            hashed_state_rx,
+            deferred_parent_pending,
+        )
     }
 
     fn payload_builder_sparse_trie_handle_for_validated_parent(
@@ -2163,6 +2175,7 @@ where
             updates_rx,
             state_root_tx,
             hashed_state_tx,
+            deferred_parent_pending,
         } = pending;
         let active_updates_tx = active_handle.updates_tx().clone();
         let active_state_root_rx = active_handle.take_state_root_rx();
@@ -2171,6 +2184,8 @@ where
         self.payload_processor.executor().spawn_blocking_named(
             "payload-builder-sparse-trie-bridge",
             move || {
+                deferred_parent_pending.store(false, Ordering::Release);
+
                 // Keep the active handle alive until the sparse-trie task delivers its outputs.
                 // The handle owns an updates sender; dropping the last sender after forwarding
                 // FinishedStateUpdates can race proof-result draining and surface as a channel
