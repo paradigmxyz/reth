@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use alloy_primitives::{Address, Bytes, B256};
 use reth_storage_errors::provider::ProviderResult;
 #[cfg(feature = "lattice-state-root")]
-use reth_trie_common::lattice::LatticeAccumulatorUpdates;
+use reth_trie_common::lattice::{LatticeAccumulatorUpdates, LatticeHashState};
 use reth_trie_common::{
     updates::{StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
     AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage, MultiProof,
@@ -49,6 +49,25 @@ pub trait StateRootProvider {
             None => self.state_root_with_updates(hashed_state)?,
         };
         Ok((root, trie_updates, Default::default()))
+    }
+
+    /// Returns the current lattice accumulator seed for incremental updates.
+    ///
+    /// The state accumulator is always returned. Storage entries are returned only when they need
+    /// to be repaired or overlaid before block-local deltas are applied.
+    #[cfg(feature = "lattice-state-root")]
+    fn lattice_accumulator_seed(&self) -> ProviderResult<LatticeAccumulatorUpdates> {
+        Ok(Default::default())
+    }
+
+    /// Returns the storage accumulator state for `hashed_address`, if the account has non-empty
+    /// storage.
+    #[cfg(feature = "lattice-state-root")]
+    fn lattice_storage_accumulator(
+        &self,
+        _hashed_address: B256,
+    ) -> ProviderResult<Option<LatticeHashState>> {
+        Ok(None)
     }
 
     /// Returns state root and trie updates.

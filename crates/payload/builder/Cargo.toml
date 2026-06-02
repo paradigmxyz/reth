@@ -43,6 +43,7 @@ tracing.workspace = true
 tokio = { workspace = true, features = ["sync", "rt"] }
 
 [features]
+lattice-state-root = ["reth-trie-parallel/lattice-state-root"]
 test-utils = [
     "reth-chain-state/test-utils",
     "reth-primitives-traits/test-utils",

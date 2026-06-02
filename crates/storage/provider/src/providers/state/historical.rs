@@ -461,6 +461,21 @@ where
         })
     }
 
+    #[cfg(feature = "lattice-state-root")]
+    fn lattice_accumulator_seed(
+        &self,
+    ) -> ProviderResult<reth_trie::lattice::LatticeAccumulatorUpdates> {
+        crate::providers::state::lattice::lattice_accumulator_seed(self.tx())
+    }
+
+    #[cfg(feature = "lattice-state-root")]
+    fn lattice_storage_accumulator(
+        &self,
+        hashed_address: B256,
+    ) -> ProviderResult<Option<reth_trie::lattice::LatticeHashState>> {
+        crate::providers::state::lattice::lattice_storage_accumulator(self.tx(), hashed_address)
+    }
+
     fn state_root_from_nodes_with_updates(
         &self,
         input: TrieInput,

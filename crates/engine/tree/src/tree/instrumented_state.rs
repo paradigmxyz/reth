@@ -232,6 +232,21 @@ impl<S: StateRootProvider> StateRootProvider for InstrumentedStateProvider<S> {
         )
     }
 
+    #[cfg(feature = "lattice-state-root")]
+    fn lattice_accumulator_seed(
+        &self,
+    ) -> ProviderResult<reth_trie::lattice::LatticeAccumulatorUpdates> {
+        self.state_provider.lattice_accumulator_seed()
+    }
+
+    #[cfg(feature = "lattice-state-root")]
+    fn lattice_storage_accumulator(
+        &self,
+        hashed_address: B256,
+    ) -> ProviderResult<Option<reth_trie::lattice::LatticeHashState>> {
+        self.state_provider.lattice_storage_accumulator(hashed_address)
+    }
+
     fn state_root_from_nodes_with_updates(
         &self,
         input: TrieInput,

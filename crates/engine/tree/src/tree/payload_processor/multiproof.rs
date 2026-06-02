@@ -7,6 +7,10 @@ pub use reth_trie_parallel::state_root_task::{
     evm_state_to_hashed_post_state, StateHookSender, StateRootComputeOutcome, StateRootHandle,
     StateRootMessage,
 };
+#[cfg(feature = "lattice-state-root")]
+pub use reth_trie_parallel::state_root_task::{
+    LatticeRootComputeOutcome, LatticeRootHandle, LatticeRootMessage, LatticeStateHookSender,
+};
 
 /// The default max targets, for limiting the number of account and storage proof targets to be
 /// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.

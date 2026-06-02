@@ -93,6 +93,7 @@ reth-rpc-layer.workspace = true
 default = []
 lattice-state-root = [
     "reth-chainspec/lattice-state-root",
+    "reth-ethereum-payload-builder/lattice-state-root",
     "reth-node-builder/lattice-state-root",
     "reth-provider/lattice-state-root",
 ]

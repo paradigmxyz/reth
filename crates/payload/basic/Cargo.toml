@@ -41,3 +41,9 @@ metrics.workspace = true
 # misc
 tracing.workspace = true
 serde.workspace = true
+
+[features]
+lattice-state-root = [
+    "reth-payload-builder/lattice-state-root",
+    "reth-trie-parallel/lattice-state-root",
+]

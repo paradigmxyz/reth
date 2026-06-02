@@ -24,6 +24,8 @@ use reth_primitives_traits::{HeaderTy, NodePrimitives, SealedHeader};
 use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::Runtime;
+#[cfg(feature = "lattice-state-root")]
+use reth_trie_parallel::state_root_task::LatticeRootHandle;
 use reth_trie_parallel::state_root_task::StateRootHandle;
 use std::{
     fmt,
@@ -181,6 +183,8 @@ where
             cached_reads,
             execution_cache: input.cache,
             trie_handle: input.trie_handle,
+            #[cfg(feature = "lattice-state-root")]
+            lattice_handle: input.lattice_handle,
             payload_task_guard: self.payload_task_guard.clone(),
             metrics: Default::default(),
             builder: self.builder.clone(),
@@ -338,6 +342,9 @@ where
     execution_cache: Option<SavedCache>,
     /// Optional state root task handle, shared with the engine.
     trie_handle: Option<StateRootHandle>,
+    /// Optional lattice root task handle, shared with the engine.
+    #[cfg(feature = "lattice-state-root")]
+    lattice_handle: Option<LatticeRootHandle>,
     /// metrics for this type
     metrics: PayloadBuilderMetrics,
     /// The type responsible for building payloads.
@@ -365,6 +372,8 @@ where
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let execution_cache = self.execution_cache.clone();
         let trie_handle = self.trie_handle.take();
+        #[cfg(feature = "lattice-state-root")]
+        let lattice_handle = self.lattice_handle.take();
         let builder = self.builder.clone();
         let executor = self.executor.clone();
         self.executor.spawn_task(async move {
@@ -376,6 +385,8 @@ where
                     cached_reads,
                     execution_cache,
                     trie_handle,
+                    #[cfg(feature = "lattice-state-root")]
+                    lattice_handle,
                     config: payload_config,
                     cancel,
                     best_payload,
@@ -512,6 +523,8 @@ where
                 cached_reads: self.cached_reads.take().unwrap_or_default(),
                 execution_cache: self.execution_cache.clone(),
                 trie_handle: None,
+                #[cfg(feature = "lattice-state-root")]
+                lattice_handle: None,
                 config: self.config.clone(),
                 cancel: CancelOnDrop::default(),
                 best_payload: None,
@@ -854,6 +867,9 @@ pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
     /// root, so if the next `newPayload` is not on top of that block, the trie cache is
     /// invalidated and cleared.
     pub trie_handle: Option<StateRootHandle>,
+    /// Optional lattice root task handle, shared with the engine.
+    #[cfg(feature = "lattice-state-root")]
+    pub lattice_handle: Option<LatticeRootHandle>,
     /// How to configure the payload.
     pub config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
     /// A marker that can be used to cancel the job.
@@ -868,11 +884,21 @@ impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
         cached_reads: CachedReads,
         execution_cache: Option<SavedCache>,
         trie_handle: Option<StateRootHandle>,
+        #[cfg(feature = "lattice-state-root")] lattice_handle: Option<LatticeRootHandle>,
         config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
         cancel: CancelOnDrop,
         best_payload: Option<Payload>,
     ) -> Self {
-        Self { cached_reads, execution_cache, trie_handle, config, cancel, best_payload }
+        Self {
+            cached_reads,
+            execution_cache,
+            trie_handle,
+            #[cfg(feature = "lattice-state-root")]
+            lattice_handle,
+            config,
+            cancel,
+            best_payload,
+        }
     }
 }
 

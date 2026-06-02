@@ -163,6 +163,36 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
         )
     }
 
+    #[cfg(feature = "lattice-state-root")]
+    fn lattice_accumulator_seed(
+        &self,
+    ) -> ProviderResult<reth_trie::lattice::LatticeAccumulatorUpdates> {
+        if self.in_memory.is_empty() {
+            return self.historical.lattice_accumulator_seed()
+        }
+
+        let mut cumulative_state = BundleState::default();
+        for block in self.in_memory.iter().rev() {
+            cumulative_state.extend(block.execution_outcome().state.clone());
+        }
+
+        self.historical
+            .lattice_state_root_with_updates(
+                &cumulative_state,
+                HashedPostState::default(),
+                Some(TrieUpdates::default()),
+            )
+            .map(|(_, _, updates)| updates)
+    }
+
+    #[cfg(feature = "lattice-state-root")]
+    fn lattice_storage_accumulator(
+        &self,
+        hashed_address: B256,
+    ) -> ProviderResult<Option<reth_trie::lattice::LatticeHashState>> {
+        self.historical.lattice_storage_accumulator(hashed_address)
+    }
+
     fn state_root_from_nodes_with_updates(
         &self,
         mut input: TrieInput,

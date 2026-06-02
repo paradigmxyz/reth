@@ -110,9 +110,11 @@ lattice-state-root = [
     "reth-chain-state/lattice-state-root",
     "reth-execution-cache/lattice-state-root",
     "reth-evm/lattice-state-root",
+    "reth-payload-builder/lattice-state-root",
     "reth-payload-primitives/lattice-state-root",
     "reth-provider/lattice-state-root",
     "reth-trie/lattice-state-root",
+    "reth-trie-parallel/lattice-state-root",
 ]
 test-utils = [
     "reth-chain-state/test-utils",

@@ -171,6 +171,8 @@ where
             cached_reads,
             execution_cache,
             trie_handle,
+            #[cfg(feature = "lattice-state-root")]
+            lattice_handle,
             config,
             cancel,
             best_payload,
@@ -183,6 +185,8 @@ where
                     cached_reads,
                     execution_cache,
                     trie_handle,
+                    #[cfg(feature = "lattice-state-root")]
+                    lattice_handle,
                     config: PayloadConfig { parent_header, attributes: left_attr, payload_id },
                     cancel,
                     best_payload: best_payload.and_then(|payload| {
@@ -200,6 +204,8 @@ where
                     cached_reads,
                     execution_cache,
                     trie_handle,
+                    #[cfg(feature = "lattice-state-root")]
+                    lattice_handle,
                     config: PayloadConfig { parent_header, attributes: right_attr, payload_id },
                     cancel,
                     best_payload: best_payload.and_then(|payload| {

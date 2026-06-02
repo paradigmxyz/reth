@@ -8893,6 +8893,7 @@ dependencies = [
  "reth-revm",
  "reth-storage-api",
  "reth-transaction-pool",
+ "reth-trie-parallel",
  "revm",
  "tracing",
 ]

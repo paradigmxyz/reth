@@ -123,6 +123,27 @@ where
     Ok(LatticeAccumulatorUpdates::new(state_root.state(), storage))
 }
 
+/// Returns the lattice accumulator seed for incremental updates.
+pub(crate) fn lattice_accumulator_seed<TX>(tx: &TX) -> ProviderResult<LatticeAccumulatorUpdates>
+where
+    TX: DbTx,
+{
+    let (state_root, storage) = state_accumulator(tx)?;
+    Ok(LatticeAccumulatorUpdates::new(state_root.state(), storage))
+}
+
+/// Returns the stored or rebuilt storage accumulator state for `hashed_address`.
+pub(crate) fn lattice_storage_accumulator<TX>(
+    tx: &TX,
+    hashed_address: B256,
+) -> ProviderResult<Option<LatticeHashState>>
+where
+    TX: DbTx,
+{
+    let storage_root = storage_accumulator(tx, hashed_address)?;
+    Ok((!storage_root.is_zero()).then_some(storage_root.state()))
+}
+
 fn state_accumulator<TX>(
     tx: &TX,
 ) -> ProviderResult<(LatticeStateRoot, B256Map<Option<LatticeHashState>>)>

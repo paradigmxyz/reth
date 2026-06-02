@@ -38,6 +38,10 @@ use reth_transaction_pool::{
     BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
     ValidPoolTransaction,
 };
+#[cfg(feature = "lattice-state-root")]
+use reth_trie_parallel::state_root_task::{
+    LatticeRootMessage, LatticeStateHookSender, StateHookSender, StateRootMessage,
+};
 use revm::context_interface::{Block as _, Cfg as _};
 use std::sync::Arc;
 use tracing::{debug, trace, warn};
@@ -120,6 +124,8 @@ where
             Default::default(),
             Default::default(),
             None,
+            #[cfg(feature = "lattice-state-root")]
+            None,
             config,
             Default::default(),
             None,
@@ -162,6 +168,8 @@ where
         mut cached_reads,
         execution_cache,
         trie_handle,
+        #[cfg(feature = "lattice-state-root")]
+        lattice_handle,
         config,
         cancel,
         best_payload,
@@ -218,10 +226,32 @@ where
     ));
     let mut total_fees = U256::ZERO;
 
-    // If we have a sparse trie handle, wire a state hook that streams per-tx state diffs
-    // to the background trie pipeline for incremental state root computation.
+    // If we have root-task handles, wire a state hook that streams per-tx state diffs to the
+    // background pipelines.
+    #[cfg(not(feature = "lattice-state-root"))]
     if let Some(ref handle) = trie_handle {
         builder.evm_mut().db_mut().set_state_hook(Some(Box::new(handle.state_hook())));
+    }
+    #[cfg(feature = "lattice-state-root")]
+    {
+        let sparse_sender =
+            trie_handle.as_ref().map(|handle| StateHookSender::new(handle.updates_tx().clone()));
+        let lattice_sender = lattice_handle
+            .as_ref()
+            .map(|handle| LatticeStateHookSender::new(handle.updates_tx().clone()));
+
+        if sparse_sender.is_some() || lattice_sender.is_some() {
+            builder.evm_mut().db_mut().set_state_hook(Some(Box::new(
+                move |state: &reth_revm::state::EvmState| {
+                    if let Some(sender) = &sparse_sender {
+                        let _ = sender.send(StateRootMessage::StateUpdate(state.clone()));
+                    }
+                    if let Some(sender) = &lattice_sender {
+                        let _ = sender.send(LatticeRootMessage::StateUpdate(state.clone()));
+                    }
+                },
+            )));
+        }
     }
 
     builder.apply_pre_execution_changes().map_err(|err| {
@@ -446,6 +476,7 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
+    #[cfg(not(feature = "lattice-state-root"))]
     let BlockBuilderOutcome { execution_result, block, block_access_list, .. } = if let Some(
         mut handle,
     ) = trie_handle
@@ -472,6 +503,49 @@ where
         }
     } else {
         builder.finish(state_provider.as_ref(), None)?
+    };
+
+    #[cfg(feature = "lattice-state-root")]
+    let BlockBuilderOutcome { execution_result, block, block_access_list, .. } = {
+        if trie_handle.is_some() || lattice_handle.is_some() {
+            builder.evm_mut().db_mut().set_state_hook(None);
+        }
+
+        let state_root_precomputed = if let Some(mut handle) = trie_handle {
+            match handle.state_root() {
+                Ok(outcome) => {
+                    debug!(target: "payload_builder", id=%payload_id, state_root=?outcome.state_root, "received state root from sparse trie");
+                    Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates)))
+                }
+                Err(err) => {
+                    warn!(target: "payload_builder", id=%payload_id, %err, "sparse trie failed, falling back to sync trie updates");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        let lattice_root_precomputed = if let Some(mut handle) = lattice_handle {
+            match handle.lattice_root() {
+                Ok(outcome) => {
+                    debug!(target: "payload_builder", id=%payload_id, state_root=?outcome.state_root, "received state root from lattice task");
+                    Some((outcome.state_root, Arc::unwrap_or_clone(outcome.accumulator_updates)))
+                }
+                Err(err) => {
+                    warn!(target: "payload_builder", id=%payload_id, %err, "lattice root task failed, falling back to bundle lattice root");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        builder.finish_with_lattice(
+            state_provider.as_ref(),
+            state_root_precomputed,
+            lattice_root_precomputed,
+        )?
     };
 
     let requests = chain_spec

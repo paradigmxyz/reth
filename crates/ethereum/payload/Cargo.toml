@@ -29,6 +29,7 @@ reth-evm-ethereum = { workspace = true, features = ["std"] }
 reth-errors.workspace = true
 reth-chainspec.workspace = true
 reth-payload-validator.workspace = true
+reth-trie-parallel.workspace = true
 
 # ethereum
 alloy-rlp.workspace = true
@@ -42,3 +43,10 @@ alloy-primitives.workspace = true
 
 # misc
 tracing.workspace = true
+
+[features]
+lattice-state-root = [
+    "reth-basic-payload-builder/lattice-state-root",
+    "reth-evm/lattice-state-root",
+    "reth-trie-parallel/lattice-state-root",
+]

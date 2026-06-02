@@ -38,6 +38,8 @@
 //! [`FullConsensus::validate_block_post_execution`]: reth_consensus::FullConsensus::validate_block_post_execution
 //! [`SealedBlock`]: reth_primitives_traits::SealedBlock
 
+#[cfg(feature = "lattice-state-root")]
+use crate::tree::multiproof::LatticeRootHandle;
 use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
@@ -226,6 +228,7 @@ where
         + StateReader
         + HashedPostStateProvider
         + Clone
+        + Send
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
@@ -841,20 +844,46 @@ where
         let _mpt_state_root = state_root;
 
         #[cfg(feature = "lattice-state-root")]
-        let (state_root, trie_output, lattice_accumulator_updates) = ensure_ok_post_block!(
-            provider_builder.build().and_then(|provider| {
-                provider
-                    .lattice_state_root_with_updates(
-                        &output.state,
-                        hashed_state.get().as_ref().clone(),
-                        Some(trie_output.as_ref().clone()),
-                    )
-                    .map(|(root, updates, lattice_updates)| {
-                        (root, Arc::new(updates), Arc::new(lattice_updates))
-                    })
-            }),
-            block
-        );
+        let streamed_lattice_root = match handle.lattice_root() {
+            Some(Ok(outcome)) => {
+                debug!(
+                    target: "engine::tree::payload_validator",
+                    state_root = ?outcome.state_root,
+                    "Lattice root task finished"
+                );
+                Some(outcome)
+            }
+            Some(Err(err)) => {
+                warn!(
+                    target: "engine::tree::payload_validator",
+                    %err,
+                    "Lattice root task failed, falling back to bundle lattice root"
+                );
+                None
+            }
+            None => None,
+        };
+
+        #[cfg(feature = "lattice-state-root")]
+        let (state_root, trie_output, lattice_accumulator_updates) =
+            if let Some(outcome) = streamed_lattice_root {
+                (outcome.state_root, trie_output, outcome.accumulator_updates)
+            } else {
+                ensure_ok_post_block!(
+                    provider_builder.build().and_then(|provider| {
+                        provider
+                            .lattice_state_root_with_updates(
+                                &output.state,
+                                hashed_state.get().as_ref().clone(),
+                                Some(trie_output.as_ref().clone()),
+                            )
+                            .map(|(root, updates, lattice_updates)| {
+                                (root, Arc::new(updates), Arc::new(lattice_updates))
+                            })
+                    }),
+                    block
+                )
+            };
 
         if let Err(err) = hashed_state_validate_result {
             // call post-block hook
@@ -1731,8 +1760,12 @@ where
             StateRootStrategy::Synchronous |
             StateRootStrategy::Custom(_) => {
                 let start = Instant::now();
-                let handle =
-                    self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder);
+                let handle = self.payload_processor.spawn_cache_exclusive(
+                    env,
+                    txs,
+                    provider_builder,
+                    parallel_bal_execution,
+                );
 
                 // Record prewarming initialization duration
                 self.metrics
@@ -2167,6 +2200,14 @@ pub trait EngineValidator<
         parent_state_root: B256,
         state: &EngineApiTreeState<N>,
     ) -> Option<StateRootHandle>;
+
+    /// Spawns a streaming lattice root pipeline and returns a handle for the payload builder.
+    #[cfg(feature = "lattice-state-root")]
+    fn lattice_root_handle_for(
+        &self,
+        parent_hash: B256,
+        state: &EngineApiTreeState<N>,
+    ) -> Option<LatticeRootHandle>;
 }
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
@@ -2285,6 +2326,29 @@ where
                 false,
                 &self.config,
             ))
+        }
+    }
+
+    #[cfg(feature = "lattice-state-root")]
+    fn lattice_root_handle_for(
+        &self,
+        parent_hash: B256,
+        state: &EngineApiTreeState<N>,
+    ) -> Option<LatticeRootHandle> {
+        match self.state_provider_builder(parent_hash, state) {
+            Ok(Some(provider_builder)) => {
+                Some(self.payload_processor.spawn_lattice_root(provider_builder))
+            }
+            Ok(None) => None,
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::payload_validator",
+                    %err,
+                    ?parent_hash,
+                    "failed to create state provider for payload builder lattice root task"
+                );
+                None
+            }
         }
     }
 }
