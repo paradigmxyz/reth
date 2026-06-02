@@ -116,7 +116,7 @@ where
             let (header, body) = block.split_sealed_header_body();
             let block = P::Block::new_sealed(header, body).with_senders(senders);
 
-            results.push(executor.execute_one(&block, false)?);
+            results.push(executor.execute_one(&block)?);
             execution_duration += execute_start.elapsed();
 
             // Seal the block back and save it

@@ -218,7 +218,7 @@ where
             self.provider.state_by_block_hash(parent_header.hash())?,
         ));
 
-        executor.execute_one(block, false)?;
+        executor.execute_one(block)?;
         let db = executor.into_state();
         let (codes, preimages, hashed_state, bundle_state) = collect_execution_data(db)?;
 

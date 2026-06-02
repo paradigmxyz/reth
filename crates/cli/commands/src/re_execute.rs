@@ -180,7 +180,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             .recovered_block(block.into(), TransactionVariant::NoHash)?
                             .unwrap();
 
-                        let result = match executor.execute_one(&block, false) {
+                        let result = match executor.execute_one(&block) {
                             Ok(result) => result,
                             Err(err) => {
                                 if skip_invalid_blocks {

@@ -39,7 +39,12 @@ pub trait Executor<DB: Database>: Sized {
     fn execute_one(
         &mut self,
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-        has_bal: bool,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>;
+
+    /// Executes a single block and builds a [`BlockAccessList`] during execution.
+    fn execute_one_with_bal_building(
+        &mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>;
 
     /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
@@ -64,7 +69,7 @@ pub trait Executor<DB: Database>: Sized {
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let result = self.execute_one(block, false)?;
+        let result = self.execute_one(block)?;
         let mut state = self.into_state();
         Ok(BlockExecutionOutput { state: state.take_bundle(), result })
     }
@@ -85,7 +90,7 @@ pub trait Executor<DB: Database>: Sized {
             if first_block.is_none() {
                 first_block = Some(block.header().number());
             }
-            results.push(self.execute_one(block, false)?);
+            results.push(self.execute_one(block)?);
         }
 
         Ok(ExecutionOutcome::from_blocks(
@@ -105,7 +110,7 @@ pub trait Executor<DB: Database>: Sized {
     where
         F: FnMut(&State<DB>),
     {
-        let result = self.execute_one(block, false)?;
+        let result = self.execute_one(block)?;
         let mut state = self.into_state();
         f(&state);
         Ok(BlockExecutionOutput { state: state.take_bundle(), result })
@@ -121,7 +126,7 @@ pub trait Executor<DB: Database>: Sized {
     where
         F: FnMut(&State<DB>),
     {
-        let result = self.execute_one(block, false);
+        let result = self.execute_one(block);
         let mut state = self.into_state();
         f(&state);
 
@@ -578,6 +583,45 @@ impl<F, DB: Database> BasicBlockExecutor<F, DB> {
         let db = State::builder().with_database(db).with_bundle_update().build();
         Self { strategy_factory, db }
     }
+
+    fn execute_one_inner(
+        &mut self,
+        block: &RecoveredBlock<<F::Primitives as NodePrimitives>::Block>,
+        build_bal: bool,
+    ) -> Result<BlockExecutionResult<<F::Primitives as NodePrimitives>::Receipt>, BlockExecutionError>
+    where
+        F: ConfigureEvm,
+    {
+        let mut executor = self
+            .strategy_factory
+            .executor_for_block(&mut self.db, block)
+            .map_err(BlockExecutionError::other)?;
+
+        if build_bal {
+            executor.evm_mut().db_mut().bal_state.bal_builder = Some(Bal::new());
+        } else {
+            executor.evm_mut().db_mut().bal_state.bal_builder = None;
+        }
+
+        executor.apply_pre_execution_changes()?;
+
+        if build_bal {
+            executor.evm_mut().db_mut().bump_bal_index();
+        }
+
+        for tx in block.transactions_recovered() {
+            executor.execute_transaction(tx)?;
+            if build_bal {
+                executor.evm_mut().db_mut().bump_bal_index();
+            }
+        }
+
+        let result = executor.apply_post_execution_changes()?;
+
+        self.db.merge_transitions(BundleRetention::Reverts);
+
+        Ok(result)
+    }
 }
 
 impl<F, DB> Executor<DB> for BasicBlockExecutor<F, DB>
@@ -591,38 +635,17 @@ where
     fn execute_one(
         &mut self,
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-        has_bal: bool,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let mut executor = self
-            .strategy_factory
-            .executor_for_block(&mut self.db, block)
-            .map_err(BlockExecutionError::other)?;
+        self.execute_one_inner(block, false)
+    }
 
-        if has_bal {
-            executor.evm_mut().db_mut().bal_state.bal_builder = Some(Bal::new());
-        } else {
-            executor.evm_mut().db_mut().bal_state.bal_builder = None;
-        }
-
-        executor.apply_pre_execution_changes()?;
-
-        if has_bal {
-            executor.evm_mut().db_mut().bump_bal_index();
-        }
-
-        for tx in block.transactions_recovered() {
-            executor.execute_transaction(tx)?;
-            if has_bal {
-                executor.evm_mut().db_mut().bump_bal_index();
-            }
-        }
-
-        let result = executor.apply_post_execution_changes()?;
-
-        self.db.merge_transitions(BundleRetention::Reverts);
-
-        Ok(result)
+    fn execute_one_with_bal_building(
+        &mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    {
+        self.execute_one_inner(block, true)
     }
 
     fn execute_one_with_state_hook<H>(
@@ -749,7 +772,14 @@ mod tests {
         fn execute_one(
             &mut self,
             _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-            _has_bal: bool,
+        ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+        {
+            Err(BlockExecutionError::msg("execution unavailable for tests"))
+        }
+
+        fn execute_one_with_bal_building(
+            &mut self,
+            _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
         {
             Err(BlockExecutionError::msg("execution unavailable for tests"))
