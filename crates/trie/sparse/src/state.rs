@@ -915,7 +915,6 @@ impl BucketedLfu<HotSlotKey> {
 
         for slots in grouped.values_mut() {
             slots.sort_unstable();
-            slots.dedup();
         }
 
         grouped

@@ -113,27 +113,28 @@ impl<K: fmt::Debug + Copy + Eq + hash::Hash> BucketedLfu<K> {
             debug_assert_eq!(self.buckets[meta.freq as usize][meta.pos], key);
 
             let old_freq = meta.freq as usize;
+            if meta.freq == LFU_MAX_FREQ {
+                return;
+            }
             let new_freq = meta.freq.saturating_add(1).min(LFU_MAX_FREQ);
 
-            if new_freq as usize != old_freq {
-                // Remove from old bucket via swap_remove and fix the swapped element's pos.
-                self.buckets[old_freq].swap_remove(meta.pos);
-                if let Some(&moved_key) = self.buckets[old_freq].get(meta.pos) {
-                    self.entries.get_mut(&moved_key).expect("moved key must exist").pos = meta.pos;
-                }
+            // Remove from old bucket via swap_remove and fix the swapped element's pos.
+            self.buckets[old_freq].swap_remove(meta.pos);
+            if let Some(&moved_key) = self.buckets[old_freq].get(meta.pos) {
+                self.entries.get_mut(&moved_key).expect("moved key must exist").pos = meta.pos;
+            }
 
-                // Insert into new bucket.
-                let new_pos = self.buckets[new_freq as usize].len();
-                self.buckets[new_freq as usize].push(key);
+            // Insert into new bucket.
+            let new_pos = self.buckets[new_freq as usize].len();
+            self.buckets[new_freq as usize].push(key);
 
-                let entry = self.entries.get_mut(&key).expect("key must exist");
-                entry.freq = new_freq;
-                entry.pos = new_pos;
+            let entry = self.entries.get_mut(&key).expect("key must exist");
+            entry.freq = new_freq;
+            entry.pos = new_pos;
 
-                // Update min_freq if old bucket is now empty.
-                if self.buckets[old_freq].is_empty() && old_freq == self.min_freq as usize {
-                    self.min_freq = new_freq;
-                }
+            // Update min_freq if old bucket is now empty.
+            if self.buckets[old_freq].is_empty() && old_freq == self.min_freq as usize {
+                self.min_freq = new_freq;
             }
         } else {
             // Evict if at capacity before inserting.
