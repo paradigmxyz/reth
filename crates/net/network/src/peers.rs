@@ -16,7 +16,7 @@ use reth_network_peers::{NodeRecord, PeerId, TrustedPeer};
 use reth_network_types::{
     is_connection_failed_reputation,
     peers::{
-        config::PeerBackoffDurations,
+        config::{PeerBackoffDurations, PEER_ROTATION_MIN_UPTIME},
         reputation::{DEFAULT_REPUTATION, MAX_TRUSTED_PEER_REPUTATION_CHANGE},
     },
     ConnectionsConfig, Peer, PeerAddr, PeerConnectionState, PeerKind, PeersConfig,
@@ -27,13 +27,15 @@ use std::{
     fmt::Display,
     io::{self},
     net::{IpAddr, SocketAddr},
+    pin::Pin,
     task::{Context, Poll},
     time::Duration,
 };
 use thiserror::Error;
+use rand::Rng;
 use tokio::{
     sync::mpsc,
-    time::{Instant, Interval},
+    time::{Instant, Interval, Sleep},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{trace, warn};
@@ -95,6 +97,14 @@ pub struct PeersManager {
     /// If true, discovered peers without a confirmed ENR fork ID will not be added until their
     /// fork ID is verified via EIP-868.
     enforce_enr_fork_id: bool,
+    /// Tracks when each connection (inbound or outbound) was established, used by peer rotation
+    /// to enforce minimum uptime before a peer becomes eligible for eviction.
+    connected_at: HashMap<PeerId, std::time::Instant>,
+    /// One-shot sleep that fires when it's time to rotate a peer; reset with jitter after each
+    /// fire. `None` when rotation is disabled.
+    peer_rotation_sleep: Option<Pin<Box<Sleep>>>,
+    /// Mean duration for computing jittered rotation intervals. `None` when rotation is disabled.
+    peer_rotation_mean: Option<Duration>,
 }
 
 impl PeersManager {
@@ -116,6 +126,7 @@ impl PeersManager {
             incoming_ip_throttle_duration,
             ip_filter,
             enforce_enr_fork_id,
+            peer_rotation_interval,
         } = config;
         let (manager_tx, handle_rx) = mpsc::unbounded_channel();
         let now = Instant::now();
@@ -193,6 +204,10 @@ impl PeersManager {
             incoming_ip_throttle_duration,
             ip_filter,
             enforce_enr_fork_id,
+            connected_at: Default::default(),
+            peer_rotation_sleep: peer_rotation_interval
+                .map(|mean| Box::pin(tokio::time::sleep(jitter_rotation_interval(mean)))),
+            peer_rotation_mean: peer_rotation_interval,
         }
     }
 
@@ -440,6 +455,7 @@ impl PeersManager {
         let has_in_capacity = self.connection_info.has_in_capacity();
         // increment new incoming connection
         self.connection_info.inc_in();
+        self.connected_at.insert(peer_id, std::time::Instant::now());
 
         // disconnect the peer if we don't have capacity for more inbound connections
         if !is_trusted && !has_in_capacity {
@@ -596,6 +612,7 @@ impl PeersManager {
 
     /// Gracefully disconnected an active session
     pub(crate) fn on_active_session_gracefully_closed(&mut self, peer_id: PeerId) {
+        self.connected_at.remove(&peer_id);
         match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
                 trace!(target: "net::peers", ?peer_id, direction=?entry.get().state, "active session gracefully closed");
@@ -638,6 +655,7 @@ impl PeersManager {
             self.connection_info.decr_state(peer.state);
             self.connection_info.inc_out();
             peer.state = PeerConnectionState::Out;
+            self.connected_at.insert(peer_id, std::time::Instant::now());
         }
     }
 
@@ -688,6 +706,7 @@ impl PeersManager {
         err: impl SessionError,
         reputation_change: ReputationChangeKind,
     ) {
+        self.connected_at.remove(peer_id);
         trace!(target: "net::peers", ?remote_addr, ?peer_id, %err, "handling failed connection");
 
         if err.is_fatal_protocol_error() {
@@ -1041,6 +1060,53 @@ impl PeersManager {
         Some((*best_peer.0, best_peer.1))
     }
 
+    /// Disconnects one eligible peer (inbound or outbound) to open a slot for new nodes,
+    /// mirroring geth's peer dropper logic.
+    ///
+    /// A peer is eligible when its pool (inbound or outbound) is at capacity, the peer is not
+    /// trusted or static, and it has been connected for at least [`PEER_ROTATION_MIN_UPTIME`].
+    fn try_rotate_peer(&mut self) {
+        let outbound_at_capacity = self.connection_info.is_outbound_at_capacity();
+        let inbound_at_capacity = self.connection_info.is_inbound_at_capacity();
+
+        if !outbound_at_capacity && !inbound_at_capacity {
+            return
+        }
+
+        let now = std::time::Instant::now();
+
+        let candidate = self
+            .peers
+            .iter()
+            .find(|(peer_id, peer)| {
+                let eligible = match peer.state {
+                    PeerConnectionState::Out => outbound_at_capacity,
+                    PeerConnectionState::In => inbound_at_capacity,
+                    _ => false,
+                };
+                eligible &&
+                    !peer.is_trusted() &&
+                    !peer.is_static() &&
+                    !self.trusted_peer_ids.contains(*peer_id) &&
+                    self.connected_at
+                        .get(*peer_id)
+                        .is_some_and(|t| now.saturating_duration_since(*t) >= PEER_ROTATION_MIN_UPTIME)
+            })
+            .map(|(peer_id, _)| *peer_id);
+
+        let Some(peer_id) = candidate else { return };
+
+        trace!(target: "net::peers", ?peer_id, "rotating peer to open slot for new nodes");
+
+        if let Some(peer) = self.peers.get_mut(&peer_id) {
+            peer.state.disconnect();
+        }
+        self.queued_actions.push_back(PeerAction::Disconnect {
+            peer_id,
+            reason: Some(DisconnectReason::UselessPeer),
+        });
+    }
+
     /// If there's capacity for new outbound connections, this will queue new
     /// [`PeerAction::Connect`] actions.
     ///
@@ -1169,6 +1235,21 @@ impl PeersManager {
                 self.fill_outbound_slots();
             }
 
+            let rotation_ready = self
+                .peer_rotation_sleep
+                .as_mut()
+                .map(|sleep| sleep.as_mut().poll(cx).is_ready())
+                .unwrap_or(false);
+            if rotation_ready {
+                self.try_rotate_peer();
+                if let Some(mean) = self.peer_rotation_mean {
+                    let next = tokio::time::Instant::now() + jitter_rotation_interval(mean);
+                    if let Some(ref mut sleep) = self.peer_rotation_sleep {
+                        sleep.as_mut().reset(next);
+                    }
+                }
+            }
+
             if let Poll::Ready((peer_id, new_record)) = self.trusted_peers_resolver.poll(cx) {
                 self.on_resolved_peer(peer_id, new_record);
             }
@@ -1184,6 +1265,16 @@ impl Default for PeersManager {
     fn default() -> Self {
         Self::new(Default::default())
     }
+}
+
+/// Returns a random duration uniformly distributed in `[mean * 3/5, mean * 7/5]`.
+///
+/// With the default 5-minute mean this gives `[3 min, 7 min]`, matching geth's peer dropper
+/// interval range.
+fn jitter_rotation_interval(mean: Duration) -> Duration {
+    let min_nanos = (mean * 3 / 5).as_nanos() as u64;
+    let max_nanos = (mean * 7 / 5).as_nanos() as u64;
+    Duration::from_nanos(rand::rng().random_range(min_nanos..=max_nanos))
 }
 
 /// Tracks stats about connected nodes
@@ -1213,6 +1304,16 @@ impl ConnectionInfo {
     const fn has_out_capacity(&self) -> bool {
         self.num_pending_out < self.config.max_concurrent_outbound_dials &&
             self.num_outbound < self.config.max_outbound
+    }
+
+    /// Returns `true` if all active outbound slots are occupied (ignoring pending dials).
+    const fn is_outbound_at_capacity(&self) -> bool {
+        self.num_outbound >= self.config.max_outbound
+    }
+
+    /// Returns `true` if all active inbound slots are occupied.
+    const fn is_inbound_at_capacity(&self) -> bool {
+        self.num_inbound >= self.config.max_inbound
     }
 
     ///  Returns `true` if there's still capacity to accept a new incoming connection.
@@ -3385,5 +3486,167 @@ mod tests {
 
         assert!(!manager.peers.contains_key(&peer_id));
         assert!(!manager.trusted_peer_ids.contains(&peer_id));
+    }
+
+    #[tokio::test]
+    async fn test_rotation_disconnects_eligible_peer() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let peer = PeerId::random();
+        let mut peers = PeersManager::new(
+            PeersConfig::test()
+                .with_max_outbound(1)
+                .with_peer_rotation_interval(Some(Duration::from_millis(50))),
+        );
+
+        peers.add_peer(peer, PeerAddr::from_tcp(addr), None);
+        match event!(peers) {
+            PeerAction::PeerAdded(_) => {}
+            _ => unreachable!(),
+        }
+        match event!(peers) {
+            PeerAction::Connect { .. } => {}
+            _ => unreachable!(),
+        }
+        peers.on_active_outgoing_established(peer);
+
+        peers.connected_at.insert(peer, std::time::Instant::now() - Duration::from_secs(11 * 60));
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        match event!(peers) {
+            PeerAction::Disconnect { peer_id, reason } => {
+                assert_eq!(peer_id, peer);
+                assert_eq!(reason, Some(DisconnectReason::UselessPeer));
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_rotation_skips_trusted_peers() {
+        let _addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 3)), 8008);
+        let peer = PeerId::random();
+        let trusted = TrustedPeer {
+            host: Host::Ipv4(Ipv4Addr::new(127, 0, 1, 3)),
+            tcp_port: 8008,
+            udp_port: 8008,
+            id: peer,
+        };
+        let mut peers = PeersManager::new(
+            PeersConfig::test()
+                .with_max_outbound(1)
+                .with_trusted_nodes(vec![trusted])
+                .with_peer_rotation_interval(Some(Duration::from_millis(50))),
+        );
+
+        match event!(peers) {
+            PeerAction::Connect { .. } => {}
+            _ => unreachable!(),
+        }
+        peers.on_active_outgoing_established(peer);
+        peers.connected_at.insert(peer, std::time::Instant::now() - Duration::from_secs(11 * 60));
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        poll_fn(|cx| {
+            assert!(peers.poll(cx).is_pending(), "trusted peer must not be rotated");
+            Poll::Ready(())
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_rotation_skips_recently_connected_peers() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 4)), 8008);
+        let peer = PeerId::random();
+        let mut peers = PeersManager::new(
+            PeersConfig::test()
+                .with_max_outbound(1)
+                .with_peer_rotation_interval(Some(Duration::from_millis(50))),
+        );
+
+        peers.add_peer(peer, PeerAddr::from_tcp(addr), None);
+        match event!(peers) {
+            PeerAction::PeerAdded(_) => {}
+            _ => unreachable!(),
+        }
+        match event!(peers) {
+            PeerAction::Connect { .. } => {}
+            _ => unreachable!(),
+        }
+        peers.on_active_outgoing_established(peer);
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        poll_fn(|cx| {
+            assert!(peers.poll(cx).is_pending(), "recently connected peer must not be rotated");
+            Poll::Ready(())
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_rotation_skips_when_slots_available() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 5)), 8008);
+        let peer = PeerId::random();
+        let mut peers = PeersManager::new(
+            PeersConfig::test()
+                .with_max_outbound(2)
+                .with_peer_rotation_interval(Some(Duration::from_millis(50))),
+        );
+
+        peers.add_peer(peer, PeerAddr::from_tcp(addr), None);
+        match event!(peers) {
+            PeerAction::PeerAdded(_) => {}
+            _ => unreachable!(),
+        }
+        match event!(peers) {
+            PeerAction::Connect { .. } => {}
+            _ => unreachable!(),
+        }
+        peers.on_active_outgoing_established(peer);
+        peers.connected_at.insert(peer, std::time::Instant::now() - Duration::from_secs(11 * 60));
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        poll_fn(|cx| {
+            assert!(
+                peers.poll(cx).is_pending(),
+                "rotation must not fire when outbound slots are available"
+            );
+            Poll::Ready(())
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_rotation_disconnects_inbound_peer() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 6)), 8008);
+        let peer = PeerId::random();
+        let mut peers = PeersManager::new(
+            PeersConfig::test()
+                .with_max_inbound(1)
+                .with_peer_rotation_interval(Some(Duration::from_millis(50))),
+        );
+
+        assert!(peers.on_incoming_pending_session(addr.ip()).is_ok());
+        peers.on_incoming_session_established(peer, addr);
+
+        match event!(peers) {
+            PeerAction::PeerAdded(_) => {}
+            _ => unreachable!(),
+        }
+
+        peers.connected_at.insert(peer, std::time::Instant::now() - Duration::from_secs(11 * 60));
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        match event!(peers) {
+            PeerAction::Disconnect { peer_id, reason } => {
+                assert_eq!(peer_id, peer);
+                assert_eq!(reason, Some(DisconnectReason::UselessPeer));
+            }
+            _ => unreachable!(),
+        }
     }
 }
