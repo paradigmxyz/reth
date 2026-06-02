@@ -28,7 +28,7 @@ use reth_evm::{
     ExecutableTxIterator, ExecutionCtxFor, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::{EthEvmConfig, RethReceiptBuilder};
-use reth_primitives_traits::{SealedBlock, SealedHeader, SignedTransaction, TxTy};
+use reth_primitives_traits::{SealedBlock, SealedHeader, TxTy};
 use revm::{primitives::hardfork::SpecId, state::bal::BlockAccessIndex};
 use std::sync::Arc;
 
@@ -306,8 +306,8 @@ where
         let convert = |tx: Bytes| {
             let tx =
                 TxTy::<Self::Primitives>::decode_2718_exact(tx.as_ref()).map_err(AnyError::new)?;
-            let signer = tx.try_recover().map_err(AnyError::new)?;
-            Ok::<_, AnyError>(tx.with_signer(signer))
+            alloy_consensus::transaction::SignerRecoverable::try_into_recovered(tx)
+                .map_err(AnyError::new)
         };
 
         Ok((transactions, convert))

@@ -305,8 +305,8 @@ where
         let convert = |tx: Bytes| {
             let tx =
                 TxTy::<Self::Primitives>::decode_2718_exact(tx.as_ref()).map_err(AnyError::new)?;
-            let signer = tx.try_recover().map_err(AnyError::new)?;
-            Ok::<_, AnyError>(tx.with_signer(signer))
+            alloy_consensus::transaction::SignerRecoverable::try_into_recovered(tx)
+                .map_err(AnyError::new)
         };
 
         Ok((txs, convert))
