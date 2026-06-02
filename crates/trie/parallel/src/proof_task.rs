@@ -1071,16 +1071,18 @@ fn dispatch_v2_storage_proofs(
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(storage_targets.len(), Default::default());
 
-    // Collect hashed addresses from account targets that need their storage roots computed
-    let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
+    if !account_targets.is_empty() {
+        // Collect hashed addresses from account targets that need their storage roots computed.
+        let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
 
-    // For storage targets with associated account proofs, ensure the first target has
-    // min_len(0) so the root node is returned for storage root computation
-    for (hashed_address, targets) in &mut storage_targets {
-        if account_target_addresses.contains(hashed_address) &&
-            let Some(first) = targets.first_mut()
-        {
-            *first = first.with_min_len(0);
+        // For storage targets with associated account proofs, ensure the first target has
+        // min_len(0) so the root node is returned for storage root computation.
+        for (hashed_address, targets) in &mut storage_targets {
+            if account_target_addresses.contains(hashed_address) &&
+                let Some(first) = targets.first_mut()
+            {
+                *first = first.with_min_len(0);
+            }
         }
     }
 
@@ -1088,7 +1090,7 @@ fn dispatch_v2_storage_proofs(
     // Since trie walk processes accounts in lexicographical order, dispatching in the same order
     // reduces head-of-line blocking when consuming results.
     let mut sorted_storage_targets: Vec<_> = storage_targets.into_iter().collect();
-    sorted_storage_targets.sort_unstable_by_key(|(addr, _)| *addr);
+    sorted_storage_targets.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
 
     // Dispatch all proofs for targeted storage slots
     for (hashed_address, targets) in sorted_storage_targets {
