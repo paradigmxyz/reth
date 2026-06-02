@@ -92,6 +92,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+#[cfg(feature = "lattice-state-root")]
+use reth_db as _;
+
 /// Support for backfill sync mode.
 pub mod backfill;
 /// The type that drives the chain forward.

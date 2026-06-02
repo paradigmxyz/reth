@@ -219,17 +219,11 @@ impl<S: StateRootProvider> StateRootProvider for InstrumentedStateProvider<S> {
     }
 
     #[cfg(feature = "lattice-state-root")]
-    fn lattice_state_root_with_updates(
+    fn lattice_state_root(
         &self,
         bundle_state: &reth_revm::db::BundleState,
-        hashed_state: HashedPostState,
-        precomputed_trie_updates: Option<TrieUpdates>,
-    ) -> ProviderResult<(B256, TrieUpdates, reth_trie::lattice::LatticeAccumulatorUpdates)> {
-        self.state_provider.lattice_state_root_with_updates(
-            bundle_state,
-            hashed_state,
-            precomputed_trie_updates,
-        )
+    ) -> ProviderResult<(B256, reth_trie::lattice::LatticeAccumulatorUpdates)> {
+        self.state_provider.lattice_state_root(bundle_state)
     }
 
     #[cfg(feature = "lattice-state-root")]

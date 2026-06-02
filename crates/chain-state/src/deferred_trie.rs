@@ -168,12 +168,22 @@ impl DeferredTrieData {
     #[cfg(feature = "lattice-state-root")]
     pub fn sort_with_lattice(
         hashed_state: Arc<HashedPostState>,
-        trie_updates: Arc<TrieUpdates>,
+        _trie_updates: Arc<TrieUpdates>,
         lattice_accumulator_updates: Arc<LatticeAccumulatorUpdates>,
     ) -> ComputedTrieData {
-        let mut computed = Self::sort(hashed_state, trie_updates);
-        computed.lattice_accumulator_updates = lattice_accumulator_updates;
-        computed
+        let _span =
+            debug_span!(target: "engine::tree::deferred_trie", "sort_lattice_inputs").entered();
+
+        let sorted_hashed_state = match Arc::try_unwrap(hashed_state) {
+            Ok(state) => state.into_sorted(),
+            Err(arc) => arc.clone_into_sorted(),
+        };
+
+        ComputedTrieData::new_with_lattice(
+            Arc::new(sorted_hashed_state),
+            Arc::new(TrieUpdatesSorted::default()),
+            lattice_accumulator_updates,
+        )
     }
 
     /// Returns trie data, computing synchronously if the async task hasn't completed.

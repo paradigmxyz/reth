@@ -38,10 +38,10 @@ use reth_transaction_pool::{
     BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
     ValidPoolTransaction,
 };
+#[cfg(not(feature = "lattice-state-root"))]
+use reth_trie_parallel as _;
 #[cfg(feature = "lattice-state-root")]
-use reth_trie_parallel::state_root_task::{
-    LatticeRootMessage, LatticeStateHookSender, StateHookSender, StateRootMessage,
-};
+use reth_trie_parallel::state_root_task::{LatticeRootMessage, LatticeStateHookSender};
 use revm::context_interface::{Block as _, Cfg as _};
 use std::sync::Arc;
 use tracing::{debug, trace, warn};
@@ -167,7 +167,10 @@ where
     let BuildArguments {
         mut cached_reads,
         execution_cache,
+        #[cfg(not(feature = "lattice-state-root"))]
         trie_handle,
+        #[cfg(feature = "lattice-state-root")]
+            trie_handle: _,
         #[cfg(feature = "lattice-state-root")]
         lattice_handle,
         config,
@@ -234,18 +237,13 @@ where
     }
     #[cfg(feature = "lattice-state-root")]
     {
-        let sparse_sender =
-            trie_handle.as_ref().map(|handle| StateHookSender::new(handle.updates_tx().clone()));
         let lattice_sender = lattice_handle
             .as_ref()
             .map(|handle| LatticeStateHookSender::new(handle.updates_tx().clone()));
 
-        if sparse_sender.is_some() || lattice_sender.is_some() {
+        if lattice_sender.is_some() {
             builder.evm_mut().db_mut().set_state_hook(Some(Box::new(
                 move |state: &reth_revm::state::EvmState| {
-                    if let Some(sender) = &sparse_sender {
-                        let _ = sender.send(StateRootMessage::StateUpdate(state.clone()));
-                    }
                     if let Some(sender) = &lattice_sender {
                         let _ = sender.send(LatticeRootMessage::StateUpdate(state.clone()));
                     }
@@ -507,24 +505,9 @@ where
 
     #[cfg(feature = "lattice-state-root")]
     let BlockBuilderOutcome { execution_result, block, block_access_list, .. } = {
-        if trie_handle.is_some() || lattice_handle.is_some() {
+        if lattice_handle.is_some() {
             builder.evm_mut().db_mut().set_state_hook(None);
         }
-
-        let state_root_precomputed = if let Some(mut handle) = trie_handle {
-            match handle.state_root() {
-                Ok(outcome) => {
-                    debug!(target: "payload_builder", id=%payload_id, state_root=?outcome.state_root, "received state root from sparse trie");
-                    Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates)))
-                }
-                Err(err) => {
-                    warn!(target: "payload_builder", id=%payload_id, %err, "sparse trie failed, falling back to sync trie updates");
-                    None
-                }
-            }
-        } else {
-            None
-        };
 
         let lattice_root_precomputed = if let Some(mut handle) = lattice_handle {
             match handle.lattice_root() {
@@ -541,11 +524,7 @@ where
             None
         };
 
-        builder.finish_with_lattice(
-            state_provider.as_ref(),
-            state_root_precomputed,
-            lattice_root_precomputed,
-        )?
+        builder.finish_with_lattice(state_provider.as_ref(), None, lattice_root_precomputed)?
     };
 
     let requests = chain_spec

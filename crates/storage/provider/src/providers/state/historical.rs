@@ -445,20 +445,11 @@ where
     }
 
     #[cfg(feature = "lattice-state-root")]
-    fn lattice_state_root_with_updates(
+    fn lattice_state_root(
         &self,
         bundle_state: &revm_database::BundleState,
-        hashed_state: HashedPostState,
-        precomputed_trie_updates: Option<TrieUpdates>,
-    ) -> ProviderResult<(B256, TrieUpdates, reth_trie::lattice::LatticeAccumulatorUpdates)> {
-        reth_trie_db::with_adapter!(self.provider, |A| {
-            crate::providers::state::lattice::lattice_state_root_with_updates::<_, A>(
-                self.tx(),
-                bundle_state,
-                hashed_state,
-                precomputed_trie_updates,
-            )
-        })
+    ) -> ProviderResult<(B256, reth_trie::lattice::LatticeAccumulatorUpdates)> {
+        crate::providers::state::lattice::lattice_state_root(self.tx(), bundle_state)
     }
 
     #[cfg(feature = "lattice-state-root")]

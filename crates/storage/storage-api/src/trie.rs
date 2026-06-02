@@ -35,20 +35,14 @@ pub trait StateRootProvider {
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)>;
 
-    /// Returns a lattice state root, MPT trie updates, and full lattice accumulator updates for
-    /// the provided EVM bundle state.
+    /// Returns a lattice state root and full lattice accumulator updates for the provided EVM
+    /// bundle state.
     #[cfg(feature = "lattice-state-root")]
-    fn lattice_state_root_with_updates(
+    fn lattice_state_root(
         &self,
         _bundle_state: &BundleState,
-        hashed_state: HashedPostState,
-        precomputed_trie_updates: Option<TrieUpdates>,
-    ) -> ProviderResult<(B256, TrieUpdates, LatticeAccumulatorUpdates)> {
-        let (root, trie_updates) = match precomputed_trie_updates {
-            Some(updates) => (self.state_root(hashed_state)?, updates),
-            None => self.state_root_with_updates(hashed_state)?,
-        };
-        Ok((root, trie_updates, Default::default()))
+    ) -> ProviderResult<(B256, LatticeAccumulatorUpdates)> {
+        Ok((B256::ZERO, Default::default()))
     }
 
     /// Returns the current lattice accumulator seed for incremental updates.

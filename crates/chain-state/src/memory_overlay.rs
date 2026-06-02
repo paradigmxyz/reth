@@ -139,28 +139,17 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
     }
 
     #[cfg(feature = "lattice-state-root")]
-    fn lattice_state_root_with_updates(
+    fn lattice_state_root(
         &self,
         bundle_state: &BundleState,
-        hashed_state: HashedPostState,
-        precomputed_trie_updates: Option<TrieUpdates>,
-    ) -> ProviderResult<(B256, TrieUpdates, reth_trie::lattice::LatticeAccumulatorUpdates)> {
-        let trie_updates = match precomputed_trie_updates {
-            Some(updates) => updates,
-            None => self.state_root_with_updates(hashed_state.clone())?.1,
-        };
-
+    ) -> ProviderResult<(B256, reth_trie::lattice::LatticeAccumulatorUpdates)> {
         let mut cumulative_state = BundleState::default();
         for block in self.in_memory.iter().rev() {
             cumulative_state.extend(block.execution_outcome().state.clone());
         }
         cumulative_state.extend(bundle_state.clone());
 
-        self.historical.lattice_state_root_with_updates(
-            &cumulative_state,
-            hashed_state,
-            Some(trie_updates),
-        )
+        self.historical.lattice_state_root(&cumulative_state)
     }
 
     #[cfg(feature = "lattice-state-root")]
@@ -176,13 +165,7 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
             cumulative_state.extend(block.execution_outcome().state.clone());
         }
 
-        self.historical
-            .lattice_state_root_with_updates(
-                &cumulative_state,
-                HashedPostState::default(),
-                Some(TrieUpdates::default()),
-            )
-            .map(|(_, _, updates)| updates)
+        self.historical.lattice_state_root(&cumulative_state).map(|(_, updates)| updates)
     }
 
     #[cfg(feature = "lattice-state-root")]

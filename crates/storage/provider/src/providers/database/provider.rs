@@ -729,13 +729,17 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 }
                 timings.write_hashed_state += start.elapsed();
 
-                let start = Instant::now();
-                let merged_trie =
-                    TrieUpdatesSorted::merge_batch(blocks.iter().rev().map(|b| b.trie_updates()));
-                if !merged_trie.is_empty() {
-                    self.write_trie_updates_sorted(&merged_trie)?;
+                #[cfg(not(feature = "lattice-state-root"))]
+                {
+                    let start = Instant::now();
+                    let merged_trie = TrieUpdatesSorted::merge_batch(
+                        blocks.iter().rev().map(|b| b.trie_updates()),
+                    );
+                    if !merged_trie.is_empty() {
+                        self.write_trie_updates_sorted(&merged_trie)?;
+                    }
+                    timings.write_trie_updates += start.elapsed();
                 }
-                timings.write_trie_updates += start.elapsed();
 
                 #[cfg(feature = "lattice-state-root")]
                 {
@@ -882,19 +886,26 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // Unwind storage history indices.
         self.unwind_storage_history_indices(changed_storages.iter().copied())?;
 
-        // Unwind accounts/storages trie tables using the revert.
-        // Get the database tip block number
-        let db_tip_block = self
-            .get_stage_checkpoint(reth_stages_types::StageId::Finish)?
-            .as_ref()
-            .map(|chk| chk.block_number)
-            .ok_or_else(|| ProviderError::InsufficientChangesets {
-                requested: from,
-                available: 0..=0,
-            })?;
+        #[cfg(not(feature = "lattice-state-root"))]
+        {
+            // Unwind accounts/storages trie tables using the revert.
+            // Get the database tip block number
+            let db_tip_block = self
+                .get_stage_checkpoint(reth_stages_types::StageId::Finish)?
+                .as_ref()
+                .map(|chk| chk.block_number)
+                .ok_or_else(|| ProviderError::InsufficientChangesets {
+                    requested: from,
+                    available: 0..=0,
+                })?;
 
-        let trie_revert = self.changeset_cache.get_or_compute_range(self, from..=db_tip_block)?;
-        self.write_trie_updates_sorted(&trie_revert)?;
+            let trie_revert =
+                self.changeset_cache.get_or_compute_range(self, from..=db_tip_block)?;
+            self.write_trie_updates_sorted(&trie_revert)?;
+        }
+
+        #[cfg(feature = "lattice-state-root")]
+        self.rebuild_lattice_accumulators()?;
 
         Ok(())
     }

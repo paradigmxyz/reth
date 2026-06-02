@@ -346,6 +346,9 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + Send + 'static,
     {
+        #[cfg(not(feature = "lattice-state-root"))]
+        let _ = parallel_bal_execution;
+
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count);
         #[cfg(feature = "lattice-state-root")]

@@ -523,6 +523,8 @@ where
         state: impl StateProvider,
         state_root_precomputed: Option<(B256, TrieUpdates)>,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
+        #[cfg(feature = "lattice-state-root")]
+        let _ = state_root_precomputed;
         let (evm, result) = self.executor.finish()?;
         let (db, evm_env) = evm.finish();
 
@@ -535,13 +537,10 @@ where
 
         let hashed_state = state.hashed_post_state(&db.bundle_state);
         #[cfg(feature = "lattice-state-root")]
-        let (state_root, trie_updates, lattice_accumulator_updates) = state
-            .lattice_state_root_with_updates(
-                &db.bundle_state,
-                hashed_state.clone(),
-                state_root_precomputed.map(|(_, trie_updates)| trie_updates),
-            )
-            .map_err(BlockExecutionError::other)?;
+        let (state_root, lattice_accumulator_updates) =
+            state.lattice_state_root(&db.bundle_state).map_err(BlockExecutionError::other)?;
+        #[cfg(feature = "lattice-state-root")]
+        let trie_updates = TrieUpdates::default();
         #[cfg(not(feature = "lattice-state-root"))]
         let (state_root, trie_updates) = match state_root_precomputed {
             Some(precomputed) => precomputed,
@@ -582,7 +581,7 @@ where
     fn finish_with_lattice(
         self,
         state: impl StateProvider,
-        state_root_precomputed: Option<(B256, TrieUpdates)>,
+        _state_root_precomputed: Option<(B256, TrieUpdates)>,
         lattice_root_precomputed: Option<(B256, LatticeAccumulatorUpdates)>,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
         let (evm, result) = self.executor.finish()?;
@@ -596,27 +595,13 @@ where
             block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal.as_slice()));
 
         let hashed_state = state.hashed_post_state(&db.bundle_state);
-        let (state_root, trie_updates, lattice_accumulator_updates) =
+        let (state_root, lattice_accumulator_updates) =
             if let Some((lattice_root, lattice_updates)) = lattice_root_precomputed {
-                let trie_updates = match state_root_precomputed {
-                    Some((_, trie_updates)) => trie_updates,
-                    None => {
-                        state
-                            .state_root_with_updates(hashed_state.clone())
-                            .map_err(BlockExecutionError::other)?
-                            .1
-                    }
-                };
-                (lattice_root, trie_updates, lattice_updates)
+                (lattice_root, lattice_updates)
             } else {
-                state
-                    .lattice_state_root_with_updates(
-                        &db.bundle_state,
-                        hashed_state.clone(),
-                        state_root_precomputed.map(|(_, trie_updates)| trie_updates),
-                    )
-                    .map_err(BlockExecutionError::other)?
+                state.lattice_state_root(&db.bundle_state).map_err(BlockExecutionError::other)?
             };
+        let trie_updates = TrieUpdates::default();
 
         let (transactions, senders) =
             self.transactions.into_iter().map(|tx| tx.into_parts()).unzip();

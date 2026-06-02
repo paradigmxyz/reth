@@ -6,44 +6,22 @@ use reth_db_api::{
 };
 use reth_primitives_traits::{Account, StorageEntry};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use reth_trie::{
-    lattice::{LatticeAccumulatorUpdates, LatticeHashState, LatticeStateRoot, LatticeStorageRoot},
-    updates::TrieUpdates,
-    HashedPostState, StateRoot,
-};
-use reth_trie_db::{
-    DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory, TrieTableAdapter,
+use reth_trie::lattice::{
+    LatticeAccumulatorUpdates, LatticeHashState, LatticeStateRoot, LatticeStorageRoot,
 };
 use revm_database::BundleState;
 use std::io::{Error as IoError, ErrorKind};
 
 const LATTICE_STATE_ACCUMULATOR_KEY: u8 = 0;
 
-type DbStateRoot<'a, TX, A> =
-    StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
-
-/// Computes a lattice state root from an EVM bundle state and returns trie updates to persist.
-pub(crate) fn lattice_state_root_with_updates<TX, A>(
+/// Computes a lattice state root from an EVM bundle state.
+pub(crate) fn lattice_state_root<TX>(
     tx: &TX,
     bundle_state: &BundleState,
-    hashed_state: HashedPostState,
-    precomputed_trie_updates: Option<TrieUpdates>,
-) -> ProviderResult<(B256, TrieUpdates, LatticeAccumulatorUpdates)>
+) -> ProviderResult<(B256, LatticeAccumulatorUpdates)>
 where
     TX: DbTx,
-    A: TrieTableAdapter,
 {
-    let trie_updates = match precomputed_trie_updates {
-        Some(updates) => updates,
-        None => {
-            let sorted = hashed_state.into_sorted();
-            <DbStateRoot<'_, TX, A> as DatabaseStateRoot<'_, TX>>::overlay_root_with_updates(
-                tx, &sorted,
-            )?
-            .1
-        }
-    };
-
     let (mut state_root, mut storage_updates) = state_accumulator(tx)?;
 
     let mut accounts = bundle_state.state.iter().collect::<Vec<_>>();
@@ -101,7 +79,7 @@ where
 
     let root = state_root.root();
     let updates = LatticeAccumulatorUpdates::new(state_root.state(), storage_updates);
-    Ok((root, trie_updates, updates))
+    Ok((root, updates))
 }
 
 /// Rebuilds lattice accumulators from the current hashed state tables.
