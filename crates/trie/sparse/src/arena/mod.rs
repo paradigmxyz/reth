@@ -2808,6 +2808,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         sorted.sort_unstable_by_key(|entry| entry.1);
 
         let threshold = self.parallelism_thresholds.min_updates;
+        let parallelize_distributed_updates = nodes.len() >= threshold.saturating_mul(4);
 
         let mut cursor = mem::take(&mut self.buffers.cursor);
         cursor.reset(&self.upper_arena, self.root, Nibbles::default());
@@ -2885,7 +2886,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     let might_empty_subtrie =
                         all_removals && num_subtrie_updates as u64 >= subtrie_num_leaves;
 
-                    if num_subtrie_updates >= threshold && !might_empty_subtrie {
+                    if (num_subtrie_updates >= threshold || parallelize_distributed_updates) &&
+                        !might_empty_subtrie
+                    {
                         // Take subtrie for parallel update.
                         trace!(target: TRACE_TARGET, ?subtrie_root_path, num_subtrie_updates, "Taking subtrie for parallel update");
                         let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
