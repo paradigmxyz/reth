@@ -53,7 +53,7 @@ use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
-use alloy_primitives::{map::B256Set, B256};
+use alloy_primitives::{map::B256Set, B256, U256};
 use reth_tasks::LazyHandle;
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
@@ -94,6 +94,7 @@ use reth_revm::db::{
 use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
+use revm::{bytecode::Bytecode, state::AccountInfo};
 use revm_primitives::{Address, KECCAK_EMPTY};
 use std::{
     collections::HashMap,
@@ -536,8 +537,8 @@ where
         //   whole anyway.
         //
         // Therefore, `fill_on_miss` is false for those paths. If transaction prewarming can hand
-        // execution a revm cache snapshot, serial execution skips the shared cache wrapper entirely
-        // so provider misses do not pay fixed-cache lookup costs.
+        // execution a read overlay, serial execution skips the shared cache wrapper entirely so
+        // provider misses do not pay fixed-cache lookup costs.
         //
         // The second parameter `instrument_state_provider` controls whether we should
         // instrument the state provider with metrics.
@@ -1053,7 +1054,9 @@ where
         let has_bal = env.decoded_bal.is_some();
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
-                .with_database(StateProviderDatabase::new(state_provider))
+                .with_database(PrewarmStateDatabase::new(StateProviderDatabase::new(
+                    state_provider,
+                )))
                 .with_bundle_update()
                 .with_bal_builder_if(has_bal)
                 .build()
@@ -1098,7 +1101,7 @@ where
 
         let execution_start = Instant::now();
         let mut prewarm_state_loaded = false;
-        Self::maybe_preload_prewarm_state(
+        Self::maybe_install_prewarm_overlay(
             executor.evm_mut().db_mut(),
             prewarm_state_loader.as_ref(),
             &mut prewarm_state_loaded,
@@ -1119,9 +1122,12 @@ where
 
         // Finish execution and get the result
         let post_exec_start = Instant::now();
-        let (_evm, result) = debug_span!(target: "engine::tree", "BlockExecutor::finish")
+        let result = debug_span!(target: "engine::tree", "BlockExecutor::finish")
             .in_scope(|| executor.finish())
-            .map(|(evm, result)| (evm.into_db(), result))?;
+            .map(|(evm, result)| {
+                let _ = evm.into_db();
+                result
+            })?;
         self.metrics.record_post_execution(post_exec_start.elapsed());
 
         // Merge transitions into bundle state
@@ -1257,7 +1263,7 @@ where
     /// - Collecting transaction senders for later use
     ///
     /// Returns the executor (for finalization) and the collected senders.
-    fn execute_transactions<'a, E, Tx, InnerTx, Err, DB>(
+    fn execute_transactions<'db, 'overlay, E, Tx, InnerTx, Err, DB>(
         &self,
         mut executor: E,
         transaction_count: usize,
@@ -1265,14 +1271,18 @@ where
         receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
         executed_tx_index: &AtomicUsize,
         has_bal: bool,
-        prewarm_state_loader: Option<&PrewarmStateLoader>,
+        prewarm_state_loader: Option<&'overlay PrewarmStateLoader>,
         prewarm_state_loaded: &mut bool,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
-        E: BlockExecutor<Receipt = N::Receipt, Evm: alloy_evm::Evm<DB = &'a mut State<DB>>>,
+        E: BlockExecutor<
+            Receipt = N::Receipt,
+            Evm: alloy_evm::Evm<DB = &'db mut State<PrewarmStateDatabase<'overlay, DB>>>,
+        >,
         Tx: alloy_evm::block::ExecutableTx<E> + alloy_evm::RecoveredTx<InnerTx>,
         InnerTx: TxHashRef,
-        DB: revm::Database + 'a,
+        DB: revm::Database + 'db,
+        'overlay: 'db,
         Err: core::error::Error + Send + Sync + 'static,
     {
         let mut senders = Vec::with_capacity(transaction_count);
@@ -1297,7 +1307,7 @@ where
         // receipt with the same index and can panic the ordered root builder.
         let mut last_sent_len = 0usize;
         loop {
-            Self::maybe_preload_prewarm_state(
+            Self::maybe_install_prewarm_overlay(
                 executor.evm_mut().db_mut(),
                 prewarm_state_loader,
                 prewarm_state_loaded,
@@ -1353,9 +1363,9 @@ where
         Ok((executor, senders))
     }
 
-    fn maybe_preload_prewarm_state<DB: revm::Database>(
-        state: &mut State<DB>,
-        prewarm_state_loader: Option<&PrewarmStateLoader>,
+    fn maybe_install_prewarm_overlay<'a, DB: revm::Database>(
+        state: &mut State<PrewarmStateDatabase<'a, DB>>,
+        prewarm_state_loader: Option<&'a PrewarmStateLoader>,
         prewarm_state_loaded: &mut bool,
     ) {
         if *prewarm_state_loaded {
@@ -1367,48 +1377,8 @@ where
             return;
         };
 
-        Self::preload_prewarm_states(state, prewarm_states);
+        state.database.set_prewarm_states(prewarm_states);
         *prewarm_state_loaded = true;
-    }
-
-    fn preload_prewarm_states<DB: revm::Database>(
-        state: &mut State<DB>,
-        prewarm_states: &[CacheState],
-    ) {
-        // Prewarm reads are parent-state values. Never overwrite accounts or slots already
-        // touched by execution because those may include earlier transaction effects.
-        for prewarm_state in prewarm_states {
-            for (code_hash, bytecode) in &prewarm_state.contracts {
-                state.cache.contracts.entry(*code_hash).or_insert_with(|| bytecode.clone());
-            }
-
-            for (address, prewarm_account) in &prewarm_state.accounts {
-                let Some(cache_account) = state.cache.accounts.get_mut(address) else {
-                    state.cache.accounts.insert(*address, prewarm_account.clone());
-                    continue;
-                };
-                Self::merge_prewarm_cache_account(cache_account, prewarm_account);
-            }
-        }
-    }
-
-    fn merge_prewarm_cache_account(
-        cache_account: &mut CacheAccount,
-        prewarm_account: &CacheAccount,
-    ) {
-        if !cache_account.status.is_not_modified() {
-            return;
-        }
-        let Some(prewarm_account) = prewarm_account.account.as_ref() else {
-            return;
-        };
-        let Some(cache_account) = cache_account.account.as_mut() else {
-            return;
-        };
-
-        for (storage_key, value) in &prewarm_account.storage {
-            cache_account.storage.entry(*storage_key).or_insert(*value);
-        }
     }
 
     /// Compute state root for the given hashed post state in parallel.
@@ -2140,6 +2110,80 @@ enum StateRootStrategy<N: NodePrimitives> {
     Synchronous,
     /// Custom state root computation strategy.
     Custom(#[debug(skip)] CustomStateRoot<N>),
+}
+
+struct PrewarmStateDatabase<'a, DB> {
+    database: DB,
+    prewarm_states: Option<&'a [CacheState]>,
+}
+
+impl<DB> PrewarmStateDatabase<'_, DB> {
+    const fn new(database: DB) -> Self {
+        Self { database, prewarm_states: None }
+    }
+}
+
+impl<'a, DB> PrewarmStateDatabase<'a, DB> {
+    fn set_prewarm_states(&mut self, prewarm_states: &'a [CacheState]) {
+        self.prewarm_states = Some(prewarm_states);
+    }
+
+    fn prewarm_account(&self, address: &Address) -> Option<&CacheAccount> {
+        self.prewarm_states?.iter().find_map(|prewarm_state| prewarm_state.accounts.get(address))
+    }
+}
+
+impl<DB: std::fmt::Debug> std::fmt::Debug for PrewarmStateDatabase<'_, DB> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PrewarmStateDatabase")
+            .field("database", &self.database)
+            .field("has_prewarm_states", &self.prewarm_states.is_some())
+            .finish()
+    }
+}
+
+impl<DB: revm::Database> revm::Database for PrewarmStateDatabase<'_, DB> {
+    type Error = DB::Error;
+
+    fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        if let Some(account) = self.prewarm_account(&address) {
+            return Ok(account.account_info());
+        }
+
+        self.database.basic(address)
+    }
+
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        if let Some(bytecode) = self.prewarm_states.and_then(|prewarm_states| {
+            prewarm_states.iter().find_map(|prewarm_state| prewarm_state.contracts.get(&code_hash))
+        }) {
+            return Ok(bytecode.clone());
+        }
+
+        self.database.code_by_hash(code_hash)
+    }
+
+    fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
+        if let Some(prewarm_states) = self.prewarm_states {
+            for prewarm_state in prewarm_states {
+                let Some(cache_account) = prewarm_state.accounts.get(&address) else {
+                    continue;
+                };
+                let Some(account) = cache_account.account.as_ref() else {
+                    return Ok(U256::ZERO);
+                };
+                if let Some(value) = account.storage.get(&index) {
+                    return Ok(*value);
+                }
+            }
+        }
+
+        self.database.storage(address, index)
+    }
+
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+        self.database.block_hash(number)
+    }
 }
 
 /// Type that validates the payloads processed by the engine.

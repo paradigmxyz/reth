@@ -934,7 +934,7 @@ pub struct CacheTaskHandle<R> {
     executed_tx_index: Arc<AtomicUsize>,
     /// Metrics for the execution cache.
     cache_metrics: Option<CachedStateMetrics>,
-    /// Completed prewarm state used by execution as a read cache preload.
+    /// Completed prewarm state used by execution as a read overlay.
     prewarm_state_loader: Option<PrewarmStateLoader>,
 }
 
