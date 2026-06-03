@@ -4,7 +4,7 @@
 //! parent has not been persisted yet. [`StateTrieOverlayManager`] tracks those in-memory blocks and
 //! builds reusable flattened state trie overlays on demand.
 
-use crate::{EthPrimitives, ExecutedBlock};
+use crate::{ComputedTrieData, EthPrimitives, ExecutedBlock};
 use alloy_primitives::B256;
 use reth_metrics::{
     metrics::{Counter, Histogram},
@@ -449,7 +449,7 @@ fn compute_overlay<N: NodePrimitives>(
 
     let overlay = match input {
         ComputeOverlayInput::ExtendCached { block, parent_input } => {
-            let trie_data = block.trie_data();
+            let trie_data = load_block_trie_data_for_overlay(&block, "extend_cached");
 
             trace!(
                 target: "chain_state::state_trie_overlay",
@@ -481,7 +481,10 @@ fn compute_overlay<N: NodePrimitives>(
 }
 
 fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSorted {
-    let trie_data = blocks.iter().map(ExecutedBlock::trie_data).collect::<Vec<_>>();
+    let trie_data = blocks
+        .iter()
+        .map(|block| load_block_trie_data_for_overlay(block, "merge_blocks"))
+        .collect::<Vec<_>>();
 
     #[cfg(feature = "rayon")]
     let (nodes, state) = rayon::join(
@@ -506,6 +509,42 @@ fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSo
     );
 
     TrieInputSorted::new(nodes, state, Default::default())
+}
+
+fn load_block_trie_data_for_overlay<N: NodePrimitives>(
+    block: &ExecutedBlock<N>,
+    overlay_mode: &'static str,
+) -> ComputedTrieData {
+    let started_at = Instant::now();
+    let block_hash = block.recovered_block().hash();
+    let block_number = block.recovered_block().number();
+    let parent_hash = block.recovered_block().parent_hash();
+
+    debug!(
+        target: "chain_state::state_trie_overlay",
+        %block_hash,
+        block_number,
+        %parent_hash,
+        overlay_mode,
+        "loading block trie data for state trie overlay"
+    );
+
+    let trie_data = block.trie_data();
+    let elapsed = started_at.elapsed();
+
+    debug!(
+        target: "chain_state::state_trie_overlay",
+        %block_hash,
+        block_number,
+        %parent_hash,
+        overlay_mode,
+        hashed_state_len = trie_data.hashed_state.total_len(),
+        trie_updates_len = trie_data.trie_updates.total_len(),
+        ?elapsed,
+        "loaded block trie data for state trie overlay"
+    );
+
+    trie_data
 }
 
 fn extend_overlay(

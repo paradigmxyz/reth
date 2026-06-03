@@ -172,6 +172,7 @@ const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
 
 /// Poll interval used while bridging deferred payload-builder sparse-trie handles.
 const PAYLOAD_BUILDER_SPARSE_TRIE_BRIDGE_POLL_INTERVAL: Duration = Duration::from_millis(1);
+const PAYLOAD_BUILDER_SPARSE_TRIE_BRIDGE_STALL_LOG_INTERVAL: Duration = Duration::from_millis(500);
 
 type ReceiptRootSender<N> =
     crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
@@ -1924,6 +1925,12 @@ where
         // this computation to finish rather than falling back to the expensive DB path.
         // The guard ensures the pending entry is cancelled if the task panics.
         let pending_changeset_guard = self.changeset_cache.register_pending(block_hash);
+        debug!(
+            target: "engine::tree::payload_validator",
+            %block_hash,
+            block_number,
+            "registered pending changeset and scheduled deferred trie task"
+        );
 
         // Spawn background task to compute trie data. Calling `wait_cloned` will compute from
         // the stored inputs and cache the result, so subsequent calls return immediately.
@@ -1935,12 +1942,30 @@ where
             )
             .entered();
 
+            let task_start = Instant::now();
+            debug!(
+                target: "engine::tree::payload_validator",
+                %block_hash,
+                block_number,
+                "started deferred trie task"
+            );
+
             let result = panic::catch_unwind(AssertUnwindSafe(|| {
                 let compute_start = Instant::now();
                 let computed = deferred_handle_task.wait_cloned();
+                let trie_data_elapsed = compute_start.elapsed();
                 block_validation_metrics
                     .deferred_trie_compute_duration
-                    .record(compute_start.elapsed().as_secs_f64());
+                    .record(trie_data_elapsed.as_secs_f64());
+                debug!(
+                    target: "engine::tree::payload_validator",
+                    %block_hash,
+                    block_number,
+                    hashed_state_len = computed.hashed_state.total_len(),
+                    trie_updates_len = computed.trie_updates.total_len(),
+                    ?trie_data_elapsed,
+                    "loaded deferred trie data"
+                );
 
                 // Record sizes of the computed trie data
                 block_validation_metrics
@@ -1982,7 +2007,17 @@ where
             if result.is_err() {
                 error!(
                     target: "engine::tree::payload_validator",
+                    %block_hash,
+                    block_number,
                     "Deferred trie task panicked; fallback computation will be used when trie data is accessed"
+                );
+            } else {
+                debug!(
+                    target: "engine::tree::payload_validator",
+                    %block_hash,
+                    block_number,
+                    elapsed = ?task_start.elapsed(),
+                    "completed deferred trie task"
                 );
             }
         };
@@ -2138,12 +2173,27 @@ where
         let executor = self.payload_processor.executor().clone();
         let config = self.config.clone();
         executor.clone().spawn_blocking_named("payload-builder-sparse-trie-fulfill", move || {
+            debug!(
+                target: "engine::tree::payload_validator",
+                %parent_hash,
+                parent_number,
+                pending_count,
+                "started deferred payload-builder sparse trie fulfillment"
+            );
             let overlay_start = Instant::now();
             let state_trie_overlays = state_trie_overlays.detached_snapshot();
             state_trie_overlays.insert_block(executed_parent);
             let overlay_elapsed = overlay_start.elapsed();
 
-            for pending in pending_handles {
+            for (pending_index, pending) in pending_handles.into_iter().enumerate() {
+                debug!(
+                    target: "engine::tree::payload_validator",
+                    %parent_hash,
+                    parent_number,
+                    pending_index,
+                    pending_count,
+                    "preparing payload-builder sparse trie handle from fulfilled parent"
+                );
                 let overlay_builder = OverlayBuilder::new(parent_hash, changeset_cache.clone())
                     .with_state_trie_overlay_manager(state_trie_overlays.clone());
                 let overlay_factory =
@@ -2215,6 +2265,31 @@ where
             let bridge_start = Instant::now();
             let mut forwarded_updates = 0usize;
             let mut finished = false;
+            let mut last_wait_log = Instant::now();
+
+            debug!(
+                target: "engine::tree::payload_validator",
+                %parent_hash,
+                parent_number,
+                "started payload-builder sparse trie bridge"
+            );
+            macro_rules! log_bridge_wait {
+                ($message:literal) => {
+                    if last_wait_log.elapsed()
+                        >= PAYLOAD_BUILDER_SPARSE_TRIE_BRIDGE_STALL_LOG_INTERVAL
+                    {
+                        debug!(
+                            target: "engine::tree::payload_validator",
+                            %parent_hash,
+                            parent_number,
+                            forwarded_updates,
+                            elapsed = ?bridge_start.elapsed(),
+                            $message
+                        );
+                        last_wait_log = Instant::now();
+                    }
+                };
+            }
 
             loop {
                 if consumer_cancelled.load(Ordering::Acquire) {
@@ -2232,7 +2307,10 @@ where
                     PAYLOAD_BUILDER_SPARSE_TRIE_BRIDGE_POLL_INTERVAL,
                 ) {
                     Ok(message) => message,
-                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                        log_bridge_wait!("waiting for payload-builder sparse trie updates");
+                        continue
+                    }
                     Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
                 };
 
@@ -2265,6 +2343,15 @@ where
                 return;
             }
 
+            debug!(
+                target: "engine::tree::payload_validator",
+                %parent_hash,
+                parent_number,
+                forwarded_updates,
+                elapsed = ?bridge_start.elapsed(),
+                "payload-builder sparse trie bridge forwarded all updates; waiting for hashed state"
+            );
+            last_wait_log = Instant::now();
             let hashed_state = loop {
                 if consumer_cancelled.load(Ordering::Acquire) {
                     debug!(
@@ -2281,7 +2368,10 @@ where
                     PAYLOAD_BUILDER_SPARSE_TRIE_BRIDGE_POLL_INTERVAL,
                 ) {
                     Ok(hashed_state) => break hashed_state,
-                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Timeout) => {
+                        log_bridge_wait!("waiting for payload-builder sparse trie hashed state");
+                        continue
+                    }
                     Err(RecvTimeoutError::Disconnected) => {
                         debug!(
                             target: "engine::tree::payload_validator",
@@ -2305,6 +2395,15 @@ where
                 return;
             }
 
+            debug!(
+                target: "engine::tree::payload_validator",
+                %parent_hash,
+                parent_number,
+                forwarded_updates,
+                elapsed = ?bridge_start.elapsed(),
+                "payload-builder sparse trie bridge forwarded hashed state; waiting for state root"
+            );
+            last_wait_log = Instant::now();
             let result = loop {
                 if consumer_cancelled.load(Ordering::Acquire) {
                     debug!(
@@ -2321,7 +2420,10 @@ where
                     PAYLOAD_BUILDER_SPARSE_TRIE_BRIDGE_POLL_INTERVAL,
                 ) {
                     Ok(result) => break result,
-                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Timeout) => {
+                        log_bridge_wait!("waiting for payload-builder sparse trie state root");
+                        continue
+                    }
                     Err(RecvTimeoutError::Disconnected) => {
                         break Err(ParallelStateRootError::Other(
                             "payload-builder sparse trie task dropped state root sender".to_string(),
