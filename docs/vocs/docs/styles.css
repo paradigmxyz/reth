@@ -1,6 +1,6 @@
 @import "tailwindcss" important;
 
-@custom-variant dark (&:where(.dark, .dark *));
+@custom-variant dark (&:where(.dark, .dark *, [data-vocs-theme="dark"], [data-vocs-theme="dark"] *));
 
 [data-layout="landing"] .vocs_Button_button {
   border-radius: 4px !important;
