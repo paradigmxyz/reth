@@ -899,8 +899,6 @@ impl Iterator for ChunkedHashedPostState {
 mod tests {
     use super::*;
     use crate::KeccakKeyHasher;
-    use alloy_primitives::Bytes;
-    use revm_state::{AccountInfo, Bytecode};
 
     #[test]
     fn hashed_state_wiped_extension() {
@@ -981,14 +979,8 @@ mod tests {
         // Prepare a random Ethereum address as a key for the account.
         let address = Address::random();
 
-        // Create a mock account info object.
-        let account_info = AccountInfo {
-            balance: U256::from(123),
-            nonce: 42,
-            code_hash: B256::random(),
-            code: Some(Bytecode::new_raw(Bytes::from(vec![1, 2]))),
-            account_id: None,
-        };
+        let account =
+            Account { balance: U256::from(123), nonce: 42, bytecode_hash: Some(B256::random()) };
 
         let slot = U256::from(1);
         let value = U256::from(4);
@@ -996,7 +988,7 @@ mod tests {
 
         let state = vec![(
             &address,
-            Some(Account::from(account_info.clone())),
+            Some(account),
             false,
             storage.iter().map(|(slot, value)| (slot, value)),
         )];
@@ -1009,10 +1001,7 @@ mod tests {
         assert_eq!(hashed_state.storages.len(), 1);
 
         // Validate the account info.
-        assert_eq!(
-            *hashed_state.accounts.get(&keccak256(address)).unwrap(),
-            Some(account_info.into())
-        );
+        assert_eq!(*hashed_state.accounts.get(&keccak256(address)).unwrap(), Some(account));
     }
 
     #[test]
