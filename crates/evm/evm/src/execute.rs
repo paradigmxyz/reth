@@ -1,6 +1,6 @@
 //! Traits for execution.
 
-use crate::{ConfigureEvm, Database, OnStateHook, StateHookExt, TxEnvFor};
+use crate::{ConfigureEvm, Database, EvmFactory, OnStateHook, StateHookExt, TxEnvFor};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eip7928::{compute_block_access_list_hash, BlockAccessList};
@@ -15,7 +15,7 @@ use alloy_evm::{
         InternalBlockExecutionError as AlloyInternalBlockExecutionError, StateDB,
         TxResult as AlloyTxResult,
     },
-    Evm, EvmEnv, EvmFactory, RecoveredTx, ToTxEnv,
+    Evm, EvmEnv, RecoveredTx, ToTxEnv,
 };
 use alloy_primitives::{map::AddressHashSet, Address, B256};
 pub use reth_execution_errors::{

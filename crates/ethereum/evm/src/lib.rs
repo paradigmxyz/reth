@@ -30,7 +30,7 @@ use reth_evm::{
     hardfork::SpecId,
     precompiles::PrecompilesMap,
     ConfigureEvm, EthEvmFactory, EvmEnv, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
-    NextBlockEnvAttributes, TransactionEnvMut,
+    LegacyEvmFactory, NextBlockEnvAttributes, TransactionEnvMut,
 };
 use reth_primitives_traits::{SealedBlock, SealedHeader};
 
@@ -215,7 +215,8 @@ where
             Spec = SpecId,
             BlockEnv = BlockEnv,
             Precompiles = PrecompilesMap,
-        > + Clone
+        > + LegacyEvmFactory
+        + Clone
         + Debug
         + Send
         + Sync
@@ -310,7 +311,8 @@ where
             Spec = SpecId,
             BlockEnv = BlockEnv,
             Precompiles = PrecompilesMap,
-        > + Clone
+        > + LegacyEvmFactory
+        + Clone
         + Debug
         + Send
         + Sync
@@ -405,7 +407,8 @@ where
             Spec = SpecId,
             BlockEnv = BlockEnv,
             Precompiles = PrecompilesMap,
-        > + Clone
+        > + LegacyEvmFactory
+        + Clone
         + Debug
         + Send
         + Sync
@@ -503,7 +506,8 @@ where
             Spec = SpecId,
             BlockEnv = BlockEnv,
             Precompiles = PrecompilesMap,
-        > + Clone
+        > + LegacyEvmFactory
+        + Clone
         + Debug
         + Send
         + Sync

@@ -22,7 +22,7 @@ use alloc::vec::Vec;
 use alloy_eips::eip4895::Withdrawals;
 use alloy_evm::{precompiles::PrecompilesMap, Database as AlloyDatabase};
 use alloy_primitives::{Address, Bytes, B256};
-use core::{error::Error, fmt::Debug};
+use core::{error::Error, fmt::Debug, hash::Hash};
 use execute::{
     BasicBlockExecutor, BlockAssembler, BlockBuilder, BlockExecutorFactory, BlockExecutorFor,
 };
@@ -30,7 +30,13 @@ use reth_execution_errors::BlockExecutionError;
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SealedBlock, SealedHeader, TxTy,
 };
-use revm::primitives::hardfork::SpecId;
+use revm::{
+    context_interface::{result::HaltReasonTr, ContextTr},
+    database_interface::DBErrorMarker as AlloyDBErrorMarker,
+    inspector::{JournalExt, NoOpInspector},
+    primitives::hardfork::SpecId,
+    Inspector,
+};
 
 pub mod cached;
 pub mod cancelled;
@@ -77,10 +83,111 @@ pub use alloy_evm::{
     env, error, eth,
     evm::EvmFactoryExt,
     precompiles as alloy_precompiles, spec, spec_by_timestamp_and_block_number, traits, tx, EthEvm,
-    EthEvmFactory, Evm, EvmEnv, EvmError, EvmFactory, EvmLimitParams, FromRecoveredTx,
-    FromTxWithEncoded, IntoTxEnv, InvalidTxError, MovePrecompileError, RecoveredTx, ToTxEnv,
-    TransactionEnvMut,
+    EthEvmFactory, Evm, EvmEnv, EvmError, EvmLimitParams, FromRecoveredTx, FromTxWithEncoded,
+    IntoTxEnv, InvalidTxError, MovePrecompileError, RecoveredTx, ToTxEnv, TransactionEnvMut,
 };
+
+/// A type responsible for creating configured EVM instances.
+pub trait EvmFactory {
+    /// The EVM type that this factory creates.
+    type Evm<DB: AlloyDatabase, I: Inspector<Self::Context<DB>>>: Evm<
+        DB = DB,
+        Tx = Self::Tx,
+        HaltReason = Self::HaltReason,
+        Error = Self::Error<DB::Error>,
+        Spec = Self::Spec,
+        BlockEnv = Self::BlockEnv,
+        Precompiles = Self::Precompiles,
+        Inspector = I,
+    >;
+
+    /// The EVM context for inspectors.
+    type Context<DB: AlloyDatabase>: ContextTr<Db = DB, Journal: JournalExt>;
+    /// Transaction environment.
+    type Tx: IntoTxEnv<Self::Tx>;
+    /// EVM error.
+    type Error<DBError: AlloyDBErrorMarker>: EvmError;
+    /// Halt reason.
+    type HaltReason: HaltReasonTr + Send + Sync + 'static;
+    /// Specification identifier.
+    type Spec: Debug + Copy + Hash + Eq + Send + Sync + Default + 'static;
+    /// Block environment.
+    type BlockEnv: alloy_evm::env::BlockEnvironment;
+    /// Precompiles used by the EVM.
+    type Precompiles;
+
+    /// Creates a new EVM.
+    fn create_evm<DB: AlloyDatabase>(
+        &self,
+        db: DB,
+        evm_env: EvmEnv<Self::Spec, Self::BlockEnv>,
+    ) -> Self::Evm<DB, NoOpInspector>;
+
+    /// Creates a new EVM with an inspector.
+    fn create_evm_with_inspector<DB: AlloyDatabase, I: Inspector<Self::Context<DB>>>(
+        &self,
+        db: DB,
+        input: EvmEnv<Self::Spec, Self::BlockEnv>,
+        inspector: I,
+    ) -> Self::Evm<DB, I>;
+}
+
+impl<T> EvmFactory for T
+where
+    T: alloy_evm::EvmFactory,
+{
+    type Evm<DB: AlloyDatabase, I: Inspector<Self::Context<DB>>> =
+        <T as alloy_evm::EvmFactory>::Evm<DB, I>;
+    type Context<DB: AlloyDatabase> = <T as alloy_evm::EvmFactory>::Context<DB>;
+    type Tx = <T as alloy_evm::EvmFactory>::Tx;
+    type Error<DBError: AlloyDBErrorMarker> = <T as alloy_evm::EvmFactory>::Error<DBError>;
+    type HaltReason = <T as alloy_evm::EvmFactory>::HaltReason;
+    type Spec = <T as alloy_evm::EvmFactory>::Spec;
+    type BlockEnv = <T as alloy_evm::EvmFactory>::BlockEnv;
+    type Precompiles = <T as alloy_evm::EvmFactory>::Precompiles;
+
+    fn create_evm<DB: AlloyDatabase>(
+        &self,
+        db: DB,
+        evm_env: EvmEnv<Self::Spec, Self::BlockEnv>,
+    ) -> Self::Evm<DB, NoOpInspector> {
+        alloy_evm::EvmFactory::create_evm(self, db, evm_env)
+    }
+
+    fn create_evm_with_inspector<DB: AlloyDatabase, I: Inspector<Self::Context<DB>>>(
+        &self,
+        db: DB,
+        input: EvmEnv<Self::Spec, Self::BlockEnv>,
+        inspector: I,
+    ) -> Self::Evm<DB, I> {
+        alloy_evm::EvmFactory::create_evm_with_inspector(self, db, input, inspector)
+    }
+}
+
+/// Marker for factories that can still drive the legacy block executor adapters.
+pub trait LegacyEvmFactory:
+    EvmFactory
+    + alloy_evm::EvmFactory<
+        Tx = <Self as EvmFactory>::Tx,
+        HaltReason = <Self as EvmFactory>::HaltReason,
+        Spec = <Self as EvmFactory>::Spec,
+        BlockEnv = <Self as EvmFactory>::BlockEnv,
+        Precompiles = <Self as EvmFactory>::Precompiles,
+    >
+{
+}
+
+impl<T> LegacyEvmFactory for T where
+    T: EvmFactory
+        + alloy_evm::EvmFactory<
+            Tx = <T as EvmFactory>::Tx,
+            HaltReason = <T as EvmFactory>::HaltReason,
+            Spec = <T as EvmFactory>::Spec,
+            BlockEnv = <T as EvmFactory>::BlockEnv,
+            Precompiles = <T as EvmFactory>::Precompiles,
+        >
+{
+}
 
 /// A complete configuration of EVM for Reth.
 ///

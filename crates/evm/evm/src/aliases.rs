@@ -2,9 +2,9 @@
 
 use crate::{
     execute::{BlockExecutorFactory, BlockExecutorFor},
-    ConfigureEvm,
+    ConfigureEvm, EvmFactory,
 };
-use alloy_evm::{Database, EvmEnv, EvmFactory};
+use alloy_evm::{Database, EvmEnv};
 use reth_execution_types::State;
 use revm::{inspector::NoOpInspector, Inspector};
 
