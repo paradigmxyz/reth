@@ -9,7 +9,10 @@ use std::{
 use alloy_consensus::BlockHeader;
 use alloy_primitives::BlockNumber;
 use reth_ethereum_primitives::Receipt;
-use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput, Executor};
+use reth_evm::{
+    database::StateProviderDatabase,
+    execute::{BlockExecutionError, BlockExecutionOutput, Executor},
+};
 use reth_node_api::{Block as _, BlockBody as _, NodePrimitives};
 use reth_primitives_traits::{format_gas_throughput, RecoveredBlock, SignedTransaction};
 use reth_provider::{
@@ -17,7 +20,6 @@ use reth_provider::{
     TransactionVariant,
 };
 use reth_prune_types::PruneModes;
-use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ExecutionStageThresholds;
 use reth_tracing::tracing::{debug, trace};
 

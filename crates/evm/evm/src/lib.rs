@@ -33,6 +33,7 @@ use reth_primitives_traits::{
 };
 use revm::{database::State, primitives::hardfork::SpecId};
 
+pub mod database;
 pub mod either;
 pub mod evm2;
 /// EVM environment configuration.
