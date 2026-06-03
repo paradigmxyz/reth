@@ -9,7 +9,33 @@
 }
 
 [data-layout="landing"] .vocs_Content {
+  overflow-x: clip;
+  padding-left: 24px;
+  padding-right: 24px;
   position: inherit;
+}
+
+@media (min-width: 768px) {
+  [data-layout="landing"] .vocs_Content {
+    padding-left: 0;
+    padding-right: 0;
+  }
+}
+
+[data-layout="landing"] .vocs_Content > h2 {
+  font-size: 32px;
+  letter-spacing: 0;
+  line-height: 1.15;
+  margin-bottom: 8px;
+  margin-top: 64px;
+}
+
+[data-layout="landing"] .vocs_Content > p {
+  font-size: 18px;
+  line-height: 1.55;
+  margin-bottom: 24px;
+  margin-top: 0;
+  max-width: 820px;
 }
 
 #home-install .vocs_CodeGroup {
