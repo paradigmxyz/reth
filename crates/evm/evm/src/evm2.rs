@@ -540,10 +540,10 @@ const fn account_status(
 ) -> AccountStatus {
     if present.is_none() && original.is_some() {
         AccountStatus::Destroyed
-    } else if storage_wiped {
-        AccountStatus::DestroyedChanged
     } else if original.is_none() {
         AccountStatus::InMemoryChange
+    } else if storage_wiped {
+        AccountStatus::DestroyedChanged
     } else {
         AccountStatus::Changed
     }
@@ -2068,6 +2068,57 @@ mod tests {
     }
 
     #[test]
+    fn created_account_with_storage_wipe_is_not_destroyed() {
+        let address = address!("0x0000000000000000000000000000000000000018");
+        let code = Evm2Bytecode::new_legacy(Bytes::from_static(&[0x60, 0x00]));
+        let code_hash = code.hash_slow();
+        let changes = StateChanges {
+            accounts: core::iter::once((
+                address,
+                Tracked {
+                    original: None,
+                    current: Some(Evm2AccountInfo {
+                        balance: U256::ZERO,
+                        nonce: 1,
+                        code_hash,
+                        code: Some(code.clone()),
+                        _non_exhaustive: (),
+                    }),
+                    _non_exhaustive: (),
+                },
+            ))
+            .collect(),
+            storage: core::iter::once((
+                address,
+                StorageChangeSet {
+                    wipe: true,
+                    slots: core::iter::once((
+                        U256::from(2),
+                        Tracked {
+                            original: U256::ZERO,
+                            current: U256::from(3),
+                            _non_exhaustive: (),
+                        },
+                    ))
+                    .collect(),
+                    _non_exhaustive: (),
+                },
+            ))
+            .collect(),
+            code: core::iter::once((code_hash, code)).collect(),
+            logs: Vec::new(),
+            _non_exhaustive: (),
+        };
+
+        let bundle = bundle_state_from_evm2(changes);
+        let account = bundle.account(&address).unwrap();
+
+        assert_eq!(account.status, AccountStatus::InMemoryChange);
+        assert!(!account.was_destroyed());
+        assert_eq!(account.info.as_ref().map(|info| info.code_hash), Some(code_hash));
+    }
+
+    #[test]
     fn converts_destroyed_account_status() {
         let address = address!("0x0000000000000000000000000000000000000002");
         let changes = StateChanges {
@@ -2652,7 +2703,7 @@ mod tests {
         let bundle = bundle_state_from_evm2(changes);
         let account = bundle.account(&address).unwrap();
 
-        assert!(account.was_destroyed());
+        assert_eq!(account.status, AccountStatus::InMemoryChange);
         assert_eq!(account.storage_slot(U256::from(1)), Some(U256::ZERO));
     }
 
