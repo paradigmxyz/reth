@@ -48,11 +48,13 @@ use crate::tree::{
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
-use alloy_consensus::transaction::{Either, TxHashRef};
+use alloy_consensus::{
+    constants::KECCAK_EMPTY,
+    transaction::{Either, TxHashRef},
+};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
-use alloy_evm::Evm;
-use alloy_primitives::{map::B256Set, B256};
+use alloy_primitives::{map::B256Set, Address, B256};
 use reth_tasks::LazyHandle;
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
@@ -67,11 +69,13 @@ use reth_engine_primitives::{
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
-    block::BlockExecutor,
+    block::{BlockExecutor, ExecutableTx},
+    database::State,
     execute::{
         convert_alloy_block_execution_error, convert_alloy_block_execution_result, ExecutableTxFor,
     },
-    ConfigureEvm, EvmEnvFor, ExecutionCtxFor, OnStateHook, SpecFor, StateHookExt,
+    ConfigureEvm, Database, Evm, EvmEnvFor, ExecutionCtxFor, OnStateHook, RecoveredTx, SpecFor,
+    StateHookExt,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
 use reth_execution_types::{BundleAccount, BundleRetention};
@@ -90,11 +94,9 @@ use reth_provider::{
     StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
     StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_revm::db::State;
 use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm_primitives::{Address, KECCAK_EMPTY};
 use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
@@ -528,8 +530,8 @@ where
         // back into the cache. On a glance it seems to be always useful to do this. However,
         // in practice, for the serial/non-BAL execution, it's not needed and is net negative:
         //
-        // - It's not necessary because the revm machinery provides layer of caching itself. That
-        //   means a value for a miss will be recorded in revm's cache.
+        // - It's not necessary because the execution database provides a cache layer itself. That
+        //   means a value for a miss will be recorded there.
         // - Inserting back into the cache is not free.
         // - After execution, the execution post-state will be dumped into the execution cache as
         //   whole anyway.
@@ -1247,10 +1249,10 @@ where
         has_bal: bool,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
-        E: BlockExecutor<Receipt = N::Receipt, Evm: alloy_evm::Evm<DB = &'a mut State<DB>>>,
-        Tx: alloy_evm::block::ExecutableTx<E> + alloy_evm::RecoveredTx<InnerTx>,
+        E: BlockExecutor<Receipt = N::Receipt, Evm: Evm<DB = &'a mut State<DB>>>,
+        Tx: ExecutableTx<E> + RecoveredTx<InnerTx>,
         InnerTx: TxHashRef,
-        DB: revm::Database + 'a,
+        DB: Database + 'a,
         Err: core::error::Error + Send + Sync + 'static,
     {
         let mut senders = Vec::with_capacity(transaction_count);
@@ -1283,7 +1285,7 @@ where
             self.metrics.record_transaction_wait(wait_start.elapsed());
 
             let tx = tx_result.map_err(BlockExecutionError::other)?;
-            let tx_signer = *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(&tx);
+            let tx_signer = *<Tx as RecoveredTx<InnerTx>>::signer(&tx);
 
             senders.push(tx_signer);
 
