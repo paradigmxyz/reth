@@ -51,10 +51,12 @@ use revm::{
         BlockEnv,
     },
     database::states::{
-        AccountStatus, BundleAccount, BundleState, StorageSlot, StorageWithOriginalValues,
+        reverts::{AccountInfoRevert, Reverts},
+        AccountRevert, AccountStatus, BundleAccount, BundleState, RevertToSlot, StorageSlot,
+        StorageWithOriginalValues,
     },
     inspector::Inspector,
-    primitives::hardfork::SpecId as RevmSpecId,
+    primitives::{hardfork::SpecId as RevmSpecId, StorageKeyMap},
     state::{
         Account as RevmAccount, AccountInfo, Bytecode, EvmState, EvmStorageSlot, TransactionId,
     },
@@ -461,6 +463,23 @@ fn storage_from_evm2(storage: StorageChangeSet) -> StorageWithOriginalValues {
         .collect()
 }
 
+fn storage_reverts_from_evm2(storage: &StorageChangeSet) -> StorageKeyMap<RevertToSlot> {
+    storage.slots.iter().map(|(&key, slot)| (key, RevertToSlot::Some(slot.original))).collect()
+}
+
+fn account_info_revert_from_evm2(
+    original: &Option<Evm2AccountInfo>,
+    present: &Option<Evm2AccountInfo>,
+) -> AccountInfoRevert {
+    match (original, present) {
+        (Some(original), _) => {
+            AccountInfoRevert::RevertTo(account_info_from_evm2(original.clone()))
+        }
+        (None, Some(_)) => AccountInfoRevert::DeleteIt,
+        (None, None) => AccountInfoRevert::DoNothing,
+    }
+}
+
 const fn account_status(
     original: &Option<AccountInfo>,
     present: &Option<AccountInfo>,
@@ -468,10 +487,10 @@ const fn account_status(
 ) -> AccountStatus {
     if present.is_none() && original.is_some() {
         AccountStatus::Destroyed
-    } else if original.is_none() && present.is_some() {
-        AccountStatus::InMemoryChange
     } else if storage_wiped {
         AccountStatus::DestroyedChanged
+    } else if original.is_none() && present.is_some() {
+        AccountStatus::InMemoryChange
     } else {
         AccountStatus::Changed
     }
@@ -481,6 +500,34 @@ const fn account_status(
 pub fn bundle_state_from_evm2(changes: StateChanges) -> BundleState {
     let mut state = AddressMap::<BundleAccount>::default();
     let mut contracts = B256Map::<Bytecode>::default();
+    let mut reverts = Vec::with_capacity(changes.accounts.len() + changes.storage.len());
+    let mut reverts_size = 0;
+
+    for (address, account) in &changes.accounts {
+        let storage = changes.storage.get(address);
+        let revert = AccountRevert {
+            account: account_info_revert_from_evm2(&account.original, &account.current),
+            storage: storage.map(storage_reverts_from_evm2).unwrap_or_default(),
+            previous_status: AccountStatus::Changed,
+            wipe_storage: storage.is_some_and(|storage| storage.wipe),
+        };
+        reverts_size += revert.size_hint();
+        reverts.push((*address, revert));
+    }
+
+    for (address, storage) in &changes.storage {
+        if changes.accounts.contains_key(address) {
+            continue;
+        }
+        let revert = AccountRevert {
+            account: AccountInfoRevert::DoNothing,
+            storage: storage_reverts_from_evm2(storage),
+            previous_status: AccountStatus::Changed,
+            wipe_storage: storage.wipe,
+        };
+        reverts_size += revert.size_hint();
+        reverts.push((*address, revert));
+    }
 
     for (hash, bytecode) in changes.code {
         contracts.insert(hash, bytecode_from_evm2(bytecode));
@@ -508,7 +555,7 @@ pub fn bundle_state_from_evm2(changes: StateChanges) -> BundleState {
         state.insert(address, account);
     }
 
-    BundleState { state, contracts, state_size, ..Default::default() }
+    BundleState { state, contracts, reverts: Reverts::new(vec![reverts]), state_size, reverts_size }
 }
 
 fn evm_state_from_evm2_with_accounts<R>(
@@ -1796,6 +1843,10 @@ mod tests {
         assert_eq!(account.info.as_ref().unwrap().balance, U256::from(7));
         assert_eq!(account.storage_slot(U256::from(2)), Some(U256::from(3)));
         assert!(bundle.bytecode(&code_hash).is_some());
+
+        let revert = &bundle.reverts[0][0].1;
+        assert_eq!(revert.account, AccountInfoRevert::DeleteIt);
+        assert_eq!(revert.storage.get(&U256::from(2)), Some(&RevertToSlot::Some(U256::ZERO)));
     }
 
     #[test]
@@ -1826,6 +1877,41 @@ mod tests {
         let bundle = bundle_state_from_evm2(changes);
 
         assert!(bundle.account(&address).unwrap().was_destroyed());
+    }
+
+    #[test]
+    fn converts_storage_only_changes_to_reverts() {
+        let address = address!("0x0000000000000000000000000000000000000003");
+        let changes = StateChanges {
+            accounts: Default::default(),
+            storage: core::iter::once((
+                address,
+                StorageChangeSet {
+                    wipe: false,
+                    slots: core::iter::once((
+                        U256::from(2),
+                        Tracked {
+                            original: U256::from(1),
+                            current: U256::from(3),
+                            _non_exhaustive: (),
+                        },
+                    ))
+                    .collect(),
+                    _non_exhaustive: (),
+                },
+            ))
+            .collect(),
+            code: Default::default(),
+            logs: Vec::new(),
+            _non_exhaustive: (),
+        };
+
+        let bundle = bundle_state_from_evm2(changes);
+        let revert = &bundle.reverts[0][0];
+
+        assert_eq!(revert.0, address);
+        assert_eq!(revert.1.account, AccountInfoRevert::DoNothing);
+        assert_eq!(revert.1.storage.get(&U256::from(2)), Some(&RevertToSlot::Some(U256::from(1))));
     }
 
     #[test]
