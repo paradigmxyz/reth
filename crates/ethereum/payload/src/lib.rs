@@ -21,10 +21,9 @@ use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_errors::{BlockExecutionError, BlockValidationError, ConsensusError};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
-    block::TxResult,
     context::{Block as _, Cfg as _, InvalidTransaction},
     database::{State, StateProviderDatabase},
-    execute::{BlockBuilder, BlockBuilderOutcome},
+    execute::{BlockBuilder, BlockBuilderOutcome, TxResult},
     ConfigureEvm, Evm, NextBlockEnvAttributes, StateHookExt,
 };
 use reth_evm_ethereum::EthEvm2Config;
