@@ -5,19 +5,16 @@ use crate::block::CachedTransaction;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{Address, TxHash, B256};
+use alloy_primitives::{Address, StorageKey, StorageValue, TxHash, B256};
 use futures::{stream::FuturesOrdered, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::{
     AccountBal as ExecutionAccountBal, AccountInfoBal as ExecutionAccountInfoBal,
-    Bal as ExecutionBal, BalWrites as ExecutionBalWrites, Chain, StorageBal as ExecutionStorageBal,
+    Bal as ExecutionBal, BalWrites as ExecutionBalWrites, Bytecode, Chain,
+    StorageBal as ExecutionStorageBal,
 };
 use reth_primitives_traits::{Block, BlockBody, InMemorySize, NodePrimitives, RecoveredBlock};
-use reth_revm::{
-    bytecode::Bytecode,
-    primitives::{StorageKey, StorageValue},
-};
 use reth_storage_api::{BalProvider, BlockReader, TransactionVariant};
 use reth_tasks::Runtime;
 use schnellru::{ByLength, Limiter, LruMap};
