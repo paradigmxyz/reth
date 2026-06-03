@@ -76,9 +76,10 @@ pub use alloy_evm::{
     block::{self, state_changes, system_calls},
     env, error, eth,
     evm::EvmFactoryExt,
-    precompiles as alloy_precompiles, traits, tx, EthEvm, EthEvmFactory, Evm, EvmEnv, EvmError,
-    EvmFactory, EvmLimitParams, FromRecoveredTx, FromTxWithEncoded, IntoTxEnv, InvalidTxError,
-    MovePrecompileError, RecoveredTx, ToTxEnv, TransactionEnvMut,
+    precompiles as alloy_precompiles, spec, spec_by_timestamp_and_block_number, traits, tx, EthEvm,
+    EthEvmFactory, Evm, EvmEnv, EvmError, EvmFactory, EvmLimitParams, FromRecoveredTx,
+    FromTxWithEncoded, IntoTxEnv, InvalidTxError, MovePrecompileError, RecoveredTx, ToTxEnv,
+    TransactionEnvMut,
 };
 
 /// A complete configuration of EVM for Reth.

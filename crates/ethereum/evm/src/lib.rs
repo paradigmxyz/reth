@@ -594,11 +594,15 @@ mod tests {
     use reth_chainspec::{Chain, ChainSpec};
     use reth_evm::{
         context::{BlockEnv, CfgEnv},
-        database::{CacheDB, EmptyDBTyped},
+        database::EmptyDBTyped,
         execute::ProviderError,
         inspector::NoOpInspector,
-        EvmEnv,
+        Evm, EvmEnv, State,
     };
+
+    fn test_db() -> State<EmptyDBTyped<ProviderError>> {
+        State::builder().with_database(EmptyDBTyped::<ProviderError>::default()).build()
+    }
 
     #[test]
     fn test_fill_cfg_and_block_env() {
@@ -629,22 +633,22 @@ mod tests {
     fn test_evm_with_env_default_spec() {
         let evm_config = EthEvmConfig::mainnet();
 
-        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
+        let db = test_db();
 
         let evm_env = EvmEnv::default();
 
         let evm = evm_config.evm_with_env(db, evm_env.clone());
 
         // Check that the EVM environment
-        assert_eq!(evm.block, evm_env.block_env);
-        assert_eq!(evm.cfg, evm_env.cfg_env);
+        assert_eq!(evm.block(), &evm_env.block_env);
+        assert_eq!(evm.cfg_env(), &evm_env.cfg_env);
     }
 
     #[test]
     fn test_evm_with_env_custom_cfg() {
         let evm_config = EthEvmConfig::mainnet();
 
-        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
+        let db = test_db();
 
         // Create a custom configuration environment with a chain ID of 111
         let cfg = CfgEnv::default().with_chain_id(111);
@@ -654,14 +658,14 @@ mod tests {
         let evm = evm_config.evm_with_env(db, evm_env);
 
         // Check that the EVM environment is initialized with the custom environment
-        assert_eq!(evm.cfg, cfg);
+        assert_eq!(evm.cfg_env(), &cfg);
     }
 
     #[test]
     fn test_evm_with_env_custom_block_and_tx() {
         let evm_config = EthEvmConfig::mainnet();
 
-        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
+        let db = test_db();
 
         // Create customs block and tx env
         let block = BlockEnv {
@@ -676,17 +680,17 @@ mod tests {
         let evm = evm_config.evm_with_env(db, evm_env.clone());
 
         // Verify that the block and transaction environments are set correctly
-        assert_eq!(evm.block, evm_env.block_env);
+        assert_eq!(evm.block(), &evm_env.block_env);
 
         // Default spec ID
-        assert_eq!(evm.cfg.spec, SpecId::default());
+        assert_eq!(evm.cfg_env().spec, SpecId::default());
     }
 
     #[test]
     fn test_evm_with_spec_id() {
         let evm_config = EthEvmConfig::mainnet();
 
-        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
+        let db = test_db();
 
         let evm_env = EvmEnv {
             cfg_env: CfgEnv::new().with_spec_and_mainnet_gas_params(SpecId::PETERSBURG),
@@ -696,27 +700,27 @@ mod tests {
         let evm = evm_config.evm_with_env(db, evm_env);
 
         // Check that the spec ID is setup properly
-        assert_eq!(evm.cfg.spec, SpecId::PETERSBURG);
+        assert_eq!(evm.cfg_env().spec, SpecId::PETERSBURG);
     }
 
     #[test]
     fn test_evm_with_env_and_default_inspector() {
         let evm_config = EthEvmConfig::mainnet();
-        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
+        let db = test_db();
 
         let evm_env = EvmEnv::default();
 
         let evm = evm_config.evm_with_env_and_inspector(db, evm_env.clone(), NoOpInspector {});
 
         // Check that the EVM environment is set to default values
-        assert_eq!(evm.block, evm_env.block_env);
-        assert_eq!(evm.cfg, evm_env.cfg_env);
+        assert_eq!(evm.block(), &evm_env.block_env);
+        assert_eq!(evm.cfg_env(), &evm_env.cfg_env);
     }
 
     #[test]
     fn test_evm_with_env_inspector_and_custom_cfg() {
         let evm_config = EthEvmConfig::mainnet();
-        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
+        let db = test_db();
 
         let cfg_env = CfgEnv::default().with_chain_id(111);
         let block = BlockEnv::default();
@@ -725,14 +729,14 @@ mod tests {
         let evm = evm_config.evm_with_env_and_inspector(db, evm_env, NoOpInspector {});
 
         // Check that the EVM environment is set with custom configuration
-        assert_eq!(evm.cfg, cfg_env);
-        assert_eq!(evm.cfg.spec, SpecId::default());
+        assert_eq!(evm.cfg_env(), &cfg_env);
+        assert_eq!(evm.cfg_env().spec, SpecId::default());
     }
 
     #[test]
     fn test_evm_with_env_inspector_and_custom_block_tx() {
         let evm_config = EthEvmConfig::mainnet();
-        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
+        let db = test_db();
 
         // Create custom block and tx environment
         let block = BlockEnv {
@@ -746,14 +750,14 @@ mod tests {
         let evm = evm_config.evm_with_env_and_inspector(db, evm_env.clone(), NoOpInspector {});
 
         // Verify that the block and transaction environments are set correctly
-        assert_eq!(evm.block, evm_env.block_env);
-        assert_eq!(evm.cfg.spec, SpecId::default());
+        assert_eq!(evm.block(), &evm_env.block_env);
+        assert_eq!(evm.cfg_env().spec, SpecId::default());
     }
 
     #[test]
     fn test_evm_with_env_inspector_and_spec_id() {
         let evm_config = EthEvmConfig::mainnet();
-        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
+        let db = test_db();
 
         let evm_env = EvmEnv {
             cfg_env: CfgEnv::new().with_spec_and_mainnet_gas_params(SpecId::PETERSBURG),
@@ -763,8 +767,8 @@ mod tests {
         let evm = evm_config.evm_with_env_and_inspector(db, evm_env.clone(), NoOpInspector {});
 
         // Check that the spec ID is set properly
-        assert_eq!(evm.block, evm_env.block_env);
-        assert_eq!(evm.cfg, evm_env.cfg_env);
-        assert_eq!(evm.tx, Default::default());
+        assert_eq!(evm.block(), &evm_env.block_env);
+        assert_eq!(evm.cfg_env(), &evm_env.cfg_env);
+        assert_eq!(evm.ctx().tx, Default::default());
     }
 }

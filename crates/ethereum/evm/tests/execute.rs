@@ -8,12 +8,16 @@ use alloy_eips::{
     eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     eip7685::EMPTY_REQUESTS_HASH,
 };
-use alloy_primitives::{address, b256, fixed_bytes, keccak256, Bytes, TxKind, B256, U256};
+use alloy_primitives::{
+    address, b256, fixed_bytes, keccak256,
+    map::{AddressMap, B256Map, HashMap},
+    Bytes, TxKind, B256, U256,
+};
 use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, ForkCondition, MAINNET};
 use reth_errors::BlockValidationError;
 use reth_ethereum_primitives::{Block, BlockBody, Transaction};
 use reth_evm::{
-    database::{CacheDB, Database, EmptyDB, TransitionState},
+    database::{Database, EmptyDB, TransitionState},
     eth::dao_fork,
     execute::{BasicBlockExecutor, Executor},
     ConfigureEvm,
@@ -25,6 +29,77 @@ use reth_primitives_traits::{
 };
 use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
 use std::sync::{mpsc, Arc};
+
+#[derive(Clone, Debug, Default)]
+struct CacheState {
+    accounts: AddressMap<AccountInfo>,
+    contracts: B256Map<Bytecode>,
+    storage: AddressMap<HashMap<U256, U256>>,
+    block_hashes: HashMap<U256, B256>,
+}
+
+#[derive(Clone, Debug)]
+struct CacheDB<ExtDB = EmptyDB> {
+    cache: CacheState,
+    ext: ExtDB,
+}
+
+impl<ExtDB: Default> Default for CacheDB<ExtDB> {
+    fn default() -> Self {
+        Self::new(ExtDB::default())
+    }
+}
+
+impl<ExtDB> CacheDB<ExtDB> {
+    fn new(ext: ExtDB) -> Self {
+        Self { cache: Default::default(), ext }
+    }
+
+    fn insert_account_info(&mut self, address: alloy_primitives::Address, info: AccountInfo) {
+        if let Some(code) = info.code.clone() {
+            self.cache.contracts.insert(info.code_hash, code);
+        }
+        self.cache.accounts.insert(address, info);
+    }
+}
+
+impl<ExtDB: Database> Database for CacheDB<ExtDB> {
+    type Error = ExtDB::Error;
+
+    fn basic(
+        &mut self,
+        address: alloy_primitives::Address,
+    ) -> Result<Option<AccountInfo>, Self::Error> {
+        Ok(self.cache.accounts.get(&address).cloned().or(self.ext.basic(address)?))
+    }
+
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        if let Some(code) = self.cache.contracts.get(&code_hash) {
+            return Ok(code.clone())
+        }
+        self.ext.code_by_hash(code_hash)
+    }
+
+    fn storage(
+        &mut self,
+        address: alloy_primitives::Address,
+        index: U256,
+    ) -> Result<U256, Self::Error> {
+        if let Some(value) =
+            self.cache.storage.get(&address).and_then(|storage| storage.get(&index))
+        {
+            return Ok(*value)
+        }
+        self.ext.storage(address, index)
+    }
+
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+        if let Some(hash) = self.cache.block_hashes.get(&U256::from(number)) {
+            return Ok(*hash)
+        }
+        self.ext.block_hash(number)
+    }
+}
 
 fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
     let mut db = CacheDB::new(Default::default());
