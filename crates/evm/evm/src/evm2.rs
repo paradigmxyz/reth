@@ -498,7 +498,7 @@ fn account_info_revert(
 fn account_info_revert_from_bundle_account(account: &BundleAccount) -> AccountInfoRevert {
     if account.original_info.is_none() &&
         account.info.is_none() &&
-        account.status == AccountStatus::InMemoryChange
+        (account.status == AccountStatus::InMemoryChange || account.was_destroyed())
     {
         return AccountInfoRevert::DeleteIt;
     }
@@ -2045,6 +2045,67 @@ mod tests {
 
         assert!(db.bundle_state.account(&address).is_none());
         assert_eq!(db.bundle_state.reverts[0][0].1.account, AccountInfoRevert::DeleteIt);
+    }
+
+    #[test]
+    fn evm2_output_keeps_block_original_revert_for_created_then_deleted_account() {
+        let address = address!("0x0000000000000000000000000000000000000010");
+        let created = Evm2AccountInfo {
+            balance: U256::ZERO,
+            nonce: 1,
+            code_hash: KECCAK256_EMPTY,
+            code: None,
+            _non_exhaustive: (),
+        };
+        let mut output = Evm2ExecutionOutput::default();
+
+        output.merge_state_changes(StateChanges {
+            accounts: core::iter::once((
+                address,
+                Tracked { original: None, current: Some(created.clone()), _non_exhaustive: () },
+            ))
+            .collect(),
+            storage: core::iter::once((
+                address,
+                StorageChangeSet {
+                    wipe: true,
+                    slots: core::iter::once((
+                        U256::from(3),
+                        Tracked {
+                            original: U256::ZERO,
+                            current: U256::from(5),
+                            _non_exhaustive: (),
+                        },
+                    ))
+                    .collect(),
+                    _non_exhaustive: (),
+                },
+            ))
+            .collect(),
+            code: Default::default(),
+            logs: Vec::new(),
+            _non_exhaustive: (),
+        });
+        output.merge_state_changes(StateChanges {
+            accounts: core::iter::once((
+                address,
+                Tracked { original: Some(created), current: None, _non_exhaustive: () },
+            ))
+            .collect(),
+            storage: core::iter::once((
+                address,
+                StorageChangeSet { wipe: true, slots: Default::default(), _non_exhaustive: () },
+            ))
+            .collect(),
+            code: Default::default(),
+            logs: Vec::new(),
+            _non_exhaustive: (),
+        });
+
+        assert_eq!(
+            into_block_bundle(output.bundle).reverts[0][0].1.account,
+            AccountInfoRevert::DeleteIt
+        );
     }
 
     #[test]
