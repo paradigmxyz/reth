@@ -3449,7 +3449,6 @@ dependencies = [
  "reth-tracing",
  "reth-trie",
  "reth-trie-db",
- "revm",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

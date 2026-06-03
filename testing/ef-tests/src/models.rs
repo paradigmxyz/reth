@@ -8,10 +8,9 @@ use alloy_primitives::{keccak256, Address, Bloom, Bytes, B256, B64, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, ForkCondition};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::SealedHeader;
-use revm::primitives::HashMap;
 use serde::Deserialize;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     ops::Deref,
     sync::{Arc, OnceLock, RwLock},
 };
