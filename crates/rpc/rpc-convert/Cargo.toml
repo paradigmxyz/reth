@@ -14,7 +14,7 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives-traits.workspace = true
-reth-evm.workspace = true
+reth-evm = { workspace = true, features = ["rpc"] }
 reth-rpc-traits.workspace = true
 
 # ethereum
@@ -23,7 +23,6 @@ alloy-rpc-types-eth = { workspace = true, features = ["serde"] }
 alloy-consensus.workspace = true
 alloy-network.workspace = true
 alloy-json-rpc.workspace = true
-alloy-evm = { workspace = true, features = ["rpc"] }
 
 # io
 jsonrpsee-types.workspace = true

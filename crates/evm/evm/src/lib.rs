@@ -53,6 +53,8 @@ pub use engine::{ConfigureEngineEvm, ConvertTx, ExecutableTxIterator, Executable
 pub mod metrics;
 pub mod noop;
 pub mod precompiles;
+#[cfg(feature = "rpc")]
+pub mod rpc;
 mod state_hook;
 pub use state_hook::{OnStateHook, StateHookExt};
 #[cfg(any(test, feature = "test-utils"))]
