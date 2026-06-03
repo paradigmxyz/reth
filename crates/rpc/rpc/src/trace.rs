@@ -15,11 +15,17 @@ use alloy_rpc_types_trace::{
     tracerequest::TraceCallRequest,
 };
 use async_trait::async_trait;
+use evm2_inspectors::{
+    opcode::OpcodeGasInspector,
+    storage::StorageInspector,
+    tracing::{TracingInspector, TracingInspectorConfig},
+};
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{
     base_block_reward_pre_merge, block_reward, ommer_reward, ChainSpecProvider, EthereumHardforks,
 };
-use reth_evm::{database::DatabaseCommit, ConfigureEvm};
+use reth_errors::RethError;
+use reth_evm::{database::DatabaseCommit, evm2::create_evm2_db_ref, ConfigureEvm};
 use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_convert::RpcTxReq;
@@ -31,11 +37,6 @@ use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction, Eth
 use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
-use revm_inspectors::{
-    opcode::OpcodeGasInspector,
-    storage::StorageInspector,
-    tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
-};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
@@ -97,14 +98,22 @@ where
         let config = TracingInspectorConfig::from_parity_config(&trace_request.trace_types);
         let overrides =
             EvmOverrides::new(trace_request.state_overrides, trace_request.block_overrides);
-        let mut inspector = TracingInspector::new(config);
+        let inspector = TracingInspector::new(config);
         let this = self.clone();
         self.eth_api()
             .spawn_with_call_at(trace_request.call, at, overrides, move |db, evm_env, tx_env| {
-                let res = this.eth_api().inspect(&mut *db, evm_env, tx_env, &mut inspector)?;
+                let (inspector, res) =
+                    this.eth_api().inspect(&mut *db, evm_env, tx_env, inspector)?;
+                let mut evm2_db = create_evm2_db_ref(&mut *db);
                 let trace_res = inspector
                     .into_parity_builder()
-                    .into_trace_results_with_state(&res, &trace_request.trace_types, &db)
+                    .into_trace_results_with_state(
+                        res.evm2_result.output.clone(),
+                        &res.evm2_result.state_changes,
+                        &trace_request.trace_types,
+                        &mut evm2_db,
+                    )
+                    .map_err(|err| RethError::msg(format_args!("evm2 database error {err:?}")))
                     .map_err(Eth::Error::from_eth_err)?;
                 Ok(trace_res)
             })
@@ -127,12 +136,25 @@ where
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
 
         self.eth_api()
-            .spawn_trace_at_with_state(evm_env, tx_env, config, at, move |inspector, res, db| {
-                inspector
-                    .into_parity_builder()
-                    .into_trace_results_with_state(&res, &trace_types, &db)
-                    .map_err(Eth::Error::from_eth_err)
-            })
+            .spawn_trace_at_with_state(
+                evm_env,
+                tx_env,
+                config,
+                at,
+                move |inspector, res, mut db| {
+                    let mut evm2_db = create_evm2_db_ref(&mut db);
+                    inspector
+                        .into_parity_builder()
+                        .into_trace_results_with_state(
+                            res.evm2_result.output.clone(),
+                            &res.evm2_result.state_changes,
+                            &trace_types,
+                            &mut evm2_db,
+                        )
+                        .map_err(|err| RethError::msg(format_args!("evm2 database error {err:?}")))
+                        .map_err(Eth::Error::from_eth_err)
+                },
+            )
             .await
     }
 
@@ -162,12 +184,19 @@ where
                         Default::default(),
                     )?;
                     let config = TracingInspectorConfig::from_parity_config(&trace_types);
-                    let mut inspector = TracingInspector::new(config);
-                    let res = eth_api.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
+                    let inspector = TracingInspector::new(config);
+                    let (inspector, res) = eth_api.inspect(&mut db, evm_env, tx_env, inspector)?;
 
+                    let mut evm2_db = create_evm2_db_ref(&mut db);
                     let trace_res = inspector
                         .into_parity_builder()
-                        .into_trace_results_with_state(&res, &trace_types, &db)
+                        .into_trace_results_with_state(
+                            res.evm2_result.output.clone(),
+                            &res.evm2_result.state_changes,
+                            &trace_types,
+                            &mut evm2_db,
+                        )
+                        .map_err(|err| RethError::msg(format_args!("evm2 database error {err:?}")))
                         .map_err(Eth::Error::from_eth_err)?;
 
                     results.push(trace_res);
@@ -175,7 +204,7 @@ where
                     // need to apply the state changes of this call before executing the
                     // next call
                     if calls.peek().is_some() {
-                        db.commit(res.state)
+                        db.commit(res.result.state)
                     }
                 }
 
@@ -192,10 +221,17 @@ where
     ) -> Result<TraceResults, Eth::Error> {
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
         self.eth_api()
-            .spawn_trace_transaction_in_block(hash, config, move |_, inspector, res, db| {
+            .spawn_trace_transaction_in_block(hash, config, move |_, inspector, res, mut db| {
+                let mut evm2_db = create_evm2_db_ref(&mut db);
                 let trace_res = inspector
                     .into_parity_builder()
-                    .into_trace_results_with_state(&res, &trace_types, &db)
+                    .into_trace_results_with_state(
+                        res.evm2_result.output.clone(),
+                        &res.evm2_result.state_changes,
+                        &trace_types,
+                        &mut evm2_db,
+                    )
+                    .map_err(|err| RethError::msg(format_args!("evm2 database error {err:?}")))
                     .map_err(Eth::Error::from_eth_err)?;
                 Ok(trace_res)
             })
@@ -536,17 +572,20 @@ where
                 None,
                 TracingInspectorConfig::from_parity_config(&trace_types),
                 move |tx_info, mut ctx| {
-                    let mut full_trace = ctx
+                    let output = ctx.evm2.evm2_result.output.clone();
+                    let state_changes = ctx.evm2.evm2_result.state_changes.clone();
+                    let mut evm2_db = ctx.evm2_db();
+                    let full_trace = ctx
                         .take_inspector()
                         .into_parity_builder()
-                        .into_trace_results(&ctx.result, &trace_types);
-
-                    // If statediffs were requested, populate them with the account balance and
-                    // nonce from pre-state
-                    if let Some(ref mut state_diff) = full_trace.state_diff {
-                        populate_state_diff(state_diff, &ctx.db, ctx.state.iter())
-                            .map_err(Eth::Error::from_eth_err)?;
-                    }
+                        .into_trace_results_with_state(
+                            output,
+                            &state_changes,
+                            &trace_types,
+                            &mut evm2_db,
+                        )
+                        .map_err(|err| RethError::msg(format_args!("evm2 database error {err:?}")))
+                        .map_err(Eth::Error::from_eth_err)?;
 
                     let trace = TraceResultsWithTransactionHash {
                         transaction_hash: tx_info.hash.expect("tx hash is set"),

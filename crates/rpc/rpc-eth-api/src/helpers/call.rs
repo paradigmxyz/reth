@@ -16,6 +16,7 @@ use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
     BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
+use evm2_inspectors::access_list::AccessListInspector;
 use futures::Future;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_errors::{ProviderError, RethError};
@@ -24,10 +25,13 @@ use reth_evm::{
     context::{Block, ResultAndState, Transaction},
     database::{Database, DatabaseCommit, EvmDatabaseError, State, StateProviderDatabase},
     env::BlockEnvironment,
+    evm2::{
+        block_env_from_revm, ethereum_tx_env_from_revm, execute_tx_env_for, inspect_tx_env_for,
+    },
     execute::{BlockBuilder, BlockExecutor},
     overrides::{apply_block_overrides, apply_state_overrides, OverrideBlockHashes},
     rpc::caller_gas_allowance,
-    ConfigureEvm, Evm, EvmEnvFor, HaltReasonFor, InspectorFor, TransactionEnvMut, TxEnvFor,
+    ConfigureEvm, Evm, EvmEnvFor, HaltReasonFor, TransactionEnvMut, TxEnvFor,
 };
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
@@ -39,7 +43,7 @@ use reth_rpc_eth_types::{
     EthApiError, StateCacheDb,
 };
 use reth_storage_api::{BlockIdReader, ProviderTx, StateProviderBox};
-use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
+use revm_inspectors::transfer::TransferInspector;
 use std::collections::BTreeMap;
 use tracing::{trace, warn};
 
@@ -477,13 +481,14 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit()));
             }
 
-            let mut inspector = AccessListInspector::new(initial);
+            let inspector = AccessListInspector::new(initial);
 
-            let result = this.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
+            let (inspector, result) =
+                this.inspect(&mut db, evm_env.clone(), tx_env.clone(), inspector)?;
             let access_list = inspector.into_access_list();
-            let gas_used = result.result.tx_gas_used();
+            let gas_used = result.result.result.tx_gas_used();
             tx_env.set_access_list(access_list.clone());
-            if let Err(err) = Self::Error::ensure_success(result.result) {
+            if let Err(err) = Self::Error::ensure_success(result.result.result) {
                 return Ok(AccessListResult {
                     access_list,
                     gas_used: U256::from(gas_used),
@@ -558,10 +563,17 @@ pub trait Call:
     where
         DB: Database<Error = EvmDatabaseError<ProviderError>> + fmt::Debug,
     {
-        let mut evm = self.evm_config().evm_with_env(db, evm_env);
-        let res = evm.transact(tx_env).map_err(Self::Error::from_evm_err)?;
-
-        Ok(res)
+        let mut db = db;
+        let block_env = block_env_from_revm(evm_env.block_env);
+        let tx_env = ethereum_tx_env_from_revm(&tx_env);
+        execute_tx_env_for::<Self::Evm, _>(
+            &mut db,
+            *evm_env.cfg_env.spec(),
+            block_env,
+            &tx_env,
+        )
+        .map_err(RethError::other)
+        .map_err(Self::Error::from_eth_err)
     }
 
     /// Executes the [`reth_evm::EvmEnv`] against the given [Database] without committing state
@@ -575,12 +587,21 @@ pub trait Call:
     ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>
     where
         DB: Database<Error = EvmDatabaseError<ProviderError>> + fmt::Debug,
-        I: InspectorFor<Self::Evm, DB>,
+        I: evm2::Inspector<evm2::BaseEvmTypes> + 'static,
     {
-        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
-        let res = evm.transact(tx_env).map_err(Self::Error::from_evm_err)?;
-
-        Ok(res)
+        let mut db = db;
+        let block_env = block_env_from_revm(evm_env.block_env);
+        let tx_env = ethereum_tx_env_from_revm(&tx_env);
+        let (_, res) = inspect_tx_env_for::<Self::Evm, _, _>(
+            &mut db,
+            *evm_env.cfg_env.spec(),
+            block_env,
+            tx_env,
+            inspector,
+        )
+        .map_err(RethError::other)
+        .map_err(Self::Error::from_eth_err)?;
+        Ok(res.result)
     }
 
     /// Executes the call request at the given [`BlockId`].
@@ -764,7 +785,6 @@ pub trait Call:
         DB: Database<Error = EvmDatabaseError<ProviderError>> + DatabaseCommit + core::fmt::Debug,
         I: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
     {
-        let mut evm = self.evm_config().evm_with_env(db, evm_env);
         let mut index = 0;
         for tx in transactions {
             if *tx.tx_hash() == target_tx_hash {
@@ -773,7 +793,17 @@ pub trait Call:
             }
 
             let tx_env = self.evm_config().tx_env(tx);
-            evm.transact_commit(tx_env).map_err(Self::Error::from_evm_err)?;
+            let block_env = block_env_from_revm(evm_env.block_env.clone());
+            let tx_env = ethereum_tx_env_from_revm(&tx_env);
+            let res = execute_tx_env_for::<Self::Evm, _>(
+                &mut *db,
+                *evm_env.cfg_env.spec(),
+                block_env,
+                &tx_env,
+            )
+            .map_err(RethError::other)
+            .map_err(Self::Error::from_eth_err)?;
+            db.commit(res.state);
             index += 1;
         }
         Ok(index)

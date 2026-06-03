@@ -1,11 +1,13 @@
 //! Helpers for integrating `evm2` execution output with reth execution types.
 
 use crate::{
+    aliases::{HaltReasonFor, SpecFor},
     eth::{dao_fork, EthBlockExecutionCtx},
     execute::{
         BlockExecutionError, BlockExecutor, BlockValidationError, CommitChanges, ExecutableTx,
         GasOutput, TxResult,
     },
+    ConfigureEvm,
 };
 use alloc::{
     boxed::Box,
@@ -19,6 +21,7 @@ use alloy_consensus::{
 };
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::{
+    eip2930::{AccessList, AccessListItem},
     eip4844::DATA_GAS_PER_BLOB,
     eip4895::Withdrawal,
     eip6110::{DEPOSIT_REQUEST_TYPE, MAINNET_DEPOSIT_CONTRACT_ADDRESS},
@@ -38,7 +41,7 @@ use core::{error::Error, fmt, ptr::NonNull};
 use evm2::{
     bytecode::{Bytecode as Evm2Bytecode, JumpTable as Evm2JumpTable},
     env::BlockEnv as Evm2BlockEnv,
-    ethereum::{ethereum_tx_registry, RecoveredTxEnvelope},
+    ethereum::{ethereum_tx_registry, EthereumTxEnv, RecoveredTxEnvelope},
     evm::{
         AccountInfo as Evm2AccountInfo, Database as Evm2DatabaseTrait, Db as Evm2Db,
         DbErrorCode as Evm2DbErrorCode, Evm as Evm2, StateChanges, StorageChangeSet,
@@ -58,6 +61,7 @@ use revm::{
         result::{ExecutionResult, HaltReason, Output, ResultAndState, ResultGas, SuccessReason},
         BlockEnv,
     },
+    context_interface::transaction::{AccessListItemTr, Transaction as RevmTransaction},
     inspector::Inspector,
     primitives::hardfork::SpecId as RevmSpecId,
     state::{
@@ -215,6 +219,20 @@ impl Evm2DatabaseRef {
             get_block_hash: evm2_database_ref_get_block_hash::<DB>,
         }
     }
+
+    /// Creates a borrowed evm2 database adapter from a reth database.
+    pub fn new_reth<DB>(db: &mut DB) -> Self
+    where
+        DB: crate::Database,
+    {
+        Self {
+            ptr: NonNull::from(db).cast(),
+            get_account: evm2_database_ref_get_reth_account::<DB>,
+            get_code_by_hash: evm2_database_ref_get_reth_code_by_hash::<DB>,
+            get_storage: evm2_database_ref_get_reth_storage::<DB>,
+            get_block_hash: evm2_database_ref_get_reth_block_hash::<DB>,
+        }
+    }
 }
 
 impl Evm2DatabaseTrait for Evm2DatabaseRef {
@@ -297,6 +315,61 @@ where
         .map_err(|err| Evm2DatabaseRefError(Box::new(err)))
 }
 
+unsafe fn evm2_database_ref_get_reth_account<DB>(
+    ptr: NonNull<()>,
+    address: &Address,
+) -> Evm2DatabaseRefResult<Option<Evm2AccountInfo>>
+where
+    DB: crate::Database,
+{
+    // SAFETY: The vtable functions are installed for the same `DB` used to create the pointer.
+    let db = unsafe { &mut *ptr.cast::<DB>().as_ptr() };
+    db.basic(*address)
+        .map(|info| info.map(account_info_to_evm2))
+        .map_err(|err| Evm2DatabaseRefError(Box::new(err)))
+}
+
+unsafe fn evm2_database_ref_get_reth_code_by_hash<DB>(
+    ptr: NonNull<()>,
+    code_hash: &B256,
+) -> Evm2DatabaseRefResult<Evm2Bytecode>
+where
+    DB: crate::Database,
+{
+    // SAFETY: The vtable functions are installed for the same `DB` used to create the pointer.
+    let db = unsafe { &mut *ptr.cast::<DB>().as_ptr() };
+    db.code_by_hash(*code_hash)
+        .map(bytecode_to_evm2)
+        .map_err(|err| Evm2DatabaseRefError(Box::new(err)))
+}
+
+unsafe fn evm2_database_ref_get_reth_storage<DB>(
+    ptr: NonNull<()>,
+    address: &Address,
+    key: &U256,
+) -> Evm2DatabaseRefResult<U256>
+where
+    DB: crate::Database,
+{
+    // SAFETY: The vtable functions are installed for the same `DB` used to create the pointer.
+    let db = unsafe { &mut *ptr.cast::<DB>().as_ptr() };
+    db.storage(*address, *key).map_err(|err| Evm2DatabaseRefError(Box::new(err)))
+}
+
+unsafe fn evm2_database_ref_get_reth_block_hash<DB>(
+    ptr: NonNull<()>,
+    number: &U256,
+) -> Evm2DatabaseRefResult<Option<B256>>
+where
+    DB: crate::Database,
+{
+    // SAFETY: The vtable functions are installed for the same `DB` used to create the pointer.
+    let db = unsafe { &mut *ptr.cast::<DB>().as_ptr() };
+    db.block_hash(number.saturating_to())
+        .map(Some)
+        .map_err(|err| Evm2DatabaseRefError(Box::new(err)))
+}
+
 /// Converts a revm spec ID into evm2's spec ID.
 pub const fn spec_id_from_revm(spec: RevmSpecId) -> SpecId {
     match spec {
@@ -319,7 +392,11 @@ pub const fn spec_id_from_revm(spec: RevmSpecId) -> SpecId {
 }
 
 /// Converts a revm block environment into evm2's block environment.
-pub fn block_env_from_revm(block: BlockEnv) -> Evm2BlockEnv {
+pub fn block_env_from_revm<B>(mut block: B) -> Evm2BlockEnv
+where
+    B: alloy_evm::env::BlockEnvironment,
+{
+    let block = block.inner_mut();
     Evm2BlockEnv {
         number: block.number,
         beneficiary: block.beneficiary,
@@ -358,6 +435,194 @@ where
     DB: crate::Database + Send + 'static,
 {
     create_evm2(db, spec_id_from_revm(spec), block_env_from_revm(block))
+}
+
+/// Creates a borrowed evm2 database adapter for a reth database.
+pub fn create_evm2_db_ref<DB>(db: &mut DB) -> Evm2Db<Evm2DatabaseRef>
+where
+    DB: crate::Database,
+{
+    Evm2Db::new(Evm2DatabaseRef::new_reth(db))
+}
+
+/// Executes an evm2 Ethereum transaction environment.
+pub fn execute_tx_env<DB>(
+    db: &mut DB,
+    spec: SpecId,
+    block: Evm2BlockEnv,
+    tx: &EthereumTxEnv,
+) -> Result<ResultAndState<HaltReason>, BlockExecutionError>
+where
+    DB: crate::Database,
+{
+    let evm = Evm2::new(
+        spec,
+        block,
+        ethereum_tx_registry(spec),
+        create_evm2_db_ref(db),
+        precompiles_for_spec(spec),
+    );
+    let mut executor = Evm2TransactionExecutor::new(evm);
+    let evm2_result = evm2::ethereum::transact_tx_env(&mut executor.evm, tx).map_err(|err| {
+        BlockExecutionError::msg(format_args!("evm2 transaction execution failed: {err}"))
+    })?;
+    let evm_state =
+        evm_state_from_evm2_with_accounts(&mut executor, evm2_result.state_changes.clone())?;
+    let mut result = evm2_result_to_revm_result(&evm2_result);
+    result.state = evm_state;
+    Ok(result)
+}
+
+/// Result of inspecting a transaction with evm2.
+#[derive(Clone, Debug)]
+pub struct Evm2InspectResult<H = HaltReason> {
+    /// Converted reth execution result and state.
+    pub result: ResultAndState<H>,
+    /// Native evm2 transaction result.
+    pub evm2_result: Evm2TxResult,
+    /// Native evm2 transaction environment.
+    pub evm2_tx: EthereumTxEnv,
+    /// Native evm2 block environment.
+    pub evm2_block: Evm2BlockEnv,
+}
+
+impl Evm2InspectResult<HaltReason> {
+    /// Converts this result to another halt reason type.
+    pub fn convert_halt_reason<Halt>(self) -> Evm2InspectResult<Halt>
+    where
+        Halt: From<HaltReason>,
+    {
+        Evm2InspectResult {
+            result: convert_result_and_state(self.result),
+            evm2_result: self.evm2_result,
+            evm2_tx: self.evm2_tx,
+            evm2_block: self.evm2_block,
+        }
+    }
+}
+
+/// Executes an evm2 Ethereum transaction environment with an inspector.
+pub fn inspect_tx_env<DB, I>(
+    db: &mut DB,
+    spec: SpecId,
+    block: Evm2BlockEnv,
+    tx: EthereumTxEnv,
+    inspector: I,
+) -> Result<(I, Evm2InspectResult), BlockExecutionError>
+where
+    DB: crate::Database,
+    I: evm2::Inspector<evm2::BaseEvmTypes> + 'static,
+{
+    let evm = Evm2::new(
+        spec,
+        block.clone(),
+        ethereum_tx_registry(spec),
+        create_evm2_db_ref(db),
+        precompiles_for_spec(spec),
+    );
+    let mut executor = Evm2TransactionExecutor::new(evm);
+    executor.evm.set_inspector(inspector);
+    let evm2_result = evm2::ethereum::transact_tx_env(&mut executor.evm, &tx).map_err(|err| {
+        BlockExecutionError::msg(format_args!("evm2 transaction execution failed: {err}"))
+    })?;
+    let inspector = *executor.evm.clear_inspector_as::<I>().expect("inspector type is unchanged");
+    let evm_state =
+        evm_state_from_evm2_with_accounts(&mut executor, evm2_result.state_changes.clone())?;
+    let mut result = evm2_result_to_revm_result(&evm2_result);
+    result.state = evm_state;
+    Ok((inspector, Evm2InspectResult { result, evm2_result, evm2_tx: tx, evm2_block: block }))
+}
+
+/// Executes an evm2 Ethereum transaction environment for a configured EVM.
+pub fn execute_tx_env_for<Evm, DB>(
+    db: &mut DB,
+    spec: SpecFor<Evm>,
+    block: Evm2BlockEnv,
+    tx: &EthereumTxEnv,
+) -> Result<ResultAndState<HaltReasonFor<Evm>>, BlockExecutionError>
+where
+    Evm: ConfigureEvm,
+    DB: crate::Database,
+    SpecFor<Evm>: Into<RevmSpecId>,
+    HaltReasonFor<Evm>: From<HaltReason>,
+{
+    execute_tx_env(db, spec_id_from_revm(spec.into()), block, tx).map(convert_result_and_state)
+}
+
+/// Inspects an evm2 Ethereum transaction environment for a configured EVM.
+pub fn inspect_tx_env_for<Evm, DB, I>(
+    db: &mut DB,
+    spec: SpecFor<Evm>,
+    block: Evm2BlockEnv,
+    tx: EthereumTxEnv,
+    inspector: I,
+) -> Result<(I, Evm2InspectResult<HaltReasonFor<Evm>>), BlockExecutionError>
+where
+    Evm: ConfigureEvm,
+    DB: crate::Database,
+    I: evm2::Inspector<evm2::BaseEvmTypes> + 'static,
+    SpecFor<Evm>: Into<RevmSpecId>,
+    HaltReasonFor<Evm>: From<HaltReason>,
+{
+    inspect_tx_env(db, spec_id_from_revm(spec.into()), block, tx, inspector)
+        .map(|(inspector, result)| (inspector, result.convert_halt_reason()))
+}
+
+/// Converts a revm transaction environment to evm2's Ethereum transaction environment.
+pub fn ethereum_tx_env_from_revm<Tx>(tx: &Tx) -> evm2::ethereum::EthereumTxEnv
+where
+    Tx: RevmTransaction,
+{
+    let access_list = tx
+        .access_list()
+        .map(|items| {
+            AccessList(
+                items
+                    .map(|item| AccessListItem {
+                        address: *item.address(),
+                        storage_keys: item.storage_slots().copied().collect(),
+                    })
+                    .collect(),
+            )
+        })
+        .unwrap_or_default();
+
+    evm2::ethereum::EthereumTxEnv {
+        tx_type: tx.tx_type(),
+        caller: tx.caller(),
+        gas_limit: tx.gas_limit(),
+        gas_price: U256::from(tx.gas_price()),
+        kind: tx.kind(),
+        value: tx.value(),
+        input: tx.input().clone(),
+        nonce: tx.nonce(),
+        chain_id: tx.chain_id(),
+        access_list,
+        max_priority_fee_per_gas: tx.max_priority_fee_per_gas().map(U256::from),
+        blob_hashes: tx.blob_versioned_hashes().to_vec(),
+        max_fee_per_blob_gas: U256::from(tx.max_fee_per_blob_gas()),
+    }
+}
+
+fn convert_result_and_state<Halt>(
+    result_and_state: ResultAndState<HaltReason>,
+) -> ResultAndState<Halt>
+where
+    Halt: From<HaltReason>,
+{
+    let ResultAndState { result, state } = result_and_state;
+    let result = match result {
+        ExecutionResult::Success { reason, gas, logs, output } => {
+            ExecutionResult::Success { reason, gas, logs, output }
+        }
+        ExecutionResult::Revert { gas, logs, output } => {
+            ExecutionResult::Revert { gas, logs, output }
+        }
+        ExecutionResult::Halt { reason, gas, logs } => {
+            ExecutionResult::Halt { reason: reason.into(), gas, logs }
+        }
+    };
+    ResultAndState { result, state }
 }
 
 fn create_evm2_from_alloy_evm<E>(evm: &mut E) -> EthEvm2

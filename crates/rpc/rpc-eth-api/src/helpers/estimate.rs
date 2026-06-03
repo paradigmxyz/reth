@@ -13,15 +13,13 @@ use reth_evm::{
     context::{Block, Cfg, ExecutionResult, Transaction},
     database::{Database, EvmDatabaseError, EvmStateProvider, State, StateProviderDatabase},
     env::BlockEnvironment,
+    evm2::{block_env_from_revm, ethereum_tx_env_from_revm, execute_tx_env_for},
     overrides::{apply_block_overrides, apply_state_overrides},
-    ConfigureEvm, Evm, EvmEnvFor, EvmFor, TransactionEnvMut, TxEnvFor,
+    EvmEnvFor, HaltReasonFor, TransactionEnvMut, TxEnvFor,
 };
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
-    error::{
-        api::{FromEvmHalt, FromRevert},
-        FromEvmError,
-    },
+    error::api::{FromEvmHalt, FromRevert},
     EthApiError, RpcInvalidTransactionError,
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
@@ -138,9 +136,6 @@ pub trait EstimateCall: Call {
         // If the provided gas limit is less than computed cap, use that
         tx_env.set_gas_limit(tx_env.gas_limit().min(highest_gas_limit));
 
-        // Create EVM instance once and reuse it throughout the entire estimation process
-        let mut evm = self.evm_config().evm_with_env(&mut db, evm_env);
-
         // For basic transfers, try using minimum gas before running full binary search
         if is_basic_transfer {
             // If the tx is a simple transfer (call to an account with no code) we can
@@ -152,7 +147,7 @@ pub trait EstimateCall: Call {
             min_tx_env.set_gas_limit(MIN_TRANSACTION_GAS);
 
             // Reuse the same EVM instance
-            if let Ok(res) = evm.transact(min_tx_env).map_err(Self::Error::from_evm_err) &&
+            if let Ok(res) = Self::transact_estimate_tx(&mut db, &evm_env, min_tx_env) &&
                 res.result.is_success()
             {
                 return Ok(U256::from(MIN_TRANSACTION_GAS))
@@ -162,7 +157,7 @@ pub trait EstimateCall: Call {
         trace!(target: "rpc::eth::estimate", ?tx_env, gas_limit = tx_env.gas_limit(), is_basic_transfer, "Starting gas estimation");
 
         // Execute the transaction with the highest possible gas limit.
-        let mut res = match evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err) {
+        let mut res = match Self::transact_estimate_tx(&mut db, &evm_env, tx_env.clone()) {
             // Handle the exceptional case where the transaction initialization uses too much
             // gas. If the gas price or gas limit was specified in the request,
             // retry the transaction with the block's gas limit to determine if
@@ -171,7 +166,7 @@ pub trait EstimateCall: Call {
                 if err.is_gas_too_high() &&
                     (tx_request_gas_limit.is_some() || tx_request_gas_price.is_some()) =>
             {
-                return Self::map_out_of_gas_err(&mut evm, tx_env, max_gas_limit);
+                return Self::map_out_of_gas_err(&mut db, &evm_env, tx_env, max_gas_limit);
             }
             Err(err) if err.is_gas_too_low() => {
                 // This failed because the configured gas cost of the tx was lower than what
@@ -198,7 +193,7 @@ pub trait EstimateCall: Call {
                 // if price or limit was included in the request then we can execute the request
                 // again with the block's gas limit to check if revert is gas related or not
                 return if tx_request_gas_limit.is_some() || tx_request_gas_price.is_some() {
-                    Self::map_out_of_gas_err(&mut evm, tx_env, max_gas_limit)
+                    Self::map_out_of_gas_err(&mut db, &evm_env, tx_env, max_gas_limit)
                 } else {
                     // the transaction did revert
                     Err(Self::Error::from_revert(output))
@@ -233,7 +228,7 @@ pub trait EstimateCall: Call {
 
             // Re-execute the transaction with the new gas limit and update the result and
             // environment.
-            res = evm.transact(optimistic_tx_env).map_err(Self::Error::from_evm_err)?;
+            res = Self::transact_estimate_tx(&mut db, &evm_env, optimistic_tx_env)?;
 
             // Update the gas used based on the new result.
             gas_used = res.result.tx_gas_used();
@@ -269,7 +264,7 @@ pub trait EstimateCall: Call {
             mid_tx_env.set_gas_limit(mid_gas_limit);
 
             // Execute transaction and handle potential gas errors, adjusting limits accordingly.
-            match evm.transact(mid_tx_env).map_err(Self::Error::from_evm_err) {
+            match Self::transact_estimate_tx(&mut db, &evm_env, mid_tx_env) {
                 Err(err) if err.is_gas_too_high() => {
                     // Decrease the highest gas limit if gas is too high
                     highest_gas_limit = mid_gas_limit;
@@ -320,11 +315,34 @@ pub trait EstimateCall: Call {
         }
     }
 
-    /// Executes the requests again after an out of gas error to check if the error is gas related
-    /// or not
+    /// Executes one estimator probe transaction without committing state changes.
+    #[inline]
+    fn transact_estimate_tx<DB>(
+        db: &mut DB,
+        evm_env: &EvmEnvFor<Self::Evm>,
+        tx_env: TxEnvFor<Self::Evm>,
+    ) -> Result<reth_evm::context::ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>
+    where
+        DB: Database<Error = EvmDatabaseError<ProviderError>> + core::fmt::Debug,
+    {
+        let block_env = block_env_from_revm(evm_env.block_env.clone());
+        let tx_env = ethereum_tx_env_from_revm(&tx_env);
+        execute_tx_env_for::<Self::Evm, _>(
+            db,
+            *evm_env.cfg_env.spec(),
+            block_env,
+            &tx_env,
+        )
+        .map_err(reth_errors::RethError::other)
+        .map_err(Self::Error::from_eth_err)
+    }
+
+    /// Executes the request again after an out-of-gas error to check whether the error is gas
+    /// related.
     #[inline]
     fn map_out_of_gas_err<DB>(
-        evm: &mut EvmFor<Self::Evm, DB>,
+        db: &mut DB,
+        evm_env: &EvmEnvFor<Self::Evm>,
         mut tx_env: TxEnvFor<Self::Evm>,
         max_gas_limit: u64,
     ) -> Result<U256, Self::Error>
@@ -335,7 +353,7 @@ pub trait EstimateCall: Call {
         let req_gas_limit = tx_env.gas_limit();
         tx_env.set_gas_limit(max_gas_limit);
 
-        let retry_res = evm.transact(tx_env).map_err(Self::Error::from_evm_err)?;
+        let retry_res = Self::transact_estimate_tx(db, evm_env, tx_env)?;
 
         match retry_res.result {
             ExecutionResult::Success { .. } => {

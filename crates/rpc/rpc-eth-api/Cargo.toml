@@ -14,6 +14,8 @@ workspace = true
 [dependencies]
 # reth
 reth-chain-state.workspace = true
+evm2.workspace = true
+evm2-inspectors.workspace = true
 revm-inspectors.workspace = true
 reth-primitives-traits = { workspace = true, features = ["rpc-compat"] }
 reth-errors.workspace = true
@@ -60,5 +62,5 @@ serde_json.workspace = true
 tracing.workspace = true
 
 [features]
-js-tracer = ["revm-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]
+js-tracer = ["evm2-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]
 client = ["jsonrpsee/client", "jsonrpsee/async-client"]

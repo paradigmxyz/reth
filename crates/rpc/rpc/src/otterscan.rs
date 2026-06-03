@@ -11,6 +11,10 @@ use alloy_rpc_types_trace::{
     parity::{Action, CreateAction, CreateOutput, TraceOutput},
 };
 use async_trait::async_trait;
+use evm2_inspectors::{
+    tracing::{types::CallTraceNode, TracingInspectorConfig},
+    transfer::{TransferInspector, TransferKind},
+};
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
 use reth_evm::context::ExecutionResult;
 use reth_primitives_traits::TxTy;
@@ -22,10 +26,6 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
-use revm_inspectors::{
-    tracing::{types::CallTraceNode, TracingInspectorConfig},
-    transfer::{TransferInspector, TransferKind},
-};
 
 const API_LEVEL: u64 = 8;
 

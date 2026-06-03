@@ -3632,7 +3632,7 @@ dependencies = [
 [[package]]
 name = "evm2"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?branch=dani%2Fadd-inspectors-crate#517b40f196a7e0bb9baca4cce56283357bf1855b"
+source = "git+https://github.com/alloy-rs/evm2?branch=dani%2Fadd-inspectors-crate#56e80550e4961d446af499b0040ce20a6b01adc3"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -3662,9 +3662,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "evm2-inspectors"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/evm2?branch=dani%2Fadd-inspectors-crate#56e80550e4961d446af499b0040ce20a6b01adc3"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rpc-types-eth",
+ "alloy-rpc-types-trace",
+ "alloy-sol-types",
+ "boa_engine",
+ "boa_gc",
+ "colorchoice",
+ "evm2",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "evm2-macros"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?branch=dani%2Fadd-inspectors-crate#517b40f196a7e0bb9baca4cce56283357bf1855b"
+source = "git+https://github.com/alloy-rs/evm2?branch=dani%2Fadd-inspectors-crate#56e80550e4961d446af499b0040ce20a6b01adc3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9879,6 +9896,7 @@ dependencies = [
  "async-trait",
  "derive_more",
  "dyn-clone",
+ "evm2-inspectors",
  "futures",
  "itertools 0.14.0",
  "jsonrpsee",
@@ -9916,7 +9934,6 @@ dependencies = [
  "reth-testing-utils",
  "reth-transaction-pool",
  "reth-trie-common",
- "revm-inspectors",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -10127,6 +10144,8 @@ dependencies = [
  "async-trait",
  "auto_impl",
  "dyn-clone",
+ "evm2",
+ "evm2-inspectors",
  "futures",
  "jsonrpsee",
  "jsonrpsee-types",

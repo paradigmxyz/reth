@@ -12,6 +12,7 @@ use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
 use async_trait::async_trait;
+use evm2_inspectors::tracing::{DebugInspector, TransactionContext};
 use futures::Stream;
 use jsonrpsee::core::RpcResult;
 use parking_lot::RwLock;
@@ -21,6 +22,7 @@ use reth_errors::RethError;
 use reth_evm::{
     database::{Database, DatabaseCommit, State},
     env::BlockEnvironment,
+    evm2::create_evm2_db_ref,
     execute::{BlockExecutor, Executor},
     witness::ExecutionWitnessRecord,
     ConfigureEvm, Evm, EvmEnvFor,
@@ -46,7 +48,6 @@ use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_trie_common::{
     updates::TrieUpdates, ExecutionWitnessMode, HashedPostState, HashedStorage,
 };
-use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
@@ -127,37 +128,41 @@ where
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
-                let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
+                let mut inspector = DebugInspector::new(opts)
+                    .map_err(RethError::other)
+                    .map_err(Eth::Error::from_eth_err)?;
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx);
 
-                    let res = eth_api.inspect(
-                        &mut db,
-                        evm_env.clone(),
-                        tx_env.clone(),
-                        &mut inspector,
-                    )?;
+                    let (next_inspector, res) =
+                        eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), inspector)?;
+                    inspector = next_inspector;
+                    let mut evm2_db = create_evm2_db_ref(&mut db);
                     let result = inspector
-                        .get_result(
+                        .get_result_tx_env(
                             Some(TransactionContext {
                                 block_hash: Some(block.hash()),
                                 tx_hash: Some(tx_hash),
                                 tx_index: Some(index),
                             }),
-                            &tx_env,
-                            &evm_env.block_env,
-                            &res,
-                            &mut db,
+                            &res.evm2_tx,
+                            &res.evm2_block,
+                            &res.evm2_result,
+                            &mut evm2_db,
                         )
+                        .map_err(RethError::other)
                         .map_err(Eth::Error::from_eth_err)?;
 
                     results.push(TraceResult::Success { result, tx_hash: Some(tx_hash) });
                     if transactions.peek().is_some() {
-                        inspector.fuse().map_err(Eth::Error::from_eth_err)?;
+                        inspector
+                            .fuse()
+                            .map_err(RethError::other)
+                            .map_err(Eth::Error::from_eth_err)?;
                         // need to apply the state changes of this transaction before executing the
                         // next transaction
-                        db.commit(res.state)
+                        db.commit(res.result.state)
                     }
                 }
 
@@ -253,21 +258,25 @@ where
 
                 let tx_env = eth_api.evm_config().tx_env(&tx);
 
-                let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
-                let res =
-                    eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
+                let inspector = DebugInspector::new(opts)
+                    .map_err(RethError::other)
+                    .map_err(Eth::Error::from_eth_err)?;
+                let (mut inspector, res) =
+                    eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), inspector)?;
+                let mut evm2_db = create_evm2_db_ref(&mut db);
                 let trace = inspector
-                    .get_result(
+                    .get_result_tx_env(
                         Some(TransactionContext {
                             block_hash: Some(block_hash),
                             tx_index: Some(index),
                             tx_hash: Some(*tx.tx_hash()),
                         }),
-                        &tx_env,
-                        &evm_env.block_env,
-                        &res,
-                        &mut db,
+                        &res.evm2_tx,
+                        &res.evm2_block,
+                        &res.evm2_result,
+                        &mut evm2_db,
                     )
+                    .map_err(RethError::other)
                     .map_err(Eth::Error::from_eth_err)?;
 
                 Ok(trace)
@@ -309,16 +318,21 @@ where
         let this = self.clone();
         self.eth_api()
             .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
-                let mut inspector =
-                    DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?;
-                let res = this.eth_api().inspect(
-                    &mut *db,
-                    evm_env.clone(),
-                    tx_env.clone(),
-                    &mut inspector,
-                )?;
+                let inspector = DebugInspector::new(tracing_options)
+                    .map_err(RethError::other)
+                    .map_err(Eth::Error::from_eth_err)?;
+                let (mut inspector, res) =
+                    this.eth_api().inspect(&mut *db, evm_env.clone(), tx_env.clone(), inspector)?;
+                let mut evm2_db = create_evm2_db_ref(&mut *db);
                 let trace = inspector
-                    .get_result(None, &tx_env, &evm_env.block_env, &res, db)
+                    .get_result_tx_env(
+                        None,
+                        &res.evm2_tx,
+                        &res.evm2_block,
+                        &res.evm2_result,
+                        &mut evm2_db,
+                    )
+                    .map_err(RethError::other)
                     .map_err(Eth::Error::from_eth_err)?;
                 Ok(trace)
             })
@@ -375,12 +389,21 @@ where
                 let (evm_env, tx_env) =
                     eth_api.prepare_call_env(evm_env, call, &mut db, overrides)?;
 
-                let mut inspector =
-                    DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?;
-                let res =
-                    eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
+                let inspector = DebugInspector::new(tracing_options)
+                    .map_err(RethError::other)
+                    .map_err(Eth::Error::from_eth_err)?;
+                let (mut inspector, res) =
+                    eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), inspector)?;
+                let mut evm2_db = create_evm2_db_ref(&mut db);
                 let trace = inspector
-                    .get_result(None, &tx_env, &evm_env.block_env, &res, &mut db)
+                    .get_result_tx_env(
+                        None,
+                        &res.evm2_tx,
+                        &res.evm2_block,
+                        &res.evm2_result,
+                        &mut evm2_db,
+                    )
+                    .map_err(RethError::other)
                     .map_err(Eth::Error::from_eth_err)?;
 
                 Ok(trace)
@@ -455,6 +478,7 @@ where
                 // Trace all bundles
                 let mut bundles = bundles.into_iter().peekable();
                 let mut inspector = DebugInspector::new(tracing_options.clone())
+                    .map_err(RethError::other)
                     .map_err(Eth::Error::from_eth_err)?;
                 while let Some(bundle) = bundles.next() {
                     let mut results = Vec::with_capacity(bundle.transactions.len());
@@ -471,21 +495,28 @@ where
                         let (evm_env, tx_env) =
                             eth_api.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
 
-                        let res = eth_api.inspect(
-                            &mut db,
-                            evm_env.clone(),
-                            tx_env.clone(),
-                            &mut inspector,
-                        )?;
+                        let (next_inspector, res) =
+                            eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), inspector)?;
+                        inspector = next_inspector;
                         let trace = inspector
-                            .get_result(None, &tx_env, &evm_env.block_env, &res, &mut db)
+                            .get_result_tx_env(
+                                None,
+                                &res.evm2_tx,
+                                &res.evm2_block,
+                                &res.evm2_result,
+                                &mut create_evm2_db_ref(&mut db),
+                            )
+                            .map_err(RethError::other)
                             .map_err(Eth::Error::from_eth_err)?;
 
                         // If there is more transactions, commit the database
                         // If there is no transactions, but more bundles, commit to the database too
                         if transactions.peek().is_some() || bundles.peek().is_some() {
-                            inspector.fuse().map_err(Eth::Error::from_eth_err)?;
-                            db.commit(res.state);
+                            inspector
+                                .fuse()
+                                .map_err(RethError::other)
+                                .map_err(Eth::Error::from_eth_err)?;
+                            db.commit(res.result.state);
                         }
                         results.push(trace);
                     }
