@@ -1,4 +1,4 @@
-# Runs `Soubhik-10/hive` tests.
+# Runs `ethereum/hive` tests.
 
 name: hive
 
@@ -48,8 +48,8 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: Soubhik-10/hive
-          ref: rpc-state-root
+          repository: ethereum/hive
+          ref: master
           path: hivetests
           persist-credentials: false
 
@@ -237,8 +237,8 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: Soubhik-10/hive
-          ref: rpc-state-root
+          repository: ethereum/hive
+          ref: master
           path: hivetests
           persist-credentials: false
 
@@ -419,8 +419,8 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: Soubhik-10/hive
-          ref: rpc-state-root
+          repository: ethereum/hive
+          ref: master
           path: hivetests
           persist-credentials: false
 
