@@ -4,8 +4,8 @@ use crate::root::ParallelStateRootError;
 use alloy_eip7928::BlockAccessList;
 use alloy_primitives::{keccak256, B256};
 use derive_more::derive::Deref;
+use reth_execution_types::EvmState;
 use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2};
-use revm_state::EvmState;
 use std::sync::Arc;
 use tracing::trace;
 

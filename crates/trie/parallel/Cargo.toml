@@ -15,6 +15,7 @@ workspace = true
 # reth
 reth-primitives-traits = { workspace = true, features = ["dashmap", "std"] }
 reth-execution-errors.workspace = true
+reth-execution-types.workspace = true
 reth-provider.workspace = true
 reth-storage-errors.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
@@ -27,9 +28,6 @@ alloy-rlp.workspace = true
 
 # tracing
 tracing.workspace = true
-
-# revm
-revm-state.workspace = true
 
 # misc
 thiserror.workspace = true
