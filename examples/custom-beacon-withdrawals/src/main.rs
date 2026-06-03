@@ -40,7 +40,7 @@ use reth_evm::{
     revm::context::Block as _,
     EthEvm, EthEvmFactory, EvmFactory,
 };
-use std::{fmt::Display, sync::Arc};
+use std::fmt::Display;
 
 pub const SYSTEM_ADDRESS: Address = address!("0xfffffffffffffffffffffffffffffffffffffffe");
 pub const WITHDRAWALS_ADDRESS: Address = address!("0x4200000000000000000000000000000000000000");
