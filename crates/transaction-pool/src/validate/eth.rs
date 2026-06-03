@@ -1445,7 +1445,7 @@ mod tests {
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
     use reth_ethereum_primitives::PooledTransactionVariant;
-    use reth_evm::{gas::MAX_INITCODE_SIZE, hardfork::SpecId};
+    use reth_evm::gas::MAX_INITCODE_SIZE;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::SignedTransaction;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
