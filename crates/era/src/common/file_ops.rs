@@ -217,13 +217,17 @@ impl EraFileType {
         format!("{network_name}-{era_number:05}{era_count}-{hash}{}", self.extension())
     }
 
-    /// Detect file type from URL
-    /// By default, it assumes `Era` type
+    /// Detect file type from a URL, defaulting to `Era`.
+    ///
+    /// Resolves by file extension when the URL names a file; otherwise falls back to the `era1`
+    /// host/path substring.
     pub fn from_url(url: &str) -> Self {
+        let file_url = url.split(['?', '#']).next().unwrap_or(url);
+        if let Some(ty) = Self::from_filename(file_url) {
+            return ty;
+        }
         if url.contains("era1") {
             Self::Era1
-        } else if url.contains(".ere") {
-            Self::Ere
         } else {
             Self::Era
         }
@@ -235,5 +239,49 @@ pub fn format_hash(hash: Option<[u8; 4]>) -> String {
     match hash {
         Some(h) => format!("{:02x}{:02x}{:02x}{:02x}", h[0], h[1], h[2], h[3]),
         None => "00000000".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_from_url_detection() {
+        // A URL that names a file resolves by its extension, regardless of the rest of the path.
+        assert_eq!(
+            EraFileType::from_url("https://host/mainnet-00000-abcd1234.ere"),
+            EraFileType::Ere
+        );
+        assert_eq!(
+            EraFileType::from_url("https://host/mainnet-00000-abcd1234.era1"),
+            EraFileType::Era1
+        );
+        assert_eq!(
+            EraFileType::from_url("https://host/mainnet-00000-abcd1234.era"),
+            EraFileType::Era
+        );
+    }
+
+    #[test]
+    fn test_from_filename_detection() {
+        assert_eq!(
+            EraFileType::from_filename("mainnet-00000-abcd1234.era"),
+            Some(EraFileType::Era)
+        );
+        assert_eq!(
+            EraFileType::from_filename("mainnet-00000-abcd1234.era1"),
+            Some(EraFileType::Era1)
+        );
+        assert_eq!(
+            EraFileType::from_filename("mainnet-00000-abcd1234.ere"),
+            Some(EraFileType::Ere)
+        );
+        // Profile postfixes don't change extension detection.
+        assert_eq!(
+            EraFileType::from_filename("mainnet-00000-abcd1234-noproofs.ere"),
+            Some(EraFileType::Ere)
+        );
+        assert_eq!(EraFileType::from_filename("mainnet-00000-abcd1234.txt"), None);
     }
 }
