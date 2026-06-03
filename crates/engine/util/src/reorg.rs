@@ -12,6 +12,7 @@ use reth_engine_primitives::{
 use reth_engine_tree::tree::EngineValidator;
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_evm::{
+    database::{State, StateProviderDatabase},
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm,
 };
@@ -19,7 +20,6 @@ use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives_traits::{
     block::Block as _, BlockBody as _, BlockTy, HeaderTy, SealedBlock, SignedTransaction,
 };
-use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_storage_api::{errors::ProviderError, BlockReader, StateProviderFactory};
 use std::{
     collections::VecDeque,
