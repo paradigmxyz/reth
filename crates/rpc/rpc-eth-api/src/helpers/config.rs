@@ -9,11 +9,7 @@ use alloy_primitives::Address;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks, Head};
 use reth_errors::{ProviderError, RethError};
-use reth_evm::{
-    database::EmptyDB,
-    precompiles::{Precompile, PrecompilesMap},
-    ConfigureEvm, Evm,
-};
+use reth_evm::ConfigureEvm;
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::header::HeaderMut;
 use reth_rpc_eth_types::EthApiError;
@@ -97,9 +93,8 @@ where
             .ok_or_else(|| ProviderError::BestBlockNotFound)?
             .into_header();
 
-        let current_precompiles = evm_to_precompiles_map(
-            self.evm_config.evm_for_block(EmptyDB::default(), &latest).map_err(RethError::other)?,
-        );
+        let current_precompiles =
+            precompiles_to_map(self.evm_config.precompiles(&latest).map_err(RethError::other)?);
 
         let mut fork_timestamps =
             chain_spec.forks_iter().filter_map(|(_, cond)| cond.as_timestamp()).collect::<Vec<_>>();
@@ -129,10 +124,8 @@ where
                 header.set_timestamp(next_fork_timestamp);
                 header
             };
-            let next_precompiles = evm_to_precompiles_map(
-                self.evm_config
-                    .evm_for_block(EmptyDB::default(), &fake_header)
-                    .map_err(RethError::other)?,
+            let next_precompiles = precompiles_to_map(
+                self.evm_config.precompiles(&fake_header).map_err(RethError::other)?,
             );
 
             config.next = Some(self.build_fork_config_at(next_fork_timestamp, next_precompiles));
@@ -147,10 +140,8 @@ where
             header.set_timestamp(last_fork_timestamp);
             header
         };
-        let last_precompiles = evm_to_precompiles_map(
-            self.evm_config
-                .evm_for_block(EmptyDB::default(), &fake_header)
-                .map_err(RethError::other)?,
+        let last_precompiles = precompiles_to_map(
+            self.evm_config.precompiles(&fake_header).map_err(RethError::other)?,
         );
 
         config.last = Some(self.build_fork_config_at(last_fork_timestamp, last_precompiles));
@@ -171,14 +162,8 @@ where
     }
 }
 
-fn evm_to_precompiles_map(
-    evm: impl Evm<Precompiles = PrecompilesMap>,
+fn precompiles_to_map(
+    precompiles: impl IntoIterator<Item = (String, Address)>,
 ) -> BTreeMap<String, Address> {
-    let precompiles = evm.precompiles();
-    precompiles
-        .addresses()
-        .filter_map(|address| {
-            Some((precompiles.get(address)?.precompile_id().name().to_string(), *address))
-        })
-        .collect()
+    precompiles.into_iter().collect()
 }

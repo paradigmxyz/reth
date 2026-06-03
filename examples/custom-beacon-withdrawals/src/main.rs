@@ -139,6 +139,10 @@ impl ConfigureEvm for CustomEvmConfig {
         self.inner.evm_env(header)
     }
 
+    fn precompiles(&self, header: &Header) -> Result<Vec<(String, Address)>, Self::Error> {
+        self.inner.precompiles(header)
+    }
+
     fn next_evm_env(
         &self,
         parent: &Header,

@@ -17,7 +17,12 @@
 
 extern crate alloc;
 
-use alloc::{borrow::Cow, sync::Arc};
+use alloc::{
+    borrow::Cow,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use alloy_consensus::{BlockHeader, Header};
 use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthExecutorSpec, MAINNET};
@@ -25,7 +30,10 @@ use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
     context::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, HaltReason},
     eth::EthBlockExecutionCtx,
-    evm2::{Evm2RethBlockExecutorFactory, RethEvm2ReceiptBuilder},
+    evm2::{
+        precompiles_for_spec, spec_id_from_revm, Evm2RethBlockExecutorFactory,
+        RethEvm2ReceiptBuilder,
+    },
     hardfork::SpecId,
     precompiles::PrecompilesMap,
     ConfigureEvm, EthEvmFactory, EvmEnv, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
@@ -38,7 +46,7 @@ use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
 #[allow(unused_imports)]
 use {
     alloy_eips::Decodable2718,
-    alloy_primitives::{Bytes, U256},
+    alloy_primitives::{Address, Bytes, U256},
     alloy_rpc_types_engine::ExecutionData,
     reth_chainspec::EthereumHardforks,
     reth_evm::{EvmEnvFor, ExecutionCtxFor},
@@ -154,6 +162,18 @@ where
             self.chain_spec().chain().id(),
             self.chain_spec().blob_params_at_timestamp(header.timestamp),
         ))
+    }
+
+    fn precompiles(&self, header: &Header) -> Result<Vec<(String, Address)>, Self::Error> {
+        let evm_env = self.evm_env(header)?;
+        let precompiles = precompiles_for_spec(spec_id_from_revm(evm_env.cfg_env.spec));
+        let precompiles = precompiles.as_map();
+        Ok(precompiles
+            .addresses()
+            .filter_map(|address| {
+                Some((precompiles.get(&address)?.id().name().to_string(), address))
+            })
+            .collect())
     }
 
     fn next_evm_env(

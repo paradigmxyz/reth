@@ -47,6 +47,14 @@ where
         self.inner().evm_env(header)
     }
 
+    fn precompiles(
+        &self,
+        header: &HeaderTy<Self::Primitives>,
+    ) -> Result<alloc::vec::Vec<(alloc::string::String, alloy_primitives::Address)>, Self::Error>
+    {
+        self.inner().precompiles(header)
+    }
+
     fn next_evm_env(
         &self,
         parent: &HeaderTy<Self::Primitives>,

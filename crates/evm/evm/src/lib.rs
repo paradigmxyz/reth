@@ -18,7 +18,7 @@
 extern crate alloc;
 
 use crate::execute::{BasicBlockBuilder, Executor};
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 use alloy_eips::eip4895::Withdrawals;
 use alloy_evm::{precompiles::PrecompilesMap, Database as AlloyDatabase};
 use alloy_primitives::{Address, Bytes, B256};
@@ -355,6 +355,14 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
 
     /// Creates a new [`EvmEnv`] for the given header.
     fn evm_env(&self, header: &HeaderTy<Self::Primitives>) -> Result<EvmEnvFor<Self>, Self::Error>;
+
+    /// Returns active precompiles for the given header.
+    fn precompiles(
+        &self,
+        _header: &HeaderTy<Self::Primitives>,
+    ) -> Result<Vec<(String, Address)>, Self::Error> {
+        Ok(Vec::new())
+    }
 
     /// Returns the configured [`EvmEnv`] for `parent + 1` block.
     ///

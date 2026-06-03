@@ -12,7 +12,7 @@ use reth_storage_errors::any::AnyError;
 use crate::evm::{BalIndexReader, BbBlockExecutorFactory, BbEvmPlan};
 use alloy_consensus::Header;
 use alloy_eips::Decodable2718;
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{Address, Bytes, B256};
 use alloy_rpc_types::engine::ExecutionData;
 use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthExecutorSpec as RethEthExecutorSpec};
@@ -156,6 +156,10 @@ where
 
     fn evm_env(&self, header: &Header) -> Result<EvmEnv<SpecId>, Self::Error> {
         self.inner.evm_env(header)
+    }
+
+    fn precompiles(&self, header: &Header) -> Result<Vec<(String, Address)>, Self::Error> {
+        self.inner.precompiles(header)
     }
 
     fn next_evm_env(
