@@ -90,6 +90,30 @@ const fn debug_evm2_tx(_tx_hash: &B256) -> bool {
     false
 }
 
+#[cfg(feature = "std")]
+fn debug_evm2_address(address: &Address) -> bool {
+    std::env::var("RETH_EVM2_DEBUG_ADDRESS").is_ok_and(|value| {
+        value.eq_ignore_ascii_case(&address.to_string()) ||
+            value.eq_ignore_ascii_case(&format!("{address:#x}"))
+    })
+}
+
+#[cfg(feature = "std")]
+fn debug_evm2_account_info(info: Option<&Evm2AccountInfo>) -> String {
+    info.map_or_else(
+        || "none".to_string(),
+        |info| {
+            format!(
+                "balance={} nonce={} code_hash={} code_len={:?}",
+                info.balance,
+                info.nonce,
+                info.code_hash,
+                info.code.as_ref().map(Evm2Bytecode::len)
+            )
+        },
+    )
+}
+
 const PRECOMPILE_CACHE_SIZE: usize = 7;
 const ONE_ETHER: u128 = 1_000_000_000_000_000_000;
 
@@ -733,6 +757,16 @@ where
     let mut storage = storage;
 
     for (address, account) in accounts {
+        #[cfg(feature = "std")]
+        if debug_evm2_address(&address) {
+            eprintln!(
+                "evm2-debug-state account address={address} original=[{}] current=[{}] storage_wipe={} storage_slots={}",
+                debug_evm2_account_info(account.original.as_ref()),
+                debug_evm2_account_info(account.current.as_ref()),
+                storage.get(&address).is_some_and(|storage| storage.wipe),
+                storage.get(&address).map_or(0, |storage| storage.slots.len())
+            );
+        }
         let original = account.original.map(account_info_from_evm2);
         let is_created = original.is_none() && account.current.is_some();
         let storage_wiped = storage.get(&address).is_some_and(|storage| storage.wipe);
@@ -794,6 +828,14 @@ where
     }
 
     for (address, storage) in storage {
+        #[cfg(feature = "std")]
+        if debug_evm2_address(&address) {
+            eprintln!(
+                "evm2-debug-state storage-only address={address} wipe={} slots={}",
+                storage.wipe,
+                storage.slots.len()
+            );
+        }
         let is_deleted_after_block_creation =
             executor.output.bundle.account(&address).is_some_and(|account| {
                 bundle_account_deleted_after_block_creation(account, &storage)
