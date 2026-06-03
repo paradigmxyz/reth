@@ -23,8 +23,9 @@ use alloy_evm::{
     eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
     EthEvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
+use alloy_primitives::Address;
 use core::{convert::Infallible, fmt::Debug};
-use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
+use reth_chainspec::{ChainSpec, EthChainSpec, EthExecutorSpec, MAINNET};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
     eth::NextEvmEnvAttributes,
@@ -53,9 +54,8 @@ use {
 pub use alloy_evm::EthEvm;
 
 mod config;
-use alloy_evm::eth::spec::EthExecutorSpec;
 pub use config::{revm_spec, revm_spec_by_timestamp_and_block_number};
-use reth_ethereum_forks::{EthereumHardfork, Hardforks};
+use reth_ethereum_forks::{EthereumHardfork, ForkCondition, Hardforks};
 
 /// Helper type with backwards compatible methods to obtain Ethereum executor
 /// providers.
@@ -78,11 +78,42 @@ mod test_utils;
 #[cfg(feature = "test-utils")]
 pub use test_utils::*;
 
+/// Temporary adapter for the remaining alloy block executor factory.
+#[derive(Debug, Clone)]
+#[doc(hidden)]
+pub struct AlloyChainSpec<C>(Arc<C>);
+
+impl<C> AlloyChainSpec<C> {
+    /// Creates a new adapter.
+    pub const fn new(chain_spec: Arc<C>) -> Self {
+        Self(chain_spec)
+    }
+}
+
+impl<C> EthereumHardforks for AlloyChainSpec<C>
+where
+    C: EthereumHardforks,
+{
+    fn ethereum_fork_activation(&self, fork: EthereumHardfork) -> ForkCondition {
+        self.0.ethereum_fork_activation(fork)
+    }
+}
+
+impl<C> alloy_evm::eth::spec::EthExecutorSpec for AlloyChainSpec<C>
+where
+    C: EthExecutorSpec,
+{
+    fn deposit_contract_address(&self) -> Option<Address> {
+        self.0.deposit_contract_address()
+    }
+}
+
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone)]
 pub struct EthEvmConfig<C = ChainSpec, EvmFactory = EthEvmFactory> {
     /// Inner [`EthBlockExecutorFactory`].
-    pub executor_factory: EthBlockExecutorFactory<RethReceiptBuilder, Arc<C>, EvmFactory>,
+    pub executor_factory:
+        EthBlockExecutorFactory<RethReceiptBuilder, AlloyChainSpec<C>, EvmFactory>,
     /// Ethereum block assembler.
     pub block_assembler: EthBlockAssembler<C>,
 }
@@ -122,7 +153,7 @@ impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory> {
             block_assembler: EthBlockAssembler::new(chain_spec.clone()),
             executor_factory: EthBlockExecutorFactory::new(
                 RethReceiptBuilder::default(),
-                chain_spec,
+                AlloyChainSpec::new(chain_spec),
                 evm_factory,
             ),
         }
@@ -130,7 +161,7 @@ impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory> {
 
     /// Returns the chain spec associated with this configuration.
     pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
-        self.executor_factory.spec()
+        &self.block_assembler.chain_spec
     }
 }
 
@@ -199,7 +230,8 @@ where
     type Primitives = EthPrimitives;
     type Error = Infallible;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
-    type BlockExecutorFactory = EthBlockExecutorFactory<RethReceiptBuilder, Arc<ChainSpec>, EvmF>;
+    type BlockExecutorFactory =
+        EthBlockExecutorFactory<RethReceiptBuilder, AlloyChainSpec<ChainSpec>, EvmF>;
     type BlockAssembler = EthBlockAssembler<ChainSpec>;
 
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {

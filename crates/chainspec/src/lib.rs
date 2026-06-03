@@ -16,6 +16,7 @@ mod constants;
 pub use constants::*;
 
 mod api;
+mod evm;
 /// The chain info module.
 mod info;
 /// The chain spec module.
@@ -25,8 +26,11 @@ pub use alloy_chains::{Chain, ChainKind, NamedChain};
 /// Re-export for convenience
 pub use reth_ethereum_forks::*;
 
-pub use alloy_evm::EvmLimitParams;
 pub use api::EthChainSpec;
+pub use evm::{
+    base_block_reward, base_block_reward_pre_merge, block_reward, ommer_reward, EthExecutorSpec,
+    EvmLimitParams,
+};
 pub use info::ChainInfo;
 #[cfg(any(test, feature = "test-utils"))]
 pub use spec::test_fork_ids;

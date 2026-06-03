@@ -1,5 +1,4 @@
 pub use alloy_eips::eip1559::BaseFeeParams;
-use alloy_evm::eth::spec::EthExecutorSpec;
 
 use crate::{
     constants::{MAINNET_DEPOSIT_CONTRACT, MAINNET_PRUNE_DELETE_LIMIT},
@@ -8,7 +7,7 @@ use crate::{
     mainnet::{MAINNET_PARIS_BLOCK, MAINNET_PARIS_TTD},
     sepolia,
     sepolia::SEPOLIA_PARIS_BLOCK,
-    EthChainSpec,
+    EthChainSpec, EthExecutorSpec,
 };
 use alloc::{
     boxed::Box,
@@ -1297,10 +1296,10 @@ pub fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{base_block_reward, block_reward};
     use alloy_chains::Chain;
     use alloy_consensus::constants::ETH_TO_WEI;
     use alloy_eips::{eip4844::BLOB_TX_MIN_BLOB_GASPRICE, eip7840::BlobParams};
-    use alloy_evm::block::calc::{base_block_reward, block_reward};
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
     use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
