@@ -643,7 +643,10 @@ where
     Provider: NodePrimitivesProvider<Primitives = N>,
     N: NodePrimitives,
 {
-    fn hashed_post_state(&self, bundle_state: &revm_database::BundleState) -> HashedPostState {
+    fn hashed_post_state(
+        &self,
+        bundle_state: &reth_execution_types::BundleState,
+    ) -> HashedPostState {
         HashedPostState::from_bundle_state::<KeccakKeyHasher, _>(bundle_state.state().iter().map(
             |(address, account)| {
                 (
@@ -1320,9 +1323,8 @@ mod tests {
         use crate::BlockWriter;
         use alloy_primitives::keccak256;
         use reth_db_api::models::StorageSettings;
-        use reth_execution_types::ExecutionOutcome;
+        use reth_execution_types::{BundleState, ExecutionOutcome};
         use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
-        use revm_database::BundleState;
         use std::collections::HashMap;
 
         let factory = create_test_provider_factory();

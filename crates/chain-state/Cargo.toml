@@ -27,7 +27,6 @@ reth-trie.workspace = true
 alloy-eips.workspace = true
 alloy-primitives = { workspace = true, features = ["std"] }
 alloy-consensus.workspace = true
-revm-database.workspace = true
 revm-state = { workspace = true, optional = true }
 
 # async
@@ -70,7 +69,6 @@ serde = [
     "reth-execution-types/serde",
     "reth-primitives-traits/serde",
     "reth-trie/serde",
-    "revm-database/serde",
     "revm-state?/serde",
     "reth-storage-api/serde",
 ]

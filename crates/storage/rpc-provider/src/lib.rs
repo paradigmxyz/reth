@@ -1316,7 +1316,10 @@ where
     N: Network,
     Node: NodeTypes,
 {
-    fn hashed_post_state(&self, bundle_state: &revm::database::BundleState) -> HashedPostState {
+    fn hashed_post_state(
+        &self,
+        bundle_state: &reth_execution_types::BundleState,
+    ) -> HashedPostState {
         HashedPostState::from_bundle_state::<KeccakKeyHasher, _>(bundle_state.state().iter().map(
             |(address, account)| {
                 (

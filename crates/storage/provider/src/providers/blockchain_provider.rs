@@ -21,7 +21,7 @@ use reth_chain_state::{
 };
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::{BundleState, ExecutionOutcome};
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives_traits::{Account, RecoveredBlock, SealedHeader, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -30,7 +30,6 @@ use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{BlockBodyIndicesProvider, NodePrimitivesProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{HashedPostState, KeccakKeyHasher};
-use revm_database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
@@ -816,7 +815,8 @@ mod tests {
     use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Block, Receipt};
     use reth_execution_types::{
-        BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome,
+        BlockExecutionOutput, BlockExecutionResult, BundleState, Chain, ExecutionOutcome,
+        OriginalValuesKnown,
     };
     use reth_primitives_traits::{RecoveredBlock, SealedBlock, SignerRecoverable};
     use reth_storage_api::{
@@ -829,7 +829,6 @@ mod tests {
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
         random_receipt, BlockParams, BlockRangeParams,
     };
-    use revm_database::{BundleState, OriginalValuesKnown};
     use std::{
         collections::BTreeMap,
         ops::{Bound, Range, RangeBounds},

@@ -1,5 +1,5 @@
 use alloy_primitives::{B256, U256};
-use revm_database::states::RevertToSlot;
+use reth_execution_types::RevertToSlot;
 use std::iter::Peekable;
 
 /// Iterator over storage reverts.

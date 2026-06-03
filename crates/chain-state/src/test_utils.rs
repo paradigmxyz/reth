@@ -13,7 +13,9 @@ use reth_chainspec::{ChainSpec, EthereumHardfork, MIN_TRANSACTION_GAS};
 use reth_ethereum_primitives::{
     Block, BlockBody, EthPrimitives, Receipt, Transaction, TransactionSigned,
 };
-use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
+use reth_execution_types::{
+    BlockExecutionOutput, BlockExecutionResult, BundleState, Chain, ExecutionOutcome,
+};
 use reth_primitives_traits::{
     proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
     Account, NodePrimitives, Recovered, RecoveredBlock, SealedBlock, SealedHeader,
@@ -21,7 +23,6 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::NodePrimitivesProvider;
 use reth_trie::root::state_root_unhashed;
-use revm_database::BundleState;
 use revm_state::AccountInfo;
 use std::{
     ops::Range,

@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives-traits.workspace = true
+reth-execution-types = { workspace = true, optional = true }
 reth-storage-errors.workspace = true
 reth-storage-api.workspace = true
 reth-trie = { workspace = true, optional = true }
@@ -40,12 +41,14 @@ std = [
     "revm/std",
     "alloy-consensus/std",
     "reth-ethereum-forks/std",
+    "reth-execution-types?/std",
     "reth-storage-api/std",
     "reth-storage-errors/std",
 ]
 witness = ["dep:reth-trie", "dep:alloy-rlp", "dep:alloy-rpc-types-debug"]
 test-utils = [
     "dep:reth-trie",
+    "dep:reth-execution-types",
     "reth-primitives-traits/test-utils",
     "reth-trie?/test-utils",
 ]
@@ -55,6 +58,7 @@ serde = [
     "alloy-consensus/serde",
     "reth-trie?/serde",
     "reth-ethereum-forks/serde",
+    "reth-execution-types?/serde",
     "reth-primitives-traits/serde",
     "reth-storage-api/serde",
 ]

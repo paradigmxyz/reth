@@ -48,7 +48,10 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     BlockNumberList,
 };
-use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
+use reth_execution_types::{
+    BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome, PlainStateReverts,
+    PlainStorageChangeset, PlainStorageRevert, StateChangeset,
+};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, FastInstant as Instant, RecoveredBlock,
@@ -70,9 +73,6 @@ use reth_trie::{
     HashedPostStateSorted,
 };
 use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
-use revm_database::states::{
-    PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
-};
 use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
@@ -3948,14 +3948,15 @@ mod tests {
     use reth_chain_state::ExecutedBlock;
     use reth_db_api::models::StorageSettings;
     use reth_ethereum_primitives::Receipt;
-    use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
+    use reth_execution_types::{
+        AccountRevertInit, BlockExecutionOutput, BlockExecutionResult, BundleState,
+    };
     use reth_primitives_traits::SealedBlock;
     use reth_storage_api::MetadataWriter;
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
         HashedPostState, KeccakKeyHasher, Nibbles, StoredNibbles, StoredNibblesSubKey,
     };
-    use revm_database::BundleState;
     use revm_state::AccountInfo;
     use std::{sync::mpsc, time::Duration};
 
@@ -4881,9 +4882,9 @@ mod tests {
 
     #[test]
     fn test_write_state_and_historical_read_hashed() {
+        use reth_execution_types::BundleState;
         use reth_storage_api::StateProvider;
         use reth_trie::{HashedPostState, KeccakKeyHasher};
-        use revm_database::BundleState;
         use revm_state::AccountInfo;
 
         let factory = create_test_provider_factory();

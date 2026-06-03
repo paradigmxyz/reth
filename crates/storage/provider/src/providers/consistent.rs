@@ -16,7 +16,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::{ExecutionOutcome, PlainStorageRevert};
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_primitives_traits::{Account, BlockBody, RecoveredBlock, SealedHeader, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -27,7 +27,6 @@ use reth_storage_api::{
     StateProviderBox, StorageChangeSetReader, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
-use revm_database::states::PlainStorageRevert;
 use std::{
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
     sync::Arc,
@@ -1503,13 +1502,14 @@ mod tests {
     use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
     use reth_db_api::models::AccountBeforeTx;
     use reth_ethereum_primitives::Block;
-    use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
+    use reth_execution_types::{
+        BlockExecutionOutput, BlockExecutionResult, BundleState, ExecutionOutcome,
+    };
     use reth_primitives_traits::{RecoveredBlock, SealedBlock};
     use reth_storage_api::{BlockReader, BlockSource, ChangeSetReader, StateReader};
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
     };
-    use revm_database::BundleState;
     use std::{
         ops::{Bound, Range, RangeBounds},
         sync::Arc,

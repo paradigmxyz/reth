@@ -21,6 +21,7 @@ use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
+use reth_execution_types::BundleState;
 use reth_node_types::{
     BlockTy, HeaderTy, NodeTypesWithDB, NodeTypesWithDBAdapter, ReceiptTy, TxTy,
 };
@@ -35,7 +36,6 @@ use reth_storage_api::{
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
 use reth_trie_db::ChangesetCache;
-use revm_database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
     path::Path,

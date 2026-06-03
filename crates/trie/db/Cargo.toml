@@ -43,6 +43,7 @@ reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
+reth-execution-types.workspace = true
 
 alloy-consensus.workspace = true
 alloy-rlp.workspace = true
@@ -72,6 +73,7 @@ serde = [
     "reth-primitives-traits/serde",
     "revm-database/serde",
     "revm/serde",
+    "reth-execution-types/serde",
 ]
 test-utils = [
     "reth-trie-common/test-utils",
