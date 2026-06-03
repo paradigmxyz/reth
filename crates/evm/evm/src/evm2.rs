@@ -476,6 +476,9 @@ fn account_info_revert_from_evm2(
     original: &Option<Evm2AccountInfo>,
     present: &Option<Evm2AccountInfo>,
 ) -> AccountInfoRevert {
+    if original.is_none() && present.is_none() {
+        return AccountInfoRevert::DeleteIt;
+    }
     let original = original.clone().map(account_info_from_evm2);
     let present = present.clone().map(account_info_from_evm2);
     account_info_revert(&original, &present)
@@ -492,6 +495,16 @@ fn account_info_revert(
     }
 }
 
+fn account_info_revert_from_bundle_account(account: &BundleAccount) -> AccountInfoRevert {
+    if account.original_info.is_none() &&
+        account.info.is_none() &&
+        account.status == AccountStatus::InMemoryChange
+    {
+        return AccountInfoRevert::DeleteIt;
+    }
+    account_info_revert(&account.original_info, &account.info)
+}
+
 const fn account_status(
     original: &Option<AccountInfo>,
     present: &Option<AccountInfo>,
@@ -501,7 +514,7 @@ const fn account_status(
         AccountStatus::Destroyed
     } else if storage_wiped {
         AccountStatus::DestroyedChanged
-    } else if original.is_none() && present.is_some() {
+    } else if original.is_none() {
         AccountStatus::InMemoryChange
     } else {
         AccountStatus::Changed
@@ -576,7 +589,7 @@ fn block_reverts_from_bundle(bundle: &BundleState) -> (Vec<(Address, AccountReve
 
     for (&address, account) in &bundle.state {
         let revert = AccountRevert {
-            account: account_info_revert(&account.original_info, &account.info),
+            account: account_info_revert_from_bundle_account(account),
             storage: account
                 .storage
                 .iter()
@@ -1965,6 +1978,28 @@ mod tests {
         let bundle = bundle_state_from_evm2(changes);
 
         assert!(bundle.account(&address).unwrap().was_destroyed());
+    }
+
+    #[test]
+    fn preserves_created_deleted_account_revert() {
+        let address = address!("0x000000000000000000000000000000000000000e");
+        let changes = StateChanges {
+            accounts: core::iter::once((
+                address,
+                Tracked { original: None, current: None, _non_exhaustive: () },
+            ))
+            .collect(),
+            storage: Default::default(),
+            code: Default::default(),
+            logs: Vec::new(),
+            _non_exhaustive: (),
+        };
+
+        let bundle = bundle_state_from_evm2(changes);
+        let revert = &bundle.reverts[0][0].1;
+
+        assert_eq!(revert.account, AccountInfoRevert::DeleteIt);
+        assert_eq!(into_block_bundle(bundle).reverts[0][0].1.account, AccountInfoRevert::DeleteIt);
     }
 
     #[test]
