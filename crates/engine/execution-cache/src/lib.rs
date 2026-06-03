@@ -68,10 +68,10 @@ impl PayloadExecutionCache {
             // Check that the cache hash matches the parent hash of the current block. It won't
             // match in case it's a fork block.
             let hash_matches = cached_hash == parent_hash;
-            // Check `is_available()` to ensure no other tasks (e.g., prewarming) currently hold
-            // a reference to this cache. We can only reuse it when we have exclusive access.
-            let available = c.is_available();
+            // Check the usage count to ensure no other tasks (e.g., prewarming) currently hold a
+            // reference to this cache. We can only reuse it when we have exclusive access.
             let usage_count = c.usage_count();
+            let available = usage_count == 1;
 
             debug!(
                 target: "engine::caching",
