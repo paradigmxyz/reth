@@ -16,7 +16,7 @@ use alloy_evm::{
     },
     Evm, EvmEnv, EvmFactory, RecoveredTx, ToTxEnv,
 };
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{map::AddressHashSet, Address, B256};
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
@@ -29,7 +29,10 @@ use reth_storage_api::StateProvider;
 pub use reth_storage_errors::provider::ProviderError;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::{
-    database::{states::bundle_state::BundleRetention, BundleState, State},
+    database::{
+        states::{bundle_state::BundleRetention, reverts::AccountInfoRevert, AccountStatus},
+        BundleState, State,
+    },
     state::bal::Bal,
 };
 
@@ -142,6 +145,40 @@ fn convert_alloy_internal_block_execution_error(
             InternalBlockExecutionError::EVM { hash, error }
         }
         AlloyInternalBlockExecutionError::Other(error) => InternalBlockExecutionError::Other(error),
+    }
+}
+
+pub(crate) fn prune_created_deleted_empty_accounts(bundle: &mut BundleState) {
+    let delete_revert_accounts = bundle
+        .reverts
+        .iter()
+        .flat_map(|block| block.iter())
+        .filter_map(|(address, revert)| {
+            matches!(revert.account, AccountInfoRevert::DeleteIt).then_some(*address)
+        })
+        .collect::<AddressHashSet>();
+
+    if delete_revert_accounts.is_empty() {
+        return;
+    }
+
+    let accounts = bundle
+        .state
+        .iter()
+        .filter(|(address, account)| {
+            delete_revert_accounts.contains(*address) &&
+                account.original_info.is_none() &&
+                account.info.as_ref().is_some_and(|info| info.is_empty()) &&
+                account.status == AccountStatus::InMemoryChange &&
+                account.storage.is_empty()
+        })
+        .map(|(&address, _)| address)
+        .collect::<Vec<_>>();
+
+    for address in accounts {
+        if let Some(account) = bundle.state.remove(&address) {
+            bundle.state_size = bundle.state_size.saturating_sub(account.size_hint());
+        }
     }
 }
 
@@ -630,6 +667,7 @@ where
 
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);
+        prune_created_deleted_empty_accounts(&mut db.bundle_state);
 
         let block_access_list = db.take_built_alloy_bal();
         let block_access_list_hash =
@@ -744,6 +782,7 @@ where
         let result = convert_alloy_block_execution_result(result);
 
         self.db.merge_transitions(BundleRetention::Reverts);
+        prune_created_deleted_empty_accounts(&mut self.db.bundle_state);
 
         Ok(result)
     }
@@ -767,6 +806,7 @@ where
 
         self.db.set_reth_state_hook(None);
         self.db.merge_transitions(BundleRetention::Reverts);
+        prune_created_deleted_empty_accounts(&mut self.db.bundle_state);
 
         result
             .map(convert_alloy_block_execution_result)
