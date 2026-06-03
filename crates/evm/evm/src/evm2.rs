@@ -517,10 +517,17 @@ fn account_info_revert(
     present: &Option<AccountInfo>,
 ) -> AccountInfoRevert {
     match (original, present) {
+        (Some(original), Some(present)) if account_info_persistent_eq(original, present) => {
+            AccountInfoRevert::DoNothing
+        }
         (Some(original), _) => AccountInfoRevert::RevertTo(original.clone()),
         (None, Some(_)) => AccountInfoRevert::DeleteIt,
         (None, None) => AccountInfoRevert::DoNothing,
     }
+}
+
+fn account_info_persistent_eq(a: &AccountInfo, b: &AccountInfo) -> bool {
+    a.balance == b.balance && a.nonce == b.nonce && a.code_hash == b.code_hash
 }
 
 fn account_info_revert_from_bundle_account(account: &BundleAccount) -> AccountInfoRevert {
@@ -2116,6 +2123,37 @@ mod tests {
         assert_eq!(account.status, AccountStatus::InMemoryChange);
         assert!(!account.was_destroyed());
         assert_eq!(account.info.as_ref().map(|info| info.code_hash), Some(code_hash));
+    }
+
+    #[test]
+    fn unchanged_account_info_revert_is_do_nothing() {
+        let address = address!("0x000000000000000000000000000000000000001a");
+        let code = Evm2Bytecode::new_legacy(Bytes::from_static(&[0x60, 0x00]));
+        let code_hash = code.hash_slow();
+        let original = Evm2AccountInfo {
+            balance: U256::from(1),
+            nonce: 1,
+            code_hash,
+            code: None,
+            _non_exhaustive: (),
+        };
+        let current = Evm2AccountInfo { code: Some(code), ..original.clone() };
+        let changes = StateChanges {
+            accounts: core::iter::once((
+                address,
+                Tracked { original: Some(original), current: Some(current), _non_exhaustive: () },
+            ))
+            .collect(),
+            storage: Default::default(),
+            code: Default::default(),
+            logs: Vec::new(),
+            _non_exhaustive: (),
+        };
+
+        let bundle = bundle_state_from_evm2(changes);
+        let revert = &bundle.reverts[0][0].1;
+
+        assert_eq!(revert.account, AccountInfoRevert::DoNothing);
     }
 
     #[test]
