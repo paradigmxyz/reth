@@ -4,6 +4,7 @@
 #![warn(unused_crate_dependencies)]
 
 use alloy_eips::eip4895::Withdrawal;
+use alloy_primitives::{address, Address};
 use alloy_sol_types::{sol, SolCall};
 use reth_ethereum::{
     chainspec::ChainSpec,
@@ -12,11 +13,6 @@ use reth_ethereum::{
         primitives::{
             block::StateDB, Evm, EvmEnv, EvmEnvFor, ExecutionCtxFor, InspectorFor,
             NextBlockEnvAttributes,
-        },
-        revm::{
-            context::TxEnv,
-            primitives::{address, hardfork::SpecId, Address},
-            DatabaseCommit,
         },
         AlloyChainSpec, EthBlockAssembler, EthEvmConfig, RethReceiptBuilder,
     },
@@ -35,9 +31,11 @@ use reth_evm::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
         ExecutableTx, GasOutput, InternalBlockExecutionError,
     },
+    context::{Block as _, TxEnv},
+    database::DatabaseCommit,
     eth::{EthBlockExecutionCtx, EthBlockExecutor, EthTxResult},
+    hardfork::SpecId,
     precompiles::PrecompilesMap,
-    revm::context::Block as _,
     EthEvm, EthEvmFactory, EvmFactory,
 };
 use std::fmt::Display;

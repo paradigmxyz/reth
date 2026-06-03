@@ -8,15 +8,6 @@ use reth_ethereum::{
     chainspec::{Chain, ChainSpec},
     evm::{
         primitives::{Database, EvmEnv},
-        revm::{
-            context::{BlockEnv, Context, TxEnv},
-            context_interface::result::{EVMError, HaltReason},
-            inspector::{Inspector, NoOpInspector},
-            interpreter::interpreter::EthInterpreter,
-            precompile::{PrecompileOutput, Precompiles},
-            primitives::hardfork::SpecId,
-            MainBuilder, MainContext,
-        },
         EthEvm, EthEvmConfig,
     },
     node::{
@@ -30,13 +21,15 @@ use reth_ethereum::{
     EthPrimitives,
 };
 use reth_evm::{
-    eth::EthEvmContext,
-    precompiles::PrecompilesMap,
-    revm::{
-        context::DBErrorMarker,
-        handler::EthPrecompiles,
-        precompile::{Precompile, PrecompileId},
+    context::{
+        BlockEnv, Context, DBErrorMarker, EVMError, HaltReason, MainBuilder, MainContext, TxEnv,
     },
+    eth::EthEvmContext,
+    hardfork::SpecId,
+    inspector::{Inspector, NoOpInspector},
+    interpreter::EthInterpreter,
+    precompile::{EthPrecompiles, Precompile, PrecompileId, PrecompileOutput, Precompiles},
+    precompiles::PrecompilesMap,
     EvmFactory,
 };
 use reth_tracing::{RethTracer, Tracer};

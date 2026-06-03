@@ -41,6 +41,10 @@ pub mod either;
 pub mod evm2;
 /// EVM environment configuration.
 pub mod execute;
+pub mod hardfork;
+pub mod inspector;
+pub mod interpreter;
+pub mod precompile;
 
 mod aliases;
 pub use aliases::*;

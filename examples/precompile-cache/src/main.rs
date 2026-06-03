@@ -7,18 +7,7 @@ use alloy_primitives::Bytes;
 use parking_lot::RwLock;
 use reth_ethereum::{
     chainspec::{Chain, ChainSpec},
-    evm::{
-        primitives::{Database, EvmEnv},
-        revm::{
-            context::{BlockEnv, Context, TxEnv},
-            context_interface::result::{EVMError, HaltReason},
-            inspector::{Inspector, NoOpInspector},
-            interpreter::interpreter::EthInterpreter,
-            precompile::PrecompileResult,
-            primitives::hardfork::SpecId,
-            MainBuilder, MainContext,
-        },
-    },
+    evm::primitives::{Database, EvmEnv},
     node::{
         api::{FullNodeTypes, NodeTypes},
         builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
@@ -31,9 +20,15 @@ use reth_ethereum::{
     EthPrimitives,
 };
 use reth_evm::{
+    context::{
+        BlockEnv, Context, DBErrorMarker, EVMError, HaltReason, MainBuilder, MainContext, TxEnv,
+    },
     eth::EthEvmContext,
+    hardfork::SpecId,
+    inspector::{Inspector, NoOpInspector},
+    interpreter::EthInterpreter,
+    precompile::{EthPrecompiles, PrecompileId, PrecompileResult},
     precompiles::{DynPrecompile, Precompile, PrecompileInput, PrecompilesMap},
-    revm::{context::DBErrorMarker, handler::EthPrecompiles, precompile::PrecompileId},
     Evm, EvmFactory,
 };
 use reth_tracing::{RethTracer, Tracer};

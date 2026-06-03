@@ -17,20 +17,17 @@ use clap::Parser;
 use futures_util::StreamExt;
 use reth_ethereum::{
     cli::{chainspec::EthereumChainSpecParser, interface::Cli},
-    evm::{
-        primitives::ConfigureEvm,
-        revm::revm::{
-            bytecode::opcode::OpCode,
-            context_interface::ContextTr,
-            inspector::Inspector,
-            interpreter::{interpreter::EthInterpreter, interpreter_types::Jumps, Interpreter},
-        },
-    },
+    evm::primitives::ConfigureEvm,
     node::{builder::FullNodeFor, EthereumNode},
     pool::TransactionPool,
     rpc::api::eth::helpers::Call,
 };
-use reth_evm::Evm;
+use reth_evm::{
+    context::ContextTr,
+    inspector::Inspector,
+    interpreter::{EthInterpreter, Interpreter, Jumps, OpCode},
+    Evm,
+};
 
 fn main() {
     Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
