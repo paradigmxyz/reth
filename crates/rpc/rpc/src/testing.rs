@@ -16,7 +16,6 @@
 
 use alloy_consensus::{Header, Transaction};
 use alloy_eips::{eip1559::calculate_block_gas_limit, eip2718::Decodable2718};
-use alloy_evm::{Evm, RecoveredTx};
 use alloy_primitives::{
     map::{DefaultHashBuilder, HashSet},
     Address, U256,
@@ -31,9 +30,10 @@ use reth_errors::RethError;
 use reth_ethereum_engine_primitives::EthBuiltPayload;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
+    context::Block,
     database::{State, StateProviderDatabase},
     execute::BlockBuilder,
-    ConfigureEvm, NextBlockEnvAttributes,
+    ConfigureEvm, Evm, NextBlockEnvAttributes, RecoveredTx,
 };
 use reth_primitives_traits::{
     transaction::{recover::try_recover_signers, signed::RecoveryError},
@@ -44,7 +44,6 @@ use reth_rpc_eth_api::{helpers::Call, FromEthApiError};
 use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::{BlockReader, HeaderProvider};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use revm::context::Block;
 use std::sync::Arc;
 use tracing::debug;
 

@@ -2,12 +2,16 @@
 
 use alloy_consensus::{transaction::TxHashRef, EnvKzgSettings, Transaction as _};
 use alloy_eips::eip7840::BlobParams;
-use alloy_evm::env::BlockEnvironment;
 use alloy_primitives::{uint, Keccak256, U256};
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
-use reth_evm::{ConfigureEvm, Evm};
+use reth_evm::{
+    context::{Block, ResultAndState},
+    database::{DatabaseCommit, DatabaseRef},
+    env::BlockEnvironment,
+    ConfigureEvm, Evm,
+};
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
     EthCallBundleApiServer, FromEthApiError, FromEvmError,
@@ -16,9 +20,6 @@ use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, RpcInvalid
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{
     EthBlobTransactionSidecar, EthPoolTransaction, PoolPooledTx, PoolTransaction, TransactionPool,
-};
-use revm::{
-    context::Block, context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef,
 };
 use std::sync::Arc;
 

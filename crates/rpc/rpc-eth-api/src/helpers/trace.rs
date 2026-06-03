@@ -33,7 +33,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         inspector: I,
     ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>
     where
-        DB: Database<Error = EvmDatabaseError<ProviderError>>,
+        DB: Database<Error = EvmDatabaseError<ProviderError>> + core::fmt::Debug,
         I: InspectorFor<Self::Evm, DB>,
     {
         let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);

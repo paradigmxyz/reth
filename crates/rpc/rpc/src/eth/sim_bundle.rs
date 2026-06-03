@@ -2,7 +2,6 @@
 
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::BlockNumberOrTag;
-use alloy_evm::{env::BlockEnvironment, overrides::apply_block_overrides};
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{BlockId, Log};
 use alloy_rpc_types_mev::{
@@ -10,7 +9,13 @@ use alloy_rpc_types_mev::{
     SimBundleResponse, Validity,
 };
 use jsonrpsee::core::RpcResult;
-use reth_evm::{ConfigureEvm, Evm};
+use reth_evm::{
+    context::{Block, ResultAndState},
+    database::{DatabaseCommit, DatabaseRef},
+    env::BlockEnvironment,
+    overrides::apply_block_overrides,
+    ConfigureEvm, Evm,
+};
 use reth_primitives_traits::Recovered;
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{
@@ -21,9 +26,6 @@ use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_storage_api::ProviderTx;
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
-use revm::{
-    context::Block, context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef,
-};
 use std::{sync::Arc, time::Duration};
 use tracing::trace;
 

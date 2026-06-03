@@ -19,7 +19,7 @@ use jsonrpsee::core::RpcResult;
 use reth_chainspec::{
     base_block_reward_pre_merge, block_reward, ommer_reward, ChainSpecProvider, EthereumHardforks,
 };
-use reth_evm::ConfigureEvm;
+use reth_evm::{database::DatabaseCommit, ConfigureEvm};
 use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_convert::RpcTxReq;
@@ -31,7 +31,6 @@ use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction, Eth
 use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
-use revm::DatabaseCommit;
 use revm_inspectors::{
     opcode::OpcodeGasInspector,
     storage::StorageInspector,

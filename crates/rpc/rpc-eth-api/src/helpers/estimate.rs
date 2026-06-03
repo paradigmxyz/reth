@@ -329,7 +329,7 @@ pub trait EstimateCall: Call {
         max_gas_limit: u64,
     ) -> Result<U256, Self::Error>
     where
-        DB: Database<Error = EvmDatabaseError<ProviderError>>,
+        DB: Database<Error = EvmDatabaseError<ProviderError>> + core::fmt::Debug,
         EthApiError: From<DB::Error>,
     {
         let req_gas_limit = tx_env.gas_limit();

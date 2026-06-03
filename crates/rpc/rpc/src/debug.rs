@@ -1,6 +1,5 @@
 use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TxHashRef, BlockHeader};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
-use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U64};
 use alloy_rlp::{Decodable, Encodable};
@@ -20,9 +19,14 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::RethError;
 use reth_evm::{
-    block::BlockExecutor, database::State, execute::Executor, witness::ExecutionWitnessRecord,
-    ConfigureEvm, EvmEnvFor,
+    block::BlockExecutor,
+    database::{Database, DatabaseCommit, State},
+    env::BlockEnvironment,
+    execute::Executor,
+    witness::ExecutionWitnessRecord,
+    ConfigureEvm, Evm, EvmEnvFor,
 };
+use reth_execution_types::BundleRetention;
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
 };
@@ -43,7 +47,6 @@ use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_trie_common::{
     updates::TrieUpdates, ExecutionWitnessMode, HashedPostState, HashedStorage,
 };
-use revm::{database::states::bundle_state::BundleRetention, Database, DatabaseCommit};
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, sync::Arc};

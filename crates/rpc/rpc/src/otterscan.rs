@@ -12,6 +12,7 @@ use alloy_rpc_types_trace::{
 };
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
+use reth_evm::context::ExecutionResult;
 use reth_primitives_traits::TxTy;
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_convert::RpcTxReq;
@@ -21,7 +22,6 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
-use revm::context_interface::result::ExecutionResult;
 use revm_inspectors::{
     tracing::{types::CallTraceNode, TracingInspectorConfig},
     transfer::{TransferInspector, TransferKind},
