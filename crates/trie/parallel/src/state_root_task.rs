@@ -99,7 +99,9 @@ impl StateRootHandle {
         let sender = StateHookSender::new(self.updates_tx.clone());
 
         move |state: &EvmState| {
-            let _ = sender.send(StateRootMessage::StateUpdate(state.clone()));
+            if !state.is_empty() {
+                let _ = sender.send(StateRootMessage::StateUpdate(state.clone()));
+            }
         }
     }
 
