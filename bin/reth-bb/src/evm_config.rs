@@ -14,7 +14,7 @@ use alloy_consensus::Header;
 use alloy_eips::Decodable2718;
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types::engine::ExecutionData;
-use core::convert::Infallible;
+use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthExecutorSpec as RethEthExecutorSpec};
 use reth_ethereum_forks::Hardforks;
 use reth_ethereum_primitives::{Block, EthPrimitives};
@@ -30,7 +30,6 @@ use reth_evm::{
 use reth_evm_ethereum::{AlloyChainSpec, EthEvmConfig, RethReceiptBuilder};
 use reth_execution_types::BlockAccessIndex;
 use reth_primitives_traits::{SealedBlock, SealedHeader, SignedTransaction, TxTy};
-use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 // Execution plan types
@@ -188,7 +187,7 @@ where
         ctx: BbEvmPlan<'a>,
     ) -> BlockExecutorFor<'a, Self::BlockExecutorFactory, &'a mut State<DB>, I>
     where
-        DB: Database,
+        DB: Database + Debug,
         I: reth_evm::InspectorFor<Self, &'a mut State<DB>> + 'a,
     {
         let bal_index_reader: Option<BalIndexReader<&'a mut State<DB>>> =
@@ -213,7 +212,7 @@ where
         ctx: BbEvmPlan<'ctx>,
     ) -> BlockExecutorFor<'ctx, Self::BlockExecutorFactory, &'db mut State<DB>, I>
     where
-        DB: Database,
+        DB: Database + Debug,
         I: reth_evm::InspectorFor<Self, &'db mut State<DB>>,
     {
         let bal_index_reader: Option<BalIndexReader<&'db mut State<DB>>> =
