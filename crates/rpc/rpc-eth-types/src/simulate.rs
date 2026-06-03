@@ -9,11 +9,13 @@ use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_eips::eip2718::WithEncoded;
 use alloy_evm::{block::TxResult, precompiles::PrecompilesMap};
 use alloy_network::{NetworkTransactionBuilder, TransactionBuilder};
+use alloy_primitives::{Log, LogData, B256};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimCallResult, SimulateError, SimulatedBlock},
     state::StateOverride,
     BlockOverrides, BlockTransactionsKind,
 };
+use alloy_sol_types::SolValue;
 use jsonrpsee_types::ErrorObject;
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
@@ -30,6 +32,9 @@ use revm::{
     context_interface::result::ExecutionResult,
     primitives::{Address, Bytes, TxKind, U256},
     Database,
+};
+use revm_inspectors::transfer::{
+    TransferInspector, TransferOperation, TRANSFER_EVENT_TOPIC, TRANSFER_LOG_EMITTER,
 };
 
 /// Fallback seconds added between simulated block timestamps when neither the user nor the chain
@@ -277,6 +282,40 @@ pub fn apply_precompile_overrides(
     Ok(())
 }
 
+/// Appends newly observed ETH transfers to the cloned simulation result as RPC-only logs.
+///
+/// The underlying `TransferInspector` does not write these synthetic logs to the journal, so
+/// simulated receipts, blooms, and block hashes continue to reflect only contract-emitted logs.
+pub fn append_transfer_logs<HaltReasonTy>(
+    inspector: &TransferInspector,
+    result: &mut ExecutionResult<HaltReasonTy>,
+    next_transfer: &mut usize,
+) {
+    let transfers = inspector.transfers();
+    if *next_transfer >= transfers.len() {
+        return
+    }
+
+    let ExecutionResult::Success { logs, .. } = result else {
+        *next_transfer = transfers.len();
+        return
+    };
+
+    logs.extend(transfers[*next_transfer..].iter().map(transfer_to_log));
+    *next_transfer = transfers.len();
+}
+
+fn transfer_to_log(transfer: &TransferOperation) -> Log {
+    let from = B256::from_slice(&transfer.from.abi_encode());
+    let to = B256::from_slice(&transfer.to.abi_encode());
+    let data = transfer.value.abi_encode();
+
+    Log {
+        address: TRANSFER_LOG_EMITTER,
+        data: LogData::new_unchecked(vec![TRANSFER_EVENT_TOPIC, from, to], data.into()),
+    }
+}
+
 /// Converts all [`TransactionRequest`]s into [`Recovered`] transactions and applies them to the
 /// given [`BlockExecutor`].
 ///
@@ -295,6 +334,7 @@ pub fn execute_transactions<S, T>(
     remaining_call_gas_limit: &mut Option<u64>,
     chain_id: u64,
     converter: &T,
+    trace_transfers: bool,
 ) -> Result<
     (
         BlockBuilderOutcome<S::Primitives>,
@@ -304,6 +344,7 @@ pub fn execute_transactions<S, T>(
 >
 where
     S: BlockBuilder<Executor: BlockExecutor<Evm: Evm<DB: Database<Error: Into<EthApiError>>>>>,
+    <S::Executor as BlockExecutor>::Evm: Evm<Inspector = TransferInspector>,
     T: RpcConvert<Primitives = S::Primitives>,
 {
     builder.apply_pre_execution_changes()?;
@@ -315,6 +356,7 @@ where
     let block_gas_limit = builder.evm().block().gas_limit();
     let is_amsterdam = builder.evm().cfg_env().enable_amsterdam_eip8037;
     let tx_gas_limit_cap = builder.evm().cfg_env().tx_gas_limit_cap.unwrap_or(u64::MAX);
+    let mut next_simulated_log = 0;
     for mut call in calls {
         let block_gas_remaining = if is_amsterdam {
             block_gas_limit
@@ -370,6 +412,10 @@ where
             tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
             results.push(result.result().result.clone())
         })?;
+
+        if trace_transfers && let Some(result) = results.last_mut() {
+            append_transfer_logs(builder.evm().inspector(), result, &mut next_simulated_log);
+        }
 
         let gas_used = gas_output.tx_gas_used();
         if let Some(remaining_call_gas_limit) = remaining_call_gas_limit.as_mut() {
