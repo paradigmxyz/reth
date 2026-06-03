@@ -5,12 +5,13 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eip7928::{compute_block_access_list_hash, BlockAccessList};
 use alloy_eips::eip2718::WithEncoded;
-pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory, GasOutput};
+pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
 use alloy_evm::{
     block::{
         BlockExecutionError as AlloyBlockExecutionError,
         BlockExecutionResult as AlloyBlockExecutionResult,
         BlockValidationError as AlloyBlockValidationError, CommitChanges, ExecutableTxParts,
+        GasOutput as AlloyGasOutput,
         InternalBlockExecutionError as AlloyInternalBlockExecutionError,
     },
     Evm, EvmEnv, EvmFactory, RecoveredTx, ToTxEnv,
@@ -50,6 +51,43 @@ pub fn convert_alloy_block_execution_result<T>(
 ) -> BlockExecutionResult<T> {
     let AlloyBlockExecutionResult { receipts, requests, gas_used, blob_gas_used } = result;
     BlockExecutionResult { receipts, requests, gas_used, blob_gas_used }
+}
+
+/// Gas used by a transaction, split into regular and state gas components.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GasOutput {
+    /// Gas used by the transaction. This value is found in the receipt.
+    tx_gas_used: u64,
+    /// State gas used by the transaction.
+    state_gas_used: u64,
+}
+
+impl GasOutput {
+    /// Creates a new [`GasOutput`] with the given regular gas used.
+    pub const fn new(tx_gas_used: u64) -> Self {
+        Self { tx_gas_used, state_gas_used: 0 }
+    }
+
+    /// Creates a new [`GasOutput`] with both regular and state gas.
+    pub const fn with_state_gas(tx_gas_used: u64, state_gas_used: u64) -> Self {
+        Self { tx_gas_used, state_gas_used }
+    }
+
+    /// Returns the regular gas used.
+    pub const fn tx_gas_used(&self) -> u64 {
+        self.tx_gas_used
+    }
+
+    /// Returns the state gas used.
+    pub const fn state_gas_used(&self) -> u64 {
+        self.state_gas_used
+    }
+}
+
+impl From<AlloyGasOutput> for GasOutput {
+    fn from(output: AlloyGasOutput) -> Self {
+        Self::with_state_gas(output.tx_gas_used(), output.state_gas_used())
+    }
 }
 
 fn convert_alloy_block_validation_error(error: AlloyBlockValidationError) -> BlockValidationError {
@@ -575,7 +613,7 @@ where
         {
             self.transactions.push(tx);
             self.executor.evm_mut().db_mut().bump_bal_index();
-            Ok(Some(gas_used))
+            Ok(Some(gas_used.into()))
         } else {
             Ok(None)
         }
