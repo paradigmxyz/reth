@@ -116,6 +116,9 @@ const MAX_EXPECTED_GAS_USAGE_MULTIPLIER: u64 = 2;
 /// Worker name for deferred trie data and changeset provider preparation.
 const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
 
+/// Publish main execution progress to prewarm workers every N transactions.
+const EXECUTED_TX_INDEX_PUBLISH_INTERVAL: usize = 8;
+
 type ReceiptRootSender<N> =
     crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
 type ReceiptRootReceiver = tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>;
@@ -1297,8 +1300,12 @@ where
             executor.execute_transaction(tx)?;
             self.metrics.record_transaction_execution(tx_start.elapsed());
 
-            // advance the shared counter so prewarm workers skip already-executed txs
-            executed_tx_index.store(senders.len(), Ordering::Relaxed);
+            // Advance the shared counter so prewarm workers skip already-executed txs. Publishing
+            // in small batches avoids a cache-line write for every transaction while bounding
+            // redundant prewarm work to a few transactions.
+            if senders.len() % EXECUTED_TX_INDEX_PUBLISH_INTERVAL == 0 {
+                executed_tx_index.store(senders.len(), Ordering::Relaxed);
+            }
 
             let current_len = executor.receipts().len();
             if current_len > last_sent_len {
@@ -1316,6 +1323,7 @@ where
         }
 
         drop(exec_span);
+        executed_tx_index.store(senders.len(), Ordering::Relaxed);
 
         Ok((executor, senders))
     }
