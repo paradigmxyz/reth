@@ -570,8 +570,7 @@ mod tests {
     use alloy_eips::eip7685::Requests;
     use metrics_util::debugging::{DebuggingRecorder, Snapshotter};
     use reth_ethereum_primitives::Receipt;
-    use reth_execution_types::BlockExecutionResult;
-    use reth_revm::db::BundleState;
+    use reth_execution_types::{BlockExecutionResult, BundleState};
 
     fn setup_test_recorder() -> Snapshotter {
         let recorder = DebuggingRecorder::new();

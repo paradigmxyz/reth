@@ -8938,12 +8938,11 @@ dependencies = [
  "metrics",
  "parking_lot",
  "reth-errors",
+ "reth-execution-types",
  "reth-metrics",
  "reth-primitives-traits",
  "reth-provider",
- "reth-revm",
  "reth-trie",
- "revm-state",
  "tracing",
 ]
 
@@ -9098,6 +9097,7 @@ dependencies = [
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-evm-ethereum",
+ "reth-execution-types",
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",

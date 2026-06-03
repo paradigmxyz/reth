@@ -320,8 +320,8 @@ mod tests {
     use alloy_primitives::{keccak256, B256, U256};
     use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_execution_types::BundleState;
     use reth_primitives_traits::{Block as _, Recovered, SealedBlock};
-    use reth_revm::db::BundleState;
     use reth_tasks::Runtime;
     use revm::{
         database::{CacheDB, EmptyDB},

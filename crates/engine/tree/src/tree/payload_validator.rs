@@ -74,6 +74,7 @@ use reth_evm::{
     ConfigureEvm, EvmEnvFor, ExecutionCtxFor, OnStateHook, SpecFor, StateHookExt,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
+use reth_execution_types::{BundleAccount, BundleRetention};
 use reth_payload_primitives::{
     BuiltPayload, BuiltPayloadExecutedBlock, InvalidPayloadAttributesError, NewPayloadError,
     PayloadTypes,
@@ -89,7 +90,7 @@ use reth_provider::{
     StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
     StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
+use reth_revm::db::State;
 use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};

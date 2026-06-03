@@ -17,6 +17,7 @@ revm-bytecode.workspace = true
 revm-database.workspace = true
 reth-engine-primitives.workspace = true
 reth-evm.workspace = true
+reth-execution-types.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-revm = { workspace = true, features = ["serde"] }

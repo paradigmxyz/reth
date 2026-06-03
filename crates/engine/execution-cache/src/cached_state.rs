@@ -7,13 +7,13 @@ use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
 use metrics::{Counter, Gauge, Histogram};
 use parking_lot::Once;
 use reth_errors::ProviderResult;
+use reth_execution_types::BundleState;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
 use reth_provider::{
     AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
     StateProvider, StateRootProvider, StorageRootProvider,
 };
-use reth_revm::db::BundleState;
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
@@ -685,7 +685,7 @@ impl<S: BlockHashReader> BlockHashReader for CachedStateProvider<S> {
 }
 
 impl<S: HashedPostStateProvider> HashedPostStateProvider for CachedStateProvider<S> {
-    fn hashed_post_state(&self, bundle_state: &reth_revm::db::BundleState) -> HashedPostState {
+    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
         self.state_provider.hashed_post_state(bundle_state)
     }
 }
@@ -1043,9 +1043,8 @@ impl SavedCache {
 mod tests {
     use super::*;
     use alloy_primitives::{map::HashMap, U256};
+    use reth_execution_types::{AccountInfo, AccountStatus, BundleAccount};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-    use reth_revm::db::{AccountStatus, BundleAccount};
-    use revm_state::AccountInfo;
 
     #[test]
     fn test_empty_storage_cached_state_provider() {
