@@ -58,6 +58,8 @@ pub use engine::{ConfigureEngineEvm, ConvertTx, ExecutableTxIterator, Executable
 #[cfg(feature = "metrics")]
 pub mod metrics;
 pub mod noop;
+#[cfg(feature = "rpc")]
+pub mod overrides;
 pub mod precompiles;
 #[cfg(feature = "rpc")]
 pub mod rpc;

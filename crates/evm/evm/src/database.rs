@@ -5,10 +5,13 @@ use core::ops::{Deref, DerefMut};
 use reth_primitives_traits::Account;
 use reth_storage_api::{AccountReader, BlockHashReader, BytecodeReader, StateProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
+use revm::{bytecode::Bytecode, state::AccountInfo};
 
 pub use reth_execution_types::{DatabaseCommit, EmptyDBTyped, EvmDatabaseError};
-pub use revm::database::{CacheDB, EmptyDB, State};
+pub use revm::{
+    database::{CacheDB, EmptyDB, State},
+    Database, DatabaseRef,
+};
 
 /// A helper trait responsible for providing state necessary for EVM execution.
 ///

@@ -79,9 +79,14 @@ c-kzg = ["evm2/c-kzg", "revm/c-kzg"]
 memory_limit = ["revm/memory_limit"]
 metrics = ["std", "dep:metrics", "dep:reth-metrics"]
 optional-balance-check = ["revm/optional_balance_check"]
+optional-block-gas-limit = ["revm/optional_block_gas_limit"]
+optional-eip3541 = ["revm/optional_eip3541"]
+optional-eip3607 = ["revm/optional_eip3607"]
+optional-fee-charge = ["revm/optional_fee_charge"]
+optional-no-base-fee = ["revm/optional_no_base_fee"]
 p256-aws-lc-rs = ["evm2/p256-aws-lc-rs", "revm/p256-aws-lc-rs"]
 portable = ["evm2/portable", "revm/portable"]
-rpc = ["alloy-evm/rpc"]
+rpc = ["alloy-evm/call-util", "alloy-evm/overrides", "alloy-evm/rpc"]
 secp256k1 = [
     "evm2/secp256k1",
     "revm/secp256k1",

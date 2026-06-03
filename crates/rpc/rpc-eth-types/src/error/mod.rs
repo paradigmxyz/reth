@@ -2,7 +2,6 @@
 
 pub mod api;
 use alloy_eips::BlockId;
-use alloy_evm::{call::CallError, overrides::StateOverrideError};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
 use alloy_sol_types::{ContractError, RevertReason};
@@ -10,7 +9,11 @@ use alloy_transport::{RpcError, TransportErrorKind};
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
-use reth_evm::context::{EVMError, HaltReason, InvalidHeader, InvalidTransaction, OutOfGasError};
+use reth_evm::{
+    context::{EVMError, HaltReason, InvalidHeader, InvalidTransaction, OutOfGasError},
+    overrides::StateOverrideError,
+    rpc::CallError,
+};
 use reth_execution_types::{BalError, EvmDatabaseError};
 use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed::RecoveryError};
 use reth_rpc_convert::{CallFeesError, EthTxEnvError, TransactionConversionError};

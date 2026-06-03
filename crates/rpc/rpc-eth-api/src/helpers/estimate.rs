@@ -3,7 +3,6 @@
 use super::{Call, LoadPendingBlock};
 use crate::{AsEthApiError, FromEthApiError, IntoEthApiError};
 use alloy_consensus::constants::KECCAK_EMPTY;
-use alloy_evm::overrides::{apply_block_overrides, apply_state_overrides};
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types_eth::{state::EvmOverrides, BlockId};
@@ -12,9 +11,10 @@ use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
 use reth_evm::{
     context::{Block, Cfg, ExecutionResult, Transaction},
-    database::{EvmDatabaseError, EvmStateProvider, State, StateProviderDatabase},
+    database::{Database, EvmDatabaseError, EvmStateProvider, State, StateProviderDatabase},
     env::BlockEnvironment,
-    ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, TransactionEnvMut, TxEnvFor,
+    overrides::{apply_block_overrides, apply_state_overrides},
+    ConfigureEvm, Evm, EvmEnvFor, EvmFor, TransactionEnvMut, TxEnvFor,
 };
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{

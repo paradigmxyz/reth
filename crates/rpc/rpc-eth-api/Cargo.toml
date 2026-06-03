@@ -17,7 +17,7 @@ reth-chain-state.workspace = true
 revm-inspectors.workspace = true
 reth-primitives-traits = { workspace = true, features = ["rpc-compat"] }
 reth-errors.workspace = true
-reth-evm.workspace = true
+reth-evm = { workspace = true, features = ["memory_limit", "optional-block-gas-limit", "optional-eip3607", "optional-fee-charge", "optional-no-base-fee", "rpc"] }
 reth-storage-api.workspace = true
 reth-rpc-convert.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
@@ -31,7 +31,6 @@ reth-trie-common = { workspace = true, features = ["eip1186"] }
 reth-prune-types.workspace = true
 
 # ethereum
-alloy-evm = { workspace = true, features = ["overrides", "call-util"] }
 alloy-rlp.workspace = true
 alloy-serde.workspace = true
 alloy-eips.workspace = true

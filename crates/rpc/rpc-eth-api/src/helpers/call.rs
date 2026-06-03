@@ -9,7 +9,6 @@ use crate::{
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::eip2930::AccessListResult;
-use alloy_evm::overrides::{apply_block_overrides, apply_state_overrides, OverrideBlockHashes};
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_eth::{
@@ -24,11 +23,12 @@ use reth_evm::{
     block::BlockExecutor,
     cancelled::CancelOnDrop,
     context::{Block, ResultAndState, Transaction},
-    database::{DatabaseCommit, EvmDatabaseError, State, StateProviderDatabase},
+    database::{Database, DatabaseCommit, EvmDatabaseError, State, StateProviderDatabase},
     env::BlockEnvironment,
     execute::BlockBuilder,
-    ConfigureEvm, Database, Evm, EvmEnvFor, HaltReasonFor, InspectorFor, TransactionEnvMut,
-    TxEnvFor,
+    overrides::{apply_block_overrides, apply_state_overrides, OverrideBlockHashes},
+    rpc::caller_gas_allowance,
+    ConfigureEvm, Evm, EvmEnvFor, HaltReasonFor, InspectorFor, TransactionEnvMut, TxEnvFor,
 };
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
@@ -529,7 +529,7 @@ pub trait Call:
         _evm_env: &EvmEnvFor<Self::Evm>,
         tx_env: &TxEnvFor<Self::Evm>,
     ) -> Result<u64, Self::Error> {
-        alloy_evm::call::caller_gas_allowance(&mut db, tx_env).map_err(Self::Error::from_eth_err)
+        caller_gas_allowance(&mut db, tx_env).map_err(Self::Error::from_eth_err)
     }
 
     /// Executes the closure with the state that corresponds to the given [`BlockId`].

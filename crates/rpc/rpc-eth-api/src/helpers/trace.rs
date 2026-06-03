@@ -10,10 +10,10 @@ use reth_errors::{ProviderError, RethError};
 use reth_evm::{
     block::BlockExecutor,
     context::{Block, ResultAndState},
-    database::{EvmDatabaseError, State, StateProviderDatabase},
+    database::{Database, EvmDatabaseError, State, StateProviderDatabase},
     evm::EvmFactoryExt,
     tracing::TracingCtx,
-    ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TxEnvFor,
+    ConfigureEvm, Evm, EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TxEnvFor,
 };
 use reth_primitives_traits::{BlockBody, Recovered, RecoveredBlock};
 use reth_rpc_eth_types::cache::db::StateCacheDb;
