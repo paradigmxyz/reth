@@ -11,5 +11,8 @@ pub use revm::{
         },
         State,
     },
-    state::{Account, AccountInfo, Bytecode, EvmState, EvmStorageSlot, TransactionId},
+    state::{
+        bal::{AccountBal, AccountInfoBal, Bal, BalWrites, BlockAccessIndex, StorageBal},
+        Account, AccountInfo, Bytecode, EvmState, EvmStorageSlot, TransactionId,
+    },
 };

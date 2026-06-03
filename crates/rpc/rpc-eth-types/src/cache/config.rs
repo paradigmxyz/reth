@@ -23,7 +23,7 @@ pub struct EthStateCacheConfig {
     ///
     /// Default is 1000.
     pub max_headers: u32,
-    /// Max number of revm BALs in cache.
+    /// Max number of execution BALs in cache.
     ///
     /// Default is 1000.
     pub max_bals: u32,
