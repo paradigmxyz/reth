@@ -11,7 +11,11 @@ mod tests {
         transaction::{DbTx, DbTxMut},
     };
     use reth_ethereum_primitives::Receipt;
-    use reth_execution_types::ExecutionOutcome;
+    use reth_execution_types::{
+        Account as RevmAccount, AccountInfo as RevmAccountInfo, AccountStatus, BundleRetention,
+        BundleState, EvmStorageSlot, ExecutionOutcome, OriginalValuesKnown, PlainStorageChangeset,
+        PlainStorageRevert, State,
+    };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{
         DatabaseProviderFactory, HashedPostStateProvider, StateWriteConfig, StateWriter,
@@ -22,16 +26,7 @@ mod tests {
         HashedPostState, HashedStorage, StateRoot, StorageRoot, StorageRootProgress,
     };
     use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot, LegacyKeyAdapter, PackedKeyAdapter};
-    use revm_database::{
-        states::{
-            bundle_state::BundleRetention, changes::PlainStorageRevert, PlainStorageChangeset,
-        },
-        BundleState, OriginalValuesKnown, State,
-    };
     use revm_database_interface::{DatabaseCommit, EmptyDB};
-    use revm_state::{
-        Account as RevmAccount, AccountInfo as RevmAccountInfo, AccountStatus, EvmStorageSlot,
-    };
     use std::{collections::BTreeMap, str::FromStr};
 
     #[test]

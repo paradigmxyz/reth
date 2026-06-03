@@ -3949,7 +3949,7 @@ mod tests {
     use reth_db_api::models::StorageSettings;
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{
-        AccountRevertInit, BlockExecutionOutput, BlockExecutionResult, BundleState,
+        AccountInfo, AccountRevertInit, BlockExecutionOutput, BlockExecutionResult, BundleState,
     };
     use reth_primitives_traits::SealedBlock;
     use reth_storage_api::MetadataWriter;
@@ -3957,7 +3957,6 @@ mod tests {
     use reth_trie::{
         HashedPostState, KeccakKeyHasher, Nibbles, StoredNibbles, StoredNibblesSubKey,
     };
-    use revm_state::AccountInfo;
     use std::{sync::mpsc, time::Duration};
 
     #[test]
@@ -4882,10 +4881,9 @@ mod tests {
 
     #[test]
     fn test_write_state_and_historical_read_hashed() {
-        use reth_execution_types::BundleState;
+        use reth_execution_types::{AccountInfo, BundleState};
         use reth_storage_api::StateProvider;
         use reth_trie::{HashedPostState, KeccakKeyHasher};
-        use revm_state::AccountInfo;
 
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());

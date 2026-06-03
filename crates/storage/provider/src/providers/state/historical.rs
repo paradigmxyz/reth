@@ -1323,7 +1323,7 @@ mod tests {
         use crate::BlockWriter;
         use alloy_primitives::keccak256;
         use reth_db_api::models::StorageSettings;
-        use reth_execution_types::{BundleState, ExecutionOutcome};
+        use reth_execution_types::{AccountInfo, BundleState, ExecutionOutcome};
         use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
         use std::collections::HashMap;
 
@@ -1331,9 +1331,9 @@ mod tests {
         factory.set_storage_settings_cache(StorageSettings::v2());
 
         let slot = U256::from_be_bytes(*STORAGE);
-        let account: revm_state::AccountInfo =
+        let account: AccountInfo =
             Account { nonce: 1, balance: U256::from(1000), bytecode_hash: None }.into();
-        let higher_account: revm_state::AccountInfo =
+        let higher_account: AccountInfo =
             Account { nonce: 1, balance: U256::from(2000), bytecode_hash: None }.into();
 
         let mut rng = generators::rng();
@@ -1348,7 +1348,7 @@ mod tests {
         let mut higher_storage = HashMap::default();
         higher_storage.insert(slot, (U256::ZERO, U256::from(1000)));
 
-        type Revert = Vec<(Address, Option<Option<revm_state::AccountInfo>>, Vec<(U256, U256)>)>;
+        type Revert = Vec<(Address, Option<Option<AccountInfo>>, Vec<(U256, U256)>)>;
         let mut reverts: Vec<Revert> = vec![Vec::new(); 16];
 
         reverts[3] = vec![(ADDRESS, Some(Some(account.clone())), vec![(slot, U256::ZERO)])];

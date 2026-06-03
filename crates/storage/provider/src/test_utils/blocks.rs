@@ -10,11 +10,10 @@ use alloy_eips::eip4895::{Withdrawal, Withdrawals};
 use alloy_primitives::Signature;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices, tables};
 use reth_ethereum_primitives::{BlockBody, Receipt, Transaction, TransactionSigned, TxType};
-use reth_execution_types::BundleState;
+use reth_execution_types::{AccountInfo, BundleState};
 use reth_node_types::NodeTypes;
 use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
-use revm_state::AccountInfo;
 use std::{str::FromStr, sync::LazyLock};
 
 /// Assert genesis block
