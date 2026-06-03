@@ -26,6 +26,7 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     /// Get the precompile cache for the given address.
+    #[inline]
     pub fn cache_for_address(&self, address: Address) -> PrecompileCache<S> {
         // Try just using `.get` first to avoid acquiring a write lock.
         if let Some(cache) = self.0.get(&address) {
@@ -66,11 +67,13 @@ impl<S> PrecompileCache<S>
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
+    #[inline]
     fn get(&self, input: &[u8], spec: S) -> Option<CacheEntry<S>> {
         self.0.get(input).filter(|e| e.spec == spec)
     }
 
     /// Inserts the given key and value into the cache, returning the new cache size.
+    #[inline]
     fn insert(&self, input: Bytes, value: CacheEntry<S>) -> usize {
         self.0.insert(input, value);
         self.0.entry_count() as usize
@@ -87,6 +90,7 @@ pub struct CacheEntry<S> {
 }
 
 impl<S> CacheEntry<S> {
+    #[inline]
     const fn gas_used(&self) -> u64 {
         self.output.gas_used
     }
@@ -95,6 +99,7 @@ impl<S> CacheEntry<S> {
     ///
     /// All cached precompiles are not expected to access/created state and thus reservoir is always
     /// kept as is.
+    #[inline]
     fn to_precompile_result(&self, reservoir: u64) -> PrecompileResult {
         let mut output = self.output.clone();
         output.reservoir = reservoir;
@@ -147,24 +152,28 @@ where
             .into()
     }
 
+    #[inline]
     fn increment_by_one_precompile_cache_hits(&self) {
         if let Some(metrics) = &self.metrics {
             metrics.precompile_cache_hits.increment(1);
         }
     }
 
+    #[inline]
     fn increment_by_one_precompile_cache_misses(&self) {
         if let Some(metrics) = &self.metrics {
             metrics.precompile_cache_misses.increment(1);
         }
     }
 
+    #[inline]
     fn set_precompile_cache_size_metric(&self, to: f64) {
         if let Some(metrics) = &self.metrics {
             metrics.precompile_cache_size.set(to);
         }
     }
 
+    #[inline]
     fn increment_by_one_precompile_errors(&self) {
         if let Some(metrics) = &self.metrics {
             metrics.precompile_errors.increment(1);
