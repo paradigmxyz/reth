@@ -357,14 +357,13 @@ mod tests {
         transaction::DbTxMut,
     };
     use reth_execution_errors::StateRootError;
-    use reth_execution_types::BundleState;
+    use reth_execution_types::{AccountInfo, BundleState};
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_storage_api::StorageSettingsCache;
     use reth_trie::{
         HashedPostState, HashedPostStateSorted, HashedStorage, KeccakKeyHasher, StateRoot,
     };
-    use revm::state::AccountInfo;
 
     fn overlay_root_for_provider<TX: reth_db_api::transaction::DbTx>(
         provider: &impl StorageSettingsCache,

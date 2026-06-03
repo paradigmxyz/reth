@@ -47,8 +47,6 @@ reth-execution-types.workspace = true
 
 alloy-consensus.workspace = true
 alloy-rlp.workspace = true
-revm.workspace = true
-revm-database.workspace = true
 
 # trie
 triehash.workspace = true
@@ -71,8 +69,6 @@ serde = [
     "reth-trie/serde",
     "reth-trie-common/serde",
     "reth-primitives-traits/serde",
-    "revm-database/serde",
-    "revm/serde",
     "reth-execution-types/serde",
 ]
 test-utils = [

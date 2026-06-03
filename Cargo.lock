@@ -10736,8 +10736,6 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie",
  "reth-trie-common",
- "revm",
- "revm-database",
  "serde_json",
  "similar-asserts",
  "tracing",
