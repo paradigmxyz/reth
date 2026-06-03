@@ -493,7 +493,7 @@ where
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
         let changeset_provider = self.spawn_changeset_provider_task(overlay_factory.clone());
 
-        let bal_eligible = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
+        let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
 
         // Spawn the appropriate processor based on strategy
         let mut handle = ensure_ok!(self.spawn_payload_processor(
@@ -502,6 +502,7 @@ where
             provider_builder.clone(),
             overlay_factory,
             &strategy,
+            parallel_bal_execution,
         ));
 
         // Create optional cache stats for detailed block logging
@@ -573,7 +574,7 @@ where
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
         let execute_block_start = Instant::now();
-        let execution_result = if bal_eligible {
+        let execution_result = if parallel_bal_execution {
             self.execute_block_bal(env, &input, &handle, &make_state_provider)
         } else {
             let state_provider = make_state_provider(false);
@@ -1074,8 +1075,8 @@ where
         let transaction_count = input.transaction_count();
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
-        let executor = executor.with_state_hook(
-            handle.state_hook().map(|hook| Box::new(hook) as Box<dyn OnStateHook>),
+        executor.evm_mut().db_mut().set_state_hook(
+            handle.state_hook().map(|hook| Box::new(hook) as Box<dyn OnStateHook + 'static>),
         );
 
         let execution_start = Instant::now();
@@ -1123,9 +1124,7 @@ where
     //     empirically once workers are parallel; meaningless while the commit loop is sequential.
     fn bal_path_eligible(&self, bal: Option<&DecodedBal>) -> Result<bool, InsertBlockErrorKind> {
         let has_bal = bal.is_some();
-        let parallel_execution = has_bal &&
-            !self.config.disable_state_cache() &&
-            !self.config.disable_bal_parallel_execution();
+        let parallel_execution = has_bal && !self.config.disable_bal_parallel_execution();
         if parallel_execution && self.config.disable_bal_parallel_state_root() {
             return Err(InsertBlockErrorKind::Other(
                 "disabling parallel state root is impossible when parallel execution is enabled"
@@ -1282,8 +1281,8 @@ where
 
             senders.push(tx_signer);
 
-            let _enter = tracing::enabled!(target: "engine::tree", Level::DEBUG).then(|| {
-                debug_span!(
+            let _enter = tracing::enabled!(target: "engine::tree", Level::TRACE).then(|| {
+                tracing::trace_span!(
                     target: "engine::tree",
                     "execute tx",
                     tx_index = senders.len() - 1,
@@ -1661,7 +1660,7 @@ where
         level = "debug",
         target = "engine::tree::payload_validator",
         skip_all,
-        fields(?strategy)
+        fields(?strategy, parallel_bal_execution)
     )]
     fn spawn_payload_processor<T: ExecutableTxIterator<Evm>>(
         &mut self,
@@ -1670,6 +1669,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         overlay_factory: OverlayStateProviderFactory<P, N>,
         strategy: &StateRootStrategy<N>,
+        parallel_bal_execution: bool,
     ) -> Result<
         PayloadHandle<
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
@@ -1689,6 +1689,7 @@ where
                     provider_builder,
                     overlay_factory,
                     &self.config,
+                    parallel_bal_execution,
                 );
 
                 // record prewarming initialization duration

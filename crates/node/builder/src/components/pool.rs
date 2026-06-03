@@ -136,8 +136,8 @@ where
     V::Transaction:
         PoolTransaction<Consensus = TxTy<Node::Types>> + reth_transaction_pool::EthPoolTransaction,
 {
-    /// Consume the ype and build the [`reth_transaction_pool::Pool`] with the given config and blob
-    /// store.
+    /// Consume the type and build the [`reth_transaction_pool::Pool`] with the given config and
+    /// blob store.
     pub fn build<BS>(
         self,
         blob_store: BS,

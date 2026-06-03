@@ -1,15 +1,201 @@
 use crate::utils::eth_payload_attributes;
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{bytes, Address, U256};
 use alloy_provider::{network::EthereumWallet, Provider, ProviderBuilder};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
-    state::StateOverridesBuilder,
-    BlockOverrides, TransactionRequest,
+    state::{AccountOverride, StateOverride, StateOverridesBuilder},
+    BlockOverrides, TransactionRequest, TransactionTrait as _,
 };
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::setup_engine;
 use reth_node_ethereum::EthereumNode;
 use std::sync::Arc;
+
+#[tokio::test]
+async fn test_simulate_v1_explicit_gas_uses_remaining_block_gas() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .build(),
+    );
+
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec,
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
+    let node = nodes.pop().unwrap();
+    let provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
+        .connect_http(node.rpc_url());
+
+    let tx = TransactionRequest::default().to(Address::ZERO).gas_limit(3_000_000);
+    let sim_block = SimBlock::default().call(tx.clone()).call(tx);
+    let payload = SimulatePayload::default().extend(sim_block);
+
+    let result: Vec<SimulatedBlock> =
+        provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].calls.len(), 2);
+    assert!(result[0].calls.iter().all(|call| call.status));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_simulate_v1_no_fields_call_defaults_to_remaining_block_gas() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .build(),
+    );
+
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec,
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
+    let node = nodes.pop().unwrap();
+    let provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
+        .connect_http(node.rpc_url());
+
+    let first_tx_gas_limit = 21_000;
+    let sim_block = SimBlock::default()
+        .call(TransactionRequest::default().to(Address::ZERO).gas_limit(first_tx_gas_limit))
+        .call(TransactionRequest::default());
+    let payload = SimulatePayload::default().with_full_transactions().extend(sim_block);
+
+    let result: Vec<SimulatedBlock> =
+        provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].calls.len(), 2);
+    assert!(result[0].calls.iter().all(|call| call.status));
+
+    let block = &result[0].inner;
+    let txs = block.transactions.as_transactions().expect("expected full transactions");
+    assert_eq!(txs.len(), 2);
+    assert_eq!(txs[0].gas_limit(), first_tx_gas_limit);
+
+    let expected_remaining_gas = block.header.inner.gas_limit - result[0].calls[0].gas_used;
+    assert_eq!(txs[1].gas_limit(), expected_remaining_gas);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_simulate_v1_blockhash_reads_prior_simulated_block() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .build(),
+    );
+
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec,
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
+    let node = nodes.pop().unwrap();
+    let provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
+        .connect_http(node.rpc_url());
+
+    let contract = Address::with_last_byte(0x42);
+    let mut state_overrides = StateOverride::default();
+    state_overrides.insert(
+        contract,
+        AccountOverride::default().with_code(bytes!("0x6004354303405f5260205ff3")),
+    );
+    let input =
+        bytes!("0xee82ac5e000000000000000000000000000000000000000000000000000000000000000f").into();
+
+    let payload = SimulatePayload::default().extend(SimBlock::default()).extend(
+        SimBlock::default()
+            .with_block_overrides(BlockOverrides {
+                number: Some(U256::from(16)),
+                ..Default::default()
+            })
+            .with_state_overrides(state_overrides)
+            .call(TransactionRequest::default().to(contract).input(input)),
+    );
+
+    let result: Vec<SimulatedBlock> =
+        provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+
+    assert_eq!(result.len(), 16);
+    assert_eq!(result[15].calls.len(), 1);
+    assert!(result[15].calls[0].status);
+    assert_eq!(result[15].calls[0].return_data.as_ref(), result[0].inner.header.hash.as_slice());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_simulate_v1_explicit_gas_over_remaining_block_gas_errors() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .build(),
+    );
+
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec,
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
+    let node = nodes.pop().unwrap();
+    let provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
+        .connect_http(node.rpc_url());
+
+    let sim_block = SimBlock::default()
+        .with_block_overrides(BlockOverrides { gas_limit: Some(50_000), ..Default::default() })
+        .call(TransactionRequest::default().to(Address::ZERO))
+        .call(TransactionRequest::default().to(Address::ZERO).gas_limit(30_000));
+    let payload = SimulatePayload::default().extend(sim_block);
+
+    let err = provider
+        .raw_request::<_, Vec<SimulatedBlock>>("eth_simulateV1".into(), (&payload, "latest"))
+        .await
+        .unwrap_err();
+    let err = err.as_error_resp().expect("expected JSON-RPC error response");
+
+    assert_eq!(err.code, -38015);
+    assert_eq!(err.message, "Block gas limit exceeded by the block's transactions");
+
+    Ok(())
+}
 
 /// Tests that `eth_simulateV1` handles a transaction with `maxFeePerBlobGas` set but no
 /// `blob_versioned_hashes` or sidecar. The transaction should be treated as EIP-1559, not
