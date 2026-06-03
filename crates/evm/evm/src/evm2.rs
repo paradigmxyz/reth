@@ -525,8 +525,29 @@ fn bundle_account_created_in_block(account: &BundleAccount) -> bool {
     account.original_info.is_none() && (account.info.is_some() || !account.storage.is_empty())
 }
 
-const fn bundle_account_deleted_after_block_creation(account: &BundleAccount) -> bool {
-    account.original_info.is_none() && account.info.is_none() && account.was_destroyed()
+fn bundle_account_deleted_after_block_creation(
+    account: &BundleAccount,
+    storage: &StorageChangeSet,
+) -> bool {
+    account.original_info.is_none() &&
+        account.info.is_none() &&
+        account.was_destroyed() &&
+        bundle_account_has_nonzero_storage_after(account, storage)
+}
+
+fn bundle_account_has_nonzero_storage_after(
+    account: &BundleAccount,
+    storage: &StorageChangeSet,
+) -> bool {
+    account.storage.iter().any(|(key, slot)| {
+        storage
+            .slots
+            .get(key)
+            .map_or_else(|| !slot.present_value.is_zero(), |slot| !slot.current.is_zero())
+    }) || storage
+        .slots
+        .iter()
+        .any(|(key, slot)| !account.storage.contains_key(key) && !slot.current.is_zero())
 }
 
 /// Converts a single `evm2` transaction or system-call state change set into a revm bundle.
@@ -692,11 +713,10 @@ where
     }
 
     for (address, storage) in storage {
-        let is_deleted_after_block_creation = executor
-            .output
-            .bundle
-            .account(&address)
-            .is_some_and(bundle_account_deleted_after_block_creation);
+        let is_deleted_after_block_creation =
+            executor.output.bundle.account(&address).is_some_and(|account| {
+                bundle_account_deleted_after_block_creation(account, &storage)
+            });
         if is_deleted_after_block_creation {
             let mut account = RevmAccount::new_not_existing(TransactionId::ZERO);
             account.mark_touch();
@@ -2303,7 +2323,7 @@ mod tests {
                         U256::from(3),
                         Tracked {
                             original: U256::from(5),
-                            current: U256::ZERO,
+                            current: U256::from(6),
                             _non_exhaustive: (),
                         },
                     ))
@@ -2329,7 +2349,8 @@ mod tests {
         executor.output.merge_state_changes(deleted_changes);
         assert!(
             bundle_account_deleted_after_block_creation(
-                executor.output.bundle.account(&address).expect("account exists")
+                executor.output.bundle.account(&address).expect("account exists"),
+                post_delete_storage.storage.get(&address).expect("storage exists")
             ),
             "account={:?}",
             executor.output.bundle.account(&address)
@@ -2348,6 +2369,34 @@ mod tests {
             db.bundle_state.reverts
         );
         assert_eq!(db.bundle_state.reverts[0][0].1.account, AccountInfoRevert::DeleteIt);
+    }
+
+    #[test]
+    fn evm2_created_deleted_storage_marker_requires_nonzero_effective_storage() {
+        let mut storage = StorageWithOriginalValues::default();
+        storage.insert(U256::from(3), StorageSlot::new_changed(U256::ZERO, U256::from(5)));
+        let account = BundleAccount::new(None, None, storage, AccountStatus::DestroyedChanged);
+        let zeroed_storage = StorageChangeSet {
+            wipe: false,
+            slots: core::iter::once((
+                U256::from(3),
+                Tracked { original: U256::from(5), current: U256::ZERO, _non_exhaustive: () },
+            ))
+            .collect(),
+            _non_exhaustive: (),
+        };
+        let nonzero_storage = StorageChangeSet {
+            wipe: false,
+            slots: core::iter::once((
+                U256::from(3),
+                Tracked { original: U256::from(5), current: U256::from(6), _non_exhaustive: () },
+            ))
+            .collect(),
+            _non_exhaustive: (),
+        };
+
+        assert!(!bundle_account_deleted_after_block_creation(&account, &zeroed_storage));
+        assert!(bundle_account_deleted_after_block_creation(&account, &nonzero_storage));
     }
 
     #[test]
