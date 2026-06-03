@@ -192,7 +192,7 @@ impl DynamicBlockIndex {
         // Derive the offset count from the actual entry length, not the untrusted `count`, so a
         // crafted `count` can't overflow `* 8` and drive a huge `Vec::with_capacity`.
         let offsets_bytes = len - 24; // len >= 24 checked above
-        if offsets_bytes % 8 != 0 {
+        if !offsets_bytes.is_multiple_of(8) {
             return Err(E2sError::Ssz(
                 "DynamicBlockIndex offset section is not 8-byte aligned".to_string(),
             ));
@@ -466,6 +466,19 @@ mod tests {
         data.extend_from_slice(&42i64.to_le_bytes()); // single offset
         data.extend_from_slice(&1u64.to_le_bytes()); // component-count = 1 (invalid)
         data.extend_from_slice(&1u64.to_le_bytes()); // count
+        let entry = Entry::new(DYNAMIC_BLOCK_INDEX, data);
+
+        assert!(DynamicBlockIndex::from_entry(&entry).is_err());
+    }
+
+    #[test]
+    fn test_dynamic_block_index_rejects_overflowing_count() {
+        // 24-byte entry declaring a count whose offset length overflows usize; must be rejected,
+        // not allocated.
+        let mut data = Vec::new();
+        data.extend_from_slice(&1000u64.to_le_bytes()); // starting-number
+        data.extend_from_slice(&2u64.to_le_bytes()); // component-count = 2
+        data.extend_from_slice(&(1u64 << 60).to_le_bytes()); // count = 2^60
         let entry = Entry::new(DYNAMIC_BLOCK_INDEX, data);
 
         assert!(DynamicBlockIndex::from_entry(&entry).is_err());
