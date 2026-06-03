@@ -13,7 +13,7 @@ use std::{
     fmt,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use ::enr::Enr;
@@ -470,6 +470,12 @@ pub fn build_local_enr(
     config: &Config,
 ) -> (Enr<SecretKey>, NodeRecord, Option<&'static [u8]>, IpMode) {
     let mut builder = discv5::enr::Enr::builder();
+    // Seed the ENR sequence number from the current UNIX time so it strictly increases across
+    // restarts. The node key (and thus peer id) is persisted, but the ENR is rebuilt on every
+    // start; without this the seq resets to 1 and peers that already hold our record won't adopt
+    // a new IP (e.g. a changed k8s POD_IP) because the sequence number isn't higher.
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    builder.seq(now);
 
     let Config { discv5_config, fork, tcp_socket, advertised_ip, other_enr_kv_pairs, .. } = config;
 
@@ -1007,6 +1013,21 @@ mod test {
 
         assert_eq!(fork_id, decoded_fork_id);
         assert_eq!(TCP_PORT, enr.tcp4().unwrap()); // listen config is defaulting to ip mode ipv4
+    }
+
+    #[test]
+    fn build_enr_seeds_seq_from_unix_time() {
+        let config = Config::builder((Ipv4Addr::UNSPECIFIED, 30303).into()).build();
+        let sk = SecretKey::new(&mut thread_rng());
+
+        // seq is seeded from the current UNIX time (not the enr-crate default of 1) so it
+        // strictly increases across restarts (see build_local_enr). The seed is taken inside
+        // build_local_enr, so it must fall within the window bracketing the call.
+        let before = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let (enr, _, _, _) = build_local_enr(&sk, &config);
+        let after = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+        assert!(enr.seq() >= before && enr.seq() <= after);
     }
 
     #[test]
