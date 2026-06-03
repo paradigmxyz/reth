@@ -1385,7 +1385,9 @@ impl RocksDBProvider {
                 batch.put::<tables::TransactionHashNumbers>(*transaction.tx_hash(), &tx_num)?;
             }
         }
-        ctx.pending_batches.lock().push(batch.into_inner());
+        if !batch.is_empty() {
+            ctx.pending_batches.lock().push(batch.into_inner());
+        }
         Ok(())
     }
 
@@ -1418,7 +1420,9 @@ impl RocksDBProvider {
         for (address, indices) in account_history {
             batch.append_account_history_shard(address, indices)?;
         }
-        ctx.pending_batches.lock().push(batch.into_inner());
+        if !batch.is_empty() {
+            ctx.pending_batches.lock().push(batch.into_inner());
+        }
         Ok(())
     }
 
@@ -1457,7 +1461,9 @@ impl RocksDBProvider {
         for ((address, slot), indices) in storage_history {
             batch.append_storage_history_shard(address, slot, indices)?;
         }
-        ctx.pending_batches.lock().push(batch.into_inner());
+        if !batch.is_empty() {
+            ctx.pending_batches.lock().push(batch.into_inner());
+        }
         Ok(())
     }
 }
