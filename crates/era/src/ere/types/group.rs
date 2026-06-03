@@ -189,14 +189,21 @@ impl DynamicBlockIndex {
             )));
         }
 
-        let total_offsets = count.checked_mul(component_count as usize).ok_or_else(|| {
-            E2sError::Ssz("DynamicBlockIndex offset count overflows usize".to_string())
-        })?;
+        // Derive the offset count from the actual entry length, not the untrusted `count`, so a
+        // crafted `count` can't overflow `* 8` and drive a huge `Vec::with_capacity`.
+        let offsets_bytes = len - 24; // len >= 24 checked above
+        if offsets_bytes % 8 != 0 {
+            return Err(E2sError::Ssz(
+                "DynamicBlockIndex offset section is not 8-byte aligned".to_string(),
+            ));
+        }
+        let total_offsets = offsets_bytes / 8;
 
-        let expected_len = 8 + total_offsets * 8 + 16;
-        if len != expected_len {
+        // The declared `count` and `component-count` must match the stored offsets exactly.
+        if count.checked_mul(component_count as usize) != Some(total_offsets) {
             return Err(E2sError::Ssz(format!(
-                "DynamicBlockIndex has incorrect length: expected {expected_len}, got {len}"
+                "DynamicBlockIndex length mismatch: count {count} * component-count \
+                 {component_count} does not equal the {total_offsets} stored offsets"
             )));
         }
 
@@ -207,7 +214,7 @@ impl DynamicBlockIndex {
         );
 
         let mut offsets = Vec::with_capacity(total_offsets);
-        for chunk in data[8..8 + total_offsets * 8].chunks_exact(8) {
+        for chunk in data[8..8 + offsets_bytes].chunks_exact(8) {
             let offset = i64::from_le_bytes(
                 chunk.try_into().map_err(|_| E2sError::Ssz("Failed to read offset".to_string()))?,
             );
