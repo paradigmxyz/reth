@@ -10675,7 +10675,6 @@ dependencies = [
  "reth-tracing",
  "reth-trie-common",
  "reth-trie-sparse",
- "revm-database",
  "tracing",
  "triehash",
 ]
