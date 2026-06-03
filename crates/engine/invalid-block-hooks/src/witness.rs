@@ -3,20 +3,19 @@ use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
-use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_execution_types::BundleState;
+use reth_evm::{
+    database::{State, StateProviderDatabase},
+    execute::Executor,
+    ConfigureEvm,
+};
+use reth_execution_types::{
+    AccountInfo, AccountInfoRevert, AccountStatus, BundleState, Bytecode, RevertToSlot, StorageSlot,
+};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderBox, StateProviderFactory};
-use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
 use reth_trie::{updates::TrieUpdates, HashedStorage};
-use revm::state::AccountInfo;
-use revm_bytecode::Bytecode;
-use revm_database::{
-    states::{reverts::AccountInfoRevert, StorageSlot},
-    AccountStatus, RevertToSlot,
-};
 use serde::Serialize;
 use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
@@ -416,14 +415,12 @@ mod tests {
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_execution_types::{BundleAccount, BundleState};
+    use reth_execution_types::{AccountRevert, BundleAccount, BundleState};
     use reth_provider::test_utils::MockEthProvider;
-    use revm_database::states::reverts::AccountRevert;
     use tempfile::TempDir;
 
-    use reth_revm::test_utils::StateProviderTest;
+    use reth_evm::test_utils::StateProviderTest;
     use reth_testing_utils::generators::{self, random_block, random_eoa_accounts, BlockParams};
-    use revm_bytecode::Bytecode;
 
     /// Creates a test `BundleState` with realistic accounts, contracts, and reverts
     fn create_bundle_state() -> BundleState {
