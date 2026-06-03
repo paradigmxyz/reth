@@ -7,7 +7,6 @@ use crate::{
 use alloy_chains::Chain;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_eips::eip2718::WithEncoded;
-use alloy_evm::{block::TxResult, precompiles::PrecompilesMap};
 use alloy_network::{NetworkTransactionBuilder, TransactionBuilder};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimCallResult, SimulateError, SimulatedBlock},
@@ -16,7 +15,8 @@ use alloy_rpc_types_eth::{
 };
 use jsonrpsee_types::ErrorObject;
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor, TxResult},
+    precompiles::{MovePrecompileError, PrecompileOverrideMap},
     Evm, HaltReasonFor,
 };
 use reth_primitives_traits::{
@@ -250,7 +250,7 @@ where
 /// is cleared (precompile removed) and the precompile is installed at the destination address.
 pub fn apply_precompile_overrides(
     state_overrides: &StateOverride,
-    precompiles: &mut PrecompilesMap,
+    precompiles: &mut impl PrecompileOverrideMap,
 ) -> Result<(), EthSimulateError> {
     let moves: Vec<_> = state_overrides
         .iter()
@@ -261,18 +261,16 @@ pub fn apply_precompile_overrides(
 
     for (source, dest) in &moves {
         if source == dest {
-            if precompiles.get(source).is_none() {
+            if !precompiles.contains_precompile(source) {
                 return Err(EthSimulateError::NotAPrecompile(*source))
             }
             return Err(EthSimulateError::MovePrecompileToSelf(*source))
         }
     }
 
-    precompiles.move_precompiles(moves).map_err(
-        |alloy_evm::precompiles::MovePrecompileError::NotAPrecompile(addr)| {
-            EthSimulateError::NotAPrecompile(addr)
-        },
-    )?;
+    precompiles.move_precompiles(moves).map_err(|MovePrecompileError::NotAPrecompile(addr)| {
+        EthSimulateError::NotAPrecompile(addr)
+    })?;
 
     Ok(())
 }
@@ -557,15 +555,52 @@ mod tests {
     use crate::EthApiError;
     use alloy_chains::Chain;
     use alloy_consensus::Header;
-    use alloy_evm::precompiles::PrecompilesMap;
-    use alloy_primitives::{address, U256};
+    use alloy_primitives::{address, Address, U256};
     use alloy_rpc_types_eth::{
         simulate::SimBlock,
         state::{AccountOverride, StateOverride},
         BlockOverrides, TransactionRequest,
     };
+    use reth_evm::precompiles::{MovePrecompileError, PrecompileOverrideMap};
     use reth_primitives_traits::SealedHeader;
-    use revm::precompile::Precompiles;
+    use std::collections::HashSet;
+
+    #[derive(Default)]
+    struct TestPrecompiles {
+        addresses: HashSet<alloy_primitives::Address>,
+    }
+
+    impl TestPrecompiles {
+        fn prague() -> Self {
+            Self { addresses: (1u8..=10).map(Address::with_last_byte).collect() }
+        }
+
+        fn get(&self, address: &Address) -> bool {
+            self.addresses.contains(address)
+        }
+    }
+
+    impl PrecompileOverrideMap for TestPrecompiles {
+        fn contains_precompile(&self, address: &Address) -> bool {
+            self.get(address)
+        }
+
+        fn move_precompiles(
+            &mut self,
+            moves: Vec<(Address, Address)>,
+        ) -> Result<(), MovePrecompileError> {
+            for (source, _) in &moves {
+                if !self.addresses.contains(source) {
+                    return Err(MovePrecompileError::NotAPrecompile(*source))
+                }
+            }
+            for (source, dest) in moves {
+                self.addresses.remove(&source);
+                self.addresses.insert(dest);
+            }
+            Ok(())
+        }
+    }
 
     fn parent_at(number: u64, timestamp: u64) -> SealedHeader<Header> {
         SealedHeader::seal_slow(Header { number, timestamp, ..Default::default() })
@@ -589,7 +624,7 @@ mod tests {
             address,
             AccountOverride { move_precompile_to: Some(address), ..Default::default() },
         );
-        let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+        let mut precompiles = TestPrecompiles::prague();
 
         let err = apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap_err();
 
@@ -604,7 +639,7 @@ mod tests {
             address,
             AccountOverride { move_precompile_to: Some(address), ..Default::default() },
         );
-        let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+        let mut precompiles = TestPrecompiles::prague();
 
         let err = apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap_err();
 
@@ -620,12 +655,12 @@ mod tests {
             source,
             AccountOverride { move_precompile_to: Some(dest), ..Default::default() },
         );
-        let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+        let mut precompiles = TestPrecompiles::prague();
 
         apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap();
 
-        assert!(precompiles.get(&source).is_none());
-        assert!(precompiles.get(&dest).is_some());
+        assert!(!precompiles.get(&source));
+        assert!(precompiles.get(&dest));
     }
 
     #[test]

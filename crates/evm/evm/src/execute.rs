@@ -5,7 +5,7 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eip7928::{compute_block_access_list_hash, BlockAccessList};
 use alloy_eips::eip2718::WithEncoded;
-pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
+pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory, TxResult};
 use alloy_evm::{
     block::{
         BlockExecutionError as AlloyBlockExecutionError,

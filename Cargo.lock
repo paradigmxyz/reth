@@ -8902,6 +8902,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie-common",
  "revm",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
