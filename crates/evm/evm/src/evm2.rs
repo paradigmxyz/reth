@@ -36,7 +36,7 @@ use alloy_primitives::{
 };
 use core::{error::Error, fmt, ptr::NonNull};
 use evm2::{
-    bytecode::Bytecode as Evm2Bytecode,
+    bytecode::{Bytecode as Evm2Bytecode, JumpTable as Evm2JumpTable},
     env::BlockEnv as Evm2BlockEnv,
     ethereum::{ethereum_tx_registry, RecoveredTxEnvelope},
     evm::{
@@ -424,6 +424,14 @@ pub const fn transaction_gas_limit(tx: &RethEthereumTxEnvelope) -> u64 {
 pub fn bytecode_from_evm2(bytecode: Evm2Bytecode) -> Bytecode {
     if bytecode.is_eip7702() {
         Bytecode::new_eip7702(bytecode.eip7702_address().expect("checked eip7702 bytecode"))
+    } else if bytecode.is_empty() {
+        Bytecode::new()
+    } else if let Some(jump_table) = bytecode.legacy_jump_table() {
+        let jump_table =
+            revm_bytecode::JumpTable::from_slice(jump_table.as_slice(), jump_table.len());
+        // SAFETY: evm2 bytecode has already been analyzed and enforces the same padding and jump
+        // table invariants as revm bytecode.
+        unsafe { Bytecode::new_analyzed(bytecode.bytes().clone(), bytecode.len(), jump_table) }
     } else {
         Bytecode::new_raw(bytecode.original_bytes())
     }
@@ -444,6 +452,13 @@ pub fn account_info_from_evm2(info: Evm2AccountInfo) -> AccountInfo {
 pub fn bytecode_to_evm2(bytecode: Bytecode) -> Evm2Bytecode {
     if bytecode.is_eip7702() {
         Evm2Bytecode::new_eip7702(bytecode.eip7702_address().expect("checked eip7702 bytecode"))
+    } else if bytecode.is_empty() {
+        Evm2Bytecode::new()
+    } else if let Some(jump_table) = bytecode.legacy_jump_table() {
+        let jump_table = Evm2JumpTable::from_slice(jump_table.as_slice(), jump_table.len());
+        // SAFETY: revm bytecode has already been analyzed and enforces the same padding and jump
+        // table invariants as evm2 bytecode.
+        unsafe { Evm2Bytecode::new_analyzed(bytecode.bytes(), bytecode.len(), jump_table) }
     } else {
         Evm2Bytecode::new_raw(bytecode.original_bytes())
     }
