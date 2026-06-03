@@ -347,7 +347,8 @@ where
 
                 if self.finished_state_updates &&
                     self.account_updates.is_empty() &&
-                    self.storage_updates.iter().all(|(_, updates)| updates.is_empty())
+                    self.storage_updates.iter().all(|(_, updates)| updates.is_empty()) &&
+                    self.pending_account_updates.is_empty()
                 {
                     break;
                 }
@@ -777,8 +778,16 @@ where
                         // If account has pending storage updates, it is still pending.
                         return true;
                     } else if let Some(account) = account.take() {
-                        let storage_root = self.trie.storage_root(addr).expect("updates are drained, storage trie should be revealed by now");
-                        let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
+                        let storage_root = if account.is_some() {
+                            let Some(storage_root) = self.trie.storage_root(addr) else {
+                                return true;
+                            };
+                            storage_root
+                        } else {
+                            EMPTY_ROOT_HASH
+                        };
+                        let encoded =
+                            encode_account_leaf_value(account, storage_root, account_rlp_buf);
                         self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
                         num_promoted += 1;
                         return false;
@@ -795,18 +804,31 @@ where
                     None => self.trie.get_account_value(addr),
                 };
 
-                let trie_account = trie_account.map(|value| TrieAccount::decode(&mut &value[..]).expect("invalid account RLP"));
+                let trie_account = trie_account.map(|value| {
+                    TrieAccount::decode(&mut &value[..]).expect("invalid account RLP")
+                });
 
                 let (account, storage_root) = if let Some(account) = account.take() {
                     // If account is Some(_) here it means it didn't have any storage updates
                     // and we can fetch the storage root directly from the account trie.
                     //
-                    // If it did have storage updates, we would've had processed it above when iterating over storage tries.
-                    let storage_root = trie_account.map(|account| account.storage_root).unwrap_or(EMPTY_ROOT_HASH);
+                    // If it did have storage updates, we would've had processed it above when
+                    // iterating over storage tries.
+                    let storage_root =
+                        trie_account.map(|account| account.storage_root).unwrap_or(EMPTY_ROOT_HASH);
 
                     (account, storage_root)
                 } else {
-                    (trie_account.map(Into::into), self.trie.storage_root(addr).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
+                    let account = trie_account.map(Into::into);
+                    let storage_root = if account.is_some() {
+                        let Some(storage_root) = self.trie.storage_root(addr) else {
+                            return true;
+                        };
+                        storage_root
+                    } else {
+                        EMPTY_ROOT_HASH
+                    };
+                    (account, storage_root)
                 };
 
                 let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
@@ -1066,6 +1088,49 @@ mod tests {
         assert!(trie_updates.storage_tries[&address].is_deleted);
 
         drop(updates_tx);
+    }
+
+    #[test]
+    fn storage_only_absent_account_promotion_does_not_need_storage_root() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = provider_factory.chain_spec().genesis_hash();
+        let overlay_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayBuilder::<reth_chain_state::EthPrimitives>::new(
+                anchor_hash,
+                ChangesetCache::new(),
+            ),
+        );
+        let proof_worker_handle =
+            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
+        let (_updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (final_hashed_state_tx, _final_hashed_state_rx) = std::sync::mpsc::channel();
+        let default_trie = RevealableSparseTrie::blind_from(ConfigurableSparseTrie::Arena(
+            ArenaParallelSparseTrie::default(),
+        ));
+        let trie = SparseStateTrie::<ConfigurableSparseTrie, ConfigurableSparseTrie>::default()
+            .with_accounts_trie(RevealableSparseTrie::revealed_empty())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            final_hashed_state_tx,
+            proof_worker_handle,
+            MultiProofTaskMetrics::default(),
+            trie,
+            B256::ZERO,
+            1,
+        );
+        let address = keccak256(Address::random());
+
+        task.storage_updates.insert(address, Default::default());
+        task.pending_account_updates.insert(address, None);
+        task.promote_pending_account_updates().expect("absent account promotes");
+
+        assert!(task.pending_account_updates.is_empty());
+        assert!(task.account_updates.is_empty());
     }
 
     #[test]
