@@ -325,7 +325,9 @@ where
 
         let span = Span::current();
 
-        let halve_workers = env.transaction_count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD;
+        // Keep spare proof-pool capacity while validation and speculative payload-builder sparse
+        // tries may be live at the same time.
+        let halve_workers = true;
         let state_root_handle = self.spawn_state_root(
             multiproof_provider_factory,
             env.parent_state_root,
@@ -453,10 +455,6 @@ where
                 config,
             )
     }
-
-    /// Transaction count threshold below which proof workers are halved, since fewer transactions
-    /// produce fewer state changes and most workers would be idle overhead.
-    const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 30;
 
     /// Transaction count threshold below which sequential conversion is used.
     ///

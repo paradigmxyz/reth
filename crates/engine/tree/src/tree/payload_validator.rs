@@ -2064,7 +2064,7 @@ where
                 base_state_root,
                 parent_state_root,
                 &parent_trie_updates,
-                false,
+                true,
                 &self.config,
             );
 
@@ -2089,7 +2089,7 @@ where
             let handle = self.payload_processor.spawn_state_root(
                 overlay_factory,
                 parent_state_root,
-                false,
+                true,
                 &self.config,
             );
 
@@ -2148,7 +2148,7 @@ where
                         base_state_root,
                         parent_state_root,
                         &parent_trie_updates,
-                        false,
+                        true,
                         &config,
                     );
                 Self::spawn_payload_builder_sparse_trie_bridge_with_executor(
@@ -2616,8 +2616,8 @@ where
         Some(self.payload_processor.spawn_state_root(
             overlay_factory,
             parent_state_root,
-            // Full proof workers — tx count unknown at FCU time (block built incrementally)
-            false,
+            // Leave spare proof-pool capacity for validation while the builder is active.
+            true,
             &self.config,
         ))
     }
