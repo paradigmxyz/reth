@@ -351,24 +351,21 @@ impl ProofWorkerHandle {
         &self,
         input: AccountMultiproofInput,
     ) -> Result<(), ProviderError> {
-        self.account_work_tx
-            .send(AccountWorkerJob::AccountMultiproof { input: Box::new(input) })
-            .map_err(|err| {
-                let error =
-                    ProviderError::other(std::io::Error::other("account workers unavailable"));
+        self.account_work_tx.send(AccountWorkerJob::AccountMultiproof { input }).map_err(|err| {
+            let error = ProviderError::other(std::io::Error::other("account workers unavailable"));
 
-                let AccountWorkerJob::AccountMultiproof { input } = err.0;
-                let ProofResultContext { sender: result_tx, state, start_time: start } =
-                    input.into_proof_result_sender();
+            let AccountWorkerJob::AccountMultiproof { input } = err.0;
+            let ProofResultContext { sender: result_tx, state, start_time: start } =
+                input.into_proof_result_sender();
 
-                let _ = result_tx.send(ProofResultMessage {
-                    result: Err(ParallelStateRootError::Provider(error.clone())),
-                    elapsed: start.elapsed(),
-                    state,
-                });
+            let _ = result_tx.send(ProofResultMessage {
+                result: Err(ParallelStateRootError::Provider(error.clone())),
+                elapsed: start.elapsed(),
+                state,
+            });
 
-                error
-            })
+            error
+        })
     }
 }
 
@@ -922,7 +919,7 @@ where
                     let value_encoder_stats = self.process_account_multiproof::<Factory::Provider>(
                         &mut v2_account_calculator,
                         v2_storage_calculator.clone(),
-                        *input,
+                        input,
                         &mut account_proofs_processed,
                     );
                     total_idle_time += value_encoder_stats.storage_wait_time;
@@ -1148,7 +1145,7 @@ enum AccountWorkerJob {
     /// Account multiproof computation request
     AccountMultiproof {
         /// Account multiproof input parameters
-        input: Box<AccountMultiproofInput>,
+        input: AccountMultiproofInput,
     },
 }
 
