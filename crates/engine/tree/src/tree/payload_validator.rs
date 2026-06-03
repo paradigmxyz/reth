@@ -71,7 +71,7 @@ use reth_evm::{
     execute::{
         convert_alloy_block_execution_error, convert_alloy_block_execution_result, ExecutableTxFor,
     },
-    ConfigureEvm, EvmEnvFor, ExecutionCtxFor, OnStateHook, SpecFor,
+    ConfigureEvm, EvmEnvFor, ExecutionCtxFor, OnStateHook, SpecFor, StateHookExt,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
 use reth_payload_primitives::{
@@ -1078,7 +1078,7 @@ where
         let transaction_count = input.transaction_count();
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
-        executor.evm_mut().db_mut().set_state_hook(
+        executor.evm_mut().db_mut().set_reth_state_hook(
             handle.state_hook().map(|hook| Box::new(hook) as Box<dyn OnStateHook + 'static>),
         );
 
