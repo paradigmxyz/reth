@@ -2,6 +2,7 @@
 
 use super::{Call, LoadPendingBlock};
 use crate::{AsEthApiError, FromEthApiError, IntoEthApiError};
+use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_evm::overrides::{apply_block_overrides, apply_state_overrides};
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{TxKind, U256};
@@ -10,6 +11,7 @@ use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
 use reth_evm::{
+    context::{Block, Cfg, ExecutionResult, Transaction},
     database::{EvmDatabaseError, EvmStateProvider, State, StateProviderDatabase},
     env::BlockEnvironment,
     ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, TransactionEnvMut, TxEnvFor,
@@ -23,11 +25,6 @@ use reth_rpc_eth_types::{
     EthApiError, RpcInvalidTransactionError,
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
-use revm::{
-    context::Block,
-    context_interface::{result::ExecutionResult, Cfg, Transaction},
-    primitives::KECCAK_EMPTY,
-};
 use tracing::trace;
 
 /// Gas execution estimates

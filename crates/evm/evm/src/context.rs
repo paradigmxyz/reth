@@ -7,7 +7,7 @@ pub use revm::{
             EVMError, ExecResultAndState, ExecutionResult, HaltReason, InvalidHeader,
             InvalidTransaction, OutOfGasError, Output, ResultAndState, ResultGas, SuccessReason,
         },
-        Block, Cfg, ContextTr,
+        Block, Cfg, ContextTr, Transaction,
     },
     MainBuilder, MainContext,
 };

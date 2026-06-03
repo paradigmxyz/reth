@@ -23,10 +23,12 @@ use reth_errors::{ProviderError, RethError};
 use reth_evm::{
     block::BlockExecutor,
     cancelled::CancelOnDrop,
-    database::{EvmDatabaseError, State, StateProviderDatabase},
+    context::{Block, ResultAndState, Transaction},
+    database::{DatabaseCommit, EvmDatabaseError, State, StateProviderDatabase},
     env::BlockEnvironment,
     execute::BlockBuilder,
-    ConfigureEvm, Evm, EvmEnvFor, HaltReasonFor, InspectorFor, TransactionEnvMut, TxEnvFor,
+    ConfigureEvm, Database, Evm, EvmEnvFor, HaltReasonFor, InspectorFor, TransactionEnvMut,
+    TxEnvFor,
 };
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
@@ -38,11 +40,6 @@ use reth_rpc_eth_types::{
     EthApiError, StateCacheDb,
 };
 use reth_storage_api::{BlockIdReader, ProviderTx, StateProviderBox};
-use revm::{
-    context::Block,
-    context_interface::{result::ResultAndState, Transaction},
-    Database, DatabaseCommit,
-};
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
 use std::collections::BTreeMap;
 use tracing::{trace, warn};

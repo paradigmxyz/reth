@@ -9,6 +9,7 @@ use futures::Future;
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
     block::BlockExecutor,
+    context::{Block, ResultAndState},
     database::{EvmDatabaseError, State, StateProviderDatabase},
     evm::EvmFactoryExt,
     tracing::TracingCtx,
@@ -17,7 +18,6 @@ use reth_evm::{
 use reth_primitives_traits::{BlockBody, Recovered, RecoveredBlock};
 use reth_rpc_eth_types::cache::db::StateCacheDb;
 use reth_storage_api::{ProviderBlock, ProviderTx};
-use revm::{context::Block, context_interface::result::ResultAndState};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::sync::Arc;
 

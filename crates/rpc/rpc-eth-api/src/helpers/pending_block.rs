@@ -13,6 +13,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_evm::{
     block::TxResult,
+    context::{Block, Cfg as _, InvalidTransaction},
     database::{State, StateProviderDatabase},
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionOutput},
     ConfigureEvm, Evm, EvmEnvFor, NextBlockEnvAttributes,
@@ -31,7 +32,6 @@ use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
     PoolTransaction, TransactionPool,
 };
-use revm::context_interface::{result::InvalidTransaction, Block, Cfg as _};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
