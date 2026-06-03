@@ -626,7 +626,12 @@ where
     for (address, account) in changes.accounts {
         let original = account.original.map(account_info_from_evm2);
         let is_created = original.is_none() && account.current.is_some();
-        if original.is_none() && account.current.is_none() {
+        let is_deleted_after_block_creation = account.current.is_none() &&
+            executor.output.bundle.account(&address).is_some_and(|account| {
+                account.original_info.is_none() && account.info.is_some()
+            });
+        if (original.is_none() && account.current.is_none()) || is_deleted_after_block_creation {
+            storage.remove(&address);
             let mut account = RevmAccount::new_not_existing(TransactionId::ZERO);
             account.mark_touch();
             account.mark_created();
@@ -635,7 +640,11 @@ where
         }
         let mut revm_account = match account.current {
             Some(info) => {
-                let mut account = RevmAccount::default();
+                let mut account = if is_created {
+                    RevmAccount::new_not_existing(TransactionId::ZERO)
+                } else {
+                    RevmAccount::default()
+                };
                 account.info = account_info_from_evm2(info);
                 account.transaction_id = TransactionId::ZERO;
                 account
@@ -2106,6 +2115,86 @@ mod tests {
             into_block_bundle(output.bundle).reverts[0][0].1.account,
             AccountInfoRevert::DeleteIt
         );
+    }
+
+    #[test]
+    fn evm2_revm_state_keeps_block_original_revert_for_created_then_deleted_account() {
+        let address = address!("0x0000000000000000000000000000000000000011");
+        let created = Evm2AccountInfo {
+            balance: U256::ZERO,
+            nonce: 1,
+            code_hash: KECCAK256_EMPTY,
+            code: None,
+            _non_exhaustive: (),
+        };
+        let evm = create_evm2_from_revm_env(
+            EmptyDB::default(),
+            RevmSpecId::FRONTIER,
+            BlockEnv::default(),
+        );
+        let mut executor = Evm2TransactionExecutor::new(evm);
+        let mut db = RevmState::builder()
+            .with_database(CacheDB::new(EmptyDB::default()))
+            .with_bundle_update()
+            .build();
+
+        let created_changes = StateChanges {
+            accounts: core::iter::once((
+                address,
+                Tracked { original: None, current: Some(created.clone()), _non_exhaustive: () },
+            ))
+            .collect(),
+            storage: core::iter::once((
+                address,
+                StorageChangeSet {
+                    wipe: true,
+                    slots: core::iter::once((
+                        U256::from(3),
+                        Tracked {
+                            original: U256::ZERO,
+                            current: U256::from(5),
+                            _non_exhaustive: (),
+                        },
+                    ))
+                    .collect(),
+                    _non_exhaustive: (),
+                },
+            ))
+            .collect(),
+            code: Default::default(),
+            logs: Vec::new(),
+            _non_exhaustive: (),
+        };
+        let deleted_changes = StateChanges {
+            accounts: core::iter::once((
+                address,
+                Tracked { original: Some(created), current: None, _non_exhaustive: () },
+            ))
+            .collect(),
+            storage: core::iter::once((
+                address,
+                StorageChangeSet { wipe: true, slots: Default::default(), _non_exhaustive: () },
+            ))
+            .collect(),
+            code: Default::default(),
+            logs: Vec::new(),
+            _non_exhaustive: (),
+        };
+
+        db.commit(
+            evm_state_from_evm2_with_accounts(&mut executor, created_changes.clone())
+                .expect("created state converts"),
+        );
+        executor.output.merge_state_changes(created_changes);
+        db.commit(
+            evm_state_from_evm2_with_accounts(&mut executor, deleted_changes)
+                .expect("deleted state converts"),
+        );
+        db.merge_transitions(BundleRetention::Reverts);
+        crate::execute::prune_created_deleted_empty_accounts(&mut db.bundle_state);
+
+        assert!(db.bundle_state.account(&address).is_none());
+        assert_eq!(db.bundle_state.reverts[0][0].1.account, AccountInfoRevert::DeleteIt);
     }
 
     #[test]

@@ -168,9 +168,9 @@ pub(crate) fn prune_created_deleted_empty_accounts(bundle: &mut BundleState) {
         .filter(|(address, account)| {
             delete_revert_accounts.contains(*address) &&
                 account.original_info.is_none() &&
-                account.info.as_ref().is_some_and(|info| info.is_empty()) &&
-                account.status == AccountStatus::InMemoryChange &&
-                account.storage.is_empty()
+                account.info.as_ref().is_none_or(|info| info.is_empty()) &&
+                (account.status == AccountStatus::InMemoryChange || account.was_destroyed()) &&
+                account.storage.values().all(|slot| slot.previous_or_original_value.is_zero())
         })
         .map(|(&address, _)| address)
         .collect::<Vec<_>>();
