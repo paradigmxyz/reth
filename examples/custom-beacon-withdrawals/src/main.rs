@@ -4,13 +4,6 @@
 #![warn(unused_crate_dependencies)]
 
 use alloy_eips::eip4895::Withdrawal;
-use alloy_evm::{
-    block::{BlockExecutorFactory, ExecutableTx, GasOutput},
-    eth::{EthBlockExecutionCtx, EthBlockExecutor, EthTxResult},
-    precompiles::PrecompilesMap,
-    revm::context::Block as _,
-    EthEvm, EthEvmFactory, EvmFactory,
-};
 use alloy_sol_types::{sol, SolCall};
 use reth_ethereum::{
     chainspec::ChainSpec,
@@ -38,6 +31,13 @@ use reth_ethereum::{
     provider::BlockExecutionResult,
     rpc::types::engine::ExecutionData,
     Block, EthPrimitives, Receipt, TransactionSigned, TxType,
+};
+use reth_evm::{
+    block::{BlockExecutorFactory, ExecutableTx, GasOutput},
+    eth::{EthBlockExecutionCtx, EthBlockExecutor, EthTxResult},
+    precompiles::PrecompilesMap,
+    revm::context::Block as _,
+    EthEvm, EthEvmFactory, EvmFactory,
 };
 use std::{fmt::Display, sync::Arc};
 

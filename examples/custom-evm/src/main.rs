@@ -2,16 +2,6 @@
 
 #![warn(unused_crate_dependencies)]
 
-use alloy_evm::{
-    eth::EthEvmContext,
-    precompiles::PrecompilesMap,
-    revm::{
-        context::DBErrorMarker,
-        handler::EthPrecompiles,
-        precompile::{Precompile, PrecompileId},
-    },
-    EvmFactory,
-};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, Bytes};
 use reth_ethereum::{
@@ -38,6 +28,16 @@ use reth_ethereum::{
     },
     tasks::Runtime,
     EthPrimitives,
+};
+use reth_evm::{
+    eth::EthEvmContext,
+    precompiles::PrecompilesMap,
+    revm::{
+        context::DBErrorMarker,
+        handler::EthPrecompiles,
+        precompile::{Precompile, PrecompileId},
+    },
+    EvmFactory,
 };
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::OnceLock;

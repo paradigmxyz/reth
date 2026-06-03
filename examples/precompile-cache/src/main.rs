@@ -2,12 +2,6 @@
 
 #![warn(unused_crate_dependencies)]
 
-use alloy_evm::{
-    eth::EthEvmContext,
-    precompiles::{DynPrecompile, Precompile, PrecompileInput, PrecompilesMap},
-    revm::{context::DBErrorMarker, handler::EthPrecompiles, precompile::PrecompileId},
-    Evm, EvmFactory,
-};
 use alloy_genesis::Genesis;
 use alloy_primitives::Bytes;
 use parking_lot::RwLock;
@@ -35,6 +29,12 @@ use reth_ethereum::{
     },
     tasks::Runtime,
     EthPrimitives,
+};
+use reth_evm::{
+    eth::EthEvmContext,
+    precompiles::{DynPrecompile, Precompile, PrecompileInput, PrecompilesMap},
+    revm::{context::DBErrorMarker, handler::EthPrecompiles, precompile::PrecompileId},
+    Evm, EvmFactory,
 };
 use reth_tracing::{RethTracer, Tracer};
 use schnellru::{ByLength, LruMap};

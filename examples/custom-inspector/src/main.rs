@@ -11,7 +11,6 @@
 #![warn(unused_crate_dependencies)]
 
 use alloy_eips::BlockNumberOrTag;
-use alloy_evm::Evm;
 use alloy_primitives::Address;
 use alloy_rpc_types_eth::{state::EvmOverrides, TransactionRequest};
 use clap::Parser;
@@ -31,6 +30,7 @@ use reth_ethereum::{
     pool::TransactionPool,
     rpc::api::eth::helpers::Call,
 };
+use reth_evm::Evm;
 
 fn main() {
     Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
