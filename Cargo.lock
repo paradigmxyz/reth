@@ -8873,6 +8873,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-debug",
+ "alloy-rpc-types-eth",
  "auto_impl",
  "derive_more",
  "evm2",

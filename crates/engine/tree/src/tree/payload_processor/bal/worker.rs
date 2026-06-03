@@ -5,9 +5,8 @@ use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
 use reth_errors::BlockExecutionError;
 use reth_evm::{
-    block::{BlockExecutor, BlockExecutorFactory},
     database::State,
-    execute::{convert_alloy_block_execution_error, ExecutableTxFor},
+    execute::{BlockExecutor, BlockExecutorFactory, ExecutableTxFor},
     ConfigureEvm, Database, Evm as EvmTrait, EvmEnvFor, ExecutionCtxFor,
 };
 use reth_execution_types::Bal as ExecutionBal;
@@ -95,7 +94,6 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
                 executor.evm_mut().db_mut().set_bal_index(BlockAccessIndex::new(index as u64 + 1));
                 let result = executor
                     .execute_transaction_without_commit(tx)
-                    .map_err(convert_alloy_block_execution_error)
                     .map_err(BalWorkerError::Execution)?;
 
                 if result_tx

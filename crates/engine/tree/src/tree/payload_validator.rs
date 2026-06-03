@@ -69,11 +69,8 @@ use reth_engine_primitives::{
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
-    block::{BlockExecutor, ExecutableTx},
     database::State,
-    execute::{
-        convert_alloy_block_execution_error, convert_alloy_block_execution_result, ExecutableTxFor,
-    },
+    execute::{BlockExecutor, ExecutableTx, ExecutableTxFor},
     ConfigureEvm, Database, Evm as EvmTrait, EvmEnvFor, ExecutionCtxFor, OnStateHook, RecoveredTx,
     SpecFor, StateHookExt,
 };
@@ -1102,8 +1099,7 @@ where
         let post_exec_start = Instant::now();
         let (_evm, result) = debug_span!(target: "engine::tree", "BlockExecutor::finish")
             .in_scope(|| executor.finish())
-            .map_err(convert_alloy_block_execution_error)
-            .map(|(evm, result)| (evm.into_db(), convert_alloy_block_execution_result(result)))?;
+            .map(|(evm, result)| (evm.into_db(), result))?;
         self.metrics.record_post_execution(post_exec_start.elapsed());
 
         // Merge transitions into bundle state
@@ -1260,8 +1256,7 @@ where
         // Apply pre-execution changes (e.g., beacon root update)
         let pre_exec_start = Instant::now();
         debug_span!(target: "engine::tree", "pre_execution")
-            .in_scope(|| executor.apply_pre_execution_changes())
-            .map_err(convert_alloy_block_execution_error)?;
+            .in_scope(|| executor.apply_pre_execution_changes())?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
 
         // Bump BAL index after pre-execution changes (EIP-7928: index 0 is pre-execution)
@@ -1302,7 +1297,7 @@ where
             }
 
             let tx_start = Instant::now();
-            executor.execute_transaction(tx).map_err(convert_alloy_block_execution_error)?;
+            executor.execute_transaction(tx)?;
             self.metrics.record_transaction_execution(tx_start.elapsed());
 
             // advance the shared counter so prewarm workers skip already-executed txs

@@ -38,6 +38,7 @@ use revm::{
     Inspector,
 };
 
+pub mod block;
 pub mod cached;
 pub mod cancelled;
 pub mod context;
@@ -53,6 +54,11 @@ pub mod hardfork;
 pub mod inspector;
 pub mod interpreter;
 pub mod precompile;
+pub mod tracing {
+    //! Transaction tracing helpers.
+
+    pub use alloy_evm::tracing::*;
+}
 
 mod aliases;
 pub use aliases::*;
@@ -80,12 +86,10 @@ pub mod test_utils;
 pub mod witness;
 
 pub use alloy_evm::{
-    block::{self, state_changes, system_calls},
-    env, error,
-    evm::EvmFactoryExt,
-    precompiles as alloy_precompiles, spec, spec_by_timestamp_and_block_number, traits, tx, EthEvm,
-    EthEvmFactory, Evm, EvmEnv, EvmError, EvmLimitParams, FromRecoveredTx, FromTxWithEncoded,
-    IntoTxEnv, InvalidTxError, MovePrecompileError, RecoveredTx, ToTxEnv, TransactionEnvMut,
+    env, error, evm::EvmFactoryExt, precompiles as alloy_precompiles, spec,
+    spec_by_timestamp_and_block_number, traits, tx, EthEvm, EthEvmFactory, Evm, EvmEnv, EvmError,
+    EvmLimitParams, FromRecoveredTx, FromTxWithEncoded, IntoTxEnv, InvalidTxError,
+    MovePrecompileError, RecoveredTx, ToTxEnv, TransactionEnvMut,
 };
 
 /// A type responsible for creating configured EVM instances.

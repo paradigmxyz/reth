@@ -8,12 +8,11 @@ use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use futures::Future;
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
-    block::BlockExecutor,
     context::{Block, ResultAndState},
     database::{Database, EvmDatabaseError, State, StateProviderDatabase},
-    evm::EvmFactoryExt,
+    execute::BlockExecutor,
     tracing::TracingCtx,
-    ConfigureEvm, Evm, EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TxEnvFor,
+    ConfigureEvm, Evm, EvmEnvFor, EvmFactoryExt, EvmFor, HaltReasonFor, InspectorFor, TxEnvFor,
 };
 use reth_primitives_traits::{BlockBody, Recovered, RecoveredBlock};
 use reth_rpc_eth_types::cache::db::StateCacheDb;

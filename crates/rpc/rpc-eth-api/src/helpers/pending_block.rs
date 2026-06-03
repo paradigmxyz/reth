@@ -12,10 +12,9 @@ use reth_chain_state::{BlockState, ComputedTrieData, ExecutedBlock};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_evm::{
-    block::TxResult,
     context::{Block, Cfg as _, InvalidTransaction},
     database::{State, StateProviderDatabase},
-    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionOutput},
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionOutput, TxResult},
     ConfigureEvm, Evm, EvmEnvFor, NextBlockEnvAttributes,
 };
 use reth_primitives_traits::{transaction::error::InvalidTransactionError, HeaderTy, SealedHeader};

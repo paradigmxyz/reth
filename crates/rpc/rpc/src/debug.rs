@@ -19,10 +19,9 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::RethError;
 use reth_evm::{
-    block::BlockExecutor,
     database::{Database, DatabaseCommit, State},
     env::BlockEnvironment,
-    execute::Executor,
+    execute::{BlockExecutor, Executor},
     witness::ExecutionWitnessRecord,
     ConfigureEvm, Evm, EvmEnvFor,
 };

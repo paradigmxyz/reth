@@ -472,14 +472,6 @@ impl From<RethError> for EthApiError {
     }
 }
 
-impl From<reth_evm::block::BlockExecutionError> for EthApiError {
-    fn from(error: reth_evm::block::BlockExecutionError) -> Self {
-        let error: BlockExecutionError =
-            reth_evm::execute::convert_alloy_block_execution_error(error);
-        error.into()
-    }
-}
-
 impl From<BlockExecutionError> for EthApiError {
     fn from(error: BlockExecutionError) -> Self {
         match error {

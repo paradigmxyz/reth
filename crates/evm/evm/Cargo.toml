@@ -31,6 +31,7 @@ alloy-eip7928.workspace = true
 alloy-eips.workspace = true
 alloy-evm.workspace = true
 alloy-consensus.workspace = true
+alloy-rpc-types-eth = { workspace = true, optional = true }
 alloy-rlp = { workspace = true, optional = true }
 alloy-rpc-types-debug = { workspace = true, optional = true }
 
@@ -86,7 +87,13 @@ optional-fee-charge = ["revm/optional_fee_charge"]
 optional-no-base-fee = ["revm/optional_no_base_fee"]
 p256-aws-lc-rs = ["evm2/p256-aws-lc-rs", "revm/p256-aws-lc-rs"]
 portable = ["evm2/portable", "revm/portable"]
-rpc = ["alloy-evm/call-util", "alloy-evm/overrides", "alloy-evm/rpc"]
+rpc = [
+    "dep:alloy-rpc-types-eth",
+    "alloy-rpc-types-eth/std",
+    "alloy-evm/call-util",
+    "alloy-evm/overrides",
+    "alloy-evm/rpc",
+]
 secp256k1 = [
     "evm2/secp256k1",
     "revm/secp256k1",

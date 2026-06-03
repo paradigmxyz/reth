@@ -23,12 +23,9 @@ use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
 use reth_errors::{BlockExecutionError, BlockValidationError};
 use reth_evm::{
-    block::{BlockExecutor, TxResult},
     context::{Block, ResultAndState},
     database::State,
-    execute::{
-        convert_alloy_block_execution_error, convert_alloy_block_execution_result, ExecutableTxFor,
-    },
+    execute::{BlockExecutor, ExecutableTxFor, TxResult},
     ConfigureEvm, Database, Evm as EvmTrait, EvmEnvFor, ExecutionCtxFor,
 };
 use reth_execution_types::{Bal as ExecutionBal, BundleRetention};
@@ -142,9 +139,7 @@ where
         let evm = evm_config.evm_with_env(&mut canonical_state, evm_env);
         let mut canonical_executor = evm_config.create_executor_with_state(evm, ctx.clone());
 
-        canonical_executor
-            .apply_pre_execution_changes()
-            .map_err(convert_alloy_block_execution_error)?;
+        canonical_executor.apply_pre_execution_changes()?;
         let mut senders = Vec::with_capacity(transaction_count);
         let mut last_sent_len = 0usize;
         for output in ordered_worker_outputs(&result_rx, transaction_count) {
@@ -169,10 +164,7 @@ where
         drop(abort_guard);
 
         canonical_executor.evm_mut().db_mut().bump_bal_index();
-        let block_result = canonical_executor
-            .apply_post_execution_changes()
-            .map(convert_alloy_block_execution_result)
-            .map_err(convert_alloy_block_execution_error)?;
+        let block_result = canonical_executor.apply_post_execution_changes()?;
         (block_result, senders)
     };
 

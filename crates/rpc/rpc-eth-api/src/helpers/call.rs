@@ -20,12 +20,11 @@ use futures::Future;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
-    block::BlockExecutor,
     cancelled::CancelOnDrop,
     context::{Block, ResultAndState, Transaction},
     database::{Database, DatabaseCommit, EvmDatabaseError, State, StateProviderDatabase},
     env::BlockEnvironment,
-    execute::BlockBuilder,
+    execute::{BlockBuilder, BlockExecutor},
     overrides::{apply_block_overrides, apply_state_overrides, OverrideBlockHashes},
     rpc::caller_gas_allowance,
     ConfigureEvm, Evm, EvmEnvFor, HaltReasonFor, InspectorFor, TransactionEnvMut, TxEnvFor,

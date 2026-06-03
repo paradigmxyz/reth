@@ -5,8 +5,8 @@ use alloy_primitives::Bytes;
 use alloy_rpc_types_eth::BlockId;
 use reth_errors::RethError;
 use reth_evm::{
-    block::BlockExecutor,
     database::{State, StateProviderDatabase},
+    execute::BlockExecutor,
     ConfigureEvm, Evm,
 };
 use reth_rpc_eth_types::{
