@@ -3,33 +3,694 @@
 use alloc::{
     boxed::Box,
     collections::{BTreeMap, BTreeSet},
+    string::ToString,
     sync::Arc,
     vec::Vec,
 };
 use alloy_primitives::{
+    keccak256,
     map::{AddressMap, AddressSet, B256Map, HashMap},
     Address, StorageValue, B256, KECCAK256_EMPTY, U256,
 };
 use core::{
     cmp::Ordering,
+    convert::Infallible,
+    error::Error,
+    fmt,
+    marker::PhantomData,
     mem,
     ops::{Deref, DerefMut, RangeInclusive},
 };
 
 pub use revm::state::{
     bal::{AccountBal, AccountInfoBal, Bal, BalError, BalWrites, BlockAccessIndex, StorageBal},
-    Account, AccountInfo, AccountStatus as EvmAccountStatus, Bytecode, EvmState, EvmStorageSlot,
-    TransactionId,
-};
-pub use revm_database_interface::{
-    bal::{BalState, EvmDatabaseError},
-    DBErrorMarker, Database, DatabaseCommit, DatabaseRef, EmptyDB, EmptyDBTyped, OnStateHook,
-    WrapDatabaseRef,
+    Account, AccountId, AccountInfo, AccountStatus as EvmAccountStatus, Bytecode, EvmState,
+    EvmStorageSlot, TransactionId,
 };
 
 type StorageKey = U256;
 type StorageKeyMap<T> = HashMap<StorageKey, T>;
 const BLOCK_HASH_HISTORY: u64 = 256;
+
+/// Database error marker used by EVM database implementations.
+pub trait DBErrorMarker: Error + Send + Sync + 'static {
+    /// Returns true if execution cannot recover from this error.
+    fn is_fatal(&self) -> bool {
+        true
+    }
+}
+
+impl DBErrorMarker for Infallible {}
+
+/// EVM database interface.
+pub trait Database {
+    /// Database error type.
+    type Error: DBErrorMarker;
+
+    /// Gets basic account information.
+    fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error>;
+
+    /// Gets account code by hash.
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error>;
+
+    /// Gets storage value of address at index.
+    fn storage(&mut self, address: Address, index: StorageKey)
+        -> Result<StorageValue, Self::Error>;
+
+    /// Gets storage value by account id.
+    fn storage_by_account_id(
+        &mut self,
+        address: Address,
+        account_id: AccountId,
+        storage_key: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        let _ = account_id;
+        self.storage(address, storage_key)
+    }
+
+    /// Gets block hash by block number.
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error>;
+}
+
+impl<T: Database + ?Sized> Database for &mut T {
+    type Error = T::Error;
+
+    fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        (**self).basic(address)
+    }
+
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        (**self).code_by_hash(code_hash)
+    }
+
+    fn storage(
+        &mut self,
+        address: Address,
+        index: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        (**self).storage(address, index)
+    }
+
+    fn storage_by_account_id(
+        &mut self,
+        address: Address,
+        account_id: AccountId,
+        storage_key: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        (**self).storage_by_account_id(address, account_id, storage_key)
+    }
+
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+        (**self).block_hash(number)
+    }
+}
+
+impl<T: Database + ?Sized> Database for Box<T> {
+    type Error = T::Error;
+
+    fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        self.as_mut().basic(address)
+    }
+
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        self.as_mut().code_by_hash(code_hash)
+    }
+
+    fn storage(
+        &mut self,
+        address: Address,
+        index: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        self.as_mut().storage(address, index)
+    }
+
+    fn storage_by_account_id(
+        &mut self,
+        address: Address,
+        account_id: AccountId,
+        storage_key: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        self.as_mut().storage_by_account_id(address, account_id, storage_key)
+    }
+
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+        self.as_mut().block_hash(number)
+    }
+}
+
+/// EVM database commit interface.
+pub trait DatabaseCommit {
+    /// Commits changes to the database.
+    fn commit(&mut self, changes: AddressMap<Account>);
+
+    /// Commits changes from an iterator.
+    fn commit_iter(&mut self, changes: &mut dyn Iterator<Item = (Address, Account)>) {
+        self.commit(changes.collect());
+    }
+}
+
+impl<T: DatabaseCommit + ?Sized> DatabaseCommit for &mut T {
+    fn commit(&mut self, changes: AddressMap<Account>) {
+        (**self).commit(changes);
+    }
+
+    fn commit_iter(&mut self, changes: &mut dyn Iterator<Item = (Address, Account)>) {
+        (**self).commit_iter(changes);
+    }
+}
+
+impl<T: DatabaseCommit + ?Sized> DatabaseCommit for Box<T> {
+    fn commit(&mut self, changes: AddressMap<Account>) {
+        self.as_mut().commit(changes);
+    }
+
+    fn commit_iter(&mut self, changes: &mut dyn Iterator<Item = (Address, Account)>) {
+        self.as_mut().commit_iter(changes);
+    }
+}
+
+/// EVM database interface with shared-reference receivers.
+pub trait DatabaseRef {
+    /// Database error type.
+    type Error: DBErrorMarker;
+
+    /// Gets basic account information.
+    fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error>;
+
+    /// Gets account code by hash.
+    fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error>;
+
+    /// Gets storage value of address at index.
+    fn storage_ref(&self, address: Address, index: StorageKey)
+        -> Result<StorageValue, Self::Error>;
+
+    /// Gets storage value by account id.
+    fn storage_by_account_id_ref(
+        &self,
+        address: Address,
+        account_id: AccountId,
+        storage_key: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        let _ = account_id;
+        self.storage_ref(address, storage_key)
+    }
+
+    /// Gets block hash by block number.
+    fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error>;
+}
+
+impl<T: DatabaseRef + ?Sized> DatabaseRef for &T {
+    type Error = T::Error;
+
+    fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        (**self).basic_ref(address)
+    }
+
+    fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        (**self).code_by_hash_ref(code_hash)
+    }
+
+    fn storage_ref(
+        &self,
+        address: Address,
+        index: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        (**self).storage_ref(address, index)
+    }
+
+    fn storage_by_account_id_ref(
+        &self,
+        address: Address,
+        account_id: AccountId,
+        storage_key: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        (**self).storage_by_account_id_ref(address, account_id, storage_key)
+    }
+
+    fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
+        (**self).block_hash_ref(number)
+    }
+}
+
+impl<T: DatabaseRef + ?Sized> DatabaseRef for &mut T {
+    type Error = T::Error;
+
+    fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        (**self).basic_ref(address)
+    }
+
+    fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        (**self).code_by_hash_ref(code_hash)
+    }
+
+    fn storage_ref(
+        &self,
+        address: Address,
+        index: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        (**self).storage_ref(address, index)
+    }
+
+    fn storage_by_account_id_ref(
+        &self,
+        address: Address,
+        account_id: AccountId,
+        storage_key: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        (**self).storage_by_account_id_ref(address, account_id, storage_key)
+    }
+
+    fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
+        (**self).block_hash_ref(number)
+    }
+}
+
+impl<T: DatabaseRef + ?Sized> DatabaseRef for Box<T> {
+    type Error = T::Error;
+
+    fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        self.as_ref().basic_ref(address)
+    }
+
+    fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        self.as_ref().code_by_hash_ref(code_hash)
+    }
+
+    fn storage_ref(
+        &self,
+        address: Address,
+        index: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        self.as_ref().storage_ref(address, index)
+    }
+
+    fn storage_by_account_id_ref(
+        &self,
+        address: Address,
+        account_id: AccountId,
+        storage_key: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        self.as_ref().storage_by_account_id_ref(address, account_id, storage_key)
+    }
+
+    fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
+        self.as_ref().block_hash_ref(number)
+    }
+}
+
+impl<T: DatabaseRef + ?Sized> DatabaseRef for Arc<T> {
+    type Error = T::Error;
+
+    fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        self.as_ref().basic_ref(address)
+    }
+
+    fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        self.as_ref().code_by_hash_ref(code_hash)
+    }
+
+    fn storage_ref(
+        &self,
+        address: Address,
+        index: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        self.as_ref().storage_ref(address, index)
+    }
+
+    fn storage_by_account_id_ref(
+        &self,
+        address: Address,
+        account_id: AccountId,
+        storage_key: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        self.as_ref().storage_by_account_id_ref(address, account_id, storage_key)
+    }
+
+    fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
+        self.as_ref().block_hash_ref(number)
+    }
+}
+
+/// Wraps a [`DatabaseRef`] to provide a [`Database`] implementation.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct WrapDatabaseRef<T: DatabaseRef>(pub T);
+
+impl<T: DatabaseRef> From<T> for WrapDatabaseRef<T> {
+    fn from(value: T) -> Self {
+        Self(value)
+    }
+}
+
+impl<T: DatabaseRef> Database for WrapDatabaseRef<T> {
+    type Error = T::Error;
+
+    fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        self.0.basic_ref(address)
+    }
+
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        self.0.code_by_hash_ref(code_hash)
+    }
+
+    fn storage(
+        &mut self,
+        address: Address,
+        index: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        self.0.storage_ref(address, index)
+    }
+
+    fn storage_by_account_id(
+        &mut self,
+        address: Address,
+        account_id: AccountId,
+        storage_key: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        self.0.storage_by_account_id_ref(address, account_id, storage_key)
+    }
+
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+        self.0.block_hash_ref(number)
+    }
+}
+
+impl<T: DatabaseRef + DatabaseCommit> DatabaseCommit for WrapDatabaseRef<T> {
+    fn commit(&mut self, changes: AddressMap<Account>) {
+        self.0.commit(changes);
+    }
+
+    fn commit_iter(&mut self, changes: &mut dyn Iterator<Item = (Address, Account)>) {
+        self.0.commit_iter(changes);
+    }
+}
+
+impl<T: DatabaseRef> DatabaseRef for WrapDatabaseRef<T> {
+    type Error = T::Error;
+
+    fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        self.0.basic_ref(address)
+    }
+
+    fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        self.0.code_by_hash_ref(code_hash)
+    }
+
+    fn storage_ref(
+        &self,
+        address: Address,
+        index: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        self.0.storage_ref(address, index)
+    }
+
+    fn storage_by_account_id_ref(
+        &self,
+        address: Address,
+        account_id: AccountId,
+        storage_key: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        self.0.storage_by_account_id_ref(address, account_id, storage_key)
+    }
+
+    fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
+        self.0.block_hash_ref(number)
+    }
+}
+
+/// Empty database.
+pub type EmptyDB = EmptyDBTyped<Infallible>;
+
+/// Empty database with configurable error type.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct EmptyDBTyped<E> {
+    _phantom: PhantomData<E>,
+}
+
+impl<E> Clone for EmptyDBTyped<E> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<E> Copy for EmptyDBTyped<E> {}
+
+impl<E> Default for EmptyDBTyped<E> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<E> fmt::Debug for EmptyDBTyped<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EmptyDB").finish_non_exhaustive()
+    }
+}
+
+impl<E> PartialEq for EmptyDBTyped<E> {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl<E> Eq for EmptyDBTyped<E> {}
+
+impl<E> EmptyDBTyped<E> {
+    /// Creates a new empty database.
+    pub const fn new() -> Self {
+        Self { _phantom: PhantomData }
+    }
+}
+
+impl<E: DBErrorMarker> Database for EmptyDBTyped<E> {
+    type Error = E;
+
+    fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        <Self as DatabaseRef>::basic_ref(self, address)
+    }
+
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        <Self as DatabaseRef>::code_by_hash_ref(self, code_hash)
+    }
+
+    fn storage(
+        &mut self,
+        address: Address,
+        index: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        <Self as DatabaseRef>::storage_ref(self, address, index)
+    }
+
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+        <Self as DatabaseRef>::block_hash_ref(self, number)
+    }
+}
+
+impl<E: DBErrorMarker> DatabaseRef for EmptyDBTyped<E> {
+    type Error = E;
+
+    fn basic_ref(&self, _address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        Ok(None)
+    }
+
+    fn code_by_hash_ref(&self, _code_hash: B256) -> Result<Bytecode, Self::Error> {
+        Ok(Bytecode::default())
+    }
+
+    fn storage_ref(
+        &self,
+        _address: Address,
+        _index: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        Ok(StorageValue::default())
+    }
+
+    fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
+        Ok(keccak256(number.to_string().as_bytes()))
+    }
+}
+
+/// A hook that is called when state changes are committed.
+pub trait OnStateHook {
+    /// Invoked with the state being committed.
+    fn on_state(&mut self, state: &EvmState);
+}
+
+impl<F> OnStateHook for F
+where
+    F: FnMut(&EvmState),
+{
+    fn on_state(&mut self, state: &EvmState) {
+        self(state);
+    }
+}
+
+/// Contains both the BAL for reads and BAL builder state.
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct BalState {
+    /// BAL used to execute transactions.
+    pub bal: Option<Arc<Bal>>,
+    /// BAL builder used to build a BAL from transaction state outputs.
+    pub bal_builder: Option<Bal>,
+    /// BAL index used to fetch and submit values.
+    pub bal_index: BlockAccessIndex,
+}
+
+impl BalState {
+    /// Creates a new BAL state.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Resets BAL index to pre-execution.
+    pub const fn reset_bal_index(&mut self) {
+        self.bal_index = BlockAccessIndex::PRE_EXECUTION;
+    }
+
+    /// Bumps BAL index.
+    pub const fn bump_bal_index(&mut self) {
+        self.bal_index.increment();
+    }
+
+    /// Takes built BAL.
+    pub const fn take_built_bal(&mut self) -> Option<Bal> {
+        self.reset_bal_index();
+        self.bal_builder.take()
+    }
+
+    /// Takes built BAL as alloy BAL.
+    pub fn take_built_alloy_bal(&mut self) -> Option<alloy_eip7928::BlockAccessList> {
+        self.take_built_bal().map(Bal::into_alloy_bal)
+    }
+
+    /// Gets account id from BAL.
+    pub fn get_account_id(&self, address: &Address) -> Result<Option<AccountId>, BalError> {
+        self.bal
+            .as_ref()
+            .map(|bal| {
+                bal.accounts
+                    .get_full(address)
+                    .map(|i| AccountId::new(i.0).expect("too many BAL accounts"))
+                    .ok_or(BalError::AccountNotFound { address: *address })
+            })
+            .transpose()
+    }
+
+    /// Applies BAL account info changes by account id.
+    pub fn basic_by_account_id(
+        &self,
+        account_id: AccountId,
+        basic: &mut Option<AccountInfo>,
+    ) -> Result<bool, BalError> {
+        let Some(bal) = &self.bal else { return Ok(false) };
+        let is_none = basic.is_none();
+        let mut bal_basic = mem::take(basic).unwrap_or_default();
+        let changed = bal.populate_account_info(account_id, self.bal_index, &mut bal_basic)?;
+
+        if !changed && is_none {
+            return Ok(true)
+        }
+
+        *basic = Some(bal_basic);
+        Ok(true)
+    }
+
+    /// Gets storage value from BAL.
+    pub fn storage(
+        &self,
+        account: &Address,
+        storage_key: StorageKey,
+    ) -> Result<Option<StorageValue>, BalError> {
+        let Some(bal) = &self.bal else { return Ok(None) };
+        let Some(bal_account) = bal.accounts.get(account) else {
+            return Err(BalError::AccountNotFound { address: *account });
+        };
+
+        Ok(bal_account.storage.get_bal_writes(account, storage_key)?.get(self.bal_index))
+    }
+
+    /// Gets storage value from BAL by account id.
+    pub fn storage_by_account_id(
+        &self,
+        account_id: AccountId,
+        storage_key: StorageKey,
+    ) -> Result<Option<StorageValue>, BalError> {
+        let Some(bal) = &self.bal else { return Ok(None) };
+        let Some((address, bal_account)) = bal.accounts.get_index(account_id.get()) else {
+            return Err(BalError::InvalidAccountId { account_id });
+        };
+
+        Ok(bal_account.storage.get_bal_writes(address, storage_key)?.get(self.bal_index))
+    }
+
+    /// Applies EVM state changes to the BAL builder.
+    pub fn commit(&mut self, changes: &EvmState) {
+        if let Some(bal_builder) = &mut self.bal_builder {
+            for (address, account) in changes {
+                bal_builder.update_account(self.bal_index, *address, account);
+            }
+        }
+    }
+
+    /// Applies one account change to the BAL builder.
+    pub fn commit_one(&mut self, address: Address, account: &Account) {
+        if let Some(bal_builder) = &mut self.bal_builder {
+            bal_builder.update_account(self.bal_index, address, account);
+        }
+    }
+}
+
+/// Error type for state database wrappers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum EvmDatabaseError<ERROR> {
+    /// BAL error.
+    Bal(BalError),
+    /// External database error.
+    Database(ERROR),
+}
+
+impl<ERROR> From<BalError> for EvmDatabaseError<ERROR> {
+    fn from(error: BalError) -> Self {
+        Self::Bal(error)
+    }
+}
+
+impl<ERROR: DBErrorMarker> DBErrorMarker for EvmDatabaseError<ERROR> {
+    fn is_fatal(&self) -> bool {
+        match self {
+            Self::Bal(_) => false,
+            Self::Database(error) => error.is_fatal(),
+        }
+    }
+}
+
+impl<ERROR: DBErrorMarker> revm::context_interface::DBErrorMarker for EvmDatabaseError<ERROR> {
+    fn is_fatal(&self) -> bool {
+        DBErrorMarker::is_fatal(self)
+    }
+}
+
+impl<ERROR: fmt::Display> fmt::Display for EvmDatabaseError<ERROR> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Bal(error) => write!(f, "BAL error: {error}"),
+            Self::Database(error) => write!(f, "Database error: {error}"),
+        }
+    }
+}
+
+impl<ERROR: Error> Error for EvmDatabaseError<ERROR> {}
+
+impl<ERROR> EvmDatabaseError<ERROR> {
+    /// Converts this error into the external database error.
+    pub fn into_external_error(self) -> ERROR {
+        match self {
+            Self::Bal(_) => panic!("expected database error, got BAL error"),
+            Self::Database(error) => error,
+        }
+    }
+}
 
 /// This builder is used to initialize a [`BundleState`].
 #[derive(Debug)]
@@ -2025,7 +2686,6 @@ pub type DBBox<'a, E> = Box<dyn Database<Error = E> + Send + 'a>;
 pub type StateDBBox<'a, E> = State<DBBox<'a, E>>;
 
 /// State cache and bundle accumulator used by EVM execution.
-#[derive(derive_more::Debug)]
 pub struct State<DB> {
     /// Cached loaded and changed state.
     pub cache: CacheState,
@@ -2042,8 +2702,22 @@ pub struct State<DB> {
     /// BAL state.
     pub bal_state: BalState,
     /// Hook invoked whenever state is committed.
-    #[debug(skip)]
     pub state_hook: Option<Box<dyn OnStateHook>>,
+}
+
+impl<DB> fmt::Debug for State<DB> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("State")
+            .field("cache", &self.cache)
+            .field("database", &"<database>")
+            .field("transition_state", &self.transition_state)
+            .field("bundle_state", &self.bundle_state)
+            .field("use_preloaded_bundle", &self.use_preloaded_bundle)
+            .field("block_hashes", &self.block_hashes)
+            .field("bal_state", &self.bal_state)
+            .field("state_hook", &self.state_hook.as_ref().map(|_| "<state hook>"))
+            .finish()
+    }
 }
 
 impl State<EmptyDB> {
@@ -2266,7 +2940,7 @@ impl<DB: Database> Database for State<DB> {
     fn storage_by_account_id(
         &mut self,
         address: Address,
-        account_id: revm::state::AccountId,
+        account_id: AccountId,
         key: StorageKey,
     ) -> Result<StorageValue, Self::Error> {
         if let Some(storage) = self.bal_state.storage_by_account_id(account_id, key)? {
@@ -2385,6 +3059,82 @@ impl<DB: DatabaseRef> DatabaseRef for State<DB> {
             return Ok(hash)
         }
         self.database.block_hash_ref(number).map_err(EvmDatabaseError::Database)
+    }
+}
+
+impl<DB: Database> revm::Database for State<DB> {
+    type Error = EvmDatabaseError<DB::Error>;
+
+    fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        <Self as Database>::basic(self, address)
+    }
+
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        <Self as Database>::code_by_hash(self, code_hash)
+    }
+
+    fn storage(
+        &mut self,
+        address: Address,
+        index: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        <Self as Database>::storage(self, address, index)
+    }
+
+    fn storage_by_account_id(
+        &mut self,
+        address: Address,
+        account_id: AccountId,
+        storage_key: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        <Self as Database>::storage_by_account_id(self, address, account_id, storage_key)
+    }
+
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+        <Self as Database>::block_hash(self, number)
+    }
+}
+
+impl<DB: Database> revm::DatabaseCommit for State<DB> {
+    fn commit(&mut self, changes: AddressMap<Account>) {
+        <Self as DatabaseCommit>::commit(self, changes);
+    }
+
+    fn commit_iter(&mut self, changes: &mut dyn Iterator<Item = (Address, Account)>) {
+        <Self as DatabaseCommit>::commit_iter(self, changes);
+    }
+}
+
+impl<DB: DatabaseRef> revm::DatabaseRef for State<DB> {
+    type Error = EvmDatabaseError<DB::Error>;
+
+    fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        <Self as DatabaseRef>::basic_ref(self, address)
+    }
+
+    fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        <Self as DatabaseRef>::code_by_hash_ref(self, code_hash)
+    }
+
+    fn storage_ref(
+        &self,
+        address: Address,
+        index: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        <Self as DatabaseRef>::storage_ref(self, address, index)
+    }
+
+    fn storage_by_account_id_ref(
+        &self,
+        address: Address,
+        account_id: AccountId,
+        storage_key: StorageKey,
+    ) -> Result<StorageValue, Self::Error> {
+        <Self as DatabaseRef>::storage_by_account_id_ref(self, address, account_id, storage_key)
+    }
+
+    fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
+        <Self as DatabaseRef>::block_hash_ref(self, number)
     }
 }
 

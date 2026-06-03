@@ -204,7 +204,7 @@ impl Evm2DatabaseRef {
     /// Creates a borrowed evm2 database adapter.
     pub fn new<DB>(db: &mut DB) -> Self
     where
-        DB: crate::Database,
+        DB: alloy_evm::Database,
     {
         Self {
             ptr: NonNull::from(db).cast(),
@@ -246,7 +246,7 @@ unsafe fn evm2_database_ref_get_account<DB>(
     address: &Address,
 ) -> Evm2DatabaseRefResult<Option<Evm2AccountInfo>>
 where
-    DB: crate::Database,
+    DB: alloy_evm::Database,
 {
     // SAFETY: The vtable functions are installed for the same `DB` used to create the pointer.
     let db = unsafe { &mut *ptr.cast::<DB>().as_ptr() };
@@ -260,7 +260,7 @@ unsafe fn evm2_database_ref_get_code_by_hash<DB>(
     code_hash: &B256,
 ) -> Evm2DatabaseRefResult<Evm2Bytecode>
 where
-    DB: crate::Database,
+    DB: alloy_evm::Database,
 {
     // SAFETY: The vtable functions are installed for the same `DB` used to create the pointer.
     let db = unsafe { &mut *ptr.cast::<DB>().as_ptr() };
@@ -275,7 +275,7 @@ unsafe fn evm2_database_ref_get_storage<DB>(
     key: &U256,
 ) -> Evm2DatabaseRefResult<U256>
 where
-    DB: crate::Database,
+    DB: alloy_evm::Database,
 {
     // SAFETY: The vtable functions are installed for the same `DB` used to create the pointer.
     let db = unsafe { &mut *ptr.cast::<DB>().as_ptr() };
@@ -287,7 +287,7 @@ unsafe fn evm2_database_ref_get_block_hash<DB>(
     number: &U256,
 ) -> Evm2DatabaseRefResult<Option<B256>>
 where
-    DB: crate::Database,
+    DB: alloy_evm::Database,
 {
     // SAFETY: The vtable functions are installed for the same `DB` used to create the pointer.
     let db = unsafe { &mut *ptr.cast::<DB>().as_ptr() };
@@ -362,7 +362,6 @@ where
 fn create_evm2_from_alloy_evm<E>(evm: &mut E) -> EthEvm2
 where
     E: AlloyEvm<Spec = RevmSpecId, BlockEnv = BlockEnv>,
-    E::DB: crate::Database,
 {
     let spec = spec_id_from_revm(*evm.cfg_env().spec());
     Evm2::new(
@@ -1234,7 +1233,6 @@ where
 impl<'a, E, R> Evm2AlloyBlockExecutor<'a, E, R>
 where
     E: AlloyEvm<Spec = RevmSpecId, BlockEnv = BlockEnv>,
-    E::DB: crate::Database,
     R: Evm2ReceiptBuilder + Clone,
 {
     /// Creates a new evm2-backed alloy block executor.
@@ -1258,7 +1256,7 @@ where
 impl<E, R> AlloyBlockExecutor for Evm2AlloyBlockExecutor<'_, E, R>
 where
     E: AlloyEvm<
-        DB: crate::Database + DatabaseCommit,
+        DB: DatabaseCommit,
         Tx: FromRecoveredTx<RethEthereumTxEnvelope> + FromTxWithEncoded<RethEthereumTxEnvelope>,
         HaltReason = HaltReason,
         Spec = RevmSpecId,
@@ -2020,6 +2018,7 @@ const fn ommer_reward(base_block_reward: u128, block_number: u64, ommer_block_nu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{Database, DatabaseCommit, EmptyDB};
     use alloy_consensus::{SignableTransaction, TxLegacy};
     use alloy_eips::{eip4788::BEACON_ROOTS_CODE, Typed2718};
     use alloy_primitives::{address, Address, Bytes, Signature, TxKind, KECCAK256_EMPTY};
@@ -2028,10 +2027,65 @@ mod tests {
         interpreter::Host,
     };
     use reth_execution_types::{BundleRetention, State};
-    use revm::{
-        database::{CacheDB, EmptyDB},
-        Database, DatabaseCommit,
-    };
+
+    #[derive(Clone, Debug)]
+    struct CacheDB<ExtDB = EmptyDB> {
+        accounts: AddressMap<AccountInfo>,
+        contracts: B256Map<Bytecode>,
+        storage: AddressMap<HashMap<U256, U256>>,
+        ext: ExtDB,
+    }
+
+    impl<ExtDB: Default> Default for CacheDB<ExtDB> {
+        fn default() -> Self {
+            Self::new(ExtDB::default())
+        }
+    }
+
+    impl<ExtDB> CacheDB<ExtDB> {
+        fn new(ext: ExtDB) -> Self {
+            Self {
+                accounts: Default::default(),
+                contracts: Default::default(),
+                storage: Default::default(),
+                ext,
+            }
+        }
+
+        fn insert_account_info(&mut self, address: Address, info: AccountInfo) {
+            if let Some(code) = info.code.clone() {
+                self.contracts.insert(info.code_hash, code);
+            }
+            self.accounts.insert(address, info);
+        }
+    }
+
+    impl<ExtDB: crate::Database> crate::Database for CacheDB<ExtDB> {
+        type Error = ExtDB::Error;
+
+        fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+            Ok(self.accounts.get(&address).cloned().or(self.ext.basic(address)?))
+        }
+
+        fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+            if let Some(code) = self.contracts.get(&code_hash) {
+                return Ok(code.clone())
+            }
+            self.ext.code_by_hash(code_hash)
+        }
+
+        fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
+            if let Some(value) = self.storage.get(&address).and_then(|storage| storage.get(&index))
+            {
+                return Ok(*value)
+            }
+            self.ext.storage(address, index)
+        }
+
+        fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+            self.ext.block_hash(number)
+        }
+    }
 
     #[test]
     fn merges_evm2_account_storage_and_code_changes() {

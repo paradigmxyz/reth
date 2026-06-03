@@ -23,12 +23,12 @@ use alloy_eips::eip4895::Withdrawals;
 use alloy_evm::{
     block::{BlockExecutorFactory, BlockExecutorFor},
     precompiles::PrecompilesMap,
+    Database as AlloyDatabase,
 };
 use alloy_primitives::{Address, Bytes, B256};
 use core::{error::Error, fmt::Debug};
 use execute::{BasicBlockExecutor, BlockAssembler, BlockBuilder};
 use reth_execution_errors::BlockExecutionError;
-use reth_execution_types::State;
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SealedBlock, SealedHeader, TxTy,
 };
@@ -38,6 +38,7 @@ pub mod cached;
 pub mod cancelled;
 pub mod context;
 pub mod database;
+pub use database::*;
 pub mod either;
 pub mod evm2;
 /// EVM environment configuration.
@@ -74,8 +75,12 @@ pub mod test_utils;
 pub mod witness;
 
 pub use alloy_evm::{
-    block::{state_changes, system_calls},
-    *,
+    block::{self, state_changes, system_calls},
+    env, error, eth,
+    evm::EvmFactoryExt,
+    precompiles as alloy_precompiles, traits, tx, EthEvm, EthEvmFactory, Evm, EvmEnv, EvmError,
+    EvmFactory, EvmLimitParams, FromRecoveredTx, FromTxWithEncoded, IntoTxEnv, InvalidTxError,
+    MovePrecompileError, RecoveredTx, ToTxEnv, TransactionEnvMut,
 };
 
 /// A complete configuration of EVM for Reth.
@@ -289,7 +294,11 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// including the spec id and transaction environment.
     ///
     /// This will preserve any handler modifications
-    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnvFor<Self>) -> EvmFor<Self, DB> {
+    fn evm_with_env<DB: AlloyDatabase>(
+        &self,
+        db: DB,
+        evm_env: EvmEnvFor<Self>,
+    ) -> EvmFor<Self, DB> {
         self.evm_factory().create_evm(db, evm_env)
     }
 
@@ -300,7 +309,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// # Caution
     ///
     /// This does not initialize the tx environment.
-    fn evm_for_block<DB: Database>(
+    fn evm_for_block<DB: AlloyDatabase>(
         &self,
         db: DB,
         header: &HeaderTy<Self::Primitives>,
@@ -322,7 +331,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         inspector: I,
     ) -> EvmFor<Self, DB, I>
     where
-        DB: Database,
+        DB: AlloyDatabase,
         I: InspectorFor<Self, DB>,
     {
         self.evm_factory().create_evm_with_inspector(db, evm_env, inspector)

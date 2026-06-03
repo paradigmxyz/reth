@@ -8959,7 +8959,6 @@ dependencies = [
  "reth-primitives-traits",
  "reth-trie-common",
  "revm",
- "revm-database-interface",
  "serde",
  "serde_with",
 ]
