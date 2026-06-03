@@ -41,7 +41,7 @@ pub struct EreGroup {
     pub accumulator: Option<Accumulator>,
 
     /// Dynamic block index, required
-    pub block_index: DynamicBlockIndex,
+    pub index: DynamicBlockIndex,
 }
 
 impl EreGroup {
@@ -49,9 +49,9 @@ impl EreGroup {
     pub const fn new(
         blocks: Vec<BlockTuple>,
         accumulator: Option<Accumulator>,
-        block_index: DynamicBlockIndex,
+        index: DynamicBlockIndex,
     ) -> Self {
-        Self { blocks, accumulator, block_index, other_entries: Vec::new() }
+        Self { blocks, accumulator, index, other_entries: Vec::new() }
     }
 
     /// Add another entry to this group
@@ -70,10 +70,8 @@ impl EreGroup {
 /// where each `indexes` group holds the offsets for one block:
 /// `header-index | body-index | receipts-index? | difficulty-index? | proof-index?`
 ///
-/// `component-count` is in the range 2-5 depending on which optional components are present, and
-/// every value is encoded as a little-endian 64-bit integer. Offsets are stored as `i64` because
-/// they point backward from the index record to earlier entries; the on-wire byte layout is
-/// identical to the spec's unsigned 64-bit values.
+/// `component-count` is 2-5 depending on which optional components are present. Offsets are `i64`
+/// (they point backward to earlier entries); their little-endian bytes match the spec's `uint64`.
 ///
 /// See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/ere.md#specification>
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -480,8 +478,8 @@ mod tests {
         assert_eq!(group.blocks.len(), 3);
         assert_eq!(group.other_entries.len(), 0);
         assert_eq!(group.accumulator.unwrap().root, accumulator.root);
-        assert_eq!(group.block_index.starting_number(), 1000);
-        assert_eq!(group.block_index.offsets(), vec![100, 200, 300, 400, 500, 600]);
+        assert_eq!(group.index.starting_number(), 1000);
+        assert_eq!(group.index.offsets(), vec![100, 200, 300, 400, 500, 600]);
     }
 
     #[test]

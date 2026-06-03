@@ -178,9 +178,8 @@ pub enum EraFileType {
 }
 
 impl EraFileType {
-    /// Every file type. The single source of truth for filename/extension lookups; no extension is
-    /// a suffix of another (`.era1` ends in `1`, not `.era`), so suffix matching over this list is
-    /// unambiguous regardless of order.
+    /// All file types. No extension is a suffix of another, so `from_filename`'s suffix match is
+    /// order-independent.
     const ALL: [Self; 3] = [Self::Era, Self::Era1, Self::Ere];
 
     /// Get the file extension for this type, dot included
