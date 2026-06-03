@@ -10,7 +10,6 @@ pub use reth_execution_types::{
     AccountInfo, Bytecode, Database, DatabaseCommit, DatabaseRef, EmptyDB, EmptyDBTyped,
     EvmDatabaseError, State, TransitionState,
 };
-pub use revm::database::CacheDB;
 
 /// A helper trait responsible for providing state necessary for EVM execution.
 ///
