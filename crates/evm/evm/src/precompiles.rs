@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use alloy_primitives::Address;
 
-pub use alloy_evm::precompiles::PrecompilesMap;
+pub use alloy_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput, PrecompilesMap};
 
 /// Error returned when moving precompiles.
 #[derive(Debug, thiserror::Error)]
