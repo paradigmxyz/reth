@@ -2206,6 +2206,41 @@ mod tests {
     }
 
     #[test]
+    fn created_deleted_account_prune_keeps_older_reverts() {
+        let address = address!("0x0000000000000000000000000000000000000019");
+        let revert = AccountRevert {
+            account: AccountInfoRevert::DeleteIt,
+            storage: Default::default(),
+            previous_status: AccountStatus::Changed,
+            wipe_storage: false,
+        };
+        let mut state = AddressMap::default();
+        state.insert(
+            address,
+            BundleAccount::new(
+                None,
+                Some(AccountInfo::default()),
+                Default::default(),
+                AccountStatus::InMemoryChange,
+            ),
+        );
+        let reverts_size = revert.size_hint() * 2;
+        let mut bundle = BundleState {
+            state,
+            reverts: Reverts::new(vec![vec![(address, revert.clone())], vec![(address, revert)]]),
+            state_size: 1,
+            reverts_size,
+            ..Default::default()
+        };
+
+        crate::execute::prune_created_deleted_empty_accounts(&mut bundle);
+
+        assert_eq!(bundle.reverts[0].len(), 1);
+        assert_eq!(bundle.reverts[1].len(), 0);
+        assert!(bundle.account(&address).is_none());
+    }
+
+    #[test]
     fn evm2_output_keeps_block_original_revert_for_created_then_deleted_account() {
         let address = address!("0x0000000000000000000000000000000000000010");
         let created = Evm2AccountInfo {

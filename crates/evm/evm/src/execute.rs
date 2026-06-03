@@ -149,10 +149,12 @@ fn convert_alloy_internal_block_execution_error(
 }
 
 pub(crate) fn prune_created_deleted_empty_accounts(bundle: &mut BundleState) {
-    let delete_revert_accounts = bundle
-        .reverts
+    let Some(block_reverts) = bundle.reverts.last() else {
+        return;
+    };
+
+    let delete_revert_accounts = block_reverts
         .iter()
-        .flat_map(|block| block.iter())
         .filter_map(|(address, revert)| {
             matches!(revert.account, AccountInfoRevert::DeleteIt).then_some(*address)
         })
@@ -185,7 +187,7 @@ pub(crate) fn prune_created_deleted_empty_accounts(bundle: &mut BundleState) {
 
     let accounts = accounts.into_iter().collect::<AddressHashSet>();
     let mut removed_reverts_size = 0;
-    for block_reverts in bundle.reverts.iter_mut() {
+    if let Some(block_reverts) = bundle.reverts.last_mut() {
         block_reverts.retain(|(address, revert)| {
             if accounts.contains(address) && matches!(revert.account, AccountInfoRevert::DeleteIt) {
                 removed_reverts_size += revert.size_hint();
