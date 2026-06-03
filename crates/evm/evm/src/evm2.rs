@@ -670,6 +670,7 @@ where
     for (address, account) in changes.accounts {
         let original = account.original.map(account_info_from_evm2);
         let is_created = original.is_none() && account.current.is_some();
+        let storage_wiped = storage.get(&address).is_some_and(|storage| storage.wipe);
         let is_deleted_after_block_creation = account.current.is_none() &&
             executor
                 .output
@@ -686,7 +687,7 @@ where
         }
         let mut revm_account = match account.current {
             Some(info) => {
-                let mut account = if is_created {
+                let mut account = if is_created || storage_wiped {
                     RevmAccount::new_not_existing(TransactionId::ZERO)
                 } else {
                     RevmAccount::default()
@@ -702,7 +703,7 @@ where
             }
         };
         revm_account.mark_touch();
-        if is_created {
+        if is_created || storage_wiped {
             revm_account.mark_created();
         }
         if let Some(original) = original {
@@ -757,7 +758,8 @@ where
         let is_storage_only_block_creation = current_info.is_none() &&
             !storage.slots.is_empty() &&
             storage.slots.values().all(|slot| slot.original.is_zero());
-        let mut account = if is_storage_only_block_creation {
+        let storage_wiped_existing_account = storage.wipe && current_info.is_some();
+        let mut account = if is_storage_only_block_creation || storage_wiped_existing_account {
             RevmAccount::new_not_existing(TransactionId::ZERO)
         } else {
             RevmAccount::default()
@@ -765,11 +767,11 @@ where
         if let Some(info) = current_info {
             account.info = info;
         }
-        if is_storage_only_block_creation {
+        if is_storage_only_block_creation || storage_wiped_existing_account {
             account.mark_created();
         }
         account.mark_touch();
-        if storage.wipe && !is_storage_only_block_creation {
+        if storage.wipe && !is_storage_only_block_creation && !storage_wiped_existing_account {
             account.mark_selfdestruct();
         }
         account.storage = storage
@@ -1993,7 +1995,7 @@ mod tests {
     };
     use revm::{
         database::{states::bundle_state::BundleRetention, CacheDB, EmptyDB, State as RevmState},
-        DatabaseCommit,
+        Database, DatabaseCommit,
     };
 
     #[test]
@@ -2460,6 +2462,70 @@ mod tests {
 
         assert!(account.is_selfdestructed());
         assert_eq!(account.original_info().code_hash, original.code_hash);
+    }
+
+    #[test]
+    fn evm2_revm_state_wipes_surviving_account_storage() {
+        let address = address!("0x0000000000000000000000000000000000000016");
+        let stale_slot = U256::from(1);
+        let new_slot = U256::from(2);
+        let original = Evm2AccountInfo {
+            balance: U256::from(1),
+            nonce: 1,
+            code_hash: KECCAK256_EMPTY,
+            code: None,
+            _non_exhaustive: (),
+        };
+        let current = Evm2AccountInfo { balance: U256::from(2), ..original.clone() };
+        let evm = create_evm2_from_revm_env(
+            EmptyDB::default(),
+            RevmSpecId::FRONTIER,
+            BlockEnv::default(),
+        );
+        let mut executor = Evm2TransactionExecutor::new(evm);
+        let mut db = RevmState::builder()
+            .with_database(CacheDB::new(EmptyDB::default()))
+            .with_bundle_update()
+            .build();
+        let mut stale_storage = StorageKeyMap::default();
+        stale_storage.insert(stale_slot, U256::from(9));
+        db.cache.insert_account_with_storage(
+            address,
+            account_info_from_evm2(original.clone()),
+            stale_storage,
+        );
+        let changes = StateChanges {
+            accounts: core::iter::once((
+                address,
+                Tracked { original: Some(original), current: Some(current), _non_exhaustive: () },
+            ))
+            .collect(),
+            storage: core::iter::once((
+                address,
+                StorageChangeSet {
+                    wipe: true,
+                    slots: core::iter::once((
+                        new_slot,
+                        Tracked {
+                            original: U256::ZERO,
+                            current: U256::from(7),
+                            _non_exhaustive: (),
+                        },
+                    ))
+                    .collect(),
+                    _non_exhaustive: (),
+                },
+            ))
+            .collect(),
+            code: Default::default(),
+            logs: Vec::new(),
+            _non_exhaustive: (),
+        };
+
+        db.commit(evm_state_from_evm2_with_accounts(&mut executor, changes).unwrap());
+
+        assert_eq!(db.storage(address, stale_slot).unwrap(), U256::ZERO);
+        assert_eq!(db.storage(address, new_slot).unwrap(), U256::from(7));
     }
 
     #[test]
