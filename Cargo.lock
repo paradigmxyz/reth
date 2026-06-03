@@ -3632,7 +3632,7 @@ dependencies = [
 [[package]]
 name = "evm2"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?branch=dani%2Fadd-inspectors-crate#56e80550e4961d446af499b0040ce20a6b01adc3"
+source = "git+https://github.com/alloy-rs/evm2?branch=dani%2Fadd-inspectors-crate#d8c70d335d184e4c75f2ccf7f65939f92e8e4b4f"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -3664,7 +3664,7 @@ dependencies = [
 [[package]]
 name = "evm2-inspectors"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?branch=dani%2Fadd-inspectors-crate#56e80550e4961d446af499b0040ce20a6b01adc3"
+source = "git+https://github.com/alloy-rs/evm2?branch=dani%2Fadd-inspectors-crate#d8c70d335d184e4c75f2ccf7f65939f92e8e4b4f"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -3681,7 +3681,7 @@ dependencies = [
 [[package]]
 name = "evm2-macros"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?branch=dani%2Fadd-inspectors-crate#56e80550e4961d446af499b0040ce20a6b01adc3"
+source = "git+https://github.com/alloy-rs/evm2?branch=dani%2Fadd-inspectors-crate#d8c70d335d184e4c75f2ccf7f65939f92e8e4b4f"
 dependencies = [
  "proc-macro2",
  "quote",
