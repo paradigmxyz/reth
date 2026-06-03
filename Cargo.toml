@@ -440,7 +440,7 @@ revm-primitives = { version = "24.0.0", default-features = false }
 revm-interpreter = { version = "37.0.0", default-features = false }
 revm-database-interface = { version = "12.0.0", default-features = false }
 revm-inspectors = "0.40.0"
-evm2 = { path = "../../danipopes/evm2/crates/evm2", default-features = false }
+evm2 = { git = "https://github.com/alloy-rs/evm2", branch = "main", default-features = false }
 
 # eth
 alloy-dyn-abi = "1.6.0"
