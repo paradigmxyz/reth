@@ -592,10 +592,17 @@ fn account_info_revert(
     present: &Option<AccountInfo>,
 ) -> AccountInfoRevert {
     match (original, present) {
+        (Some(original), Some(present)) if account_info_persistent_eq(original, present) => {
+            AccountInfoRevert::DoNothing
+        }
         (Some(original), _) => AccountInfoRevert::RevertTo(original.clone()),
         (None, Some(_)) => AccountInfoRevert::DeleteIt,
         (None, None) => AccountInfoRevert::DoNothing,
     }
+}
+
+fn account_info_persistent_eq(a: &AccountInfo, b: &AccountInfo) -> bool {
+    a.balance == b.balance && a.nonce == b.nonce && a.code_hash == b.code_hash
 }
 
 fn account_info_revert_from_bundle_account(account: &BundleAccount) -> AccountInfoRevert {
@@ -615,10 +622,10 @@ const fn account_status(
 ) -> AccountStatus {
     if present.is_none() && original.is_some() {
         AccountStatus::Destroyed
-    } else if storage_wiped {
-        AccountStatus::DestroyedChanged
     } else if original.is_none() {
         AccountStatus::InMemoryChange
+    } else if storage_wiped {
+        AccountStatus::DestroyedChanged
     } else {
         AccountStatus::Changed
     }
@@ -2185,6 +2192,88 @@ mod tests {
     }
 
     #[test]
+    fn created_account_with_storage_wipe_is_not_destroyed() {
+        let address = address!("0x0000000000000000000000000000000000000018");
+        let code = Evm2Bytecode::new_legacy(Bytes::from_static(&[0x60, 0x00]));
+        let code_hash = code.hash_slow();
+        let changes = StateChanges {
+            accounts: core::iter::once((
+                address,
+                Tracked {
+                    original: None,
+                    current: Some(Evm2AccountInfo {
+                        balance: U256::ZERO,
+                        nonce: 1,
+                        code_hash,
+                        code: Some(code.clone()),
+                        _non_exhaustive: (),
+                    }),
+                    _non_exhaustive: (),
+                },
+            ))
+            .collect(),
+            storage: core::iter::once((
+                address,
+                StorageChangeSet {
+                    wipe: true,
+                    slots: core::iter::once((
+                        U256::from(2),
+                        Tracked {
+                            original: U256::ZERO,
+                            current: U256::from(3),
+                            _non_exhaustive: (),
+                        },
+                    ))
+                    .collect(),
+                    _non_exhaustive: (),
+                },
+            ))
+            .collect(),
+            code: core::iter::once((code_hash, code)).collect(),
+            logs: Vec::new(),
+            _non_exhaustive: (),
+        };
+
+        let bundle = bundle_state_from_evm2(changes);
+        let account = bundle.account(&address).unwrap();
+
+        assert_eq!(account.status, AccountStatus::InMemoryChange);
+        assert!(!account.was_destroyed());
+        assert_eq!(account.info.as_ref().map(|info| info.code_hash), Some(code_hash));
+    }
+
+    #[test]
+    fn unchanged_account_info_revert_is_do_nothing() {
+        let address = address!("0x000000000000000000000000000000000000001a");
+        let code = Evm2Bytecode::new_legacy(Bytes::from_static(&[0x60, 0x00]));
+        let code_hash = code.hash_slow();
+        let original = Evm2AccountInfo {
+            balance: U256::from(1),
+            nonce: 1,
+            code_hash,
+            code: None,
+            _non_exhaustive: (),
+        };
+        let current = Evm2AccountInfo { code: Some(code), ..original.clone() };
+        let changes = StateChanges {
+            accounts: core::iter::once((
+                address,
+                Tracked { original: Some(original), current: Some(current), _non_exhaustive: () },
+            ))
+            .collect(),
+            storage: Default::default(),
+            code: Default::default(),
+            logs: Vec::new(),
+            _non_exhaustive: (),
+        };
+
+        let bundle = bundle_state_from_evm2(changes);
+        let revert = &bundle.reverts[0][0].1;
+
+        assert_eq!(revert.account, AccountInfoRevert::DoNothing);
+    }
+
+    #[test]
     fn converts_destroyed_account_status() {
         let address = address!("0x0000000000000000000000000000000000000002");
         let changes = StateChanges {
@@ -2269,6 +2358,41 @@ mod tests {
 
         assert!(db.bundle_state.account(&address).is_none());
         assert!(db.bundle_state.reverts[0].iter().all(|(addr, _)| *addr != address));
+    }
+
+    #[test]
+    fn created_deleted_account_prune_keeps_older_reverts() {
+        let address = address!("0x0000000000000000000000000000000000000019");
+        let revert = AccountRevert {
+            account: AccountInfoRevert::DeleteIt,
+            storage: Default::default(),
+            previous_status: AccountStatus::Changed,
+            wipe_storage: false,
+        };
+        let mut state = AddressMap::default();
+        state.insert(
+            address,
+            BundleAccount::new(
+                None,
+                Some(AccountInfo::default()),
+                Default::default(),
+                AccountStatus::InMemoryChange,
+            ),
+        );
+        let reverts_size = revert.size_hint() * 2;
+        let mut bundle = BundleState {
+            state,
+            reverts: Reverts::new(vec![vec![(address, revert.clone())], vec![(address, revert)]]),
+            state_size: 1,
+            reverts_size,
+            ..Default::default()
+        };
+
+        crate::execute::prune_created_deleted_empty_accounts(&mut bundle);
+
+        assert_eq!(bundle.reverts[0].len(), 1);
+        assert_eq!(bundle.reverts[1].len(), 0);
+        assert!(bundle.account(&address).is_none());
     }
 
     #[test]
@@ -2769,7 +2893,7 @@ mod tests {
         let bundle = bundle_state_from_evm2(changes);
         let account = bundle.account(&address).unwrap();
 
-        assert!(account.was_destroyed());
+        assert_eq!(account.status, AccountStatus::InMemoryChange);
         assert_eq!(account.storage_slot(U256::from(1)), Some(U256::ZERO));
     }
 
