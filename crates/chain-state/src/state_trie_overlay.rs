@@ -289,38 +289,38 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
             None => ComputeOverlayInput::MergeBlocks(blocks),
         };
 
-        // The vacant entry is the cache-fill gate: racing callers block instead of recomputing.
+        // FIX (jnt-v2 engine wedge): do not hold an `overlays` DashMap entry (shard write) guard
+        // across the blocking overlay compute. Compute first, then recheck-and-insert.
+        self.metrics.overlay_cache_fills.increment(1);
+        let computed = {
+            #[cfg(feature = "rayon")]
+            {
+                if let Some(worker_pool) = &self.worker_pool {
+                    let compute_span = span.clone();
+                    let metrics = self.metrics.clone();
+                    Arc::new(worker_pool.install_fn(move || {
+                        let _guard = compute_span.enter();
+                        compute_overlay(compute_input, anchor_hash, &metrics)
+                    }))
+                } else {
+                    Arc::new(compute_overlay(compute_input, anchor_hash, &self.metrics))
+                }
+            }
+
+            #[cfg(not(feature = "rayon"))]
+            {
+                Arc::new(compute_overlay(compute_input, anchor_hash, &self.metrics))
+            }
+        };
         let input = match self.overlays.entry(key) {
             Entry::Occupied(entry) => {
                 self.metrics.overlay_cache_reuses.increment(1);
                 span.record("cache_reused", true);
-                return Ok(Arc::clone(entry.get()))
+                Arc::clone(entry.get())
             }
             Entry::Vacant(entry) => {
-                self.metrics.overlay_cache_fills.increment(1);
-                let input = {
-                    #[cfg(feature = "rayon")]
-                    {
-                        if let Some(worker_pool) = &self.worker_pool {
-                            let compute_span = span;
-                            let metrics = self.metrics.clone();
-                            Arc::new(worker_pool.install_fn(move || {
-                                let _guard = compute_span.enter();
-                                compute_overlay(compute_input, anchor_hash, &metrics)
-                            }))
-                        } else {
-                            Arc::new(compute_overlay(compute_input, anchor_hash, &self.metrics))
-                        }
-                    }
-
-                    #[cfg(not(feature = "rayon"))]
-                    {
-                        Arc::new(compute_overlay(compute_input, anchor_hash, &self.metrics))
-                    }
-                };
-
-                entry.insert(Arc::clone(&input));
-                input
+                entry.insert(Arc::clone(&computed));
+                computed
             }
         };
 
