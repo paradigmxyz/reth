@@ -1,6 +1,11 @@
 //! Helpers for integrating `evm2` execution output with reth execution types.
 
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
 use alloy_consensus::{
     transaction::Recovered, EthereumReceipt, EthereumTxEnvelope, TxEip4844, TxType,
 };
@@ -565,6 +570,36 @@ pub fn bundle_state_from_evm2(changes: StateChanges) -> BundleState {
     BundleState { state, contracts, reverts: Reverts::new(vec![reverts]), state_size, reverts_size }
 }
 
+fn block_reverts_from_bundle(bundle: &BundleState) -> (Vec<(Address, AccountRevert)>, usize) {
+    let mut reverts = Vec::with_capacity(bundle.state.len());
+    let mut reverts_size = 0;
+
+    for (&address, account) in &bundle.state {
+        let revert = AccountRevert {
+            account: account_info_revert(&account.original_info, &account.info),
+            storage: account
+                .storage
+                .iter()
+                .filter(|(_, slot)| account.was_destroyed() || slot.is_changed())
+                .map(|(&key, slot)| (key, RevertToSlot::Some(slot.original_value())))
+                .collect(),
+            previous_status: AccountStatus::Changed,
+            wipe_storage: account.was_destroyed(),
+        };
+        reverts_size += revert.size_hint();
+        reverts.push((address, revert));
+    }
+
+    (reverts, reverts_size)
+}
+
+fn into_block_bundle(mut bundle: BundleState) -> BundleState {
+    let (reverts, reverts_size) = block_reverts_from_bundle(&bundle);
+    bundle.reverts = Reverts::new(vec![reverts]);
+    bundle.reverts_size = reverts_size;
+    bundle
+}
+
 fn evm_state_from_evm2_with_accounts<R>(
     executor: &mut Evm2TransactionExecutor<R>,
     changes: StateChanges,
@@ -683,7 +718,7 @@ impl Evm2ExecutionOutput {
 
     /// Consumes the output accumulator and returns the merged bundle state.
     pub fn into_bundle(self) -> BundleState {
-        self.bundle
+        into_block_bundle(self.bundle)
     }
 
     /// Takes a built EIP-7928 block access list.
@@ -2316,11 +2351,12 @@ mod tests {
         let account = state.account(&recipient).expect("recipient account exists");
         assert_eq!(account.original_info.as_ref().map(|info| info.balance), Some(U256::from(5)));
         assert_eq!(account.info.as_ref().map(|info| info.balance), Some(U256::from(1_000_000_007)));
-        assert_eq!(state.reverts[1][0].0, recipient);
+        assert_eq!(state.reverts.len(), 1);
+        assert_eq!(state.reverts[0][0].0, recipient);
         assert_eq!(
-            state.reverts[1][0].1.account,
+            state.reverts[0][0].1.account,
             AccountInfoRevert::RevertTo(AccountInfo {
-                balance: U256::from(7),
+                balance: U256::from(5),
                 ..Default::default()
             })
         );

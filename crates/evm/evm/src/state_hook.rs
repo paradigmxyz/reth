@@ -1,3 +1,5 @@
+use alloc::boxed::Box;
+
 use revm::{database::State, state::EvmState};
 
 /// A hook that is called when state changes are committed.
