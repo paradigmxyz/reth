@@ -520,6 +520,7 @@ fn account_info_revert(
         (Some(original), Some(present)) if account_info_persistent_eq(original, present) => {
             AccountInfoRevert::DoNothing
         }
+        (Some(original), None) if original.is_empty() => AccountInfoRevert::DoNothing,
         (Some(original), _) => AccountInfoRevert::RevertTo(original.clone()),
         (None, Some(_)) => AccountInfoRevert::DeleteIt,
         (None, None) => AccountInfoRevert::DoNothing,
@@ -2145,6 +2146,41 @@ mod tests {
             ))
             .collect(),
             storage: Default::default(),
+            code: Default::default(),
+            logs: Vec::new(),
+            _non_exhaustive: (),
+        };
+
+        let bundle = bundle_state_from_evm2(changes);
+        let revert = &bundle.reverts[0][0].1;
+
+        assert_eq!(revert.account, AccountInfoRevert::DoNothing);
+    }
+
+    #[test]
+    fn deleted_empty_account_revert_is_do_nothing() {
+        let address = address!("0x000000000000000000000000000000000000001b");
+        let changes = StateChanges {
+            accounts: core::iter::once((
+                address,
+                Tracked {
+                    original: Some(Evm2AccountInfo {
+                        balance: U256::ZERO,
+                        nonce: 0,
+                        code_hash: KECCAK256_EMPTY,
+                        code: Some(Evm2Bytecode::new()),
+                        _non_exhaustive: (),
+                    }),
+                    current: None,
+                    _non_exhaustive: (),
+                },
+            ))
+            .collect(),
+            storage: core::iter::once((
+                address,
+                StorageChangeSet { wipe: true, slots: Default::default(), _non_exhaustive: () },
+            ))
+            .collect(),
             code: Default::default(),
             logs: Vec::new(),
             _non_exhaustive: (),
