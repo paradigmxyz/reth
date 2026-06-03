@@ -9,7 +9,10 @@ use crate::tree::{
     },
     payload_processor::multiproof::MultiProofTaskMetrics,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{
+    map::{B256Map, B256Set},
+    B256,
+};
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -31,7 +34,7 @@ use reth_trie_sparse::{
     ConfigurableSparseTrie, DeferredDrops, LeafUpdate, RevealableSparseTrie, SparseStateTrie,
     SparseTrie,
 };
-use revm_primitives::{hash_map::Entry, B256Map};
+use revm_primitives::hash_map::Entry;
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
@@ -68,6 +71,8 @@ pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = Configurab
     new_account_updates: B256Map<LeafUpdate>,
     /// Storage updates that are buffered but were not yet applied to the trie.
     new_storage_updates: B256Map<B256Map<LeafUpdate>>,
+    /// Storage tries that should be wiped before applying pending slot updates.
+    storage_wipes: B256Set,
     /// Account updates that are blocked by storage root calculation or account reveal.
     ///
     /// Those are being moved into `account_updates` once storage roots
@@ -157,6 +162,7 @@ where
             storage_updates: Default::default(),
             new_account_updates: Default::default(),
             new_storage_updates: Default::default(),
+            storage_wipes: Default::default(),
             pending_account_updates: Default::default(),
             fetched_account_targets: Default::default(),
             fetched_storage_targets: Default::default(),
@@ -469,6 +475,11 @@ where
     )]
     fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
         for (&address, storage) in &hashed_state_update.storages {
+            if storage.wiped {
+                self.storage_wipes.insert(address);
+                self.new_storage_updates.entry(address).or_default();
+            }
+
             if !storage.storage.is_empty() {
                 // Look up outer maps once per address instead of once per slot.
                 let new_updates = self.new_storage_updates.entry(address).or_default();
@@ -590,6 +601,15 @@ where
         // Process all storage updates, skipping tries with no pending updates.
         let span = trace_span!("process_storage_leaf_updates").entered();
         for (address, updates) in storage_updates {
+            if self.storage_wipes.remove(address) {
+                let trie = self.trie.get_or_create_storage_trie_mut(*address);
+                if trie.is_blind() {
+                    *trie = RevealableSparseTrie::revealed_empty();
+                    trie.as_revealed_mut().expect("trie was just revealed").set_updates(true);
+                }
+                trie.wipe()?;
+            }
+
             if updates.is_empty() {
                 continue;
             }
@@ -996,6 +1016,56 @@ mod tests {
         assert_eq!(decoded.balance, U256::from(42));
         assert_eq!(decoded.storage_root, storage_root);
         assert_eq!(account_rlp_buf, encoded);
+    }
+
+    #[test]
+    fn storage_wipe_without_slots_promotes_empty_storage_root() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = provider_factory.chain_spec().genesis_hash();
+        let overlay_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayBuilder::<reth_chain_state::EthPrimitives>::new(
+                anchor_hash,
+                ChangesetCache::new(),
+            ),
+        );
+        let proof_worker_handle =
+            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (final_hashed_state_tx, _final_hashed_state_rx) = std::sync::mpsc::channel();
+        let default_trie = RevealableSparseTrie::blind_from(ConfigurableSparseTrie::Arena(
+            ArenaParallelSparseTrie::default(),
+        ));
+        let trie = SparseStateTrie::<ConfigurableSparseTrie, ConfigurableSparseTrie>::default()
+            .with_accounts_trie(RevealableSparseTrie::revealed_empty())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            final_hashed_state_tx,
+            proof_worker_handle,
+            MultiProofTaskMetrics::default(),
+            trie,
+            B256::ZERO,
+            1,
+        );
+        let address = keccak256(Address::random());
+        let mut hashed_state = HashedPostState::default();
+        hashed_state.storages.insert(address, reth_trie::HashedStorage::new(true));
+
+        task.on_hashed_state_update(hashed_state);
+        task.pending_updates = 1;
+        task.process_new_updates().expect("state updates process");
+        task.promote_pending_account_updates().expect("account update promotes");
+
+        assert_eq!(task.trie.storage_root(&address), Some(EMPTY_ROOT_HASH));
+
+        let (_, trie_updates) = task.trie.root_with_updates().expect("root computes");
+        assert!(trie_updates.storage_tries[&address].is_deleted);
+
+        drop(updates_tx);
     }
 
     #[test]

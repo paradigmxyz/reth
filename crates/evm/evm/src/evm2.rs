@@ -569,7 +569,8 @@ where
     let mut storage = changes.storage;
 
     for (address, account) in changes.accounts {
-        let is_created = account.original.is_none() && account.current.is_some();
+        let original = account.original.map(account_info_from_evm2);
+        let is_created = original.is_none() && account.current.is_some();
         let mut revm_account = match account.current {
             Some(info) => {
                 let mut account = RevmAccount::default();
@@ -586,6 +587,9 @@ where
         revm_account.mark_touch();
         if is_created {
             revm_account.mark_created();
+        }
+        if let Some(original) = original {
+            *revm_account.original_info_mut() = original;
         }
         if let Some(storage) = storage.remove(&address) {
             revm_account.storage = storage
@@ -1890,6 +1894,42 @@ mod tests {
         let bundle = bundle_state_from_evm2(changes);
 
         assert!(bundle.account(&address).unwrap().was_destroyed());
+    }
+
+    #[test]
+    fn converts_destroyed_account_original_info_for_state_hook() {
+        let address = address!("0x000000000000000000000000000000000000000c");
+        let original = Evm2AccountInfo {
+            balance: U256::from(1),
+            nonce: 1,
+            code_hash: B256::with_last_byte(1),
+            code: None,
+            _non_exhaustive: (),
+        };
+        let changes = StateChanges {
+            accounts: core::iter::once((
+                address,
+                Tracked { original: Some(original.clone()), current: None, _non_exhaustive: () },
+            ))
+            .collect(),
+            storage: Default::default(),
+            code: Default::default(),
+            logs: Vec::new(),
+            _non_exhaustive: (),
+        };
+        let evm = create_evm2_from_revm_env(
+            EmptyDB::default(),
+            RevmSpecId::FRONTIER,
+            BlockEnv::default(),
+        );
+        let mut executor = Evm2TransactionExecutor::new(evm);
+
+        let state =
+            evm_state_from_evm2_with_accounts(&mut executor, changes).expect("evm state converts");
+        let account = state.get(&address).expect("account exists");
+
+        assert!(account.is_selfdestructed());
+        assert_eq!(account.original_info().code_hash, original.code_hash);
     }
 
     #[test]
