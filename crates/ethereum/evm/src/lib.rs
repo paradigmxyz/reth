@@ -55,8 +55,6 @@ use {
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_and_block_number};
 use reth_ethereum_forks::{EthereumHardfork, Hardforks};
-pub use reth_evm::EthEvm;
-
 mod build;
 pub use build::EthBlockAssembler;
 
