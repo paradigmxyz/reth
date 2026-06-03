@@ -3632,7 +3632,7 @@ dependencies = [
 [[package]]
 name = "evm2"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?branch=main#c61653463f056d7df660ba148bae56df7068b88c"
+source = "git+https://github.com/alloy-rs/evm2?branch=dani%2Fadd-inspectors-crate#517b40f196a7e0bb9baca4cce56283357bf1855b"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -3653,6 +3653,7 @@ dependencies = [
  "k256",
  "once_cell",
  "p256",
+ "phf",
  "ripemd 0.2.0",
  "secp256k1 0.31.1",
  "serde",
@@ -3663,7 +3664,7 @@ dependencies = [
 [[package]]
 name = "evm2-macros"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?branch=main#c61653463f056d7df660ba148bae56df7068b88c"
+source = "git+https://github.com/alloy-rs/evm2?branch=dani%2Fadd-inspectors-crate#517b40f196a7e0bb9baca4cce56283357bf1855b"
 dependencies = [
  "proc-macro2",
  "quote",

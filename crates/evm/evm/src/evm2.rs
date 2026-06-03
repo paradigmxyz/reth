@@ -97,7 +97,7 @@ pub fn precompile_cache_for_spec(spec: SpecId) -> &'static Precompiles {
 /// Returns an evm2 precompile provider for the given spec.
 #[cfg(feature = "std")]
 pub fn precompiles_for_spec(spec: SpecId) -> Precompiles {
-    precompile_cache_for_spec(spec).clone()
+    Precompiles::base(spec)
 }
 
 /// Returns an evm2 precompile provider for the given spec.
