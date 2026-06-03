@@ -18,4 +18,4 @@ pub use revm::{
         EvmStorageSlot, TransactionId,
     },
 };
-pub use revm_database_interface::{bal::EvmDatabaseError, DatabaseCommit, EmptyDB};
+pub use revm_database_interface::{bal::EvmDatabaseError, DatabaseCommit, EmptyDB, EmptyDBTyped};
