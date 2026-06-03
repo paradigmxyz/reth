@@ -20,6 +20,7 @@ revm-database-interface.workspace = true
 
 # alloy
 alloy-consensus.workspace = true
+alloy-eip7928.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-rlp = { workspace = true, optional = true }
@@ -44,6 +45,7 @@ serde = [
     "rand/serde",
     "revm/serde",
     "alloy-eips/serde",
+    "alloy-eip7928/serde",
     "alloy-primitives/serde",
     "reth-primitives-traits/serde",
     "alloy-consensus/serde",
@@ -61,6 +63,7 @@ serde-bincode-compat = [
 ]
 std = [
     "alloy-eips/std",
+    "alloy-eip7928/std",
     "alloy-primitives/std",
     "revm/std",
     "revm-database-interface/std",

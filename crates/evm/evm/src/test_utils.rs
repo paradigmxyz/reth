@@ -7,6 +7,7 @@ use alloy_primitives::{
     map::{AddressMap, B256Map, HashMap},
     Address, BlockNumber, Bytes, StorageKey, B256, U256,
 };
+use reth_execution_types::State;
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
     AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
@@ -14,7 +15,6 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::{HashedPostState, HashedStorage, KeccakKeyHasher};
-use revm::database::State;
 
 impl<Factory, DB> BasicBlockExecutor<Factory, DB> {
     /// Provides safe read access to the state

@@ -5,7 +5,8 @@ use alloy_evm::{
     block::{BlockExecutorFactory, BlockExecutorFor},
     Database, EvmEnv, EvmFactory,
 };
-use revm::{database::State, inspector::NoOpInspector, Inspector};
+use reth_execution_types::State;
+use revm::{inspector::NoOpInspector, Inspector};
 
 /// Helper to access [`EvmFactory`] for a given [`ConfigureEvm`].
 pub type EvmFactoryFor<Evm> =

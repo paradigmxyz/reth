@@ -21,7 +21,8 @@ pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
 use reth_execution_types::{
-    AccountInfoRevert, AccountStatus, BlockExecutionResult, BundleRetention, BundleState,
+    AccountInfoRevert, AccountStatus, Bal, BlockExecutionResult, BundleRetention, BundleState,
+    State,
 };
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_primitives_traits::{
@@ -30,7 +31,6 @@ use reth_primitives_traits::{
 use reth_storage_api::StateProvider;
 pub use reth_storage_errors::provider::ProviderError;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
-use revm::{database::State, state::bal::Bal};
 
 /// Converts a temporary alloy block execution error into reth's owned execution error type.
 pub fn convert_alloy_block_execution_error(error: AlloyBlockExecutionError) -> BlockExecutionError {

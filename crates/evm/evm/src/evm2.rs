@@ -32,7 +32,7 @@ use alloy_evm::{
     RecoveredTx,
 };
 use alloy_primitives::{
-    map::{AddressMap, B256Map},
+    map::{AddressMap, B256Map, HashMap},
     Address, Bytes, B256, U256,
 };
 use core::{error::Error, fmt, ptr::NonNull};
@@ -60,7 +60,7 @@ use revm::{
         BlockEnv,
     },
     inspector::Inspector,
-    primitives::{hardfork::SpecId as RevmSpecId, StorageKeyMap},
+    primitives::hardfork::SpecId as RevmSpecId,
     state::{
         Account as RevmAccount, AccountInfo, Bytecode, EvmState, EvmStorageSlot, TransactionId,
     },
@@ -494,7 +494,7 @@ fn storage_from_evm2(storage: StorageChangeSet) -> StorageWithOriginalValues {
         .collect()
 }
 
-fn storage_reverts_from_evm2(storage: &StorageChangeSet) -> StorageKeyMap<RevertToSlot> {
+fn storage_reverts_from_evm2(storage: &StorageChangeSet) -> HashMap<U256, RevertToSlot> {
     storage.slots.iter().map(|(&key, slot)| (key, RevertToSlot::Some(slot.original))).collect()
 }
 
@@ -584,7 +584,7 @@ fn bundle_account_has_nonzero_storage_after(
         .any(|(key, slot)| !account.storage.contains_key(key) && !slot.current.is_zero())
 }
 
-/// Converts a single `evm2` transaction or system-call state change set into a revm bundle.
+/// Converts a single `evm2` transaction or system-call state change set into a bundle.
 pub fn bundle_state_from_evm2(changes: StateChanges) -> BundleState {
     let mut state = AddressMap::<BundleAccount>::default();
     let mut contracts = B256Map::<Bytecode>::default();
@@ -2027,8 +2027,9 @@ mod tests {
         evm::{precompile::PrecompileProvider, Tracked},
         interpreter::Host,
     };
+    use reth_execution_types::{BundleRetention, State};
     use revm::{
-        database::{states::bundle_state::BundleRetention, CacheDB, EmptyDB, State as RevmState},
+        database::{CacheDB, EmptyDB},
         Database, DatabaseCommit,
     };
 
@@ -2150,7 +2151,7 @@ mod tests {
             code: None,
             _non_exhaustive: (),
         };
-        let current = Evm2AccountInfo { code: Some(code), ..original.clone() };
+        let current = Evm2AccountInfo { code: Some(code), ..original };
         let changes = StateChanges {
             accounts: core::iter::once((
                 address,
@@ -2318,7 +2319,7 @@ mod tests {
         let mut executor = Evm2TransactionExecutor::new(evm);
         let evm_state =
             evm_state_from_evm2_with_accounts(&mut executor, changes).expect("evm state converts");
-        let mut db = RevmState::builder()
+        let mut db = State::builder()
             .with_database(CacheDB::new(EmptyDB::default()))
             .with_bundle_update()
             .build();
@@ -2466,7 +2467,7 @@ mod tests {
             BlockEnv::default(),
         );
         let mut executor = Evm2TransactionExecutor::new(evm);
-        let mut db = RevmState::builder()
+        let mut db = State::builder()
             .with_database(CacheDB::new(EmptyDB::default()))
             .with_bundle_update()
             .build();
@@ -2555,7 +2556,7 @@ mod tests {
             BlockEnv::default(),
         );
         let mut executor = Evm2TransactionExecutor::new(evm);
-        let mut db = RevmState::builder()
+        let mut db = State::builder()
             .with_database(CacheDB::new(EmptyDB::default()))
             .with_bundle_update()
             .build();
@@ -2640,7 +2641,7 @@ mod tests {
             BlockEnv::default(),
         );
         let mut executor = Evm2TransactionExecutor::new(evm);
-        let mut db = RevmState::builder()
+        let mut db = State::builder()
             .with_database(CacheDB::new(EmptyDB::default()))
             .with_bundle_update()
             .build();
@@ -2824,11 +2825,11 @@ mod tests {
             BlockEnv::default(),
         );
         let mut executor = Evm2TransactionExecutor::new(evm);
-        let mut db = RevmState::builder()
+        let mut db = State::builder()
             .with_database(CacheDB::new(EmptyDB::default()))
             .with_bundle_update()
             .build();
-        let mut stale_storage = StorageKeyMap::default();
+        let mut stale_storage = HashMap::default();
         stale_storage.insert(stale_slot, U256::from(9));
         db.cache.insert_account_with_storage(
             address,
@@ -2880,7 +2881,7 @@ mod tests {
             BlockEnv::default(),
         );
         let mut executor = Evm2TransactionExecutor::new(evm);
-        let mut db = RevmState::builder()
+        let mut db = State::builder()
             .with_database(CacheDB::new(EmptyDB::default()))
             .with_bundle_update()
             .build();

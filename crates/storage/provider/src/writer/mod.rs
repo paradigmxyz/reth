@@ -12,9 +12,9 @@ mod tests {
     };
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{
-        Account as ExecutionAccount, AccountInfo as ExecutionAccountInfo, AccountStatus, BundleRetention,
-        BundleState, DatabaseCommit, EmptyDB, EvmStorageSlot, ExecutionOutcome,
-        OriginalValuesKnown, PlainStorageChangeset, PlainStorageRevert, State,
+        Account as ExecutionAccount, AccountInfo as ExecutionAccountInfo, BundleRetention,
+        BundleState, DatabaseCommit, EmptyDB, EvmAccountStatus as AccountStatus, EvmStorageSlot,
+        ExecutionOutcome, OriginalValuesKnown, PlainStorageChangeset, PlainStorageRevert, State,
     };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{

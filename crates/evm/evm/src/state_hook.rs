@@ -1,6 +1,7 @@
 use alloc::boxed::Box;
 
-use revm::{database::State, state::EvmState};
+use crate::Database;
+use reth_execution_types::{EvmState, State};
 
 /// A hook that is called when state changes are committed.
 pub trait OnStateHook: Send + 'static {
@@ -23,17 +24,15 @@ pub trait StateHookExt {
     fn set_reth_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>);
 }
 
-impl<DB: revm::Database> StateHookExt for State<DB> {
+impl<DB: Database> StateHookExt for State<DB> {
     fn set_reth_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
-        self.set_state_hook(
-            hook.map(|hook| Box::new(RevmStateHook(hook)) as Box<dyn revm::OnStateHook>),
-        );
+        self.set_state_hook(hook.map(|hook| Box::new(RethStateHook(hook)) as _));
     }
 }
 
-struct RevmStateHook(Box<dyn OnStateHook>);
+struct RethStateHook(Box<dyn OnStateHook>);
 
-impl revm::OnStateHook for RevmStateHook {
+impl reth_execution_types::OnStateHook for RethStateHook {
     fn on_state(&mut self, state: &EvmState) {
         self.0.on_state(state);
     }

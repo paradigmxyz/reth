@@ -1010,16 +1010,11 @@ mod tests {
         let address_1 = Address::random();
         let address_2 = Address::random();
 
-        let account_info_1 = AccountInfo {
-            balance: U256::from(1000),
-            nonce: 1,
-            code_hash: B256::random(),
-            code: None,
-            account_id: None,
-        };
+        let account_info_1 =
+            Account { balance: U256::from(1000), nonce: 1, bytecode_hash: Some(B256::random()) };
 
         // Create hashed accounts with addresses.
-        let account_1 = (keccak256(address_1), Some(account_info_1.into()));
+        let account_1 = (keccak256(address_1), Some(account_info_1));
         let account_2 = (keccak256(address_2), None);
 
         // Add accounts to the hashed post state.

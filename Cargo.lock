@@ -8947,6 +8947,7 @@ name = "reth-execution-types"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eip7928 0.4.1",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",

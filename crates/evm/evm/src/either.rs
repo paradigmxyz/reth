@@ -4,7 +4,7 @@ use crate::{execute::Executor, Database, OnStateHook};
 
 // re-export Either
 pub use futures_util::future::Either;
-use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
+use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, State};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 
 impl<A, B, DB> Executor<DB> for Either<A, B>
@@ -58,7 +58,7 @@ where
         state: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(&revm::database::State<DB>),
+        F: FnMut(&State<DB>),
     {
         match self {
             Self::Left(a) => a.execute_with_state_closure(block, state),
@@ -66,7 +66,7 @@ where
         }
     }
 
-    fn into_state(self) -> revm::database::State<DB> {
+    fn into_state(self) -> State<DB> {
         match self {
             Self::Left(a) => a.into_state(),
             Self::Right(b) => b.into_state(),

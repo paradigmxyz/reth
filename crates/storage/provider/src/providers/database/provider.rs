@@ -5004,7 +5004,7 @@ mod tests {
     }
 
     fn run_save_blocks_and_verify(mode: StorageMode) {
-        use alloy_primitives::map::{FbBuildHasher, HashMap};
+        use alloy_primitives::map::HashMap;
 
         let factory = create_test_provider_factory();
 
@@ -5056,8 +5056,7 @@ mod tests {
                     ..Default::default()
                 };
 
-                let storage: HashMap<U256, (U256, U256), FbBuildHasher<32>> = (1..=
-                    slots_per_account as u64)
+                let storage: HashMap<U256, (U256, U256)> = (1..=slots_per_account as u64)
                     .map(|s| {
                         (
                             U256::from(s + acct_idx as u64 * 100),
