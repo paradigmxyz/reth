@@ -699,6 +699,13 @@ where
                 .bundle
                 .account(&address)
                 .is_some_and(bundle_account_created_in_block);
+        let empty_account_delete = account.current.is_none() &&
+            original.as_ref().is_some_and(AccountInfo::is_empty) &&
+            storage.get(&address).is_none_or(|storage| storage.slots.is_empty());
+        if empty_account_delete {
+            storage.remove(&address);
+            continue;
+        }
         if (original.is_none() && account.current.is_none()) || is_deleted_after_block_creation {
             storage.remove(&address);
             let mut account = RevmAccount::new_not_existing(TransactionId::ZERO);
@@ -2190,6 +2197,46 @@ mod tests {
         let revert = &bundle.reverts[0][0].1;
 
         assert_eq!(revert.account, AccountInfoRevert::DoNothing);
+    }
+
+    #[test]
+    fn deleted_empty_account_is_skipped_in_revm_state() {
+        let address = address!("0x000000000000000000000000000000000000001c");
+        let changes = StateChanges {
+            accounts: core::iter::once((
+                address,
+                Tracked {
+                    original: Some(Evm2AccountInfo {
+                        balance: U256::ZERO,
+                        nonce: 0,
+                        code_hash: KECCAK256_EMPTY,
+                        code: Some(Evm2Bytecode::new()),
+                        _non_exhaustive: (),
+                    }),
+                    current: None,
+                    _non_exhaustive: (),
+                },
+            ))
+            .collect(),
+            storage: core::iter::once((
+                address,
+                StorageChangeSet { wipe: true, slots: Default::default(), _non_exhaustive: () },
+            ))
+            .collect(),
+            code: Default::default(),
+            logs: Vec::new(),
+            _non_exhaustive: (),
+        };
+        let evm = create_evm2_from_revm_env(
+            EmptyDB::default(),
+            RevmSpecId::FRONTIER,
+            BlockEnv::default(),
+        );
+        let mut executor = Evm2TransactionExecutor::new(evm);
+        let evm_state =
+            evm_state_from_evm2_with_accounts(&mut executor, changes).expect("evm state converts");
+
+        assert!(!evm_state.contains_key(&address));
     }
 
     #[test]
