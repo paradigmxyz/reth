@@ -1866,7 +1866,7 @@ where
                     &computed.trie_updates,
                 ) {
                     Ok(changesets) => {
-                        debug!(
+                        trace!(
                             target: "engine::tree::changeset",
                             ?block_number,
                             elapsed = ?changeset_start.elapsed(),
