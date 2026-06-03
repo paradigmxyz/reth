@@ -256,8 +256,16 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             .map_err(|err| Error::block_failed(block_number, err))?;
 
         // Compute and check the post state root
-        let hashed_state =
-            HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
+        let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher, _>(
+            output.state.state().iter().map(|(address, account)| {
+                (
+                    address,
+                    account.info.as_ref().map(Into::into),
+                    account.was_destroyed(),
+                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                )
+            }),
+        );
         let sorted = hashed_state.clone_into_sorted();
         let (computed_state_root, _) = reth_trie_db::with_adapter!(provider, |A| {
             StateRoot::<reth_trie_db::DatabaseTrieCursorFactory<_, A>, _>::overlay_root_with_updates(
