@@ -5,7 +5,7 @@ use alloy_primitives::{
     Address, B256, U256,
 };
 use core::cell::RefCell;
-use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
+use reth_execution_types::{AccountInfo, Bytecode, Database, DatabaseRef};
 
 /// A container type that caches reads from an underlying [`DatabaseRef`].
 #[derive(Debug, Clone, Default)]
