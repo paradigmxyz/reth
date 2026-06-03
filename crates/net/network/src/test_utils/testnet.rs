@@ -19,7 +19,7 @@ use reth_eth_wire::{
     protocol::Protocol, DisconnectReason, EthNetworkPrimitives, HelloMessageWithProtocols,
 };
 use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
-use reth_evm_ethereum::EthEvmConfig;
+use reth_evm_ethereum::EthEvm2Config;
 use reth_metrics::common::mpsc::memory_bounded_channel;
 use reth_network_api::{
     events::{PeerEvent, SessionInfo},
@@ -192,12 +192,12 @@ where
     /// Installs an eth pool on each peer
     pub fn with_eth_pool(
         self,
-    ) -> Testnet<C, EthTransactionPool<C, InMemoryBlobStore, EthEvmConfig>> {
+    ) -> Testnet<C, EthTransactionPool<C, InMemoryBlobStore, EthEvm2Config>> {
         self.map_pool(|peer| {
             let blob_store = InMemoryBlobStore::default();
             let pool = TransactionValidationTaskExecutor::eth(
                 peer.client.clone(),
-                EthEvmConfig::mainnet(),
+                EthEvm2Config::mainnet(),
                 blob_store.clone(),
                 Runtime::test(),
             );
@@ -213,7 +213,7 @@ where
     pub fn with_eth_pool_config(
         self,
         tx_manager_config: TransactionsManagerConfig,
-    ) -> Testnet<C, EthTransactionPool<C, InMemoryBlobStore, EthEvmConfig>> {
+    ) -> Testnet<C, EthTransactionPool<C, InMemoryBlobStore, EthEvm2Config>> {
         self.with_eth_pool_config_and_policy(tx_manager_config, Default::default())
     }
 
@@ -222,12 +222,12 @@ where
         self,
         tx_manager_config: TransactionsManagerConfig,
         policy: TransactionPropagationKind,
-    ) -> Testnet<C, EthTransactionPool<C, InMemoryBlobStore, EthEvmConfig>> {
+    ) -> Testnet<C, EthTransactionPool<C, InMemoryBlobStore, EthEvm2Config>> {
         self.map_pool(|peer| {
             let blob_store = InMemoryBlobStore::default();
             let pool = TransactionValidationTaskExecutor::eth(
                 peer.client.clone(),
-                EthEvmConfig::mainnet(),
+                EthEvm2Config::mainnet(),
                 blob_store.clone(),
                 Runtime::test(),
             );

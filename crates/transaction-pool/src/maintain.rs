@@ -859,7 +859,7 @@ mod tests {
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
     use reth_ethereum_primitives::PooledTransactionVariant;
-    use reth_evm_ethereum::EthEvmConfig;
+    use reth_evm_ethereum::EthEvm2Config;
     use reth_fs_util as fs;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_tasks::Runtime;
@@ -889,7 +889,7 @@ mod tests {
         let sender = hex!("1f9090aaE28b8a3dCeaDf281B0F12828e676c326").into();
         provider.add_account(sender, ExtendedAccount::new(42, U256::MAX));
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider, EthEvmConfig::mainnet())
+        let validator = EthTransactionValidatorBuilder::new(provider, EthEvm2Config::mainnet())
             .build(blob_store.clone());
 
         let txpool = Pool::new(

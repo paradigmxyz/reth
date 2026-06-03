@@ -22,7 +22,7 @@ use reth_evm::{
     execute::{BasicBlockExecutor, Executor},
     ConfigureEvm,
 };
-use reth_evm_ethereum::{EthEvm2Config, EthEvmConfig};
+use reth_evm_ethereum::EthEvm2Config;
 use reth_execution_types::{AccountInfo, BlockExecutionResult, Bytecode, EvmState};
 use reth_primitives_traits::{
     crypto::secp256k1::public_key_to_address, Block as _, RecoveredBlock,
@@ -150,7 +150,7 @@ fn eip_4788_non_genesis_call() {
             .build(),
     );
 
-    let provider = EthEvmConfig::new(chain_spec);
+    let provider = EthEvm2Config::new(chain_spec);
 
     let mut executor = BasicBlockExecutor::new(provider, db);
 
@@ -230,7 +230,7 @@ fn eip_4788_no_code_cancun() {
             .build(),
     );
 
-    let provider = EthEvmConfig::new(chain_spec);
+    let provider = EthEvm2Config::new(chain_spec);
 
     // attempt to execute an empty block with parent beacon block root, this should not fail
     provider
@@ -262,7 +262,7 @@ fn eip_4788_empty_account_call() {
             .build(),
     );
 
-    let provider = EthEvmConfig::new(chain_spec);
+    let provider = EthEvm2Config::new(chain_spec);
 
     // construct the header for block one
     let header = Header {
@@ -305,7 +305,7 @@ fn eip_4788_genesis_call() {
     );
 
     let mut header = chain_spec.genesis_header().clone();
-    let provider = EthEvmConfig::new(chain_spec);
+    let provider = EthEvm2Config::new(chain_spec);
     let mut executor = BasicBlockExecutor::new(provider, db);
 
     // attempt to execute the genesis block with non-zero parent beacon block root, expect err
@@ -364,7 +364,7 @@ fn eip_4788_high_base_fee() {
             .build(),
     );
 
-    let provider = EthEvmConfig::new(chain_spec);
+    let provider = EthEvm2Config::new(chain_spec);
 
     // execute header
     let mut executor = BasicBlockExecutor::new(provider, db);
@@ -430,7 +430,7 @@ fn eip_2935_pre_fork() {
             .build(),
     );
 
-    let provider = EthEvmConfig::new(chain_spec);
+    let provider = EthEvm2Config::new(chain_spec);
     let mut executor = BasicBlockExecutor::new(provider, db);
 
     // construct the header for block one
@@ -467,7 +467,7 @@ fn eip_2935_fork_activation_genesis() {
     );
 
     let header = chain_spec.genesis_header().clone();
-    let provider = EthEvmConfig::new(chain_spec);
+    let provider = EthEvm2Config::new(chain_spec);
     let mut executor = BasicBlockExecutor::new(provider, db);
 
     // attempt to execute genesis block, this should not fail
@@ -510,7 +510,7 @@ fn eip_2935_fork_activation_within_window_bounds() {
         parent_beacon_block_root: Some(B256::random()),
         ..Header::default()
     };
-    let provider = EthEvmConfig::new(chain_spec);
+    let provider = EthEvm2Config::new(chain_spec);
     let mut executor = BasicBlockExecutor::new(provider, db);
 
     // attempt to execute the fork activation block, this should not fail
@@ -552,7 +552,7 @@ fn eip_2935_fork_activation_outside_window_bounds() {
             .build(),
     );
 
-    let provider = EthEvmConfig::new(chain_spec);
+    let provider = EthEvm2Config::new(chain_spec);
     let mut executor = BasicBlockExecutor::new(provider, db);
 
     let header = Header {
@@ -594,7 +594,7 @@ fn eip_2935_state_transition_inside_fork() {
     let header = chain_spec.genesis_header().clone();
     let header_hash = header.hash_slow();
 
-    let provider = EthEvmConfig::new(chain_spec);
+    let provider = EthEvm2Config::new(chain_spec);
     let mut executor = BasicBlockExecutor::new(provider, db);
 
     // attempt to execute the genesis block, this should not fail
@@ -731,7 +731,7 @@ fn eip_7002() {
         }),
     );
 
-    let provider = EthEvmConfig::new(chain_spec);
+    let provider = EthEvm2Config::new(chain_spec);
 
     let mut executor = provider.batch_executor(db);
 
@@ -807,7 +807,7 @@ fn block_gas_limit_error() {
     );
 
     // Create an executor from the state provider
-    let evm_config = EthEvmConfig::new(chain_spec);
+    let evm_config = EthEvm2Config::new(chain_spec);
     let mut executor = evm_config.batch_executor(db);
 
     // Execute the block and capture the result
@@ -872,7 +872,7 @@ fn test_balance_increment_not_duplicated() {
         vec![],
     );
 
-    let provider = EthEvmConfig::new(chain_spec);
+    let provider = EthEvm2Config::new(chain_spec);
     let executor = provider.batch_executor(db);
 
     let (tx, rx) = mpsc::channel();

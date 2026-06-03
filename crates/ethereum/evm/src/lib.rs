@@ -51,16 +51,6 @@ pub use config::{revm_spec, revm_spec_by_timestamp_and_block_number};
 use reth_ethereum_forks::{EthereumHardfork, Hardforks};
 pub use reth_evm::EthEvm;
 
-/// Helper type with backwards compatible methods to obtain Ethereum executor
-/// providers.
-#[doc(hidden)]
-pub mod execute {
-    use crate::EthEvmConfig;
-
-    #[deprecated(note = "Use `EthEvmConfig` instead")]
-    pub type EthExecutorProvider = EthEvmConfig;
-}
-
 mod build;
 pub use build::EthBlockAssembler;
 
@@ -68,9 +58,6 @@ pub use build::EthBlockAssembler;
 mod test_utils;
 #[cfg(feature = "test-utils")]
 pub use test_utils::*;
-
-/// Ethereum-related EVM configuration.
-pub type EthEvmConfig<C = ChainSpec, EvmFactory = EthEvmFactory> = EthEvm2Config<C, EvmFactory>;
 
 /// Ethereum-related EVM configuration backed by evm2 execution.
 #[derive(Debug, Clone)]
@@ -376,10 +363,10 @@ mod tests {
             .shanghai_activated()
             .build();
 
-        // Use the `EthEvmConfig` to fill the `cfg_env` and `block_env` based on the ChainSpec,
+        // Use the `EthEvm2Config` to fill the `cfg_env` and `block_env` based on the ChainSpec,
         // Header, and total difficulty
         let EvmEnv { cfg_env, .. } =
-            EthEvmConfig::new(Arc::new(chain_spec.clone())).evm_env(&header).unwrap();
+            EthEvm2Config::new(Arc::new(chain_spec.clone())).evm_env(&header).unwrap();
 
         // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
         // ChainSpec
@@ -388,7 +375,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_env_default_spec() {
-        let evm_config = EthEvmConfig::mainnet();
+        let evm_config = EthEvm2Config::mainnet();
 
         let db = test_db();
 
@@ -403,7 +390,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_env_custom_cfg() {
-        let evm_config = EthEvmConfig::mainnet();
+        let evm_config = EthEvm2Config::mainnet();
 
         let db = test_db();
 
@@ -420,7 +407,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_env_custom_block_and_tx() {
-        let evm_config = EthEvmConfig::mainnet();
+        let evm_config = EthEvm2Config::mainnet();
 
         let db = test_db();
 
@@ -445,7 +432,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_spec_id() {
-        let evm_config = EthEvmConfig::mainnet();
+        let evm_config = EthEvm2Config::mainnet();
 
         let db = test_db();
 
@@ -462,7 +449,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_env_and_default_inspector() {
-        let evm_config = EthEvmConfig::mainnet();
+        let evm_config = EthEvm2Config::mainnet();
         let db = test_db();
 
         let evm_env = EvmEnv::default();
@@ -476,7 +463,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_env_inspector_and_custom_cfg() {
-        let evm_config = EthEvmConfig::mainnet();
+        let evm_config = EthEvm2Config::mainnet();
         let db = test_db();
 
         let cfg_env = CfgEnv::default().with_chain_id(111);
@@ -492,7 +479,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_env_inspector_and_custom_block_tx() {
-        let evm_config = EthEvmConfig::mainnet();
+        let evm_config = EthEvm2Config::mainnet();
         let db = test_db();
 
         // Create custom block and tx environment
@@ -513,7 +500,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_env_inspector_and_spec_id() {
-        let evm_config = EthEvmConfig::mainnet();
+        let evm_config = EthEvm2Config::mainnet();
         let db = test_db();
 
         let evm_env = EvmEnv {

@@ -1031,7 +1031,7 @@ mod tests {
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::OnStateHook;
-    use reth_evm_ethereum::EthEvmConfig;
+    use reth_evm_ethereum::EthEvm2Config;
     use reth_execution_cache::CachedStatus;
     use reth_execution_types::{
         Account as EvmAccount, AccountInfo, BundleState, EvmAccountStatus, EvmState,
@@ -1142,7 +1142,7 @@ mod tests {
     fn on_inserted_executed_block_populates_cache() {
         let payload_processor = PayloadProcessor::new(
             reth_tasks::Runtime::test(),
-            EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            EthEvm2Config::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
         );
@@ -1171,7 +1171,7 @@ mod tests {
     fn on_inserted_executed_block_skips_on_parent_mismatch() {
         let payload_processor = PayloadProcessor::new(
             reth_tasks::Runtime::test(),
-            EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            EthEvm2Config::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
         );
@@ -1206,7 +1206,7 @@ mod tests {
     fn on_inserted_executed_block_does_not_mutate_checked_out_parent_cache() {
         let payload_processor = PayloadProcessor::new(
             reth_tasks::Runtime::test(),
-            EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            EthEvm2Config::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
         );
@@ -1363,7 +1363,7 @@ mod tests {
 
         let mut payload_processor = PayloadProcessor::new(
             reth_tasks::Runtime::test(),
-            EthEvmConfig::new(factory.chain_spec()),
+            EthEvm2Config::new(factory.chain_spec()),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
         );

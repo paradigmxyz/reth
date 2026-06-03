@@ -27,7 +27,7 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm, NextBlockEnvAttributes, StateHookExt,
 };
-use reth_evm_ethereum::EthEvmConfig;
+use reth_evm_ethereum::EthEvm2Config;
 use reth_execution_cache::{CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider};
 use reth_payload_builder::{BlobSidecars, EthBuiltPayload};
 use reth_payload_builder_primitives::PayloadBuilderError;
@@ -54,7 +54,7 @@ type BestTransactionsIter<Pool> = Box<
 
 /// Ethereum payload builder
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EthereumPayloadBuilder<Pool, Client, EvmConfig = EthEvmConfig> {
+pub struct EthereumPayloadBuilder<Pool, Client, EvmConfig = EthEvm2Config> {
     /// Client providing access to node state.
     client: Client,
     /// Transaction pool.

@@ -134,7 +134,7 @@ pub async fn setup_engine_with_chain_import(
         let config = Config::default();
 
         // Create EVM and consensus for Ethereum
-        let evm_config = reth_node_ethereum::EthEvmConfig::new(chain_spec.clone());
+        let evm_config = reth_node_ethereum::EthEvm2Config::new(chain_spec.clone());
         // Use NoopConsensus to skip gas limit validation for test imports
         let consensus = reth_consensus::noop::NoopConsensus::arc();
 
@@ -338,7 +338,7 @@ mod tests {
             // Import the chain data
             let import_config = ImportConfig::default();
             let config = Config::default();
-            let evm_config = reth_node_ethereum::EthEvmConfig::new(chain_spec.clone());
+            let evm_config = reth_node_ethereum::EthEvm2Config::new(chain_spec.clone());
             // Use NoopConsensus to skip gas limit validation for test imports
             let consensus = reth_consensus::noop::NoopConsensus::arc();
             let runtime = reth_tasks::Runtime::test();
@@ -505,7 +505,7 @@ mod tests {
         // Import the chain data
         let import_config = ImportConfig::default();
         let config = Config::default();
-        let evm_config = reth_node_ethereum::EthEvmConfig::new(chain_spec.clone());
+        let evm_config = reth_node_ethereum::EthEvm2Config::new(chain_spec.clone());
         // Use NoopConsensus to skip gas limit validation for test imports
         let consensus = reth_consensus::noop::NoopConsensus::arc();
         let runtime = reth_tasks::Runtime::test();

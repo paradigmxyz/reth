@@ -11,7 +11,7 @@ use alloy_primitives::{Bytes, U256};
 use alloy_rpc_client::RpcClient;
 use derive_more::Deref;
 use reth_chainspec::{ChainSpec, ChainSpecProvider};
-use reth_evm_ethereum::EthEvmConfig;
+use reth_evm_ethereum::EthEvm2Config;
 use reth_network_api::noop::NoopNetwork;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
 use reth_rpc_convert::{RpcConvert, RpcConverter};
@@ -84,7 +84,7 @@ where
 
 impl
     EthApi<
-        RpcNodeCoreAdapter<NoopProvider, NoopTransactionPool, NoopNetwork, EthEvmConfig>,
+        RpcNodeCoreAdapter<NoopProvider, NoopTransactionPool, NoopNetwork, EthEvm2Config>,
         EthRpcConverter<ChainSpec>,
     >
 {
@@ -101,7 +101,7 @@ impl
     ///
     /// ```no_run
     /// use alloy_network::Ethereum;
-    /// use reth_evm_ethereum::EthEvmConfig;
+    /// use reth_evm_ethereum::EthEvm2Config;
     /// use reth_network_api::noop::NoopNetwork;
     /// use reth_provider::noop::NoopProvider;
     /// use reth_rpc::EthApi;
@@ -110,7 +110,7 @@ impl
     ///     NoopProvider::default(),
     ///     NoopTransactionPool::default(),
     ///     NoopNetwork::default(),
-    ///     EthEvmConfig::mainnet(),
+    ///     EthEvm2Config::mainnet(),
     /// )
     /// .build();
     /// ```
@@ -572,7 +572,7 @@ mod tests {
     use reth_chain_state::CanonStateSubscriptions;
     use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec};
     use reth_ethereum_primitives::TransactionSigned;
-    use reth_evm_ethereum::EthEvmConfig;
+    use reth_evm_ethereum::EthEvm2Config;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
@@ -584,7 +584,7 @@ mod tests {
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 
     type FakeEthApi<P = MockEthProvider> = EthApi<
-        RpcNodeCoreAdapter<P, TestPool, NoopNetwork, EthEvmConfig>,
+        RpcNodeCoreAdapter<P, TestPool, NoopNetwork, EthEvm2Config>,
         EthRpcConverter<ChainSpec>,
     >;
 
@@ -611,7 +611,7 @@ mod tests {
             provider.clone(),
             testing_pool(),
             NoopNetwork::default(),
-            EthEvmConfig::new(provider.chain_spec()),
+            EthEvm2Config::new(provider.chain_spec()),
         )
         .build()
     }

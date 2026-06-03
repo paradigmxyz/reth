@@ -758,7 +758,7 @@ mod tests {
     };
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_primitives::Block;
-    use reth_evm_ethereum::EthEvmConfig;
+    use reth_evm_ethereum::EthEvm2Config;
     use reth_primitives_traits::{Account, Block as _, Bytecode, SealedBlock, StorageEntry};
     use reth_provider::{
         test_utils::{create_test_provider_factory, create_test_provider_factory_with_chain_spec},
@@ -771,9 +771,9 @@ mod tests {
     use reth_testing_utils::generators;
     use std::collections::BTreeMap;
 
-    fn stage() -> ExecutionStage<EthEvmConfig> {
+    fn stage() -> ExecutionStage<EthEvm2Config> {
         let evm_config =
-            EthEvmConfig::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()));
+            EthEvm2Config::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()));
         let consensus = Arc::new(EthBeaconConsensus::new(Arc::new(
             ChainSpecBuilder::mainnet().berlin_activated().build(),
         )));

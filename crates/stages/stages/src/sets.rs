@@ -14,7 +14,7 @@
 //! # use reth_stages::sets::{OfflineStages};
 //! # use reth_chainspec::MAINNET;
 //! # use reth_prune_types::PruneModes;
-//! # use reth_evm_ethereum::EthEvmConfig;
+//! # use reth_evm_ethereum::EthEvm2Config;
 //! # use reth_evm::ConfigureEvm;
 //! # use reth_provider::StaticFileProviderFactory;
 //! # use reth_provider::test_utils::{create_test_provider_factory, MockNodeTypesWithDB};

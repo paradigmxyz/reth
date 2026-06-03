@@ -15,7 +15,7 @@ use reth_downloaders::{
 };
 use reth_ethereum_primitives::{Block, BlockBody, Transaction};
 use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
-use reth_evm_ethereum::EthEvmConfig;
+use reth_evm_ethereum::EthEvm2Config;
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
@@ -175,7 +175,7 @@ where
 {
     let consensus = NoopConsensus::arc();
     let stages_config = StageConfig::default();
-    let evm_config = EthEvmConfig::new(provider_factory.chain_spec());
+    let evm_config = EthEvm2Config::new(provider_factory.chain_spec());
 
     let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
     let static_file_producer =
@@ -261,7 +261,7 @@ async fn run_pipeline_forward_and_unwind(
     init_genesis(&provider_factory).expect("init genesis");
 
     let genesis = provider_factory.sealed_header(0)?.expect("genesis should exist");
-    let evm_config = EthEvmConfig::new(chain_spec.clone());
+    let evm_config = EthEvm2Config::new(chain_spec.clone());
 
     // Build blocks by actually executing transactions to get correct state roots
     let mut blocks: Vec<SealedBlock<Block>> = Vec::new();

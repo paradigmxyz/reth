@@ -311,7 +311,7 @@ use aquamarine as _;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_evm::ConfigureEvm;
-use reth_evm_ethereum::EthEvmConfig;
+use reth_evm_ethereum::EthEvm2Config;
 use reth_execution_types::ChangedAccount;
 use reth_primitives_traits::{HeaderTy, Recovered};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
@@ -338,7 +338,7 @@ mod traits;
 pub mod test_utils;
 
 /// Type alias for default ethereum transaction pool
-pub type EthTransactionPool<Client, S, Evm = EthEvmConfig, T = EthPooledTransaction> = Pool<
+pub type EthTransactionPool<Client, S, Evm = EthEvm2Config, T = EthPooledTransaction> = Pool<
     TransactionValidationTaskExecutor<EthTransactionValidator<Client, T, Evm>>,
     CoinbaseTipOrdering<T>,
     S,

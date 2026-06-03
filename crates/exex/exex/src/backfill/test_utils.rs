@@ -10,7 +10,7 @@ use reth_evm::{
     execute::{BlockExecutionOutput, Executor},
     ConfigureEvm,
 };
-use reth_evm_ethereum::EthEvmConfig;
+use reth_evm_ethereum::EthEvm2Config;
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
@@ -69,7 +69,7 @@ where
     let provider = provider_factory.provider()?;
 
     // Execute the block to produce a block execution output
-    let mut block_execution_output = EthEvmConfig::ethereum(chain_spec)
+    let mut block_execution_output = EthEvm2Config::ethereum(chain_spec)
         .batch_executor(StateProviderDatabase::new(LatestStateProvider::new(provider)))
         .execute(block)?;
     block_execution_output.state.reverts.sort();
@@ -200,7 +200,7 @@ where
 
     let provider = provider_factory.provider()?;
 
-    let evm_config = EthEvmConfig::new(chain_spec);
+    let evm_config = EthEvm2Config::new(chain_spec);
     let executor =
         evm_config.batch_executor(StateProviderDatabase::new(LatestStateProvider::new(provider)));
 

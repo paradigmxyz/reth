@@ -414,7 +414,7 @@ mod tests {
     use alloy_primitives::{map::HashMap, Address, Bytes, B256, U256};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::EthPrimitives;
-    use reth_evm_ethereum::EthEvmConfig;
+    use reth_evm_ethereum::EthEvm2Config;
     use reth_execution_types::{AccountRevert, BundleAccount, BundleState};
     use reth_provider::test_utils::MockEthProvider;
     use tempfile::TempDir;
@@ -591,7 +591,7 @@ mod tests {
 
     /// Creates test `InvalidBlockWitnessHook` with temporary directory
     fn create_test_hook() -> (
-        InvalidBlockWitnessHook<MockEthProvider<EthPrimitives, ChainSpec>, EthEvmConfig>,
+        InvalidBlockWitnessHook<MockEthProvider<EthPrimitives, ChainSpec>, EthEvm2Config>,
         PathBuf,
         TempDir,
     ) {
@@ -599,7 +599,7 @@ mod tests {
         let output_directory = temp_dir.path().to_path_buf();
 
         let provider = MockEthProvider::<EthPrimitives, ChainSpec>::default();
-        let evm_config = EthEvmConfig::mainnet();
+        let evm_config = EthEvm2Config::mainnet();
 
         let hook =
             InvalidBlockWitnessHook::new(provider, evm_config, output_directory.clone(), None);

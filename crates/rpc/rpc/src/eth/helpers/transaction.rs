@@ -140,7 +140,7 @@ mod tests {
     use alloy_primitives::{map::AddressMap, Address, Bytes, U256};
     use alloy_rpc_types_eth::request::TransactionRequest;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
-    use reth_evm_ethereum::EthEvmConfig;
+    use reth_evm_ethereum::EthEvm2Config;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::{
         test_utils::{ExtendedAccount, MockEthProvider},
@@ -152,14 +152,14 @@ mod tests {
     fn mock_eth_api(
         accounts: AddressMap<ExtendedAccount>,
     ) -> EthApi<
-        RpcNodeCoreAdapter<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>,
+        RpcNodeCoreAdapter<MockEthProvider, TestPool, NoopNetwork, EthEvm2Config>,
         EthRpcConverter<ChainSpec>,
     > {
         let mock_provider = MockEthProvider::default()
             .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
         mock_provider.extend_accounts(accounts);
 
-        let evm_config = EthEvmConfig::new(mock_provider.chain_spec());
+        let evm_config = EthEvm2Config::new(mock_provider.chain_spec());
         let pool = testing_pool();
 
         let genesis_header = Header {

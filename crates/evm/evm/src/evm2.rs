@@ -68,9 +68,11 @@ use revm::{
 #[cfg(feature = "std")]
 use std::sync::OnceLock;
 
+#[cfg(feature = "std")]
 const PRECOMPILE_CACHE_SIZE: usize = 7;
 const ONE_ETHER: u128 = 1_000_000_000_000_000_000;
 
+#[cfg(feature = "std")]
 const fn precompile_cache_index(spec: SpecId) -> usize {
     match spec {
         SpecId::FRONTIER | SpecId::HOMESTEAD | SpecId::TANGERINE | SpecId::SPURIOUS_DRAGON => 0,

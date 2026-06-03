@@ -7,7 +7,7 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_tokio_util::EventSender;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
-use reth_evm_ethereum::EthEvmConfig;
+use reth_evm_ethereum::EthEvm2Config;
 use reth_network_api::noop::NoopNetwork;
 use reth_node_ethereum::EthereumEngineValidator;
 use reth_payload_builder::test_utils::spawn_test_payload_service;
@@ -139,14 +139,19 @@ pub async fn launch_http_ws_same_port(modules: impl Into<RpcModuleSelection>) ->
 }
 
 /// Returns an [`RpcModuleBuilder`] with testing components.
-pub fn test_rpc_builder(
-) -> RpcModuleBuilder<EthPrimitives, NoopProvider, TestPool, NoopNetwork, EthEvmConfig, NoopConsensus>
-{
+pub fn test_rpc_builder() -> RpcModuleBuilder<
+    EthPrimitives,
+    NoopProvider,
+    TestPool,
+    NoopNetwork,
+    EthEvm2Config,
+    NoopConsensus,
+> {
     RpcModuleBuilder::default()
         .with_provider(NoopProvider::default())
         .with_pool(TestPoolBuilder::default().into())
         .with_network(NoopNetwork::default())
         .with_executor(Runtime::test())
-        .with_evm_config(EthEvmConfig::mainnet())
+        .with_evm_config(EthEvm2Config::mainnet())
         .with_consensus(NoopConsensus::default())
 }

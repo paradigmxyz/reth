@@ -1446,12 +1446,12 @@ mod tests {
     use alloy_primitives::{hex, U256};
     use reth_ethereum_primitives::PooledTransactionVariant;
     use reth_evm::gas::MAX_INITCODE_SIZE;
-    use reth_evm_ethereum::EthEvmConfig;
+    use reth_evm_ethereum::EthEvm2Config;
     use reth_primitives_traits::SignedTransaction;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
-    fn test_evm_config() -> EthEvmConfig {
-        EthEvmConfig::mainnet()
+    fn test_evm_config() -> EthEvm2Config {
+        EthEvm2Config::mainnet()
     }
 
     fn get_transaction() -> EthPooledTransaction {
@@ -1589,7 +1589,7 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider, EthEvmConfig::mainnet())
+        let validator = EthTransactionValidatorBuilder::new(provider, EthEvm2Config::mainnet())
             .set_tx_fee_cap(0) // no cap
             .build(blob_store);
 
@@ -1607,7 +1607,7 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider, EthEvmConfig::mainnet())
+        let validator = EthTransactionValidatorBuilder::new(provider, EthEvm2Config::mainnet())
             .set_tx_fee_cap(2e18 as u128) // 2 ETH cap
             .build(blob_store);
 
@@ -1625,7 +1625,7 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider, EthEvmConfig::mainnet())
+        let validator = EthTransactionValidatorBuilder::new(provider, EthEvm2Config::mainnet())
             .with_max_tx_gas_limit(Some(500_000)) // Set limit lower than transaction gas limit (1_015_288)
             .build(blob_store.clone());
 
@@ -1657,7 +1657,7 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider, EthEvmConfig::mainnet())
+        let validator = EthTransactionValidatorBuilder::new(provider, EthEvm2Config::mainnet())
             .with_max_tx_gas_limit(None) // disabled
             .build(blob_store);
 
@@ -1675,7 +1675,7 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider, EthEvmConfig::mainnet())
+        let validator = EthTransactionValidatorBuilder::new(provider, EthEvm2Config::mainnet())
             .with_max_tx_gas_limit(Some(2_000_000)) // Set limit higher than transaction gas limit (1_015_288)
             .build(blob_store);
 
@@ -1699,7 +1699,7 @@ mod tests {
         provider: MockEthProvider,
         minimum_priority_fee: Option<u128>,
         local_config: Option<LocalTransactionConfig>,
-    ) -> EthTransactionValidator<MockEthProvider, EthPooledTransaction, EthEvmConfig> {
+    ) -> EthTransactionValidator<MockEthProvider, EthPooledTransaction, EthEvm2Config> {
         let blob_store = InMemoryBlobStore::default();
         let mut builder = EthTransactionValidatorBuilder::new(provider, test_evm_config())
             .with_minimum_priority_fee(minimum_priority_fee);
@@ -1879,7 +1879,7 @@ mod tests {
 
         // Validate with balance check enabled
         let validator =
-            EthTransactionValidatorBuilder::new(provider.clone(), EthEvmConfig::mainnet())
+            EthTransactionValidatorBuilder::new(provider.clone(), EthEvm2Config::mainnet())
                 .build(InMemoryBlobStore::default());
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
@@ -1895,7 +1895,7 @@ mod tests {
         }
 
         // Validate with balance check disabled
-        let validator = EthTransactionValidatorBuilder::new(provider, EthEvmConfig::mainnet())
+        let validator = EthTransactionValidatorBuilder::new(provider, EthEvm2Config::mainnet())
             .disable_balance_check()
             .build(InMemoryBlobStore::default());
 

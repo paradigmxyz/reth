@@ -14,10 +14,7 @@
 pub use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadTypes};
 
 pub mod evm;
-pub use evm::{EthEvm2Config, EthEvmConfig};
-
-#[allow(deprecated)]
-pub use evm::EthExecutorProvider;
+pub use evm::EthEvm2Config;
 
 pub use reth_ethereum_consensus as consensus;
 pub mod node;
