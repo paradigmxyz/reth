@@ -66,6 +66,9 @@ pub use state_hook::{OnStateHook, StateHookExt};
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking executor
 pub mod test_utils;
+/// Helper types for execution witness generation.
+#[cfg(feature = "witness")]
+pub mod witness;
 
 pub use alloy_evm::{
     block::{state_changes, system_calls},

@@ -19,6 +19,7 @@ reth-primitives-traits.workspace = true
 reth-storage-api.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
+reth-trie = { workspace = true, optional = true }
 
 revm.workspace = true
 revm-bytecode.workspace = true
@@ -30,6 +31,8 @@ alloy-eip7928.workspace = true
 alloy-eips.workspace = true
 alloy-evm.workspace = true
 alloy-consensus.workspace = true
+alloy-rlp = { workspace = true, optional = true }
+alloy-rpc-types-debug = { workspace = true, optional = true }
 
 auto_impl.workspace = true
 derive_more.workspace = true
@@ -63,6 +66,7 @@ std = [
     "reth-ethereum-primitives/std",
     "alloy-eip7928/std",
     "thiserror/std",
+    "alloy-rlp?/std",
 ]
 asm-keccak = [
     "alloy-primitives/asm-keccak",
@@ -90,4 +94,6 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
     "reth-ethereum-primitives/test-utils",
+    "reth-trie?/test-utils",
 ]
+witness = ["dep:reth-trie", "dep:alloy-rlp", "dep:alloy-rpc-types-debug"]
