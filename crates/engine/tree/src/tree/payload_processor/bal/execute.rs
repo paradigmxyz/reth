@@ -19,28 +19,22 @@ use alloy_eip7928::{
     bal::{Bal as AlloyBal, DecodedBal},
     compute_block_access_list_hash, BlockAccessList,
 };
-use alloy_evm::{
-    block::{BlockExecutor, TxResult},
-    Evm,
-};
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
 use reth_errors::{BlockExecutionError, BlockValidationError};
 use reth_evm::{
+    block::{BlockExecutor, TxResult},
+    context::{Block, ResultAndState},
+    database::State,
     execute::{
         convert_alloy_block_execution_error, convert_alloy_block_execution_result, ExecutableTxFor,
     },
-    ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor,
+    ConfigureEvm, Database, Evm as EvmTrait, EvmEnvFor, ExecutionCtxFor,
 };
-use reth_execution_types::Bal as ExecutionBal;
+use reth_execution_types::{Bal as ExecutionBal, BundleRetention};
 use reth_primitives_traits::ReceiptTy;
 use reth_provider::BlockExecutionOutput;
 use reth_tasks::Runtime;
-use revm::{
-    bytecode::BytecodeDecodeError,
-    context::{result::ResultAndState, Block},
-    database::{states::bundle_state::BundleRetention, State},
-};
 use std::sync::Arc;
 
 use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
@@ -206,7 +200,6 @@ fn convert_input_to_execution_bal(bal: &AlloyBal) -> Result<Arc<ExecutionBal>, B
     // invalid as no legal execution should've led to this bytecode deployment.
     let bal_entries: Vec<_> = Vec::<_>::from(bal.clone());
     let execution_bal = ExecutionBal::try_from(bal_entries).map_err(|e| {
-        let e: BytecodeDecodeError = e;
         BalExecutionError::Consensus(reth_consensus::ConsensusError::BlockAccessListInvalid(
             format!("{e:?}"),
         ))

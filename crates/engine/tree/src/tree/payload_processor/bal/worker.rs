@@ -1,19 +1,16 @@
 use super::BalExecutionError;
 use alloy_consensus::Transaction;
 use alloy_eip7928::BlockAccessIndex;
-use alloy_evm::{
-    block::{BlockExecutor, BlockExecutorFactory},
-    Evm,
-};
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
 use reth_errors::BlockExecutionError;
 use reth_evm::{
+    block::{BlockExecutor, BlockExecutorFactory},
+    database::State,
     execute::{convert_alloy_block_execution_error, ExecutableTxFor},
-    ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor,
+    ConfigureEvm, Database, Evm as EvmTrait, EvmEnvFor, ExecutionCtxFor,
 };
 use reth_execution_types::Bal as ExecutionBal;
-use revm::database::State;
 use std::sync::Arc;
 
 #[derive(Debug, thiserror::Error)]
