@@ -5,6 +5,9 @@ name: book
 on:
   push:
     branches: [main]
+    paths:
+      - ".github/workflows/book.yml"
+      - "docs/vocs/**"
   pull_request:
     branches: [main]
     types: [opened, reopened, synchronize, closed]
@@ -48,6 +51,7 @@ jobs:
           test -f docs/dist/public/index.html
           test -f docs/dist/public/overview/index.html
           test -f docs/dist/public/sdk/index.html
+          test -f docs/dist/public/docs/index.html
           test -f docs/dist/public/logo.png
           test -f docs/dist/public/reth-prod.png
           echo "Vocs Build Complete"

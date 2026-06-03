@@ -3,7 +3,8 @@ import { glob } from 'glob';
 
 const CARGO_DOCS_PATH = '../../target/doc';
 const VOCS_DIST_ROOT = './docs/dist';
-const VOCS_DIST_PATH = `${VOCS_DIST_ROOT}/docs`;
+const VOCS_PUBLIC_PATH = `${VOCS_DIST_ROOT}/public`;
+const VOCS_DIST_PATH = `${VOCS_PUBLIC_PATH}/docs`;
 const BASE_PATH = '/docs';
 
 async function injectCargoDocs() {
@@ -18,9 +19,9 @@ async function injectCargoDocs() {
     process.exit(1);
   }
 
-  // Check if Vocs dist exists
+  // Check if Vocs public dist exists
   try {
-    await fs.access(VOCS_DIST_ROOT);
+    await fs.access(VOCS_PUBLIC_PATH);
   } catch {
     console.error('Error: Vocs dist not found. Please run: bun run build');
     process.exit(1);
@@ -33,7 +34,7 @@ async function injectCargoDocs() {
   console.log(`Copying cargo docs to ${VOCS_DIST_PATH}...`);
   await fs.cp(CARGO_DOCS_PATH, VOCS_DIST_PATH, { recursive: true });
 
-  // Fix relative paths in HTML files to work from /reth/docs
+  // Fix relative paths in HTML files to work from /docs
   console.log('Fixing relative paths in HTML files...');
   
   const htmlFiles = await glob(`${VOCS_DIST_PATH}/**/*.html`);
@@ -44,7 +45,7 @@ async function injectCargoDocs() {
     // Extract the current crate name and module path from the file path
     // Remove the base path to get the relative path within the docs
     const relativePath = file.startsWith('./') ? file.slice(2) : file;
-    const docsRelativePath = relativePath.replace(/^docs\/dist\/docs\//, '');
+    const docsRelativePath = relativePath.replace(/^docs\/dist\/public\/docs\//, '');
     const pathParts = docsRelativePath.split('/');
     const fileName = pathParts[pathParts.length - 1];
     

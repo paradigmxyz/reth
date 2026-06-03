@@ -56,17 +56,17 @@ import { TrustedBy } from "../components/TrustedBy";
 
         :::
       </div>
-      <div className="flex gap-x-5 gap-y-2 flex-wrap text-[15px] font-medium max-md:justify-center">
-        <a href="/run/ethereum" className="vocs_Link vocs_Link_styleless text-black dark:text-white hover:opacity-70">Run a Node</a>
-        <a href="/sdk" className="vocs_Link vocs_Link_styleless text-black dark:text-white hover:opacity-70">Build a Node</a>
-        <a href="/introduction/why-reth" className="vocs_Link vocs_Link_styleless text-black dark:text-white hover:opacity-70">Why Reth?</a>
+      <div className="flex flex-wrap gap-3 max-md:justify-center">
+        <a href="/run/ethereum" className="vocs_Link vocs_Link_styleless inline-flex h-10 items-center justify-center rounded-lg bg-black px-4 text-[15px] font-medium text-white transition-colors hover:bg-black/80 dark:bg-white dark:text-black dark:hover:bg-white/80">Run a Node</a>
+        <a href="/sdk" className="vocs_Link vocs_Link_styleless inline-flex h-10 items-center justify-center rounded-lg border border-black/10 bg-black/[0.03] px-4 text-[15px] font-medium text-black transition-colors hover:bg-black/[0.06] dark:border-white/10 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.1]">Build a Node</a>
+        <a href="/introduction/why-reth" className="vocs_Link vocs_Link_styleless inline-flex h-10 items-center justify-center rounded-lg border border-black/10 bg-black/[0.03] px-4 text-[15px] font-medium text-black transition-colors hover:bg-black/[0.06] dark:border-white/10 dark:bg-white/[0.06] dark:text-white dark:hover:bg-white/[0.1]">Why Reth?</a>
       </div>
     </div>
   </div>
-  <div className="flex justify-between flex-wrap mt-10 lg:mt-16">
-      <div className="pr-2 w-1/4 max-lg:pb-3 max-sm:px-0 max-lg:w-1/2 max-sm:w-full z-0">
-        <div className="relative w-full min-h-[220px] overflow-hidden">
-          <a href="/run/ethereum" className="hover:bg-black/2 dark:hover:bg-white/2 border-black/10 dark:border-white/10 border border-solid rounded-lg min-h-[220px] px-5 py-6 relative z-10 flex flex-col gap-4 w-full vocs_Link vocs_Link_styleless">
+  <div className="grid grid-cols-1 gap-4 mt-10 md:grid-cols-2 lg:mt-16">
+      <div className="z-0">
+        <div className="relative h-full min-h-[168px] overflow-hidden">
+          <a href="/run/ethereum" className="hover:bg-black/2 dark:hover:bg-white/2 border-black/10 dark:border-white/10 border border-solid rounded-lg min-h-[168px] h-full px-5 py-6 relative z-10 flex flex-col gap-4 w-full vocs_Link vocs_Link_styleless">
             <div className="text-lg leading-tight font-medium text-black dark:text-white">Institutional Security</div>
             <div className="text-[15px] leading-6 text-[#919193]">Run reliable staking nodes trusted by Coinbase Staking</div>
           </a>
@@ -74,9 +74,9 @@ import { TrustedBy } from "../components/TrustedBy";
           <div className="absolute left-0 right-0 top-0 bottom-0 backdrop-filter backdrop-blur-[2px] z-0" />
         </div>
       </div>
-      <div className="pl-2 pr-2 max-sm:px-0 max-lg:pb-3 max-lg:pr-0 w-1/4 max-lg:w-1/2 max-sm:w-full z-0">
-        <div className="relative w-full min-h-[220px] overflow-hidden">
-          <a href="/overview" className="hover:bg-black/2 dark:hover:bg-white/2 border-black/10 dark:border-white/10 border border-solid rounded-lg min-h-[220px] px-5 py-6 relative z-10 flex flex-col gap-4 w-full vocs_Link vocs_Link_styleless">
+      <div className="z-0">
+        <div className="relative h-full min-h-[168px] overflow-hidden">
+          <a href="/overview" className="hover:bg-black/2 dark:hover:bg-white/2 border-black/10 dark:border-white/10 border border-solid rounded-lg min-h-[168px] h-full px-5 py-6 relative z-10 flex flex-col gap-4 w-full vocs_Link vocs_Link_styleless">
             <div className="text-lg leading-tight font-medium text-black dark:text-white">Performant</div>
             <div className="text-[15px] leading-6 text-[#919193]">Sync faster with optimal transaction processing</div>
           </a>
@@ -84,9 +84,9 @@ import { TrustedBy } from "../components/TrustedBy";
           <div className="absolute left-0 right-0 top-0 bottom-0 backdrop-filter backdrop-blur-[2px] z-0" />
         </div>
       </div>
-      <div className="pl-2 pr-2 max-lg:pb-3 max-sm:px-0 max-lg:pl-0 w-1/4 max-lg:w-1/2 max-sm:w-full z-0">
-        <div className="relative w-full min-h-[220px] overflow-hidden">
-          <a href="/sdk" className="hover:bg-black/2 dark:hover:bg-white/2 border-black/10 dark:border-white/10 border border-solid rounded-lg min-h-[220px] px-5 py-6 relative z-10 flex flex-col gap-4 w-full vocs_Link vocs_Link_styleless">
+      <div className="z-0">
+        <div className="relative h-full min-h-[168px] overflow-hidden">
+          <a href="/sdk" className="hover:bg-black/2 dark:hover:bg-white/2 border-black/10 dark:border-white/10 border border-solid rounded-lg min-h-[168px] h-full px-5 py-6 relative z-10 flex flex-col gap-4 w-full vocs_Link vocs_Link_styleless">
             <div className="text-lg leading-tight font-medium text-black dark:text-white">Customizable</div>
             <div className="text-[15px] leading-6 text-[#919193]">Build custom nodes with tailored transaction handling</div>
           </a>
@@ -94,9 +94,9 @@ import { TrustedBy } from "../components/TrustedBy";
           <div className="absolute left-0 right-0 top-0 bottom-0 backdrop-filter backdrop-blur-[2px] z-0" />
         </div>
       </div>
-      <div className="pl-2 w-1/4 max-sm:px-0 max-lg:w-1/2 max-sm:w-full z-0">
-        <div className="relative w-full min-h-[220px] overflow-hidden">
-          <a href="/exex/overview" className="hover:bg-black/2 dark:hover:bg-white/2 border-black/10 dark:border-white/10 border border-solid rounded-lg min-h-[220px] px-5 py-6 relative z-10 flex flex-col gap-4 w-full vocs_Link vocs_Link_styleless">
+      <div className="z-0">
+        <div className="relative h-full min-h-[168px] overflow-hidden">
+          <a href="/exex/overview" className="hover:bg-black/2 dark:hover:bg-white/2 border-black/10 dark:border-white/10 border border-solid rounded-lg min-h-[168px] h-full px-5 py-6 relative z-10 flex flex-col gap-4 w-full vocs_Link vocs_Link_styleless">
             <div className="text-lg leading-tight font-medium text-black dark:text-white">Extensible</div>
             <div className="text-[15px] leading-6 text-[#919193]">Build indexers and offchain services with ExExs</div>
           </a>
