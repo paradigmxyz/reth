@@ -70,6 +70,9 @@ pub struct DatabaseArgs {
     /// Number of recent blocks to keep in the in-memory BAL store cache.
     #[arg(long = "db.balstore-cache-size")]
     pub balstore_cache_size: Option<u64>,
+    /// Disable built-in database metrics.
+    #[arg(long = "db.disable-metrics")]
+    pub disable_metrics: bool,
 }
 
 impl DatabaseArgs {
@@ -99,6 +102,11 @@ impl DatabaseArgs {
             .with_growth_step(self.growth_step)
             .with_max_readers(self.max_readers)
             .with_sync_mode(self.sync_mode)
+    }
+
+    /// Returns whether built-in database metrics are enabled.
+    pub const fn metrics_enabled(&self) -> bool {
+        !self.disable_metrics
     }
 }
 
@@ -231,6 +239,16 @@ mod tests {
         let default_args = DatabaseArgs::default();
         let args = CommandParser::<DatabaseArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn test_command_parser_disable_metrics() {
+        let args = CommandParser::<DatabaseArgs>::parse_from(["reth"]).args;
+        assert!(args.metrics_enabled());
+
+        let args = CommandParser::<DatabaseArgs>::parse_from(["reth", "--db.disable-metrics"]).args;
+        assert!(args.disable_metrics);
+        assert!(!args.metrics_enabled());
     }
 
     #[test]
