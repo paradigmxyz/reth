@@ -10,16 +10,15 @@ use reth_ethereum::{
     cli::interface::Cli,
     evm::{
         primitives::{
-            block::StateDB,
-            execute::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
-            Evm, EvmEnv, EvmEnvFor, ExecutionCtxFor, InspectorFor, NextBlockEnvAttributes,
+            block::StateDB, Evm, EvmEnv, EvmEnvFor, ExecutionCtxFor, InspectorFor,
+            NextBlockEnvAttributes,
         },
         revm::{
             context::TxEnv,
             primitives::{address, hardfork::SpecId, Address},
             DatabaseCommit,
         },
-        EthBlockAssembler, EthEvmConfig, RethReceiptBuilder,
+        AlloyChainSpec, EthBlockAssembler, EthEvmConfig, RethReceiptBuilder,
     },
     node::{
         api::{ConfigureEngineEvm, ConfigureEvm, ExecutableTxIterator, FullNodeTypes, NodeTypes},
@@ -28,12 +27,14 @@ use reth_ethereum::{
         EthereumNode,
     },
     primitives::{Header, SealedBlock, SealedHeader},
-    provider::BlockExecutionResult,
     rpc::types::engine::ExecutionData,
     Block, EthPrimitives, Receipt, TransactionSigned, TxType,
 };
 use reth_evm::{
-    block::{BlockExecutorFactory, ExecutableTx, GasOutput},
+    block::{
+        BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
+        ExecutableTx, GasOutput, InternalBlockExecutionError,
+    },
     eth::{EthBlockExecutionCtx, EthBlockExecutor, EthTxResult},
     precompiles::PrecompilesMap,
     revm::context::Block as _,
@@ -114,7 +115,7 @@ impl BlockExecutorFactory for CustomEvmConfig {
             inner: EthBlockExecutor::new(
                 evm,
                 ctx,
-                self.inner.chain_spec(),
+                self.inner.executor_factory.spec(),
                 self.inner.executor_factory.receipt_builder(),
             ),
         }
@@ -186,7 +187,7 @@ impl ConfigureEngineEvm<ExecutionData> for CustomEvmConfig {
 
 pub struct CustomBlockExecutor<'a, Evm> {
     /// Inner Ethereum execution strategy.
-    inner: EthBlockExecutor<'a, Evm, &'a Arc<ChainSpec>, &'a RethReceiptBuilder>,
+    inner: EthBlockExecutor<'a, Evm, &'a AlloyChainSpec<ChainSpec>, &'a RethReceiptBuilder>,
 }
 
 impl<E> BlockExecutor for CustomBlockExecutor<'_, E>
