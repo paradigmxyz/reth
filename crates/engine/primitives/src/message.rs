@@ -287,6 +287,8 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
     InsertExecutedBlock {
         /// The executed block emitted by the payload builder.
         payload: BuiltPayloadExecutedBlock<<Payload::BuiltPayload as BuiltPayload>::Primitives>,
+        /// Optional sender notified after the engine tree has handled the insert.
+        tx: Option<oneshot::Sender<Result<(), BeaconOnNewPayloadError>>>,
     },
     /// Message with new payload used by `reth_newPayload` endpoint.
     ///
@@ -341,7 +343,7 @@ impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
                     payload.block_hash()
                 )
             }
-            Self::InsertExecutedBlock { payload } => {
+            Self::InsertExecutedBlock { payload, .. } => {
                 write!(f, "InsertExecutedBlock({:?})", payload.recovered_block.num_hash())
             }
             Self::RethNewPayload { payload, .. } => {
@@ -416,8 +418,24 @@ where
         payload: BuiltPayloadExecutedBlock<<Payload::BuiltPayload as BuiltPayload>::Primitives>,
     ) -> Result<(), BeaconOnNewPayloadError> {
         self.to_engine
-            .send(BeaconEngineMessage::InsertExecutedBlock { payload })
+            .send(BeaconEngineMessage::InsertExecutedBlock { payload, tx: None })
             .map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)
+    }
+
+    /// Inserts a locally built block and waits until the engine tree has handled the insert.
+    ///
+    /// This is useful before sending forkchoice updates for self-built payloads: the successful
+    /// send only means the command was queued, while this waits until the block is known to the
+    /// tree or the insert failed.
+    pub async fn insert_executed_block_and_wait(
+        &self,
+        payload: BuiltPayloadExecutedBlock<<Payload::BuiltPayload as BuiltPayload>::Primitives>,
+    ) -> Result<(), BeaconOnNewPayloadError> {
+        let (tx, rx) = oneshot::channel();
+        self.to_engine
+            .send(BeaconEngineMessage::InsertExecutedBlock { payload, tx: Some(tx) })
+            .map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?;
+        rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
     }
 
     /// Sends a new payload message used by `reth_newPayload` endpoint.

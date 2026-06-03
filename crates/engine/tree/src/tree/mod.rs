@@ -786,16 +786,19 @@ where
     }
 
     /// Inserts a locally built block that already carries execution output.
-    fn on_insert_executed_block(&mut self, payload: BuiltPayloadExecutedBlock<N>) {
+    fn on_insert_executed_block(
+        &mut self,
+        payload: BuiltPayloadExecutedBlock<N>,
+    ) -> ProviderResult<()> {
         let block_num_hash = payload.recovered_block.num_hash();
         if block_num_hash.number <= self.state.tree_state.canonical_block_number() {
             // outdated block that can be skipped
-            return
+            return Ok(())
         }
 
         if self.state.tree_state.contains_hash(&block_num_hash.hash) {
             // block already known to the tree (e.g. delivered via newPayload first)
-            return
+            return Ok(())
         }
 
         debug!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
@@ -805,7 +808,7 @@ where
             Ok(block) => block,
             Err(err) => {
                 warn!(target: "engine::tree", %err, block=?block_num_hash, "Failed to insert already executed block");
-                return
+                return Err(err)
             }
         };
 
@@ -821,6 +824,8 @@ where
         self.emit_event(EngineApiEvent::BeaconConsensus(
             ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
         ));
+
+        Ok(())
     }
 
     /// Processes a payload during normal sync operation.
@@ -1585,12 +1590,17 @@ where
             FromEngine::Request(request) => {
                 match request {
                     EngineApiRequest::InsertExecutedBlock(payload) => {
-                        self.on_insert_executed_block(payload);
+                        let _ = self.on_insert_executed_block(payload);
                     }
                     EngineApiRequest::Beacon(request) => {
                         match request {
-                            BeaconEngineMessage::InsertExecutedBlock { payload } => {
-                                self.on_insert_executed_block(payload);
+                            BeaconEngineMessage::InsertExecutedBlock { payload, tx } => {
+                                let result = self
+                                    .on_insert_executed_block(payload)
+                                    .map_err(BeaconOnNewPayloadError::internal);
+                                if let Some(tx) = tx {
+                                    let _ = tx.send(result);
+                                }
                             }
                             BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
                                 let has_attrs = payload_attrs.is_some();
