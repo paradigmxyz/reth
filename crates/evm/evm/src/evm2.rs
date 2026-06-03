@@ -471,10 +471,17 @@ fn account_info_revert_from_evm2(
     original: &Option<Evm2AccountInfo>,
     present: &Option<Evm2AccountInfo>,
 ) -> AccountInfoRevert {
+    let original = original.clone().map(account_info_from_evm2);
+    let present = present.clone().map(account_info_from_evm2);
+    account_info_revert(&original, &present)
+}
+
+fn account_info_revert(
+    original: &Option<AccountInfo>,
+    present: &Option<AccountInfo>,
+) -> AccountInfoRevert {
     match (original, present) {
-        (Some(original), _) => {
-            AccountInfoRevert::RevertTo(account_info_from_evm2(original.clone()))
-        }
+        (Some(original), _) => AccountInfoRevert::RevertTo(original.clone()),
         (None, Some(_)) => AccountInfoRevert::DeleteIt,
         (None, None) => AccountInfoRevert::DoNothing,
     }
@@ -1533,24 +1540,38 @@ where
         }
 
         let mut state = AddressMap::with_capacity_and_hasher(increments.len(), Default::default());
+        let mut reverts = Vec::with_capacity(increments.len());
         let mut state_size = 0;
+        let mut reverts_size = 0;
 
         for (address, amount) in increments {
             let original = self.current_account_info(address)?;
             let mut present = original.clone().unwrap_or_default();
             present.balance = present.balance.wrapping_add(amount);
+            let present = Some(present);
+            let status = account_status(&original, &present, false);
+            let revert = AccountRevert {
+                account: account_info_revert(&original, &present),
+                storage: Default::default(),
+                previous_status: AccountStatus::Changed,
+                wipe_storage: false,
+            };
+            reverts_size += revert.size_hint();
+            reverts.push((address, revert));
 
-            let account = BundleAccount::new(
-                original,
-                Some(present),
-                StorageWithOriginalValues::default(),
-                AccountStatus::Changed,
-            );
+            let account =
+                BundleAccount::new(original, present, StorageWithOriginalValues::default(), status);
             state_size += account.size_hint();
             state.insert(address, account);
         }
 
-        self.output.bundle.extend(BundleState { state, state_size, ..Default::default() });
+        self.output.bundle.extend(BundleState {
+            state,
+            reverts: Reverts::new(vec![reverts]),
+            state_size,
+            reverts_size,
+            ..Default::default()
+        });
         Ok(())
     }
 
@@ -1562,7 +1583,9 @@ where
         let mut drained_balance = U256::ZERO;
         let mut bundle_state = AddressMap::<BundleAccount>::default();
         let mut evm_state = AddressMap::<RevmAccount>::default();
+        let mut reverts = Vec::new();
         let mut state_size = 0;
+        let mut reverts_size = 0;
 
         for address in accounts {
             let Some(original) = self.current_account_info(address).map_err(evm2_block_error)?
@@ -1582,9 +1605,20 @@ where
             revm_account.mark_touch();
             evm_state.insert(address, revm_account);
 
+            let original = Some(original);
+            let present = Some(present);
+            let revert = AccountRevert {
+                account: account_info_revert(&original, &present),
+                storage: Default::default(),
+                previous_status: AccountStatus::Changed,
+                wipe_storage: false,
+            };
+            reverts_size += revert.size_hint();
+            reverts.push((address, revert));
+
             let account = BundleAccount::new(
-                Some(original),
-                Some(present),
+                original,
+                present,
                 StorageWithOriginalValues::default(),
                 AccountStatus::Changed,
             );
@@ -1594,7 +1628,9 @@ where
 
         self.output.bundle.extend(BundleState {
             state: bundle_state,
+            reverts: Reverts::new(vec![reverts]),
             state_size,
+            reverts_size,
             ..Default::default()
         });
         Ok((drained_balance, evm_state))
@@ -2230,6 +2266,8 @@ mod tests {
         let account = state.account(&recipient).expect("recipient account exists");
         assert_eq!(account.original_info, None);
         assert_eq!(account.info.as_ref().map(|info| info.balance), Some(U256::from(1_000_000_000)));
+        assert_eq!(state.reverts[0][0].0, recipient);
+        assert_eq!(state.reverts[0][0].1.account, AccountInfoRevert::DeleteIt);
     }
 
     #[test]
@@ -2278,6 +2316,14 @@ mod tests {
         let account = state.account(&recipient).expect("recipient account exists");
         assert_eq!(account.original_info.as_ref().map(|info| info.balance), Some(U256::from(5)));
         assert_eq!(account.info.as_ref().map(|info| info.balance), Some(U256::from(1_000_000_007)));
+        assert_eq!(state.reverts[1][0].0, recipient);
+        assert_eq!(
+            state.reverts[1][0].1.account,
+            AccountInfoRevert::RevertTo(AccountInfo {
+                balance: U256::from(7),
+                ..Default::default()
+            })
+        );
     }
 
     #[test]
@@ -2326,6 +2372,32 @@ mod tests {
         assert_eq!(account.info.as_ref().map(|info| info.nonce), Some(1));
         assert_eq!(account.info.as_ref().map(|info| info.code_hash), Some(code_hash));
         assert!(state.bytecode(&code_hash).is_some());
+    }
+
+    #[test]
+    fn direct_evm2_executor_drains_balances_with_reverts() {
+        let address = address!("0x0000000000000000000000000000000000000015");
+        let mut db = CacheDB::new(EmptyDB::default());
+        db.insert_account_info(
+            address,
+            AccountInfo { balance: U256::from(5), ..Default::default() },
+        );
+        let evm = create_evm2_from_revm_env(db, RevmSpecId::FRONTIER, BlockEnv::default());
+        let mut executor = Evm2TransactionExecutor::new(evm);
+
+        let (drained, _) = executor.drain_balances([address]).expect("balances drain");
+        let (state, _) = executor.finish_evm2();
+
+        assert_eq!(drained, U256::from(5));
+        assert_eq!(state.account(&address).unwrap().info.as_ref().unwrap().balance, U256::ZERO);
+        assert_eq!(state.reverts[0][0].0, address);
+        assert_eq!(
+            state.reverts[0][0].1.account,
+            AccountInfoRevert::RevertTo(AccountInfo {
+                balance: U256::from(5),
+                ..Default::default()
+            })
+        );
     }
 
     #[test]
