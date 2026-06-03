@@ -52,6 +52,8 @@
 
 // Used in feature flags only (`asm-keccak`, `keccak-cache-global`)
 use alloy_primitives as _;
+// Used in feature flags only (`portable`)
+use reth_evm as _;
 
 pub mod cli;
 
@@ -143,11 +145,6 @@ pub mod consensus {
 /// Re-exported from `reth_consensus_common`.
 pub mod consensus_common {
     pub use reth_consensus_common::*;
-}
-
-/// Re-exported from `reth_revm`.
-pub mod revm {
-    pub use reth_revm::*;
 }
 
 /// Re-exported from `reth_tasks`.
