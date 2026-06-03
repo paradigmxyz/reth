@@ -521,6 +521,10 @@ const fn account_status(
     }
 }
 
+fn bundle_account_created_in_block(account: &BundleAccount) -> bool {
+    account.original_info.is_none() && (account.info.is_some() || !account.storage.is_empty())
+}
+
 /// Converts a single `evm2` transaction or system-call state change set into a revm bundle.
 pub fn bundle_state_from_evm2(changes: StateChanges) -> BundleState {
     let mut state = AddressMap::<BundleAccount>::default();
@@ -627,9 +631,11 @@ where
         let original = account.original.map(account_info_from_evm2);
         let is_created = original.is_none() && account.current.is_some();
         let is_deleted_after_block_creation = account.current.is_none() &&
-            executor.output.bundle.account(&address).is_some_and(|account| {
-                account.original_info.is_none() && account.info.is_some()
-            });
+            executor
+                .output
+                .bundle
+                .account(&address)
+                .is_some_and(bundle_account_created_in_block);
         if (original.is_none() && account.current.is_none()) || is_deleted_after_block_creation {
             storage.remove(&address);
             let mut account = RevmAccount::new_not_existing(TransactionId::ZERO);
@@ -683,9 +689,11 @@ where
 
     for (address, storage) in storage {
         let is_deleted_after_block_creation = storage.wipe &&
-            executor.output.bundle.account(&address).is_some_and(|account| {
-                account.original_info.is_none() && account.info.is_some()
-            });
+            executor
+                .output
+                .bundle
+                .account(&address)
+                .is_some_and(bundle_account_created_in_block);
         if is_deleted_after_block_creation {
             let mut account = RevmAccount::new_not_existing(TransactionId::ZERO);
             account.mark_touch();
@@ -707,12 +715,23 @@ where
             state.insert(address, account);
             continue;
         }
-        let mut account = RevmAccount::default();
-        if let Some(info) = executor.current_account_info(address).map_err(evm2_block_error)? {
+        let current_info = executor.current_account_info(address).map_err(evm2_block_error)?;
+        let is_storage_only_block_creation = current_info.is_none() &&
+            !storage.slots.is_empty() &&
+            storage.slots.values().all(|slot| slot.original.is_zero());
+        let mut account = if is_storage_only_block_creation {
+            RevmAccount::new_not_existing(TransactionId::ZERO)
+        } else {
+            RevmAccount::default()
+        };
+        if let Some(info) = current_info {
             account.info = info;
         }
+        if is_storage_only_block_creation {
+            account.mark_created();
+        }
         account.mark_touch();
-        if storage.wipe {
+        if storage.wipe && !is_storage_only_block_creation {
             account.mark_selfdestruct();
         }
         account.storage = storage
@@ -2145,13 +2164,6 @@ mod tests {
     #[test]
     fn evm2_revm_state_keeps_block_original_revert_for_created_then_deleted_account() {
         let address = address!("0x0000000000000000000000000000000000000011");
-        let created = Evm2AccountInfo {
-            balance: U256::ZERO,
-            nonce: 1,
-            code_hash: KECCAK256_EMPTY,
-            code: None,
-            _non_exhaustive: (),
-        };
         let evm = create_evm2_from_revm_env(
             EmptyDB::default(),
             RevmSpecId::FRONTIER,
@@ -2164,11 +2176,7 @@ mod tests {
             .build();
 
         let created_changes = StateChanges {
-            accounts: core::iter::once((
-                address,
-                Tracked { original: None, current: Some(created.clone()), _non_exhaustive: () },
-            ))
-            .collect(),
+            accounts: Default::default(),
             storage: core::iter::once((
                 address,
                 StorageChangeSet {
@@ -2214,7 +2222,12 @@ mod tests {
         db.merge_transitions(BundleRetention::Reverts);
         crate::execute::prune_created_deleted_empty_accounts(&mut db.bundle_state);
 
-        assert!(db.bundle_state.account(&address).is_none());
+        assert!(
+            db.bundle_state.account(&address).is_none(),
+            "account={:?} reverts={:?}",
+            db.bundle_state.account(&address),
+            db.bundle_state.reverts
+        );
         assert_eq!(db.bundle_state.reverts[0][0].1.account, AccountInfoRevert::DeleteIt);
     }
 
