@@ -1888,6 +1888,21 @@ where
             .with_state_trie_overlay_manager(state.tree_state.state_trie_overlays.clone())
     }
 
+    /// Returns an overlay builder backed by a detached copy of the in-memory trie overlay graph.
+    ///
+    /// Speculative payload-builder state-root work must not fill or wait on validation's live
+    /// overlay cache entries. The detached manager shares immutable block/trie data but owns its
+    /// overlay cache, so cancellation or slow builder work cannot hold validation's cache-fill gate.
+    fn detached_overlay_builder_for_parent(
+        parent_hash: B256,
+        state: &EngineApiTreeState<N>,
+        changeset_cache: ChangesetCache,
+    ) -> OverlayBuilder<N> {
+        let state_trie_overlays = state.tree_state.state_trie_overlays.detached_snapshot();
+        OverlayBuilder::new(parent_hash, changeset_cache)
+            .with_state_trie_overlay_manager(state_trie_overlays)
+    }
+
     /// Converts a raw block access list into the hashed post-state for that block.
     fn block_access_list_hashed_post_state(
         state_provider: &dyn StateProvider,
@@ -3119,7 +3134,7 @@ where
                     "failed loading base parent `{base_parent_hash}` state provider for payload-builder sparse trie"
                 ))
             })?;
-        let base_overlay_builder = Self::overlay_builder_for_parent(
+        let base_overlay_builder = Self::detached_overlay_builder_for_parent(
             base_parent_hash,
             state,
             self.changeset_cache.clone(),
