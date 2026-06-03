@@ -18,13 +18,13 @@
 extern crate alloc;
 
 use alloc::{borrow::Cow, sync::Arc};
-use alloy_consensus::Header;
+use alloy_consensus::{BlockHeader, Header};
 use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthExecutorSpec, MAINNET};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
     context::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, HaltReason},
-    eth::{EthBlockExecutionCtx, NextEvmEnvAttributes},
+    eth::EthBlockExecutionCtx,
     evm2::{Evm2AlloyBlockExecutorFactory, RethEvm2ReceiptBuilder},
     hardfork::SpecId,
     precompiles::PrecompilesMap,
@@ -174,20 +174,45 @@ where
         parent: &Header,
         attributes: &NextBlockEnvAttributes,
     ) -> Result<EvmEnv, Self::Error> {
-        Ok(EvmEnv::for_eth_next_block(
-            parent,
-            NextEvmEnvAttributes {
-                timestamp: attributes.timestamp,
-                suggested_fee_recipient: attributes.suggested_fee_recipient,
-                prev_randao: attributes.prev_randao,
-                gas_limit: attributes.gas_limit,
-                slot_number: attributes.slot_number,
-            },
-            self.chain_spec().next_block_base_fee(parent, attributes.timestamp).unwrap_or_default(),
-            self.chain_spec(),
-            self.chain_spec().chain().id(),
-            self.chain_spec().blob_params_at_timestamp(attributes.timestamp),
-        ))
+        let number = parent.number + 1;
+        let timestamp = attributes.timestamp;
+        let blob_params = self.chain_spec().blob_params_at_timestamp(timestamp);
+        let spec = revm_spec_by_timestamp_and_block_number(self.chain_spec(), timestamp, number);
+
+        let mut cfg_env = CfgEnv::new()
+            .with_chain_id(self.chain_spec().chain().id())
+            .with_spec_and_mainnet_gas_params(spec);
+
+        if let Some(blob_params) = &blob_params {
+            cfg_env.set_max_blobs_per_tx(blob_params.max_blobs_per_tx);
+        }
+
+        if self.chain_spec().is_osaka_active_at_timestamp(timestamp) {
+            cfg_env.tx_gas_limit_cap = Some(MAX_TX_GAS_LIMIT_OSAKA);
+        }
+
+        let blob_excess_gas_and_price = parent
+            .maybe_next_block_excess_blob_gas(blob_params)
+            .or_else(|| blob_params.map(|_| 0))
+            .zip(blob_params)
+            .map(|(excess_blob_gas, params)| {
+                let blob_gasprice = params.calc_blob_fee(excess_blob_gas);
+                BlobExcessGasAndPrice { excess_blob_gas, blob_gasprice }
+            });
+
+        let block_env = BlockEnv {
+            number: U256::from(number),
+            beneficiary: attributes.suggested_fee_recipient,
+            timestamp: U256::from(timestamp),
+            difficulty: U256::ZERO,
+            prevrandao: Some(attributes.prev_randao),
+            gas_limit: attributes.gas_limit,
+            basefee: self.chain_spec().next_block_base_fee(parent, timestamp).unwrap_or_default(),
+            blob_excess_gas_and_price,
+            slot_num: attributes.slot_number.unwrap_or_default(),
+        };
+
+        Ok(EvmEnv { cfg_env, block_env })
     }
 
     fn context_for_block<'a>(

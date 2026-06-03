@@ -1,5 +1,6 @@
 //! Helpers for integrating `evm2` execution output with reth execution types.
 
+use crate::eth::{dao_fork, EthBlockExecutionCtx};
 use alloc::{
     boxed::Box,
     collections::BTreeMap,
@@ -22,11 +23,9 @@ use alloy_eips::{
 use alloy_evm::{
     block::{
         BlockExecutionError, BlockExecutionResult as AlloyBlockExecutionResult,
-        BlockExecutor as AlloyBlockExecutor, BlockExecutorFactory as AlloyBlockExecutorFactory,
-        BlockValidationError, CommitChanges, ExecutableTx, GasOutput, StateDB,
-        TxResult as AlloyTxResult,
+        BlockExecutor as AlloyBlockExecutor, BlockValidationError, CommitChanges, ExecutableTx,
+        GasOutput, StateDB, TxResult as AlloyTxResult,
     },
-    eth::{dao_fork, EthBlockExecutionCtx},
     precompiles::PrecompilesMap,
     Evm as AlloyEvm, EvmFactory as AlloyEvmFactory, FromRecoveredTx, FromTxWithEncoded,
     RecoveredTx,
@@ -1147,7 +1146,8 @@ impl<R, Spec, EvmFactory> Evm2AlloyBlockExecutorFactory<R, Spec, EvmFactory> {
     }
 }
 
-impl<R, Spec, EvmF> AlloyBlockExecutorFactory for Evm2AlloyBlockExecutorFactory<R, Spec, EvmF>
+impl<R, Spec, EvmF> crate::execute::BlockExecutorFactory
+    for Evm2AlloyBlockExecutorFactory<R, Spec, EvmF>
 where
     R: Evm2ReceiptBuilder<Transaction = RethEthereumTxEnvelope> + Clone + Send + Sync + 'static,
     R::Receipt: Clone + Send + Sync + 'static,
@@ -1167,8 +1167,8 @@ where
     type Transaction = RethEthereumTxEnvelope;
     type Receipt = R::Receipt;
     type TxExecutionResult = Evm2AlloyTxResult;
-    type Executor<'a, DB: StateDB, I: Inspector<EvmF::Context<DB>>> =
-        Evm2AlloyBlockExecutor<'a, EvmF::Evm<DB, I>, R>;
+    type Executor<'a, DB: StateDB, I: Inspector<<EvmF as crate::EvmFactory>::Context<DB>>> =
+        Evm2AlloyBlockExecutor<'a, <EvmF as crate::EvmFactory>::Evm<DB, I>, R>;
 
     fn evm_factory(&self) -> &Self::EvmFactory {
         &self.evm_factory
@@ -1176,12 +1176,12 @@ where
 
     fn create_executor<'a, DB, I>(
         &'a self,
-        evm: EvmF::Evm<DB, I>,
+        evm: <EvmF as crate::EvmFactory>::Evm<DB, I>,
         ctx: Self::ExecutionCtx<'a>,
     ) -> Self::Executor<'a, DB, I>
     where
         DB: StateDB,
-        I: Inspector<EvmF::Context<DB>>,
+        I: Inspector<<EvmF as crate::EvmFactory>::Context<DB>>,
     {
         Evm2AlloyBlockExecutor::new(evm, ctx, self.receipt_builder.clone(), self.dao_fork_block)
     }
