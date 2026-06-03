@@ -1170,6 +1170,7 @@ where
         V: PayloadValidator<T, Block = N::Block>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block via BAL path");
+        tracing::info!("input BAL: {:#?}", env.decoded_bal);
 
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(env.transaction_count);
         let input_bal = env.decoded_bal.ok_or_else(|| {
@@ -1204,7 +1205,7 @@ where
             elapsed = ?execution_duration,
             "Executed block via BAL path",
         );
-
+        tracing::info!("output BAL: {:#?}", built_bal);
         Ok((output, senders, result_rx, Some(built_bal)))
     }
 
