@@ -15,9 +15,9 @@ use alloy_rpc_types_eth::TransactionRequest;
 use futures::StreamExt;
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::setup_engine;
+use reth_execution_types::BundleAccount;
 use reth_node_api::TreeConfig;
 use reth_node_ethereum::EthereumNode;
-use reth_revm::db::BundleAccount;
 use std::sync::Arc;
 
 const MAX_FEE_PER_GAS: u128 = 20_000_000_000;

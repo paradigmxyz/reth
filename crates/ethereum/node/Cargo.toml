@@ -32,11 +32,11 @@ reth-rpc-builder.workspace = true
 reth-rpc-server-types.workspace = true
 reth-node-api.workspace = true
 reth-chainspec.workspace = true
-reth-revm = { workspace = true, features = ["std"] }
 reth-rpc-eth-types.workspace = true
 reth-engine-local.workspace = true
 reth-engine-primitives = { workspace = true, features = ["std"] }
 reth-payload-primitives.workspace = true
+
 # ethereum
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
@@ -44,13 +44,7 @@ jsonrpsee.workspace = true
 alloy-network.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-engine = { workspace = true, features = ["ssz"] }
-
-# async
 tokio = { workspace = true, features = ["sync"] }
-
-# revm with required ethereum features
-# Note: this must be kept to ensure all features are properly enabled/forwarded
-revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg", "memory_limit", "p256-aws-lc-rs"] }
 
 # misc
 eyre.workspace = true
@@ -66,6 +60,7 @@ reth-e2e-test-utils.workspace = true
 reth-tasks.workspace = true
 reth-testing-utils.workspace = true
 reth-stages-types.workspace = true
+reth-execution-types.workspace = true
 tempfile.workspace = true
 jsonrpsee-core.workspace = true
 
@@ -95,7 +90,6 @@ asm-keccak = [
     "alloy-primitives/asm-keccak",
     "reth-node-core/asm-keccak",
     "reth-evm/asm-keccak",
-    "revm/asm-keccak",
 ]
 keccak-cache-global = [
     "alloy-primitives/keccak-cache-global",
@@ -112,7 +106,6 @@ test-utils = [
     "reth-chainspec/test-utils",
     "reth-network/test-utils",
     "reth-ethereum-primitives/test-utils",
-    "reth-revm/test-utils",
     "reth-db/test-utils",
     "reth-provider/test-utils",
     "reth-transaction-pool/test-utils",
