@@ -4,11 +4,10 @@ use alloy_eips::{BlockHashOrNumber, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256};
 use derive_more::Display;
 use reth_codecs::DecompressError;
+use reth_execution_types::{BalError, DBErrorMarker, EvmDatabaseError};
 use reth_primitives_traits::{transaction::signed::RecoveryError, GotExpected};
 use reth_prune_types::PruneSegmentError;
 use reth_static_file_types::StaticFileSegment;
-use revm_database_interface::{bal::EvmDatabaseError, DBErrorMarker};
-use revm_state::bal::BalError;
 
 /// Provider result type.
 pub type ProviderResult<Ok> = Result<Ok, ProviderError>;

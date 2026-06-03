@@ -8971,6 +8971,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-trie-common",
  "revm",
+ "revm-database-interface",
  "serde",
  "serde_with",
 ]
@@ -10481,11 +10482,10 @@ dependencies = [
  "alloy-rlp",
  "derive_more",
  "reth-codecs",
+ "reth-execution-types",
  "reth-primitives-traits",
  "reth-prune-types",
  "reth-static-file-types",
- "revm-database-interface",
- "revm-state",
  "thiserror 2.0.18",
 ]
 
