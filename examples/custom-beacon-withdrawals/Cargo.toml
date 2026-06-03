@@ -11,5 +11,6 @@ reth-ethereum = { workspace = true, features = ["node", "node-api", "evm", "cli"
 reth-evm.workspace = true
 alloy-sol-types.workspace = true
 alloy-eips.workspace = true
+alloy-primitives.workspace = true
 
 eyre.workspace = true

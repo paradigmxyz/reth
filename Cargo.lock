@@ -3768,6 +3768,7 @@ name = "example-custom-beacon-withdrawals"
 version = "0.0.0"
 dependencies = [
  "alloy-eips",
+ "alloy-primitives",
  "alloy-sol-types",
  "eyre",
  "reth-ethereum",
