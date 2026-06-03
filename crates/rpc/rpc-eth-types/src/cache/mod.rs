@@ -5,7 +5,7 @@ use crate::block::CachedTransaction;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{Address, StorageKey, StorageValue, TxHash, B256};
+use alloy_primitives::{Address, TxHash, B256, U256};
 use futures::{stream::FuturesOrdered, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
@@ -29,6 +29,9 @@ use tokio::sync::{
     oneshot, Semaphore,
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
+
+type StorageKey = U256;
+type StorageValue = U256;
 
 pub mod config;
 pub mod db;
