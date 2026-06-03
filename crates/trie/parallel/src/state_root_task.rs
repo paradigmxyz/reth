@@ -143,17 +143,33 @@ impl StateRootHandle {
         }
     }
 
+    /// Returns a state hook that flattens updates until `is_released` returns true.
+    ///
+    /// A deferred parent also keeps updates flattened. Once released, any flattened updates are
+    /// flushed and subsequent updates use the same stream as [`Self::state_hook`]. If the hook is
+    /// dropped before release, the flattened updates are discarded.
+    pub fn state_hook_flatten_until<F>(
+        &self,
+        is_released: F,
+    ) -> impl alloy_evm::block::OnStateHook
+    where
+        F: Fn() -> bool + Send + 'static,
+    {
+        let mut hook = DeferredFlatteningStateHook::new(
+            self.updates_tx.clone(),
+            self.deferred_parent_pending.clone(),
+            is_released,
+        );
+
+        move |state: &EvmState| hook.on_state(state)
+    }
+
     /// Returns a state hook that flattens updates only while a deferred parent is pending.
     ///
     /// Once parent validation fulfills the handle, any flattened updates are flushed and subsequent
     /// updates use the same stream as [`Self::state_hook`].
     pub fn state_hook_flatten_while_deferred(&self) -> impl alloy_evm::block::OnStateHook {
-        let mut hook = DeferredFlatteningStateHook::new(
-            self.updates_tx.clone(),
-            self.deferred_parent_pending.clone(),
-        );
-
-        move |state: &EvmState| hook.on_state(state)
+        self.state_hook_flatten_until(|| true)
     }
 
     /// Awaits the state root computation result.
@@ -212,20 +228,29 @@ impl Drop for StateHookSender {
     }
 }
 
-struct DeferredFlatteningStateHook {
+struct DeferredFlatteningStateHook<F>
+where
+    F: Fn() -> bool,
+{
     sender: StateHookSender,
     deferred_parent_pending: Option<Arc<AtomicBool>>,
+    is_released: F,
     flattened_state: HashedPostState,
 }
 
-impl DeferredFlatteningStateHook {
+impl<F> DeferredFlatteningStateHook<F>
+where
+    F: Fn() -> bool,
+{
     fn new(
         sender: crossbeam_channel::Sender<StateRootMessage>,
         deferred_parent_pending: Option<Arc<AtomicBool>>,
+        is_released: F,
     ) -> Self {
         Self {
             sender: StateHookSender::new(sender),
             deferred_parent_pending,
+            is_released,
             flattened_state: HashedPostState::default(),
         }
     }
@@ -235,6 +260,7 @@ impl DeferredFlatteningStateHook {
             .deferred_parent_pending
             .as_ref()
             .is_some_and(|pending| pending.load(Ordering::Acquire))
+            || !(self.is_released)()
         {
             self.flattened_state.extend(evm_state_to_hashed_post_state(state.clone()));
             return
@@ -243,7 +269,12 @@ impl DeferredFlatteningStateHook {
         self.flush_flattened_state();
         let _ = self.sender.send(StateRootMessage::StateUpdate(state.clone()));
     }
+}
 
+impl<F> DeferredFlatteningStateHook<F>
+where
+    F: Fn() -> bool,
+{
     fn flush_flattened_state(&mut self) {
         if self.flattened_state.is_empty() {
             return
@@ -254,9 +285,14 @@ impl DeferredFlatteningStateHook {
     }
 }
 
-impl Drop for DeferredFlatteningStateHook {
+impl<F> Drop for DeferredFlatteningStateHook<F>
+where
+    F: Fn() -> bool,
+{
     fn drop(&mut self) {
-        self.flush_flattened_state();
+        if (self.is_released)() {
+            self.flush_flattened_state();
+        }
     }
 }
 
@@ -298,6 +334,7 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_evm::block::OnStateHook;
 
     #[test]
     fn state_root_handle_tracks_deferred_parent() {
@@ -323,5 +360,46 @@ mod tests {
         );
         assert!(handle.is_deferred());
         assert!(handle.is_deferred_parent_pending());
+    }
+
+    #[test]
+    fn state_hook_flatten_until_release_gates_updates() {
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (_state_root_tx, state_root_rx) = std::sync::mpsc::channel();
+        let (_hashed_state_tx, hashed_state_rx) = std::sync::mpsc::channel();
+        let handle =
+            StateRootHandle::new(B256::ZERO, updates_tx, state_root_rx, hashed_state_rx);
+
+        let released = Arc::new(AtomicBool::new(false));
+        let mut hook = handle.state_hook_flatten_until({
+            let released = released.clone();
+            move || released.load(Ordering::Acquire)
+        });
+
+        hook.on_state(&EvmState::default());
+        assert!(updates_rx.try_recv().is_err());
+
+        released.store(true, Ordering::Release);
+        hook.on_state(&EvmState::default());
+        assert!(matches!(updates_rx.recv().unwrap(), StateRootMessage::StateUpdate(_)));
+
+        drop(hook);
+        assert!(matches!(updates_rx.recv().unwrap(), StateRootMessage::FinishedStateUpdates));
+    }
+
+    #[test]
+    fn state_hook_flatten_until_discards_updates_when_dropped_before_release() {
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (_state_root_tx, state_root_rx) = std::sync::mpsc::channel();
+        let (_hashed_state_tx, hashed_state_rx) = std::sync::mpsc::channel();
+        let handle =
+            StateRootHandle::new(B256::ZERO, updates_tx, state_root_rx, hashed_state_rx);
+
+        let mut hook = handle.state_hook_flatten_until(|| false);
+        hook.on_state(&EvmState::default());
+        drop(hook);
+
+        assert!(matches!(updates_rx.recv().unwrap(), StateRootMessage::FinishedStateUpdates));
+        assert!(updates_rx.try_recv().is_err());
     }
 }
