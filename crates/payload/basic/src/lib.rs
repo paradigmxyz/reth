@@ -14,6 +14,7 @@ use alloy_primitives::{B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_chain_state::CanonStateNotification;
+use reth_evm::{cached::CachedReads, cancelled::CancelOnDrop};
 use reth_execution_cache::SavedCache;
 use reth_payload_builder::{
     BuildNewPayload, KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator,
@@ -21,7 +22,6 @@ use reth_payload_builder::{
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
 use reth_primitives_traits::{HeaderTy, NodePrimitives, SealedHeader};
-use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::Runtime;
 use reth_trie_parallel::state_root_task::StateRootHandle;
