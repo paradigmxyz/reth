@@ -114,7 +114,7 @@ compact_types!(
         StaticFileBlockWithdrawals,
         // Manual implementations
         TransactionSigned,
-        // Bytecode, // todo revm arbitrary
+        // Bytecode, // todo arbitrary bytecode generation
         StorageEntry,
         // MerkleCheckpoint, // todo storedsubnode -> branchnodecompact arbitrary
         AccountBeforeTx,

@@ -12,14 +12,13 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
 use reth_execution_types::{AccountInfoRevert, BundleState, RevertToSlot};
 use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
 use reth_provider::{
     BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory, ReceiptProvider,
     StaticFileProviderFactory, TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_stages::stages::calculate_gas_used_from_headers;
 use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader};
 use std::{
@@ -432,7 +431,7 @@ where
                 let cs_value = cs_slots.as_mut().and_then(|s| s.remove(&b256_key));
                 match (revert_slot, cs_value) {
                     // When a contract is selfdestructed and re-created at the same address
-                    // within the same block, revm marks slots touched by the new contract
+                    // within the same block, execution marks slots touched by the new contract
                     // as `Destroyed` and never reads the original DB value, so
                     // `to_previous_value()` would resolve to zero, which might be wrong.
                     (RevertToSlot::Destroyed, _) => {}
