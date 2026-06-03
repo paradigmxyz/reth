@@ -8838,10 +8838,8 @@ dependencies = [
  "reth-payload-primitives",
  "reth-payload-validator",
  "reth-primitives-traits",
- "reth-revm",
  "reth-storage-api",
  "reth-transaction-pool",
- "revm",
  "tracing",
 ]
 
@@ -10335,7 +10333,6 @@ dependencies = [
  "reth-provider",
  "reth-prune",
  "reth-prune-types",
- "reth-revm",
  "reth-stages-api",
  "reth-static-file",
  "reth-static-file-types",

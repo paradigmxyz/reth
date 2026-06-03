@@ -6,11 +6,11 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     transaction::DbTx,
 };
+use reth_execution_types::{AccountRevert, RevertToSlot};
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, SyncMode, WriteFlags, RO,
 };
 use reth_provider::{DBProvider, ExecutionOutcome};
-use reth_revm::revm::database::states::RevertToSlot;
 use reth_stages_api::StageError;
 use std::path::Path;
 use tracing::trace;
@@ -129,7 +129,7 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     state: &mut ExecutionOutcome<R>,
 ) -> Result<(), StageError> {
     // Collect preimage entries from bundle state and reverts.
-    // StorageKey in revm is U256, representing a plain EVM slot index.
+    // Storage keys are plain EVM slot indexes.
     let mut preimage_entries = Vec::new();
     let mut seen_hashes = HashSet::new();
     for account in state.bundle.state().values() {
@@ -196,7 +196,7 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
 /// into the account revert if not already present.
 fn inject_preimage_entry(
     reader: &SlotPreimagesReader,
-    revert: &mut reth_revm::revm::database::AccountRevert,
+    revert: &mut AccountRevert,
     address: alloy_primitives::Address,
     hashed_slot: B256,
     value: alloy_primitives::U256,
@@ -208,7 +208,7 @@ fn inject_preimage_entry(
     // Convert B256 plain slot to U256 StorageKey for the revert map.
     let plain_key = alloy_primitives::U256::from_be_bytes(plain_slot.0);
     // When a contract is selfdestructed and then re-created at the same address via
-    // CREATE2 in the same block, revm treats the new contract as fresh and never reads
+    // CREATE2 in the same block, execution treats the new contract as fresh and never reads
     // the slot's original DB value. Slots touched by the new contract are marked as
     // `Destroyed` instead of `Some(previous_value)`. We must overwrite these with the
     // actual DB value here, otherwise `to_previous_value()` resolves them to zero.

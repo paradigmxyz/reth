@@ -43,7 +43,7 @@ mod slot_preimages;
 ///
 /// Input tables:
 /// - [`tables::CanonicalHeaders`] get next block to execute.
-/// - [`tables::Headers`] get for revm environment variables.
+/// - [`tables::Headers`] get for execution environment variables.
 /// - [`tables::BlockBodyIndices`] to get tx number
 /// - [`tables::Transactions`] to execute
 ///
