@@ -1024,6 +1024,7 @@ mod tests {
         ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
     };
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
+    use alloy_primitives::{map::HashMap, Address, B256, KECCAK_EMPTY, U256};
     use rand::Rng;
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
@@ -1031,7 +1032,10 @@ mod tests {
     use reth_evm::OnStateHook;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_cache::CachedStatus;
-    use reth_execution_types::BundleState;
+    use reth_execution_types::{
+        Account as EvmAccount, AccountInfo, AccountStatus, BundleState, EvmState, EvmStorageSlot,
+        TransactionId,
+    };
     use reth_primitives_traits::{Account, Recovered, StorageEntry};
     use reth_provider::{
         providers::{BlockchainProvider, OverlayBuilder, OverlayStateProviderFactory},
@@ -1041,13 +1045,20 @@ mod tests {
     use reth_testing_utils::generators;
     use reth_trie::{test_utils::state_root, HashedPostState};
     use reth_trie_db::ChangesetCache;
-    use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
-    use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
     use std::sync::Arc;
 
     fn make_saved_cache(hash: B256) -> SavedCache {
         let execution_cache = ExecutionCache::new(1_000);
         SavedCache::new(hash, execution_cache)
+    }
+
+    fn account_from_state(account: &EvmAccount) -> Account {
+        Account {
+            balance: account.info.balance,
+            nonce: account.info.nonce,
+            bytecode_hash: (account.info.code_hash != KECCAK_EMPTY)
+                .then_some(account.info.code_hash),
+        }
     }
 
     #[test]
@@ -1276,7 +1287,7 @@ mod tests {
                     }
                 }
 
-                let mut account = revm_state::Account::default();
+                let mut account = EvmAccount::default();
                 account.info = AccountInfo {
                     balance: U256::from(rng.random::<u64>()),
                     nonce: rng.random::<u64>(),
@@ -1313,9 +1324,9 @@ mod tests {
             let provider_rw = factory.provider_rw().expect("failed to get provider");
 
             for update in &state_updates {
-                let account_updates = update.iter().map(|(address, account)| {
-                    (*address, Some(Account::from_revm_account(account)))
-                });
+                let account_updates = update
+                    .iter()
+                    .map(|(address, account)| (*address, Some(account_from_state(account))));
                 provider_rw
                     .insert_account_for_hashing(account_updates)
                     .expect("failed to insert accounts");
@@ -1344,7 +1355,7 @@ mod tests {
                     .collect();
 
                 let entry = accumulated_state.entry(*address).or_default();
-                entry.0 = Account::from_revm_account(account);
+                entry.0 = account_from_state(account);
                 entry.1.extend(storage);
             }
         }
