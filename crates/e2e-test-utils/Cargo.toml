@@ -39,9 +39,9 @@ reth-cli-commands.workspace = true
 reth-config.workspace = true
 reth-consensus.workspace = true
 reth-db-common.workspace = true
+reth-execution-types.workspace = true
 reth-primitives-traits.workspace = true
 
-revm.workspace = true
 tempfile.workspace = true
 
 # rpc
