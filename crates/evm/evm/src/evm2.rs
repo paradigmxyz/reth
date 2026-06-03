@@ -682,6 +682,31 @@ where
     }
 
     for (address, storage) in storage {
+        let is_deleted_after_block_creation = storage.wipe &&
+            executor.output.bundle.account(&address).is_some_and(|account| {
+                account.original_info.is_none() && account.info.is_some()
+            });
+        if is_deleted_after_block_creation {
+            let mut account = RevmAccount::new_not_existing(TransactionId::ZERO);
+            account.mark_touch();
+            account.mark_created();
+            account.storage = storage
+                .slots
+                .into_iter()
+                .map(|(key, slot)| {
+                    (
+                        key,
+                        EvmStorageSlot::new_changed(
+                            slot.original,
+                            slot.current,
+                            TransactionId::ZERO,
+                        ),
+                    )
+                })
+                .collect();
+            state.insert(address, account);
+            continue;
+        }
         let mut account = RevmAccount::default();
         if let Some(info) = executor.current_account_info(address).map_err(evm2_block_error)? {
             account.info = info;
@@ -2166,11 +2191,7 @@ mod tests {
             _non_exhaustive: (),
         };
         let deleted_changes = StateChanges {
-            accounts: core::iter::once((
-                address,
-                Tracked { original: Some(created), current: None, _non_exhaustive: () },
-            ))
-            .collect(),
+            accounts: Default::default(),
             storage: core::iter::once((
                 address,
                 StorageChangeSet { wipe: true, slots: Default::default(), _non_exhaustive: () },
