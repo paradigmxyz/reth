@@ -20,7 +20,7 @@ use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     trie_cursor::{InMemoryTrieCursor, TrieCursor, TrieCursorFactory, TrieStorageCursor},
     updates::TrieUpdatesSorted,
-    HashedPostStateSorted,
+    HashedPostStateSorted, TrieInputSorted,
 };
 use reth_trie_db::{
     ChangesetCache, DatabaseAccountTrieCursor, DatabaseHashedCursorFactory,
@@ -78,9 +78,12 @@ pub(super) enum OverlaySource<N: NodePrimitives = EthPrimitives> {
     Managed {
         /// Manager used to resolve in-memory parent state if the parent is not persisted.
         manager: StateTrieOverlayManager<N>,
+        /// Immediate trie updates overlay applied on top of any manager-produced overlay.
+        trie: Arc<TrieUpdatesSorted>,
         /// Immediate hashed state overlay applied on top of any manager-produced overlay.
         ///
-        /// This is populated by the `with_hashed_state_overlay` methods.
+        /// This is populated by the `with_hashed_state_overlay` and `with_trie_input_overlay`
+        /// methods.
         state: Arc<HashedPostStateSorted>,
     },
 }
@@ -127,6 +130,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     ) -> Self {
         self.overlay_source = Some(OverlaySource::Managed {
             manager: state_trie_overlay_manager,
+            trie: Arc::new(TrieUpdatesSorted::default()),
             state: Arc::new(HashedPostStateSorted::default()),
         });
         self
@@ -148,6 +152,25 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                         state,
                     });
                 }
+            }
+        }
+        self
+    }
+
+    /// Set the trie input overlay.
+    ///
+    /// For managed overlays, the input is applied on top of the manager-produced in-memory parent
+    /// overlay. For immediate overlays, the input is used directly.
+    pub fn with_trie_input_overlay(mut self, input: TrieInputSorted) -> Self {
+        match &mut self.overlay_source {
+            Some(OverlaySource::Immediate { trie, state }) |
+            Some(OverlaySource::Managed { trie, state, .. }) => {
+                *trie = input.nodes;
+                *state = input.state;
+            }
+            None => {
+                self.overlay_source =
+                    Some(OverlaySource::Immediate { trie: input.nodes, state: input.state });
             }
         }
         self
@@ -177,8 +200,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         anchor_hash: BlockHash,
     ) -> ProviderResult<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>)> {
         match &self.overlay_source {
-            Some(OverlaySource::Managed { manager, state }) => {
-                let (trie, mut overlay_state) = if anchor_hash == self.parent_hash {
+            Some(OverlaySource::Managed { manager, trie: extra_trie, state }) => {
+                let (mut trie, mut overlay_state) = if anchor_hash == self.parent_hash {
                     (
                         Arc::new(TrieUpdatesSorted::default()),
                         Arc::new(HashedPostStateSorted::default()),
@@ -188,6 +211,12 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                         .overlay_for_parent(self.parent_hash, anchor_hash)
                         .map_err(ProviderError::other)?
                 };
+
+                if trie.is_empty() {
+                    trie = Arc::clone(extra_trie);
+                } else if !extra_trie.is_empty() {
+                    Arc::make_mut(&mut trie).extend_ref_and_sort(extra_trie);
+                }
 
                 if overlay_state.is_empty() {
                     overlay_state = Arc::clone(state);

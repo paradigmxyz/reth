@@ -101,6 +101,42 @@ impl PayloadExecutionCache {
         None
     }
 
+    /// Returns a non-exclusive shared cache view for `parent_hash` without mutating the cache slot.
+    ///
+    /// Unlike [`Self::get_cache_for`], this never clears or retags the stored cache on a hash
+    /// mismatch. Discardable consumers such as speculative payload builders can use the returned
+    /// shared view without holding the slot unavailable for validation or prewarming.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip(self))]
+    pub fn get_shared_cache_for(&self, parent_hash: B256) -> Option<SavedCache> {
+        let start = Instant::now();
+        let cache = self.inner.lock();
+
+        let elapsed = start.elapsed();
+        self.metrics.execution_cache_wait_duration.record(elapsed.as_secs_f64());
+        if elapsed.as_millis() > 5 {
+            warn!(blocked_for=?elapsed, "Blocked waiting for execution cache mutex");
+        }
+
+        let Some(c) = cache.as_ref() else {
+            debug!(target: "engine::caching", %parent_hash, "No cache found");
+            return None
+        };
+
+        let cached_hash = c.executed_block_hash();
+        let hash_matches = cached_hash == parent_hash;
+        let usage_count = c.usage_count();
+        debug!(
+            target: "engine::caching",
+            %cached_hash,
+            %parent_hash,
+            hash_matches,
+            usage_count,
+            "Existing cache found for shared view"
+        );
+
+        hash_matches.then(|| c.clone().into_shared_view())
+    }
+
     /// Waits until the execution cache becomes available for use.
     ///
     /// This acquires a write lock to ensure exclusive access, then immediately releases it.
@@ -205,6 +241,39 @@ mod tests {
         let checked_out = cache.get_cache_for(hash_b);
         assert!(checked_out.is_some());
         assert_eq!(checked_out.unwrap().executed_block_hash(), hash_b);
+    }
+
+    #[test]
+    fn shared_cache_view_does_not_block_checkout() {
+        let cache = PayloadExecutionCache::default();
+        let hash = B256::from([0xCC; 32]);
+
+        cache.update_with_guard(|slot| {
+            *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
+        });
+
+        let shared = cache.get_shared_cache_for(hash);
+        assert!(shared.is_some());
+
+        let exclusive = cache.get_cache_for(hash);
+        assert!(exclusive.is_some());
+    }
+
+    #[test]
+    fn shared_cache_mismatch_does_not_retag() {
+        let cache = PayloadExecutionCache::default();
+        let hash_a = B256::from([0xDD; 32]);
+        let hash_b = B256::from([0xEE; 32]);
+
+        cache.update_with_guard(|slot| {
+            *slot = Some(SavedCache::new(hash_a, ExecutionCache::new(1_000)))
+        });
+
+        assert!(cache.get_shared_cache_for(hash_b).is_none());
+
+        let original = cache.get_cache_for(hash_a);
+        assert!(original.is_some());
+        assert_eq!(original.unwrap().executed_block_hash(), hash_a);
     }
 
     #[test]

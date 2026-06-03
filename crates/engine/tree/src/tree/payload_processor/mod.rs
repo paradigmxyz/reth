@@ -173,6 +173,33 @@ pub(crate) struct StateRootSpawner {
     disable_sparse_trie_cache_pruning: bool,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct PrivateSparseTrieSnapshot {
+    sparse_state_trie: SharedPreservedSparseTrie,
+}
+
+impl PrivateSparseTrieSnapshot {
+    fn new(sparse_state_trie: SharedPreservedSparseTrie) -> Self {
+        Self { sparse_state_trie }
+    }
+
+    pub(crate) fn clone_at_root(&self, state_root: B256) -> Self {
+        let clone_start = Instant::now();
+        let preserved =
+            self.sparse_state_trie
+                .clone_with_updates(state_root, state_root, &TrieUpdates::default());
+        let clone_elapsed = clone_start.elapsed();
+        debug!(
+            target: "engine::tree::payload_processor",
+            %state_root,
+            cloned = preserved.is_some(),
+            ?clone_elapsed,
+            "cloned private sparse-trie snapshot at root"
+        );
+        Self::new(SharedPreservedSparseTrie::new(preserved))
+    }
+}
+
 const VALIDATION_SPARSE_TRIE_WORKER_NAME: &str = "sparse-trie";
 const PAYLOAD_BUILDER_SPARSE_TRIE_WORKER_NAME: &str = "payload-builder-sparse-trie";
 
@@ -637,7 +664,18 @@ where
     /// This shares the underlying cache storage without keeping the shared cache slot checked out,
     /// so validation and prewarming can still publish the next block's cache state.
     pub fn shared_cache_for_payload_builder(&self, parent_hash: B256) -> SavedCache {
-        self.cache_for(parent_hash).into_shared_view()
+        if let Some(cache) = self.execution_cache.get_shared_cache_for(parent_hash) {
+            debug!("sharing execution cache with payload builder");
+            cache
+        } else {
+            debug!("creating private execution cache for payload builder");
+            let start = Instant::now();
+            let cache = ExecutionCache::new(self.cross_block_cache_size);
+            if let Some(metrics) = &self.cache_metrics {
+                metrics.record_cache_creation(start.elapsed());
+            }
+            SavedCache::new(parent_hash, cache)
+        }
     }
 
     /// Updates the execution cache with the post-execution state from an inserted block.
@@ -761,6 +799,56 @@ impl StateRootSpawner {
             config,
             PAYLOAD_BUILDER_SPARSE_TRIE_WORKER_NAME,
             SharedPreservedSparseTrie::new(preserved),
+        )
+    }
+
+    /// Creates a private sparse-trie snapshot anchored at `state_root`.
+    ///
+    /// The returned snapshot is detached from validation's shared sparse-trie cache. Tasks spawned
+    /// from it can advance speculative state without blocking validation's cache publication.
+    pub(crate) fn private_sparse_trie_snapshot(
+        &self,
+        state_root: B256,
+    ) -> PrivateSparseTrieSnapshot {
+        let clone_start = Instant::now();
+        let preserved =
+            self.sparse_state_trie
+                .clone_with_updates(state_root, state_root, &TrieUpdates::default());
+        let clone_elapsed = clone_start.elapsed();
+        debug!(
+            target: "engine::tree::payload_processor",
+            %state_root,
+            cloned = preserved.is_some(),
+            ?clone_elapsed,
+            "cloned private sparse-trie snapshot from shared cache"
+        );
+        PrivateSparseTrieSnapshot::new(SharedPreservedSparseTrie::new(preserved))
+    }
+
+    /// Spawns a state-root computation pipeline backed by a caller-owned private sparse-trie
+    /// snapshot.
+    pub(crate) fn spawn_state_root_with_private_sparse_trie<F>(
+        &self,
+        multiproof_provider_factory: F,
+        parent_state_root: B256,
+        halve_workers: bool,
+        config: &TreeConfig,
+        snapshot: PrivateSparseTrieSnapshot,
+    ) -> StateRootHandle
+    where
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.spawn_state_root_with_preserved_sparse_trie(
+            multiproof_provider_factory,
+            parent_state_root,
+            halve_workers,
+            config,
+            PAYLOAD_BUILDER_SPARSE_TRIE_WORKER_NAME,
+            snapshot.sparse_state_trie,
         )
     }
 
