@@ -1,6 +1,6 @@
 //! Traits for execution.
 
-use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
+use crate::{ConfigureEvm, Database, OnStateHook, StateHookExt, TxEnvFor};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eip7928::{compute_block_access_list_hash, BlockAccessList};
@@ -638,11 +638,11 @@ where
             .executor_for_block(&mut self.db, block)
             .map_err(BlockExecutionError::other)?;
 
-        executor.evm_mut().db_mut().set_state_hook(Some(Box::new(state_hook)));
+        executor.evm_mut().db_mut().set_reth_state_hook(Some(Box::new(state_hook)));
 
         let result = executor.execute_block(block.transactions_recovered());
 
-        self.db.set_state_hook(None);
+        self.db.set_reth_state_hook(None);
         self.db.merge_transitions(BundleRetention::Reverts);
 
         result

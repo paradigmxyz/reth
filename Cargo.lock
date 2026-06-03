@@ -10545,7 +10545,6 @@ name = "reth-trie-parallel"
 version = "2.2.0"
 dependencies = [
  "alloy-eip7928 0.4.1",
- "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
  "crossbeam-channel",
