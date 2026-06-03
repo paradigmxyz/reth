@@ -25,7 +25,9 @@ use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{
-    database::StateProviderDatabase, execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor,
+    database::{State, StateProviderDatabase},
+    execute::ExecutableTxFor,
+    ConfigureEvm, Evm, EvmFor,
     RecoveredTx, SpecFor,
 };
 use reth_execution_types::EvmState;
@@ -553,7 +555,7 @@ where
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
 type PrewarmEvmState<Evm> =
-    Option<EvmFor<Evm, StateProviderDatabase<reth_provider::StateProviderBox>>>;
+    Option<EvmFor<Evm, State<StateProviderDatabase<StateProviderBox>>>>;
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
@@ -582,7 +584,8 @@ where
             state_provider = Box::new(CachedStateProvider::new_prewarm(state_provider, caches));
         }
 
-        let state_provider = StateProviderDatabase::new(state_provider);
+        let state_provider =
+            State::builder().with_database(StateProviderDatabase::new(state_provider)).build();
 
         let mut evm_env = self.env.evm_env.clone();
 

@@ -24,20 +24,18 @@ use alloc::{
     vec::Vec,
 };
 use alloy_consensus::{BlockHeader, Header};
-use core::{convert::Infallible, fmt::Debug};
+use core::convert::Infallible;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthExecutorSpec, MAINNET};
-use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
+use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm::{
-    context::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, HaltReason},
+    context::{BlobExcessGasAndPrice, BlockEnv, CfgEnv},
     eth::EthBlockExecutionCtx,
     evm2::{
         precompiles_for_spec, spec_id_from_revm, Evm2RethBlockExecutorFactory,
         RethEvm2ReceiptBuilder,
     },
     hardfork::SpecId,
-    precompiles::PrecompilesMap,
-    ConfigureEvm, EthEvmFactory, EvmEnv, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
-    LegacyEvmFactory, NextBlockEnvAttributes, TransactionEnvMut,
+    ConfigureEvm, EvmEnv, NextBlockEnvAttributes,
 };
 use reth_primitives_traits::{SealedBlock, SealedHeader};
 
@@ -69,9 +67,9 @@ pub use test_utils::*;
 
 /// Ethereum-related EVM configuration backed by evm2 execution.
 #[derive(Debug, Clone)]
-pub struct EthEvm2Config<C = ChainSpec, EvmFactory = EthEvmFactory> {
+pub struct EthEvm2Config<C = ChainSpec> {
     /// Inner evm2 [`BlockExecutorFactory`](reth_evm::execute::BlockExecutorFactory).
-    pub executor_factory: Evm2RethBlockExecutorFactory<RethEvm2ReceiptBuilder, Arc<C>, EvmFactory>,
+    pub executor_factory: Evm2RethBlockExecutorFactory<RethEvm2ReceiptBuilder, Arc<C>>,
     /// Ethereum block assembler.
     pub block_assembler: EthBlockAssembler<C>,
 }
@@ -94,22 +92,11 @@ where
 
     /// Creates a new evm2 Ethereum EVM configuration.
     pub fn ethereum(chain_spec: Arc<ChainSpec>) -> Self {
-        Self::new_with_evm_factory(chain_spec, EthEvmFactory::default())
-    }
-}
-
-impl<ChainSpec, EvmFactory> EthEvm2Config<ChainSpec, EvmFactory>
-where
-    ChainSpec: Hardforks,
-{
-    /// Creates a new evm2 Ethereum EVM configuration with the given chain spec and EVM factory.
-    pub fn new_with_evm_factory(chain_spec: Arc<ChainSpec>, evm_factory: EvmFactory) -> Self {
         Self {
             block_assembler: EthBlockAssembler::new(chain_spec.clone()),
             executor_factory: Evm2RethBlockExecutorFactory::new(
                 RethEvm2ReceiptBuilder,
                 chain_spec.clone(),
-                evm_factory,
             )
             .with_dao_fork_block(chain_spec.fork(EthereumHardfork::Dao).block_number()),
         }
@@ -121,30 +108,15 @@ where
     }
 }
 
-impl<ChainSpec, EvmF> ConfigureEvm for EthEvm2Config<ChainSpec, EvmF>
+impl<ChainSpec> ConfigureEvm for EthEvm2Config<ChainSpec>
 where
     ChainSpec: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
-    EvmF: EvmFactory<
-            Tx: TransactionEnvMut
-                    + FromRecoveredTx<TransactionSigned>
-                    + FromTxWithEncoded<TransactionSigned>,
-            HaltReason = HaltReason,
-            Spec = SpecId,
-            BlockEnv = BlockEnv,
-            Precompiles = PrecompilesMap,
-        > + LegacyEvmFactory
-        + Clone
-        + Debug
-        + Send
-        + Sync
-        + Unpin
-        + 'static,
 {
     type Primitives = EthPrimitives;
     type Error = Infallible;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
     type BlockExecutorFactory =
-        Evm2RethBlockExecutorFactory<RethEvm2ReceiptBuilder, Arc<ChainSpec>, EvmF>;
+        Evm2RethBlockExecutorFactory<RethEvm2ReceiptBuilder, Arc<ChainSpec>>;
     type BlockAssembler = EthBlockAssembler<ChainSpec>;
 
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
@@ -255,24 +227,9 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<ChainSpec, EvmF> ConfigureEngineEvm<ExecutionData> for EthEvm2Config<ChainSpec, EvmF>
+impl<ChainSpec> ConfigureEngineEvm<ExecutionData> for EthEvm2Config<ChainSpec>
 where
     ChainSpec: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
-    EvmF: EvmFactory<
-            Tx: TransactionEnvMut
-                    + FromRecoveredTx<TransactionSigned>
-                    + FromTxWithEncoded<TransactionSigned>,
-            HaltReason = HaltReason,
-            Spec = SpecId,
-            BlockEnv = BlockEnv,
-            Precompiles = PrecompilesMap,
-        > + LegacyEvmFactory
-        + Clone
-        + Debug
-        + Send
-        + Sync
-        + Unpin
-        + 'static,
 {
     fn evm_env_for_payload(&self, payload: &ExecutionData) -> Result<EvmEnvFor<Self>, Self::Error> {
         let timestamp = payload.payload.timestamp();

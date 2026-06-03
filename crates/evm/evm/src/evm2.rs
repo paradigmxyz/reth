@@ -30,8 +30,8 @@ use alloy_eips::{
     eip7685::Requests,
 };
 use alloy_evm::{
-    block::StateDB, precompiles::PrecompilesMap, Evm as AlloyEvm, EvmFactory as AlloyEvmFactory,
-    FromRecoveredTx, FromTxWithEncoded, RecoveredTx,
+    block::StateDB, EthEvmFactory, Evm as AlloyEvm, FromRecoveredTx, FromTxWithEncoded,
+    RecoveredTx,
 };
 use alloy_primitives::{
     map::{AddressMap, B256Map, HashMap},
@@ -1379,21 +1379,26 @@ impl<R> Evm2DirectBlockExecutorFactory<R> {
 
 /// Reth block executor factory backed by evm2 transaction execution.
 #[derive(Debug, Clone)]
-pub struct Evm2RethBlockExecutorFactory<R, Spec, EvmFactory> {
+pub struct Evm2RethBlockExecutorFactory<R, Spec> {
     /// Receipt builder.
     receipt_builder: R,
     /// Chain specification.
     spec: Spec,
-    /// EVM factory used to create the carrier EVM.
-    evm_factory: EvmFactory,
+    /// EVM factory used by the temporary carrier EVM.
+    evm_factory: EthEvmFactory,
     /// DAO hardfork activation block, if configured.
     dao_fork_block: Option<u64>,
 }
 
-impl<R, Spec, EvmFactory> Evm2RethBlockExecutorFactory<R, Spec, EvmFactory> {
+impl<R, Spec> Evm2RethBlockExecutorFactory<R, Spec> {
     /// Creates a new evm2-backed block executor factory.
-    pub const fn new(receipt_builder: R, spec: Spec, evm_factory: EvmFactory) -> Self {
-        Self { receipt_builder, spec, evm_factory, dao_fork_block: None }
+    pub fn new(receipt_builder: R, spec: Spec) -> Self {
+        Self {
+            receipt_builder,
+            spec,
+            evm_factory: EthEvmFactory::default(),
+            dao_fork_block: None,
+        }
     }
 
     /// Sets the DAO hardfork activation block for this factory.
@@ -1413,29 +1418,22 @@ impl<R, Spec, EvmFactory> Evm2RethBlockExecutorFactory<R, Spec, EvmFactory> {
     }
 }
 
-impl<R, Spec, EvmF> crate::execute::BlockExecutorFactory
-    for Evm2RethBlockExecutorFactory<R, Spec, EvmF>
+impl<R, Spec> crate::execute::BlockExecutorFactory for Evm2RethBlockExecutorFactory<R, Spec>
 where
     R: Evm2ReceiptBuilder<Transaction = RethEthereumTxEnvelope> + Clone + Send + Sync + 'static,
     R::Receipt: Clone + Send + Sync + 'static,
     Spec: Send + Sync + 'static,
-    EvmF: AlloyEvmFactory<
-            Tx: FromRecoveredTx<RethEthereumTxEnvelope> + FromTxWithEncoded<RethEthereumTxEnvelope>,
-            HaltReason = HaltReason,
-            Spec = RevmSpecId,
-            BlockEnv = BlockEnv,
-            Precompiles = PrecompilesMap,
-        > + Send
-        + Sync
-        + 'static,
 {
-    type EvmFactory = EvmF;
+    type EvmFactory = EthEvmFactory;
     type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
     type Transaction = RethEthereumTxEnvelope;
     type Receipt = R::Receipt;
     type TxExecutionResult = Evm2TxExecutionResult;
-    type Executor<'a, DB: StateDB, I: Inspector<<EvmF as crate::EvmFactory>::Context<DB>>> =
-        Evm2RethBlockExecutor<'a, <EvmF as crate::EvmFactory>::Evm<DB, I>, R>;
+    type Executor<
+        'a,
+        DB: StateDB,
+        I: Inspector<<EthEvmFactory as crate::EvmFactory>::Context<DB>>,
+    > = Evm2RethBlockExecutor<'a, <EthEvmFactory as crate::EvmFactory>::Evm<DB, I>, R>;
 
     fn evm_factory(&self) -> &Self::EvmFactory {
         &self.evm_factory
@@ -1443,12 +1441,12 @@ where
 
     fn create_executor<'a, DB, I>(
         &'a self,
-        evm: <EvmF as crate::EvmFactory>::Evm<DB, I>,
+        evm: <EthEvmFactory as crate::EvmFactory>::Evm<DB, I>,
         ctx: Self::ExecutionCtx<'a>,
     ) -> Self::Executor<'a, DB, I>
     where
         DB: StateDB,
-        I: Inspector<<EvmF as crate::EvmFactory>::Context<DB>>,
+        I: Inspector<<EthEvmFactory as crate::EvmFactory>::Context<DB>>,
     {
         Evm2RethBlockExecutor::new(evm, ctx, self.receipt_builder.clone(), self.dao_fork_block)
     }
