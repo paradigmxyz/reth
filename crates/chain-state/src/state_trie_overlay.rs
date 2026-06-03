@@ -18,7 +18,7 @@ use reth_primitives_traits::{
 use reth_tasks::WorkerPool;
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
 use std::{fmt, sync::Arc, time::Instant};
-use tracing::{debug, trace};
+use tracing::trace;
 
 /// Manages flattened state trie overlays for in-memory blocks.
 ///
@@ -98,7 +98,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         match self.blocks.entry(hash) {
             Entry::Occupied(_) => {
                 span.record("duplicate", true);
-                debug!(
+                trace!(
                     target: "chain_state::state_trie_overlay",
                     %hash,
                     %parent_hash,
@@ -122,7 +122,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
             })
             .collect::<Vec<_>>();
 
-        debug!(
+        trace!(
             target: "chain_state::state_trie_overlay",
             %hash,
             %parent_hash,
@@ -198,7 +198,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
             pruned_overlays = overlays_before.saturating_sub(self.overlays.len());
             span.record("pruned_overlays", pruned_overlays);
         }
-        debug!(
+        trace!(
             target: "chain_state::state_trie_overlay",
             block_count,
             removed_blocks,
@@ -219,7 +219,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         parent_hash: B256,
         anchor_hash: B256,
     ) -> Result<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>), StateTrieOverlayError> {
-        debug!(
+        trace!(
             target: "chain_state::state_trie_overlay",
             tip_hash = %parent_hash,
             %anchor_hash,
@@ -437,7 +437,7 @@ fn compute_overlay<N: NodePrimitives>(
     let elapsed = started_at.elapsed();
     metrics.overlay_computation_duration_seconds.record(elapsed.as_secs_f64());
     tracing::Span::current().record("elapsed_us", elapsed.as_micros() as u64);
-    debug!(
+    trace!(
         target: "chain_state::state_trie_overlay",
         %anchor_hash,
         block_count,
