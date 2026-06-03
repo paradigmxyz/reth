@@ -1,6 +1,12 @@
 //! Helpers for integrating `evm2` execution output with reth execution types.
 
-use crate::eth::{dao_fork, EthBlockExecutionCtx};
+use crate::{
+    eth::{dao_fork, EthBlockExecutionCtx},
+    execute::{
+        BlockExecutionError, BlockExecutor, BlockValidationError, CommitChanges, ExecutableTx,
+        GasOutput, TxResult,
+    },
+};
 use alloc::{
     boxed::Box,
     collections::BTreeMap,
@@ -21,14 +27,8 @@ use alloy_eips::{
     eip7685::Requests,
 };
 use alloy_evm::{
-    block::{
-        BlockExecutionError, BlockExecutionResult as AlloyBlockExecutionResult,
-        BlockExecutor as AlloyBlockExecutor, BlockValidationError, CommitChanges, ExecutableTx,
-        GasOutput, StateDB, TxResult as AlloyTxResult,
-    },
-    precompiles::PrecompilesMap,
-    Evm as AlloyEvm, EvmFactory as AlloyEvmFactory, FromRecoveredTx, FromTxWithEncoded,
-    RecoveredTx,
+    block::StateDB, precompiles::PrecompilesMap, Evm as AlloyEvm, EvmFactory as AlloyEvmFactory,
+    FromRecoveredTx, FromTxWithEncoded, RecoveredTx,
 };
 use alloy_primitives::{
     map::{AddressMap, B256Map, HashMap},
@@ -1197,7 +1197,7 @@ pub struct Evm2TxExecutionResult {
     tx_type: TxType,
 }
 
-impl AlloyTxResult for Evm2TxExecutionResult {
+impl TxResult for Evm2TxExecutionResult {
     type HaltReason = HaltReason;
 
     fn result(&self) -> &ResultAndState<Self::HaltReason> {
@@ -1253,7 +1253,7 @@ where
     }
 }
 
-impl<E, R> AlloyBlockExecutor for Evm2RethBlockExecutor<'_, E, R>
+impl<E, R> BlockExecutor for Evm2RethBlockExecutor<'_, E, R>
 where
     E: AlloyEvm<
         DB: DatabaseCommit,
@@ -1367,7 +1367,7 @@ where
 
     fn finish(
         mut self,
-    ) -> Result<(Self::Evm, AlloyBlockExecutionResult<Self::Receipt>), BlockExecutionError> {
+    ) -> Result<(Self::Evm, BlockExecutionResult<Self::Receipt>), BlockExecutionError> {
         if self.evm2.evm.spec_id().enables(SpecId::PRAGUE) {
             self.evm2
                 .append_deposit_requests_from_tx_results(MAINNET_DEPOSIT_CONTRACT_ADDRESS)
@@ -1410,7 +1410,7 @@ where
 
         Ok((
             *self.evm,
-            AlloyBlockExecutionResult {
+            BlockExecutionResult {
                 receipts: result.receipts,
                 requests: result.requests,
                 gas_used: result.gas_used,
