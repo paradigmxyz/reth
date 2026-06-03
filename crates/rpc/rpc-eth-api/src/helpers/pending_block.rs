@@ -13,11 +13,11 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_evm::{
     block::TxResult,
+    database::{State, StateProviderDatabase},
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionOutput},
     ConfigureEvm, Evm, EvmEnvFor, NextBlockEnvAttributes,
 };
 use reth_primitives_traits::{transaction::error::InvalidTransactionError, HeaderTy, SealedHeader};
-use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{
     block::BlockAndReceipts, builder::config::PendingBlockKind, EthApiError, PendingBlock,

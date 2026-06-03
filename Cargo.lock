@@ -10163,7 +10163,6 @@ dependencies = [
  "reth-node-api",
  "reth-primitives-traits",
  "reth-prune-types",
- "reth-revm",
  "reth-rpc-convert",
  "reth-rpc-eth-types",
  "reth-rpc-server-types",

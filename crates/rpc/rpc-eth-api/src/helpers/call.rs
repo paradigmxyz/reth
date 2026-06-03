@@ -21,16 +21,16 @@ use futures::Future;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
-    block::BlockExecutor, env::BlockEnvironment, execute::BlockBuilder, ConfigureEvm, Evm,
-    EvmEnvFor, HaltReasonFor, InspectorFor, TransactionEnvMut, TxEnvFor,
+    block::BlockExecutor,
+    cancelled::CancelOnDrop,
+    database::{State, StateProviderDatabase},
+    env::BlockEnvironment,
+    execute::BlockBuilder,
+    ConfigureEvm, Evm, EvmEnvFor, HaltReasonFor, InspectorFor, TransactionEnvMut, TxEnvFor,
 };
+use reth_execution_types::EvmDatabaseError;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
-use reth_revm::{
-    cancelled::CancelOnDrop,
-    database::StateProviderDatabase,
-    db::{bal::EvmDatabaseError, State},
-};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     cache::db::StateProviderTraitObjWrapper,

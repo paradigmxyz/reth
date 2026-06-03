@@ -10,13 +10,11 @@ use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
 use reth_evm::{
-    env::BlockEnvironment, ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, TransactionEnvMut,
-    TxEnvFor,
+    database::{EvmStateProvider, State, StateProviderDatabase},
+    env::BlockEnvironment,
+    ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, TransactionEnvMut, TxEnvFor,
 };
-use reth_revm::{
-    database::{EvmStateProvider, StateProviderDatabase},
-    db::{bal::EvmDatabaseError, State},
-};
+use reth_execution_types::EvmDatabaseError;
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     error::{

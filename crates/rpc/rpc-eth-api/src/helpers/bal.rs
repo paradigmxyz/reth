@@ -4,8 +4,11 @@ use alloy_eip7928::BlockAccessList;
 use alloy_primitives::Bytes;
 use alloy_rpc_types_eth::BlockId;
 use reth_errors::RethError;
-use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm};
-use reth_revm::{database::StateProviderDatabase, State};
+use reth_evm::{
+    block::BlockExecutor,
+    database::{State, StateProviderDatabase},
+    ConfigureEvm, Evm,
+};
 use reth_rpc_eth_types::{
     cache::db::StateProviderTraitObjWrapper, error::FromEthApiError, EthApiError,
 };
