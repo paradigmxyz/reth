@@ -1,9 +1,9 @@
 //! EVM config for vanilla ethereum.
 //!
-//! # Revm features
+//! # EVM features
 //!
-//! This crate does __not__ enforce specific revm features such as `blst` or `c-kzg`, which are
-//! critical for revm's evm internals, it is the responsibility of the implementer to ensure the
+//! This crate does __not__ enforce specific EVM features such as `blst` or `c-kzg`, which are
+//! critical for EVM internals, it is the responsibility of the implementer to ensure the
 //! proper features are selected.
 
 #![doc(
@@ -19,22 +19,20 @@ extern crate alloc;
 
 use alloc::{borrow::Cow, sync::Arc};
 use alloy_consensus::Header;
-use alloy_evm::{
-    eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
-    EthEvmFactory, FromRecoveredTx, FromTxWithEncoded,
-};
 use alloy_primitives::Address;
 use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthExecutorSpec, MAINNET};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
-    eth::NextEvmEnvAttributes,
+    context::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, HaltReason},
+    eth::{EthBlockExecutionCtx, EthBlockExecutorFactory, NextEvmEnvAttributes},
     evm2::{Evm2AlloyBlockExecutorFactory, RethEvm2ReceiptBuilder},
+    hardfork::SpecId,
     precompiles::PrecompilesMap,
-    ConfigureEvm, EvmEnv, EvmFactory, NextBlockEnvAttributes, TransactionEnvMut,
+    ConfigureEvm, EthEvm, EthEvmFactory, EvmEnv, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
+    NextBlockEnvAttributes, TransactionEnvMut,
 };
 use reth_primitives_traits::{SealedBlock, SealedHeader};
-use revm::{context::BlockEnv, primitives::hardfork::SpecId};
 
 #[cfg(feature = "std")]
 use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
@@ -47,11 +45,7 @@ use {
     reth_evm::{EvmEnvFor, ExecutionCtxFor},
     reth_primitives_traits::{constants::MAX_TX_GAS_LIMIT_OSAKA, SignedTransaction, TxTy},
     reth_storage_errors::any::AnyError,
-    revm::context::{result::HaltReason, CfgEnv},
-    revm::context_interface::block::BlobExcessGasAndPrice,
 };
-
-pub use alloy_evm::EthEvm;
 
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_and_block_number};
@@ -99,7 +93,7 @@ where
     }
 }
 
-impl<C> alloy_evm::eth::spec::EthExecutorSpec for AlloyChainSpec<C>
+impl<C> reth_evm::eth::spec::EthExecutorSpec for AlloyChainSpec<C>
 where
     C: EthExecutorSpec,
 {
@@ -121,7 +115,7 @@ pub struct EthEvmConfig<C = ChainSpec, EvmFactory = EthEvmFactory> {
 /// Ethereum-related EVM configuration backed by evm2 execution.
 #[derive(Debug, Clone)]
 pub struct EthEvm2Config<C = ChainSpec, EvmFactory = EthEvmFactory> {
-    /// Inner evm2 [`BlockExecutorFactory`](alloy_evm::block::BlockExecutorFactory).
+    /// Inner evm2 [`BlockExecutorFactory`](reth_evm::execute::BlockExecutorFactory).
     pub executor_factory: Evm2AlloyBlockExecutorFactory<RethEvm2ReceiptBuilder, Arc<C>, EvmFactory>,
     /// Ethereum block assembler.
     pub block_assembler: EthBlockAssembler<C>,
@@ -597,12 +591,12 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_genesis::Genesis;
     use reth_chainspec::{Chain, ChainSpec};
-    use reth_evm::{execute::ProviderError, EvmEnv};
-    use revm::{
+    use reth_evm::{
         context::{BlockEnv, CfgEnv},
-        database::CacheDB,
-        database_interface::EmptyDBTyped,
+        database::{CacheDB, EmptyDBTyped},
+        execute::ProviderError,
         inspector::NoOpInspector,
+        EvmEnv,
     };
 
     #[test]

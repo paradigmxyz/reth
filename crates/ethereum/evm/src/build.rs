@@ -4,13 +4,15 @@ use alloy_consensus::{
     Block, BlockBody, BlockHeader, Header, TxReceipt, EMPTY_OMMER_ROOT_HASH,
 };
 use alloy_eips::{eip4895::Withdrawals, merge::BEACON_NONCE};
-use alloy_evm::{block::BlockExecutorFactory, eth::EthBlockExecutionCtx};
 use alloy_primitives::{Bloom, B256};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_evm::execute::{BlockAssembler, BlockAssemblerInput, BlockExecutionError};
+use reth_evm::{
+    context::Block as _,
+    eth::EthBlockExecutionCtx,
+    execute::{BlockAssembler, BlockAssemblerInput, BlockExecutionError, BlockExecutorFactory},
+};
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{logs_bloom as calculate_logs_bloom, Receipt, SignedTransaction};
-use revm::context::Block as _;
 
 /// Block builder for Ethereum.
 #[derive(Debug, Clone)]

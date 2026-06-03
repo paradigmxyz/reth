@@ -9,7 +9,7 @@ use revm::{bytecode::Bytecode, state::AccountInfo};
 
 pub use reth_execution_types::{DatabaseCommit, EmptyDBTyped, EvmDatabaseError};
 pub use revm::{
-    database::{CacheDB, EmptyDB, State},
+    database::{CacheDB, EmptyDB, State, TransitionState},
     Database, DatabaseRef,
 };
 

@@ -8902,7 +8902,6 @@ version = "2.2.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -8914,7 +8913,6 @@ dependencies = [
  "reth-primitives-traits",
  "reth-storage-errors",
  "reth-testing-utils",
- "revm",
  "secp256k1 0.30.0",
 ]
 

@@ -8,27 +8,22 @@ use alloy_eips::{
     eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     eip7685::EMPTY_REQUESTS_HASH,
 };
-use alloy_evm::eth::dao_fork;
-use alloy_primitives::{b256, fixed_bytes, keccak256, Bytes, TxKind, B256, U256};
+use alloy_primitives::{address, b256, fixed_bytes, keccak256, Bytes, TxKind, B256, U256};
 use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, ForkCondition, MAINNET};
 use reth_errors::BlockValidationError;
 use reth_ethereum_primitives::{Block, BlockBody, Transaction};
 use reth_evm::{
+    database::{CacheDB, Database, EmptyDB, TransitionState},
+    eth::dao_fork,
     execute::{BasicBlockExecutor, Executor},
     ConfigureEvm,
 };
 use reth_evm_ethereum::{EthEvm2Config, EthEvmConfig};
-use reth_execution_types::BlockExecutionResult;
+use reth_execution_types::{AccountInfo, BlockExecutionResult, Bytecode, EvmState};
 use reth_primitives_traits::{
     crypto::secp256k1::public_key_to_address, Block as _, RecoveredBlock,
 };
 use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
-use revm::{
-    database::{CacheDB, EmptyDB, TransitionState},
-    primitives::address,
-    state::{AccountInfo, Bytecode, EvmState},
-    Database,
-};
 use std::sync::{mpsc, Arc};
 
 fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
@@ -377,8 +372,7 @@ fn eip_2935_pre_fork() {
     // ensure that the block hash was *not* written to storage, since this is before the fork
     // was activated
     //
-    // we load the account first, because revm expects it to be
-    // loaded
+    // load the account first so storage reads observe cached account state
     executor.with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap());
     assert!(executor.with_state_mut(|state| {
         state.storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap().is_zero()
@@ -412,8 +406,7 @@ fn eip_2935_fork_activation_genesis() {
     // ensure that the block hash was *not* written to storage, since there are no blocks
     // preceding genesis
     //
-    // we load the account first, because revm expects it to be
-    // loaded
+    // load the account first so storage reads observe cached account state
     executor.with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap());
     assert!(executor.with_state_mut(|state| {
         state.storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap().is_zero()
@@ -539,8 +532,7 @@ fn eip_2935_state_transition_inside_fork() {
 
     // nothing should be written as the genesis has no ancestors
     //
-    // we load the account first, because revm expects it to be
-    // loaded
+    // load the account first so storage reads observe cached account state
     executor.with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap());
     assert!(executor.with_state_mut(|state| {
         state.storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap().is_zero()

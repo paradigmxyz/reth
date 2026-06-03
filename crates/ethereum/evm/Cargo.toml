@@ -17,14 +17,12 @@ reth-chainspec.workspace = true
 reth-ethereum-forks.workspace = true
 reth-primitives-traits.workspace = true
 reth-ethereum-primitives.workspace = true
-revm.workspace = true
 reth-evm.workspace = true
 reth-storage-errors.workspace = true
 
 # Alloy
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
-alloy-evm.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
 
@@ -44,11 +42,9 @@ std = [
     "secp256k1/std",
     "reth-ethereum-forks/std",
     "reth-chainspec/std",
-    "alloy-evm/std",
     "reth-execution-types/std",
     "reth-evm/std",
     "reth-primitives-traits/std",
-    "revm/std",
     "reth-ethereum-primitives/std",
     "alloy-rpc-types-engine/std",
     "reth-storage-errors/std",
