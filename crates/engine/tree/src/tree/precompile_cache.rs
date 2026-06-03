@@ -2,13 +2,14 @@
 
 use alloy_primitives::{
     map::{DefaultHashBuilder, FbBuildHasher},
-    Bytes,
+    Address, Bytes,
 };
 use moka::policy::EvictionPolicy;
-use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput};
+use reth_evm::{
+    precompile::{PrecompileId, PrecompileOutput, PrecompileResult},
+    precompiles::{DynPrecompile, Precompile, PrecompileInput},
+};
 use reth_primitives_traits::dashmap::DashMap;
-use revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
-use revm_primitives::Address;
 use std::{hash::Hash, sync::Arc};
 use tracing::error;
 
@@ -252,13 +253,10 @@ impl CachedPrecompileMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_evm::{EthEvmFactory, Evm, EvmEnv, EvmFactory};
-    use reth_revm::db::EmptyDB;
-    use revm::{
-        context::TxEnv,
-        precompile::{PrecompileOutput, PrecompileStatus},
+    use reth_evm::{
+        context::TxEnv, database::EmptyDB, hardfork::SpecId, precompile::PrecompileStatus,
+        EthEvmFactory, Evm, EvmEnv, EvmFactory,
     };
-    use revm_primitives::hardfork::SpecId;
 
     #[test]
     fn test_precompile_cache_basic() {

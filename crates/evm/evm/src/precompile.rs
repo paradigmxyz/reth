@@ -2,5 +2,7 @@
 
 pub use revm::{
     handler::EthPrecompiles,
-    precompile::{Precompile, PrecompileId, PrecompileOutput, PrecompileResult, Precompiles},
+    precompile::{
+        Precompile, PrecompileId, PrecompileOutput, PrecompileResult, PrecompileStatus, Precompiles,
+    },
 };
