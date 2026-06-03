@@ -2,6 +2,7 @@
 
 use alloc::{
     boxed::Box,
+    collections::BTreeMap,
     string::{String, ToString},
     vec,
     vec::Vec,
@@ -448,6 +449,18 @@ pub fn account_info_from_evm2(info: Evm2AccountInfo) -> AccountInfo {
     }
 }
 
+fn account_info_from_evm2_with_code(
+    mut info: Evm2AccountInfo,
+    code: &BTreeMap<B256, Evm2Bytecode>,
+) -> AccountInfo {
+    if info.code.is_none() &&
+        let Some(bytecode) = code.get(&info.code_hash)
+    {
+        info.code = Some(bytecode.clone());
+    }
+    account_info_from_evm2(info)
+}
+
 /// Converts a revm bytecode value into evm2 bytecode.
 pub fn bytecode_to_evm2(bytecode: Bytecode) -> Evm2Bytecode {
     if bytecode.is_eip7702() {
@@ -665,9 +678,10 @@ where
     R: Evm2ReceiptBuilder,
 {
     let mut state = AddressMap::<RevmAccount>::default();
-    let mut storage = changes.storage;
+    let StateChanges { accounts, storage, code, .. } = changes;
+    let mut storage = storage;
 
-    for (address, account) in changes.accounts {
+    for (address, account) in accounts {
         let original = account.original.map(account_info_from_evm2);
         let is_created = original.is_none() && account.current.is_some();
         let storage_wiped = storage.get(&address).is_some_and(|storage| storage.wipe);
@@ -692,7 +706,7 @@ where
                 } else {
                     RevmAccount::default()
                 };
-                account.info = account_info_from_evm2(info);
+                account.info = account_info_from_evm2_with_code(info, &code);
                 account.transaction_id = TransactionId::ZERO;
                 account
             }
@@ -2526,6 +2540,49 @@ mod tests {
 
         assert_eq!(db.storage(address, stale_slot).unwrap(), U256::ZERO);
         assert_eq!(db.storage(address, new_slot).unwrap(), U256::from(7));
+    }
+
+    #[test]
+    fn evm2_revm_state_attaches_changed_code() {
+        let address = address!("0x0000000000000000000000000000000000000017");
+        let code = Evm2Bytecode::new_legacy(Bytes::from_static(&[0x60, 0x00]));
+        let code_hash = code.hash_slow();
+        let evm = create_evm2_from_revm_env(
+            EmptyDB::default(),
+            RevmSpecId::FRONTIER,
+            BlockEnv::default(),
+        );
+        let mut executor = Evm2TransactionExecutor::new(evm);
+        let mut db = RevmState::builder()
+            .with_database(CacheDB::new(EmptyDB::default()))
+            .with_bundle_update()
+            .build();
+        let changes = StateChanges {
+            accounts: core::iter::once((
+                address,
+                Tracked {
+                    original: None,
+                    current: Some(Evm2AccountInfo {
+                        balance: U256::ZERO,
+                        nonce: 1,
+                        code_hash,
+                        code: None,
+                        _non_exhaustive: (),
+                    }),
+                    _non_exhaustive: (),
+                },
+            ))
+            .collect(),
+            storage: Default::default(),
+            code: core::iter::once((code_hash, code)).collect(),
+            logs: Vec::new(),
+            _non_exhaustive: (),
+        };
+
+        db.commit(evm_state_from_evm2_with_accounts(&mut executor, changes).unwrap());
+        db.merge_transitions(BundleRetention::Reverts);
+
+        assert!(db.bundle_state.bytecode(&code_hash).is_some());
     }
 
     #[test]
