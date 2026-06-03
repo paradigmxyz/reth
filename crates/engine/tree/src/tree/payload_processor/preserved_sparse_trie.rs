@@ -127,9 +127,10 @@ impl PreservedSparseTrie {
     /// preserved trie while the builder receives a private copy for the speculative parent root.
     ///
     /// Trie updates only describe intermediate trie node changes, not account/storage leaf
-    /// post-state. Applying non-empty updates to a cloned sparse trie would make the clone appear
-    /// anchored at `updated_state_root` while still containing `base_state_root` leaf values.
-    /// Likewise, a changed root cannot be represented safely without applying that post-state.
+    /// post-state. Applying non-empty updates to a cloned base-root sparse trie would make the
+    /// clone appear anchored at `updated_state_root` while still containing `base_state_root` leaf
+    /// values. If the preserved trie is already anchored at `updated_state_root`, it represents the
+    /// validated post-state and can be cloned directly.
     fn clone_with_updates(
         &self,
         base_state_root: B256,
@@ -137,6 +138,12 @@ impl PreservedSparseTrie {
         trie_updates: &TrieUpdates,
     ) -> Option<Self> {
         match self {
+            Self::Anchored { trie, state_root } if *state_root == updated_state_root => {
+                Some(Self::Anchored {
+                    trie: trie.clone_for_reuse(),
+                    state_root: updated_state_root,
+                })
+            }
             Self::Anchored { trie, state_root } if *state_root == base_state_root => {
                 if updated_state_root != base_state_root || !trie_updates.is_empty() {
                     debug!(
@@ -163,7 +170,7 @@ impl PreservedSparseTrie {
                     anchor_root = %state_root,
                     %base_state_root,
                     %updated_state_root,
-                    "not cloning preserved sparse trie because anchor root does not match update base"
+                    "not cloning preserved sparse trie because anchor root matches neither update base nor updated root"
                 );
                 None
             }
@@ -250,6 +257,36 @@ mod tests {
 
         assert!(preserved
             .clone_with_updates(base_state_root, updated_state_root, &trie_updates)
+            .is_none());
+    }
+
+    #[test]
+    fn clone_with_updates_reuses_trie_already_anchored_at_updated_root() {
+        let base_state_root = B256::with_last_byte(1);
+        let updated_state_root = B256::with_last_byte(2);
+        let preserved = PreservedSparseTrie::anchored(SparseTrie::default(), updated_state_root);
+        let mut trie_updates = TrieUpdates::default();
+        trie_updates.removed_nodes.insert(Nibbles::from_nibbles_unchecked([0x01]));
+
+        let cloned = preserved
+            .clone_with_updates(base_state_root, updated_state_root, &trie_updates)
+            .expect("validated post-state trie can be cloned for speculative builder");
+
+        assert!(matches!(
+            cloned,
+            PreservedSparseTrie::Anchored { state_root, .. } if state_root == updated_state_root
+        ));
+    }
+
+    #[test]
+    fn clone_with_updates_rejects_unrelated_anchor() {
+        let base_state_root = B256::with_last_byte(1);
+        let updated_state_root = B256::with_last_byte(2);
+        let unrelated_state_root = B256::with_last_byte(3);
+        let preserved = PreservedSparseTrie::anchored(SparseTrie::default(), unrelated_state_root);
+
+        assert!(preserved
+            .clone_with_updates(base_state_root, updated_state_root, &TrieUpdates::default())
             .is_none());
     }
 }
