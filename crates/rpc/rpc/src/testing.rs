@@ -30,12 +30,15 @@ use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_errors::RethError;
 use reth_ethereum_engine_primitives::EthBuiltPayload;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::{execute::BlockBuilder, ConfigureEvm, NextBlockEnvAttributes};
+use reth_evm::{
+    database::{State, StateProviderDatabase},
+    execute::BlockBuilder,
+    ConfigureEvm, NextBlockEnvAttributes,
+};
 use reth_primitives_traits::{
     transaction::{recover::try_recover_signers, signed::RecoveryError},
     AlloyBlockHeader as BlockTrait, TxTy,
 };
-use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_api::{TestingApiServer, TestingBuildBlockRequestV1};
 use reth_rpc_eth_api::{helpers::Call, FromEthApiError};
 use reth_rpc_eth_types::EthApiError;
