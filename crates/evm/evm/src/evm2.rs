@@ -1054,25 +1054,25 @@ pub type Evm2BlockExecutor<R = RethEvm2ReceiptBuilder> = Evm2TransactionExecutor
 
 /// Factory for direct evm2 block executors.
 #[derive(Debug, Clone)]
-pub struct Evm2BlockExecutorFactory<R = RethEvm2ReceiptBuilder> {
+pub struct Evm2DirectBlockExecutorFactory<R = RethEvm2ReceiptBuilder> {
     /// Receipt builder cloned into each executor.
     pub receipt_builder: R,
 }
 
-impl Evm2BlockExecutorFactory {
+impl Evm2DirectBlockExecutorFactory {
     /// Creates a new factory with reth's default Ethereum receipt builder.
     pub const fn new() -> Self {
         Self::with_receipt_builder(RethEvm2ReceiptBuilder)
     }
 }
 
-impl Default for Evm2BlockExecutorFactory {
+impl Default for Evm2DirectBlockExecutorFactory {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<R> Evm2BlockExecutorFactory<R> {
+impl<R> Evm2DirectBlockExecutorFactory<R> {
     /// Creates a new factory with the given receipt builder.
     pub const fn with_receipt_builder(receipt_builder: R) -> Self {
         Self { receipt_builder }
@@ -1110,9 +1110,9 @@ impl<R> Evm2BlockExecutorFactory<R> {
     }
 }
 
-/// Alloy block executor factory backed by evm2 transaction execution.
+/// Reth block executor factory backed by evm2 transaction execution.
 #[derive(Debug, Clone)]
-pub struct Evm2AlloyBlockExecutorFactory<R, Spec, EvmFactory> {
+pub struct Evm2RethBlockExecutorFactory<R, Spec, EvmFactory> {
     /// Receipt builder.
     receipt_builder: R,
     /// Chain specification.
@@ -1123,7 +1123,7 @@ pub struct Evm2AlloyBlockExecutorFactory<R, Spec, EvmFactory> {
     dao_fork_block: Option<u64>,
 }
 
-impl<R, Spec, EvmFactory> Evm2AlloyBlockExecutorFactory<R, Spec, EvmFactory> {
+impl<R, Spec, EvmFactory> Evm2RethBlockExecutorFactory<R, Spec, EvmFactory> {
     /// Creates a new evm2-backed block executor factory.
     pub const fn new(receipt_builder: R, spec: Spec, evm_factory: EvmFactory) -> Self {
         Self { receipt_builder, spec, evm_factory, dao_fork_block: None }
@@ -1147,7 +1147,7 @@ impl<R, Spec, EvmFactory> Evm2AlloyBlockExecutorFactory<R, Spec, EvmFactory> {
 }
 
 impl<R, Spec, EvmF> crate::execute::BlockExecutorFactory
-    for Evm2AlloyBlockExecutorFactory<R, Spec, EvmF>
+    for Evm2RethBlockExecutorFactory<R, Spec, EvmF>
 where
     R: Evm2ReceiptBuilder<Transaction = RethEthereumTxEnvelope> + Clone + Send + Sync + 'static,
     R::Receipt: Clone + Send + Sync + 'static,
@@ -1166,9 +1166,9 @@ where
     type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
     type Transaction = RethEthereumTxEnvelope;
     type Receipt = R::Receipt;
-    type TxExecutionResult = Evm2AlloyTxResult;
+    type TxExecutionResult = Evm2TxExecutionResult;
     type Executor<'a, DB: StateDB, I: Inspector<<EvmF as crate::EvmFactory>::Context<DB>>> =
-        Evm2AlloyBlockExecutor<'a, <EvmF as crate::EvmFactory>::Evm<DB, I>, R>;
+        Evm2RethBlockExecutor<'a, <EvmF as crate::EvmFactory>::Evm<DB, I>, R>;
 
     fn evm_factory(&self) -> &Self::EvmFactory {
         &self.evm_factory
@@ -1183,13 +1183,13 @@ where
         DB: StateDB,
         I: Inspector<<EvmF as crate::EvmFactory>::Context<DB>>,
     {
-        Evm2AlloyBlockExecutor::new(evm, ctx, self.receipt_builder.clone(), self.dao_fork_block)
+        Evm2RethBlockExecutor::new(evm, ctx, self.receipt_builder.clone(), self.dao_fork_block)
     }
 }
 
 /// A transaction result adapter for callers expecting alloy/revm result access.
 #[derive(Debug, Clone)]
-pub struct Evm2AlloyTxResult {
+pub struct Evm2TxExecutionResult {
     result: ResultAndState<HaltReason>,
     evm2_result: Evm2TxResult,
     evm_state: EvmState,
@@ -1197,7 +1197,7 @@ pub struct Evm2AlloyTxResult {
     tx_type: TxType,
 }
 
-impl AlloyTxResult for Evm2AlloyTxResult {
+impl AlloyTxResult for Evm2TxExecutionResult {
     type HaltReason = HaltReason;
 
     fn result(&self) -> &ResultAndState<Self::HaltReason> {
@@ -1209,33 +1209,33 @@ impl AlloyTxResult for Evm2AlloyTxResult {
     }
 }
 
-/// Alloy-compatible block executor that executes with evm2 and keeps reth's normal DB carrier.
-pub struct Evm2AlloyBlockExecutor<'a, E, R: Evm2ReceiptBuilder> {
+/// Reth block executor that executes with evm2 and keeps reth's normal DB carrier.
+pub struct Evm2RethBlockExecutor<'a, E, R: Evm2ReceiptBuilder> {
     evm2: Evm2TransactionExecutor<R>,
     evm: Box<E>,
     ctx: EthBlockExecutionCtx<'a>,
     dao_fork_block: Option<u64>,
 }
 
-impl<E, R> fmt::Debug for Evm2AlloyBlockExecutor<'_, E, R>
+impl<E, R> fmt::Debug for Evm2RethBlockExecutor<'_, E, R>
 where
     E: fmt::Debug,
     R: Evm2ReceiptBuilder,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Evm2AlloyBlockExecutor")
+        f.debug_struct("Evm2RethBlockExecutor")
             .field("evm", &self.evm)
             .field("ctx", &self.ctx)
             .finish_non_exhaustive()
     }
 }
 
-impl<'a, E, R> Evm2AlloyBlockExecutor<'a, E, R>
+impl<'a, E, R> Evm2RethBlockExecutor<'a, E, R>
 where
     E: AlloyEvm<Spec = RevmSpecId, BlockEnv = BlockEnv>,
     R: Evm2ReceiptBuilder + Clone,
 {
-    /// Creates a new evm2-backed alloy block executor.
+    /// Creates a new evm2-backed reth block executor.
     pub fn new(
         evm: E,
         ctx: EthBlockExecutionCtx<'a>,
@@ -1253,7 +1253,7 @@ where
     }
 }
 
-impl<E, R> AlloyBlockExecutor for Evm2AlloyBlockExecutor<'_, E, R>
+impl<E, R> AlloyBlockExecutor for Evm2RethBlockExecutor<'_, E, R>
 where
     E: AlloyEvm<
         DB: DatabaseCommit,
@@ -1268,7 +1268,7 @@ where
     type Transaction = RethEthereumTxEnvelope;
     type Receipt = R::Receipt;
     type Evm = E;
-    type Result = Evm2AlloyTxResult;
+    type Result = Evm2TxExecutionResult;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         let start = self.evm2.result.pre_block_system_results.len();
@@ -1316,7 +1316,7 @@ where
             evm_state_from_evm2_with_accounts(&mut self.evm2, evm2_result.state_changes.clone())?;
         let result = evm2_result_to_revm_result(&evm2_result);
 
-        Ok(Evm2AlloyTxResult {
+        Ok(Evm2TxExecutionResult {
             result,
             evm2_result,
             evm_state,
@@ -1341,7 +1341,7 @@ where
     }
 
     fn commit_transaction(&mut self, output: Self::Result) -> GasOutput {
-        let Evm2AlloyTxResult { evm2_result, evm_state, blob_gas_used, tx_type, .. } = output;
+        let Evm2TxExecutionResult { evm2_result, evm_state, blob_gas_used, tx_type, .. } = output;
         let gas_used = evm2_result.gas_used;
 
         self.evm2.result.cumulative_tx_gas_used =
@@ -3064,7 +3064,7 @@ mod tests {
 
     #[test]
     fn factory_creates_direct_evm2_block_executor() {
-        let factory = Evm2BlockExecutorFactory::new();
+        let factory = Evm2DirectBlockExecutorFactory::new();
         let mut executor = factory.create_executor_from_revm_env(
             EmptyDB::default(),
             RevmSpecId::PRAGUE,

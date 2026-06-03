@@ -25,7 +25,7 @@ use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
     context::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, HaltReason},
     eth::EthBlockExecutionCtx,
-    evm2::{Evm2AlloyBlockExecutorFactory, RethEvm2ReceiptBuilder},
+    evm2::{Evm2RethBlockExecutorFactory, RethEvm2ReceiptBuilder},
     hardfork::SpecId,
     precompiles::PrecompilesMap,
     ConfigureEvm, EthEvmFactory, EvmEnv, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
@@ -76,7 +76,7 @@ pub type EthEvmConfig<C = ChainSpec, EvmFactory = EthEvmFactory> = EthEvm2Config
 #[derive(Debug, Clone)]
 pub struct EthEvm2Config<C = ChainSpec, EvmFactory = EthEvmFactory> {
     /// Inner evm2 [`BlockExecutorFactory`](reth_evm::execute::BlockExecutorFactory).
-    pub executor_factory: Evm2AlloyBlockExecutorFactory<RethEvm2ReceiptBuilder, Arc<C>, EvmFactory>,
+    pub executor_factory: Evm2RethBlockExecutorFactory<RethEvm2ReceiptBuilder, Arc<C>, EvmFactory>,
     /// Ethereum block assembler.
     pub block_assembler: EthBlockAssembler<C>,
 }
@@ -111,7 +111,7 @@ where
     pub fn new_with_evm_factory(chain_spec: Arc<ChainSpec>, evm_factory: EvmFactory) -> Self {
         Self {
             block_assembler: EthBlockAssembler::new(chain_spec.clone()),
-            executor_factory: Evm2AlloyBlockExecutorFactory::new(
+            executor_factory: Evm2RethBlockExecutorFactory::new(
                 RethEvm2ReceiptBuilder,
                 chain_spec.clone(),
                 evm_factory,
@@ -149,7 +149,7 @@ where
     type Error = Infallible;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
     type BlockExecutorFactory =
-        Evm2AlloyBlockExecutorFactory<RethEvm2ReceiptBuilder, Arc<ChainSpec>, EvmF>;
+        Evm2RethBlockExecutorFactory<RethEvm2ReceiptBuilder, Arc<ChainSpec>, EvmF>;
     type BlockAssembler = EthBlockAssembler<ChainSpec>;
 
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
