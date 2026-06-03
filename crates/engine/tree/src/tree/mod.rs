@@ -22,7 +22,7 @@ use reth_engine_primitives::{
     ForkchoiceStateTracker, NewPayloadTimings, OnForkChoiceUpdated, SlowBlockInfo,
 };
 use reth_errors::{ConsensusError, ProviderResult};
-use reth_evm::ConfigureEvm;
+use reth_evm::{database::StateProviderDatabase, ConfigureEvm};
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle};
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadTypes};
 use reth_primitives_traits::{
@@ -34,11 +34,9 @@ use reth_provider::{
     StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
     StorageSettingsCache, TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority, WorkerPool};
 use reth_trie_db::ChangesetCache;
-use revm::interpreter::debug_unreachable;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
 
@@ -2705,7 +2703,8 @@ where
                 self.metrics.tree.reorgs.head.increment(1);
             }
         } else {
-            debug_unreachable!("Reorged chain doesn't have any blocks");
+            #[cfg(debug_assertions)]
+            unreachable!("Reorged chain doesn't have any blocks");
         }
         self.metrics.tree.latest_reorg_depth.set(old_chain_length as f64);
     }

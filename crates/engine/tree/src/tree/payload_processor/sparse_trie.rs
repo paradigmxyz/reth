@@ -10,7 +10,7 @@ use crate::tree::{
     payload_processor::multiproof::MultiProofTaskMetrics,
 };
 use alloy_primitives::{
-    map::{B256Map, B256Set},
+    map::{hash_map::Entry, B256Map, B256Set},
     B256,
 };
 use alloy_rlp::{Decodable, Encodable};
@@ -34,7 +34,6 @@ use reth_trie_sparse::{
     ConfigurableSparseTrie, DeferredDrops, LeafUpdate, RevealableSparseTrie, SparseStateTrie,
     SparseTrie,
 };
-use revm_primitives::hash_map::Entry;
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
