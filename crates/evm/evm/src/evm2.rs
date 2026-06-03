@@ -756,7 +756,7 @@ pub struct Evm2BlockExecutionCtx<'a> {
 }
 
 /// Error produced by direct evm2 block execution helpers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Evm2BlockExecutionError {
     /// Transaction execution failed.
     Transaction(evm2::evm::registry::HandlerError),
@@ -782,6 +782,15 @@ pub enum Evm2BlockExecutionError {
         address: Address,
         /// Stop reason.
         stop: InstrStop,
+    },
+    /// System call execution failed with a database error.
+    SystemCallDatabase {
+        /// System call label.
+        label: &'static str,
+        /// System contract address.
+        address: Address,
+        /// Database error.
+        error: String,
     },
     /// Database read failed while building block-level state output.
     Database(Evm2DbErrorCode),
@@ -1621,6 +1630,10 @@ where
             SystemCallPhase::Post => self.execute_post_block_system_call(address, data),
         };
         if !result.status {
+            if let Some(code) = result.db_error_code {
+                let error = self.evm.database_mut().error(code).to_string();
+                return Err(Evm2BlockExecutionError::SystemCallDatabase { label, address, error });
+            }
             return Err(Evm2BlockExecutionError::SystemCall { label, address, stop: result.stop });
         }
         Ok(result)
