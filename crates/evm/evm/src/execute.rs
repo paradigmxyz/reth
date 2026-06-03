@@ -170,16 +170,31 @@ pub(crate) fn prune_created_deleted_empty_accounts(bundle: &mut BundleState) {
                 account.original_info.is_none() &&
                 account.info.as_ref().is_none_or(|info| info.is_empty()) &&
                 (account.status == AccountStatus::InMemoryChange || account.was_destroyed()) &&
-                account.storage.values().all(|slot| slot.previous_or_original_value.is_zero())
+                account.storage.values().all(|slot| {
+                    slot.previous_or_original_value.is_zero() && slot.present_value.is_zero()
+                })
         })
         .map(|(&address, _)| address)
         .collect::<Vec<_>>();
 
-    for address in accounts {
+    for &address in &accounts {
         if let Some(account) = bundle.state.remove(&address) {
             bundle.state_size = bundle.state_size.saturating_sub(account.size_hint());
         }
     }
+
+    let accounts = accounts.into_iter().collect::<AddressHashSet>();
+    let mut removed_reverts_size = 0;
+    for block_reverts in bundle.reverts.iter_mut() {
+        block_reverts.retain(|(address, revert)| {
+            if accounts.contains(address) && matches!(revert.account, AccountInfoRevert::DeleteIt) {
+                removed_reverts_size += revert.size_hint();
+                return false;
+            }
+            true
+        });
+    }
+    bundle.reverts_size = bundle.reverts_size.saturating_sub(removed_reverts_size);
 }
 
 /// A type that knows how to execute a block. It is assumed to operate on a

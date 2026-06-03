@@ -2089,7 +2089,7 @@ mod tests {
     }
 
     #[test]
-    fn created_deleted_account_revm_state_keeps_revert_without_post_state() {
+    fn created_deleted_account_revm_state_prunes_revert_without_post_state() {
         let address = address!("0x000000000000000000000000000000000000000f");
         let changes = StateChanges {
             accounts: core::iter::once((
@@ -2120,7 +2120,7 @@ mod tests {
         crate::execute::prune_created_deleted_empty_accounts(&mut db.bundle_state);
 
         assert!(db.bundle_state.account(&address).is_none());
-        assert_eq!(db.bundle_state.reverts[0][0].1.account, AccountInfoRevert::DeleteIt);
+        assert!(db.bundle_state.reverts[0].iter().all(|(addr, _)| *addr != address));
     }
 
     #[test]
@@ -2185,7 +2185,7 @@ mod tests {
     }
 
     #[test]
-    fn evm2_revm_state_keeps_block_original_revert_for_created_then_deleted_account() {
+    fn evm2_revm_state_prunes_block_original_revert_for_created_then_deleted_account() {
         let address = address!("0x0000000000000000000000000000000000000011");
         let evm = create_evm2_from_revm_env(
             EmptyDB::default(),
@@ -2225,7 +2225,19 @@ mod tests {
             accounts: Default::default(),
             storage: core::iter::once((
                 address,
-                StorageChangeSet { wipe: true, slots: Default::default(), _non_exhaustive: () },
+                StorageChangeSet {
+                    wipe: true,
+                    slots: core::iter::once((
+                        U256::from(3),
+                        Tracked {
+                            original: U256::from(5),
+                            current: U256::ZERO,
+                            _non_exhaustive: (),
+                        },
+                    ))
+                    .collect(),
+                    _non_exhaustive: (),
+                },
             ))
             .collect(),
             code: Default::default(),
@@ -2251,7 +2263,7 @@ mod tests {
             db.bundle_state.account(&address),
             db.bundle_state.reverts
         );
-        assert_eq!(db.bundle_state.reverts[0][0].1.account, AccountInfoRevert::DeleteIt);
+        assert!(db.bundle_state.reverts[0].iter().all(|(addr, _)| *addr != address));
     }
 
     #[test]
@@ -2363,7 +2375,7 @@ mod tests {
         crate::execute::prune_created_deleted_empty_accounts(&mut db.bundle_state);
 
         assert!(
-            db.bundle_state.account(&address).is_none(),
+            db.bundle_state.account(&address).is_some(),
             "account={:?} reverts={:?}",
             db.bundle_state.account(&address),
             db.bundle_state.reverts
