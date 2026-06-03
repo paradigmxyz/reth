@@ -33,10 +33,15 @@ import { TrustedBy } from "../components/TrustedBy";
             <span style={{ color: "light-dark(rgb(0 0 0 / 0.62), rgb(255 255 255 / 0.62))", fontSize: 13, fontWeight: 500, lineHeight: 1 }}>license</span>
           </a>
       </div>
+      <div className="flex gap-x-5 gap-y-2 flex-wrap text-[15px] font-medium max-md:justify-center">
+        <a href="/run/ethereum" className="vocs_Link vocs_Link_styleless text-black dark:text-white hover:opacity-70">Run a Node</a>
+        <a href="/sdk" className="vocs_Link vocs_Link_styleless text-black dark:text-white hover:opacity-70">Build a Node</a>
+        <a href="/introduction/why-reth" className="vocs_Link vocs_Link_styleless text-black dark:text-white hover:opacity-70">Why Reth?</a>
+      </div>
       <div id="home-install">
         :::code-group
 
-        ```bash [CLI]
+        ```bash [Run a Node]
         # Install the binary
         brew install paradigmxyz/brew/reth
 
@@ -44,7 +49,7 @@ import { TrustedBy } from "../components/TrustedBy";
         reth node --http --http.api eth,trace
         ```
 
-        ```rust [Rust SDK]
+        ```rust [Build a Node]
         // .. snip ..
         let handle = node_builder
           .with_types::<EthereumNode>()
