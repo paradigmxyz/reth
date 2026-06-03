@@ -118,6 +118,7 @@ struct PendingPayloadBuilderSparseTrie {
     state_root_tx: std::sync::mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
     hashed_state_tx: std::sync::mpsc::Sender<HashedPostState>,
     deferred_parent_pending: Arc<AtomicBool>,
+    consumer_cancelled: Arc<AtomicBool>,
 }
 
 struct PendingPayloadBuilderSparseTrieCancelGuard {
@@ -168,6 +169,9 @@ const MAX_EXPECTED_GAS_USAGE_MULTIPLIER: u64 = 2;
 
 /// Worker name for deferred trie data and changeset provider preparation.
 const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
+
+/// Poll interval used while bridging deferred payload-builder sparse-trie handles.
+const PAYLOAD_BUILDER_SPARSE_TRIE_BRIDGE_POLL_INTERVAL: Duration = Duration::from_millis(1);
 
 type ReceiptRootSender<N> =
     crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
@@ -2000,12 +2004,20 @@ where
         let (state_root_tx, state_root_rx) = std::sync::mpsc::channel();
         let (hashed_state_tx, hashed_state_rx) = std::sync::mpsc::channel();
         let deferred_parent_pending = Arc::new(AtomicBool::new(true));
+        let handle = StateRootHandle::new_deferred(
+            parent_state_root,
+            updates_tx,
+            state_root_rx,
+            hashed_state_rx,
+            Arc::clone(&deferred_parent_pending),
+        );
 
         let pending = PendingPayloadBuilderSparseTrie {
             updates_rx,
             state_root_tx,
             hashed_state_tx,
             deferred_parent_pending: Arc::clone(&deferred_parent_pending),
+            consumer_cancelled: handle.consumer_cancelled(),
         };
         let pending_count = {
             let mut pending_sparse_tries = self
@@ -2025,13 +2037,7 @@ where
             "registered deferred payload-builder sparse trie handle"
         );
 
-        StateRootHandle::new_deferred(
-            parent_state_root,
-            updates_tx,
-            state_root_rx,
-            hashed_state_rx,
-            deferred_parent_pending,
-        )
+        handle
     }
 
     fn payload_builder_sparse_trie_handle_for_validated_parent(
@@ -2192,6 +2198,7 @@ where
             state_root_tx,
             hashed_state_tx,
             deferred_parent_pending,
+            consumer_cancelled,
         } = pending;
         let active_updates_tx = active_handle.updates_tx().clone();
         let active_state_root_rx = active_handle.take_state_root_rx();
@@ -2209,7 +2216,26 @@ where
             let mut forwarded_updates = 0usize;
             let mut finished = false;
 
-            while let Ok(message) = updates_rx.recv() {
+            loop {
+                if consumer_cancelled.load(Ordering::Acquire) {
+                    debug!(
+                        target: "engine::tree::payload_validator",
+                        %parent_hash,
+                        parent_number,
+                        forwarded_updates,
+                        "payload builder dropped deferred sparse trie handle before update stream finished"
+                    );
+                    return;
+                }
+
+                let message = match updates_rx.recv_timeout(
+                    PAYLOAD_BUILDER_SPARSE_TRIE_BRIDGE_POLL_INTERVAL,
+                ) {
+                    Ok(message) => message,
+                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                };
+
                 finished = matches!(message, StateRootMessage::FinishedStateUpdates);
                 if active_updates_tx.send(message).is_err() {
                     debug!(
@@ -2239,15 +2265,34 @@ where
                 return;
             }
 
-            let Ok(hashed_state) = active_hashed_state_rx.recv() else {
-                debug!(
-                    target: "engine::tree::payload_validator",
-                    %parent_hash,
-                    parent_number,
-                    forwarded_updates,
-                    "payload-builder sparse trie task dropped hashed state sender"
-                );
-                return;
+            let hashed_state = loop {
+                if consumer_cancelled.load(Ordering::Acquire) {
+                    debug!(
+                        target: "engine::tree::payload_validator",
+                        %parent_hash,
+                        parent_number,
+                        forwarded_updates,
+                        "payload builder dropped deferred sparse trie handle while waiting for hashed state"
+                    );
+                    return;
+                }
+
+                match active_hashed_state_rx.recv_timeout(
+                    PAYLOAD_BUILDER_SPARSE_TRIE_BRIDGE_POLL_INTERVAL,
+                ) {
+                    Ok(hashed_state) => break hashed_state,
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => {
+                        debug!(
+                            target: "engine::tree::payload_validator",
+                            %parent_hash,
+                            parent_number,
+                            forwarded_updates,
+                            "payload-builder sparse trie task dropped hashed state sender"
+                        );
+                        return;
+                    }
+                }
             };
             if hashed_state_tx.send(hashed_state).is_err() {
                 debug!(
@@ -2260,11 +2305,30 @@ where
                 return;
             }
 
-            let result = active_state_root_rx.recv().unwrap_or_else(|_| {
-                Err(ParallelStateRootError::Other(
-                    "payload-builder sparse trie task dropped state root sender".to_string(),
-                ))
-            });
+            let result = loop {
+                if consumer_cancelled.load(Ordering::Acquire) {
+                    debug!(
+                        target: "engine::tree::payload_validator",
+                        %parent_hash,
+                        parent_number,
+                        forwarded_updates,
+                        "payload builder dropped deferred sparse trie handle while waiting for state root"
+                    );
+                    return;
+                }
+
+                match active_state_root_rx.recv_timeout(
+                    PAYLOAD_BUILDER_SPARSE_TRIE_BRIDGE_POLL_INTERVAL,
+                ) {
+                    Ok(result) => break result,
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => {
+                        break Err(ParallelStateRootError::Other(
+                            "payload-builder sparse trie task dropped state root sender".to_string(),
+                        ));
+                    }
+                }
+            };
             let success = result.is_ok();
             let _ = state_root_tx.send(result);
 

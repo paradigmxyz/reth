@@ -67,11 +67,13 @@ pub struct StateRootHandle {
         Option<std::sync::mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
     /// Receiver for the hashed post state.
     hashed_state_rx: Option<std::sync::mpsc::Receiver<HashedPostState>>,
+    /// Set when the payload-builder side drops this handle before consuming sparse-trie outputs.
+    consumer_cancelled: Arc<AtomicBool>,
 }
 
 impl StateRootHandle {
     /// Creates a new [`StateRootHandle`].
-    pub const fn new(
+    pub fn new(
         cached_trie_state_root: B256,
         updates_tx: crossbeam_channel::Sender<StateRootMessage>,
         state_root_rx: std::sync::mpsc::Receiver<
@@ -85,6 +87,7 @@ impl StateRootHandle {
             updates_tx,
             state_root_rx: Some(state_root_rx),
             hashed_state_rx: Some(hashed_state_rx),
+            consumer_cancelled: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -107,6 +110,7 @@ impl StateRootHandle {
             updates_tx,
             state_root_rx: Some(state_root_rx),
             hashed_state_rx: Some(hashed_state_rx),
+            consumer_cancelled: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -125,6 +129,11 @@ impl StateRootHandle {
         self.deferred_parent_pending
             .as_ref()
             .is_some_and(|pending| pending.load(Ordering::Acquire))
+    }
+
+    /// Returns a flag that is set once this handle is dropped by its consumer.
+    pub fn consumer_cancelled(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.consumer_cancelled)
     }
 
     /// Returns a reference to the updates sender channel.
@@ -203,6 +212,12 @@ impl StateRootHandle {
     /// If called more than once.
     pub const fn take_hashed_state_rx(&mut self) -> std::sync::mpsc::Receiver<HashedPostState> {
         self.hashed_state_rx.take().expect("hashed_state already taken")
+    }
+}
+
+impl Drop for StateRootHandle {
+    fn drop(&mut self) {
+        self.consumer_cancelled.store(true, Ordering::Release);
     }
 }
 
@@ -360,6 +375,20 @@ mod tests {
         );
         assert!(handle.is_deferred());
         assert!(handle.is_deferred_parent_pending());
+    }
+
+    #[test]
+    fn state_root_handle_drop_signals_consumer_cancelled() {
+        let (updates_tx, _updates_rx) = crossbeam_channel::unbounded();
+        let (_state_root_tx, state_root_rx) = std::sync::mpsc::channel();
+        let (_hashed_state_tx, hashed_state_rx) = std::sync::mpsc::channel();
+        let handle =
+            StateRootHandle::new(B256::ZERO, updates_tx, state_root_rx, hashed_state_rx);
+        let consumer_cancelled = handle.consumer_cancelled();
+
+        assert!(!consumer_cancelled.load(Ordering::Acquire));
+        drop(handle);
+        assert!(consumer_cancelled.load(Ordering::Acquire));
     }
 
     #[test]
