@@ -34,6 +34,7 @@ use revm::{
     context::{result::ResultAndState, Block},
     database::{states::bundle_state::BundleRetention, State},
 };
+use revm_primitives::SpecId;
 use revm_state::bal::Bal as RevmBal;
 use std::sync::Arc;
 
@@ -112,10 +113,12 @@ where
     let block_gas_limit = evm_env.block_env.gas_limit();
     let enable_amsterdam_eip8037 = evm_env.cfg_env.enable_amsterdam_eip8037;
     let tx_gas_limit_cap = evm_env.cfg_env.tx_gas_limit_cap;
+    let is_bogota_active = evm_env.spec_id().is_enabled_in(SpecId::BOGOTA);
     let mut canonical_state = State::builder()
         .with_database(make_db(false)?)
         .with_bundle_update()
         .with_bal_builder()
+        .with_bal_storage_root_if(is_bogota_active)
         .build();
 
     let (block_result, senders) = {

@@ -268,11 +268,14 @@ where
 
     // Configure state
     let has_bal = reorg_target.header().block_access_list_hash().is_some();
+    let is_bogota_active =
+        provider.chain_spec().is_bogota_active_at_timestamp(reorg_target.header().timestamp());
     let state_provider = provider.state_by_block_hash(reorg_target.header().parent_hash())?;
     let mut state = State::builder()
         .with_database_ref(StateProviderDatabase::new(&state_provider))
         .with_bundle_update()
         .with_bal_builder_if(has_bal)
+        .with_bal_storage_root_if(is_bogota_active)
         .build();
 
     let ctx = evm_config.context_for_block(&reorg_target).map_err(RethError::other)?;
