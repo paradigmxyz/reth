@@ -66,12 +66,26 @@ pub trait PayloadBuilderBuilder<Node: FullNodeTypes, Pool: TransactionPool, EvmC
 
 /// Basic payload service builder that spawns a [`BasicPayloadJobGenerator`]
 #[derive(Debug, Default, Clone)]
-pub struct BasicPayloadServiceBuilder<PB>(PB);
+pub struct BasicPayloadServiceBuilder<PB> {
+    /// Builds the payload builder used by generated payload jobs.
+    payload_builder_builder: PB,
+    /// Configuration for generated payload jobs.
+    payload_job_config: BasicPayloadJobGeneratorConfig,
+}
 
 impl<PB> BasicPayloadServiceBuilder<PB> {
     /// Create a new [`BasicPayloadServiceBuilder`].
     pub const fn new(payload_builder_builder: PB) -> Self {
-        Self(payload_builder_builder)
+        Self { payload_builder_builder, payload_job_config: BasicPayloadJobGeneratorConfig::new() }
+    }
+
+    /// Sets the [`BasicPayloadJobGeneratorConfig`] used by spawned payload jobs.
+    pub const fn with_payload_job_config(
+        mut self,
+        payload_job_config: BasicPayloadJobGeneratorConfig,
+    ) -> Self {
+        self.payload_job_config = payload_job_config;
+        self
     }
 }
 
@@ -89,11 +103,13 @@ where
         pool: Pool,
         evm_config: EvmConfig,
     ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>> {
-        let payload_builder = self.0.build_payload_builder(ctx, pool, evm_config).await?;
+        let Self { payload_builder_builder, payload_job_config } = self;
+        let payload_builder =
+            payload_builder_builder.build_payload_builder(ctx, pool, evm_config).await?;
 
         let conf = ctx.config().builder.clone();
 
-        let payload_job_config = BasicPayloadJobGeneratorConfig::default()
+        let payload_job_config = payload_job_config
             .interval(conf.interval)
             .deadline(conf.deadline)
             .max_payload_tasks(conf.max_payload_tasks);

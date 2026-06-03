@@ -276,6 +276,17 @@ pub struct BasicPayloadJobGeneratorConfig {
 // === impl BasicPayloadJobGeneratorConfig ===
 
 impl BasicPayloadJobGeneratorConfig {
+    /// Creates a new config with default values.
+    pub const fn new() -> Self {
+        Self {
+            interval: Duration::from_secs(1),
+            // 12s slot time
+            deadline: SLOT_DURATION,
+            max_payload_tasks: 3,
+            pre_cache_state: true,
+        }
+    }
+
     /// Sets the interval at which the job should build a new payload after the last.
     pub const fn interval(mut self, interval: Duration) -> Self {
         self.interval = interval;
@@ -311,13 +322,7 @@ impl BasicPayloadJobGeneratorConfig {
 
 impl Default for BasicPayloadJobGeneratorConfig {
     fn default() -> Self {
-        Self {
-            interval: Duration::from_secs(1),
-            // 12s slot time
-            deadline: SLOT_DURATION,
-            max_payload_tasks: 3,
-            pre_cache_state: true,
-        }
+        Self::new()
     }
 }
 
