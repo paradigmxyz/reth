@@ -80,7 +80,6 @@ members = [
     "crates/prune/db",
     "crates/prune/prune",
     "crates/prune/types",
-    "crates/revm/",
     "crates/rpc/ipc/",
     "crates/rpc/rpc-api/",
     "crates/rpc/rpc-builder/",
@@ -398,7 +397,6 @@ reth-primitives-traits = { version = "0.4.0", default-features = false }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }
 reth-prune-types = { path = "crates/prune/types", default-features = false }
-reth-revm = { path = "crates/revm", default-features = false }
 reth-rpc = { path = "crates/rpc/rpc" }
 reth-rpc-api = { path = "crates/rpc/rpc-api" }
 reth-rpc-api-testing-util = { path = "crates/rpc/rpc-testing-util" }
