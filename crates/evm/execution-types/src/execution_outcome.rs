@@ -1,4 +1,4 @@
-use crate::{BlockExecutionOutput, BlockExecutionResult};
+use crate::{AccountInfo, BlockExecutionOutput, BlockExecutionResult, BundleAccount, BundleState};
 use alloc::{vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{
@@ -8,18 +8,14 @@ use alloy_primitives::{
 };
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
 use reth_trie_common::{HashedPostState, KeyHasher};
-use revm::{
-    database::{states::BundleState, BundleAccount},
-    state::AccountInfo,
-};
 
-/// Type used to initialize revms bundle state.
+/// Type used to initialize the execution bundle state.
 pub type BundleStateInit = AddressMap<(Option<Account>, Option<Account>, B256Map<(U256, U256)>)>;
 
-/// Types used inside `RevertsInit` to initialize revms reverts.
+/// Types used inside `RevertsInit` to initialize execution reverts.
 pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
 
-/// Type used to initialize revms reverts.
+/// Type used to initialize execution reverts.
 pub type RevertsInit = HashMap<BlockNumber, AddressMap<AccountRevertInit>>;
 
 /// Represents a changed account
@@ -105,7 +101,7 @@ impl<T> ExecutionOutcome<T> {
         let mut reverts = revert_init.into_iter().collect::<Vec<_>>();
         reverts.sort_unstable_by_key(|a| a.0);
 
-        // initialize revm bundle
+        // initialize execution bundle
         let bundle = BundleState::new(
             state_init.into_iter().map(|(address, (original, present, storage))| {
                 (
@@ -160,12 +156,12 @@ impl<T> ExecutionOutcome<T> {
         value
     }
 
-    /// Return revm bundle state.
+    /// Return bundle state.
     pub const fn state(&self) -> &BundleState {
         &self.bundle
     }
 
-    /// Returns mutable revm bundle state.
+    /// Returns mutable bundle state.
     pub const fn state_mut(&mut self) -> &mut BundleState {
         &mut self.bundle
     }
@@ -424,11 +420,11 @@ impl<T> From<(BlockExecutionOutput<T>, BlockNumber)> for ExecutionOutcome<T> {
 
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
+    use crate::BundleState;
     use alloc::{borrow::Cow, vec::Vec};
     use alloy_eips::eip7685::Requests;
     use alloy_primitives::{BlockNumber, Bytes};
     use reth_primitives_traits::Receipt;
-    use revm::database::BundleState;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 

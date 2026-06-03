@@ -681,10 +681,10 @@ pub(super) mod serde_bincode_compat {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{AccountInfo, BundleState};
     use alloy_consensus::TxType;
-    use alloy_primitives::{Address, B256};
+    use alloy_primitives::{map::HashMap, Address, B256};
     use reth_ethereum_primitives::Receipt;
-    use revm::{database::BundleState, primitives::HashMap, state::AccountInfo};
 
     #[test]
     fn chain_append() {

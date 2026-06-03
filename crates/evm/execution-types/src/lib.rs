@@ -20,6 +20,9 @@ pub use execute::*;
 mod execution_outcome;
 pub use execution_outcome::*;
 
+mod state;
+pub use state::*;
+
 /// Bincode-compatible serde implementations for commonly used types for (EVM) block execution.
 ///
 /// `bincode` crate doesn't work with optionally serializable serde fields, but some of the

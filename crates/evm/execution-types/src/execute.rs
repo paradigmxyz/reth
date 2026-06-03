@@ -1,6 +1,6 @@
+use crate::{BundleAccount, BundleState};
 use alloy_primitives::{Address, B256, U256};
 use reth_primitives_traits::{Account, Bytecode};
-use revm::database::{states::BundleState, BundleAccount};
 
 use alloc::vec::Vec;
 use alloy_eips::eip7685::Requests;

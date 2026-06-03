@@ -20,7 +20,9 @@ use alloy_primitives::{map::AddressHashSet, Address, B256};
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
-use reth_execution_types::BlockExecutionResult;
+use reth_execution_types::{
+    AccountInfoRevert, AccountStatus, BlockExecutionResult, BundleRetention, BundleState,
+};
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_primitives_traits::{
     Block, HeaderTy, NodePrimitives, ReceiptTy, Recovered, RecoveredBlock, SealedHeader, TxTy,
@@ -28,13 +30,7 @@ use reth_primitives_traits::{
 use reth_storage_api::StateProvider;
 pub use reth_storage_errors::provider::ProviderError;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
-use revm::{
-    database::{
-        states::{bundle_state::BundleRetention, reverts::AccountInfoRevert, AccountStatus},
-        BundleState, State,
-    },
-    state::bal::Bal,
-};
+use revm::{database::State, state::bal::Bal};
 
 /// Converts a temporary alloy block execution error into reth's owned execution error type.
 pub fn convert_alloy_block_execution_error(error: AlloyBlockExecutionError) -> BlockExecutionError {

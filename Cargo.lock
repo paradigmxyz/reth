@@ -7940,6 +7940,7 @@ dependencies = [
  "reth-ethereum-primitives",
  "reth-etl",
  "reth-evm",
+ "reth-execution-types",
  "reth-exex",
  "reth-fs-util",
  "reth-net-nat",

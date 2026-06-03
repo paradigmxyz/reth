@@ -50,16 +50,14 @@ use evm2::{
     precompiles::Precompiles,
     SpecId,
 };
-use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
+use reth_execution_types::{
+    AccountInfoRevert, AccountRevert, AccountStatus, BlockExecutionOutput, BlockExecutionResult,
+    BundleAccount, BundleState, RevertToSlot, Reverts, StorageSlot, StorageWithOriginalValues,
+};
 use revm::{
     context::{
         result::{ExecutionResult, HaltReason, Output, ResultAndState, ResultGas, SuccessReason},
         BlockEnv,
-    },
-    database::states::{
-        reverts::{AccountInfoRevert, Reverts},
-        AccountRevert, AccountStatus, BundleAccount, BundleState, RevertToSlot, StorageSlot,
-        StorageWithOriginalValues,
     },
     inspector::Inspector,
     primitives::{hardfork::SpecId as RevmSpecId, StorageKeyMap},
