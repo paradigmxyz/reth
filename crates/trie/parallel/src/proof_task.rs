@@ -973,7 +973,7 @@ where
             target: "trie::proof_task",
             "Account V2 multiproof calculation",
             account_targets = account_targets.len(),
-            storage_targets = storage_targets.values().map(|t| t.len()).sum::<usize>(),
+            storage_target_accounts = storage_targets.len(),
         );
         let _span_guard = span.enter();
 
