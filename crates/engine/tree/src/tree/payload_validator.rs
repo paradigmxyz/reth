@@ -68,7 +68,9 @@ use reth_engine_primitives::{
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
     block::BlockExecutor,
-    execute::{convert_alloy_block_execution_error, ExecutableTxFor},
+    execute::{
+        convert_alloy_block_execution_error, convert_alloy_block_execution_result, ExecutableTxFor,
+    },
     ConfigureEvm, EvmEnvFor, ExecutionCtxFor, OnStateHook, SpecFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
@@ -1098,7 +1100,7 @@ where
         let (_evm, result) = debug_span!(target: "engine::tree", "BlockExecutor::finish")
             .in_scope(|| executor.finish())
             .map_err(convert_alloy_block_execution_error)
-            .map(|(evm, result)| (evm.into_db(), result))?;
+            .map(|(evm, result)| (evm.into_db(), convert_alloy_block_execution_result(result)))?;
         self.metrics.record_post_execution(post_exec_start.elapsed());
 
         // Merge transitions into bundle state

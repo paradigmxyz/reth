@@ -23,7 +23,7 @@ reth-tracing.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-network.workspace = true
-reth-evm.workspace = true
+reth-evm = { workspace = true, features = ["secp256k1", "blst", "c-kzg", "memory_limit", "p256-aws-lc-rs"] }
 reth-evm-ethereum = { workspace = true, features = ["std"] }
 reth-rpc.workspace = true
 reth-rpc-api.workspace = true
@@ -94,6 +94,7 @@ default = []
 asm-keccak = [
     "alloy-primitives/asm-keccak",
     "reth-node-core/asm-keccak",
+    "reth-evm/asm-keccak",
     "revm/asm-keccak",
 ]
 keccak-cache-global = [

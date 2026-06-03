@@ -27,7 +27,9 @@ use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
 use reth_errors::{BlockExecutionError, BlockValidationError};
 use reth_evm::{
-    execute::{convert_alloy_block_execution_error, ExecutableTxFor},
+    execute::{
+        convert_alloy_block_execution_error, convert_alloy_block_execution_result, ExecutableTxFor,
+    },
     ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor,
 };
 use reth_primitives_traits::ReceiptTy;
@@ -175,6 +177,7 @@ where
         canonical_executor.evm_mut().db_mut().bump_bal_index();
         let block_result = canonical_executor
             .apply_post_execution_changes()
+            .map(convert_alloy_block_execution_result)
             .map_err(convert_alloy_block_execution_error)?;
         (block_result, senders)
     };

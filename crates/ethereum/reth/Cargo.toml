@@ -178,6 +178,7 @@ otlp = [
 ]
 portable = [
     "reth-revm?/portable",
+    "reth-evm?/portable",
 ]
 provider = ["storage-api", "tasks", "dep:reth-provider", "dep:reth-db", "dep:reth-codecs"]
 storage-api = ["dep:reth-storage-api"]

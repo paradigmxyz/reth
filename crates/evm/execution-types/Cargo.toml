@@ -18,7 +18,6 @@ reth-trie-common.workspace = true
 revm.workspace = true
 
 # alloy
-alloy-evm.workspace = true
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
@@ -69,6 +68,5 @@ std = [
     "derive_more/std",
     "reth-ethereum-primitives/std",
     "reth-trie-common/std",
-    "alloy-evm/std",
     "alloy-rlp?/std",
 ]

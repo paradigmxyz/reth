@@ -9,6 +9,7 @@ pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory, GasOutput};
 use alloy_evm::{
     block::{
         BlockExecutionError as AlloyBlockExecutionError,
+        BlockExecutionResult as AlloyBlockExecutionResult,
         BlockValidationError as AlloyBlockValidationError, CommitChanges, ExecutableTxParts,
         InternalBlockExecutionError as AlloyInternalBlockExecutionError,
     },
@@ -41,6 +42,14 @@ pub fn convert_alloy_block_execution_error(error: AlloyBlockExecutionError) -> B
             BlockExecutionError::Internal(convert_alloy_internal_block_execution_error(error))
         }
     }
+}
+
+/// Converts a temporary alloy block execution result into reth's owned execution result type.
+pub fn convert_alloy_block_execution_result<T>(
+    result: AlloyBlockExecutionResult<T>,
+) -> BlockExecutionResult<T> {
+    let AlloyBlockExecutionResult { receipts, requests, gas_used, blob_gas_used } = result;
+    BlockExecutionResult { receipts, requests, gas_used, blob_gas_used }
 }
 
 fn convert_alloy_block_validation_error(error: AlloyBlockValidationError) -> BlockValidationError {
@@ -578,6 +587,7 @@ where
         state_root_precomputed: Option<(B256, TrieUpdates)>,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
         let (evm, result) = self.executor.finish().map_err(convert_alloy_block_execution_error)?;
+        let result = convert_alloy_block_execution_result(result);
         let (db, evm_env) = evm.finish();
 
         // merge all transitions into bundle state
@@ -693,6 +703,7 @@ where
 
         let result =
             executor.apply_post_execution_changes().map_err(convert_alloy_block_execution_error)?;
+        let result = convert_alloy_block_execution_result(result);
 
         self.db.merge_transitions(BundleRetention::Reverts);
 
@@ -719,7 +730,9 @@ where
         self.db.set_state_hook(None);
         self.db.merge_transitions(BundleRetention::Reverts);
 
-        result.map_err(convert_alloy_block_execution_error)
+        result
+            .map(convert_alloy_block_execution_result)
+            .map_err(convert_alloy_block_execution_error)
     }
 
     fn into_state(self) -> State<DB> {

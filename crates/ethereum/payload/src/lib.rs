@@ -38,7 +38,7 @@ use reth_transaction_pool::{
     BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
     ValidPoolTransaction,
 };
-use revm::context_interface::{Block as _, Cfg as _};
+use revm::context_interface::{result::InvalidTransaction, Block as _, Cfg as _};
 use std::sync::Arc;
 use tracing::{debug, trace, warn};
 
@@ -374,7 +374,10 @@ where
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                 error, ..
             })) => {
-                if error.is_nonce_too_low() {
+                if error
+                    .downcast_ref::<InvalidTransaction>()
+                    .is_some_and(|err| matches!(err, InvalidTransaction::NonceTooLow { .. }))
+                {
                     // if the nonce is too low, we can skip this transaction
                     trace!(target: "payload_builder", %error, ?tx_hash, "skipping nonce too low transaction");
                 } else {

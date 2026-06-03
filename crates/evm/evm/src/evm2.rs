@@ -15,9 +15,10 @@ use alloy_eips::{
 };
 use alloy_evm::{
     block::{
-        BlockExecutionError, BlockExecutor as AlloyBlockExecutor,
-        BlockExecutorFactory as AlloyBlockExecutorFactory, BlockValidationError, CommitChanges,
-        ExecutableTx, GasOutput, StateDB, TxResult as AlloyTxResult,
+        BlockExecutionError, BlockExecutionResult as AlloyBlockExecutionResult,
+        BlockExecutor as AlloyBlockExecutor, BlockExecutorFactory as AlloyBlockExecutorFactory,
+        BlockValidationError, CommitChanges, ExecutableTx, GasOutput, StateDB,
+        TxResult as AlloyTxResult,
     },
     eth::{dao_fork, EthBlockExecutionCtx},
     precompiles::PrecompilesMap,
@@ -1119,7 +1120,7 @@ where
 
     fn finish(
         mut self,
-    ) -> Result<(Self::Evm, BlockExecutionResult<Self::Receipt>), BlockExecutionError> {
+    ) -> Result<(Self::Evm, AlloyBlockExecutionResult<Self::Receipt>), BlockExecutionError> {
         if self.evm2.evm.spec_id().enables(SpecId::PRAGUE) {
             self.evm2
                 .append_deposit_requests_from_tx_results(MAINNET_DEPOSIT_CONTRACT_ADDRESS)
@@ -1160,7 +1161,15 @@ where
 
         let (_, result) = self.evm2.finish_evm2();
 
-        Ok((*self.evm, result.into_reth()))
+        Ok((
+            *self.evm,
+            AlloyBlockExecutionResult {
+                receipts: result.receipts,
+                requests: result.requests,
+                gas_used: result.gas_used,
+                blob_gas_used: result.blob_gas_used,
+            },
+        ))
     }
 
     fn evm_mut(&mut self) -> &mut Self::Evm {

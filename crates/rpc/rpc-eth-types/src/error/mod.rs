@@ -474,12 +474,20 @@ impl From<RethError> for EthApiError {
     }
 }
 
+impl From<reth_evm::block::BlockExecutionError> for EthApiError {
+    fn from(error: reth_evm::block::BlockExecutionError) -> Self {
+        let error: BlockExecutionError =
+            reth_evm::execute::convert_alloy_block_execution_error(error);
+        error.into()
+    }
+}
+
 impl From<BlockExecutionError> for EthApiError {
     fn from(error: BlockExecutionError) -> Self {
         match error {
             BlockExecutionError::Validation(validation_error) => match validation_error {
                 BlockValidationError::InvalidTx { error, .. } => {
-                    if let Some(invalid_tx) = error.as_invalid_tx_err() {
+                    if let Some(invalid_tx) = error.downcast_ref::<InvalidTransaction>() {
                         Self::InvalidTransaction(RpcInvalidTransactionError::from(
                             invalid_tx.clone(),
                         ))

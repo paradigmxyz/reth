@@ -61,9 +61,7 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                     executor.evm_mut().db_mut().bump_bal_index();
                 }
 
-                executor
-                    .apply_post_execution_changes()
-                    .map_err(|err| EthApiError::Internal(err.into()))?;
+                executor.apply_post_execution_changes().map_err(EthApiError::from)?;
 
                 let bal = db.take_built_alloy_bal();
                 Ok(bal)

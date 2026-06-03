@@ -31,7 +31,7 @@ use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
     PoolTransaction, TransactionPool,
 };
-use revm::context_interface::{Block, Cfg as _};
+use revm::context_interface::{result::InvalidTransaction, Block, Cfg as _};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -375,7 +375,9 @@ pub trait LoadPendingBlock:
                             error,
                             ..
                         })) => {
-                            if error.is_nonce_too_low() {
+                            if error.downcast_ref::<InvalidTransaction>().is_some_and(|err| {
+                                matches!(err, InvalidTransaction::NonceTooLow { .. })
+                            }) {
                                 // if the nonce is too low, we can skip this transaction
                             } else {
                                 // if the transaction is invalid, we can skip it and all of its

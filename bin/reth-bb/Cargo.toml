@@ -105,6 +105,7 @@ asm-keccak = [
     "alloy-evm/asm-keccak",
     "revm/asm-keccak",
     "revm-primitives/asm-keccak",
+    "reth-evm/asm-keccak",
 ]
 
 keccak-cache-global = [
