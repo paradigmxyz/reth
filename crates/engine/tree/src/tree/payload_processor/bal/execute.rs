@@ -32,6 +32,7 @@ use reth_evm::{
     },
     ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor,
 };
+use reth_execution_types::Bal as ExecutionBal;
 use reth_primitives_traits::ReceiptTy;
 use reth_provider::BlockExecutionOutput;
 use reth_tasks::Runtime;
@@ -40,7 +41,6 @@ use revm::{
     context::{result::ResultAndState, Block},
     database::{states::bundle_state::BundleRetention, State},
 };
-use revm_state::bal::Bal as RevmBal;
 use std::sync::Arc;
 
 use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
@@ -113,7 +113,7 @@ where
     ReceiptTy<Evm::Primitives>: Clone,
 {
     let bal = input_bal.as_bal();
-    let input_bal_revm = convert_alloy_to_revm_bal(bal)?;
+    let execution_bal = convert_input_to_execution_bal(bal)?;
 
     let block_gas_limit = evm_env.block_env.gas_limit();
     let enable_amsterdam_eip8037 = evm_env.cfg_env.enable_amsterdam_eip8037;
@@ -136,7 +136,7 @@ where
                 result_tx.clone(),
                 evm_config,
                 make_db,
-                Arc::clone(&input_bal_revm),
+                Arc::clone(&execution_bal),
                 evm_env.clone(),
                 ctx.clone(),
             );
@@ -192,9 +192,8 @@ where
     ))
 }
 
-fn convert_alloy_to_revm_bal(bal: &AlloyBal) -> Result<Arc<RevmBal>, BalExecutionError> {
-    // Convert the BAL from alloy to a BAL that can be consumed by revm, that is more amenable
-    // for state lookups.
+fn convert_input_to_execution_bal(bal: &AlloyBal) -> Result<Arc<ExecutionBal>, BalExecutionError> {
+    // Convert the BAL into the internal representation used for state lookups.
     //
     // This is failable.
     //
@@ -205,14 +204,14 @@ fn convert_alloy_to_revm_bal(bal: &AlloyBal) -> Result<Arc<RevmBal>, BalExecutio
     // is triggered then the execution is reverted, and as such no actual code change event takes
     // place. Therefore, if we do observe such a bytecode in a BAL then that means the BAL is
     // invalid as no legal execution should've led to this bytecode deployment.
-    let alloy_bal: Vec<_> = Vec::<_>::from(bal.clone());
-    let received_bal_revm = RevmBal::try_from(alloy_bal).map_err(|e| {
+    let bal_entries: Vec<_> = Vec::<_>::from(bal.clone());
+    let execution_bal = ExecutionBal::try_from(bal_entries).map_err(|e| {
         let e: BytecodeDecodeError = e;
         BalExecutionError::Consensus(reth_consensus::ConsensusError::BlockAccessListInvalid(
             format!("{e:?}"),
         ))
     })?;
-    Ok(Arc::new(received_bal_revm))
+    Ok(Arc::new(execution_bal))
 }
 
 fn take_built_bal_and_log_divergence<DB>(

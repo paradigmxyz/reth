@@ -12,8 +12,8 @@ use reth_evm::{
     execute::{convert_alloy_block_execution_error, ExecutableTxFor},
     ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor,
 };
+use reth_execution_types::Bal as ExecutionBal;
 use revm::database::State;
-use revm_state::bal::Bal as RevmBal;
 use std::sync::Arc;
 
 #[derive(Debug, thiserror::Error)]
@@ -60,7 +60,7 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
     result_tx: WorkerResultSender<Evm>,
     evm_config: &'scope Evm,
     make_db: &'scope MakeDb,
-    received_bal_revm: Arc<RevmBal>,
+    received_bal: Arc<ExecutionBal>,
     evm_env: EvmEnvFor<Evm>,
     ctx: ExecutionCtxFor<'scope, Evm>,
 ) where
@@ -77,7 +77,7 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
             let database = make_db(true).map_err(BalWorkerError::Setup)?;
             let mut worker_state = State::builder()
                 .with_database(database)
-                .with_bal(received_bal_revm)
+                .with_bal(received_bal)
                 .with_bundle_update()
                 .build();
             let evm = evm_config.evm_with_env(&mut worker_state, evm_env);
