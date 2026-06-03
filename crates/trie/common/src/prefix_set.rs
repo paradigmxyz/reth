@@ -126,13 +126,23 @@ impl PrefixSetMut {
 
     /// Inserts the given `nibbles` into the set.
     pub fn insert(&mut self, nibbles: Nibbles) {
-        self.keys.push(nibbles);
+        if !self.all {
+            self.keys.push(nibbles);
+        }
     }
 
     /// Extend prefix set with contents of another prefix set.
     pub fn extend(&mut self, other: Self) {
-        self.all |= other.all;
-        self.keys.extend(other.keys);
+        if self.all {
+            return
+        }
+
+        if other.all {
+            self.all = true;
+            self.keys.clear();
+        } else {
+            self.keys.extend(other.keys);
+        }
     }
 
     /// Extend prefix set keys with contents of provided iterator.
@@ -140,7 +150,9 @@ impl PrefixSetMut {
     where
         I: IntoIterator<Item = Nibbles>,
     {
-        self.keys.extend(keys);
+        if !self.all {
+            self.keys.extend(keys);
+        }
     }
 
     /// Returns the number of elements in the set.
@@ -348,5 +360,19 @@ mod tests {
         let mut prefix_set_mut = PrefixSetMut::default();
         prefix_set_mut.extend(PrefixSetMut::all());
         assert!(prefix_set_mut.all);
+    }
+
+    #[test]
+    fn test_prefix_set_all_drops_keys() {
+        let mut prefix_set_mut = PrefixSetMut::default();
+        prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3]));
+        prefix_set_mut.extend(PrefixSetMut::all());
+        prefix_set_mut.insert(Nibbles::from_nibbles([4, 5, 6]));
+        prefix_set_mut.extend_keys([Nibbles::from_nibbles([7, 8, 9])]);
+
+        assert_eq!(prefix_set_mut, PrefixSetMut::all());
+        let prefix_set = prefix_set_mut.freeze();
+        assert!(prefix_set.all());
+        assert_eq!(prefix_set.len(), 0);
     }
 }
