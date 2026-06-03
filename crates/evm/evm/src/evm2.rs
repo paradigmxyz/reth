@@ -69,7 +69,26 @@ use revm::{
     DatabaseCommit,
 };
 #[cfg(feature = "std")]
-use std::sync::OnceLock;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    OnceLock,
+};
+
+#[cfg(feature = "std")]
+static DEBUG_EVM2_DB: AtomicBool = AtomicBool::new(false);
+
+#[cfg(feature = "std")]
+fn debug_evm2_tx(tx_hash: &B256) -> bool {
+    std::env::var("RETH_EVM2_DEBUG_TX").is_ok_and(|value| {
+        value.eq_ignore_ascii_case(&tx_hash.to_string()) ||
+            value.eq_ignore_ascii_case(&format!("{tx_hash:#x}"))
+    })
+}
+
+#[cfg(not(feature = "std"))]
+const fn debug_evm2_tx(_tx_hash: &B256) -> bool {
+    false
+}
 
 const PRECOMPILE_CACHE_SIZE: usize = 7;
 const ONE_ETHER: u128 = 1_000_000_000_000_000_000;
@@ -252,9 +271,24 @@ where
 {
     // SAFETY: The vtable functions are installed for the same `DB` used to create the pointer.
     let db = unsafe { &mut *ptr.cast::<DB>().as_ptr() };
-    db.basic(*address)
+    let result = db
+        .basic(*address)
         .map(|info| info.map(account_info_to_evm2))
-        .map_err(|err| Evm2DatabaseRefError(Box::new(err)))
+        .map_err(|err| Evm2DatabaseRefError(Box::new(err)));
+    #[cfg(feature = "std")]
+    if DEBUG_EVM2_DB.load(Ordering::Relaxed) {
+        match result.as_ref().ok().and_then(|info| info.as_ref()) {
+            Some(info) => eprintln!(
+                "evm2-debug account address={address} balance={} nonce={} code_hash={} code_len={:?}",
+                info.balance,
+                info.nonce,
+                info.code_hash,
+                info.code.as_ref().map(Evm2Bytecode::len)
+            ),
+            None => eprintln!("evm2-debug account address={address} none_or_error"),
+        }
+    }
+    result
 }
 
 unsafe fn evm2_database_ref_get_code_by_hash<DB>(
@@ -266,9 +300,18 @@ where
 {
     // SAFETY: The vtable functions are installed for the same `DB` used to create the pointer.
     let db = unsafe { &mut *ptr.cast::<DB>().as_ptr() };
-    db.code_by_hash(*code_hash)
+    let result = db
+        .code_by_hash(*code_hash)
         .map(bytecode_to_evm2)
-        .map_err(|err| Evm2DatabaseRefError(Box::new(err)))
+        .map_err(|err| Evm2DatabaseRefError(Box::new(err)));
+    #[cfg(feature = "std")]
+    if DEBUG_EVM2_DB.load(Ordering::Relaxed) {
+        match result.as_ref() {
+            Ok(code) => eprintln!("evm2-debug code code_hash={code_hash} len={}", code.len()),
+            Err(_) => eprintln!("evm2-debug code code_hash={code_hash} error"),
+        }
+    }
+    result
 }
 
 unsafe fn evm2_database_ref_get_storage<DB>(
@@ -281,7 +324,15 @@ where
 {
     // SAFETY: The vtable functions are installed for the same `DB` used to create the pointer.
     let db = unsafe { &mut *ptr.cast::<DB>().as_ptr() };
-    db.storage(*address, *key).map_err(|err| Evm2DatabaseRefError(Box::new(err)))
+    let result = db.storage(*address, *key).map_err(|err| Evm2DatabaseRefError(Box::new(err)));
+    #[cfg(feature = "std")]
+    if DEBUG_EVM2_DB.load(Ordering::Relaxed) {
+        match result.as_ref() {
+            Ok(value) => eprintln!("evm2-debug storage address={address} key={key} value={value}"),
+            Err(_) => eprintln!("evm2-debug storage address={address} key={key} error"),
+        }
+    }
+    result
 }
 
 unsafe fn evm2_database_ref_get_block_hash<DB>(
@@ -1272,6 +1323,12 @@ where
         tx: impl ExecutableTx<Self>,
     ) -> Result<Self::Result, BlockExecutionError> {
         let (_, tx) = tx.into_parts();
+        let tx_hash = *tx.tx().tx_hash();
+        let debug_tx = debug_evm2_tx(&tx_hash);
+        #[cfg(feature = "std")]
+        if debug_tx {
+            eprintln!("evm2-debug tx-start tx_hash={tx_hash}");
+        }
         let recovered = Recovered::new_unchecked(tx.tx(), *tx.signer());
         let evm2_tx = recovered_tx_to_evm2(recovered);
         let transaction_gas_limit = transaction_gas_limit(tx.tx());
@@ -1291,9 +1348,27 @@ where
             .into());
         }
 
-        let evm2_result = self.evm2.evm.transact(&evm2_tx).map_err(|err| {
+        #[cfg(feature = "std")]
+        DEBUG_EVM2_DB.store(debug_tx, Ordering::Relaxed);
+        let evm2_result = self.evm2.evm.transact(&evm2_tx);
+        #[cfg(feature = "std")]
+        DEBUG_EVM2_DB.store(false, Ordering::Relaxed);
+        let evm2_result = evm2_result.map_err(|err| {
             BlockExecutionError::msg(format_args!("evm2 transaction execution failed: {err}"))
         })?;
+        #[cfg(feature = "std")]
+        if debug_tx {
+            eprintln!(
+                "evm2-debug tx-result tx_hash={tx_hash} status={} gas_used={} stop={:?} output_len={} accounts={} storage={} code={}",
+                evm2_result.status,
+                evm2_result.gas_used,
+                evm2_result.stop,
+                evm2_result.output.len(),
+                evm2_result.state_changes.accounts.len(),
+                evm2_result.state_changes.storage.len(),
+                evm2_result.state_changes.code.len()
+            );
+        }
         let evm_state =
             evm_state_from_evm2_with_accounts(&mut self.evm2, evm2_result.state_changes.clone())?;
         let result = evm2_result_to_revm_result(&evm2_result);
