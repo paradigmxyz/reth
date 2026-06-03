@@ -261,6 +261,17 @@ mod tests {
             EraFileType::from_url("https://host/mainnet-00000-abcd1234.era"),
             EraFileType::Era
         );
+
+        // An ERE file under a path/mirror containing `era1` still resolves by its `.ere` extension.
+        assert_eq!(
+            EraFileType::from_url("https://host/era1/mainnet-00000-abcd1234.ere"),
+            EraFileType::Ere
+        );
+
+        // Directory/index endpoints have no file extension and fall back to the host/path
+        // substring.
+        assert_eq!(EraFileType::from_url("https://mainnet.era1.nimbus.team/"), EraFileType::Era1);
+        assert_eq!(EraFileType::from_url("https://era.ithaca.xyz/"), EraFileType::Era);
     }
 
     #[test]

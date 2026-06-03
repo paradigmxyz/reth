@@ -418,6 +418,20 @@ mod tests {
     }
 
     #[test]
+    fn test_dynamic_block_index_negative_offsets_roundtrip() {
+        // Offsets point backward from the index to earlier entries, so they are negative in real
+        // files. Cover the full component-count range (2 and 5) to exercise the `i64` LE encoding.
+        for (component_count, offsets) in [
+            (2u64, vec![-2048, -1024, -512, -256]),
+            (5u64, vec![-50, -40, -30, -20, -10, -9, -8, -7, -6, -5]),
+        ] {
+            let index = DynamicBlockIndex::new(1000, component_count, offsets);
+            let recovered = DynamicBlockIndex::from_entry(&index.to_entry()).unwrap();
+            assert_eq!(recovered, index);
+        }
+    }
+
+    #[test]
     fn test_dynamic_block_index_offset_lookup() {
         let starting_number = 1000;
         let component_count = 3;
@@ -509,6 +523,16 @@ mod tests {
         assert_eq!(group.other_entries.len(), 2);
         assert_eq!(group.other_entries[0].entry_type, [0x01, 0x01]);
         assert_eq!(group.other_entries[1].data, vec![5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn test_ere_group_with_mismatched_index() {
+        // The group is a plain container; it does not validate that block count matches the index.
+        let blocks = vec![sample_block(10), sample_block(15)];
+        let index = DynamicBlockIndex::new(2000, 2, vec![100, 200, 300, 400, 500, 600]); // 3 blocks
+        let group = EreGroup::new(blocks, None, index);
+        assert_eq!(group.blocks.len(), 2);
+        assert_eq!(group.index.starting_number(), 2000);
     }
 
     #[test_case::test_case(
