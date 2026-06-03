@@ -28,7 +28,6 @@ reth-primitives-traits = { workspace = true, features = ["rayon", "dashmap"] }
 reth-ethereum-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
-reth-revm = { workspace = true, features = ["optional-balance-check"] }
 reth-stages-api.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie-parallel.workspace = true
@@ -47,7 +46,6 @@ alloy-rlp.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 revm.workspace = true
-revm-primitives.workspace = true
 
 # common
 futures.workspace = true
@@ -118,7 +116,6 @@ test-utils = [
     "reth-provider/test-utils",
     "reth-prune-types",
     "reth-prune-types?/test-utils",
-    "reth-revm/test-utils",
     "reth-stages-api/test-utils",
     "reth-stages/test-utils",
     "reth-static-file",

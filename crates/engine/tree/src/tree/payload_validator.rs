@@ -74,8 +74,8 @@ use reth_evm::{
     execute::{
         convert_alloy_block_execution_error, convert_alloy_block_execution_result, ExecutableTxFor,
     },
-    ConfigureEvm, Database, Evm, EvmEnvFor, ExecutionCtxFor, OnStateHook, RecoveredTx, SpecFor,
-    StateHookExt,
+    ConfigureEvm, Database, Evm as EvmTrait, EvmEnvFor, ExecutionCtxFor, OnStateHook, RecoveredTx,
+    SpecFor, StateHookExt,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
 use reth_execution_types::{BundleAccount, BundleRetention};
@@ -1249,7 +1249,7 @@ where
         has_bal: bool,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
-        E: BlockExecutor<Receipt = N::Receipt, Evm: Evm<DB = &'a mut State<DB>>>,
+        E: BlockExecutor<Receipt = N::Receipt, Evm: EvmTrait<DB = &'a mut State<DB>>>,
         Tx: ExecutableTx<E> + RecoveredTx<InnerTx>,
         InnerTx: TxHashRef,
         DB: Database + 'a,
