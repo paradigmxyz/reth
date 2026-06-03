@@ -8,7 +8,7 @@ use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 
 pub use reth_execution_types::DatabaseCommit;
-pub use revm::database::{EmptyDB, State};
+pub use revm::database::{CacheDB, EmptyDB, State};
 
 /// A helper trait responsible for providing state necessary for EVM execution.
 ///

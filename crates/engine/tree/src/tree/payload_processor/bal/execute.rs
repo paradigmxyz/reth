@@ -311,14 +311,17 @@ mod tests {
     };
     use alloy_primitives::{keccak256, B256, U256};
     use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
+    use reth_evm::{
+        context::{
+            ExecResultAndState, ExecutionResult, HaltReason, Output, ResultGas, SuccessReason,
+        },
+        database::{CacheDB, EmptyDB, State as DatabaseState},
+        gas::TX_GAS_LIMIT_CAP,
+    };
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_execution_types::BundleState;
+    use reth_execution_types::{AccountInfo, BundleState, Bytecode, EvmState};
     use reth_primitives_traits::{Block as _, Recovered, SealedBlock};
     use reth_tasks::Runtime;
-    use revm::{
-        database::{CacheDB, EmptyDB},
-        state::{AccountInfo, Bytecode},
-    };
     use std::convert::Infallible;
 
     /// Wraps a `BlockAccessList` into an `Arc<DecodedBal>` by RLP-encoding the BAL.
@@ -405,11 +408,12 @@ mod tests {
     /// This intentionally mirrors what `execute_block` does internally,
     /// but without any hash check — the output is the BAL itself, not a pass/fail signal.
     fn reference_bal_for_empty_block(evm_config: &EthEvmConfig) -> BlockAccessList {
-        use revm::database::State as RevmState;
-
         let db = system_contracts_db();
-        let mut state =
-            RevmState::builder().with_database(db).with_bundle_update().with_bal_builder().build();
+        let mut state = DatabaseState::builder()
+            .with_database(db)
+            .with_bundle_update()
+            .with_bal_builder()
+            .build();
 
         // Any header_bal_hash on the reference block is fine — we don't check it here.
         let block = empty_amsterdam_block(B256::ZERO);
@@ -538,9 +542,7 @@ mod tests {
     where
         Tx: ExecutableTxFor<EthEvmConfig>,
     {
-        use revm::database::State as RevmState;
-
-        let mut state = RevmState::builder()
+        let mut state = DatabaseState::builder()
             .with_database(&mut db)
             .with_bundle_update()
             .with_bal_builder()
@@ -703,9 +705,7 @@ mod tests {
         block: &SealedBlock<Block>,
         txs: &[Recovered<TransactionSigned>],
     ) -> (ShadowOutput, BlockAccessList) {
-        use revm::database::State as RevmState;
-
-        let mut state = RevmState::builder()
+        let mut state = DatabaseState::builder()
             .with_database(canonical_db)
             .with_bundle_update()
             .with_bal_builder()
@@ -934,7 +934,6 @@ mod tests {
         use reth_ethereum_primitives::Transaction;
         use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
         use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
-        use revm::primitives::keccak256;
 
         let evm_config = EthEvmConfig::mainnet();
         let revert_contract: alloy_primitives::Address =
@@ -992,7 +991,6 @@ mod tests {
         use reth_ethereum_primitives::Transaction;
         use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
         use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
-        use revm::primitives::keccak256;
 
         let evm_config = EthEvmConfig::mainnet();
         let sstore_contract: alloy_primitives::Address =
@@ -1155,26 +1153,20 @@ mod tests {
         // All-state-gas results keep block_regular_gas_used at 0, so a second tx that fits
         // within the block limit but not the remaining cumulative budget proves that
         // non-Amsterdam reads cumulative_tx_gas_used while Amsterdam does not.
-        use revm::context::result::{
-            ExecResultAndState, ExecutionResult, Output, ResultGas, SuccessReason,
-        };
-        use revm_state::EvmState;
-
         let block_gas_limit = 1_000_000u64;
         let first_tx_gas = 600_000u64;
         let second_tx_gas_limit = 500_000u64; // fits in total limit but not after cumulative deduction
 
         let gas = ResultGas::new_with_state_gas(first_tx_gas, 0, 0, first_tx_gas);
-        let fake_result: ResultAndState<revm::context::result::HaltReason> =
-            ExecResultAndState::new(
-                ExecutionResult::Success {
-                    reason: SuccessReason::Return,
-                    gas,
-                    logs: vec![],
-                    output: Output::Call(Default::default()),
-                },
-                EvmState::default(),
-            );
+        let fake_result: ResultAndState<HaltReason> = ExecResultAndState::new(
+            ExecutionResult::Success {
+                reason: SuccessReason::Return,
+                gas,
+                logs: vec![],
+                output: Output::Call(Default::default()),
+            },
+            EvmState::default(),
+        );
 
         // Non-Amsterdam: block_available_gas = 1_000_000 - 600_000 = 400_000 → reject 500_000.
         let mut non_amsterdam = BlockGasTracker::new(block_gas_limit, false, None);
@@ -1197,14 +1189,6 @@ mod tests {
     fn gas_tracker_caps_oversized_tx_gas_limit_at_tx_gas_limit_cap() {
         // A tx with gas_limit above TX_GAS_LIMIT_CAP (EIP-7825) is admitted when the
         // capped value fits in the remaining block gas and rejected when it does not.
-        use revm::{
-            context::result::{
-                ExecResultAndState, ExecutionResult, Output, ResultGas, SuccessReason,
-            },
-            primitives::eip7825::TX_GAS_LIMIT_CAP,
-        };
-        use revm_state::EvmState;
-
         let block_gas_limit = 30_000_000u64;
         let oversized = TX_GAS_LIMIT_CAP + 1_000_000; // 17_777_216 — above the cap
 
@@ -1220,16 +1204,15 @@ mod tests {
         // tx_min_gas_limit = TX_GAS_LIMIT_CAP (16_777_216) > block_available_gas (10M) → Err.
         let prior_gas = 20_000_000u64;
         let gas = ResultGas::new_with_state_gas(prior_gas, 0, 0, prior_gas);
-        let fake_result: ResultAndState<revm::context::result::HaltReason> =
-            ExecResultAndState::new(
-                ExecutionResult::Success {
-                    reason: SuccessReason::Return,
-                    gas,
-                    logs: vec![],
-                    output: Output::Call(Default::default()),
-                },
-                EvmState::default(),
-            );
+        let fake_result: ResultAndState<HaltReason> = ExecResultAndState::new(
+            ExecutionResult::Success {
+                reason: SuccessReason::Return,
+                gas,
+                logs: vec![],
+                output: Output::Call(Default::default()),
+            },
+            EvmState::default(),
+        );
 
         let mut tracker = BlockGasTracker::new(block_gas_limit, false, Some(TX_GAS_LIMIT_CAP));
         tracker.record_result(&fake_result);
