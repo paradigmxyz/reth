@@ -77,8 +77,6 @@ reth-ethereum-engine-primitives.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-tracing.workspace = true
 
-revm-database-interface.workspace = true
-
 tempfile.workspace = true
 assert_matches.workspace = true
 rand.workspace = true

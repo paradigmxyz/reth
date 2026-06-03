@@ -9804,7 +9804,6 @@ dependencies = [
  "reth-tracing",
  "reth-trie",
  "reth-trie-db",
- "revm-database-interface",
  "rocksdb",
  "smallvec",
  "strum",

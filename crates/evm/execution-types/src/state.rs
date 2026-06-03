@@ -17,4 +17,4 @@ pub use revm::{
         Account, AccountInfo, Bytecode, EvmState, EvmStorageSlot, TransactionId,
     },
 };
-pub use revm_database_interface::bal::EvmDatabaseError;
+pub use revm_database_interface::{bal::EvmDatabaseError, DatabaseCommit, EmptyDB};

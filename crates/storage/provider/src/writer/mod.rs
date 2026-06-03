@@ -13,8 +13,8 @@ mod tests {
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{
         Account as RevmAccount, AccountInfo as RevmAccountInfo, AccountStatus, BundleRetention,
-        BundleState, EvmStorageSlot, ExecutionOutcome, OriginalValuesKnown, PlainStorageChangeset,
-        PlainStorageRevert, State,
+        BundleState, DatabaseCommit, EmptyDB, EvmStorageSlot, ExecutionOutcome,
+        OriginalValuesKnown, PlainStorageChangeset, PlainStorageRevert, State,
     };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{
@@ -26,7 +26,6 @@ mod tests {
         HashedPostState, HashedStorage, StateRoot, StorageRoot, StorageRootProgress,
     };
     use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot, LegacyKeyAdapter, PackedKeyAdapter};
-    use revm_database_interface::{DatabaseCommit, EmptyDB};
     use std::{collections::BTreeMap, str::FromStr};
 
     #[test]
