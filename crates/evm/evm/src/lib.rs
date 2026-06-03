@@ -1,9 +1,9 @@
 //! Traits for configuring an EVM specifics.
 //!
-//! # Revm features
+//! # EVM features
 //!
-//! This crate does __not__ enforce specific revm features such as `blst` or `c-kzg`, which are
-//! critical for revm's evm internals, it is the responsibility of the implementer to ensure the
+//! This crate does __not__ enforce specific EVM features such as `blst` or `c-kzg`, which are
+//! critical for EVM internals, it is the responsibility of the implementer to ensure the
 //! proper features are selected.
 
 #![doc(
@@ -44,6 +44,7 @@ pub mod context;
 pub mod database;
 pub use database::*;
 pub mod either;
+pub mod eth;
 pub mod evm2;
 /// EVM environment configuration.
 pub mod execute;
@@ -80,7 +81,7 @@ pub mod witness;
 
 pub use alloy_evm::{
     block::{self, state_changes, system_calls},
-    env, error, eth,
+    env, error,
     evm::EvmFactoryExt,
     precompiles as alloy_precompiles, spec, spec_by_timestamp_and_block_number, traits, tx, EthEvm,
     EthEvmFactory, Evm, EvmEnv, EvmError, EvmLimitParams, FromRecoveredTx, FromTxWithEncoded,
