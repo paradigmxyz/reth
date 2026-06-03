@@ -149,7 +149,7 @@ mod tests {
     fn forwards_worker_errors_and_then_stops() {
         let (tx, rx) = crossbeam_channel::unbounded();
         tx.send(Err(BalWorkerError::Setup(BalExecutionError::Execution(
-            alloy_evm::block::BlockExecutionError::msg("worker failed"),
+            reth_errors::BlockExecutionError::msg("worker failed"),
         ))))
         .unwrap();
         drop(tx);

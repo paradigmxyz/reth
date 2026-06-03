@@ -20,12 +20,16 @@ use alloy_eip7928::{
     compute_block_access_list_hash, BlockAccessList,
 };
 use alloy_evm::{
-    block::{BlockExecutionError, BlockExecutor, BlockValidationError, TxResult},
+    block::{BlockExecutor, TxResult},
     Evm,
 };
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
+use reth_errors::{BlockExecutionError, BlockValidationError};
+use reth_evm::{
+    execute::{convert_alloy_block_execution_error, ExecutableTxFor},
+    ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor,
+};
 use reth_primitives_traits::ReceiptTy;
 use reth_provider::BlockExecutionOutput;
 use reth_tasks::Runtime;
@@ -142,7 +146,9 @@ where
         let evm = evm_config.evm_with_env(&mut canonical_state, evm_env);
         let mut canonical_executor = evm_config.create_executor_with_state(evm, ctx.clone());
 
-        canonical_executor.apply_pre_execution_changes()?;
+        canonical_executor
+            .apply_pre_execution_changes()
+            .map_err(convert_alloy_block_execution_error)?;
         let mut senders = Vec::with_capacity(transaction_count);
         let mut last_sent_len = 0usize;
         for output in ordered_worker_outputs(&result_rx, transaction_count) {
@@ -167,7 +173,9 @@ where
         drop(abort_guard);
 
         canonical_executor.evm_mut().db_mut().bump_bal_index();
-        let block_result = canonical_executor.apply_post_execution_changes()?;
+        let block_result = canonical_executor
+            .apply_post_execution_changes()
+            .map_err(convert_alloy_block_execution_error)?;
         (block_result, senders)
     };
 
@@ -846,9 +854,9 @@ mod tests {
         // commit loop must still reject tx2 because tx1's committed gas leaves too little
         // block gas for tx2's gas limit.
         use alloy_consensus::TxLegacy;
-        use alloy_evm::block::BlockValidationError;
         use alloy_primitives::TxKind;
         use reth_chainspec::MAINNET;
+        use reth_errors::BlockValidationError;
         use reth_ethereum_primitives::Transaction;
         use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
         use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};

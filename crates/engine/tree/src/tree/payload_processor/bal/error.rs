@@ -1,7 +1,7 @@
 //! Errors for the BAL execution path.
 
-use alloy_evm::block::BlockExecutionError;
 use reth_consensus::ConsensusError;
+use reth_errors::BlockExecutionError;
 use reth_provider::ProviderError;
 
 /// Errors surfaced by `execute_block`.

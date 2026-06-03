@@ -7,7 +7,11 @@ use alloy_eip7928::{compute_block_access_list_hash, BlockAccessList};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory, GasOutput};
 use alloy_evm::{
-    block::{CommitChanges, ExecutableTxParts},
+    block::{
+        BlockExecutionError as AlloyBlockExecutionError,
+        BlockValidationError as AlloyBlockValidationError, CommitChanges, ExecutableTxParts,
+        InternalBlockExecutionError as AlloyInternalBlockExecutionError,
+    },
     Evm, EvmEnv, EvmFactory, RecoveredTx, ToTxEnv,
 };
 use alloy_primitives::{Address, B256};
@@ -26,6 +30,73 @@ use revm::{
     database::{states::bundle_state::BundleRetention, BundleState, State},
     state::bal::Bal,
 };
+
+/// Converts a temporary alloy block execution error into reth's owned execution error type.
+pub fn convert_alloy_block_execution_error(error: AlloyBlockExecutionError) -> BlockExecutionError {
+    match error {
+        AlloyBlockExecutionError::Validation(error) => {
+            BlockExecutionError::Validation(convert_alloy_block_validation_error(error))
+        }
+        AlloyBlockExecutionError::Internal(error) => {
+            BlockExecutionError::Internal(convert_alloy_internal_block_execution_error(error))
+        }
+    }
+}
+
+fn convert_alloy_block_validation_error(error: AlloyBlockValidationError) -> BlockValidationError {
+    match error {
+        AlloyBlockValidationError::InvalidTx { hash, error } => {
+            BlockValidationError::InvalidTx { hash, error }
+        }
+        AlloyBlockValidationError::EVM { hash, error } => BlockValidationError::EVM { hash, error },
+        AlloyBlockValidationError::IncrementBalanceFailed => {
+            BlockValidationError::IncrementBalanceFailed
+        }
+        AlloyBlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+            transaction_gas_limit,
+            block_available_gas,
+        } => BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+            transaction_gas_limit,
+            block_available_gas,
+        },
+        AlloyBlockValidationError::MissingParentBeaconBlockRoot => {
+            BlockValidationError::MissingParentBeaconBlockRoot
+        }
+        AlloyBlockValidationError::CancunGenesisParentBeaconBlockRootNotZero {
+            parent_beacon_block_root,
+        } => BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero {
+            parent_beacon_block_root,
+        },
+        AlloyBlockValidationError::BeaconRootContractCall { parent_beacon_block_root, message } => {
+            BlockValidationError::BeaconRootContractCall { parent_beacon_block_root, message }
+        }
+        AlloyBlockValidationError::BlockHashContractCall { message } => {
+            BlockValidationError::BlockHashContractCall { message }
+        }
+        AlloyBlockValidationError::WithdrawalRequestsContractCall { message } => {
+            BlockValidationError::WithdrawalRequestsContractCall { message }
+        }
+        AlloyBlockValidationError::ConsolidationRequestsContractCall { message } => {
+            BlockValidationError::ConsolidationRequestsContractCall { message }
+        }
+        AlloyBlockValidationError::DepositRequestDecode(message) => {
+            BlockValidationError::DepositRequestDecode(message)
+        }
+        AlloyBlockValidationError::BlockGasExceeded => BlockValidationError::BlockGasExceeded,
+        AlloyBlockValidationError::Other(error) => BlockValidationError::Other(error),
+    }
+}
+
+fn convert_alloy_internal_block_execution_error(
+    error: AlloyInternalBlockExecutionError,
+) -> InternalBlockExecutionError {
+    match error {
+        AlloyInternalBlockExecutionError::EVM { hash, error } => {
+            InternalBlockExecutionError::EVM { hash, error }
+        }
+        AlloyInternalBlockExecutionError::Other(error) => InternalBlockExecutionError::Other(error),
+    }
+}
 
 /// A type that knows how to execute a block. It is assumed to operate on a
 /// [`crate::Evm`] internally and use [`State`] as database.
@@ -476,7 +547,7 @@ where
     type Executor = Executor;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        self.executor.apply_pre_execution_changes()?;
+        self.executor.apply_pre_execution_changes().map_err(convert_alloy_block_execution_error)?;
         self.executor.evm_mut().db_mut().bump_bal_index();
 
         Ok(())
@@ -488,8 +559,10 @@ where
         f: impl FnOnce(&<Self::Executor as BlockExecutor>::Result) -> CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let (tx_env, tx) = tx.into_parts();
-        if let Some(gas_used) =
-            self.executor.execute_transaction_with_commit_condition((tx_env, &tx), f)?
+        if let Some(gas_used) = self
+            .executor
+            .execute_transaction_with_commit_condition((tx_env, &tx), f)
+            .map_err(convert_alloy_block_execution_error)?
         {
             self.transactions.push(tx);
             self.executor.evm_mut().db_mut().bump_bal_index();
@@ -504,7 +577,7 @@ where
         state: impl StateProvider,
         state_root_precomputed: Option<(B256, TrieUpdates)>,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
-        let (evm, result) = self.executor.finish()?;
+        let (evm, result) = self.executor.finish().map_err(convert_alloy_block_execution_error)?;
         let (db, evm_env) = evm.finish();
 
         // merge all transitions into bundle state
@@ -605,20 +678,21 @@ where
             executor.evm_mut().db_mut().bal_state.bal_builder = None;
         }
 
-        executor.apply_pre_execution_changes()?;
+        executor.apply_pre_execution_changes().map_err(convert_alloy_block_execution_error)?;
 
         if has_bal {
             executor.evm_mut().db_mut().bump_bal_index();
         }
 
         for tx in block.transactions_recovered() {
-            executor.execute_transaction(tx)?;
+            executor.execute_transaction(tx).map_err(convert_alloy_block_execution_error)?;
             if has_bal {
                 executor.evm_mut().db_mut().bump_bal_index();
             }
         }
 
-        let result = executor.apply_post_execution_changes()?;
+        let result =
+            executor.apply_post_execution_changes().map_err(convert_alloy_block_execution_error)?;
 
         self.db.merge_transitions(BundleRetention::Reverts);
 
@@ -645,7 +719,7 @@ where
         self.db.set_state_hook(None);
         self.db.merge_transitions(BundleRetention::Reverts);
 
-        result
+        result.map_err(convert_alloy_block_execution_error)
     }
 
     fn into_state(self) -> State<DB> {

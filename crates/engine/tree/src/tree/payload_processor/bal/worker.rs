@@ -2,12 +2,16 @@ use super::BalExecutionError;
 use alloy_consensus::Transaction;
 use alloy_eip7928::BlockAccessIndex;
 use alloy_evm::{
-    block::{BlockExecutionError, BlockExecutor, BlockExecutorFactory},
+    block::{BlockExecutor, BlockExecutorFactory},
     Evm,
 };
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
+use reth_errors::BlockExecutionError;
+use reth_evm::{
+    execute::{convert_alloy_block_execution_error, ExecutableTxFor},
+    ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor,
+};
 use revm::database::State;
 use revm_state::bal::Bal as RevmBal;
 use std::sync::Arc;
@@ -94,6 +98,7 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
                 executor.evm_mut().db_mut().set_bal_index(BlockAccessIndex::new(index as u64 + 1));
                 let result = executor
                     .execute_transaction_without_commit(tx)
+                    .map_err(convert_alloy_block_execution_error)
                     .map_err(BalWorkerError::Execution)?;
 
                 if result_tx
