@@ -11,6 +11,7 @@ export default defineConfig({
   iconUrl: '/logo.png',
   ogImageUrl: '/reth-prod.png',
   outDir: 'docs/dist',
+  renderStrategy: 'full-static',
   sidebar,
   basePath,
   search: {
