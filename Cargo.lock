@@ -3634,7 +3634,7 @@ dependencies = [
 [[package]]
 name = "evm2"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?branch=dani%2Fpreserve-created-deletions#64204adff71e8e92d1078d18833c4fcf0098a407"
+source = "git+https://github.com/alloy-rs/evm2?branch=main#c61653463f056d7df660ba148bae56df7068b88c"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -3665,7 +3665,7 @@ dependencies = [
 [[package]]
 name = "evm2-macros"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?branch=dani%2Fpreserve-created-deletions#64204adff71e8e92d1078d18833c4fcf0098a407"
+source = "git+https://github.com/alloy-rs/evm2?branch=main#c61653463f056d7df660ba148bae56df7068b88c"
 dependencies = [
  "proc-macro2",
  "quote",
