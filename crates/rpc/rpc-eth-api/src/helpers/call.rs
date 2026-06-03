@@ -23,12 +23,11 @@ use reth_errors::{ProviderError, RethError};
 use reth_evm::{
     block::BlockExecutor,
     cancelled::CancelOnDrop,
-    database::{State, StateProviderDatabase},
+    database::{EvmDatabaseError, State, StateProviderDatabase},
     env::BlockEnvironment,
     execute::BlockBuilder,
     ConfigureEvm, Evm, EvmEnvFor, HaltReasonFor, InspectorFor, TransactionEnvMut, TxEnvFor,
 };
-use reth_execution_types::EvmDatabaseError;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
 use reth_rpc_convert::{RpcConvert, RpcTxReq};

@@ -9,12 +9,11 @@ use futures::Future;
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
     block::BlockExecutor,
-    database::{State, StateProviderDatabase},
+    database::{EvmDatabaseError, State, StateProviderDatabase},
     evm::EvmFactoryExt,
     tracing::TracingCtx,
     ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TxEnvFor,
 };
-use reth_execution_types::EvmDatabaseError;
 use reth_primitives_traits::{BlockBody, Recovered, RecoveredBlock};
 use reth_rpc_eth_types::cache::db::StateCacheDb;
 use reth_storage_api::{ProviderBlock, ProviderTx};
