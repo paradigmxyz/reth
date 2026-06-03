@@ -2,7 +2,10 @@
 
 use crate::Nibbles;
 use alloc::vec::Vec;
-use alloy_primitives::{map::B256Map, B256};
+use alloy_primitives::{
+    map::{hash_map, B256Map},
+    B256,
+};
 
 /// Target describes a proof target. For every proof target given, a proof calculator will calculate
 /// and return all nodes whose path is a prefix of the target's `key_nibbles`.
@@ -87,6 +90,8 @@ pub struct ChunkedMultiProofTargetsV2 {
     account_targets: alloc::vec::IntoIter<ProofV2Target>,
     /// Storage targets by account address
     storage_targets: B256Map<Vec<ProofV2Target>>,
+    /// Storage-only targets after all account targets have been consumed.
+    storage_only_targets: Option<hash_map::IntoIter<B256, Vec<ProofV2Target>>>,
     /// Current account being processed (if any storage slots remain)
     current_account_storage: Option<(B256, alloc::vec::IntoIter<ProofV2Target>)>,
     /// Chunk size
@@ -99,6 +104,7 @@ impl ChunkedMultiProofTargetsV2 {
         Self {
             account_targets: targets.account_targets.into_iter(),
             storage_targets: targets.storage_targets,
+            storage_only_targets: None,
             current_account_storage: None,
             size,
         }
@@ -161,36 +167,41 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
             }
         }
 
-        // Process any remaining storage-only entries (accounts not in account_targets)
-        while let Some((account_addr, storage_slots)) = self.storage_targets.iter_mut().next() &&
-            count < self.size
-        {
-            let account_addr = *account_addr;
-            let storage_slots = core::mem::take(storage_slots);
-            let remaining_capacity = self.size - count;
+        if count < self.size {
+            // Process any remaining storage-only entries (accounts not in account_targets).
+            let mut next_current_storage = None;
+            {
+                let storage_only_targets = self
+                    .storage_only_targets
+                    .get_or_insert_with(|| core::mem::take(&mut self.storage_targets).into_iter());
 
-            // Always remove from the map - if there are remaining slots they go to
-            // current_account_storage
-            self.storage_targets.remove(&account_addr);
+                while count < self.size {
+                    let Some((account_addr, storage_slots)) = storage_only_targets.next() else {
+                        break;
+                    };
+                    let remaining_capacity = self.size - count;
 
-            if storage_slots.len() <= remaining_capacity {
-                // Optimization: We can take all slots, just move the vec
-                count += storage_slots.len();
-                chunk.storage_targets.insert(account_addr, storage_slots);
-            } else {
-                // We need to split the storage slots
-                let mut storage_iter = storage_slots.into_iter();
-                let slots_in_chunk: Vec<_> =
-                    storage_iter.by_ref().take(remaining_capacity).collect();
+                    if storage_slots.len() <= remaining_capacity {
+                        // Optimization: We can take all slots, just move the vec
+                        count += storage_slots.len();
+                        chunk.storage_targets.insert(account_addr, storage_slots);
+                    } else {
+                        // We need to split the storage slots
+                        let mut storage_iter = storage_slots.into_iter();
+                        let slots_in_chunk: Vec<_> =
+                            storage_iter.by_ref().take(remaining_capacity).collect();
 
-                chunk.storage_targets.insert(account_addr, slots_in_chunk);
+                        chunk.storage_targets.insert(account_addr, slots_in_chunk);
 
-                // Save remaining storage slots for next chunk
-                if storage_iter.len() > 0 {
-                    self.current_account_storage = Some((account_addr, storage_iter));
+                        // Save remaining storage slots for next chunk
+                        if storage_iter.len() > 0 {
+                            next_current_storage = Some((account_addr, storage_iter));
+                        }
+                        break;
+                    }
                 }
-                break;
             }
+            self.current_account_storage = next_current_storage;
         }
 
         if chunk.account_targets.is_empty() && chunk.storage_targets.is_empty() {
