@@ -4,9 +4,11 @@
 use crate::{simulate::EthSimulateError, EthApiError, RevertError};
 use alloy_primitives::Bytes;
 use reth_errors::ProviderError;
-use reth_evm::{ConfigureEvm, EvmErrorFor, HaltReasonFor};
+use reth_evm::{
+    context::{ExecutionResult, HaltReason},
+    ConfigureEvm, EvmErrorFor, HaltReasonFor,
+};
 use reth_execution_types::EvmDatabaseError;
-use revm::{context::result::ExecutionResult, context_interface::result::HaltReason};
 
 use super::RpcInvalidTransactionError;
 
@@ -109,7 +111,7 @@ impl AsEthApiError for EthApiError {
     }
 }
 
-/// Helper trait to convert from revm errors.
+/// Helper trait to convert from EVM errors.
 pub trait FromEvmError<Evm: ConfigureEvm>:
     From<EvmErrorFor<Evm, EvmDatabaseError<ProviderError>>>
     + FromEvmHalt<HaltReasonFor<Evm>>
@@ -141,7 +143,7 @@ where
 {
 }
 
-/// Helper trait to convert from revm errors.
+/// Helper trait to convert from EVM errors.
 pub trait FromEvmHalt<Halt> {
     /// Converts from EVM halt to this type.
     fn from_evm_halt(halt: Halt, gas_limit: u64) -> Self;

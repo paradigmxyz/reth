@@ -10,7 +10,8 @@ use alloy_transport::{RpcError, TransportErrorKind};
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
-use reth_execution_types::EvmDatabaseError;
+use reth_evm::context::{EVMError, HaltReason, InvalidHeader, InvalidTransaction, OutOfGasError};
+use reth_execution_types::{BalError, EvmDatabaseError};
 use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed::RecoveryError};
 use reth_rpc_convert::{CallFeesError, EthTxEnvError, TransactionConversionError};
 use reth_rpc_server_types::result::{
@@ -19,12 +20,6 @@ use reth_rpc_server_types::result::{
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
     PoolError, PoolErrorKind, PoolTransactionError,
-};
-use revm::{
-    context_interface::result::{
-        EVMError, HaltReason, InvalidHeader, InvalidTransaction, OutOfGasError,
-    },
-    state::bal::BalError,
 };
 use revm_inspectors::tracing::{DebugInspectorError, MuxError};
 use std::convert::Infallible;
@@ -591,7 +586,7 @@ impl From<Infallible> for EthApiError {
 ///
 /// These error variants can be thrown when the transaction is checked prior to execution.
 ///
-/// These variants also cover all errors that can be thrown by revm.
+/// These variants also cover all errors that can be thrown by EVM execution.
 ///
 /// ## Nomenclature
 ///
@@ -927,7 +922,7 @@ pub struct RevertError {
 impl RevertError {
     /// Wraps the output bytes
     ///
-    /// Note: this is intended to wrap a revm output
+    /// Note: this is intended to wrap an EVM output.
     pub fn new(output: Bytes) -> Self {
         if output.is_empty() {
             Self { output: None }
@@ -1138,8 +1133,8 @@ pub enum SignError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::b256;
     use alloy_sol_types::{Revert, SolError};
-    use revm::primitives::b256;
 
     #[test]
     fn timed_out_error() {
