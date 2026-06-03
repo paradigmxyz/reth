@@ -29,7 +29,7 @@ use reth_evm::{
     evm2::{Evm2AlloyBlockExecutorFactory, RethEvm2ReceiptBuilder},
     hardfork::SpecId,
     precompiles::PrecompilesMap,
-    ConfigureEvm, EthEvm, EthEvmFactory, EvmEnv, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
+    ConfigureEvm, EthEvmFactory, EvmEnv, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
     NextBlockEnvAttributes, TransactionEnvMut,
 };
 use reth_primitives_traits::{SealedBlock, SealedHeader};
@@ -50,6 +50,7 @@ use {
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_and_block_number};
 use reth_ethereum_forks::{EthereumHardfork, ForkCondition, Hardforks};
+pub use reth_evm::EthEvm;
 
 /// Helper type with backwards compatible methods to obtain Ethereum executor
 /// providers.

@@ -27,6 +27,7 @@ alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 [dev-dependencies]
+reth-errors.workspace = true
 reth-testing-utils.workspace = true
 reth-evm = { workspace = true, features = ["test-utils"] }
 secp256k1.workspace = true

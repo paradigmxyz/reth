@@ -8906,6 +8906,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "reth-chainspec",
+ "reth-errors",
  "reth-ethereum-forks",
  "reth-ethereum-primitives",
  "reth-evm",
