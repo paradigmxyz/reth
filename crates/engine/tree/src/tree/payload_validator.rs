@@ -493,7 +493,7 @@ where
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
         let changeset_provider = self.spawn_changeset_provider_task(overlay_factory.clone());
 
-        let bal_eligible = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
+        let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
 
         // Spawn the appropriate processor based on strategy
         let mut handle = ensure_ok!(self.spawn_payload_processor(
@@ -502,6 +502,7 @@ where
             provider_builder.clone(),
             overlay_factory,
             &strategy,
+            parallel_bal_execution,
         ));
 
         // Create optional cache stats for detailed block logging
@@ -514,6 +515,25 @@ where
             instrument_state_provider.then(|| Arc::new(StateProviderStats::default()));
         let execution_cache = handle.caches().map(|caches| (caches, handle.cache_metrics()));
 
+        // This state provider factory is parametrized by:
+        //
+        // 1. fill_on_miss?
+        // 2. instrument_state_provider?
+        //
+        // `fill_on_miss` controls whether the loaded value after a cache miss will be inserted
+        // back into the cache. On a glance it seems to be always useful to do this. However,
+        // in practice, for the serial/non-BAL execution, it's not needed and is net negative:
+        //
+        // - It's not necessary because the revm machinery provides layer of caching itself. That
+        //   means a value for a miss will be recorded in revm's cache.
+        // - Inserting back into the cache is not free.
+        // - After execution, the execution post-state will be dumped into the execution cache as
+        //   whole anyway.
+        //
+        // Therefore, there `fill_on_miss` is going to be false for those paths.
+        //
+        // The second parameter `instrument_state_provider` controls whether we should
+        // instrument the state provider with metrics.
         let make_state_provider = |fill_on_miss: bool| -> ProviderResult<StateProviderBox> {
             let provider = provider_builder.build()?;
             let mut provider = if let Some((caches, cache_metrics)) = &execution_cache {
@@ -554,7 +574,7 @@ where
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
         let execute_block_start = Instant::now();
-        let execution_result = if bal_eligible {
+        let execution_result = if parallel_bal_execution {
             self.execute_block_bal(env, &input, &handle, &make_state_provider)
         } else {
             let state_provider = make_state_provider(false);
@@ -1055,8 +1075,8 @@ where
         let transaction_count = input.transaction_count();
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
-        let executor = executor.with_state_hook(
-            handle.state_hook().map(|hook| Box::new(hook) as Box<dyn OnStateHook>),
+        executor.evm_mut().db_mut().set_state_hook(
+            handle.state_hook().map(|hook| Box::new(hook) as Box<dyn OnStateHook + 'static>),
         );
 
         let execution_start = Instant::now();
@@ -1104,9 +1124,7 @@ where
     //     empirically once workers are parallel; meaningless while the commit loop is sequential.
     fn bal_path_eligible(&self, bal: Option<&DecodedBal>) -> Result<bool, InsertBlockErrorKind> {
         let has_bal = bal.is_some();
-        let parallel_execution = has_bal &&
-            !self.config.disable_state_cache() &&
-            !self.config.disable_bal_parallel_execution();
+        let parallel_execution = has_bal && !self.config.disable_bal_parallel_execution();
         if parallel_execution && self.config.disable_bal_parallel_state_root() {
             return Err(InsertBlockErrorKind::Other(
                 "disabling parallel state root is impossible when parallel execution is enabled"
@@ -1642,7 +1660,7 @@ where
         level = "debug",
         target = "engine::tree::payload_validator",
         skip_all,
-        fields(?strategy)
+        fields(?strategy, parallel_bal_execution)
     )]
     fn spawn_payload_processor<T: ExecutableTxIterator<Evm>>(
         &mut self,
@@ -1651,6 +1669,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         overlay_factory: OverlayStateProviderFactory<P, N>,
         strategy: &StateRootStrategy<N>,
+        parallel_bal_execution: bool,
     ) -> Result<
         PayloadHandle<
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
@@ -1670,6 +1689,7 @@ where
                     provider_builder,
                     overlay_factory,
                     &self.config,
+                    parallel_bal_execution,
                 );
 
                 // record prewarming initialization duration
