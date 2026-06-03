@@ -172,26 +172,29 @@ pub enum EraFileType {
     /// Execution layer ERA1 file, `.era1`
     /// Contains execution blocks pre-merge
     Era1,
+    /// Execution layer ERE file, `.ere`
+    /// Contains execution blocks for both pre-merge and post-merge
+    Ere,
 }
 
 impl EraFileType {
+    /// Every file type. The single source of truth for filename/extension lookups; no extension is
+    /// a suffix of another (`.era1` ends in `1`, not `.era`), so suffix matching over this list is
+    /// unambiguous regardless of order.
+    const ALL: [Self; 3] = [Self::Era, Self::Era1, Self::Ere];
+
     /// Get the file extension for this type, dot included
     pub const fn extension(&self) -> &'static str {
         match self {
             Self::Era => ".era",
             Self::Era1 => ".era1",
+            Self::Ere => ".ere",
         }
     }
 
     /// Detect file type from a filename
     pub fn from_filename(filename: &str) -> Option<Self> {
-        if filename.ends_with(".era") {
-            Some(Self::Era)
-        } else if filename.ends_with(".era1") {
-            Some(Self::Era1)
-        } else {
-            None
-        }
+        Self::ALL.into_iter().find(|ty| filename.ends_with(ty.extension()))
     }
 
     /// Generate era file name.
@@ -210,19 +213,9 @@ impl EraFileType {
         era_count: u64,
     ) -> String {
         let hash = format_hash(hash);
-
-        if include_era_count {
-            format!(
-                "{}-{:05}-{:05}-{}{}",
-                network_name,
-                era_number,
-                era_count,
-                hash,
-                self.extension()
-            )
-        } else {
-            format!("{}-{:05}-{}{}", network_name, era_number, hash, self.extension())
-        }
+        // Custom exports insert an `-<era-count>` segment between the era number and the hash.
+        let era_count = if include_era_count { format!("-{era_count:05}") } else { String::new() };
+        format!("{network_name}-{era_number:05}{era_count}-{hash}{}", self.extension())
     }
 
     /// Detect file type from URL
@@ -230,6 +223,8 @@ impl EraFileType {
     pub fn from_url(url: &str) -> Self {
         if url.contains("era1") {
             Self::Era1
+        } else if url.contains(".ere") {
+            Self::Ere
         } else {
             Self::Era
         }
