@@ -1,10 +1,6 @@
 use crate::{
-    chain::ChainSpecInfo,
-    hooks::{Hook, Hooks},
-    process::register_process_metrics,
-    recorder::install_prometheus_recorder,
-    storage::StorageSettingsInfo,
-    version::VersionInfo,
+    chain::ChainSpecInfo, hooks::Hooks, process::register_process_metrics,
+    recorder::install_prometheus_recorder, storage::StorageSettingsInfo, version::VersionInfo,
 };
 use bytes::Bytes;
 use eyre::WrapErr;
@@ -15,7 +11,7 @@ use metrics_process::Collector;
 use reqwest::Client;
 use reth_metrics::metrics::Unit;
 use reth_tasks::TaskExecutor;
-use std::{convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{convert::Infallible, net::SocketAddr, path::PathBuf, time::Duration};
 
 /// Configuration for the [`MetricServer`]
 #[derive(Debug)]
@@ -94,22 +90,21 @@ impl MetricServer {
             pprof_dump_dir,
         } = &self.config;
 
-        let hooks_for_endpoint = hooks.clone();
-        self.start_endpoint(
-            *listen_addr,
-            Arc::new(move || hooks_for_endpoint.iter().for_each(|hook| hook())),
-            task_executor.clone(),
-            pprof_dump_dir.clone(),
-        )
-        .await
-        .wrap_err_with(|| format!("Could not start Prometheus endpoint at {listen_addr}"))?;
+        // Run the collection hooks in a background task instead of synchronously on every
+        // `/metrics` scrape. A slow hook (e.g. the static file provider walking the filesystem)
+        // would otherwise block the request future and stall the async runtime. The endpoint and
+        // the push gateway only render the already-collected metrics.
+        self.start_metrics_collection_task(hooks.clone(), task_executor.clone());
+
+        self.start_endpoint(*listen_addr, task_executor.clone(), pprof_dump_dir.clone())
+            .await
+            .wrap_err_with(|| format!("Could not start Prometheus endpoint at {listen_addr}"))?;
 
         // Start push-gateway task if configured
         if let Some(url) = push_gateway_url {
             self.start_push_gateway_task(
                 url.clone(),
                 *push_gateway_interval,
-                hooks.clone(),
                 task_executor.clone(),
             )?;
         }
@@ -132,10 +127,9 @@ impl MetricServer {
         Ok(())
     }
 
-    async fn start_endpoint<F: Hook + 'static>(
+    async fn start_endpoint(
         &self,
         listen_addr: SocketAddr,
-        hook: Arc<F>,
         task_executor: TaskExecutor,
         pprof_dump_dir: PathBuf,
     ) -> eyre::Result<()> {
@@ -160,14 +154,11 @@ impl MetricServer {
             };
 
             let handle = install_prometheus_recorder();
-            let hook = hook.clone();
             let pprof_dump_dir = pprof_dump_dir.clone();
             let service = tower::service_fn(move |req: Request<_>| {
-                let hook = hook.clone();
                 let pprof_dump_dir = pprof_dump_dir.clone();
                 async move {
-                    let response =
-                        handle_request(req.uri().path(), &*hook, handle, &pprof_dump_dir).await;
+                    let response = handle_request(req.uri().path(), handle, &pprof_dump_dir).await;
                     Ok::<_, Infallible>(response)
                 }
             });
@@ -183,12 +174,28 @@ impl MetricServer {
         Ok(())
     }
 
+    /// Spawns a background task that periodically runs the metric collection hooks off the request
+    /// path. Hooks that perform blocking work (filesystem walks, database stats) are executed on
+    /// the blocking pool, so the `/metrics` endpoint only ever renders already-collected metrics
+    /// and never stalls the async runtime.
+    fn start_metrics_collection_task(&self, hooks: Hooks, task_executor: TaskExecutor) {
+        task_executor.spawn_with_graceful_shutdown_signal(async move |mut signal| {
+            // Collect once up front so metrics are populated before the first scrape.
+            collect_hooks(&hooks).await;
+            loop {
+                tokio::select! {
+                    _ = &mut signal => break,
+                    _ = tokio::time::sleep(METRICS_COLLECTION_INTERVAL) => collect_hooks(&hooks).await,
+                }
+            }
+        });
+    }
+
     /// Starts a background task to push metrics to a metrics gateway
     fn start_push_gateway_task(
         &self,
         url: String,
         interval: Duration,
-        hooks: Hooks,
         task_executor: TaskExecutor,
     ) -> eyre::Result<()> {
         let client = Client::builder()
@@ -204,7 +211,6 @@ impl MetricServer {
                         break;
                     }
                     _ = tokio::time::sleep(interval) => {
-                        hooks.iter().for_each(|hook| hook());
                         let metrics = handle.handle().render();
                         match client.put(&url).header("Content-Type", "text/plain").body(metrics).send().await {
                             Ok(response) => {
@@ -327,9 +333,18 @@ fn describe_io_stats() {
 #[cfg(not(target_os = "linux"))]
 const fn describe_io_stats() {}
 
+/// How often the metric collection hooks run in the background. Hooks that gate themselves with
+/// `throttle!` keep their own (longer) cadence; this only bounds how fresh the cheap hooks are.
+const METRICS_COLLECTION_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Runs the collection hooks on the blocking pool so their I/O never touches the async runtime.
+async fn collect_hooks(hooks: &Hooks) {
+    let hooks = hooks.clone();
+    let _ = tokio::task::spawn_blocking(move || hooks.iter().for_each(|hook| hook())).await;
+}
+
 async fn handle_request(
     path: &str,
-    hook: impl Fn(),
     handle: &crate::recorder::PrometheusRecorder,
     pprof_dump_dir: &PathBuf,
 ) -> Response<Full<Bytes>> {
@@ -337,7 +352,6 @@ async fn handle_request(
         "/debug/pprof/heap" => handle_pprof_heap(pprof_dump_dir),
         "/debug/tokio/dump" => handle_tokio_dump().await,
         _ => {
-            hook();
             let metrics = handle.handle().render();
             let mut response = Response::new(Full::new(Bytes::from(metrics)));
             response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
@@ -522,6 +536,50 @@ mod tests {
         assert!(body.contains("prune_config="), "expected prune config label");
 
         // Make sure the runtime is dropped after the test runs.
+        drop(runtime);
+    }
+
+    /// Regression for #24566: a slow collection hook must run off the request path so the
+    /// `/metrics` endpoint stays responsive instead of blocking on it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn metrics_endpoint_is_not_blocked_by_slow_hook() {
+        install_prometheus_recorder();
+
+        let runtime = Runtime::test();
+        // Blocks far longer than the client timeout, modeling a slow `report_metrics` walk.
+        let hooks =
+            Hooks::builder().with_hook(|| std::thread::sleep(Duration::from_secs(3))).build();
+
+        let listen_addr = get_random_available_addr();
+        let config = MetricServerConfig::new(
+            listen_addr,
+            VersionInfo {
+                version: "test",
+                build_timestamp: "test",
+                cargo_features: "test",
+                git_sha: "test",
+                target_triple: "test",
+                build_profile: "test",
+            },
+            ChainSpecInfo { name: "test".to_string() },
+            runtime.clone(),
+            hooks,
+            std::env::temp_dir(),
+        );
+        MetricServer::new(config).serve().await.unwrap();
+
+        let client = Client::builder().timeout(Duration::from_millis(500)).build().unwrap();
+        let start = std::time::Instant::now();
+        let response = client.get(format!("http://{listen_addr}/metrics")).send().await;
+
+        assert!(response.is_ok(), "metrics request timed out: {response:?}");
+        assert!(response.unwrap().status().is_success());
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "metrics endpoint blocked on the slow hook ({:?})",
+            start.elapsed()
+        );
+
         drop(runtime);
     }
 }
