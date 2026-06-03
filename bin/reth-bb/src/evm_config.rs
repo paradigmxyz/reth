@@ -8,28 +8,28 @@
 pub(crate) use reth_engine_primitives::BigBlockData;
 use reth_engine_primitives::ExecutionPayload as _;
 use reth_storage_errors::any::AnyError;
-use revm_primitives::Bytes;
 
 use crate::evm::{BalIndexReader, BbBlockExecutorFactory, BbEvmPlan};
 use alloy_consensus::Header;
 use alloy_eips::Decodable2718;
-use alloy_evm::{
-    eth::{spec::EthExecutorSpec, EthBlockExecutionCtx},
-    EthEvmFactory,
-};
-use alloy_primitives::B256;
+use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types::engine::ExecutionData;
 use core::convert::Infallible;
-use reth_chainspec::{ChainSpec, EthChainSpec};
+use reth_chainspec::{ChainSpec, EthChainSpec, EthExecutorSpec};
 use reth_ethereum_forks::Hardforks;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm::{
-    execute::BlockAssembler, ConfigureEngineEvm, ConfigureEvm, Database, EvmEnv, EvmEnvFor,
-    ExecutableTxIterator, ExecutionCtxFor, NextBlockEnvAttributes,
+    block::BlockExecutorFor,
+    database::{Database, State},
+    eth::{EthBlockExecutionCtx, EthEvmFactory},
+    execute::BlockAssembler,
+    hardfork::SpecId,
+    ConfigureEngineEvm, ConfigureEvm, EvmEnv, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor,
+    NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::{EthEvmConfig, RethReceiptBuilder};
+use reth_execution_types::BlockAccessIndex;
 use reth_primitives_traits::{SealedBlock, SealedHeader, SignedTransaction, TxTy};
-use revm::{primitives::hardfork::SpecId, state::bal::BlockAccessIndex};
 use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
@@ -97,7 +97,7 @@ impl<C> BbEvmConfig<C> {
 /// `ConfigureEvm::create_executor` where the concrete `State<DB>` type is known.
 /// At each segment boundary the executor calls this to populate the ring buffer
 /// with the 256 block hashes relevant to the new segment's block number window.
-fn seed_state_block_hashes<DB>(state: &mut &mut revm::database::State<DB>, hashes: &[(u64, B256)]) {
+fn seed_state_block_hashes<DB>(state: &mut &mut State<DB>, hashes: &[(u64, B256)]) {
     for &(number, hash) in hashes {
         state.block_hashes.insert(number, hash);
     }
@@ -108,7 +108,7 @@ fn seed_state_block_hashes<DB>(state: &mut &mut revm::database::State<DB>, hashe
 /// Used as a [`BalIndexReader`] callback so the
 /// generic [`BbBlockExecutor`](crate::evm::BbBlockExecutor) can pick its
 /// starting segment without a trait bound on `DB`.
-const fn read_bal_index<DB>(state: &&mut revm::database::State<DB>) -> u64 {
+const fn read_bal_index<DB>(state: &&mut State<DB>) -> u64 {
     state.bal_state.bal_index().get()
 }
 
@@ -119,7 +119,7 @@ const fn read_bal_index<DB>(state: &&mut revm::database::State<DB>) -> u64 {
 /// `bal_index` between sub-events of a segment boundary (post-N's `finish()`
 /// and pre-N+1's `apply_pre_execution_changes()`) without a trait bound on
 /// `DB`.
-const fn bump_bal_index<DB: revm::Database>(state: &mut &mut revm::database::State<DB>) {
+const fn bump_bal_index<DB: Database>(state: &mut &mut State<DB>) {
     state.bump_bal_index();
 }
 
@@ -129,7 +129,7 @@ const fn bump_bal_index<DB: revm::Database>(state: &mut &mut revm::database::Sta
 /// [`BbBlockExecutor::initialize`](crate::evm::BbBlockExecutor) can renumber
 /// a worker's incoming `bal_index = i + 1` into the boundary-padded space
 /// `i + 1 + 2*k` (where `k` is the worker's segment index).
-const fn set_bal_index<DB: revm::Database>(state: &mut &mut revm::database::State<DB>, index: u64) {
+const fn set_bal_index<DB: Database>(state: &mut &mut State<DB>, index: u64) {
     state.set_bal_index(BlockAccessIndex::new(index));
 }
 
@@ -184,19 +184,14 @@ where
 
     fn create_executor<'a, DB, I>(
         &'a self,
-        evm: reth_evm::EvmFor<Self, &'a mut revm::database::State<DB>, I>,
+        evm: reth_evm::EvmFor<Self, &'a mut State<DB>, I>,
         ctx: BbEvmPlan<'a>,
-    ) -> alloy_evm::block::BlockExecutorFor<
-        'a,
-        Self::BlockExecutorFactory,
-        &'a mut revm::database::State<DB>,
-        I,
-    >
+    ) -> BlockExecutorFor<'a, Self::BlockExecutorFactory, &'a mut State<DB>, I>
     where
         DB: Database,
-        I: reth_evm::InspectorFor<Self, &'a mut revm::database::State<DB>> + 'a,
+        I: reth_evm::InspectorFor<Self, &'a mut State<DB>> + 'a,
     {
-        let bal_index_reader: Option<BalIndexReader<&'a mut revm::database::State<DB>>> =
+        let bal_index_reader: Option<BalIndexReader<&'a mut State<DB>>> =
             Some(read_bal_index::<DB>);
 
         // Inject concrete function pointers that know the `State<DB>` type so
@@ -214,19 +209,14 @@ where
 
     fn create_executor_with_state<'ctx, 'db, DB, I>(
         &'ctx self,
-        evm: reth_evm::EvmFor<Self, &'db mut revm::database::State<DB>, I>,
+        evm: reth_evm::EvmFor<Self, &'db mut State<DB>, I>,
         ctx: BbEvmPlan<'ctx>,
-    ) -> alloy_evm::block::BlockExecutorFor<
-        'ctx,
-        Self::BlockExecutorFactory,
-        &'db mut revm::database::State<DB>,
-        I,
-    >
+    ) -> BlockExecutorFor<'ctx, Self::BlockExecutorFactory, &'db mut State<DB>, I>
     where
         DB: Database,
-        I: reth_evm::InspectorFor<Self, &'db mut revm::database::State<DB>>,
+        I: reth_evm::InspectorFor<Self, &'db mut State<DB>>,
     {
-        let bal_index_reader: Option<BalIndexReader<&'db mut revm::database::State<DB>>> =
+        let bal_index_reader: Option<BalIndexReader<&'db mut State<DB>>> =
             Some(read_bal_index::<DB>);
 
         self.executor_factory.create_executor_with_seeder(

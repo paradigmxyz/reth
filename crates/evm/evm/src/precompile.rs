@@ -1,7 +1,7 @@
 //! EVM precompile types.
 
 pub use revm::{
-    handler::EthPrecompiles,
+    handler::{EthPrecompiles, PrecompileProvider},
     precompile::{
         Precompile, PrecompileId, PrecompileOutput, PrecompileResult, PrecompileStatus, Precompiles,
     },

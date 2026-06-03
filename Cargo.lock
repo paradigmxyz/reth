@@ -7783,7 +7783,6 @@ version = "2.2.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "alloy-evm",
  "alloy-hardforks 0.4.7",
  "alloy-primitives",
  "alloy-rlp",
@@ -7818,8 +7817,6 @@ dependencies = [
  "reth-rpc-api",
  "reth-rpc-engine-api",
  "reth-storage-errors",
- "revm",
- "revm-primitives",
  "tokio",
  "tracing",
 ]

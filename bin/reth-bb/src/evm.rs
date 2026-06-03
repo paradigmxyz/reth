@@ -9,26 +9,23 @@
 use crate::evm_config::BigBlockSegment;
 use alloy_consensus::TransactionEnvelope;
 use alloy_eips::eip7685::Requests;
-use alloy_evm::{
+use alloy_primitives::B256;
+use reth_ethereum_primitives::{Receipt, TransactionSigned};
+use reth_evm::{
     block::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
         ExecutableTx, GasOutput, StateDB,
     },
+    context::{BlockEnv, EVMError, HaltReason, TxEnv},
     eth::{EthBlockExecutionCtx, EthBlockExecutor, EthEvmContext, EthTxResult},
+    hardfork::SpecId,
+    inspector::Inspector,
+    interpreter::InterpreterResult,
+    precompile::PrecompileProvider,
     precompiles::PrecompilesMap,
     Database, EthEvm, EthEvmFactory, Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
-use alloy_primitives::B256;
-use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm_ethereum::RethReceiptBuilder;
-use revm::{
-    context::{BlockEnv, TxEnv},
-    context_interface::result::{EVMError, HaltReason},
-    handler::PrecompileProvider,
-    interpreter::InterpreterResult,
-    primitives::hardfork::SpecId,
-    Inspector,
-};
 use tracing::{debug, trace};
 
 // ---------------------------------------------------------------------------
@@ -173,7 +170,7 @@ where
     DB: StateDB,
     I: Inspector<EthEvmContext<DB>>,
     P: PrecompileProvider<EthEvmContext<DB>, Output = InterpreterResult>,
-    Spec: alloy_evm::eth::spec::EthExecutorSpec + Clone,
+    Spec: reth_evm::eth::spec::EthExecutorSpec + Clone,
     EthEvm<DB, I, P>: Evm<
         DB = DB,
         Tx = TxEnv,
@@ -391,7 +388,7 @@ where
     DB: StateDB,
     I: Inspector<EthEvmContext<DB>>,
     P: PrecompileProvider<EthEvmContext<DB>, Output = InterpreterResult>,
-    Spec: alloy_evm::eth::spec::EthExecutorSpec + Clone,
+    Spec: reth_evm::eth::spec::EthExecutorSpec + Clone,
     EthEvm<DB, I, P>: Evm<
         DB = DB,
         Tx = TxEnv,
@@ -556,7 +553,7 @@ impl<Spec> BbBlockExecutorFactory<Spec> {
         bal_index_setter: Option<BalIndexSetter<DB>>,
     ) -> BbBlockExecutor<'a, DB, I, PrecompilesMap, &'a Spec>
     where
-        Spec: alloy_evm::eth::spec::EthExecutorSpec,
+        Spec: reth_evm::eth::spec::EthExecutorSpec,
         DB: StateDB,
         I: Inspector<EthEvmContext<DB>>,
     {
@@ -575,7 +572,7 @@ impl<Spec> BbBlockExecutorFactory<Spec> {
 
 impl<Spec> BlockExecutorFactory for BbBlockExecutorFactory<Spec>
 where
-    Spec: alloy_evm::eth::spec::EthExecutorSpec + 'static,
+    Spec: reth_evm::eth::spec::EthExecutorSpec + 'static,
     TxEnv: FromRecoveredTx<TransactionSigned> + FromTxWithEncoded<TransactionSigned>,
 {
     type EvmFactory = EthEvmFactory;

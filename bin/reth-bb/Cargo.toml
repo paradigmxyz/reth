@@ -43,7 +43,6 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
-alloy-evm.workspace = true
 
 # tracing
 tracing.workspace = true
@@ -55,8 +54,6 @@ async-trait.workspace = true
 derive_more.workspace = true
 crossbeam-channel.workspace = true
 tokio = { workspace = true, features = ["sync"] }
-revm.workspace = true
-revm-primitives.workspace = true
 alloy-hardforks.workspace = true
 metrics.workspace = true
 
@@ -101,9 +98,6 @@ asm-keccak = [
     "reth-ethereum-cli/asm-keccak",
     "reth-node-ethereum/asm-keccak",
     "alloy-primitives/asm-keccak",
-    "alloy-evm/asm-keccak",
-    "revm/asm-keccak",
-    "revm-primitives/asm-keccak",
     "reth-evm/asm-keccak",
 ]
 
