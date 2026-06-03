@@ -1023,8 +1023,9 @@ mod tests {
         precompile_cache::PrecompileCacheMap,
         ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
     };
+    use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
-    use alloy_primitives::{map::HashMap, Address, B256, KECCAK_EMPTY, U256};
+    use alloy_primitives::{map::HashMap, Address, B256, U256};
     use rand::Rng;
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
@@ -1033,8 +1034,8 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_cache::CachedStatus;
     use reth_execution_types::{
-        Account as EvmAccount, AccountInfo, AccountStatus, BundleState, EvmState, EvmStorageSlot,
-        TransactionId,
+        Account as EvmAccount, AccountInfo, BundleState, EvmAccountStatus, EvmState,
+        EvmStorageSlot, TransactionId,
     };
     use reth_primitives_traits::{Account, Recovered, StorageEntry};
     use reth_provider::{
@@ -1296,7 +1297,7 @@ mod tests {
                     account_id: None,
                 };
                 account.storage = storage;
-                account.status = AccountStatus::Touched;
+                account.status = EvmAccountStatus::Touched;
                 account.transaction_id = TransactionId::ZERO;
 
                 state_update.insert(address, account);

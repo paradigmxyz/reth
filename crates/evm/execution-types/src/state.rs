@@ -14,7 +14,8 @@ pub use revm::{
     },
     state::{
         bal::{AccountBal, AccountInfoBal, Bal, BalError, BalWrites, BlockAccessIndex, StorageBal},
-        Account, AccountInfo, Bytecode, EvmState, EvmStorageSlot, TransactionId,
+        Account, AccountInfo, AccountStatus as EvmAccountStatus, Bytecode, EvmState,
+        EvmStorageSlot, TransactionId,
     },
 };
 pub use revm_database_interface::{bal::EvmDatabaseError, DatabaseCommit, EmptyDB};
