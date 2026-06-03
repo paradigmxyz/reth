@@ -29,9 +29,6 @@ derive_more.workspace = true
 itertools = { workspace = true, features = ["use_alloc"] }
 nybbles = { workspace = true, features = ["rlp"] }
 
-# reth
-revm-database.workspace = true
-
 # `serde` feature
 serde = { workspace = true, optional = true }
 
@@ -84,7 +81,6 @@ std = [
     "serde?/std",
     "serde_with?/std",
     "serde_json/std",
-    "revm-database/std",
     "revm-state/std",
     "reth-codecs?/std",
     "alloy-eips/std",
@@ -101,7 +97,6 @@ serde = [
     "alloy-rpc-types-eth?/serde",
     "reth-primitives-traits/serde",
     "reth-codecs?/serde",
-    "revm-database/serde",
     "revm-state/serde",
     "alloy-eips/serde",
 ]

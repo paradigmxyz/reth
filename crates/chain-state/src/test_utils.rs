@@ -293,7 +293,15 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
         let hashed_state = reth_trie::HashedPostState::from_bundle_state::<
             reth_trie::KeccakKeyHasher,
-        >(bundle.state.iter())
+            _,
+        >(bundle.state.iter().map(|(address, account)| {
+            (
+                address,
+                account.info.as_ref().map(Into::into),
+                account.was_destroyed(),
+                account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+            )
+        }))
         .into_sorted();
 
         let block_receipts = if receipts.is_empty() {

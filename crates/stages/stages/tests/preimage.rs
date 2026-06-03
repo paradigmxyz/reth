@@ -952,7 +952,16 @@ fn execute_and_commit_block(
     };
 
     let gas_used = output.gas_used;
-    let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
+    let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher, _>(
+        output.state.state().iter().map(|(address, account)| {
+            (
+                address,
+                account.info.as_ref().map(Into::into),
+                account.was_destroyed(),
+                account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+            )
+        }),
+    );
     type TestStateRoot<'a, TX, A> = StateRoot<
         reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
         reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,

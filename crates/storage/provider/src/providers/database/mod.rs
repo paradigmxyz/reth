@@ -946,7 +946,16 @@ impl<N: ProviderNodeTypes> PruneCheckpointReader for ProviderFactory<N> {
 
 impl<N: ProviderNodeTypes> HashedPostStateProvider for ProviderFactory<N> {
     fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
-        HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
+        HashedPostState::from_bundle_state::<KeccakKeyHasher, _>(bundle_state.state().iter().map(
+            |(address, account)| {
+                (
+                    address,
+                    account.info.as_ref().map(Into::into),
+                    account.was_destroyed(),
+                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                )
+            },
+        ))
     }
 }
 

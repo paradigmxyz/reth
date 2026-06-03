@@ -206,7 +206,16 @@ impl<T> ExecutionOutcome<T> {
     /// Returns [`HashedPostState`] for this execution outcome.
     /// See [`HashedPostState::from_bundle_state`] for more info.
     pub fn hash_state_slow<KH: KeyHasher>(&self) -> HashedPostState {
-        HashedPostState::from_bundle_state::<KH>(&self.bundle.state)
+        HashedPostState::from_bundle_state::<KH, _>(self.bundle.state.iter().map(
+            |(address, account)| {
+                (
+                    address,
+                    account.info.as_ref().map(Into::into),
+                    account.was_destroyed(),
+                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                )
+            },
+        ))
     }
 
     /// Transform block number to the index of block.

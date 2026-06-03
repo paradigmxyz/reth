@@ -4947,8 +4947,17 @@ mod tests {
             )
             .unwrap();
 
-        let hashed_state =
-            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle.state()).into_sorted();
+        let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher, _>(
+            bundle.state().iter().map(|(address, account)| {
+                (
+                    address,
+                    account.info.as_ref().map(Into::into),
+                    account.was_destroyed(),
+                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                )
+            }),
+        )
+        .into_sorted();
         provider_rw.write_hashed_state(&hashed_state).unwrap();
 
         let plain_storage_entries = provider_rw
@@ -5071,8 +5080,17 @@ mod tests {
 
             let bundle = builder.build();
 
-            let hashed_state =
-                HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle.state()).into_sorted();
+            let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher, _>(
+                bundle.state().iter().map(|(address, account)| {
+                    (
+                        address,
+                        account.info.as_ref().map(Into::into),
+                        account.was_destroyed(),
+                        account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                    )
+                }),
+            )
+            .into_sorted();
 
             let header = Header {
                 number: block_num,
@@ -5350,8 +5368,17 @@ mod tests {
             )
             .unwrap();
 
-        let hashed_state =
-            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle.state()).into_sorted();
+        let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher, _>(
+            bundle.state().iter().map(|(address, account)| {
+                (
+                    address,
+                    account.info.as_ref().map(Into::into),
+                    account.was_destroyed(),
+                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                )
+            }),
+        )
+        .into_sorted();
         provider_rw.write_hashed_state(&hashed_state).unwrap();
 
         let hashed_account = provider_rw

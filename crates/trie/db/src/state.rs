@@ -424,7 +424,16 @@ mod tests {
             .build();
         assert_eq!(bundle_state.reverts.len(), 1);
 
-        let post_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(&bundle_state.state);
+        let post_state = HashedPostState::from_bundle_state::<KeccakKeyHasher, _>(
+            bundle_state.state.iter().map(|(address, account)| {
+                (
+                    address,
+                    account.info.as_ref().map(Into::into),
+                    account.was_destroyed(),
+                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                )
+            }),
+        );
         assert_eq!(post_state.accounts.len(), 2);
         assert_eq!(post_state.storages.len(), 2);
 
