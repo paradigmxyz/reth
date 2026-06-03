@@ -15,19 +15,19 @@ use alloy_eips::Decodable2718;
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types::engine::ExecutionData;
 use core::convert::Infallible;
-use reth_chainspec::{ChainSpec, EthChainSpec, EthExecutorSpec};
+use reth_chainspec::{ChainSpec, EthChainSpec, EthExecutorSpec as RethEthExecutorSpec};
 use reth_ethereum_forks::Hardforks;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm::{
     block::BlockExecutorFor,
     database::{Database, State},
-    eth::{EthBlockExecutionCtx, EthEvmFactory},
+    eth::{spec::EthExecutorSpec as AlloyEthExecutorSpec, EthBlockExecutionCtx, EthEvmFactory},
     execute::BlockAssembler,
     hardfork::SpecId,
     ConfigureEngineEvm, ConfigureEvm, EvmEnv, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor,
     NextBlockEnvAttributes,
 };
-use reth_evm_ethereum::{EthEvmConfig, RethReceiptBuilder};
+use reth_evm_ethereum::{AlloyChainSpec, EthEvmConfig, RethReceiptBuilder};
 use reth_execution_types::BlockAccessIndex;
 use reth_primitives_traits::{SealedBlock, SealedHeader, SignedTransaction, TxTy};
 use std::sync::Arc;
@@ -64,7 +64,7 @@ pub struct BbEvmConfig<C = ChainSpec> {
     /// The inner Ethereum EVM configuration (used for env computation).
     pub inner: EthEvmConfig<C>,
     /// Block executor factory for big-block execution.
-    executor_factory: BbBlockExecutorFactory<Arc<C>>,
+    executor_factory: BbBlockExecutorFactory<AlloyChainSpec<C>>,
     /// Block assembler.
     block_assembler: BbBlockAssembler,
 }
@@ -78,7 +78,7 @@ impl<C> BbEvmConfig<C> {
         let chain_spec = inner.chain_spec().clone();
         let executor_factory = BbBlockExecutorFactory::new(
             RethReceiptBuilder::default(),
-            chain_spec,
+            AlloyChainSpec::new(chain_spec),
             EthEvmFactory::default(),
         );
 
@@ -139,12 +139,12 @@ const fn set_bal_index<DB: Database>(state: &mut &mut State<DB>, index: u64) {
 
 impl<C> ConfigureEvm for BbEvmConfig<C>
 where
-    C: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
+    C: RethEthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
 {
     type Primitives = EthPrimitives;
     type Error = Infallible;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
-    type BlockExecutorFactory = BbBlockExecutorFactory<Arc<C>>;
+    type BlockExecutorFactory = BbBlockExecutorFactory<AlloyChainSpec<C>>;
     type BlockAssembler = BbBlockAssembler;
 
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
@@ -236,7 +236,7 @@ where
 
 impl<C> ConfigureEngineEvm<BigBlockData<ExecutionData>> for BbEvmConfig<C>
 where
-    C: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
+    C: RethEthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
 {
     fn evm_env_for_payload(
         &self,
@@ -307,7 +307,7 @@ where
 #[derive(Debug, Default, Clone)]
 pub struct BbBlockAssembler;
 
-impl<Spec: EthExecutorSpec + 'static> BlockAssembler<BbBlockExecutorFactory<Spec>>
+impl<Spec: AlloyEthExecutorSpec + 'static> BlockAssembler<BbBlockExecutorFactory<Spec>>
     for BbBlockAssembler
 {
     type Block = Block;
