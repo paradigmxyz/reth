@@ -5,14 +5,15 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eip7928::{compute_block_access_list_hash, BlockAccessList};
 use alloy_eips::eip2718::WithEncoded;
-pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory, TxResult};
 use alloy_evm::{
     block::{
-        BlockExecutionError as AlloyBlockExecutionError,
-        BlockExecutionResult as AlloyBlockExecutionResult,
-        BlockValidationError as AlloyBlockValidationError, CommitChanges, ExecutableTxParts,
+        BalIndexedDatabase, BlockExecutionError as AlloyBlockExecutionError,
+        BlockExecutionResult as AlloyBlockExecutionResult, BlockExecutor as AlloyBlockExecutor,
+        BlockExecutorFactory as AlloyBlockExecutorFactory,
+        BlockValidationError as AlloyBlockValidationError, CommitChanges as AlloyCommitChanges,
         GasOutput as AlloyGasOutput,
-        InternalBlockExecutionError as AlloyInternalBlockExecutionError,
+        InternalBlockExecutionError as AlloyInternalBlockExecutionError, StateDB,
+        TxResult as AlloyTxResult,
     },
     Evm, EvmEnv, EvmFactory, RecoveredTx, ToTxEnv,
 };
@@ -31,6 +32,10 @@ use reth_primitives_traits::{
 use reth_storage_api::StateProvider;
 pub use reth_storage_errors::provider::ProviderError;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
+use revm::{
+    context::result::ResultAndState, context_interface::either::Either, inspector::NoOpInspector,
+    Inspector,
+};
 
 /// Converts a temporary alloy block execution error into reth's owned execution error type.
 pub fn convert_alloy_block_execution_error(error: AlloyBlockExecutionError) -> BlockExecutionError {
@@ -86,6 +91,432 @@ impl GasOutput {
 impl From<AlloyGasOutput> for GasOutput {
     fn from(output: AlloyGasOutput) -> Self {
         Self::with_state_gas(output.tx_gas_used(), output.state_gas_used())
+    }
+}
+
+impl From<GasOutput> for AlloyGasOutput {
+    fn from(output: GasOutput) -> Self {
+        Self::with_state_gas(output.tx_gas_used(), output.state_gas_used())
+    }
+}
+
+/// Helper trait to encapsulate requirements for block executor transaction input.
+pub trait ExecutableTxParts<TxEnv, T> {
+    /// The recovered transaction accessor type.
+    type Recovered: RecoveredTx<T>;
+
+    /// Converts the transaction into an executable transaction environment and recovered
+    /// transaction.
+    fn into_parts(self) -> (TxEnv, Self::Recovered);
+}
+
+impl<'a, S, TxEnv, T> ExecutableTxParts<TxEnv, T> for &'a S
+where
+    S: ToTxEnv<TxEnv> + RecoveredTx<T>,
+{
+    type Recovered = &'a S;
+
+    fn into_parts(self) -> (TxEnv, &'a S) {
+        (self.to_tx_env(), self)
+    }
+}
+
+impl<TxEnv, T: RecoveredTx<Tx>, Tx> ExecutableTxParts<TxEnv, Tx> for (TxEnv, T) {
+    type Recovered = T;
+
+    fn into_parts(self) -> (TxEnv, T) {
+        (self.0, self.1)
+    }
+}
+
+impl<T, TxEnv: alloy_evm::FromRecoveredTx<T>> ExecutableTxParts<TxEnv, T> for Recovered<T> {
+    type Recovered = Self;
+
+    fn into_parts(self) -> (TxEnv, Self) {
+        (self.to_tx_env(), self)
+    }
+}
+
+impl<T, TxEnv: alloy_evm::FromRecoveredTx<T>> ExecutableTxParts<TxEnv, T> for Recovered<&T> {
+    type Recovered = Self;
+
+    fn into_parts(self) -> (TxEnv, Self) {
+        (self.to_tx_env(), self)
+    }
+}
+
+impl<T, TxEnv: alloy_evm::FromTxWithEncoded<T>> ExecutableTxParts<TxEnv, T>
+    for WithEncoded<Recovered<T>>
+{
+    type Recovered = Self;
+
+    fn into_parts(self) -> (TxEnv, Self) {
+        (self.to_tx_env(), self)
+    }
+}
+
+impl<T, TxEnv: alloy_evm::FromTxWithEncoded<T>> ExecutableTxParts<TxEnv, T>
+    for WithEncoded<&Recovered<T>>
+{
+    type Recovered = Self;
+
+    fn into_parts(self) -> (TxEnv, Self) {
+        (self.to_tx_env(), self)
+    }
+}
+
+impl<L, R, TxEnv, T> ExecutableTxParts<TxEnv, T> for Either<L, R>
+where
+    L: ExecutableTxParts<TxEnv, T>,
+    R: ExecutableTxParts<TxEnv, T>,
+{
+    type Recovered = Either<L::Recovered, R::Recovered>;
+
+    fn into_parts(self) -> (TxEnv, Self::Recovered) {
+        match self {
+            Self::Left(l) => {
+                let (env, rec) = l.into_parts();
+                (env, Either::Left(rec))
+            }
+            Self::Right(r) => {
+                let (env, rec) = r.into_parts();
+                (env, Either::Right(rec))
+            }
+        }
+    }
+}
+
+/// Alias for [`ExecutableTxParts`] with types associated with the given [`BlockExecutor`].
+pub trait ExecutableTx<E: BlockExecutor + ?Sized>:
+    ExecutableTxParts<<E::Evm as Evm>::Tx, E::Transaction>
+{
+}
+
+impl<E: BlockExecutor + ?Sized, T> ExecutableTx<E> for T where
+    T: ExecutableTxParts<<E::Evm as Evm>::Tx, E::Transaction>
+{
+}
+
+/// Marks whether transaction changes should be committed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+pub enum CommitChanges {
+    /// Transaction should be committed into block executor state.
+    Yes,
+    /// Transaction should not be committed.
+    No,
+}
+
+impl CommitChanges {
+    /// Returns `true` if changes should be committed.
+    pub const fn should_commit(self) -> bool {
+        matches!(self, Self::Yes)
+    }
+}
+
+impl From<CommitChanges> for AlloyCommitChanges {
+    fn from(commit: CommitChanges) -> Self {
+        match commit {
+            CommitChanges::Yes => Self::Yes,
+            CommitChanges::No => Self::No,
+        }
+    }
+}
+
+impl From<AlloyCommitChanges> for CommitChanges {
+    fn from(commit: AlloyCommitChanges) -> Self {
+        match commit {
+            AlloyCommitChanges::Yes => Self::Yes,
+            AlloyCommitChanges::No => Self::No,
+        }
+    }
+}
+
+/// A type that knows how to execute a single block.
+pub trait BlockExecutor {
+    /// Input transaction type.
+    type Transaction;
+    /// Receipt type this executor produces.
+    type Receipt;
+    /// EVM used by the executor.
+    type Evm: Evm<
+        Tx: alloy_evm::FromRecoveredTx<Self::Transaction>
+                + alloy_evm::FromTxWithEncoded<Self::Transaction>,
+    >;
+    /// Result of a transaction execution.
+    type Result: TxResult<HaltReason = <Self::Evm as Evm>::HaltReason>;
+
+    /// Applies any necessary changes before executing block transactions.
+    fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
+
+    /// Executes a single transaction and commits the result.
+    fn execute_transaction(
+        &mut self,
+        tx: impl ExecutableTx<Self>,
+    ) -> Result<GasOutput, BlockExecutionError> {
+        self.execute_transaction_with_result_closure(tx, |_| ())
+    }
+
+    /// Executes a transaction at an explicit index and commits the result.
+    fn execute_transaction_with_index(
+        &mut self,
+        tx: impl ExecutableTx<Self>,
+        tx_index: usize,
+    ) -> Result<GasOutput, BlockExecutionError>
+    where
+        <Self::Evm as Evm>::DB: BalIndexedDatabase,
+    {
+        self.execute_transaction_with_index_and_result_closure(tx, tx_index, |_| ())
+    }
+
+    /// Executes a transaction at an explicit index and exposes the result before commit.
+    fn execute_transaction_with_index_and_result_closure(
+        &mut self,
+        tx: impl ExecutableTx<Self>,
+        tx_index: usize,
+        f: impl FnOnce(&Self::Result),
+    ) -> Result<GasOutput, BlockExecutionError>
+    where
+        <Self::Evm as Evm>::DB: BalIndexedDatabase,
+    {
+        self.evm_mut().db_mut().set_bal_index(tx_index as u64 + 1);
+        self.execute_transaction_with_result_closure(tx, f)
+    }
+
+    /// Executes a single transaction and exposes the result before commit.
+    fn execute_transaction_with_result_closure(
+        &mut self,
+        tx: impl ExecutableTx<Self>,
+        f: impl FnOnce(&Self::Result),
+    ) -> Result<GasOutput, BlockExecutionError> {
+        self.execute_transaction_with_commit_condition(tx, |res| {
+            f(res);
+            CommitChanges::Yes
+        })
+        .map(Option::unwrap_or_default)
+    }
+
+    /// Executes a single transaction and commits conditionally.
+    fn execute_transaction_with_commit_condition(
+        &mut self,
+        tx: impl ExecutableTx<Self>,
+        f: impl FnOnce(&Self::Result) -> CommitChanges,
+    ) -> Result<Option<GasOutput>, BlockExecutionError> {
+        let output = self.execute_transaction_without_commit(tx)?;
+        if !f(&output).should_commit() {
+            return Ok(None);
+        }
+        Ok(Some(self.commit_transaction(output)))
+    }
+
+    /// Executes a transaction without committing state changes.
+    fn execute_transaction_without_commit(
+        &mut self,
+        tx: impl ExecutableTx<Self>,
+    ) -> Result<Self::Result, BlockExecutionError>;
+
+    /// Commits a previously executed transaction.
+    fn commit_transaction(&mut self, output: Self::Result) -> GasOutput;
+
+    /// Applies post execution changes and returns the EVM with block execution result.
+    fn finish(
+        self,
+    ) -> Result<(Self::Evm, BlockExecutionResult<Self::Receipt>), BlockExecutionError>;
+
+    /// Applies post execution changes and returns only the execution result.
+    fn apply_post_execution_changes(
+        self,
+    ) -> Result<BlockExecutionResult<Self::Receipt>, BlockExecutionError>
+    where
+        Self: Sized,
+    {
+        self.finish().map(|(_, result)| result)
+    }
+
+    /// Exposes mutable reference to EVM.
+    fn evm_mut(&mut self) -> &mut Self::Evm;
+
+    /// Exposes immutable reference to EVM.
+    fn evm(&self) -> &Self::Evm;
+
+    /// Returns recorded receipts.
+    fn receipts(&self) -> &[Self::Receipt];
+
+    /// Executes all transactions in a block.
+    fn execute_block(
+        mut self,
+        transactions: impl IntoIterator<Item = impl ExecutableTx<Self>>,
+    ) -> Result<BlockExecutionResult<Self::Receipt>, BlockExecutionError>
+    where
+        Self: Sized,
+    {
+        self.apply_pre_execution_changes()?;
+        for tx in transactions {
+            self.execute_transaction(tx)?;
+        }
+        self.apply_post_execution_changes()
+    }
+}
+
+impl<T> BlockExecutor for T
+where
+    T: AlloyBlockExecutor,
+{
+    type Transaction = T::Transaction;
+    type Receipt = T::Receipt;
+    type Evm = T::Evm;
+    type Result = T::Result;
+
+    fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
+        AlloyBlockExecutor::apply_pre_execution_changes(self)
+            .map_err(convert_alloy_block_execution_error)
+    }
+
+    fn execute_transaction_without_commit(
+        &mut self,
+        tx: impl ExecutableTx<Self>,
+    ) -> Result<Self::Result, BlockExecutionError> {
+        let (tx_env, recovered) = tx.into_parts();
+        AlloyBlockExecutor::execute_transaction_without_commit(self, (tx_env, recovered))
+            .map_err(convert_alloy_block_execution_error)
+    }
+
+    fn execute_transaction_with_commit_condition(
+        &mut self,
+        tx: impl ExecutableTx<Self>,
+        f: impl FnOnce(&Self::Result) -> CommitChanges,
+    ) -> Result<Option<GasOutput>, BlockExecutionError> {
+        let (tx_env, recovered) = tx.into_parts();
+        AlloyBlockExecutor::execute_transaction_with_commit_condition(
+            self,
+            (tx_env, recovered),
+            |result| f(result).into(),
+        )
+        .map(|gas| gas.map(Into::into))
+        .map_err(convert_alloy_block_execution_error)
+    }
+
+    fn commit_transaction(&mut self, output: Self::Result) -> GasOutput {
+        AlloyBlockExecutor::commit_transaction(self, output).into()
+    }
+
+    fn finish(
+        self,
+    ) -> Result<(Self::Evm, BlockExecutionResult<Self::Receipt>), BlockExecutionError> {
+        AlloyBlockExecutor::finish(self)
+            .map(|(evm, result)| (evm, convert_alloy_block_execution_result(result)))
+            .map_err(convert_alloy_block_execution_error)
+    }
+
+    fn evm_mut(&mut self) -> &mut Self::Evm {
+        AlloyBlockExecutor::evm_mut(self)
+    }
+
+    fn evm(&self) -> &Self::Evm {
+        AlloyBlockExecutor::evm(self)
+    }
+
+    fn receipts(&self) -> &[Self::Receipt] {
+        AlloyBlockExecutor::receipts(self)
+    }
+}
+
+/// A result of transaction execution.
+pub trait TxResult: Send + 'static {
+    /// Halt reason.
+    type HaltReason: Send + 'static;
+
+    /// Returns the inner EVM result.
+    fn result(&self) -> &ResultAndState<Self::HaltReason>;
+
+    /// Consumes self and returns the inner EVM result.
+    fn into_result(self) -> ResultAndState<Self::HaltReason>;
+}
+
+impl<T> TxResult for T
+where
+    T: AlloyTxResult,
+{
+    type HaltReason = T::HaltReason;
+
+    fn result(&self) -> &ResultAndState<Self::HaltReason> {
+        AlloyTxResult::result(self)
+    }
+
+    fn into_result(self) -> ResultAndState<Self::HaltReason> {
+        AlloyTxResult::into_result(self)
+    }
+}
+
+/// Helper alias for executors produced by a [`BlockExecutorFactory`].
+pub type BlockExecutorFor<'a, F, DB, I = NoOpInspector> =
+    <F as BlockExecutorFactory>::Executor<'a, DB, I>;
+
+/// A factory that can create [`BlockExecutor`]s.
+pub trait BlockExecutorFactory: 'static {
+    /// The EVM factory used by the executor.
+    type EvmFactory: EvmFactory;
+
+    /// Result type produced by the executor for each transaction.
+    type TxExecutionResult: TxResult<HaltReason = <Self::EvmFactory as EvmFactory>::HaltReason>;
+
+    /// Context required for block execution beyond what the EVM provides.
+    type ExecutionCtx<'a>: Clone;
+
+    /// Transaction type used by the executor.
+    type Transaction;
+
+    /// Receipt type produced by the executor.
+    type Receipt;
+
+    /// The executor type this factory produces.
+    type Executor<'a, DB: StateDB, I: Inspector<<Self::EvmFactory as EvmFactory>::Context<DB>>>: BlockExecutor<
+        Evm = <Self::EvmFactory as EvmFactory>::Evm<DB, I>,
+        Transaction = Self::Transaction,
+        Receipt = Self::Receipt,
+        Result = Self::TxExecutionResult,
+    >;
+
+    /// Reference to EVM factory used by the executor.
+    fn evm_factory(&self) -> &Self::EvmFactory;
+
+    /// Creates an executor with given EVM and execution context.
+    fn create_executor<'a, DB, I>(
+        &'a self,
+        evm: <Self::EvmFactory as EvmFactory>::Evm<DB, I>,
+        ctx: Self::ExecutionCtx<'a>,
+    ) -> Self::Executor<'a, DB, I>
+    where
+        DB: StateDB,
+        I: Inspector<<Self::EvmFactory as EvmFactory>::Context<DB>>;
+}
+
+impl<T> BlockExecutorFactory for T
+where
+    T: AlloyBlockExecutorFactory,
+{
+    type EvmFactory = T::EvmFactory;
+    type TxExecutionResult = T::TxExecutionResult;
+    type ExecutionCtx<'a> = T::ExecutionCtx<'a>;
+    type Transaction = T::Transaction;
+    type Receipt = T::Receipt;
+    type Executor<'a, DB: StateDB, I: Inspector<<Self::EvmFactory as EvmFactory>::Context<DB>>> =
+        T::Executor<'a, DB, I>;
+
+    fn evm_factory(&self) -> &Self::EvmFactory {
+        AlloyBlockExecutorFactory::evm_factory(self)
+    }
+
+    fn create_executor<'a, DB, I>(
+        &'a self,
+        evm: <Self::EvmFactory as EvmFactory>::Evm<DB, I>,
+        ctx: Self::ExecutionCtx<'a>,
+    ) -> Self::Executor<'a, DB, I>
+    where
+        DB: StateDB,
+        I: Inspector<<Self::EvmFactory as EvmFactory>::Context<DB>>,
+    {
+        AlloyBlockExecutorFactory::create_executor(self, evm, ctx)
     }
 }
 
@@ -644,8 +1075,8 @@ where
     type Executor = Executor;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        self.executor.apply_pre_execution_changes().map_err(convert_alloy_block_execution_error)?;
-        self.executor.evm_mut().db_mut().bump_bal_index();
+        BlockExecutor::apply_pre_execution_changes(&mut self.executor)?;
+        BlockExecutor::evm_mut(&mut self.executor).db_mut().bump_bal_index();
 
         Ok(())
     }
@@ -656,14 +1087,12 @@ where
         f: impl FnOnce(&<Self::Executor as BlockExecutor>::Result) -> CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let (tx_env, tx) = tx.into_parts();
-        if let Some(gas_used) = self
-            .executor
-            .execute_transaction_with_commit_condition((tx_env, &tx), f)
-            .map_err(convert_alloy_block_execution_error)?
+        if let Some(gas_used) =
+            self.executor.execute_transaction_with_commit_condition((tx_env, &tx), f)?
         {
             self.transactions.push(tx);
-            self.executor.evm_mut().db_mut().bump_bal_index();
-            Ok(Some(gas_used.into()))
+            BlockExecutor::evm_mut(&mut self.executor).db_mut().bump_bal_index();
+            Ok(Some(gas_used))
         } else {
             Ok(None)
         }
@@ -674,8 +1103,7 @@ where
         state: impl StateProvider,
         state_root_precomputed: Option<(B256, TrieUpdates)>,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
-        let (evm, result) = self.executor.finish().map_err(convert_alloy_block_execution_error)?;
-        let result = convert_alloy_block_execution_result(result);
+        let (evm, result) = BlockExecutor::finish(self.executor)?;
         let (db, evm_env) = evm.finish();
 
         // merge all transitions into bundle state
@@ -772,27 +1200,25 @@ where
         let has_bal = block.header().block_access_list_hash().is_some();
 
         if has_bal {
-            executor.evm_mut().db_mut().bal_state.bal_builder = Some(Bal::new());
+            BlockExecutor::evm_mut(&mut executor).db_mut().bal_state.bal_builder = Some(Bal::new());
         } else {
-            executor.evm_mut().db_mut().bal_state.bal_builder = None;
+            BlockExecutor::evm_mut(&mut executor).db_mut().bal_state.bal_builder = None;
         }
 
-        executor.apply_pre_execution_changes().map_err(convert_alloy_block_execution_error)?;
+        BlockExecutor::apply_pre_execution_changes(&mut executor)?;
 
         if has_bal {
-            executor.evm_mut().db_mut().bump_bal_index();
+            BlockExecutor::evm_mut(&mut executor).db_mut().bump_bal_index();
         }
 
         for tx in block.transactions_recovered() {
-            executor.execute_transaction(tx).map_err(convert_alloy_block_execution_error)?;
+            BlockExecutor::execute_transaction(&mut executor, tx)?;
             if has_bal {
-                executor.evm_mut().db_mut().bump_bal_index();
+                BlockExecutor::evm_mut(&mut executor).db_mut().bump_bal_index();
             }
         }
 
-        let result =
-            executor.apply_post_execution_changes().map_err(convert_alloy_block_execution_error)?;
-        let result = convert_alloy_block_execution_result(result);
+        let result = BlockExecutor::apply_post_execution_changes(executor)?;
 
         self.db.merge_transitions(BundleRetention::Reverts);
         prune_created_deleted_empty_accounts(&mut self.db.bundle_state);
@@ -813,17 +1239,17 @@ where
             .executor_for_block(&mut self.db, block)
             .map_err(BlockExecutionError::other)?;
 
-        executor.evm_mut().db_mut().set_reth_state_hook(Some(Box::new(state_hook)));
+        BlockExecutor::evm_mut(&mut executor)
+            .db_mut()
+            .set_reth_state_hook(Some(Box::new(state_hook)));
 
-        let result = executor.execute_block(block.transactions_recovered());
+        let result = BlockExecutor::execute_block(executor, block.transactions_recovered());
 
         self.db.set_reth_state_hook(None);
         self.db.merge_transitions(BundleRetention::Reverts);
         prune_created_deleted_empty_accounts(&mut self.db.bundle_state);
 
         result
-            .map(convert_alloy_block_execution_result)
-            .map_err(convert_alloy_block_execution_error)
     }
 
     fn into_state(self) -> State<DB> {

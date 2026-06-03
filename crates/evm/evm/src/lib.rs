@@ -20,14 +20,12 @@ extern crate alloc;
 use crate::execute::{BasicBlockBuilder, Executor};
 use alloc::vec::Vec;
 use alloy_eips::eip4895::Withdrawals;
-use alloy_evm::{
-    block::{BlockExecutorFactory, BlockExecutorFor},
-    precompiles::PrecompilesMap,
-    Database as AlloyDatabase,
-};
+use alloy_evm::{precompiles::PrecompilesMap, Database as AlloyDatabase};
 use alloy_primitives::{Address, Bytes, B256};
 use core::{error::Error, fmt::Debug};
-use execute::{BasicBlockExecutor, BlockAssembler, BlockBuilder};
+use execute::{
+    BasicBlockExecutor, BlockAssembler, BlockBuilder, BlockExecutorFactory, BlockExecutorFor,
+};
 use reth_execution_errors::BlockExecutionError;
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SealedBlock, SealedHeader, TxTy,
