@@ -1,14 +1,12 @@
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockHash, BlockNumber, B256};
 use metrics::{Counter, Histogram};
+use parking_lot::Mutex;
 use reth_chain_state::{EthPrimitives, StateTrieOverlayManager};
 use reth_db_api::{tables, transaction::DbTx, DatabaseError};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_metrics::Metrics;
-use reth_primitives_traits::{
-    dashmap::{self, DashMap},
-    NodePrimitives,
-};
+use reth_primitives_traits::NodePrimitives;
 use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
 use reth_storage_api::{
@@ -444,9 +442,9 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     factory: F,
     /// Overlay builder containing the configuration and overlay calculation logic.
     overlay_builder: OverlayBuilder<N>,
-    /// A cache which maps `db_tip -> Overlay`. If the db tip changes during usage of the factory
-    /// then a new entry will get added to this, but in most cases only one entry is present.
-    overlay_cache: Arc<DashMap<BlockHash, Overlay>>,
+    /// A cache for the overlay at the current DB tip. If the tip changes during usage of the
+    /// factory then this slot is replaced.
+    overlay_cache: Arc<Mutex<Option<(BlockHash, Overlay)>>>,
 }
 
 impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
@@ -487,15 +485,16 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     {
         let db_tip_block = self.overlay_builder.get_db_tip_block(provider)?;
 
-        let overlay = match self.overlay_cache.entry(db_tip_block.hash) {
-            dashmap::Entry::Occupied(entry) => entry.get().clone(),
-            dashmap::Entry::Vacant(entry) => {
-                self.overlay_builder.metrics.overlay_cache_misses.increment(1);
-                let overlay = self.overlay_builder.build_overlay(provider)?;
-                entry.insert(overlay.clone());
-                overlay
+        let mut overlay_cache = self.overlay_cache.lock();
+        if let Some((hash, overlay)) = overlay_cache.as_ref() {
+            if *hash == db_tip_block.hash {
+                return Ok(overlay.clone())
             }
-        };
+        }
+
+        self.overlay_builder.metrics.overlay_cache_misses.increment(1);
+        let overlay = self.overlay_builder.calculate_overlay(provider, db_tip_block)?;
+        *overlay_cache = Some((db_tip_block.hash, overlay.clone()));
 
         Ok(overlay)
     }
