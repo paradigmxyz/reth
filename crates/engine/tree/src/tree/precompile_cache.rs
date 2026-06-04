@@ -6,7 +6,7 @@ use alloy_primitives::{
 };
 use evm2::{
     evm::{precompile::PrecompileProvider, Evm as Evm2},
-    interpreter::GasTracker,
+    interpreter::{GasTracker, Message},
     precompiles::{
         PrecompileError as Evm2PrecompileError, PrecompileResult as Evm2PrecompileResult,
         Precompiles as Evm2Precompiles,
@@ -301,10 +301,11 @@ where
     fn execute(
         &mut self,
         evm: &mut Evm2<BaseEvmTypes>,
-        address: Address,
-        input: &[u8],
+        message: &Message<BaseEvmTypes>,
         gas: &mut GasTracker,
     ) -> Option<Evm2PrecompileResult> {
+        let address = message.code_address;
+        let input = message.input.as_ref();
         let cache = self.caches.cache_for_address(address);
         if let Some(entry) = cache.get(input, self.spec_id.clone()) {
             if let Err(err) = gas.spend(entry.gas_used()) {
@@ -315,7 +316,7 @@ where
         }
 
         let before = *gas;
-        let result = self.precompiles.execute(evm, address, input, gas);
+        let result = self.precompiles.execute(evm, message, gas);
 
         match &result {
             Some(Ok(output)) => {

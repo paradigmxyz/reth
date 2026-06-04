@@ -25,12 +25,13 @@ use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{
+    context::{HaltReason, ResultAndState},
     database::{State, StateProviderDatabase},
     evm2::{
-        block_env_from_revm, create_evm2, ethereum_tx_env_from_revm, precompiles_for_spec,
-        spec_id_from_revm, Evm2TransactionExecutor,
+        block_env_from_revm, create_evm2_with_db_ref, ethereum_tx_env_from_revm,
+        precompiles_for_spec, spec_id_from_revm, Evm2TransactionExecutor,
     },
-    execute::ExecutableTxFor,
+    execute::{BlockExecutionError, ExecutableTxFor},
     ConfigureEvm, RecoveredTx, SpecFor,
 };
 use reth_execution_types::EvmState;
@@ -42,10 +43,13 @@ use reth_provider::{
 };
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
-use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering},
-    mpsc::{self, channel, Receiver, Sender},
-    Arc,
+use std::{
+    marker::PhantomData,
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc::{self, channel, Receiver, Sender},
+        Arc,
+    },
 };
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
@@ -91,7 +95,14 @@ where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
-    SpecFor<Evm>: Into<reth_evm::hardfork::SpecId>,
+    SpecFor<Evm>: Into<reth_evm::hardfork::SpecId>
+        + Eq
+        + std::hash::Hash
+        + std::fmt::Debug
+        + Send
+        + Sync
+        + Clone
+        + 'static,
 {
     /// Initializes the task with the given transactions pending execution
     pub fn new(
@@ -236,7 +247,7 @@ where
 
             let (tx_env, tx) = tx.into_parts();
             let tx_env = ethereum_tx_env_from_revm(&tx_env);
-            let res = match evm.executor.execute_tx_env(&tx_env) {
+            let res = match evm.execute_tx_env(&tx_env) {
                 Ok(res) => res,
                 Err(err) => {
                     trace!(
@@ -568,8 +579,40 @@ struct PrewarmExecutorState<Evm>
 where
     Evm: ConfigureEvm,
 {
-    executor: Evm2TransactionExecutor,
-    _marker: core::marker::PhantomData<fn() -> Evm>,
+    state_provider: State<StateProviderDatabase<StateProviderBox>>,
+    block_env: evm2::env::BlockEnv,
+    evm2_spec: evm2::SpecId,
+    spec: SpecFor<Evm>,
+    precompile_cache_disabled: bool,
+    precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+    _marker: PhantomData<fn() -> Evm>,
+}
+
+impl<Evm> PrewarmExecutorState<Evm>
+where
+    Evm: ConfigureEvm,
+    SpecFor<Evm>: Eq + std::hash::Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+{
+    fn execute_tx_env(
+        &mut self,
+        tx: &evm2::ethereum::EthereumTxEnv,
+    ) -> Result<ResultAndState<HaltReason>, BlockExecutionError> {
+        let evm = create_evm2_with_db_ref(
+            &mut self.state_provider,
+            self.evm2_spec,
+            self.block_env.clone(),
+        );
+        let mut executor = Evm2TransactionExecutor::new(evm);
+        if !self.precompile_cache_disabled {
+            executor.set_precompiles(Evm2CachedPrecompiles::new(
+                precompiles_for_spec(self.evm2_spec),
+                self.precompile_cache_map.clone(),
+                self.spec.clone(),
+                None,
+            ));
+        }
+        executor.execute_tx_env(tx)
+    }
 }
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
@@ -577,7 +620,14 @@ where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
-    SpecFor<Evm>: Into<reth_evm::hardfork::SpecId>,
+    SpecFor<Evm>: Into<reth_evm::hardfork::SpecId>
+        + Eq
+        + std::hash::Hash
+        + std::fmt::Debug
+        + Send
+        + Sync
+        + Clone
+        + 'static,
 {
     /// Creates a per-thread EVM for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
@@ -616,19 +666,16 @@ where
         let spec = *evm_env.spec_id();
         let evm2_spec = spec_id_from_revm(spec.into());
         let block_env = block_env_from_revm(evm_env.block_env);
-        let mut executor =
-            Evm2TransactionExecutor::new(create_evm2(state_provider, evm2_spec, block_env));
 
-        if !self.precompile_cache_disabled {
-            executor.set_precompiles(Evm2CachedPrecompiles::new(
-                precompiles_for_spec(evm2_spec),
-                self.precompile_cache_map.clone(),
-                spec,
-                None,
-            ));
-        }
-
-        Some(PrewarmExecutorState { executor, _marker: core::marker::PhantomData })
+        Some(PrewarmExecutorState {
+            state_provider,
+            block_env,
+            evm2_spec,
+            spec,
+            precompile_cache_disabled: self.precompile_cache_disabled,
+            precompile_cache_map: self.precompile_cache_map.clone(),
+            _marker: PhantomData,
+        })
     }
 
     /// Returns `true` if prewarming should stop.

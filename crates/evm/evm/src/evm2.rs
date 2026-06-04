@@ -455,6 +455,20 @@ where
     Evm2Db::new(Evm2DatabaseRef::new_reth(db))
 }
 
+/// Creates a concrete Ethereum evm2 host backed by a borrowed reth database.
+pub fn create_evm2_with_db_ref<DB>(db: &mut DB, spec: SpecId, block: Evm2BlockEnv) -> EthEvm2
+where
+    DB: crate::Database,
+{
+    Evm2::new(
+        spec,
+        block,
+        ethereum_tx_registry(spec),
+        create_evm2_db_ref(db),
+        precompiles_for_spec(spec),
+    )
+}
+
 /// Executes an evm2 Ethereum transaction environment.
 pub fn execute_tx_env<DB>(
     db: &mut DB,
