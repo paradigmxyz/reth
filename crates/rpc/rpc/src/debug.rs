@@ -22,10 +22,12 @@ use reth_errors::RethError;
 use reth_evm::{
     database::{Database, DatabaseCommit, State},
     env::BlockEnvironment,
-    evm2::create_evm2_db_ref,
+    evm2::{
+        block_env_from_revm, create_evm2_db_ref, ethereum_tx_env_from_revm, execute_tx_env_for,
+    },
     execute::{BlockExecutor, Executor},
     witness::ExecutionWitnessRecord,
-    ConfigureEvm, Evm, EvmEnvFor,
+    ConfigureEvm, EvmEnvFor,
 };
 use reth_execution_types::BundleRetention;
 use reth_primitives_traits::{
@@ -35,7 +37,7 @@ use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
+    FromEthApiError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
@@ -758,14 +760,21 @@ where
                 db.transition_state = Some(Default::default());
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
+                let spec = *evm_env.spec_id();
+                let block_env = block_env_from_revm(evm_env.block_env);
 
                 let mut roots = Vec::with_capacity(block.body().transactions().len());
                 for tx in block.transactions_recovered() {
                     let tx_env = eth_api.evm_config().tx_env(tx);
-                    {
-                        let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env.clone());
-                        evm.transact_commit(tx_env).map_err(Eth::Error::from_evm_err)?;
-                    }
+                    let tx_env = ethereum_tx_env_from_revm(&tx_env);
+                    let res = execute_tx_env_for::<Eth::Evm, _>(
+                        &mut db,
+                        spec,
+                        block_env.clone(),
+                        &tx_env,
+                    )
+                    .map_err(Eth::Error::from_eth_err)?;
+                    db.commit(res.state);
                     // Merge transitions into cumulative bundle_state
                     db.merge_transitions(BundleRetention::PlainState);
                     // Compute state root from the accumulated state changes
