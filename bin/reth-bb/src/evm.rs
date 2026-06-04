@@ -12,15 +12,17 @@ use reth_evm::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
         ExecutableTx, GasOutput, StateDB,
     },
-    context::{BlockEnv, EVMError, HaltReason, TxEnv},
+    context::{BlockEnv, CfgEnv, Context, EVMError, HaltReason, TxEnv},
     eth::EthBlockExecutionCtx,
     evm2::{Evm2RethBlockExecutor, Evm2TxExecutionResult, RethEvm2ReceiptBuilder},
     hardfork::SpecId,
     inspector::Inspector,
     precompiles::PrecompilesMap,
-    EthEvm, EthEvmFactory, Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
+    EthEvm, EthEvmFactory, Evm, FromRecoveredTx, FromTxWithEncoded,
 };
 use tracing::{debug, trace};
+
+type EthEvmContext<DB> = Context<BlockEnv, TxEnv, CfgEnv, DB>;
 
 // ---------------------------------------------------------------------------
 // BbEvmPlan — runtime segment tracking state
@@ -164,7 +166,7 @@ where
 impl<'a, DB, I> BbBlockExecutor<'a, DB, I>
 where
     DB: StateDB,
-    I: Inspector<<EthEvmFactory as EvmFactory>::Context<DB>>,
+    I: Inspector<EthEvmContext<DB>>,
     EthEvm<DB, I, PrecompilesMap>: Evm<
         DB = DB,
         Tx = TxEnv,
@@ -391,7 +393,7 @@ where
 impl<'a, DB, I> BlockExecutor for BbBlockExecutor<'a, DB, I>
 where
     DB: StateDB,
-    I: Inspector<<EthEvmFactory as EvmFactory>::Context<DB>>,
+    I: Inspector<EthEvmContext<DB>>,
     EthEvm<DB, I, PrecompilesMap>: Evm<
         DB = DB,
         Tx = TxEnv,
@@ -578,7 +580,7 @@ impl<Spec> BbBlockExecutorFactory<Spec> {
     ) -> BbBlockExecutor<'a, DB, I>
     where
         DB: StateDB,
-        I: Inspector<<EthEvmFactory as EvmFactory>::Context<DB>>,
+        I: Inspector<EthEvmContext<DB>>,
     {
         BbBlockExecutor::new(
             evm,
@@ -603,7 +605,7 @@ where
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
     type TxExecutionResult = Evm2TxExecutionResult;
-    type Executor<'a, DB: StateDB, I: Inspector<<EthEvmFactory as EvmFactory>::Context<DB>>> =
+    type Executor<'a, DB: StateDB, I: Inspector<EthEvmContext<DB>>> =
         BbBlockExecutor<'a, DB, I>;
 
     fn evm_factory(&self) -> &Self::EvmFactory {
@@ -617,7 +619,7 @@ where
     ) -> Self::Executor<'a, DB, I>
     where
         DB: StateDB,
-        I: Inspector<<EthEvmFactory as EvmFactory>::Context<DB>>,
+        I: Inspector<EthEvmContext<DB>>,
     {
         BbBlockExecutor::new(
             evm,
