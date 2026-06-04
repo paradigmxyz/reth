@@ -6,9 +6,11 @@
 
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
+    eip2718::Decodable2718,
     eip7685::{Requests, RequestsOrHash},
 };
 use alloy_primitives::{Bytes, B128, B256};
+use alloy_consensus::{Transaction, TxEnvelope};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
     ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ExecutionPayloadV4,
@@ -22,6 +24,7 @@ use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_payload_primitives::EngineObjectValidationError;
 use reth_rpc_engine_api::{EngineApiError, EngineApiResult};
 use reth_transaction_pool::BlobStore;
+use ssz::Decode;
 use std::{
     future::Future,
     pin::Pin,
@@ -510,8 +513,6 @@ fn engine_unavailable() -> EngineApiError {
 }
 
 fn decode_new_payload_request(version: u8, body: &[u8]) -> Result<ExecutionData, &'static str> {
-    use ssz::Decode;
-
     match version {
         1 => {
             let execution_payload =
@@ -524,28 +525,26 @@ fn decode_new_payload_request(version: u8, body: &[u8]) -> Result<ExecutionData,
             Ok(ExecutionData::new(execution_payload.into(), ExecutionPayloadSidecar::none()))
         }
         3 => {
-            let (execution_payload, expected_blob_versioned_hashes, parent_beacon_block_root) =
-                <(ExecutionPayloadV3, Vec<B256>, B256)>::from_ssz_bytes(body)
-                    .map_err(|_| "invalid ssz")?;
+            let (execution_payload, parent_beacon_block_root) =
+                <(ExecutionPayloadV3, B256)>::from_ssz_bytes(body).map_err(|_| "invalid ssz")?;
+            let versioned_hashes = calculate_versioned_hashes(
+                &execution_payload.payload_inner.payload_inner.transactions,
+            )?;
             let sidecar = ExecutionPayloadSidecar::v3(CancunPayloadFields {
                 parent_beacon_block_root,
-                versioned_hashes: expected_blob_versioned_hashes,
+                versioned_hashes,
             });
             Ok(ExecutionData::new(execution_payload.into(), sidecar))
         }
         4 => {
-            let (
-                execution_payload,
-                expected_blob_versioned_hashes,
-                parent_beacon_block_root,
-                execution_requests,
-            ) = <(ExecutionPayloadV3, Vec<B256>, B256, Vec<Bytes>)>::from_ssz_bytes(body)
-                .map_err(|_| "invalid ssz")?;
+            let (execution_payload, parent_beacon_block_root, execution_requests) =
+                <(ExecutionPayloadV3, B256, Vec<Bytes>)>::from_ssz_bytes(body)
+                    .map_err(|_| "invalid ssz")?;
+            let versioned_hashes = calculate_versioned_hashes(
+                &execution_payload.payload_inner.payload_inner.transactions,
+            )?;
             let sidecar = ExecutionPayloadSidecar::v4(
-                CancunPayloadFields {
-                    parent_beacon_block_root,
-                    versioned_hashes: expected_blob_versioned_hashes,
-                },
+                CancunPayloadFields { parent_beacon_block_root, versioned_hashes },
                 PraguePayloadFields::new(RequestsOrHash::Requests(Requests::new(
                     execution_requests,
                 ))),
@@ -553,18 +552,14 @@ fn decode_new_payload_request(version: u8, body: &[u8]) -> Result<ExecutionData,
             Ok(ExecutionData::new(execution_payload.into(), sidecar))
         }
         5 => {
-            let (
-                execution_payload,
-                expected_blob_versioned_hashes,
-                parent_beacon_block_root,
-                execution_requests,
-            ) = <(ExecutionPayloadV4, Vec<B256>, B256, Vec<Bytes>)>::from_ssz_bytes(body)
-                .map_err(|_| "invalid ssz")?;
+            let (execution_payload, parent_beacon_block_root, execution_requests) =
+                <(ExecutionPayloadV4, B256, Vec<Bytes>)>::from_ssz_bytes(body)
+                    .map_err(|_| "invalid ssz")?;
+            let versioned_hashes = calculate_versioned_hashes(
+                &execution_payload.payload_inner.payload_inner.payload_inner.transactions,
+            )?;
             let sidecar = ExecutionPayloadSidecar::v4(
-                CancunPayloadFields {
-                    parent_beacon_block_root,
-                    versioned_hashes: expected_blob_versioned_hashes,
-                },
+                CancunPayloadFields { parent_beacon_block_root, versioned_hashes },
                 PraguePayloadFields::new(RequestsOrHash::Requests(Requests::new(
                     execution_requests,
                 ))),
@@ -575,12 +570,23 @@ fn decode_new_payload_request(version: u8, body: &[u8]) -> Result<ExecutionData,
     }
 }
 
+fn calculate_versioned_hashes(transactions: &[Bytes]) -> Result<Vec<B256>, &'static str> {
+    let mut versioned_hashes = Vec::new();
+    for transaction in transactions {
+        let transaction =
+            TxEnvelope::decode_2718_exact(transaction.as_ref()).map_err(|_| "invalid tx")?;
+        if let Some(hashes) = transaction.blob_versioned_hashes() {
+            versioned_hashes.extend_from_slice(hashes);
+        }
+    }
+
+    Ok(versioned_hashes)
+}
+
 fn decode_forkchoice_request(
     version: u8,
     body: &[u8],
 ) -> Result<(ForkchoiceState, Option<PayloadAttributes>), &'static str> {
-    use ssz::Decode;
-
     match version {
         1..=4 => {
             let (forkchoice_state, payload_attributes) =

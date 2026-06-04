@@ -39,6 +39,7 @@ reth-engine-local.workspace = true
 reth-engine-primitives = { workspace = true, features = ["std"] }
 reth-payload-primitives.workspace = true
 # ethereum
+alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 jsonrpsee.workspace = true
@@ -77,7 +78,6 @@ alloy-signer.workspace = true
 alloy-sol-types.workspace = true
 alloy-contract.workspace = true
 alloy-rpc-types-beacon = { workspace = true, features = ["ssz"] }
-alloy-consensus.workspace = true
 
 futures.workspace = true
 tokio.workspace = true
