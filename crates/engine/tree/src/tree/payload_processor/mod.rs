@@ -352,9 +352,7 @@ where
 
         let span = Span::current();
 
-        // Keep spare proof-pool capacity while validation and speculative payload-builder sparse
-        // tries may be live at the same time.
-        let halve_workers = true;
+        let halve_workers = env.transaction_count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD;
         let state_root_handle = self.spawn_state_root(
             multiproof_provider_factory,
             env.parent_state_root,

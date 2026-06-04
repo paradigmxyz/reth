@@ -2259,7 +2259,7 @@ where
                 let mut parent_handle = state_root_spawner.spawn_state_root_with_private_sparse_trie(
                     base_overlay_factory,
                     base_state_root,
-                    true,
+                    false,
                     &config,
                     parent_snapshot.clone(),
                 );
@@ -2341,7 +2341,7 @@ where
                     let active_handle = state_root_spawner.spawn_state_root_with_private_sparse_trie(
                         child_overlay_factory,
                         parent_state_root,
-                        true,
+                        false,
                         &config,
                         child_snapshot,
                     );
@@ -2407,7 +2407,7 @@ where
                 base_state_root,
                 parent_state_root,
                 &parent_trie_updates,
-                true,
+                false,
                 &self.config,
             );
 
@@ -2432,7 +2432,7 @@ where
             let handle = self.payload_processor.spawn_state_root(
                 overlay_factory,
                 parent_state_root,
-                true,
+                false,
                 &self.config,
             );
 
@@ -2506,7 +2506,7 @@ where
                         base_state_root,
                         parent_state_root,
                         &parent_trie_updates,
-                        true,
+                        false,
                         &config,
                     );
                 Self::spawn_payload_builder_sparse_trie_bridge_with_executor(
@@ -3084,8 +3084,7 @@ where
         Some(self.payload_processor.spawn_state_root(
             overlay_factory,
             parent_state_root,
-            // Leave spare proof-pool capacity for validation while the builder is active.
-            true,
+            false,
             &self.config,
         ))
     }
