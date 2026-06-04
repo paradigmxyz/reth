@@ -199,6 +199,10 @@ impl<S> CachedStateProvider<S> {
     const fn should_fill_on_miss(&self) -> bool {
         matches!(self.fill_mode, CacheFillMode::FillOnMiss)
     }
+
+    const fn observes_cache_accesses(&self) -> bool {
+        self.metrics.is_some() || self.cache_stats.is_some()
+    }
 }
 
 /// Whether cache misses should populate the shared execution cache.
@@ -505,6 +509,12 @@ impl<K: PartialEq, V> StatsHandler<K, V> for CacheStatsHandler {
 impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if self.should_fill_on_miss() {
+            if !self.observes_cache_accesses() {
+                return self.caches.get_or_try_insert_account_value_with(*address, || {
+                    self.state_provider.basic_account(address)
+                });
+            }
+
             match self.caches.get_or_try_insert_account_with(*address, || {
                 self.state_provider.basic_account(address)
             })? {
@@ -543,6 +553,17 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         if self.should_fill_on_miss() {
+            if !self.observes_cache_accesses() {
+                return self
+                    .caches
+                    .get_or_try_insert_storage_value_with(account, storage_key, || {
+                        self.state_provider
+                            .storage(account, storage_key)
+                            .map(Option::unwrap_or_default)
+                    })
+                    .map(nonzero_storage_value);
+            }
+
             match self.caches.get_or_try_insert_storage_with(account, storage_key, || {
                 self.state_provider.storage(account, storage_key).map(Option::unwrap_or_default)
             })? {
@@ -568,6 +589,12 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
 impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         if self.should_fill_on_miss() {
+            if !self.observes_cache_accesses() {
+                return self.caches.get_or_try_insert_code_value_with(*code_hash, || {
+                    self.state_provider.bytecode_by_hash(code_hash)
+                });
+            }
+
             match self.caches.get_or_try_insert_code_with(*code_hash, || {
                 self.state_provider.bytecode_by_hash(code_hash)
             })? {
@@ -796,6 +823,15 @@ impl ExecutionCache {
         }
     }
 
+    /// Gets code from cache, or inserts using the provided function.
+    pub fn get_or_try_insert_code_value_with<E>(
+        &self,
+        hash: B256,
+        f: impl FnOnce() -> Result<Option<Bytecode>, E>,
+    ) -> Result<Option<Bytecode>, E> {
+        self.0.code_cache.get_or_try_insert_with(hash, |_| f())
+    }
+
     /// Gets storage from cache, or inserts using the provided function.
     pub fn get_or_try_insert_storage_with<E>(
         &self,
@@ -816,6 +852,16 @@ impl ExecutionCache {
         }
     }
 
+    /// Gets storage from cache, or inserts using the provided function.
+    pub fn get_or_try_insert_storage_value_with<E>(
+        &self,
+        address: Address,
+        key: StorageKey,
+        f: impl FnOnce() -> Result<StorageValue, E>,
+    ) -> Result<StorageValue, E> {
+        self.0.storage_cache.get_or_try_insert_with((address, key), |_| f())
+    }
+
     /// Gets account from cache, or inserts using the provided function.
     pub fn get_or_try_insert_account_with<E>(
         &self,
@@ -833,6 +879,15 @@ impl ExecutionCache {
         } else {
             Ok(CachedStatus::Cached(result))
         }
+    }
+
+    /// Gets account from cache, or inserts using the provided function.
+    pub fn get_or_try_insert_account_value_with<E>(
+        &self,
+        address: Address,
+        f: impl FnOnce() -> Result<Option<Account>, E>,
+    ) -> Result<Option<Account>, E> {
+        self.0.account_cache.get_or_try_insert_with(address, |_| f())
     }
 
     /// Insert storage value into cache.
