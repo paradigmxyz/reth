@@ -350,21 +350,21 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{hex, keccak256, map::HashMap, Address, B256, U256};
+    use alloy_primitives::{hex, keccak256, Address, B256, U256};
     use reth_db_api::{
         models::{AccountBeforeTx, BlockNumberAddress},
         tables,
         transaction::DbTxMut,
     };
     use reth_execution_errors::StateRootError;
+    use reth_execution_types::{Evm2BlockReverts, Evm2BundleState};
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_storage_api::StorageSettingsCache;
     use reth_trie::{
         HashedPostState, HashedPostStateSorted, HashedStorage, KeccakKeyHasher, StateRoot,
     };
-    use revm::state::AccountInfo;
-    use revm_database::BundleState;
+    use std::collections::BTreeMap;
 
     fn overlay_root_for_provider<TX: reth_db_api::transaction::DbTx>(
         provider: &impl StorageSettingsCache,
@@ -413,18 +413,35 @@ mod tests {
         let slot1 = U256::from(1015);
         let slot2 = U256::from(2015);
 
-        let account1 = AccountInfo { nonce: 1, ..Default::default() };
-        let account2 = AccountInfo { nonce: 2, ..Default::default() };
+        let account1 = Account { nonce: 1, ..Default::default() };
+        let account2 = Account { nonce: 2, ..Default::default() };
 
-        let bundle_state = BundleState::builder(2..=2)
-            .state_present_account_info(address1, account1)
-            .state_present_account_info(address2, account2)
-            .state_storage(address1, HashMap::from_iter([(slot1, (U256::ZERO, U256::from(10)))]))
-            .state_storage(address2, HashMap::from_iter([(slot2, (U256::ZERO, U256::from(20)))]))
-            .build();
-        assert_eq!(bundle_state.reverts.len(), 1);
+        let bundle_state = Evm2BundleState::new_init(
+            2,
+            [
+                (
+                    address1,
+                    (
+                        None,
+                        Some(account1),
+                        BTreeMap::from_iter([(slot1, (U256::ZERO, U256::from(10)))]),
+                    ),
+                ),
+                (
+                    address2,
+                    (
+                        None,
+                        Some(account2),
+                        BTreeMap::from_iter([(slot2, (U256::ZERO, U256::from(20)))]),
+                    ),
+                ),
+            ],
+            [Evm2BlockReverts::default()],
+            [],
+        );
+        assert_eq!(bundle_state.block_reverts().len(), 1);
 
-        let post_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(&bundle_state.state);
+        let post_state = bundle_state.hashed_post_state::<KeccakKeyHasher>();
         assert_eq!(post_state.accounts.len(), 2);
         assert_eq!(post_state.storages.len(), 2);
 

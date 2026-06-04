@@ -41,13 +41,12 @@ reth-chainspec.workspace = true
 reth-primitives-traits = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-execution-types.workspace = true
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
 
 alloy-consensus.workspace = true
 alloy-rlp.workspace = true
-revm.workspace = true
-revm-database.workspace = true
 
 # trie
 triehash.workspace = true
@@ -70,8 +69,6 @@ serde = [
     "reth-trie/serde",
     "reth-trie-common/serde",
     "reth-primitives-traits/serde",
-    "revm-database/serde",
-    "revm/serde",
 ]
 test-utils = [
     "reth-trie-common/test-utils",
