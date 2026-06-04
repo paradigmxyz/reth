@@ -48,7 +48,9 @@ pub use stage_checkpoint::*;
 mod state;
 pub use state::*;
 
+#[cfg(feature = "std")]
 mod evm2;
+#[cfg(feature = "std")]
 pub use evm2::*;
 
 mod storage;
