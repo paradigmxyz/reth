@@ -3,17 +3,13 @@ use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
-use reth_evm::{
-    database::{State, StateProviderDatabase},
-    execute::Executor,
-    ConfigureEvm,
-};
+use reth_evm::ConfigureEvm2BlockExecutor;
 use reth_execution_types::{Evm2AccountInfo, Evm2BundleState};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderBox, StateProviderFactory};
+use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
-use reth_trie::{updates::TrieUpdates, HashedStorage};
+use reth_trie::updates::TrieUpdates;
 use serde::Serialize;
 use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
@@ -116,46 +112,39 @@ fn account_info_sorted(info: &Evm2AccountInfo) -> AccountInfoSorted {
     }
 }
 
-/// Extracts execution data including codes, preimages, and hashed state from database
+/// Extracts execution data including codes, preimages, and hashed state from evm2 state changes.
 fn collect_execution_data(
-    mut db: State<StateProviderDatabase<StateProviderBox>>,
-    first_block: u64,
+    state_provider: &dyn StateProvider,
+    bundle_state: Evm2BundleState,
 ) -> eyre::Result<CollectionResult> {
-    let bundle_state = reth_evm::execute::revm_bundle_to_evm2(db.take_bundle(), first_block);
     let mut codes = BTreeMap::new();
     let mut preimages = BTreeMap::new();
-    let mut hashed_state = db.database.hashed_post_state(&bundle_state);
+    let hashed_state = state_provider.hashed_post_state(&bundle_state);
 
     // Collect codes
-    db.cache.contracts.values().for_each(|code| {
-        let code_bytes = code.original_bytes();
-        codes.insert(keccak256(&code_bytes), code_bytes);
-    });
     bundle_state.contracts().values().for_each(|code| {
         let code_bytes = code.original_bytes();
         codes.insert(keccak256(&code_bytes), code_bytes);
     });
 
-    // Collect preimages
-    for (address, account) in db.cache.accounts {
+    for (_, account) in bundle_state.accounts() {
+        if let Some(code) = account.current.as_ref().and_then(|account| account.code.as_ref()) {
+            let code_bytes = code.original_bytes();
+            codes.insert(keccak256(&code_bytes), code_bytes);
+        }
+    }
+
+    // Collect preimages for changed accounts and storage slots.
+    for address in bundle_state.accounts().keys().chain(bundle_state.storage().keys()) {
         let hashed_address = keccak256(address);
-        hashed_state
-            .accounts
-            .insert(hashed_address, account.account.as_ref().map(|a| a.info.clone().into()));
+        preimages.insert(hashed_address, alloy_rlp::encode(address).into());
+    }
 
-        if let Some(account_data) = account.account {
-            preimages.insert(hashed_address, alloy_rlp::encode(address).into());
-            let storage = hashed_state
-                .storages
-                .entry(hashed_address)
-                .or_insert_with(|| HashedStorage::new(account.status.was_destroyed()));
-
-            for (slot, value) in account_data.storage {
-                let slot_bytes = B256::from(slot);
-                let hashed_slot = keccak256(slot_bytes);
-                storage.storage.insert(hashed_slot, value);
-                preimages.insert(hashed_slot, alloy_rlp::encode(slot_bytes).into());
-            }
+    for storage in bundle_state.storage().values() {
+        for slot in storage.slots.keys() {
+            let slot_bytes = B256::new(slot.to_be_bytes());
+            let hashed_slot = keccak256(slot_bytes);
+            preimages.insert(hashed_slot, alloy_rlp::encode(slot_bytes).into());
         }
     }
 
@@ -214,7 +203,7 @@ impl<P, E> InvalidBlockWitnessHook<P, E> {
 impl<P, E, N> InvalidBlockWitnessHook<P, E>
 where
     P: StateProviderFactory + Send + Sync + 'static,
-    E: ConfigureEvm<Primitives = N> + 'static,
+    E: ConfigureEvm2BlockExecutor<Primitives = N> + 'static,
     N: NodePrimitives,
 {
     /// Re-executes the block and collects execution data
@@ -223,16 +212,13 @@ where
         parent_header: &SealedHeader<N::BlockHeader>,
         block: &RecoveredBlock<N::Block>,
     ) -> eyre::Result<(ExecutionWitness, Evm2BundleState)> {
-        let mut executor = self.evm_config.batch_executor(StateProviderDatabase::new(
-            self.provider.state_by_block_hash(parent_header.hash())?,
-        ));
-
-        executor.execute_one(block)?;
-        let db = executor.into_state();
-        let (codes, preimages, hashed_state, bundle_state) =
-            collect_execution_data(db, block.number())?;
-
         let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
+        let output = self
+            .evm_config
+            .execute_evm2_block_with_state_provider_ref(&*state_provider, block)
+            .map_err(|err| eyre::eyre!(err.to_string()))?;
+        let (codes, preimages, hashed_state, bundle_state) =
+            collect_execution_data(&*state_provider, output.state)?;
         let witness = generate(codes, preimages, hashed_state, state_provider)?;
 
         Ok((witness, bundle_state))
@@ -405,7 +391,7 @@ where
 impl<P, E, N: NodePrimitives> InvalidBlockHook<N> for InvalidBlockWitnessHook<P, E>
 where
     P: StateProviderFactory + Send + Sync + 'static,
-    E: ConfigureEvm<Primitives = N> + 'static,
+    E: ConfigureEvm2BlockExecutor<Primitives = N> + 'static,
 {
     fn on_invalid_block(
         &self,
@@ -427,7 +413,6 @@ mod tests {
     use alloy_primitives::{map::AddressMap, Address, Bytes, B256, U256};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::EthPrimitives;
-    use reth_evm::cached::Bytecode as EvmBytecode;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_types::{Evm2BlockReverts, Evm2StorageReverts};
     use reth_primitives_traits::{Account, Bytecode as RethBytecode};
@@ -513,23 +498,11 @@ mod tests {
         // Create test data using the fixture function
         let bundle_state = create_bundle_state();
 
-        // Create a State with an empty provider.
+        // Create an empty provider for hashing the post-state.
         let state_provider = MockEthProvider::default();
-        let mut state = State::builder()
-            .with_database(StateProviderDatabase::new(Box::new(state_provider) as StateProviderBox))
-            .with_bundle_update()
-            .build();
-
-        // Insert contracts from the fixture into the state cache
-        for (code_hash, bytecode) in bundle_state.contracts() {
-            state
-                .cache
-                .contracts
-                .insert(*code_hash, EvmBytecode::new_raw(bytecode.original_bytes()));
-        }
 
         // Call the collect function
-        let result = collect_execution_data(state, 0);
+        let result = collect_execution_data(&state_provider, bundle_state);
         // Verify the function returns successfully
         assert!(result.is_ok());
 
@@ -538,7 +511,7 @@ mod tests {
         // Verify that the returned data contains expected values
         // Since we used the fixture data, we should have some codes and state
         assert!(!codes.is_empty(), "Expected some bytecode entries");
-        assert!(returned_bundle_state.accounts().is_empty(), "Expected empty state entries");
+        assert!(!returned_bundle_state.accounts().is_empty(), "Expected state entries");
     }
 
     #[test]
