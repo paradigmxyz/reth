@@ -17,6 +17,7 @@ fixed-cache = { workspace = true, features = ["stats"] }
 metrics.workspace = true
 parking_lot.workspace = true
 reth-errors.workspace = true
+reth-execution-types.workspace = true
 reth-metrics = { workspace = true, features = ["common"] }
 reth-primitives-traits = { workspace = true, features = ["std"] }
 reth-provider.workspace = true

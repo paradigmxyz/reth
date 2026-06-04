@@ -12,6 +12,7 @@ use reth_ethereum_engine_primitives::{EthBuiltPayload, EthPayloadAttributes};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     eth::spec::EthExecutorSpec, ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes,
+    TxEnvFor,
 };
 use reth_evm_ethereum::factory::RethEvmFactory;
 #[cfg(feature = "jit")]
@@ -58,7 +59,6 @@ use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, PoolPooledTx, PoolTransaction,
     TransactionPool, TransactionValidationTaskExecutor,
 };
-use revm::context::TxEnv;
 use std::{marker::PhantomData, sync::Arc, time::SystemTime};
 
 pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
@@ -319,7 +319,7 @@ where
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
-    EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
+    EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnvFor<N::Evm>>,
     RpcMiddleware: RethRpcMiddleware,
     AuthHttpMiddleware: RethAuthHttpMiddleware<Identity>,
 {
@@ -397,7 +397,7 @@ where
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
-    EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
+    EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnvFor<N::Evm>>,
     RpcMiddleware: RethRpcMiddleware,
     AuthHttpMiddleware: RethAuthHttpMiddleware<Identity>,
 {
@@ -424,7 +424,7 @@ where
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
-    EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
+    EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnvFor<N::Evm>>,
     RpcMiddleware: Send,
     AuthHttpMiddleware: Send,
 {

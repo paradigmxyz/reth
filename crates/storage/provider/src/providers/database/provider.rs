@@ -108,7 +108,7 @@ impl CommitOrder {
     }
 }
 
-fn evm2_bundle_to_plain_state_and_reverts(
+pub(crate) fn evm2_bundle_to_plain_state_and_reverts(
     bundle: &Evm2BundleState,
     is_value_known: OriginalValuesKnown,
 ) -> (StateChangeset, PlainStateReverts) {
@@ -3810,11 +3810,18 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         let (account_transitions, storage_transitions) = {
             let mut account_transitions: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
             let mut storage_transitions: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
-            for (block_idx, block_reverts) in execution_outcome.bundle.reverts.iter().enumerate() {
+            for (block_idx, block_reverts) in
+                execution_outcome.bundle.block_reverts().iter().enumerate()
+            {
                 let block_number = first_number + block_idx as u64;
-                for (address, account_revert) in block_reverts {
+                for address in block_reverts.accounts.keys() {
                     account_transitions.entry(*address).or_default().push(block_number);
-                    for storage_key in account_revert.storage.keys() {
+                }
+                for (address, storage_revert) in &block_reverts.storage {
+                    if !block_reverts.accounts.contains_key(address) {
+                        account_transitions.entry(*address).or_default().push(block_number);
+                    }
+                    for storage_key in storage_revert.slots.keys() {
                         let key = B256::from(storage_key.to_be_bytes());
                         storage_transitions.entry((*address, key)).or_default().push(block_number);
                     }
