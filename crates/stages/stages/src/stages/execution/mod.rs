@@ -42,7 +42,7 @@ mod slot_preimages;
 ///
 /// Input tables:
 /// - [`tables::CanonicalHeaders`] get next block to execute.
-/// - [`tables::Headers`] get for revm environment variables.
+/// - [`tables::Headers`] get for EVM environment variables.
 /// - [`tables::BlockBodyIndices`] to get tx number
 /// - [`tables::Transactions`] to execute
 ///
@@ -378,7 +378,7 @@ where
             }
 
             // evm2 execution currently accumulates state per block. Commit after one block so the
-            // next stage iteration reads the just-written state instead of relying on revm's old
+            // next stage iteration reads the just-written state instead of relying on an
             // in-memory batch overlay.
             break
         }

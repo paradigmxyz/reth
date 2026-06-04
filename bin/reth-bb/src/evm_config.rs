@@ -346,9 +346,9 @@ mod revm_bal_config {
 
 // Stubbed big-block EVM configuration.
 //
-// The previous revm/BAL bridge is parked above while big-block execution is
-// ported to evm2. This wrapper keeps the node type and payload shape
-// available without retaining a direct revm dependency in `reth-bb`.
+// The previous BAL bridge is parked above while big-block execution is ported
+// to evm2. This wrapper keeps the node type and payload shape available without
+// retaining a direct legacy executor dependency in `reth-bb`.
 
 pub(crate) use reth_engine_primitives::BigBlockData;
 
@@ -463,14 +463,14 @@ where
         &self,
         _payload: &BigBlockData<ExecutionData>,
     ) -> Result<EvmEnvFor<Self>, Self::Error> {
-        unreachable!("revm-backed big-block payload execution is parked while evm2 support lands")
+        unreachable!("big-block payload execution is parked while evm2 support lands")
     }
 
     fn context_for_payload<'a>(
         &self,
         _payload: &'a BigBlockData<ExecutionData>,
     ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
-        unreachable!("revm-backed big-block payload execution is parked while evm2 support lands")
+        unreachable!("big-block payload execution is parked while evm2 support lands")
     }
 
     fn tx_iterator_for_payload(
@@ -479,9 +479,7 @@ where
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
         let transactions: Vec<Bytes> = Vec::new();
         let convert = |_tx: Bytes| -> Result<Recovered<TxTy<Self::Primitives>>, AnyError> {
-            unreachable!(
-                "revm-backed big-block payload execution is parked while evm2 support lands"
-            )
+            unreachable!("big-block payload execution is parked while evm2 support lands")
         };
 
         Ok((transactions, convert))
