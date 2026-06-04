@@ -371,7 +371,7 @@ where
     /// Previous BAL prewarm implementation, parked until Amsterdam support is ported to evm2.
     #[cfg(any())]
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
-    fn run_bal_prewarm_revm(
+    fn run_bal_prewarm_legacy(
         &self,
         decoded_bal: Arc<DecodedBal>,
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,

@@ -401,7 +401,7 @@ pub fn should_skip(path: &Path) -> bool {
         | "CALLBlake2f_MaxRounds.json"
         | "shiftCombinations.json"
 
-        // Skipped by revm as well: <https://github.com/bluealloy/revm/blob/be92e1db21f1c47b34c5a58cfbf019f6b97d7e4b/bins/revme/src/cmd/statetest/runner.rs#L115-L125>
+        // Skipped because this case is known to be invalid in the upstream state tests.
         | "RevertInCreateInInit_Paris.json"
         | "RevertInCreateInInit.json"
         | "dynamicAccountOverwriteEmpty.json"
