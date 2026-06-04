@@ -10,6 +10,7 @@ use evm2::{
     evm::{AccountInfo, StateChanges, StorageChangeSet, Tracked},
 };
 use reth_primitives_traits::{Account, Bytecode as RethBytecode};
+use reth_trie_common::{HashedPostState, HashedStorage, KeyHasher};
 
 /// Bundle state built from evm2 per-transaction state changes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -106,6 +107,32 @@ impl Evm2BundleState {
     /// Get storage if value is known.
     pub fn storage_slot(&self, address: &Address, storage_key: U256) -> Option<U256> {
         self.storage.get(address)?.slots.get(&storage_key).map(|slot| slot.current)
+    }
+
+    /// Returns the hashed post-state represented by this bundle.
+    pub fn hashed_post_state<KH: KeyHasher>(&self) -> HashedPostState {
+        let mut hashed_state = HashedPostState::with_capacity(self.accounts.len());
+
+        for (address, account) in &self.accounts {
+            hashed_state
+                .accounts
+                .insert(KH::hash_key(address), account.current.as_ref().map(account_info_to_reth));
+        }
+
+        for (address, storage) in &self.storage {
+            let hashed_storage = HashedStorage::from_iter(
+                storage.wipe,
+                storage.slots.iter().map(|(slot, value)| {
+                    (KH::hash_key(B256::new(slot.to_be_bytes())), value.current)
+                }),
+            );
+
+            if !hashed_storage.is_empty() {
+                hashed_state.storages.insert(KH::hash_key(address), hashed_storage);
+            }
+        }
+
+        hashed_state
     }
 
     /// Return iterator over all accounts.
@@ -508,6 +535,7 @@ mod serde_impl {
 mod tests {
     use super::*;
     use alloy_primitives::{address, b256};
+    use reth_trie_common::KeccakKeyHasher;
 
     #[test]
     fn bundle_keeps_first_original_and_latest_current() {
@@ -585,6 +613,44 @@ mod tests {
             bundle.block_reverts()[0].storage.get(&address).unwrap().get(&U256::from(1)),
             Some(&U256::ZERO)
         );
+    }
+
+    #[test]
+    fn hashed_post_state_hashes_accounts_and_storage() {
+        let address = address!("0000000000000000000000000000000000000001");
+        let slot = U256::from(1);
+        let value = U256::from(2);
+        let mut bundle = Evm2BundleState::new(1);
+
+        let mut tx = StateChanges::default();
+        tx.accounts.insert(
+            address,
+            Tracked { original: None, current: Some(account(1)), _non_exhaustive: () },
+        );
+        tx.storage.insert(
+            address,
+            StorageChangeSet {
+                wipe: true,
+                slots: BTreeMap::from([(
+                    slot,
+                    Tracked { original: U256::ZERO, current: value, _non_exhaustive: () },
+                )]),
+                _non_exhaustive: (),
+            },
+        );
+        bundle.append_block([tx]);
+
+        let hashed = bundle.hashed_post_state::<KeccakKeyHasher>();
+        let hashed_address = KeccakKeyHasher::hash_key(address);
+        let hashed_slot = KeccakKeyHasher::hash_key(B256::new(slot.to_be_bytes()));
+
+        assert_eq!(
+            hashed.accounts.get(&hashed_address),
+            Some(&Some(account_info_to_reth(&account(1))))
+        );
+        let storage = hashed.storages.get(&hashed_address).unwrap();
+        assert!(storage.wiped);
+        assert_eq!(storage.storage.get(&hashed_slot), Some(&value));
     }
 
     fn account(nonce: u64) -> AccountInfo {
