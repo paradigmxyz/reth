@@ -1,11 +1,18 @@
 //! Helpers for testing.
 
-use crate::{ConfigureEvm, ConfigureEvm2BlockExecutor, EvmEnvFor};
+#[cfg(feature = "std")]
+use crate::ConfigureEvm2BlockExecutor;
+use crate::{ConfigureEvm, EvmEnvFor};
+#[cfg(feature = "std")]
 use alloc::boxed::Box;
+#[cfg(feature = "std")]
 use reth_execution_types::BlockExecutionOutput;
-use reth_primitives_traits::{
-    BlockTy, HeaderTy, ReceiptTy, RecoveredBlock, SealedBlock, SealedHeader, TxTy,
-};
+#[cfg(feature = "std")]
+use reth_primitives_traits::TxTy;
+use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader};
+#[cfg(feature = "std")]
+use reth_primitives_traits::{ReceiptTy, RecoveredBlock};
+#[cfg(feature = "std")]
 use reth_storage_api::StateProvider;
 
 /// A no-op EVM config that panics on any call. Used as a typesystem hack to satisfy
@@ -76,6 +83,7 @@ where
     }
 }
 
+#[cfg(feature = "std")]
 impl<Inner> ConfigureEvm2BlockExecutor for NoopEvmConfig<Inner>
 where
     Inner: ConfigureEvm2BlockExecutor,
@@ -85,9 +93,9 @@ where
     fn execute_evm2_block_with_state_provider<DB>(
         &self,
         state_provider: DB,
-        block: &RecoveredBlock<BlockTy<Self::Primitives>>,
+        block: &RecoveredBlock<BlockTy<<Self as ConfigureEvm2BlockExecutor>::Primitives>>,
     ) -> Result<
-        BlockExecutionOutput<ReceiptTy<Self::Primitives>>,
+        BlockExecutionOutput<ReceiptTy<<Self as ConfigureEvm2BlockExecutor>::Primitives>>,
         Box<dyn core::error::Error + Send + Sync>,
     >
     where
@@ -99,9 +107,9 @@ where
     fn execute_evm2_block_with_state_provider_ref(
         &self,
         state_provider: &dyn StateProvider,
-        block: &RecoveredBlock<BlockTy<Self::Primitives>>,
+        block: &RecoveredBlock<BlockTy<<Self as ConfigureEvm2BlockExecutor>::Primitives>>,
     ) -> Result<
-        BlockExecutionOutput<ReceiptTy<Self::Primitives>>,
+        BlockExecutionOutput<ReceiptTy<<Self as ConfigureEvm2BlockExecutor>::Primitives>>,
         Box<dyn core::error::Error + Send + Sync>,
     > {
         self.inner().execute_evm2_block_with_state_provider_ref(state_provider, block)
