@@ -96,7 +96,6 @@ use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPost
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{
-    collections::HashMap,
     panic::{self, AssertUnwindSafe},
     sync::{
         atomic::{AtomicUsize, Ordering},
