@@ -9075,7 +9075,6 @@ dependencies = [
 name = "reth-execution-errors"
 version = "2.3.0"
 dependencies = [
- "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
  "nybbles",
