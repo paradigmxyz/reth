@@ -1898,8 +1898,7 @@ where
         state: &EngineApiTreeState<N>,
         changeset_cache: ChangesetCache,
     ) -> OverlayBuilder<N> {
-        let state_trie_overlays =
-            state.tree_state.state_trie_overlays.detached_block_snapshot();
+        let state_trie_overlays = state.tree_state.state_trie_overlays.detached_block_snapshot();
         OverlayBuilder::new(parent_hash, changeset_cache)
             .with_state_trie_overlay_manager(state_trie_overlays)
     }
@@ -1940,10 +1939,10 @@ where
                 }
             });
 
-            if balance.is_none() &&
-                nonce.is_none() &&
-                code_hash.is_none() &&
-                account_changes.storage_changes.is_empty()
+            if balance.is_none()
+                && nonce.is_none()
+                && code_hash.is_none()
+                && account_changes.storage_changes.is_empty()
             {
                 continue;
             }
@@ -1955,10 +1954,7 @@ where
             };
             let account = Account {
                 balance: balance.unwrap_or_else(|| {
-                    existing_account
-                        .as_ref()
-                        .map(|account| account.balance)
-                        .unwrap_or(U256::ZERO)
+                    existing_account.as_ref().map(|account| account.balance).unwrap_or(U256::ZERO)
                 }),
                 nonce: nonce.unwrap_or_else(|| {
                     existing_account.as_ref().map(|account| account.nonce).unwrap_or(0)
@@ -3042,10 +3038,43 @@ where
         block: BuiltPayloadExecutedBlock<N>,
         state: &EngineApiTreeState<N>,
     ) -> ProviderResult<ExecutedBlock<N>> {
+        let block_hash = block.recovered_block.hash();
+        let parent_hash = block.recovered_block.parent_hash();
+        let block_state_root = block.recovered_block.header().state_root();
+
         self.payload_processor.on_inserted_executed_block(
             block.recovered_block.block_with_parent(),
             &block.execution_output.state,
         );
+
+        match self.state_root_by_hash(parent_hash, state) {
+            Ok(Some(parent_state_root)) => {
+                self.payload_processor.install_payload_builder_sparse_trie_for_inserted_block(
+                    block_hash,
+                    parent_state_root,
+                    block_state_root,
+                );
+            }
+            Ok(None) => {
+                debug!(
+                    target: "engine::tree::payload_validator",
+                    %block_hash,
+                    %parent_hash,
+                    %block_state_root,
+                    "skipping payload-builder sparse trie install because parent state root is unavailable"
+                );
+            }
+            Err(err) => {
+                debug!(
+                    target: "engine::tree::payload_validator",
+                    %block_hash,
+                    %parent_hash,
+                    %block_state_root,
+                    %err,
+                    "skipping payload-builder sparse trie install after parent state root lookup failed"
+                );
+            }
+        }
 
         let overlay_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),

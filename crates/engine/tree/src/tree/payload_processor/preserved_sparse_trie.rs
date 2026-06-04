@@ -5,8 +5,13 @@ use parking_lot::Mutex;
 use reth_primitives_traits::FastInstant as Instant;
 use reth_trie::updates::TrieUpdates;
 use reth_trie_sparse::{ConfigurableSparseTrie, SparseStateTrie};
-use std::sync::Arc;
-use tracing::debug;
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::Arc,
+};
+use tracing::{debug, warn};
+
+const MAX_PUBLISHED_PAYLOAD_BUILDER_SPARSE_TRIES: usize = 64;
 
 /// Type alias for the sparse trie type used in preservation.
 pub(super) type SparseTrie = SparseStateTrie<ConfigurableSparseTrie, ConfigurableSparseTrie>;
@@ -27,6 +32,92 @@ impl SharedPreservedSparseTrie {
     /// Takes the preserved trie if present, leaving `None` in its place.
     pub(super) fn take(&self) -> Option<PreservedSparseTrie> {
         self.0.lock().take()
+    }
+
+    /// Installs a payload-builder sparse trie as the validation trie for an inserted block.
+    ///
+    /// The source trie must be anchored at `child_state_root`. If validation's current trie is
+    /// anchored at the inserted block's parent, the install advances validation's preserved trie
+    /// without forcing the next validation to clear and rebuild from scratch.
+    pub(super) fn install_payload_builder_child(
+        &self,
+        parent_state_root: B256,
+        child_state_root: B256,
+        source: SharedPreservedSparseTrie,
+    ) -> bool {
+        let Some(child) = source.take() else {
+            debug!(
+                target: "engine::tree::payload_processor",
+                %parent_state_root,
+                %child_state_root,
+                "payload-builder sparse trie source was not available for fast-path install"
+            );
+            return false;
+        };
+
+        let Some(source_state_root) = child.state_root() else {
+            debug!(
+                target: "engine::tree::payload_processor",
+                %parent_state_root,
+                %child_state_root,
+                "payload-builder sparse trie source was not anchored for fast-path install"
+            );
+            return false;
+        };
+
+        if source_state_root != child_state_root {
+            warn!(
+                target: "engine::tree::payload_processor",
+                %parent_state_root,
+                %child_state_root,
+                %source_state_root,
+                "payload-builder sparse trie source root mismatch during fast-path install"
+            );
+            return false;
+        }
+
+        let mut preserved = self.0.lock();
+        match preserved.as_ref().and_then(PreservedSparseTrie::state_root) {
+            Some(current_state_root) if current_state_root == child_state_root => {
+                debug!(
+                    target: "engine::tree::payload_processor",
+                    %parent_state_root,
+                    %child_state_root,
+                    "validation sparse trie is already anchored at inserted block"
+                );
+                true
+            }
+            Some(current_state_root) if current_state_root == parent_state_root => {
+                preserved.replace(child);
+                debug!(
+                    target: "engine::tree::payload_processor",
+                    %parent_state_root,
+                    %child_state_root,
+                    "installed payload-builder sparse trie for fast-path inserted block"
+                );
+                true
+            }
+            None => {
+                preserved.replace(child);
+                debug!(
+                    target: "engine::tree::payload_processor",
+                    %parent_state_root,
+                    %child_state_root,
+                    "installed payload-builder sparse trie into empty validation cache"
+                );
+                true
+            }
+            Some(current_state_root) => {
+                debug!(
+                    target: "engine::tree::payload_processor",
+                    %parent_state_root,
+                    %child_state_root,
+                    %current_state_root,
+                    "not installing payload-builder sparse trie because validation cache is anchored elsewhere"
+                );
+                false
+            }
+        }
     }
 
     /// Clones the preserved trie into a private handle with trie updates applied.
@@ -70,6 +161,49 @@ impl SharedPreservedSparseTrie {
             );
         }
         elapsed
+    }
+}
+
+/// Completed private payload-builder sparse tries that may be installed by fast-path insertion.
+#[derive(Debug, Default, Clone)]
+pub(super) struct PublishedPayloadBuilderSparseTries(
+    Arc<Mutex<PublishedPayloadBuilderSparseTriesInner>>,
+);
+
+#[derive(Debug, Default)]
+struct PublishedPayloadBuilderSparseTriesInner {
+    order: VecDeque<B256>,
+    tries: HashMap<B256, SharedPreservedSparseTrie>,
+}
+
+impl PublishedPayloadBuilderSparseTries {
+    /// Publishes a completed private sparse trie keyed by its computed state root.
+    pub(super) fn publish(&self, state_root: B256, trie: SharedPreservedSparseTrie) {
+        let mut inner = self.0.lock();
+        if inner.tries.insert(state_root, trie).is_some() {
+            inner.order.retain(|root| *root != state_root);
+        }
+        inner.order.push_back(state_root);
+
+        while inner.order.len() > MAX_PUBLISHED_PAYLOAD_BUILDER_SPARSE_TRIES {
+            if let Some(evicted) = inner.order.pop_front() {
+                inner.tries.remove(&evicted);
+            }
+        }
+
+        debug!(
+            target: "engine::tree::payload_processor",
+            %state_root,
+            published_sparse_tries = inner.tries.len(),
+            "published payload-builder sparse trie for fast-path reuse"
+        );
+    }
+
+    /// Takes a published private sparse trie for the given state root.
+    pub(super) fn take(&self, state_root: B256) -> Option<SharedPreservedSparseTrie> {
+        let mut inner = self.0.lock();
+        inner.order.retain(|root| *root != state_root);
+        inner.tries.remove(&state_root)
     }
 }
 
@@ -119,6 +253,13 @@ impl PreservedSparseTrie {
     /// Creates a cleared preserved trie (allocations preserved, data cleared).
     pub(super) const fn cleared(trie: SparseTrie) -> Self {
         Self::Cleared { trie }
+    }
+
+    pub(super) const fn state_root(&self) -> Option<B256> {
+        match self {
+            Self::Anchored { state_root, .. } => Some(*state_root),
+            Self::Cleared { .. } => None,
+        }
     }
 
     /// Clones this preserved trie if it can safely represent the updated root.
@@ -288,5 +429,71 @@ mod tests {
         assert!(preserved
             .clone_with_updates(base_state_root, updated_state_root, &TrieUpdates::default())
             .is_none());
+    }
+
+    #[test]
+    fn install_payload_builder_child_advances_parent_anchor() {
+        let parent_state_root = B256::with_last_byte(1);
+        let child_state_root = B256::with_last_byte(2);
+        let validation = SharedPreservedSparseTrie::new(Some(PreservedSparseTrie::anchored(
+            SparseTrie::default(),
+            parent_state_root,
+        )));
+        let source = SharedPreservedSparseTrie::new(Some(PreservedSparseTrie::anchored(
+            SparseTrie::default(),
+            child_state_root,
+        )));
+
+        assert!(validation.install_payload_builder_child(
+            parent_state_root,
+            child_state_root,
+            source
+        ));
+
+        assert_eq!(
+            validation.0.lock().as_ref().and_then(PreservedSparseTrie::state_root),
+            Some(child_state_root)
+        );
+    }
+
+    #[test]
+    fn install_payload_builder_child_rejects_unrelated_anchor() {
+        let parent_state_root = B256::with_last_byte(1);
+        let child_state_root = B256::with_last_byte(2);
+        let unrelated_state_root = B256::with_last_byte(3);
+        let validation = SharedPreservedSparseTrie::new(Some(PreservedSparseTrie::anchored(
+            SparseTrie::default(),
+            unrelated_state_root,
+        )));
+        let source = SharedPreservedSparseTrie::new(Some(PreservedSparseTrie::anchored(
+            SparseTrie::default(),
+            child_state_root,
+        )));
+
+        assert!(!validation.install_payload_builder_child(
+            parent_state_root,
+            child_state_root,
+            source
+        ));
+
+        assert_eq!(
+            validation.0.lock().as_ref().and_then(PreservedSparseTrie::state_root),
+            Some(unrelated_state_root)
+        );
+    }
+
+    #[test]
+    fn published_payload_builder_sparse_tries_take_removes_entry() {
+        let state_root = B256::with_last_byte(1);
+        let published = PublishedPayloadBuilderSparseTries::default();
+        let source = SharedPreservedSparseTrie::new(Some(PreservedSparseTrie::anchored(
+            SparseTrie::default(),
+            state_root,
+        )));
+
+        published.publish(state_root, source);
+
+        assert!(published.take(state_root).is_some());
+        assert!(published.take(state_root).is_none());
     }
 }

@@ -55,7 +55,9 @@ pub mod prewarm;
 pub mod receipt_root_task;
 pub mod sparse_trie;
 
-use preserved_sparse_trie::{PreservedSparseTrie, SharedPreservedSparseTrie};
+use preserved_sparse_trie::{
+    PreservedSparseTrie, PublishedPayloadBuilderSparseTries, SharedPreservedSparseTrie,
+};
 
 /// Default node capacity for shrinking the sparse trie. This is used to limit the number of trie
 /// nodes in allocated sparse tries.
@@ -143,6 +145,8 @@ where
     /// re-use allocated memory. Stored with the block hash it was computed for to enable trie
     /// preservation across sequential payload validations.
     sparse_state_trie: SharedPreservedSparseTrie,
+    /// Completed private payload-builder sparse tries that can be installed after fast-path insert.
+    payload_builder_sparse_tries: PublishedPayloadBuilderSparseTries,
     /// LFU hot-slot capacity: max storage slots retained across prune cycles.
     sparse_trie_max_hot_slots: usize,
     /// LFU hot-account capacity: max account addresses retained across prune cycles.
@@ -165,6 +169,8 @@ pub(crate) struct StateRootSpawner {
     /// A pruned `SparseStateTrie`, kept around as a cache of already revealed trie nodes and to
     /// re-use allocated memory.
     sparse_state_trie: SharedPreservedSparseTrie,
+    /// Completed private payload-builder sparse tries that can be installed after fast-path insert.
+    payload_builder_sparse_tries: PublishedPayloadBuilderSparseTries,
     /// LFU hot-slot capacity: max storage slots retained across prune cycles.
     sparse_trie_max_hot_slots: usize,
     /// LFU hot-account capacity: max account addresses retained across prune cycles.
@@ -185,9 +191,11 @@ impl PrivateSparseTrieSnapshot {
 
     pub(crate) fn clone_at_root(&self, state_root: B256) -> Self {
         let clone_start = Instant::now();
-        let preserved =
-            self.sparse_state_trie
-                .clone_with_updates(state_root, state_root, &TrieUpdates::default());
+        let preserved = self.sparse_state_trie.clone_with_updates(
+            state_root,
+            state_root,
+            &TrieUpdates::default(),
+        );
         let clone_elapsed = clone_start.elapsed();
         info!(
             target: "engine::tree::payload_processor",
@@ -219,6 +227,7 @@ where
             executor: self.executor.clone(),
             trie_metrics: self.trie_metrics.clone(),
             sparse_state_trie: self.sparse_state_trie.clone(),
+            payload_builder_sparse_tries: self.payload_builder_sparse_tries.clone(),
             sparse_trie_max_hot_slots: self.sparse_trie_max_hot_slots,
             sparse_trie_max_hot_accounts: self.sparse_trie_max_hot_accounts,
             disable_sparse_trie_cache_pruning: self.disable_sparse_trie_cache_pruning,
@@ -243,6 +252,7 @@ where
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
             sparse_state_trie: SharedPreservedSparseTrie::default(),
+            payload_builder_sparse_tries: PublishedPayloadBuilderSparseTries::default(),
             sparse_trie_max_hot_slots: config.sparse_trie_max_hot_slots(),
             sparse_trie_max_hot_accounts: config.sparse_trie_max_hot_accounts(),
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
@@ -470,15 +480,14 @@ where
             + Sync
             + 'static,
     {
-        self.state_root_spawner()
-            .spawn_state_root_with_updated_sparse_trie_snapshot(
-                multiproof_provider_factory,
-                base_state_root,
-                parent_state_root,
-                base_trie_updates,
-                halve_workers,
-                config,
-            )
+        self.state_root_spawner().spawn_state_root_with_updated_sparse_trie_snapshot(
+            multiproof_provider_factory,
+            base_state_root,
+            parent_state_root,
+            base_trie_updates,
+            halve_workers,
+            config,
+        )
     }
 
     /// Transaction count threshold below which sequential conversion is used.
@@ -589,8 +598,8 @@ where
             PrewarmMode::BlockAccessList(
                 env.decoded_bal.clone().expect("BAL dispatch implies decoded BAL"),
             )
-        } else if self.disable_transaction_prewarming ||
-            env.transaction_count < SMALL_BLOCK_TX_THRESHOLD
+        } else if self.disable_transaction_prewarming
+            || env.transaction_count < SMALL_BLOCK_TX_THRESHOLD
         {
             PrewarmMode::Skipped
         } else {
@@ -729,6 +738,39 @@ where
             debug!(target: "engine::caching", ?block_with_parent, "Updated execution cache for inserted block");
         });
     }
+
+    /// Installs the private payload-builder sparse trie for a locally inserted block, if available.
+    pub fn install_payload_builder_sparse_trie_for_inserted_block(
+        &self,
+        block_hash: B256,
+        parent_state_root: B256,
+        block_state_root: B256,
+    ) {
+        let Some(source) = self.payload_builder_sparse_tries.take(block_state_root) else {
+            debug!(
+                target: "engine::tree::payload_processor",
+                %block_hash,
+                %parent_state_root,
+                %block_state_root,
+                "no published payload-builder sparse trie for fast-path inserted block"
+            );
+            return;
+        };
+
+        let installed = self.sparse_state_trie.install_payload_builder_child(
+            parent_state_root,
+            block_state_root,
+            source,
+        );
+        debug!(
+            target: "engine::tree::payload_processor",
+            %block_hash,
+            %parent_state_root,
+            %block_state_root,
+            installed,
+            "handled payload-builder sparse trie for fast-path inserted block"
+        );
+    }
 }
 
 impl StateRootSpawner {
@@ -754,6 +796,7 @@ impl StateRootSpawner {
             config,
             VALIDATION_SPARSE_TRIE_WORKER_NAME,
             self.sparse_state_trie.clone(),
+            None,
         )
     }
 
@@ -797,6 +840,7 @@ impl StateRootSpawner {
             config,
             PAYLOAD_BUILDER_SPARSE_TRIE_WORKER_NAME,
             SharedPreservedSparseTrie::new(preserved),
+            Some(self.payload_builder_sparse_tries.clone()),
         )
     }
 
@@ -809,9 +853,11 @@ impl StateRootSpawner {
         state_root: B256,
     ) -> PrivateSparseTrieSnapshot {
         let clone_start = Instant::now();
-        let preserved =
-            self.sparse_state_trie
-                .clone_with_updates(state_root, state_root, &TrieUpdates::default());
+        let preserved = self.sparse_state_trie.clone_with_updates(
+            state_root,
+            state_root,
+            &TrieUpdates::default(),
+        );
         let clone_elapsed = clone_start.elapsed();
         info!(
             target: "engine::tree::payload_processor",
@@ -847,6 +893,7 @@ impl StateRootSpawner {
             config,
             PAYLOAD_BUILDER_SPARSE_TRIE_WORKER_NAME,
             snapshot.sparse_state_trie,
+            Some(self.payload_builder_sparse_tries.clone()),
         )
     }
 
@@ -858,6 +905,7 @@ impl StateRootSpawner {
         config: &TreeConfig,
         sparse_trie_worker_name: &'static str,
         sparse_state_trie: SharedPreservedSparseTrie,
+        publish_payload_builder_sparse_tries: Option<PublishedPayloadBuilderSparseTries>,
     ) -> StateRootHandle
     where
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -885,6 +933,7 @@ impl StateRootSpawner {
             config.multiproof_chunk_size(),
             sparse_trie_worker_name,
             sparse_state_trie,
+            publish_payload_builder_sparse_tries,
         );
 
         StateRootHandle::new(parent_state_root, updates_tx, state_root_rx, hashed_state_rx)
@@ -903,6 +952,7 @@ impl StateRootSpawner {
         chunk_size: usize,
         sparse_trie_worker_name: &'static str,
         preserved_sparse_trie: SharedPreservedSparseTrie,
+        publish_payload_builder_sparse_tries: Option<PublishedPayloadBuilderSparseTries>,
     ) {
         let trie_metrics = self.trie_metrics.clone();
         let max_hot_slots = self.sparse_trie_max_hot_slots;
@@ -970,6 +1020,7 @@ impl StateRootSpawner {
             let mut guard = preserved_sparse_trie.lock();
 
             let task_result = result.as_ref().ok().cloned();
+            let published_state_root = task_result.as_ref().map(|result| result.state_root);
             // Send state root computation result - next block may start but will block on take()
             if state_root_tx.send(result).is_err() {
                 // Receiver dropped - payload was likely invalid or cancelled.
@@ -1005,9 +1056,7 @@ impl StateRootSpawner {
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
-                trie_metrics
-                    .sparse_trie_retained_memory_bytes
-                    .set(trie.memory_size() as f64);
+                trie_metrics.sparse_trie_retained_memory_bytes.set(trie.memory_size() as f64);
                 trie_metrics
                     .sparse_trie_retained_storage_tries
                     .set(trie.retained_storage_tries_count() as f64);
@@ -1026,6 +1075,11 @@ impl StateRootSpawner {
                 deferred
             };
             drop(guard);
+            if let (Some(published), Some(state_root)) =
+                (publish_payload_builder_sparse_tries, published_state_root)
+            {
+                published.publish(state_root, preserved_sparse_trie.clone());
+            }
             executor.spawn_drop(deferred);
         });
     }
