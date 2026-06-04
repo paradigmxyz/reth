@@ -2705,6 +2705,16 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             }
 
             for (hashed_slot, value) in storage.storage_slots_ref() {
+                if value.is_zero() {
+                    if let Some(db_entry) =
+                        hashed_storage_cursor.seek_by_key_subkey(*hashed_address, *hashed_slot)? &&
+                        db_entry.key == *hashed_slot
+                    {
+                        hashed_storage_cursor.delete_current()?;
+                    }
+                    continue;
+                }
+
                 let entry = StorageEntry { key: *hashed_slot, value: *value };
 
                 if let Some(db_entry) =
@@ -2714,9 +2724,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     hashed_storage_cursor.delete_current()?;
                 }
 
-                if !entry.value.is_zero() {
-                    hashed_storage_cursor.upsert(*hashed_address, &entry)?;
-                }
+                hashed_storage_cursor.upsert(*hashed_address, &entry)?;
             }
         }
 
