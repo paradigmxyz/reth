@@ -1,25 +1,42 @@
 //! Contains a precompile cache backed by `schnellru::LruMap` (LRU by length).
+//!
+//! The revm-backed cache implementation is parked while payload execution is on evm2.
 
+#[cfg(any())]
 use alloy_primitives::{
     map::{DefaultHashBuilder, FbBuildHasher},
     Address, Bytes,
 };
+#[cfg(any())]
 use moka::policy::EvictionPolicy;
+#[cfg(any())]
 use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput};
+#[cfg(any())]
 use reth_primitives_traits::dashmap::DashMap;
+#[cfg(any())]
 use revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
+use std::marker::PhantomData;
+#[cfg(any())]
 use std::{hash::Hash, sync::Arc};
+#[cfg(any())]
 use tracing::error;
 
+/// Placeholder for the revm-backed precompile cache while prewarm execution is parked.
+#[derive(Debug, Clone, Default)]
+pub struct PrecompileCacheMap<S>(PhantomData<fn() -> S>);
+
 /// Default max cache size for [`PrecompileCache`]
+#[cfg(any())]
 const MAX_CACHE_SIZE: u32 = 1024 * 1024;
 
 /// Stores caches for each precompile.
+#[cfg(any())]
 #[derive(Debug, Clone, Default)]
 pub struct PrecompileCacheMap<S>(Arc<DashMap<Address, PrecompileCache<S>, FbBuildHasher<20>>>)
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static;
 
+#[cfg(any())]
 impl<S> PrecompileCacheMap<S>
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
@@ -39,11 +56,13 @@ where
 }
 
 /// Cache for precompiles, for each input stores the result.
+#[cfg(any())]
 #[derive(Debug, Clone)]
 pub struct PrecompileCache<S>(moka::sync::Cache<Bytes, CacheEntry<S>, DefaultHashBuilder>)
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static;
 
+#[cfg(any())]
 impl<S> Default for PrecompileCache<S>
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
@@ -60,6 +79,7 @@ where
     }
 }
 
+#[cfg(any())]
 impl<S> PrecompileCache<S>
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
@@ -78,12 +98,14 @@ where
 /// Cache entry for a successful precompile output.
 ///
 /// We intentionally do not cache non-successful statuses or errors.
+#[cfg(any())]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CacheEntry<S> {
     output: PrecompileOutput,
     spec: S,
 }
 
+#[cfg(any())]
 impl<S> CacheEntry<S> {
     const fn gas_used(&self) -> u64 {
         self.output.gas_used
@@ -101,6 +123,7 @@ impl<S> CacheEntry<S> {
 }
 
 /// A cache for precompile inputs / outputs.
+#[cfg(any())]
 #[derive(Debug)]
 pub struct CachedPrecompile<S>
 where
@@ -116,6 +139,7 @@ where
     spec_id: S,
 }
 
+#[cfg(any())]
 impl<S> CachedPrecompile<S>
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
@@ -170,6 +194,7 @@ where
     }
 }
 
+#[cfg(any())]
 impl<S> Precompile for CachedPrecompile<S>
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
@@ -221,6 +246,7 @@ where
 }
 
 /// Metrics for the cached precompile.
+#[cfg(any())]
 #[derive(reth_metrics::Metrics, Clone)]
 #[metrics(scope = "sync.caching")]
 pub struct CachedPrecompileMetrics {
@@ -237,6 +263,7 @@ pub struct CachedPrecompileMetrics {
     pub precompile_errors: metrics::Counter,
 }
 
+#[cfg(any())]
 impl CachedPrecompileMetrics {
     /// Creates a new instance of [`CachedPrecompileMetrics`] with the given address.
     ///
@@ -247,6 +274,7 @@ impl CachedPrecompileMetrics {
     }
 }
 
+#[cfg(any())]
 #[cfg(test)]
 mod tests {
     use super::*;

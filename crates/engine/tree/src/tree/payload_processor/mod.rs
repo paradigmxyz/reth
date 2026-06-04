@@ -19,8 +19,7 @@ use rayon::prelude::*;
 use reth_evm::{
     block::ExecutableTxParts,
     execute::{ExecutableTxFor, WithTxEnv},
-    ConfigureEvm, ConvertTx, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook,
-    SpecFor, TxEnvFor,
+    ConfigureEvm, ConvertTx, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, SpecFor, TxEnvFor,
 };
 use reth_execution_types::Evm2BundleState;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
@@ -342,6 +341,7 @@ where
 
         PayloadHandle {
             state_root_handle: Some(state_root_handle),
+            #[cfg(any())]
             install_state_hook: !parallel_bal_execution,
             prewarm_handle,
             transactions: execution_rx,
@@ -368,6 +368,7 @@ where
             self.spawn_caching_with(env, prewarm_rx, provider_builder, None, false);
         PayloadHandle {
             state_root_handle: None,
+            #[cfg(any())]
             install_state_hook: false,
             prewarm_handle,
             transactions: execution_rx,
@@ -377,13 +378,8 @@ where
 
     /// Spawns state root computation pipeline (multiproof + sparse trie tasks).
     ///
-    /// The returned [`StateRootHandle`] provides:
-    /// - [`StateRootHandle::state_hook`] — an [`OnStateHook`] to stream state updates during
-    ///   execution.
-    /// - [`StateRootHandle::state_root`] — blocks until the state root is computed and returns the
-    ///   state root.
-    ///
-    /// The state hook **must** be dropped after execution to signal the end of state updates.
+    /// The returned [`StateRootHandle`] blocks until the state root is computed and returns the
+    /// state root.
     ///
     /// When `halve_workers` is true, the proof worker pool is halved (for small blocks where
     /// fewer transactions produce fewer state changes and most workers would be idle).
@@ -846,6 +842,7 @@ pub struct PayloadHandle<Tx, Err, R> {
     /// Handle to the background state root computation, if spawned.
     state_root_handle: Option<StateRootHandle>,
     /// Whether main execution should stream per-tx state updates into the sparse trie task.
+    #[cfg(any())]
     install_state_hook: bool,
     // must include the receiver of the state root wired to the sparse trie
     prewarm_handle: CacheTaskHandle<R>,
@@ -886,6 +883,7 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     /// Returns a state hook to stream execution state updates to the sparse trie cache task.
     ///
     /// Returns `None` when BAL-driven hashed state streaming feeds the sparse trie task.
+    #[cfg(any())]
     pub fn state_hook(&self) -> Option<impl OnStateHook> {
         if self.install_state_hook {
             self.state_root_handle.as_ref().map(|handle| {
@@ -1072,30 +1070,44 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[cfg(any())]
+    use crate::tree::payload_processor::evm_state_to_hashed_post_state;
+    #[cfg(any())]
+    use crate::tree::{payload_processor::ExecutionEnv, StateProviderBuilder};
     use crate::tree::{
-        payload_processor::{evm_state_to_hashed_post_state, ExecutionEnv, PayloadProcessor},
-        precompile_cache::PrecompileCacheMap,
-        ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
+        payload_processor::PayloadProcessor, precompile_cache::PrecompileCacheMap, ExecutionCache,
+        PayloadExecutionCache, SavedCache, TreeConfig,
     };
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
-    use alloy_primitives::{map::HashMap, Address, B256, KECCAK256_EMPTY as KECCAK_EMPTY, U256};
+    #[cfg(any())]
+    use alloy_primitives::map::HashMap;
+    use alloy_primitives::{Address, B256, KECCAK256_EMPTY as KECCAK_EMPTY, U256};
+    #[cfg(any())]
     use rand::Rng;
     use reth_chainspec::ChainSpec;
+    #[cfg(any())]
     use reth_db_common::init::init_genesis;
+    #[cfg(any())]
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
-    use reth_evm::OnStateHook;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_cache::CachedStatus;
     use reth_execution_types::Evm2BundleState;
-    use reth_primitives_traits::{Account, Recovered, StorageEntry};
+    use reth_primitives_traits::Account;
+    #[cfg(any())]
+    use reth_primitives_traits::{Recovered, StorageEntry};
+    #[cfg(any())]
     use reth_provider::{
         providers::{BlockchainProvider, OverlayBuilder, OverlayStateProviderFactory},
         test_utils::create_test_provider_factory_with_chain_spec,
         ChainSpecProvider, HashingWriter,
     };
+    #[cfg(any())]
     use reth_testing_utils::generators;
+    #[cfg(any())]
     use reth_trie::{test_utils::state_root, HashedPostState};
+    #[cfg(any())]
     use reth_trie_db::ChangesetCache;
+    #[cfg(any())]
     use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
     use std::sync::Arc;
 
@@ -1308,6 +1320,7 @@ mod tests {
         );
     }
 
+    #[cfg(any())]
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
         let mut rng = generators::rng();
         let all_addresses: Vec<Address> = (0..num_accounts).map(|_| rng.random()).collect();
@@ -1356,6 +1369,7 @@ mod tests {
         updates
     }
 
+    #[cfg(any())]
     #[test]
     fn test_state_root() {
         reth_tracing::init_test_tracing();
