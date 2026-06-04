@@ -421,22 +421,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         self.evm_factory().create_evm(db, evm_env)
     }
 
-    /// Returns a new EVM with the given database configured with `cfg` and `block_env`
-    /// configuration derived from the given header. Relies on
-    /// [`ConfigureEvm::evm_env`].
-    ///
-    /// # Caution
-    ///
-    /// This does not initialize the tx environment.
-    fn evm_for_block<DB: AlloyDatabase>(
-        &self,
-        db: DB,
-        header: &HeaderTy<Self::Primitives>,
-    ) -> Result<EvmFor<Self, DB>, Self::Error> {
-        let evm_env = self.evm_env(header)?;
-        Ok(self.evm_with_env(db, evm_env))
-    }
-
     /// Returns a new EVM with the given database configured with the given environment settings,
     /// including the spec id.
     ///
