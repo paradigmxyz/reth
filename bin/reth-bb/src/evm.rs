@@ -20,7 +20,7 @@ use reth_evm::{
     interpreter::InterpreterResult,
     precompile::PrecompileProvider,
     precompiles::PrecompilesMap,
-    Database, EthEvm, EthEvmFactory, Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
+    EthEvm, EthEvmFactory, Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
 use tracing::{debug, trace};
 
@@ -130,7 +130,7 @@ pub(crate) type BalIndexSetter<DB> = fn(&mut DB, u64);
 #[expect(missing_debug_implementations)]
 pub struct BbBlockExecutor<'a, DB, I, P>
 where
-    DB: Database,
+    DB: StateDB,
 {
     /// The inner executor. `None` transiently during `apply_segment_boundary`.
     inner: Option<Evm2RethBlockExecutor<'a, EthEvm<DB, I, P>, RethEvm2ReceiptBuilder>>,
@@ -436,7 +436,7 @@ where
         // globally-correct values across all segments.
         let offset = self.gas_used_offset;
         if offset > 0 &&
-            let Some(receipt) = self.inner_mut().receipts.last_mut()
+            let Some(receipt) = self.inner_mut().receipts_mut().last_mut()
         {
             receipt.cumulative_gas_used += offset;
         }

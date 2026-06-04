@@ -14,7 +14,7 @@ use alloy_consensus::Header;
 use alloy_eips::Decodable2718;
 use alloy_primitives::{Address, Bytes, B256};
 use alloy_rpc_types::engine::ExecutionData;
-use core::{convert::Infallible, fmt::Debug};
+use core::convert::Infallible;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthExecutorSpec as RethEthExecutorSpec};
 use reth_ethereum_forks::{EthereumHardfork, Hardforks};
 use reth_ethereum_primitives::{Block, EthPrimitives};
@@ -195,7 +195,7 @@ where
         ctx: BbEvmPlan<'a>,
     ) -> BlockExecutorFor<'a, Self::BlockExecutorFactory, &'a mut State<DB>, I>
     where
-        DB: Database + Debug,
+        DB: Database,
         I: reth_evm::InspectorFor<Self, &'a mut State<DB>> + 'a,
     {
         let bal_index_reader: Option<BalIndexReader<&'a mut State<DB>>> =
@@ -220,7 +220,7 @@ where
         ctx: BbEvmPlan<'ctx>,
     ) -> BlockExecutorFor<'ctx, Self::BlockExecutorFactory, &'db mut State<DB>, I>
     where
-        DB: Database + Debug,
+        DB: Database,
         I: reth_evm::InspectorFor<Self, &'db mut State<DB>>,
     {
         let bal_index_reader: Option<BalIndexReader<&'db mut State<DB>>> =

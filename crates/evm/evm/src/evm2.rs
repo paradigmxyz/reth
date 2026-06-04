@@ -1591,6 +1591,11 @@ where
     pub fn set_receipts(&mut self, receipts: Vec<R::Receipt>) {
         self.evm2.result.receipts = receipts;
     }
+
+    /// Returns accumulated receipts.
+    pub fn receipts_mut(&mut self) -> &mut Vec<R::Receipt> {
+        &mut self.evm2.result.receipts
+    }
 }
 
 impl<E, R> BlockExecutor for Evm2RethBlockExecutor<'_, E, R>
