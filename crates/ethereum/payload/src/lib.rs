@@ -22,6 +22,7 @@ use reth_errors::{BlockExecutionError, BlockValidationError, ConsensusError};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     block::TxResult,
+    database::{State, StateProviderDatabase},
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm, NextBlockEnvAttributes,
 };
@@ -31,7 +32,6 @@ use reth_payload_builder::{BlobSidecars, EthBuiltPayload};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadAttributes;
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
-use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
