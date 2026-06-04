@@ -1,22 +1,8 @@
 //! Loads chain configuration.
 
-use alloy_consensus::BlockHeader;
-use alloy_eips::{
-    eip7840::BlobParams,
-    eip7910::{EthConfig, EthForkConfig, SystemContract},
-};
-use alloy_evm::precompiles::Precompile;
-use alloy_primitives::Address;
+use alloy_eips::eip7910::EthConfig;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks, Head};
-use reth_errors::{ProviderError, RethError};
-use reth_evm::{precompiles::PrecompilesMap, ConfigureEvm, Evm};
-use reth_node_api::NodePrimitives;
-use reth_primitives_traits::header::HeaderMut;
-use reth_revm::db::EmptyDB;
 use reth_rpc_eth_types::EthApiError;
-use reth_storage_api::BlockReaderIdExt;
-use std::collections::BTreeMap;
 
 /// RPC endpoint support for [EIP-7910](https://eips.ethereum.org/EIPS/eip-7910)
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
@@ -32,10 +18,20 @@ pub trait EthConfigApi {
 /// Ref: <https://eips.ethereum.org/EIPS/eip-7910>
 #[derive(Debug, Clone)]
 pub struct EthConfigHandler<Provider, Evm> {
+    #[expect(dead_code)]
     provider: Provider,
+    #[expect(dead_code)]
     evm_config: Evm,
 }
 
+impl<Provider, Evm> EthConfigHandler<Provider, Evm> {
+    /// Creates a new [`EthConfigHandler`].
+    pub const fn new(provider: Provider, evm_config: Evm) -> Self {
+        Self { provider, evm_config }
+    }
+}
+
+#[cfg(any())]
 impl<Provider, Evm> EthConfigHandler<Provider, Evm>
 where
     Provider: ChainSpecProvider<ChainSpec: Hardforks + EthereumHardforks>
@@ -43,11 +39,6 @@ where
         + 'static,
     Evm: ConfigureEvm<Primitives: NodePrimitives<BlockHeader = Provider::Header>> + 'static,
 {
-    /// Creates a new [`EthConfigHandler`].
-    pub const fn new(provider: Provider, evm_config: Evm) -> Self {
-        Self { provider, evm_config }
-    }
-
     /// Returns fork config for specific timestamp.
     fn build_fork_config_at(
         &self,
@@ -159,16 +150,15 @@ where
 
 impl<Provider, Evm> EthConfigApiServer for EthConfigHandler<Provider, Evm>
 where
-    Provider: ChainSpecProvider<ChainSpec: Hardforks + EthereumHardforks>
-        + BlockReaderIdExt<Header: HeaderMut>
-        + 'static,
-    Evm: ConfigureEvm<Primitives: NodePrimitives<BlockHeader = Provider::Header>> + 'static,
+    Provider: Send + Sync + 'static,
+    Evm: Send + Sync + 'static,
 {
     fn config(&self) -> RpcResult<EthConfig> {
-        Ok(self.config().map_err(EthApiError::from)?)
+        Err(EthApiError::Unsupported("eth_config is unsupported by the evm2 execution path").into())
     }
 }
 
+#[cfg(any())]
 fn evm_to_precompiles_map(
     evm: impl Evm<Precompiles = PrecompilesMap>,
 ) -> BTreeMap<String, Address> {
