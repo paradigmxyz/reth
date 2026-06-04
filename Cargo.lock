@@ -9068,7 +9068,6 @@ dependencies = [
  "reth-execution-types",
  "reth-primitives-traits",
  "reth-provider",
- "reth-revm",
  "reth-rpc-api",
  "reth-testing-utils",
  "reth-tracing",

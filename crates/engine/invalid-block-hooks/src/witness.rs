@@ -3,11 +3,14 @@ use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{
+    database::{State, StateProviderDatabase},
+    execute::Executor,
+    ConfigureEvm,
+};
 use reth_execution_types::{Evm2AccountInfo, Evm2BundleState};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderBox, StateProviderFactory};
-use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
 use reth_trie::{updates::TrieUpdates, HashedStorage};
@@ -430,7 +433,6 @@ mod tests {
     use reth_provider::test_utils::MockEthProvider;
     use tempfile::TempDir;
 
-    use reth_revm::test_utils::StateProviderTest;
     use reth_testing_utils::generators::{self, random_block, random_eoa_accounts, BlockParams};
     use revm_bytecode::Bytecode as RevmBytecode;
 
@@ -511,8 +513,8 @@ mod tests {
         // Create test data using the fixture function
         let bundle_state = create_bundle_state();
 
-        // Create a State with StateProviderTest
-        let state_provider = StateProviderTest::default();
+        // Create a State with an empty provider.
+        let state_provider = MockEthProvider::default();
         let mut state = State::builder()
             .with_database(StateProviderDatabase::new(Box::new(state_provider) as StateProviderBox))
             .with_bundle_update()
