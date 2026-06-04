@@ -34,7 +34,6 @@ reth-primitives-traits.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-provider.workspace = true
-reth-revm.workspace = true
 reth-transaction-pool.workspace = true
 reth-cli-runner.workspace = true
 reth-cli-util.workspace = true
@@ -86,7 +85,6 @@ default = [
     "jemalloc",
     "otlp",
     "otlp-logs",
-    "reth-revm/portable",
     "js-tracer",
     "jit",
     "keccak-cache-global",
