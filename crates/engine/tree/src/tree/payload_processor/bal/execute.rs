@@ -304,13 +304,17 @@ mod tests {
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE},
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     };
-    use alloy_primitives::{keccak256, B256, U256};
+    use alloy_primitives::{
+        keccak256,
+        map::{AddressMap, B256Map, HashMap},
+        B256, U256,
+    };
     use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
     use reth_evm::{
         context::{
             ExecResultAndState, ExecutionResult, HaltReason, Output, ResultGas, SuccessReason,
         },
-        database::{CacheDB, EmptyDB, State as DatabaseState},
+        database::{EmptyDB, State as DatabaseState},
         gas::TX_GAS_LIMIT_CAP,
     };
     use reth_evm_ethereum::EthEvm2Config;
@@ -318,6 +322,77 @@ mod tests {
     use reth_primitives_traits::{Block as _, Recovered, SealedBlock};
     use reth_tasks::Runtime;
     use std::convert::Infallible;
+
+    #[derive(Clone, Debug, Default)]
+    struct CacheState {
+        accounts: AddressMap<AccountInfo>,
+        contracts: B256Map<Bytecode>,
+        storage: AddressMap<HashMap<U256, U256>>,
+        block_hashes: HashMap<U256, B256>,
+    }
+
+    #[derive(Clone, Debug)]
+    struct CacheDB<ExtDB = EmptyDB> {
+        cache: CacheState,
+        ext: ExtDB,
+    }
+
+    impl<ExtDB: Default> Default for CacheDB<ExtDB> {
+        fn default() -> Self {
+            Self::new(ExtDB::default())
+        }
+    }
+
+    impl<ExtDB> CacheDB<ExtDB> {
+        fn new(ext: ExtDB) -> Self {
+            Self { cache: Default::default(), ext }
+        }
+
+        fn insert_account_info(&mut self, address: alloy_primitives::Address, info: AccountInfo) {
+            if let Some(code) = info.code.clone() {
+                self.cache.contracts.insert(info.code_hash, code);
+            }
+            self.cache.accounts.insert(address, info);
+        }
+    }
+
+    impl<ExtDB: Database> Database for CacheDB<ExtDB> {
+        type Error = ExtDB::Error;
+
+        fn basic(
+            &mut self,
+            address: alloy_primitives::Address,
+        ) -> Result<Option<AccountInfo>, Self::Error> {
+            Ok(self.cache.accounts.get(&address).cloned().or(self.ext.basic(address)?))
+        }
+
+        fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+            if let Some(code) = self.cache.contracts.get(&code_hash) {
+                return Ok(code.clone())
+            }
+            self.ext.code_by_hash(code_hash)
+        }
+
+        fn storage(
+            &mut self,
+            address: alloy_primitives::Address,
+            index: U256,
+        ) -> Result<U256, Self::Error> {
+            if let Some(value) =
+                self.cache.storage.get(&address).and_then(|storage| storage.get(&index))
+            {
+                return Ok(*value)
+            }
+            self.ext.storage(address, index)
+        }
+
+        fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+            if let Some(hash) = self.cache.block_hashes.get(&U256::from(number)) {
+                return Ok(*hash)
+            }
+            self.ext.block_hash(number)
+        }
+    }
 
     /// Wraps a `BlockAccessList` into an `Arc<DecodedBal>` by RLP-encoding the BAL.
     fn to_arc_decoded(bal: BlockAccessList) -> Arc<DecodedBal> {
