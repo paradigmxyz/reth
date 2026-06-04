@@ -192,6 +192,8 @@ impl<R: Read + Seek> EreReader<R> {
         let index =
             index.ok_or_else(|| E2sError::Ssz("ere file missing block index entry".to_string()))?;
 
+        validate_blocks_and_index(&blocks, &index)?;
+
         let mut group = EreGroup::new(blocks, accumulator, index.clone());
         for entry in other_entries {
             group.add_entry(entry);
@@ -237,6 +239,11 @@ impl<W: Write> StreamWriter<W> for EreWriter<W> {
             )));
         }
 
+        // Reject input the reader could not load back: non-uniform optional components would write
+        // a partial section, and an index that disagrees with the blocks would mislead
+        // lookups.
+        validate_blocks_and_index(blocks, &file.group.index)?;
+
         for block in blocks {
             self.writer.write_entry(&block.header.to_entry())?;
         }
@@ -277,6 +284,55 @@ impl<W: Write> StreamWriter<W> for EreWriter<W> {
     fn flush(&mut self) -> Result<(), E2sError> {
         self.writer.flush()
     }
+}
+
+/// Enforce the `ere` layout invariants tying `blocks` to `index`:
+/// - `index.block_count() == blocks.len()` — the index spans exactly the serialized blocks;
+/// - every optional component (receipts, total-difficulty, proof) is set on all blocks or none, so
+///   each per-type section has length `0` or `blocks.len()`;
+/// - `index.component_count() == BlockTuple::component_count()` — the offset stride matches the
+///   number of records per block.
+///
+/// Violations are serializable but not decodable (the sectioned reader cannot realign a partial
+/// section), so they are rejected on both the write and read paths.
+fn validate_blocks_and_index(
+    blocks: &[BlockTuple],
+    index: &DynamicBlockIndex,
+) -> Result<(), E2sError> {
+    if index.block_count() != blocks.len() {
+        return Err(E2sError::Ssz(format!(
+            "ere index covers {} blocks but the file has {}",
+            index.block_count(),
+            blocks.len()
+        )));
+    }
+
+    let Some(first) = blocks.first() else { return Ok(()) };
+    let (has_receipts, has_difficulty, has_proof) =
+        (first.receipts.is_some(), first.total_difficulty.is_some(), first.proof.is_some());
+
+    for block in blocks {
+        if block.receipts.is_some() != has_receipts ||
+            block.total_difficulty.is_some() != has_difficulty ||
+            block.proof.is_some() != has_proof
+        {
+            return Err(E2sError::Ssz(
+                "ere blocks must share the same optional components (each component present for \
+                 all blocks or none)"
+                    .to_string(),
+            ));
+        }
+    }
+
+    if index.component_count() != first.component_count() {
+        return Err(E2sError::Ssz(format!(
+            "ere index component-count {} does not match block component-count {}",
+            index.component_count(),
+            first.component_count()
+        )));
+    }
+
+    Ok(())
 }
 
 /// Zip the per-type sections of an `ere` file back into [`BlockTuple`]s.
@@ -604,6 +660,69 @@ mod tests {
 
         let err = EreReader::new(Cursor::new(&buffer)).read("testnet".to_string());
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_ere_write_rejects_non_uniform_components() {
+        // Block 0 carries receipts, block 1 does not: the sectioned layout would write a partial
+        // receipts section the reader cannot reassemble, so the writer must reject it up front.
+        let blocks = vec![
+            create_test_block(0, 8, true, false, false),
+            create_test_block(1, 8, false, false, false),
+        ];
+        let index = DynamicBlockIndex::new(0, 3, vec![0, 1, 2, 3, 4, 5]);
+        let file = EreFile::new(EreGroup::new(blocks, None, index), EreId::new("testnet", 0, 2));
+
+        let err = EreWriter::new(&mut Vec::new()).write_file(&file);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_ere_write_rejects_index_block_count_mismatch() {
+        // Two blocks but an index that covers only one.
+        let mut file = create_test_ere_file(0, 2, "testnet", false, false, false, false);
+        file.group.index = DynamicBlockIndex::new(0, 2, vec![0, 1]);
+
+        let err = EreWriter::new(&mut Vec::new()).write_file(&file);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_ere_read_rejects_index_block_count_mismatch() {
+        // Two header/body blocks written, but the index declares only one block.
+        let mut buffer = Vec::new();
+        {
+            let mut writer = E2StoreWriter::new(&mut buffer);
+            writer.write_version().unwrap();
+            let b0 = create_test_block(0, 8, false, false, false);
+            let b1 = create_test_block(1, 8, false, false, false);
+            writer.write_entry(&b0.header.to_entry()).unwrap();
+            writer.write_entry(&b1.header.to_entry()).unwrap();
+            writer.write_entry(&b0.body.to_entry()).unwrap();
+            writer.write_entry(&b1.body.to_entry()).unwrap();
+            writer.write_entry(&DynamicBlockIndex::new(0, 2, vec![0, 1]).to_entry()).unwrap();
+            writer.flush().unwrap();
+        }
+
+        let err = EreReader::new(Cursor::new(&buffer)).read("testnet".to_string());
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_ere_write_version_then_write_file_writes_single_version() {
+        // `write_version` followed by `write_file` must not emit two version records; the dedup
+        // lives in `E2StoreWriter`, so no redundant flag is needed on `EreWriter`.
+        let original = create_test_ere_file(0, 1, "testnet", false, false, false, false);
+
+        let mut buffer = Vec::new();
+        {
+            let mut writer = EreWriter::new(&mut buffer);
+            writer.write_version().unwrap();
+            writer.write_file(&original).unwrap();
+        }
+
+        let entries = E2StoreReader::new(Cursor::new(&buffer)).entries().unwrap();
+        assert_eq!(entries.iter().filter(|entry| entry.is_version()).count(), 1);
     }
 
     #[test]
