@@ -199,6 +199,7 @@ where
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
     type Evm = E;
+    type DB = E::DB;
     type Result = EthTxResult<E::HaltReason, TxType>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
@@ -235,6 +236,14 @@ where
 
     fn evm(&self) -> &Self::Evm {
         self.inner.evm()
+    }
+
+    fn db_mut(&mut self) -> &mut Self::DB {
+        self.inner.evm_mut().db_mut()
+    }
+
+    fn db(&self) -> &Self::DB {
+        self.inner.evm().db()
     }
 }
 

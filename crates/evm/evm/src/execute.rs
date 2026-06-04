@@ -245,7 +245,9 @@ pub trait BlockExecutor {
     type Evm: Evm<
         Tx: alloy_evm::FromRecoveredTx<Self::Transaction>
                 + alloy_evm::FromTxWithEncoded<Self::Transaction>,
-    >;
+        >;
+    /// State database used by the executor.
+    type DB;
     /// Result of a transaction execution.
     type Result: TxResult<HaltReason = <Self::Evm as Evm>::HaltReason>;
 
@@ -267,7 +269,7 @@ pub trait BlockExecutor {
         tx_index: usize,
     ) -> Result<GasOutput, BlockExecutionError>
     where
-        <Self::Evm as Evm>::DB: BalIndexedDatabase,
+        Self::DB: BalIndexedDatabase,
     {
         self.execute_transaction_with_index_and_result_closure(tx, tx_index, |_| ())
     }
@@ -280,7 +282,7 @@ pub trait BlockExecutor {
         f: impl FnOnce(&Self::Result),
     ) -> Result<GasOutput, BlockExecutionError>
     where
-        <Self::Evm as Evm>::DB: BalIndexedDatabase,
+        Self::DB: BalIndexedDatabase,
     {
         self.db_mut().set_bal_index(tx_index as u64 + 1);
         self.execute_transaction_with_result_closure(tx, f)
@@ -343,14 +345,10 @@ pub trait BlockExecutor {
     fn evm(&self) -> &Self::Evm;
 
     /// Exposes mutable reference to the executor state database.
-    fn db_mut(&mut self) -> &mut <Self::Evm as Evm>::DB {
-        self.evm_mut().db_mut()
-    }
+    fn db_mut(&mut self) -> &mut Self::DB;
 
     /// Exposes immutable reference to the executor state database.
-    fn db(&self) -> &<Self::Evm as Evm>::DB {
-        self.evm().db()
-    }
+    fn db(&self) -> &Self::DB;
 
     /// Exposes the block environment used by this executor.
     fn block_env(&self) -> &<Self::Evm as Evm>::BlockEnv {
@@ -395,6 +393,7 @@ where
     type Transaction = T::Transaction;
     type Receipt = T::Receipt;
     type Evm = T::Evm;
+    type DB = <T::Evm as Evm>::DB;
     type Result = T::Result;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
@@ -444,6 +443,14 @@ where
 
     fn evm(&self) -> &Self::Evm {
         AlloyBlockExecutor::evm(self)
+    }
+
+    fn db_mut(&mut self) -> &mut Self::DB {
+        self.evm_mut().db_mut()
+    }
+
+    fn db(&self) -> &Self::DB {
+        self.evm().db()
     }
 
     fn receipts(&self) -> &[Self::Receipt] {
@@ -1041,12 +1048,12 @@ pub trait BlockBuilder {
     }
 
     /// Helper to access inner executor state mutably.
-    fn db_mut(&mut self) -> &mut <<Self::Executor as BlockExecutor>::Evm as Evm>::DB {
+    fn db_mut(&mut self) -> &mut <Self::Executor as BlockExecutor>::DB {
         self.executor_mut().db_mut()
     }
 
     /// Helper to access inner executor state.
-    fn db(&self) -> &<<Self::Executor as BlockExecutor>::Evm as Evm>::DB {
+    fn db(&self) -> &<Self::Executor as BlockExecutor>::DB {
         self.executor().db()
     }
 
@@ -1129,8 +1136,8 @@ where
             Spec = <F::EvmFactory as EvmFactory>::Spec,
             HaltReason = <F::EvmFactory as EvmFactory>::HaltReason,
             BlockEnv = <F::EvmFactory as EvmFactory>::BlockEnv,
-            DB = &'a mut State<DB>,
         >,
+        DB = &'a mut State<DB>,
         Transaction = N::SignedTx,
         Receipt = N::Receipt,
     >,

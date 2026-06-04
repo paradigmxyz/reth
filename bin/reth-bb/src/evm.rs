@@ -402,6 +402,7 @@ where
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
     type Evm = EthEvm<DB, I, P>;
+    type DB = DB;
     type Result = EthTxResult<HaltReason, alloy_consensus::TxType>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
@@ -502,6 +503,14 @@ where
 
     fn evm(&self) -> &Self::Evm {
         self.inner().evm()
+    }
+
+    fn db_mut(&mut self) -> &mut Self::DB {
+        self.inner_mut().evm_mut().db_mut()
+    }
+
+    fn db(&self) -> &Self::DB {
+        self.inner().evm().db()
     }
 
     fn receipts(&self) -> &[Self::Receipt] {

@@ -1598,6 +1598,7 @@ where
     type Transaction = RethEthereumTxEnvelope;
     type Receipt = R::Receipt;
     type Evm = E;
+    type DB = E::DB;
     type Result = Evm2TxExecutionResult;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
@@ -1755,6 +1756,14 @@ where
 
     fn evm(&self) -> &Self::Evm {
         &self.evm
+    }
+
+    fn db_mut(&mut self) -> &mut Self::DB {
+        self.evm.db_mut()
+    }
+
+    fn db(&self) -> &Self::DB {
+        self.evm.db()
     }
 
     fn receipts(&self) -> &[Self::Receipt] {
