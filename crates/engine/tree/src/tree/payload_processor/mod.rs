@@ -39,6 +39,7 @@ use reth_trie_sparse::{
     ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie, SparseTrieRetainedPaths,
 };
 use std::{
+    marker::PhantomData,
     ops::Not,
     sync::{
         atomic::{AtomicBool, AtomicUsize},
@@ -118,10 +119,13 @@ where
     /// Whether state cache should be disable
     disable_state_cache: bool,
     /// Determines how to configure the evm for execution.
+    #[cfg(any())]
     evm_config: Evm,
     /// Whether precompile cache should be disabled.
+    #[cfg(any())]
     precompile_cache_disabled: bool,
     /// Precompile cache map.
+    #[cfg(any())]
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// A preserved `SparseStateTrie`, kept around as a cache of already revealed trie nodes and to
     /// re-use allocated memory. Stored with the block hash it was computed for to enable trie
@@ -133,6 +137,9 @@ where
     sparse_trie_max_hot_accounts: usize,
     /// Whether sparse trie cache pruning is fully disabled.
     disable_sparse_trie_cache_pruning: bool,
+    /// Keeps the payload processor typed by its configured EVM while revm-backed prewarming is
+    /// parked.
+    _evm: PhantomData<Evm>,
     /// Whether to disable BAL-driven parallel state root computation.
     /// Only valid when BAL parallel execution is also disabled.
     disable_bal_parallel_state_root: bool,
@@ -181,9 +188,9 @@ where
     /// Creates a new payload processor.
     pub fn new(
         executor: Runtime,
-        evm_config: Evm,
+        _evm_config: Evm,
         config: &TreeConfig,
-        precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+        _precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     ) -> Self {
         Self {
             executor,
@@ -191,14 +198,18 @@ where
             trie_metrics: Default::default(),
             cross_block_cache_size: config.cross_block_cache_size(),
             disable_transaction_prewarming: config.disable_prewarming(),
-            evm_config,
+            #[cfg(any())]
+            evm_config: _evm_config,
             disable_state_cache: config.disable_state_cache(),
+            #[cfg(any())]
             precompile_cache_disabled: config.precompile_cache_disabled(),
-            precompile_cache_map,
+            #[cfg(any())]
+            precompile_cache_map: _precompile_cache_map,
             sparse_state_trie: SharedPreservedSparseTrie::default(),
             sparse_trie_max_hot_slots: config.sparse_trie_max_hot_slots(),
             sparse_trie_max_hot_accounts: config.sparse_trie_max_hot_accounts(),
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
+            _evm: PhantomData,
             cache_metrics: (!config.disable_cache_metrics())
                 .then(|| CachedStateMetrics::zeroed(CachedStateMetricsSource::Engine)),
             cache_state_metrics: (!config.disable_cache_metrics())
@@ -596,6 +607,7 @@ where
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
+            #[cfg(any())]
             evm_config: self.evm_config.clone(),
             saved_cache: saved_cache.clone(),
             provider: provider_builder,
@@ -605,7 +617,9 @@ where
             cache_state_metrics: self.cache_state_metrics.clone(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::clone(&executed_tx_index),
+            #[cfg(any())]
             precompile_cache_disabled: self.precompile_cache_disabled,
+            #[cfg(any())]
             precompile_cache_map: self.precompile_cache_map.clone(),
             disable_bal_parallel_state_root: self.disable_bal_parallel_state_root,
             disable_bal_batch_io: self.disable_bal_batch_io,
