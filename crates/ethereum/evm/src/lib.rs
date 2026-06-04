@@ -136,6 +136,43 @@ impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory> {
     }
 }
 
+impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory>
+where
+    ChainSpec: EthChainSpec<Header = Header> + EthereumHardforks,
+{
+    /// Returns the evm2 spec id for the provided block header.
+    pub fn evm2_spec_for_header(&self, header: &Header) -> evm2::SpecId {
+        evm2_spec(self.chain_spec(), header)
+    }
+
+    /// Returns the evm2 block environment for the provided block header.
+    pub fn evm2_block_env_for_header(&self, header: &Header) -> evm2::env::BlockEnv {
+        evm2_block_env_with_blob_params(
+            header,
+            self.chain_spec().blob_params_at_timestamp(header.timestamp),
+        )
+    }
+
+    /// Returns the evm2 spec id for the provided engine payload.
+    #[cfg(feature = "std")]
+    pub fn evm2_spec_for_payload(&self, payload: &ExecutionData) -> evm2::SpecId {
+        evm2_spec_by_timestamp_and_block_number(
+            self.chain_spec(),
+            payload.payload.timestamp(),
+            payload.payload.block_number(),
+        )
+    }
+
+    /// Returns the evm2 block environment for the provided engine payload.
+    #[cfg(feature = "std")]
+    pub fn evm2_block_env_for_payload(&self, payload: &ExecutionData) -> evm2::env::BlockEnv {
+        evm2_payload_block_env(
+            payload,
+            self.chain_spec().blob_params_at_timestamp(payload.payload.timestamp()),
+        )
+    }
+}
+
 /// Adapter that lets alloy's Ethereum block executor read Reth chain specs without making the
 /// chainspec crate depend on alloy-evm.
 #[derive(Debug, Clone)]
@@ -438,6 +475,23 @@ mod tests {
         // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
         // ChainSpec
         assert_eq!(cfg_env.chain_id, chain_spec.chain().id());
+    }
+
+    #[test]
+    fn test_evm2_block_env_for_header_uses_chain_blob_params() {
+        let chain_spec = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(Genesis::default())
+            .cancun_activated()
+            .build();
+        let blob_params = chain_spec.blob_params_at_timestamp(1).expect("cancun blob params");
+        let excess_blob_gas = 1_000_000;
+        let header =
+            Header { timestamp: 1, excess_blob_gas: Some(excess_blob_gas), ..Default::default() };
+
+        let env = EthEvmConfig::new(Arc::new(chain_spec)).evm2_block_env_for_header(&header);
+
+        assert_eq!(env.blob_basefee, U256::from(blob_params.calc_blob_fee(excess_blob_gas)));
     }
 
     #[test]
