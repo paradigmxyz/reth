@@ -18,7 +18,6 @@ reth-primitives-traits = { workspace = true, features = ["rpc-compat"] }
 reth-errors.workspace = true
 reth-evm.workspace = true
 reth-storage-api.workspace = true
-reth-revm.workspace = true
 reth-rpc-convert.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-transaction-pool.workspace = true
@@ -31,7 +30,6 @@ reth-trie-common = { workspace = true, features = ["eip1186"] }
 reth-prune-types.workspace = true
 
 # ethereum
-alloy-evm = { workspace = true, features = ["overrides", "call-util"] }
 alloy-rlp.workspace = true
 alloy-serde.workspace = true
 alloy-eips.workspace = true
