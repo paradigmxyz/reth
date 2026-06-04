@@ -29,7 +29,6 @@ reth-rpc-engine-api.workspace = true
 reth-revm = { workspace = true, features = ["witness"] }
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-rpc-convert.workspace = true
-revm-inspectors.workspace = true
 reth-network-peers = { workspace = true, features = ["secp256k1"] }
 reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
@@ -104,7 +103,6 @@ jsonrpsee = { workspace = true, features = ["client"] }
 
 [features]
 js-tracer = [
-    "revm-inspectors/js-tracer",
     "reth-rpc-eth-types/js-tracer",
     "reth-rpc-eth-api/js-tracer",
 ]

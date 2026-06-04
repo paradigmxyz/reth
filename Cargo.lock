@@ -10073,7 +10073,6 @@ dependencies = [
  "reth-transaction-pool",
  "reth-trie-common",
  "revm",
- "revm-inspectors",
  "serde",
  "serde_json",
  "sha2 0.10.9",
