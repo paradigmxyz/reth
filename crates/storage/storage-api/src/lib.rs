@@ -48,6 +48,9 @@ pub use stage_checkpoint::*;
 mod state;
 pub use state::*;
 
+mod evm2;
+pub use evm2::*;
+
 mod storage;
 pub use storage::*;
 

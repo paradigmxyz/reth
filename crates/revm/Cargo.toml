@@ -26,9 +26,6 @@ alloy-rpc-types-debug = { workspace = true, optional = true }
 # revm
 revm.workspace = true
 
-# evm2
-evm2 = { workspace = true, optional = true }
-
 [dev-dependencies]
 reth-trie.workspace = true
 reth-ethereum-forks.workspace = true
@@ -45,7 +42,6 @@ std = [
     "reth-ethereum-forks/std",
     "reth-storage-api/std",
     "reth-storage-errors/std",
-    "evm2?/std",
 ]
 witness = ["dep:reth-trie", "dep:alloy-rlp", "dep:alloy-rpc-types-debug"]
 test-utils = [
@@ -68,7 +64,6 @@ optional-block-gas-limit = ["revm/optional_block_gas_limit"]
 optional-eip3541 = ["revm/optional_eip3541"]
 optional-eip3607 = ["revm/optional_eip3607"]
 optional-no-base-fee = ["revm/optional_no_base_fee"]
-evm2 = ["dep:evm2"]
 optional-checks = [
     "optional-balance-check",
     "optional-block-gas-limit",
