@@ -1629,22 +1629,6 @@ where
     fn commit_transaction(&mut self, output: Self::Result) -> GasOutput {
         let Evm2TxExecutionResult { evm2_result, evm_state, blob_gas_used, tx_type, .. } = output;
         let gas_used = evm2_result.gas_used;
-        {
-            let target = Address::from([
-                0xff, 0x29, 0x25, 0xf4, 0xcd, 0x8b, 0xed, 0x5e, 0xac, 0xbf, 0xb1, 0xf5, 0xc2,
-                0x6d, 0x08, 0xf8, 0x09, 0x22, 0xb6, 0xca,
-            ]);
-            if evm2_result.state_changes.accounts.contains_key(&target) ||
-                evm2_result.state_changes.storage.contains_key(&target)
-            {
-                eprintln!(
-                    "evm2 tx gas={gas_used} target_account={:?} target_storage={:?} revm_state={:?}",
-                    evm2_result.state_changes.accounts.get(&target),
-                    evm2_result.state_changes.storage.get(&target),
-                    evm_state.get(&target)
-                );
-            }
-        }
 
         self.evm2.result.cumulative_tx_gas_used =
             self.evm2.result.cumulative_tx_gas_used.saturating_add(gas_used);
