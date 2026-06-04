@@ -64,8 +64,10 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, BlockBodyReader, MetadataProvider, MetadataWriter,
-    NodePrimitivesProvider, StateProvider, StateReader, StateWriteConfig, StorageChangeSetReader,
-    StoragePath, StorageSettingsCache, TryIntoHistoricalStateProvider, WriteStateInput,
+    NodePrimitivesProvider, PlainStateReverts, PlainStorageChangeset, PlainStorageRevert,
+    RevertToSlot, StateChangeset, StateProvider, StateReader, StateWriteConfig,
+    StorageChangeSetReader, StoragePath, StorageSettingsCache, TryIntoHistoricalStateProvider,
+    WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_trie::{
@@ -73,12 +75,6 @@ use reth_trie::{
     HashedPostStateSorted,
 };
 use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
-use revm_database::{
-    bytecode::Bytecode as RevmBytecode,
-    state::AccountInfo as RevmAccountInfo,
-    states::{PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset},
-    RevertToSlot,
-};
 use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
@@ -119,12 +115,10 @@ pub(crate) fn evm2_bundle_to_plain_state_and_reverts(
         if is_value_known.is_not_known() || account.original != account.current {
             accounts.push((
                 *address,
-                account.current.as_ref().map(|info| RevmAccountInfo {
+                account.current.as_ref().map(|info| Account {
                     balance: info.balance,
                     nonce: info.nonce,
-                    code_hash: info.code_hash,
-                    account_id: None,
-                    code: None,
+                    bytecode_hash: (!info.code_hash.is_zero()).then_some(info.code_hash),
                 }),
             ));
         }
@@ -153,7 +147,7 @@ pub(crate) fn evm2_bundle_to_plain_state_and_reverts(
         .contracts()
         .iter()
         .filter(|(hash, _)| **hash != KECCAK_EMPTY)
-        .map(|(hash, bytecode)| (*hash, RevmBytecode::new_raw(bytecode.original_bytes())))
+        .map(|(hash, bytecode)| (*hash, Bytecode::new_raw(bytecode.original_bytes())))
         .collect();
 
     let mut reverts = PlainStateReverts::with_capacity(bundle.block_reverts().len());
@@ -165,12 +159,10 @@ pub(crate) fn evm2_bundle_to_plain_state_and_reverts(
                 .map(|(address, account)| {
                     (
                         *address,
-                        account.as_ref().map(|info| RevmAccountInfo {
+                        account.as_ref().map(|info| Account {
                             balance: info.balance,
                             nonce: info.nonce,
-                            code_hash: info.code_hash,
-                            account_id: None,
-                            code: None,
+                            bytecode_hash: (!info.code_hash.is_zero()).then_some(info.code_hash),
                         }),
                     )
                 })
@@ -2549,7 +2541,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     .state()
                     .contracts()
                     .iter()
-                    .map(|(h, b)| (*h, Bytecode(RevmBytecode::new_raw(b.original_bytes())))),
+                    .map(|(h, b)| (*h, Bytecode::new_raw(b.original_bytes()))),
             )?;
             return Ok(());
         }
@@ -2718,7 +2710,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             let block_number = first_block + block_index as BlockNumber;
             let changeset = account_block_reverts
                 .into_iter()
-                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
+                .map(|(address, info)| AccountBeforeTx { address, info })
                 .collect::<Vec<_>>();
             let mut account_changesets_writer =
                 EitherWriter::new_account_changesets(self, block_number)?;
@@ -2786,9 +2778,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
         // Write bytecode
         tracing::trace!(len = changes.contracts.len(), "Writing bytecodes");
-        self.write_bytecodes(
-            changes.contracts.into_iter().map(|(hash, bytecode)| (hash, Bytecode(bytecode))),
-        )?;
+        self.write_bytecodes(changes.contracts)?;
 
         Ok(())
     }

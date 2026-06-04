@@ -85,6 +85,7 @@ serde = [
     "alloy-consensus/serde",
     "alloy-rpc-types-engine/serde",
     "alloy-eip7928/serde",
+    "evm2?/serde",
 ]
 
 serde-bincode-compat = [
