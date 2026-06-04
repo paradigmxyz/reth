@@ -187,7 +187,6 @@ where
     let mut db = State::builder()
         .with_database(cached_reads.as_db_mut(state))
         .with_bundle_update()
-        .with_bal_builder_if(false)
         // .with_bal_builder_if(is_amsterdam)
         .build();
 
