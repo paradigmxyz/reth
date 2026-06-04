@@ -43,7 +43,7 @@ use crate::tree::{
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     multiproof::{StateRootComputeOutcome, StateRootHandle},
     payload_processor::PayloadProcessor,
-    precompile_cache::{CachedPrecompileMetrics, Evm2CachedPrecompiles, PrecompileCacheMap},
+    precompile_cache::{Evm2CachedPrecompiles, PrecompileCacheMap},
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
@@ -195,8 +195,6 @@ where
     payload_processor: PayloadProcessor<Evm>,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
-    /// Precompile cache metrics.
-    precompile_cache_metrics: HashMap<alloy_primitives::Address, CachedPrecompileMetrics>,
     /// Hook to call when invalid blocks are encountered.
     #[debug(skip)]
     invalid_block_hook: Box<dyn InvalidBlockHook<Evm::Primitives>>,
@@ -258,7 +256,6 @@ where
             evm_config,
             payload_processor,
             precompile_cache_map,
-            precompile_cache_metrics: HashMap::new(),
             config,
             invalid_block_hook,
             metrics: EngineApiMetrics::default(),
