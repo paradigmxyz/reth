@@ -24,6 +24,7 @@ pub(crate) const fn eth_payload_attributes(timestamp: u64) -> PayloadAttributes 
         suggested_fee_recipient: Address::ZERO,
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
+        target_gas_limit: None,
         slot_number: None,
     }
 }
@@ -37,6 +38,7 @@ pub(crate) const fn eth_payload_attributes_shanghai(timestamp: u64) -> PayloadAt
         suggested_fee_recipient: Address::ZERO,
         withdrawals: Some(vec![]),
         parent_beacon_block_root: None,
+        target_gas_limit: None,
         slot_number: None,
     }
 }
@@ -54,6 +56,7 @@ pub(crate) const fn eth_payload_attributes_amsterdam(timestamp: u64) -> PayloadA
         suggested_fee_recipient: Address::ZERO,
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
+        target_gas_limit: Some(30_000_000),
         slot_number: Some(timestamp),
     }
 }

@@ -2045,6 +2045,7 @@ mod tests {
             suggested_fee_recipient: Address::ZERO,
             withdrawals: Some(vec![]),
             parent_beacon_block_root: None,
+            target_gas_limit: None,
             slot_number: None,
         };
         let custody_columns = B128::from(0b1010u128);
@@ -2100,6 +2101,7 @@ mod tests {
             withdrawals: Some(vec![]),
             // Invalid for V3/Cancun, but should be ignored if forkchoice is SYNCING.
             parent_beacon_block_root: None,
+            target_gas_limit: None,
             slot_number: None,
         };
 
@@ -2148,6 +2150,7 @@ mod tests {
             suggested_fee_recipient: Address::ZERO,
             withdrawals: Some(vec![]),
             parent_beacon_block_root: None,
+            target_gas_limit: None,
             slot_number: None,
         };
 

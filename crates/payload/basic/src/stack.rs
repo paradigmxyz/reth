@@ -86,6 +86,13 @@ where
             Self::Right(r) => r.slot_number(),
         }
     }
+
+    fn target_gas_limit(&self) -> Option<u64> {
+        match self {
+            Self::Left(l) => l.target_gas_limit(),
+            Self::Right(r) => r.target_gas_limit(),
+        }
+    }
 }
 
 /// this structure enables the chaining of multiple `PayloadBuilder` implementations,

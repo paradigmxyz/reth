@@ -37,6 +37,7 @@ reth-rpc-eth-types.workspace = true
 reth-engine-local.workspace = true
 reth-engine-primitives = { workspace = true, features = ["std"] }
 reth-payload-primitives.workspace = true
+reth-payload-builder.workspace = true
 # ethereum
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
@@ -55,7 +56,9 @@ revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg", "memory_lim
 # misc
 eyre.workspace = true
 ethereum_ssz.workspace = true
+http.workspace = true
 http-body-util.workspace = true
+serde_json.workspace = true
 tower.workspace = true
 
 [dev-dependencies]
@@ -80,7 +83,6 @@ alloy-consensus.workspace = true
 
 futures.workspace = true
 tokio.workspace = true
-serde_json.workspace = true
 rand.workspace = true
 serde.workspace = true
 enr = { workspace = true, features = ["rust-secp256k1"] }
