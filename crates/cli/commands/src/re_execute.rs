@@ -12,7 +12,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
-use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
+use reth_evm::{ConfigureEvm, ConfigureEvm2BlockExecutor};
 use reth_node_core::args::JitArgs;
 use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
 use reth_provider::{
@@ -143,16 +143,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 let executor_lifetime = Duration::from_secs(600);
                 let provider = provider_factory.database_provider_ro()?.disable_long_read_transaction_safety();
 
-                let db_at = {
-                    |block_number: u64| {
-                        StateProviderDatabase(
-                            provider
-                                .history_by_block_number(block_number)
-                                .unwrap(),
-                        )
-                    }
-                };
-
                 loop {
                     if cancellation.is_cancelled() {
                         break;
@@ -166,7 +156,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     }
                     let chunk_end = (chunk_start + blocks_per_chunk).min(max_block);
 
-                    let mut executor = evm_config.batch_executor(db_at(chunk_start - 1));
+                    let mut bundle: Option<Evm2BundleState> = None;
                     let mut executor_created = Instant::now();
 
                     'blocks: for block in chunk_start..chunk_end {
@@ -178,22 +168,26 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             .recovered_block(block.into(), TransactionVariant::NoHash)?
                             .unwrap();
 
-                        let result = match executor.execute_one(&block) {
-                            Ok(result) => result,
+                        let state_provider =
+                            provider.history_by_block_number(block.number().saturating_sub(1))?;
+                        let output = match evm_config
+                            .execute_evm2_block_with_state_provider_ref(&*state_provider, &block)
+                        {
+                            Ok(output) => output,
                             Err(err) => {
                                 if skip_invalid_blocks {
-                                    executor =
-                                        evm_config.batch_executor(db_at(block.number()));
+                                    bundle = None;
                                     let _ =
-                                        info_tx.send((block, eyre::Report::new(err)));
+                                        info_tx.send((block, eyre::eyre!(err.to_string())));
                                     continue
                                 }
-                                return Err(err.into())
+                                return Err(eyre::eyre!(err.to_string()))
                             }
                         };
+                        let result = &output.result;
 
                         if let Err(err) = consensus
-                            .validate_block_post_execution(&block, &result, None,None)
+                            .validate_block_post_execution(&block, result, None,None)
                             .wrap_err_with(|| {
                                 format!(
                                     "Failed to validate block {} {}",
@@ -241,8 +235,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                                         error!(number=?block.number(), ?mismatch, "Gas usage mismatch");
                                         if skip_invalid_blocks {
-                                            executor = evm_config
-                                                .batch_executor(db_at(block.number()));
+                                            bundle = None;
                                             let _ = info_tx.send((block, err));
                                             continue 'blocks;
                                         }
@@ -257,43 +250,26 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         }
                         let _ = stats_tx.send((block.number(), block.gas_used()));
 
-                        // Reset DB once in a while to avoid OOM or read tx timeouts
-                        if executor.size_hint() > 5_000_000 ||
+                        match &mut bundle {
+                            Some(bundle) => bundle.extend(output.state),
+                            None => bundle = Some(output.state),
+                        }
+
+                        // Verify and drop accumulated state once in a while to avoid OOM.
+                        if bundle.as_ref().map(bundle_size_hint).unwrap_or_default() > 5_000_000 ||
                             executor_created.elapsed() > executor_lifetime
                         {
                             let last_block = block.number();
-                            let old_executor = std::mem::replace(
-                                &mut executor,
-                                evm_config.batch_executor(db_at(last_block)),
-                            );
-                            let revm_bundle = old_executor.into_state().take_bundle();
-                            let first_block =
-                                last_block + 1 - revm_bundle.reverts.len() as u64;
-                            let bundle = reth_evm::execute::revm_bundle_to_evm2(
-                                revm_bundle,
-                                first_block,
-                            );
-                            verify_bundle_against_changesets(
-                                &provider,
-                                &bundle,
-                                last_block,
-                            )?;
+                            let verified_bundle = bundle.take().expect("bundle has just been extended");
+                            verify_bundle_against_changesets(&provider, &verified_bundle, last_block)?;
                             executor_created = Instant::now();
                         }
                     }
 
                     // Full verification at chunk end for remaining unverified blocks
-                    let revm_bundle = executor.into_state().take_bundle();
-                    let first_block = chunk_end - revm_bundle.reverts.len() as u64;
-                    let bundle = reth_evm::execute::revm_bundle_to_evm2(
-                        revm_bundle,
-                        first_block,
-                    );
-                    verify_bundle_against_changesets(
-                        &provider,
-                        &bundle,
-                        chunk_end - 1,
-                    )?;
+                    if let Some(bundle) = bundle {
+                        verify_bundle_against_changesets(&provider, &bundle, chunk_end - 1)?;
+                    }
                 }
 
                 eyre::Ok(())
@@ -379,6 +355,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
         Ok(())
     }
+}
+
+fn bundle_size_hint(bundle: &Evm2BundleState) -> usize {
+    bundle.accounts().len() +
+        bundle.storage().values().map(|storage| storage.slots.len()).sum::<usize>() +
+        bundle.contracts().len()
 }
 
 /// Verifies reverts against database changesets.
