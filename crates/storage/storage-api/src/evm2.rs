@@ -1,7 +1,11 @@
 //! Evm2 database adapter for state providers.
 
-use crate::{AccountReader, BlockHashReader, BytecodeReader, StateProvider};
-use alloy_primitives::{Address, BlockNumber, B256, U256};
+use crate::{
+    AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
+    StateProvider, StateRootProvider, StorageRootProvider,
+};
+use alloc::vec::Vec;
+use alloy_primitives::{Address, BlockNumber, Bytes, B256, U256};
 use core::{
     mem,
     ops::{Deref, DerefMut},
@@ -12,8 +16,13 @@ use evm2::{
     evm::{AccountInfo, Database},
     interpreter::Word,
 };
-use reth_primitives_traits::Account;
-use reth_storage_errors::provider::ProviderError;
+use reth_execution_types::Evm2BundleState;
+use reth_primitives_traits::{Account, Bytecode as RethBytecode};
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use reth_trie_common::{
+    updates::TrieUpdates, AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage,
+    KeccakKeyHasher, MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+};
 
 /// An evm2 [`Database`] implementation backed by a Reth [`StateProvider`].
 #[derive(Clone)]
@@ -151,6 +160,160 @@ impl Database for BorrowedEvm2StateProviderDatabase {
     fn get_block_hash(&mut self, number: &Word) -> Result<Option<B256>, Self::Error> {
         let number = u256_to_u64_saturating(*number);
         BlockHashReader::block_hash(self.provider(), number)
+    }
+}
+
+/// A borrowed [`StateProvider`] that overlays uncommitted evm2 state on top of a base provider.
+pub struct Evm2OverlayStateProvider<'a> {
+    base: &'a dyn StateProvider,
+    overlay: &'a Evm2BundleState,
+}
+
+impl core::fmt::Debug for Evm2OverlayStateProvider<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Evm2OverlayStateProvider").finish_non_exhaustive()
+    }
+}
+
+impl<'a> Evm2OverlayStateProvider<'a> {
+    /// Creates a new overlay provider.
+    pub const fn new(base: &'a dyn StateProvider, overlay: &'a Evm2BundleState) -> Self {
+        Self { base, overlay }
+    }
+}
+
+impl AccountReader for Evm2OverlayStateProvider<'_> {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+        if let Some(account) = self.overlay.account(address) {
+            return Ok(account)
+        }
+
+        self.base.basic_account(address)
+    }
+}
+
+impl BytecodeReader for Evm2OverlayStateProvider<'_> {
+    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<RethBytecode>> {
+        if let Some(bytecode) = self.overlay.bytecode(code_hash) {
+            return Ok(Some(bytecode))
+        }
+
+        self.base.bytecode_by_hash(code_hash)
+    }
+}
+
+impl BlockHashReader for Evm2OverlayStateProvider<'_> {
+    fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
+        self.base.block_hash(number)
+    }
+
+    fn canonical_hashes_range(
+        &self,
+        start: BlockNumber,
+        end: BlockNumber,
+    ) -> ProviderResult<Vec<B256>> {
+        self.base.canonical_hashes_range(start, end)
+    }
+}
+
+impl StateRootProvider for Evm2OverlayStateProvider<'_> {
+    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
+        self.base.state_root(hashed_state)
+    }
+
+    fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
+        self.base.state_root_from_nodes(input)
+    }
+
+    fn state_root_with_updates(
+        &self,
+        hashed_state: HashedPostState,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        self.base.state_root_with_updates(hashed_state)
+    }
+
+    fn state_root_from_nodes_with_updates(
+        &self,
+        input: TrieInput,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        self.base.state_root_from_nodes_with_updates(input)
+    }
+}
+
+impl StorageRootProvider for Evm2OverlayStateProvider<'_> {
+    fn storage_root(
+        &self,
+        address: Address,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<B256> {
+        self.base.storage_root(address, hashed_storage)
+    }
+
+    fn storage_proof(
+        &self,
+        address: Address,
+        slot: B256,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageProof> {
+        self.base.storage_proof(address, slot, hashed_storage)
+    }
+
+    fn storage_multiproof(
+        &self,
+        address: Address,
+        slots: &[B256],
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageMultiProof> {
+        self.base.storage_multiproof(address, slots, hashed_storage)
+    }
+}
+
+impl StateProofProvider for Evm2OverlayStateProvider<'_> {
+    fn proof(
+        &self,
+        input: TrieInput,
+        address: Address,
+        slots: &[B256],
+    ) -> ProviderResult<AccountProof> {
+        self.base.proof(input, address, slots)
+    }
+
+    fn multiproof(
+        &self,
+        input: TrieInput,
+        targets: MultiProofTargets,
+    ) -> ProviderResult<MultiProof> {
+        self.base.multiproof(input, targets)
+    }
+
+    fn witness(
+        &self,
+        input: TrieInput,
+        target: HashedPostState,
+        mode: ExecutionWitnessMode,
+    ) -> ProviderResult<Vec<Bytes>> {
+        self.base.witness(input, target, mode)
+    }
+}
+
+impl HashedPostStateProvider for Evm2OverlayStateProvider<'_> {
+    fn hashed_post_state(&self, bundle_state: &Evm2BundleState) -> HashedPostState {
+        bundle_state.hashed_post_state::<KeccakKeyHasher>()
+    }
+}
+
+impl StateProvider for Evm2OverlayStateProvider<'_> {
+    fn storage(&self, account: Address, storage_key: B256) -> ProviderResult<Option<U256>> {
+        let slot = U256::from_be_bytes(storage_key.0);
+        if let Some(value) = self.overlay.storage_slot(&account, slot) {
+            return Ok(Some(value))
+        }
+
+        if self.overlay.storage().get(&account).map(|storage| storage.wipe).unwrap_or_default() {
+            return Ok(Some(U256::ZERO))
+        }
+
+        self.base.storage(account, storage_key)
     }
 }
 

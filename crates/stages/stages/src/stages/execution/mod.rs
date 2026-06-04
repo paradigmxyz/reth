@@ -7,7 +7,7 @@ use reth_config::config::ExecutionConfig;
 use reth_consensus::FullConsensus;
 use reth_db::{static_file::HeaderMask, tables};
 use reth_evm::{metrics::ExecutorMetrics, ConfigureEvm2BlockExecutor};
-use reth_execution_types::Chain;
+use reth_execution_types::{Chain, Evm2BundleState};
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
@@ -22,6 +22,7 @@ use reth_stages_api::{
     UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
+use reth_storage_api::Evm2OverlayStateProvider;
 use reth_trie::KeccakKeyHasher;
 use std::{
     cmp::{max, Ordering},
@@ -315,13 +316,25 @@ where
         let mut fetch_block_duration = Duration::default();
         let mut execution_duration = Duration::default();
 
+        let mut last_block = start_block;
+        let mut last_execution_duration = Duration::default();
+        let mut last_cumulative_gas = 0;
+        let mut last_log_instant = Instant::now();
+        let log_duration = Duration::from_secs(10);
+
         debug!(target: "sync::stages::execution", start = start_block, end = max_block, "Executing range");
 
         // Execute block range
         let mut cumulative_gas = 0;
+        let batch_start = Instant::now();
 
         let mut blocks = Vec::new();
-        let mut state: Option<ExecutionOutcome<<E::Primitives as NodePrimitives>::Receipt>> = None;
+        let mut state = ExecutionOutcome::new(
+            Evm2BundleState::new(start_block),
+            Vec::new(),
+            start_block,
+            Vec::new(),
+        );
         for block_number in start_block..=max_block {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -343,6 +356,7 @@ where
 
             let output = self.metrics.metered_one(&block, |input| {
                 let state_provider = LatestStateProviderRef::new(provider);
+                let state_provider = Evm2OverlayStateProvider::new(&state_provider, state.state());
                 self.evm_config
                     .execute_evm2_block_with_state_provider_ref(&state_provider, input)
                     .map_err(|error| StageError::Block {
@@ -362,14 +376,25 @@ where
                     error: BlockErrorKind::Validation(err),
                 })
             }
-            let block_state = ExecutionOutcome::single(block_number, output);
-            if let Some(state) = &mut state {
-                state.extend(block_state);
-            } else {
-                state = Some(block_state);
-            }
+            state.extend(ExecutionOutcome::single(block_number, output));
 
             execution_duration += execute_start.elapsed();
+
+            // Log execution throughput
+            if last_log_instant.elapsed() >= log_duration {
+                info!(
+                    target: "sync::stages::execution",
+                    start = last_block,
+                    end = block_number,
+                    throughput = format_gas_throughput(cumulative_gas - last_cumulative_gas, execution_duration - last_execution_duration),
+                    "Executed block range"
+                );
+
+                last_block = block_number + 1;
+                last_execution_duration = execution_duration;
+                last_cumulative_gas = cumulative_gas;
+                last_log_instant = Instant::now();
+            }
 
             stage_progress = block_number;
             stage_checkpoint.progress.processed += block.header().gas_used();
@@ -379,15 +404,19 @@ where
                 blocks.push(block);
             }
 
-            // evm2 execution currently accumulates state per block. Commit after one block so the
-            // next stage iteration reads the just-written state instead of relying on an
-            // in-memory batch overlay.
-            break
+            // Check if we should commit now
+            if self.thresholds.is_end_of_batch(
+                block_number - start_block,
+                evm2_state_size_hint(state.state()) as u64,
+                cumulative_gas,
+                batch_start.elapsed(),
+            ) {
+                break
+            }
         }
 
         // prepare execution output for writing
         let time = Instant::now();
-        let mut state = state.expect("execution loop processed at least one block");
         let write_preparation_duration = time.elapsed();
 
         // log the gas per second for the range we just executed
@@ -718,6 +747,12 @@ where
     debug!(target: "sync::stages::execution", ?range, ?duration, "Finished calculating gas used from headers");
 
     Ok(gas_total)
+}
+
+fn evm2_state_size_hint(state: &Evm2BundleState) -> usize {
+    state.accounts().len() +
+        state.contracts().len() +
+        state.storage().values().map(|storage| storage.slots.len()).sum::<usize>()
 }
 
 #[cfg(test)]
