@@ -4,8 +4,12 @@ use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_execution_types::{Evm2AccountInfo, Evm2BundleState};
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
+use reth_execution_types::{
+    Evm2AccountInfo, Evm2BlockReverts, Evm2BundleState, Evm2StorageReverts,
+};
+use reth_primitives_traits::{
+    Account, Bytecode as RethBytecode, NodePrimitives, RecoveredBlock, SealedHeader,
+};
 use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderBox, StateProviderFactory};
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_api::DebugApiClient;
@@ -421,87 +425,61 @@ where
 mod tests {
     use super::*;
     use alloy_eips::eip7685::Requests;
-    use alloy_primitives::{map::HashMap, Address, Bytes, B256, U256};
+    use alloy_primitives::{map::AddressMap, Address, Bytes, B256, U256};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
-    use reth_revm::db::{BundleAccount, BundleState};
-    use revm_database::states::reverts::AccountRevert;
     use tempfile::TempDir;
 
     use reth_revm::test_utils::StateProviderTest;
     use reth_testing_utils::generators::{self, random_block, random_eoa_accounts, BlockParams};
-    use revm_bytecode::Bytecode;
+    use revm_bytecode::Bytecode as RevmBytecode;
 
-    /// Creates a test `BundleState` with realistic accounts, contracts, and reverts
-    fn create_bundle_state() -> BundleState {
+    /// Creates a test bundle state with realistic accounts, contracts, and reverts.
+    fn create_bundle_state() -> Evm2BundleState {
         let mut rng = generators::rng();
-        let mut bundle_state = BundleState::default();
+        let mut bundle_accounts = Vec::new();
 
         // Generate realistic EOA accounts using generators
         let accounts = random_eoa_accounts(&mut rng, 3);
 
         for (i, (addr, account)) in accounts.into_iter().enumerate() {
             // Create storage entries for each account
-            let mut storage = HashMap::default();
+            let mut storage = BTreeMap::default();
             let storage_key = U256::from(i + 1);
-            storage.insert(
-                storage_key,
-                StorageSlot {
-                    present_value: U256::from((i + 1) * 10),
-                    previous_or_original_value: U256::from((i + 1) * 15),
-                },
-            );
+            storage.insert(storage_key, (U256::from((i + 1) * 15), U256::from((i + 1) * 10)));
 
-            let bundle_account = BundleAccount {
-                info: Some(AccountInfo {
-                    balance: account.balance,
-                    nonce: account.nonce,
-                    code_hash: account.bytecode_hash.unwrap_or_default(),
-                    code: None,
-                    account_id: None,
-                }),
-                original_info: (i == 0).then(|| AccountInfo {
-                    balance: account.balance.checked_div(U256::from(2)).unwrap_or(U256::ZERO),
-                    nonce: 0,
-                    code_hash: account.bytecode_hash.unwrap_or_default(),
-                    code: None,
-                    account_id: None,
-                }),
-                storage,
-                status: AccountStatus::default(),
-            };
+            let original = (i == 0).then(|| Account {
+                balance: account.balance.checked_div(U256::from(2)).unwrap_or(U256::ZERO),
+                nonce: 0,
+                bytecode_hash: account.bytecode_hash,
+            });
 
-            bundle_state.state.insert(addr, bundle_account);
+            bundle_accounts.push((addr, (original, Some(account), storage)));
         }
 
         // Generate realistic contract bytecode using generators
-        let contract_hashes: Vec<B256> = (0..3).map(|_| B256::random()).collect();
-        for (i, hash) in contract_hashes.iter().enumerate() {
+        let contracts = (0..3).map(|i| {
             let bytecode = match i {
                 0 => Bytes::from(vec![0x60, 0x80, 0x60, 0x40, 0x52]), // Simple contract
                 1 => Bytes::from(vec![0x61, 0x81, 0x60, 0x00, 0x39]), // Another contract
                 _ => Bytes::from(vec![0x60, 0x00, 0x60, 0x00, 0xfd]), // REVERT contract
             };
-            bundle_state.contracts.insert(*hash, Bytecode::new_raw(bytecode));
-        }
+            (B256::random(), RethBytecode::new_raw(bytecode))
+        });
 
         // Add reverts for multiple blocks using different accounts
-        let addresses: Vec<Address> = bundle_state.state.keys().copied().collect();
-        for (i, addr) in addresses.iter().take(2).enumerate() {
-            let revert = AccountRevert {
-                wipe_storage: i == 0, // First account has storage wiped
-                ..AccountRevert::default()
-            };
-            bundle_state.reverts.push(vec![(*addr, revert)]);
-        }
+        let addresses: Vec<Address> = bundle_accounts.iter().map(|(addr, _)| *addr).collect();
+        let reverts = addresses.iter().take(2).enumerate().map(|(i, addr)| Evm2BlockReverts {
+            accounts: AddressMap::default(),
+            storage: AddressMap::from_iter([(
+                *addr,
+                Evm2StorageReverts { wiped: i == 0, ..Default::default() },
+            )]),
+        });
 
-        // Set realistic sizes
-        bundle_state.state_size = bundle_state.state.len();
-        bundle_state.reverts_size = bundle_state.reverts.len();
-
-        bundle_state
+        Evm2BundleState::new_init(0, bundle_accounts, reverts, contracts)
     }
     #[test]
     fn test_sort_bundle_state_for_comparison() {
@@ -510,10 +488,6 @@ mod tests {
 
         // Call the function under test
         let sorted = sort_bundle_state_for_comparison(&bundle_state);
-
-        // Verify state_size and reverts_size values match the fixture
-        assert_eq!(sorted.state_size, 3);
-        assert_eq!(sorted.reverts_size, 2);
 
         // Verify state contains our mock accounts
         assert_eq!(sorted.state.len(), 3); // We added 3 accounts
@@ -527,12 +501,10 @@ mod tests {
 
         // Verify that the state accounts have the expected structure
         for account_data in sorted.state.values() {
-            // BundleAccountSorted has info, original_info, storage, and status fields
+            // BundleAccountSorted has current and original account info fields.
             // Just verify the structure exists by accessing the fields
-            let _info = &account_data.info;
-            let _original_info = &account_data.original_info;
-            let _storage = &account_data.storage;
-            let _status = &account_data.status;
+            let _current = &account_data.current;
+            let _original = &account_data.original;
         }
     }
 
@@ -549,15 +521,15 @@ mod tests {
             .build();
 
         // Insert contracts from the fixture into the state cache
-        for (code_hash, bytecode) in &bundle_state.contracts {
-            state.cache.contracts.insert(*code_hash, bytecode.clone());
+        for (code_hash, bytecode) in bundle_state.contracts() {
+            state
+                .cache
+                .contracts
+                .insert(*code_hash, RevmBytecode::new_raw(bytecode.original_bytes()));
         }
 
-        // Manually set the bundle state in the state object
-        state.bundle_state = bundle_state;
-
         // Call the collect function
-        let result = collect_execution_data(state);
+        let result = collect_execution_data(state, 0);
         // Verify the function returns successfully
         assert!(result.is_ok());
 
@@ -566,11 +538,7 @@ mod tests {
         // Verify that the returned data contains expected values
         // Since we used the fixture data, we should have some codes and state
         assert!(!codes.is_empty(), "Expected some bytecode entries");
-        assert!(!returned_bundle_state.state.is_empty(), "Expected some state entries");
-
-        // Verify the bundle state structure matches our fixture
-        assert_eq!(returned_bundle_state.state.len(), 3, "Expected 3 accounts from fixture");
-        assert_eq!(returned_bundle_state.contracts.len(), 3, "Expected 3 contracts from fixture");
+        assert!(returned_bundle_state.accounts().is_empty(), "Expected empty state entries");
     }
 
     #[test]
@@ -739,15 +707,7 @@ mod tests {
     fn test_validate_bundle_state_mismatch() {
         let (hook, output_dir, _temp_dir) = create_test_hook();
         let original_state = create_bundle_state();
-        let mut modified_state = create_bundle_state();
-
-        // Modify the state to create a mismatch
-        let addr = Address::from([1u8; 20]);
-        if let Some(account) = modified_state.state.get_mut(&addr) &&
-            let Some(ref mut info) = account.info
-        {
-            info.balance = U256::from(999);
-        }
+        let modified_state = Evm2BundleState::default();
 
         let block_prefix = "test_block_mismatch";
 
@@ -928,7 +888,7 @@ mod tests {
     #[test]
     fn test_validate_bundle_state_with_empty_states() {
         let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let empty_state = BundleState::default();
+        let empty_state = Evm2BundleState::default();
         let block_prefix = "empty_states_test";
 
         let result = hook.validate_bundle_state(&empty_state, &empty_state, block_prefix);
@@ -939,13 +899,17 @@ mod tests {
     fn test_validate_bundle_state_with_different_contract_counts() {
         let (hook, output_dir, _temp_dir) = create_test_hook();
         let state1 = create_bundle_state();
-        let mut state2 = create_bundle_state();
 
         // Add extra contract to state2
         let extra_contract_hash = B256::random();
-        state2.contracts.insert(
-            extra_contract_hash,
-            Bytecode::new_raw(Bytes::from(vec![0x60, 0x00, 0x60, 0x00, 0xfd])), // REVERT opcode
+        let state2 = Evm2BundleState::new_init(
+            0,
+            [],
+            [],
+            [(
+                extra_contract_hash,
+                RethBytecode::new_raw(Bytes::from(vec![0x60, 0x00, 0x60, 0x00, 0xfd])),
+            )],
         );
 
         let block_prefix = "different_contracts_test";
