@@ -1,28 +1,12 @@
 //! Loads a pending block from database. Helper trait for `eth_` call and trace RPC methods.
 
-use super::{Call, LoadBlock, LoadState, LoadTransaction};
-use crate::{FromEthApiError, FromEvmError};
-use alloy_consensus::{transaction::TxHashRef, BlockHeader};
-use alloy_primitives::B256;
-use alloy_rpc_types_eth::{BlockId, TransactionInfo};
-use futures::Future;
-use reth_errors::{ProviderError, RethError};
-use reth_evm::{
-    block::BlockExecutor, evm::EvmFactoryExt, tracing::TracingCtx, ConfigureEvm, Database, Evm,
-    EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TxEnvFor,
-};
-use reth_primitives_traits::{BlockBody, Recovered, RecoveredBlock};
-use reth_revm::{
-    database::StateProviderDatabase,
-    db::{bal::EvmDatabaseError, State},
-};
-use reth_rpc_eth_types::cache::db::StateCacheDb;
-use reth_storage_api::{ProviderBlock, ProviderTx};
-use revm::{context::Block, context_interface::result::ResultAndState};
-use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
-use std::sync::Arc;
+use super::{Call, LoadState};
+use crate::FromEvmError;
 
 /// Executes CPU heavy tasks.
+pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {}
+
+#[cfg(any())]
 pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     /// Executes the [`TxEnvFor`] with [`reth_evm::EvmEnv`] against the given [Database] without
     /// committing state changes.
