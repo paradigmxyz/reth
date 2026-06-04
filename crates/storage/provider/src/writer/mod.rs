@@ -11,7 +11,7 @@ mod tests {
         transaction::{DbTx, DbTxMut},
     };
     use reth_ethereum_primitives::Receipt;
-    use reth_execution_types::ExecutionOutcome;
+    use reth_execution_types::{Evm2BlockReverts, Evm2BundleState, ExecutionOutcome};
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{
         DatabaseProviderFactory, HashedPostStateProvider, StateWriteConfig, StateWriter,
@@ -26,7 +26,7 @@ mod tests {
         states::{
             bundle_state::BundleRetention, changes::PlainStorageRevert, PlainStorageChangeset,
         },
-        BundleState, OriginalValuesKnown, State,
+        OriginalValuesKnown, State,
     };
     use revm_database_interface::{DatabaseCommit, EmptyDB};
     use revm_state::{
@@ -855,7 +855,7 @@ mod tests {
     #[test]
     fn revert_to_indices() {
         let base: ExecutionOutcome = ExecutionOutcome {
-            bundle: BundleState::default(),
+            bundle: Evm2BundleState::default(),
             receipts: vec![vec![Receipt::default(); 2]; 7],
             first_block: 10,
             requests: Vec::new(),
@@ -1079,19 +1079,27 @@ mod tests {
         let address1 = Address::random();
         let address2 = Address::random();
 
-        let account1 = RevmAccountInfo { nonce: 1, ..Default::default() };
-        let account1_changed = RevmAccountInfo { nonce: 1, ..Default::default() };
-        let account2 = RevmAccountInfo { nonce: 1, ..Default::default() };
+        let account1 = Account { nonce: 1, balance: U256::ZERO, bytecode_hash: None };
+        let account1_changed = Account { nonce: 1, balance: U256::ZERO, bytecode_hash: None };
+        let account2 = Account { nonce: 1, balance: U256::ZERO, bytecode_hash: None };
 
-        let present_state = BundleState::builder(2..=2)
-            .state_present_account_info(address1, account1_changed.clone())
-            .build();
-        assert_eq!(present_state.reverts.len(), 1);
-        let previous_state = BundleState::builder(1..=1)
-            .state_present_account_info(address1, account1)
-            .state_present_account_info(address2, account2.clone())
-            .build();
-        assert_eq!(previous_state.reverts.len(), 1);
+        let present_state = Evm2BundleState::new_init(
+            2,
+            [(address1, (None, Some(account1_changed), BTreeMap::default()))],
+            [Evm2BlockReverts::default()],
+            [],
+        );
+        assert_eq!(present_state.block_reverts().len(), 1);
+        let previous_state = Evm2BundleState::new_init(
+            1,
+            [
+                (address1, (None, Some(account1), BTreeMap::default())),
+                (address2, (None, Some(account2), BTreeMap::default())),
+            ],
+            [Evm2BlockReverts::default()],
+            [],
+        );
+        assert_eq!(previous_state.block_reverts().len(), 1);
 
         let mut test: ExecutionOutcome = ExecutionOutcome {
             bundle: present_state,
@@ -1104,13 +1112,13 @@ mod tests {
 
         assert_eq!(test.receipts.len(), 1);
         let end_state = test.state();
-        assert_eq!(end_state.state.len(), 2);
+        assert_eq!(end_state.accounts().len(), 2);
         // reverts num should stay the same.
-        assert_eq!(end_state.reverts.len(), 1);
+        assert_eq!(end_state.block_reverts().len(), 1);
         // account1 is not overwritten.
-        assert_eq!(end_state.state.get(&address1).unwrap().info, Some(account1_changed));
+        assert_eq!(end_state.account(&address1), Some(Some(account1_changed)));
         // account2 got inserted
-        assert_eq!(end_state.state.get(&address2).unwrap().info, Some(account2));
+        assert_eq!(end_state.account(&address2), Some(Some(account2)));
     }
 
     #[test]
