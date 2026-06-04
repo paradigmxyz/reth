@@ -1,26 +1,19 @@
 //! Stream wrapper that simulates reorgs.
 
-use alloy_consensus::{BlockHeader, Transaction};
 use alloy_primitives::Bytes;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatus};
 use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec};
+use reth_chainspec::ChainSpecProvider;
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, ExecutionPayload as _, OnForkChoiceUpdated,
 };
 use reth_engine_tree::tree::EngineValidator;
-use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
-use reth_evm::{
-    database::{State, StateProviderDatabase},
-    execute::{BlockBuilder, BlockBuilderOutcome},
-    ConfigureEvm,
-};
+use reth_errors::{BlockValidationError, RethError, RethResult};
+use reth_evm::ConfigureEvm;
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
-use reth_primitives_traits::{
-    block::Block as _, BlockBody as _, BlockTy, HeaderTy, SealedBlock, SignedTransaction,
-};
-use reth_storage_api::{errors::ProviderError, BlockReader, StateProviderFactory};
+use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock};
+use reth_storage_api::{BlockReader, StateProviderFactory};
 use std::{
     collections::VecDeque,
     future::Future,
@@ -159,7 +152,12 @@ where
                     // forkchoice state. We will rely on CL to reorg us back to canonical chain.
                     // TODO: This is an expensive blocking operation, ideally it's spawned as a task
                     // so that the stream could yield the control back.
-                    let (reorg_block, encoded_bal) = match create_reorg_head(
+                    let (reorg_block, encoded_bal) = match create_reorg_head::<
+                        Provider,
+                        Evm,
+                        T,
+                        Validator,
+                    >(
                         this.provider,
                         this.evm_config,
                         this.payload_validator,
@@ -225,100 +223,135 @@ where
 
 #[allow(clippy::type_complexity)]
 fn create_reorg_head<Provider, Evm, T, Validator>(
-    provider: &Provider,
-    evm_config: &Evm,
-    payload_validator: &Validator,
-    mut depth: usize,
-    next_payload: T::ExecutionData,
+    _provider: &Provider,
+    _evm_config: &Evm,
+    _payload_validator: &Validator,
+    _depth: usize,
+    _next_payload: T::ExecutionData,
 ) -> RethResult<(SealedBlock<BlockTy<Evm::Primitives>>, Option<Bytes>)>
 where
-    Provider: BlockReader<Header = HeaderTy<Evm::Primitives>, Block = BlockTy<Evm::Primitives>>
-        + StateProviderFactory
-        + ChainSpecProvider<ChainSpec: EthChainSpec>,
     Evm: ConfigureEvm,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = Evm::Primitives>>,
-    Validator: EngineValidator<T, Evm::Primitives>,
 {
-    // Ensure next payload is valid.
-    let next_block =
-        payload_validator.convert_payload_to_block(next_payload).map_err(RethError::msg)?;
+    Err(RethError::Execution(
+        BlockValidationError::msg(
+            "engine reorg simulation is unsupported by the evm2 pre-Amsterdam execution path",
+        )
+        .into(),
+    ))
+}
 
-    // Fetch reorg target block depending on its depth and its parent.
-    let mut previous_hash = next_block.parent_hash();
-    let mut candidate_transactions = next_block.into_body().transactions().to_vec();
-    let reorg_target = 'target: {
-        loop {
-            let reorg_target = provider
-                .block_by_hash(previous_hash)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(previous_hash.into()))?;
-            if depth == 0 {
-                break 'target reorg_target.seal_slow()
-            }
-
-            depth -= 1;
-            previous_hash = reorg_target.header().parent_hash();
-            candidate_transactions = reorg_target.into_body().into_transactions();
-        }
+#[cfg(any())]
+mod revm_reorg_head {
+    use super::*;
+    use alloy_consensus::Transaction;
+    use reth_chainspec::EthChainSpec;
+    use reth_errors::BlockExecutionError;
+    use reth_evm::{
+        database::{State, StateProviderDatabase},
+        execute::{BlockBuilder, BlockBuilderOutcome},
     };
-    let reorg_target_parent = provider
-        .sealed_header_by_hash(reorg_target.header().parent_hash())?
-        .ok_or_else(|| ProviderError::HeaderNotFound(reorg_target.header().parent_hash().into()))?;
+    use reth_primitives_traits::SignedTransaction;
+    use reth_storage_api::errors::ProviderError;
 
-    debug!(target: "engine::stream::reorg", number = reorg_target.header().number(), hash = %previous_hash, "Selected reorg target");
+    #[allow(clippy::type_complexity)]
+    fn create_reorg_head<Provider, Evm, T, Validator>(
+        provider: &Provider,
+        evm_config: &Evm,
+        payload_validator: &Validator,
+        mut depth: usize,
+        next_payload: T::ExecutionData,
+    ) -> RethResult<(SealedBlock<BlockTy<Evm::Primitives>>, Option<Bytes>)>
+    where
+        Provider: BlockReader<Header = HeaderTy<Evm::Primitives>, Block = BlockTy<Evm::Primitives>>
+            + StateProviderFactory
+            + ChainSpecProvider<ChainSpec: EthChainSpec>,
+        Evm: ConfigureEvm,
+        T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = Evm::Primitives>>,
+        Validator: EngineValidator<T, Evm::Primitives>,
+    {
+        // Ensure next payload is valid.
+        let next_block =
+            payload_validator.convert_payload_to_block(next_payload).map_err(RethError::msg)?;
 
-    // Configure state
-    if reorg_target.header().block_access_list_hash().is_some() {
-        return Err(RethError::Execution(
-            BlockValidationError::msg(
-                "block access lists are unsupported by the evm2 execution path",
-            )
-            .into(),
-        ))
-    }
-    // BAL execution is Amsterdam-only and remains stubbed for the evm2 pre-Amsterdam path.
-    // let has_bal = reorg_target.header().block_access_list_hash().is_some();
-    let state_provider = provider.state_by_block_hash(reorg_target.header().parent_hash())?;
-    let mut state = State::builder()
-        .with_database_ref(StateProviderDatabase::new(&state_provider))
-        .with_bundle_update()
-        // .with_bal_builder_if(has_bal)
-        .build();
+        // Fetch reorg target block depending on its depth and its parent.
+        let mut previous_hash = next_block.parent_hash();
+        let mut candidate_transactions = next_block.into_body().transactions().to_vec();
+        let reorg_target = 'target: {
+            loop {
+                let reorg_target = provider
+                    .block_by_hash(previous_hash)?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(previous_hash.into()))?;
+                if depth == 0 {
+                    break 'target reorg_target.seal_slow()
+                }
 
-    let ctx = evm_config.context_for_block(&reorg_target).map_err(RethError::other)?;
-    let evm = evm_config.evm_for_block(&mut state, &reorg_target).map_err(RethError::other)?;
-    let mut builder = evm_config.create_block_builder(evm, &reorg_target_parent, ctx);
+                depth -= 1;
+                previous_hash = reorg_target.header().parent_hash();
+                candidate_transactions = reorg_target.into_body().into_transactions();
+            }
+        };
+        let reorg_target_parent =
+            provider.sealed_header_by_hash(reorg_target.header().parent_hash())?.ok_or_else(
+                || ProviderError::HeaderNotFound(reorg_target.header().parent_hash().into()),
+            )?;
 
-    builder.apply_pre_execution_changes()?;
+        debug!(target: "engine::stream::reorg", number = reorg_target.header().number(), hash = %previous_hash, "Selected reorg target");
 
-    let mut cumulative_gas_used = 0;
-    for tx in candidate_transactions {
-        // ensure we still have capacity for this transaction
-        if cumulative_gas_used + tx.gas_limit() > reorg_target.gas_limit() {
-            continue
+        // Configure state
+        if reorg_target.header().block_access_list_hash().is_some() {
+            return Err(RethError::Execution(
+                BlockValidationError::msg(
+                    "block access lists are unsupported by the evm2 execution path",
+                )
+                .into(),
+            ))
         }
+        // BAL execution is Amsterdam-only and remains stubbed for the evm2 pre-Amsterdam path.
+        // let has_bal = reorg_target.header().block_access_list_hash().is_some();
+        let state_provider = provider.state_by_block_hash(reorg_target.header().parent_hash())?;
+        let mut state = State::builder()
+            .with_database_ref(StateProviderDatabase::new(&state_provider))
+            .with_bundle_update()
+            // .with_bal_builder_if(has_bal)
+            .build();
 
-        let tx_recovered =
-            tx.try_into_recovered().map_err(|_| ProviderError::SenderRecoveryError)?;
-        let gas_used = match builder.execute_transaction(tx_recovered) {
-            Ok(gas_used) => gas_used.tx_gas_used(),
-            Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
-                hash,
-                error,
-            })) => {
-                trace!(target: "engine::stream::reorg", hash = %hash, ?error, "Error executing transaction from next block");
+        let ctx = evm_config.context_for_block(&reorg_target).map_err(RethError::other)?;
+        let evm = evm_config.evm_for_block(&mut state, &reorg_target).map_err(RethError::other)?;
+        let mut builder = evm_config.create_block_builder(evm, &reorg_target_parent, ctx);
+
+        builder.apply_pre_execution_changes()?;
+
+        let mut cumulative_gas_used = 0;
+        for tx in candidate_transactions {
+            // ensure we still have capacity for this transaction
+            if cumulative_gas_used + tx.gas_limit() > reorg_target.gas_limit() {
                 continue
             }
-            // Treat error as fatal
-            Err(error) => return Err(RethError::Execution(error)),
-        };
 
-        cumulative_gas_used += gas_used;
+            let tx_recovered =
+                tx.try_into_recovered().map_err(|_| ProviderError::SenderRecoveryError)?;
+            let gas_used = match builder.execute_transaction(tx_recovered) {
+                Ok(gas_used) => gas_used.tx_gas_used(),
+                Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
+                    hash,
+                    error,
+                })) => {
+                    trace!(target: "engine::stream::reorg", hash = %hash, ?error, "Error executing transaction from next block");
+                    continue
+                }
+                // Treat error as fatal
+                Err(error) => return Err(RethError::Execution(error)),
+            };
+
+            cumulative_gas_used += gas_used;
+        }
+
+        let BlockBuilderOutcome { block, block_access_list, .. } =
+            builder.finish(&state_provider, None)?;
+
+        let encoded_bal: Option<Bytes> = block_access_list;
+
+        Ok((block.into_sealed_block(), encoded_bal))
     }
-
-    let BlockBuilderOutcome { block, block_access_list, .. } =
-        builder.finish(&state_provider, None)?;
-
-    let encoded_bal: Option<Bytes> = block_access_list;
-
-    Ok((block.into_sealed_block(), encoded_bal))
 }
