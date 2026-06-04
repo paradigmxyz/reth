@@ -8,7 +8,7 @@ use std::{
     fmt,
     sync::{Arc, LazyLock},
 };
-use tracing::{debug_span, instrument};
+use tracing::{instrument, trace_span};
 
 /// Shared handle to asynchronously populated per-block trie data.
 ///
@@ -99,7 +99,7 @@ impl DeferredTrieData {
         hashed_state: Arc<HashedPostState>,
         trie_updates: Arc<TrieUpdates>,
     ) -> ComputedTrieData {
-        let _span = debug_span!(target: "engine::tree::deferred_trie", "sort_inputs").entered();
+        let _span = trace_span!(target: "engine::tree::deferred_trie", "sort_inputs").entered();
 
         #[cfg(feature = "rayon")]
         let (sorted_hashed_state, sorted_trie_updates) = rayon::join(
