@@ -615,10 +615,16 @@ where
                     .executor_for_block(&mut db, block.sealed_block())
                     .map_err(RethError::other)
                     .map_err(Eth::Error::from_eth_err)?;
-                executor.apply_pre_execution_changes().map_err(Eth::Error::from_eth_err)?;
+                executor
+                    .apply_pre_execution_changes()
+                    .map_err(reth_errors::BlockExecutionError::other)
+                    .map_err(Eth::Error::from_eth_err)?;
 
                 for tx in block.transactions_recovered().take(tx_index + 1) {
-                    executor.execute_transaction(tx).map_err(Eth::Error::from_eth_err)?;
+                    executor
+                        .execute_transaction(tx)
+                        .map_err(reth_errors::BlockExecutionError::other)
+                        .map_err(Eth::Error::from_eth_err)?;
                 }
                 drop(executor);
 
@@ -731,7 +737,11 @@ where
                     // Merge transitions into cumulative bundle_state
                     db.merge_transitions(BundleRetention::PlainState);
                     // Compute state root from the accumulated state changes
-                    let hashed_state = db.database.hashed_post_state(&db.bundle_state);
+                    let bundle_state = reth_evm::execute::revm_bundle_to_evm2(
+                        db.bundle_state.clone(),
+                        block.number(),
+                    );
+                    let hashed_state = db.database.hashed_post_state(&bundle_state);
                     let root =
                         db.database.state_root(hashed_state).map_err(Eth::Error::from_eth_err)?;
                     roots.push(root);

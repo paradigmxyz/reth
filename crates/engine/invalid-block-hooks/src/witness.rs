@@ -4,125 +4,131 @@ use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_execution_types::{Evm2AccountInfo, Evm2BundleState};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderBox, StateProviderFactory};
-use reth_revm::{
-    database::StateProviderDatabase,
-    db::{BundleState, State},
-};
+use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
 use reth_trie::{updates::TrieUpdates, HashedStorage};
-use revm::state::AccountInfo;
-use revm_bytecode::Bytecode;
-use revm_database::{
-    states::{reverts::AccountInfoRevert, StorageSlot},
-    AccountStatus, RevertToSlot,
-};
 use serde::Serialize;
 use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
 type CollectionResult =
-    (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, reth_trie::HashedPostState, BundleState);
+    (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, reth_trie::HashedPostState, Evm2BundleState);
 
-/// Serializable version of `BundleState` for deterministic comparison
-#[derive(Debug, PartialEq, Eq)]
+/// Serializable version of [`Evm2BundleState`] for deterministic comparison.
+#[derive(Debug, PartialEq, Eq, Serialize)]
 struct BundleStateSorted {
     /// Account state
     pub state: BTreeMap<Address, BundleAccountSorted>,
     /// All created contracts in this block.
-    pub contracts: BTreeMap<B256, Bytecode>,
+    pub contracts: BTreeMap<B256, Bytes>,
     /// Changes to revert
-    ///
-    /// **Note**: Inside vector is *not* sorted by address.
-    ///
-    /// But it is unique by address.
-    pub reverts: Vec<Vec<(Address, AccountRevertSorted)>>,
-    /// The size of the plain state in the bundle state
-    pub state_size: usize,
-    /// The size of reverts in the bundle state
-    pub reverts_size: usize,
+    pub reverts: Vec<BlockRevertsSorted>,
 }
 
-/// Serializable version of `BundleAccount`
-#[derive(Debug, PartialEq, Eq)]
+/// Serializable version of an evm2 tracked account.
+#[derive(Debug, PartialEq, Eq, Serialize)]
 struct BundleAccountSorted {
-    pub info: Option<AccountInfo>,
-    pub original_info: Option<AccountInfo>,
-    /// Contains both original and present state.
-    /// When extracting changeset we compare if original value is different from present value.
-    /// If it is different we add it to changeset.
-    /// If Account was destroyed we ignore original value and compare present state with
-    /// `U256::ZERO`.
-    pub storage: BTreeMap<U256, StorageSlot>,
-    /// Account status.
-    pub status: AccountStatus,
+    pub current: Option<AccountInfoSorted>,
+    pub original: Option<AccountInfoSorted>,
 }
 
-/// Serializable version of `AccountRevert`
-#[derive(Debug, PartialEq, Eq)]
-struct AccountRevertSorted {
-    pub account: AccountInfoRevert,
-    pub storage: BTreeMap<U256, RevertToSlot>,
-    pub previous_status: AccountStatus,
-    pub wipe_storage: bool,
+/// Serializable version of evm2 account info.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+struct AccountInfoSorted {
+    pub balance: U256,
+    pub nonce: u64,
+    pub code_hash: B256,
+    pub code: Option<Bytes>,
+}
+
+/// Serializable version of one block of evm2 reverts.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+struct BlockRevertsSorted {
+    pub accounts: BTreeMap<Address, Option<AccountInfoSorted>>,
+    pub storage: BTreeMap<Address, StorageRevertSorted>,
+}
+
+/// Serializable version of an evm2 storage revert.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+struct StorageRevertSorted {
+    pub wiped: bool,
+    pub previous_wipe: bool,
+    pub slots: BTreeMap<U256, U256>,
 }
 
 /// Converts bundle state to sorted format for deterministic comparison
-fn sort_bundle_state_for_comparison(bundle_state: &BundleState) -> BundleStateSorted {
+fn sort_bundle_state_for_comparison(bundle_state: &Evm2BundleState) -> BundleStateSorted {
     BundleStateSorted {
         state: bundle_state
-            .state
+            .accounts()
             .iter()
             .map(|(addr, acc)| {
                 (
                     *addr,
                     BundleAccountSorted {
-                        info: acc.info.clone(),
-                        original_info: acc.original_info.clone(),
-                        storage: acc.storage.iter().map(|(k, v)| (*k, *v)).collect(),
-                        status: acc.status,
+                        current: acc.current.as_ref().map(account_info_sorted),
+                        original: acc.original.as_ref().map(account_info_sorted),
                     },
                 )
             })
             .collect(),
-        contracts: bundle_state.contracts.iter().map(|(k, v)| (*k, v.clone())).collect(),
+        contracts: bundle_state.contracts().iter().map(|(k, v)| (*k, v.original_bytes())).collect(),
         reverts: bundle_state
-            .reverts
+            .block_reverts()
             .iter()
-            .map(|block| {
-                block
+            .map(|block| BlockRevertsSorted {
+                accounts: block
+                    .accounts
                     .iter()
-                    .map(|(addr, rev)| {
+                    .map(|(addr, account)| (*addr, account.as_ref().map(account_info_sorted)))
+                    .collect(),
+                storage: block
+                    .storage
+                    .iter()
+                    .map(|(addr, storage)| {
                         (
                             *addr,
-                            AccountRevertSorted {
-                                account: rev.account.clone(),
-                                storage: rev.storage.iter().map(|(k, v)| (*k, *v)).collect(),
-                                previous_status: rev.previous_status,
-                                wipe_storage: rev.wipe_storage,
+                            StorageRevertSorted {
+                                wiped: storage.wiped,
+                                previous_wipe: storage.previous_wipe,
+                                slots: storage.slots.clone(),
                             },
                         )
                     })
-                    .collect()
+                    .collect(),
             })
             .collect(),
-        state_size: bundle_state.state_size,
-        reverts_size: bundle_state.reverts_size,
+    }
+}
+
+fn account_info_sorted(info: &Evm2AccountInfo) -> AccountInfoSorted {
+    AccountInfoSorted {
+        balance: info.balance,
+        nonce: info.nonce,
+        code_hash: info.code_hash,
+        code: info.code.as_ref().map(|code| code.original_bytes()),
     }
 }
 
 /// Extracts execution data including codes, preimages, and hashed state from database
 fn collect_execution_data(
     mut db: State<StateProviderDatabase<StateProviderBox>>,
+    first_block: u64,
 ) -> eyre::Result<CollectionResult> {
-    let bundle_state = db.take_bundle();
+    let bundle_state = reth_evm::execute::revm_bundle_to_evm2(db.take_bundle(), first_block);
     let mut codes = BTreeMap::new();
     let mut preimages = BTreeMap::new();
     let mut hashed_state = db.database.hashed_post_state(&bundle_state);
 
     // Collect codes
-    db.cache.contracts.values().chain(bundle_state.contracts.values()).for_each(|code| {
+    db.cache.contracts.values().for_each(|code| {
+        let code_bytes = code.original_bytes();
+        codes.insert(keccak256(&code_bytes), code_bytes);
+    });
+    bundle_state.contracts().values().for_each(|code| {
         let code_bytes = code.original_bytes();
         codes.insert(keccak256(&code_bytes), code_bytes);
     });
@@ -213,14 +219,15 @@ where
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
         block: &RecoveredBlock<N::Block>,
-    ) -> eyre::Result<(ExecutionWitness, BundleState)> {
+    ) -> eyre::Result<(ExecutionWitness, Evm2BundleState)> {
         let mut executor = self.evm_config.batch_executor(StateProviderDatabase::new(
             self.provider.state_by_block_hash(parent_header.hash())?,
         ));
 
         executor.execute_one(block)?;
         let db = executor.into_state();
-        let (codes, preimages, hashed_state, bundle_state) = collect_execution_data(db)?;
+        let (codes, preimages, hashed_state, bundle_state) =
+            collect_execution_data(db, block.number())?;
 
         let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
         let witness = generate(codes, preimages, hashed_state, state_provider)?;
@@ -269,19 +276,19 @@ where
     /// Validates that the bundle state after re-execution matches the original
     fn validate_bundle_state(
         &self,
-        re_executed_state: &BundleState,
-        original_state: &BundleState,
+        re_executed_state: &Evm2BundleState,
+        original_state: &Evm2BundleState,
         block_prefix: &str,
     ) -> eyre::Result<()> {
         if re_executed_state != original_state {
             let original_filename = format!("{}.bundle_state.original.json", block_prefix);
-            let original_path = self.save_file(original_filename, original_state)?;
+            let output_state_sorted = sort_bundle_state_for_comparison(original_state);
+            let original_path = self.save_file(original_filename, &output_state_sorted)?;
             let re_executed_filename = format!("{}.bundle_state.re_executed.json", block_prefix);
-            let re_executed_path = self.save_file(re_executed_filename, re_executed_state)?;
+            let bundle_state_sorted = sort_bundle_state_for_comparison(re_executed_state);
+            let re_executed_path = self.save_file(re_executed_filename, &bundle_state_sorted)?;
 
             // Convert bundle state to sorted format for deterministic comparison
-            let bundle_state_sorted = sort_bundle_state_for_comparison(re_executed_state);
-            let output_state_sorted = sort_bundle_state_for_comparison(original_state);
             let filename = format!("{}.bundle_state.diff", block_prefix);
             let diff_path = self.save_diff(filename, &output_state_sorted, &bundle_state_sorted)?;
 
@@ -301,7 +308,7 @@ where
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
         block: &RecoveredBlock<N::Block>,
-        bundle_state: &BundleState,
+        bundle_state: &Evm2BundleState,
         trie_updates: Option<(&TrieUpdates, B256)>,
         block_prefix: &str,
     ) -> eyre::Result<()> {

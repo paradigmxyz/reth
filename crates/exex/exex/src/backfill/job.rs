@@ -146,7 +146,10 @@ where
 
         let outcome = ExecutionOutcome::from_blocks(
             first_block_number,
-            executor.into_state().take_bundle(),
+            reth_evm::execute::revm_bundle_to_evm2(
+                executor.into_state().take_bundle(),
+                first_block_number,
+            ),
             results,
         );
         let chain = Chain::new(blocks, outcome, BTreeMap::new());

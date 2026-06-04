@@ -408,7 +408,10 @@ where
         let time = Instant::now();
         let mut state = ExecutionOutcome::from_blocks(
             start_block,
-            executor.into_state().take_bundle(),
+            reth_evm::execute::revm_bundle_to_evm2(
+                executor.into_state().take_bundle(),
+                start_block,
+            ),
             results,
         );
         let write_preparation_duration = time.elapsed();
@@ -450,7 +453,7 @@ where
             // Iterate over all reverts and clear them if pruning is configured.
             for block_number in start_block..=max_block {
                 let Some(reverts) =
-                    state.bundle.reverts.get_mut((block_number - start_block) as usize)
+                    state.bundle.block_reverts_mut().get_mut((block_number - start_block) as usize)
                 else {
                     break
                 };

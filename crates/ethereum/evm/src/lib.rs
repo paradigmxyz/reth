@@ -26,7 +26,7 @@ use alloy_evm::{
 #[cfg(feature = "jit")]
 use core::any::Any;
 use core::{convert::Infallible, fmt::Debug};
-use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
+use reth_chainspec::{ChainSpec, EthChainSpec, EthExecutorSpec, MAINNET};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
     eth::NextEvmEnvAttributes, precompiles::PrecompilesMap, ConfigureEvm, EvmEnv, EvmFactory,
@@ -53,7 +53,6 @@ use {
 pub use alloy_evm::EthEvm;
 
 mod config;
-use alloy_evm::eth::spec::EthExecutorSpec;
 pub use config::{revm_spec, revm_spec_by_timestamp_and_block_number};
 use reth_ethereum_forks::Hardforks;
 
@@ -90,9 +89,12 @@ pub mod factory;
 #[derive(Debug, Clone)]
 pub struct EthEvmConfig<C = ChainSpec, EvmFactory = EthEvmFactory> {
     /// Inner [`EthBlockExecutorFactory`].
-    pub executor_factory: EthBlockExecutorFactory<RethReceiptBuilder, Arc<C>, EvmFactory>,
+    pub executor_factory:
+        EthBlockExecutorFactory<RethReceiptBuilder, EthExecutorSpecAdapter<C>, EvmFactory>,
     /// Ethereum block assembler.
     pub block_assembler: EthBlockAssembler<C>,
+    /// Chain specification.
+    pub chain_spec: Arc<C>,
 }
 
 impl EthEvmConfig {
@@ -121,15 +123,51 @@ impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory> {
             block_assembler: EthBlockAssembler::new(chain_spec.clone()),
             executor_factory: EthBlockExecutorFactory::new(
                 RethReceiptBuilder::default(),
-                chain_spec,
+                EthExecutorSpecAdapter::new(chain_spec.clone()),
                 evm_factory,
             ),
+            chain_spec,
         }
     }
 
     /// Returns the chain spec associated with this configuration.
     pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
-        self.executor_factory.spec()
+        &self.chain_spec
+    }
+}
+
+/// Adapter that lets alloy's Ethereum block executor read Reth chain specs without making the
+/// chainspec crate depend on alloy-evm.
+#[derive(Debug, Clone)]
+pub struct EthExecutorSpecAdapter<C> {
+    chain_spec: Arc<C>,
+}
+
+impl<C> EthExecutorSpecAdapter<C> {
+    /// Creates a new adapter.
+    pub const fn new(chain_spec: Arc<C>) -> Self {
+        Self { chain_spec }
+    }
+}
+
+impl<C> reth_ethereum_forks::EthereumHardforks for EthExecutorSpecAdapter<C>
+where
+    C: reth_ethereum_forks::EthereumHardforks,
+{
+    fn ethereum_fork_activation(
+        &self,
+        fork: reth_ethereum_forks::EthereumHardfork,
+    ) -> reth_ethereum_forks::ForkCondition {
+        self.chain_spec.ethereum_fork_activation(fork)
+    }
+}
+
+impl<C> alloy_evm::eth::spec::EthExecutorSpec for EthExecutorSpecAdapter<C>
+where
+    C: EthExecutorSpec,
+{
+    fn deposit_contract_address(&self) -> Option<alloy_primitives::Address> {
+        self.chain_spec.deposit_contract_address()
     }
 }
 
@@ -153,7 +191,8 @@ where
     type Primitives = EthPrimitives;
     type Error = Infallible;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
-    type BlockExecutorFactory = EthBlockExecutorFactory<RethReceiptBuilder, Arc<ChainSpec>, EvmF>;
+    type BlockExecutorFactory =
+        EthBlockExecutorFactory<RethReceiptBuilder, EthExecutorSpecAdapter<ChainSpec>, EvmF>;
     type BlockAssembler = EthBlockAssembler<ChainSpec>;
 
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {

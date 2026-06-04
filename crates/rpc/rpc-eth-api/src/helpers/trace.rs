@@ -418,6 +418,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             .map_err(RethError::other)
             .map_err(Self::Error::from_eth_err)?
             .apply_pre_execution_changes()
+            .map_err(reth_errors::BlockExecutionError::other)
             .map_err(Self::Error::from_eth_err)?;
         Ok(())
     }

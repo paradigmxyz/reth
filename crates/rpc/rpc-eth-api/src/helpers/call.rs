@@ -353,9 +353,15 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         .executor_for_block(&mut db, block.sealed_block())
                         .map_err(RethError::other)
                         .map_err(Self::Error::from_eth_err)?;
-                    executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
+                    executor
+                        .apply_pre_execution_changes()
+                        .map_err(reth_errors::BlockExecutionError::other)
+                        .map_err(Self::Error::from_eth_err)?;
                     for tx in block.transactions_recovered().take(num_txs) {
-                        executor.execute_transaction(tx).map_err(Self::Error::from_eth_err)?;
+                        executor
+                            .execute_transaction(tx)
+                            .map_err(reth_errors::BlockExecutionError::other)
+                            .map_err(Self::Error::from_eth_err)?;
                     }
                 }
 
@@ -751,14 +757,20 @@ pub trait Call:
                     .executor_for_block(&mut db, block.sealed_block())
                     .map_err(RethError::other)
                     .map_err(Self::Error::from_eth_err)?;
-                executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
+                executor
+                    .apply_pre_execution_changes()
+                    .map_err(reth_errors::BlockExecutionError::other)
+                    .map_err(Self::Error::from_eth_err)?;
 
                 // replay all transactions prior to the targeted transaction
                 for block_tx in block_txs {
                     if block_tx.tx_hash() == tx.tx_hash() {
                         break;
                     }
-                    executor.execute_transaction(block_tx).map_err(Self::Error::from_eth_err)?;
+                    executor
+                        .execute_transaction(block_tx)
+                        .map_err(reth_errors::BlockExecutionError::other)
+                        .map_err(Self::Error::from_eth_err)?;
                 }
 
                 let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
