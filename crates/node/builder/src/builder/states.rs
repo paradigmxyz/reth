@@ -13,6 +13,7 @@ use crate::{
     AddOns, ComponentsFor, FullNode,
 };
 
+use reth_evm::ConfigureEvm2BlockExecutor;
 use reth_exex::ExExContext;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes};
 use reth_node_core::node_config::NodeConfig;
@@ -219,6 +220,8 @@ where
     /// The `ExEx` ID must be unique.
     pub fn install_exex<F, R, E>(mut self, exex_id: impl Into<String>, exex: F) -> Self
     where
+        <CB::Components as NodeComponents<T>>::Evm:
+            ConfigureEvm2BlockExecutor<Primitives = <T::Types as NodeTypes>::Primitives>,
         F: FnOnce(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,

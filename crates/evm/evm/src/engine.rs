@@ -55,8 +55,11 @@ pub trait ConfigureEvm2Engine<ExecutionData>: ConfigureEngineEvm<ExecutionData> 
     ) -> Result<Vec<Recovered<TxTy<Self::Primitives>>>, Box<dyn core::error::Error + Send + Sync>>;
 }
 
-/// [`ConfigureEvm`] extension for evm2-native block execution.
-pub trait ConfigureEvm2BlockExecutor: ConfigureEvm {
+/// Configuration for evm2-native block execution.
+pub trait ConfigureEvm2BlockExecutor: Clone + core::fmt::Debug + Send + Sync + Unpin {
+    /// The primitives type used by the evm2 executor.
+    type Primitives: reth_primitives_traits::NodePrimitives;
+
     /// Executes a recovered block using evm2 against the provided state.
     fn execute_evm2_block_with_state_provider<DB>(
         &self,

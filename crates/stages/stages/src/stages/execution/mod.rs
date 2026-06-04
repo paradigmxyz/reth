@@ -6,7 +6,7 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_config::config::ExecutionConfig;
 use reth_consensus::FullConsensus;
 use reth_db::{static_file::HeaderMask, tables};
-use reth_evm::{metrics::ExecutorMetrics, ConfigureEvm, ConfigureEvm2BlockExecutor};
+use reth_evm::{metrics::ExecutorMetrics, ConfigureEvm2BlockExecutor};
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
@@ -70,7 +70,7 @@ pub mod slot_preimages;
 #[derive(Debug)]
 pub struct ExecutionStage<E>
 where
-    E: ConfigureEvm + ConfigureEvm2BlockExecutor,
+    E: ConfigureEvm2BlockExecutor,
 {
     /// The stage's internal block executor
     evm_config: E,
@@ -99,7 +99,7 @@ where
 
 impl<E> ExecutionStage<E>
 where
-    E: ConfigureEvm + ConfigureEvm2BlockExecutor,
+    E: ConfigureEvm2BlockExecutor,
 {
     /// Create new execution stage with specified config.
     pub fn new(
@@ -262,7 +262,7 @@ where
 
 impl<E, Provider> Stage<Provider> for ExecutionStage<E>
 where
-    E: ConfigureEvm + ConfigureEvm2BlockExecutor,
+    E: ConfigureEvm2BlockExecutor,
     Provider: DBProvider
         + BlockReader<
             Block = <E::Primitives as NodePrimitives>::Block,

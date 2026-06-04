@@ -3,7 +3,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use futures::{Stream, StreamExt};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::{ConfigureEvm, ConfigureEvm2BlockExecutor};
+use reth_evm::ConfigureEvm2BlockExecutor;
 use reth_exex_types::ExExHead;
 use reth_node_api::NodePrimitives;
 use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
@@ -24,7 +24,7 @@ use tokio::sync::mpsc::Receiver;
 #[derive(Debug)]
 pub struct ExExNotifications<P, E>
 where
-    E: ConfigureEvm,
+    E: ConfigureEvm2BlockExecutor,
 {
     inner: ExExNotificationsInner<P, E>,
 }
@@ -77,7 +77,7 @@ pub trait ExExNotificationsStream<N: NodePrimitives = EthPrimitives>:
 #[derive(Debug)]
 enum ExExNotificationsInner<P, E>
 where
-    E: ConfigureEvm,
+    E: ConfigureEvm2BlockExecutor,
 {
     /// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks.
     WithoutHead(ExExNotificationsWithoutHead<P, E>),
@@ -91,7 +91,7 @@ where
 
 impl<P, E> ExExNotifications<P, E>
 where
-    E: ConfigureEvm,
+    E: ConfigureEvm2BlockExecutor,
 {
     /// Creates a new stream of [`ExExNotifications`] without a head.
     pub const fn new(
@@ -197,7 +197,7 @@ where
 /// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks.
 pub struct ExExNotificationsWithoutHead<P, E>
 where
-    E: ConfigureEvm,
+    E: ConfigureEvm2BlockExecutor,
 {
     node_head: BlockNumHash,
     provider: P,
@@ -208,7 +208,7 @@ where
 
 impl<P: Debug, E> Debug for ExExNotificationsWithoutHead<P, E>
 where
-    E: ConfigureEvm + Debug,
+    E: ConfigureEvm2BlockExecutor + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExExNotifications")
@@ -221,7 +221,7 @@ where
 
 impl<P, E> ExExNotificationsWithoutHead<P, E>
 where
-    E: ConfigureEvm,
+    E: ConfigureEvm2BlockExecutor,
 {
     /// Creates a new instance of [`ExExNotificationsWithoutHead`].
     const fn new(
@@ -249,7 +249,7 @@ where
 
 impl<P: Unpin, E> Stream for ExExNotificationsWithoutHead<P, E>
 where
-    E: ConfigureEvm,
+    E: ConfigureEvm2BlockExecutor,
 {
     type Item = ExExNotification<E::Primitives>;
 
@@ -269,7 +269,7 @@ where
 #[derive(Debug)]
 pub struct ExExNotificationsWithHead<P, E>
 where
-    E: ConfigureEvm,
+    E: ConfigureEvm2BlockExecutor,
 {
     /// The node's local head at launch.
     initial_local_head: BlockNumHash,
@@ -297,7 +297,7 @@ where
 
 impl<P, E> ExExNotificationsWithHead<P, E>
 where
-    E: ConfigureEvm,
+    E: ConfigureEvm2BlockExecutor,
 {
     /// Creates a new [`ExExNotificationsWithHead`].
     const fn new(

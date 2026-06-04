@@ -4,6 +4,7 @@ use alloy_eips::{eip2124::Head, BlockNumHash};
 use futures::future;
 use reth_chain_state::ForkChoiceSubscriptions;
 use reth_chainspec::EthChainSpec;
+use reth_evm::ConfigureEvm2BlockExecutor;
 use reth_exex::{
     ExExContext, ExExHandle, ExExManager, ExExManagerHandle, ExExNotificationSource, Wal,
     DEFAULT_EXEX_MANAGER_CAPACITY, DEFAULT_WAL_BLOCKS_WARNING,
@@ -17,7 +18,11 @@ use tracing::Instrument;
 use crate::{common::WithConfigs, exex::BoxedLaunchExEx};
 
 /// Can launch execution extensions.
-pub struct ExExLauncher<Node: FullNodeComponents> {
+pub struct ExExLauncher<Node>
+where
+    Node: FullNodeComponents,
+    Node::Evm: ConfigureEvm2BlockExecutor<Primitives = PrimitivesTy<Node::Types>>,
+{
     head: Head,
     extensions: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
     components: Node,
@@ -28,7 +33,11 @@ pub struct ExExLauncher<Node: FullNodeComponents> {
     capacity: usize,
 }
 
-impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
+impl<Node> ExExLauncher<Node>
+where
+    Node: FullNodeComponents + Clone,
+    Node::Evm: ConfigureEvm2BlockExecutor<Primitives = PrimitivesTy<Node::Types>>,
+{
     /// Create a new `ExExLauncher` with the given extensions.
     pub const fn new(
         head: Head,
@@ -175,7 +184,11 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
     }
 }
 
-impl<Node: FullNodeComponents> Debug for ExExLauncher<Node> {
+impl<Node> Debug for ExExLauncher<Node>
+where
+    Node: FullNodeComponents,
+    Node::Evm: ConfigureEvm2BlockExecutor<Primitives = PrimitivesTy<Node::Types>>,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ExExLauncher")
             .field("head", &self.head)

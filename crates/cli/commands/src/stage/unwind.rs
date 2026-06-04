@@ -13,7 +13,7 @@ use reth_config::Config;
 use reth_consensus::noop::NoopConsensus;
 use reth_db::DatabaseEnv;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
-use reth_evm::{ConfigureEvm, ConfigureEvm2BlockExecutor};
+use reth_evm::ConfigureEvm2BlockExecutor;
 use reth_exex::ExExManagerHandle;
 use reth_provider::{providers::ProviderNodeTypes, BlockNumReader, ProviderFactory};
 use reth_stages::{
@@ -84,7 +84,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         self,
         config: Config,
         provider_factory: ProviderFactory<N>,
-        evm_config: impl ConfigureEvm<Primitives = N::Primitives> + ConfigureEvm2BlockExecutor + 'static,
+        evm_config: impl ConfigureEvm2BlockExecutor<Primitives = N::Primitives> + 'static,
     ) -> Result<Pipeline<N>, eyre::Error> {
         let stage_conf = &config.stages;
         let prune_modes = config.prune.segments.clone();

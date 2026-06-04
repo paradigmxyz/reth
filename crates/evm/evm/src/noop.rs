@@ -80,6 +80,8 @@ impl<Inner> ConfigureEvm2BlockExecutor for NoopEvmConfig<Inner>
 where
     Inner: ConfigureEvm2BlockExecutor,
 {
+    type Primitives = Inner::Primitives;
+
     fn execute_evm2_block_with_state_provider<DB>(
         &self,
         state_provider: DB,
