@@ -3872,7 +3872,7 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
     /// Commit database transaction, static files, and pending `RocksDB` batches.
     #[instrument(
         name = "DatabaseProvider::commit",
-        level = "debug",
+        level = "trace",
         target = "providers::db",
         skip_all
     )]
