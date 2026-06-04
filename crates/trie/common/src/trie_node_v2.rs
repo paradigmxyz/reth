@@ -117,6 +117,7 @@ pub enum TrieNodeV2 {
 }
 
 impl Encodable for TrieNodeV2 {
+    #[inline]
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         match self {
             Self::EmptyRoot => {
@@ -209,6 +210,7 @@ impl BranchNodeV2 {
 }
 
 impl Encodable for BranchNodeV2 {
+    #[inline]
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         if self.key.is_empty() {
             BranchNodeRef::new(&self.stack, self.state_mask).encode(out);

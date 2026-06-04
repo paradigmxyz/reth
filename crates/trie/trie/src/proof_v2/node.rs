@@ -32,6 +32,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
     ///
     /// This potentially also returns an `RlpNode` buffer which can be re-used for other
     /// [`ProofTrieBranchChild`]s.
+    #[inline]
     pub(crate) fn into_rlp(
         self,
         buf: &mut Vec<u8>,
@@ -157,6 +158,7 @@ pub(crate) struct ProofTrieBranch {
 /// # Panics
 ///
 /// Panics if the given `len` is greater than the length of the `Nibbles`.
+#[inline]
 pub(crate) fn trim_nibbles_prefix(n: &Nibbles, len: usize) -> Nibbles {
     debug_assert!(n.len() >= len);
     n.slice_unchecked(len, n.len())
