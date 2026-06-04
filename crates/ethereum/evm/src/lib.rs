@@ -17,8 +17,12 @@
 
 extern crate alloc;
 
-use alloc::{borrow::Cow, sync::Arc, vec::Vec};
-use alloy_consensus::{transaction::Recovered, Header};
+#[cfg(feature = "std")]
+use alloc::vec::Vec;
+use alloc::{borrow::Cow, sync::Arc};
+#[cfg(feature = "std")]
+use alloy_consensus::transaction::Recovered;
+use alloy_consensus::Header;
 use alloy_evm::{
     eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
     EthEvmFactory, FromRecoveredTx, FromTxWithEncoded,
@@ -32,11 +36,15 @@ use reth_evm::{
     eth::NextEvmEnvAttributes, precompiles::PrecompilesMap, ConfigureEvm, EvmEnv, EvmFactory,
     JitBackend, NextBlockEnvAttributes, TransactionEnvMut,
 };
+#[cfg(feature = "std")]
+use reth_primitives_traits::{BlockBody, RecoveredBlock};
 use reth_primitives_traits::{SealedBlock, SealedHeader};
 use revm::{context::BlockEnv, primitives::hardfork::SpecId};
 
 #[cfg(feature = "std")]
-use reth_evm::{ConfigureEngineEvm, ConfigureEvm2Engine, ExecutableTxIterator};
+use reth_evm::{
+    ConfigureEngineEvm, ConfigureEvm2BlockExecutor, ConfigureEvm2Engine, ExecutableTxIterator,
+};
 #[allow(unused_imports)]
 use {
     alloy_eips::Decodable2718,
@@ -515,6 +523,65 @@ where
                 Ok(tx.with_signer(signer))
             })
             .collect()
+    }
+}
+
+#[cfg(feature = "std")]
+impl<ChainSpec, EvmF> ConfigureEvm2BlockExecutor for EthEvmConfig<ChainSpec, EvmF>
+where
+    ChainSpec:
+        EthExecutorSpec + EthChainSpec<Header = Header> + EthereumHardforks + Hardforks + 'static,
+    EvmF: EvmFactory<
+            Tx: TransactionEnvMut
+                    + FromRecoveredTx<TransactionSigned>
+                    + FromTxWithEncoded<TransactionSigned>,
+            Spec = SpecId,
+            BlockEnv = BlockEnv,
+            Precompiles = PrecompilesMap,
+        > + Clone
+        + Debug
+        + Send
+        + Sync
+        + Unpin
+        + 'static,
+{
+    fn execute_evm2_block_with_state_provider<DB>(
+        &self,
+        state_provider: DB,
+        block: &RecoveredBlock<Block>,
+    ) -> Result<
+        reth_execution_types::BlockExecutionOutput<reth_ethereum_primitives::Receipt>,
+        Box<dyn core::error::Error + Send + Sync>,
+    >
+    where
+        DB: reth_storage_api::StateProvider + Send + 'static,
+    {
+        let header = block.header();
+        let transactions = block
+            .senders_iter()
+            .zip(block.body().transactions())
+            .map(|(signer, tx)| Recovered::new_unchecked(tx.clone(), *signer))
+            .collect::<Vec<_>>();
+        let context = Evm2BlockExecutionContext {
+            system_calls: Some(Evm2BlockSystemCalls {
+                parent_hash: header.parent_hash,
+                parent_beacon_block_root: header.parent_beacon_block_root,
+            }),
+            withdrawals: block.body().withdrawals().map(|withdrawals| withdrawals.as_slice()),
+        };
+
+        execute_evm2_block_with_state_provider_context(
+            evm2_spec(self.chain_spec(), header),
+            evm2_block_env_with_blob_params(
+                header,
+                self.chain_spec().blob_params_at_timestamp(header.timestamp),
+            ),
+            state_provider,
+            header.number,
+            transactions,
+            context,
+        )
+        .map_err(|err| Box::new(err) as Box<dyn core::error::Error + Send + Sync>)
     }
 }
 

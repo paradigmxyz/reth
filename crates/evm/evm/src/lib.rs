@@ -50,7 +50,8 @@ pub use aliases::*;
 mod engine;
 #[cfg(feature = "std")]
 pub use engine::{
-    ConfigureEngineEvm, ConfigureEvm2Engine, ConvertTx, ExecutableTxIterator, ExecutableTxTuple,
+    ConfigureEngineEvm, ConfigureEvm2BlockExecutor, ConfigureEvm2Engine, ConvertTx,
+    ExecutableTxIterator, ExecutableTxTuple,
 };
 
 #[cfg(feature = "metrics")]

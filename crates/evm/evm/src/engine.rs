@@ -3,7 +3,9 @@ use alloc::{boxed::Box, vec::Vec};
 use alloy_consensus::transaction::{Either, Recovered};
 use alloy_evm::{block::ExecutableTxParts, RecoveredTx};
 use rayon::prelude::*;
-use reth_primitives_traits::{HeaderTy, TxTy};
+use reth_execution_types::BlockExecutionOutput;
+use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, RecoveredBlock, TxTy};
+use reth_storage_api::StateProvider;
 
 /// [`ConfigureEvm`] extension providing methods for executing payloads.
 pub trait ConfigureEngineEvm<ExecutionData>: ConfigureEvm {
@@ -51,6 +53,21 @@ pub trait ConfigureEvm2Engine<ExecutionData>: ConfigureEngineEvm<ExecutionData> 
         &self,
         payload: &ExecutionData,
     ) -> Result<Vec<Recovered<TxTy<Self::Primitives>>>, Box<dyn core::error::Error + Send + Sync>>;
+}
+
+/// [`ConfigureEvm`] extension for evm2-native block execution.
+pub trait ConfigureEvm2BlockExecutor: ConfigureEvm {
+    /// Executes a recovered block using evm2 against the provided state.
+    fn execute_evm2_block_with_state_provider<DB>(
+        &self,
+        state_provider: DB,
+        block: &RecoveredBlock<BlockTy<Self::Primitives>>,
+    ) -> Result<
+        BlockExecutionOutput<ReceiptTy<Self::Primitives>>,
+        Box<dyn core::error::Error + Send + Sync>,
+    >
+    where
+        DB: StateProvider + Send + 'static;
 }
 
 /// Converts a raw transaction into an executable transaction.
