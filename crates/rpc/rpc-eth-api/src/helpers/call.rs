@@ -1,45 +1,20 @@
 //! Loads a pending block from database. Helper trait for `eth_` transaction, call and trace RPC
 //! methods.
 
-use core::fmt;
-
-use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
-use crate::{
-    helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
-};
-use alloy_consensus::{transaction::TxHashRef, BlockHeader};
+use super::{LoadBlock, LoadPendingBlock, LoadState, SpawnBlocking, Trace};
+use crate::{helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock};
 use alloy_eips::eip2930::AccessListResult;
-use alloy_evm::overrides::{apply_block_overrides, apply_state_overrides, OverrideBlockHashes};
-use alloy_network::TransactionBuilder;
-use alloy_primitives::{Bytes, B256, U256};
+use alloy_primitives::{Bytes, U256};
 use alloy_rpc_types_eth::{
     simulate::{SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
-    BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
+    BlockId, Bundle, EthCallResponse, StateContext,
 };
 use futures::Future;
-use reth_errors::{ProviderError, RethError};
-use reth_evm::{
-    block::BlockExecutor, env::BlockEnvironment, ConfigureEvm, Evm, EvmEnvFor, HaltReasonFor,
-    InspectorFor, TransactionEnvMut, TxEnvFor,
-};
-use reth_primitives_traits::Recovered;
-use reth_revm::{
-    cancelled::CancelOnDrop,
-    database::StateProviderDatabase,
-    db::{bal::EvmDatabaseError, State},
-};
+use reth_errors::ProviderError;
+use reth_evm::EvmEnvFor;
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
-use reth_rpc_eth_types::{
-    cache::db::StateProviderTraitObjWrapper, error::FromEthApiError, EthApiError, StateCacheDb,
-};
-use reth_storage_api::{ProviderTx, StateProviderBox};
-use revm::{
-    context::Block,
-    context_interface::{result::ResultAndState, Transaction},
-    Database, DatabaseCommit,
-};
-use tracing::{trace, warn};
+use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
 
 /// Result type for `eth_simulateV1` RPC method.
 pub type SimulatedBlocksResult<N, E> = Result<Vec<SimulatedBlock<RpcBlock<N>>>, E>;
@@ -612,6 +587,7 @@ pub trait Call:
     fn evm_memory_limit(&self) -> u64;
 
     /// Returns the max gas limit that the caller can afford given a transaction environment.
+    #[cfg(any())]
     fn caller_gas_allowance(
         &self,
         mut db: impl Database<Error: Into<EthApiError>>,
@@ -622,6 +598,7 @@ pub trait Call:
     }
 
     /// Executes the closure with the state that corresponds to the given [`BlockId`].
+    #[cfg(any())]
     fn with_state_at_block<F, R>(
         &self,
         at: BlockId,
@@ -639,6 +616,7 @@ pub trait Call:
 
     /// Executes the `TxEnv` against the given [Database] without committing state
     /// changes.
+    #[cfg(any())]
     fn transact<DB>(
         &self,
         db: DB,
@@ -656,6 +634,7 @@ pub trait Call:
 
     /// Executes the [`reth_evm::EvmEnv`] against the given [Database] without committing state
     /// changes.
+    #[cfg(any())]
     fn transact_with_inspector<DB, I>(
         &self,
         db: DB,
@@ -679,6 +658,7 @@ pub trait Call:
     /// the call [`Self::transact`]. If the future is dropped before the (blocking) transact
     /// call is invoked, then the task is cancelled early, (for example if the request is terminated
     /// early client-side).
+    #[cfg(any())]
     fn transact_call_at(
         &self,
         request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
@@ -708,6 +688,7 @@ pub trait Call:
     }
 
     /// Executes the closure with the state that corresponds to the given [`BlockId`] on a new task
+    #[cfg(any())]
     fn spawn_with_state_at_block<F, R>(
         &self,
         at: impl Into<BlockId>,
@@ -742,6 +723,7 @@ pub trait Call:
     /// usually allowed to consume a lot of gas, this also allows a lot of memory operations so
     /// we assume this is not primarily CPU bound and instead spawn the call on a regular tokio task
     /// instead, where blocking IO is less problematic.
+    #[cfg(any())]
     fn spawn_with_call_at<F, R>(
         &self,
         request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
@@ -781,6 +763,7 @@ pub trait Call:
     ///
     /// Note: Implementers should use a threadpool where blocking is allowed, such as
     /// [`BlockingTaskPool`](reth_tasks::pool::BlockingTaskPool).
+    #[cfg(any())]
     fn spawn_replay_transaction<F, R>(
         &self,
         hash: B256,
@@ -849,6 +832,7 @@ pub trait Call:
     ///
     /// Note: This assumes the target transaction is in the given iterator.
     /// Returns the index of the target transaction in the given iterator.
+    #[cfg(any())]
     fn replay_transactions_until<'a, DB, I>(
         &self,
         db: &mut DB,
@@ -878,6 +862,7 @@ pub trait Call:
     ///
     /// All `TxEnv` fields are derived from the given [`RpcTxReq`], if fields are
     /// `None`, they fall back to the [`reth_evm::EvmEnv`]'s settings.
+    #[cfg(any())]
     fn create_txn_env(
         &self,
         evm_env: &EvmEnvFor<Self::Evm>,
@@ -910,6 +895,7 @@ pub trait Call:
     ///
     /// In addition, this changes the block's gas limit to the configured [`Self::call_gas_limit`].
     #[expect(clippy::type_complexity)]
+    #[cfg(any())]
     fn prepare_call_env<DB>(
         &self,
         mut evm_env: EvmEnvFor<Self::Evm>,
