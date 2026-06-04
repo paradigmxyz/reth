@@ -180,11 +180,15 @@ where
     }
     let state = StateProviderDatabase::new(state_provider.as_ref());
     let chain_spec = client.chain_spec();
-    let is_amsterdam = chain_spec.is_amsterdam_active_at_timestamp(attributes.timestamp());
+    let is_amsterdam = false;
+    // BAL payload construction is Amsterdam-only and remains stubbed for the evm2 pre-Amsterdam
+    // path.
+    // let is_amsterdam = chain_spec.is_amsterdam_active_at_timestamp(attributes.timestamp());
     let mut db = State::builder()
         .with_database(cached_reads.as_db_mut(state))
         .with_bundle_update()
-        .with_bal_builder_if(is_amsterdam)
+        .with_bal_builder_if(false)
+        // .with_bal_builder_if(is_amsterdam)
         .build();
 
     let evm_config = evm_config.with_jit_support();

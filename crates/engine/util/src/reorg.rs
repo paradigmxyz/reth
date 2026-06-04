@@ -267,12 +267,22 @@ where
     debug!(target: "engine::stream::reorg", number = reorg_target.header().number(), hash = %previous_hash, "Selected reorg target");
 
     // Configure state
-    let has_bal = reorg_target.header().block_access_list_hash().is_some();
+    if reorg_target.header().block_access_list_hash().is_some() {
+        return Err(RethError::Execution(
+            BlockValidationError::msg(
+                "block access lists are unsupported by the evm2 execution path",
+            )
+            .into(),
+        ))
+    }
+    // BAL execution is Amsterdam-only and remains stubbed for the evm2 pre-Amsterdam path.
+    // let has_bal = reorg_target.header().block_access_list_hash().is_some();
     let state_provider = provider.state_by_block_hash(reorg_target.header().parent_hash())?;
     let mut state = State::builder()
         .with_database_ref(StateProviderDatabase::new(&state_provider))
         .with_bundle_update()
-        .with_bal_builder_if(has_bal)
+        .with_bal_builder_if(false)
+        // .with_bal_builder_if(has_bal)
         .build();
 
     let ctx = evm_config.context_for_block(&reorg_target).map_err(RethError::other)?;
