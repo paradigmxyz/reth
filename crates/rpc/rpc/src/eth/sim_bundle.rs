@@ -21,7 +21,7 @@ use reth_primitives_traits::Recovered;
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{
     helpers::{block::LoadBlock, Call, EthTransactions},
-    FromEthApiError, FromEvmError,
+    FromEthApiError,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_storage_api::ProviderTx;

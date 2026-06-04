@@ -15,7 +15,7 @@ use reth_evm::{
 };
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
-    EthCallBundleApiServer, FromEthApiError, FromEvmError,
+    EthCallBundleApiServer, FromEthApiError,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, RpcInvalidTransactionError};
 use reth_tasks::pool::BlockingTaskGuard;
