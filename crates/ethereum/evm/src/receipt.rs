@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use alloy_consensus::TxType;
 use alloy_evm::eth::receipt_builder::{ReceiptBuilder, ReceiptBuilderCtx};
 use core::mem;
-use evm2::TxResult;
+use evm2::{evm::StateChanges, TxResult};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::Evm;
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Evm2BundleState};
@@ -35,6 +35,21 @@ impl RethReceiptBuilder {
         block_number: u64,
         txs: impl IntoIterator<Item = (TxType, TxResult)>,
     ) -> BlockExecutionOutput<Receipt> {
+        self.build_evm2_block_output_with_state_changes(
+            block_number,
+            txs,
+            core::iter::empty::<StateChanges>(),
+        )
+    }
+
+    /// Builds a block execution output from evm2 transaction results plus non-receipt state
+    /// changes, such as withdrawals.
+    pub fn build_evm2_block_output_with_state_changes(
+        &self,
+        block_number: u64,
+        txs: impl IntoIterator<Item = (TxType, TxResult)>,
+        extra_state_changes: impl IntoIterator<Item = StateChanges>,
+    ) -> BlockExecutionOutput<Receipt> {
         let mut receipts = Vec::new();
         let mut state_changes = Vec::new();
         let mut cumulative_gas_used = 0;
@@ -45,6 +60,7 @@ impl RethReceiptBuilder {
             receipts.push(Receipt { tx_type, success: result.status, cumulative_gas_used, logs });
             state_changes.push(result.state_changes);
         }
+        state_changes.extend(extra_state_changes);
 
         let mut state = Evm2BundleState::new(block_number);
         state.append_block(state_changes);
@@ -135,5 +151,38 @@ mod tests {
             output.state.accounts().get(&address).unwrap().current.as_ref().unwrap().nonce,
             1
         );
+    }
+
+    #[test]
+    fn builds_block_output_with_extra_state_changes() {
+        let address = address!("0000000000000000000000000000000000000001");
+        let mut extra = StateChanges::default();
+        extra.accounts.insert(
+            address,
+            Tracked {
+                original: None,
+                current: Some(AccountInfo {
+                    balance: U256::from(5),
+                    nonce: 0,
+                    code_hash: B256::ZERO,
+                    code: None,
+                    _non_exhaustive: (),
+                }),
+                _non_exhaustive: (),
+            },
+        );
+
+        let output = RethReceiptBuilder.build_evm2_block_output_with_state_changes(
+            7,
+            core::iter::empty::<(TxType, TxResult)>(),
+            [extra],
+        );
+
+        assert!(output.result.receipts.is_empty());
+        assert_eq!(
+            output.state.accounts().get(&address).unwrap().current.as_ref().unwrap().balance,
+            U256::from(5)
+        );
+        assert_eq!(output.state.block_reverts().len(), 1);
     }
 }

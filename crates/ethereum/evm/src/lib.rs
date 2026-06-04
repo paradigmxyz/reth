@@ -76,9 +76,13 @@ pub use evm2_convert::{
 };
 
 mod evm2_executor;
+pub use evm2_executor::{
+    execute_evm2_block, execute_evm2_block_with_withdrawals, Evm2ExecutionError,
+};
 #[cfg(feature = "std")]
-pub use evm2_executor::execute_evm2_block_with_state_provider;
-pub use evm2_executor::{execute_evm2_block, Evm2ExecutionError};
+pub use evm2_executor::{
+    execute_evm2_block_with_state_provider, execute_evm2_block_with_state_provider_and_withdrawals,
+};
 
 mod receipt;
 pub use receipt::RethReceiptBuilder;
