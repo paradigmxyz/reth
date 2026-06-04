@@ -4,13 +4,13 @@
 //!
 //! [EIP-8178]: https://eips.ethereum.org/EIPS/eip-8178
 
+use alloy_consensus::{Transaction, TxEnvelope};
 use alloy_eips::{
-    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip2718::Decodable2718,
+    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7685::{Requests, RequestsOrHash},
 };
 use alloy_primitives::{Bytes, B128, B256};
-use alloy_consensus::{Transaction, TxEnvelope};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
     ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ExecutionPayloadV4,
@@ -18,7 +18,7 @@ use alloy_rpc_types_engine::{
 };
 use http_body_util::BodyExt;
 use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
-use reth_chainspec::{ EthereumHardforks};
+use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_payload_primitives::EngineObjectValidationError;
@@ -52,7 +52,7 @@ const MAX_BLOB_LIMIT: usize = 128;
 pub struct EngineSszProxyHandle<ChainSpec> {
     engine: Arc<RwLock<Option<ConsensusEngineHandle<EthEngineTypes>>>>,
     blob_store: Arc<RwLock<Option<Arc<dyn BlobStore>>>>,
-    chain_spec:  Arc<ChainSpec>,
+    chain_spec: Arc<ChainSpec>,
 }
 
 impl<C> Clone for EngineSszProxyHandle<C> {
@@ -97,10 +97,9 @@ impl<ChainSpec> EngineSszProxyHandle<ChainSpec> {
     }
 
     /// Sets the chain spec used for getBlobs fork validation.
-    pub async fn set_chain_spec(&self, chain_spec: Arc<C>) {
-        *self.chain_spec.write().await = Some(chain_spec);
+    pub async fn set_chain_spec(&self, chain_spec: Arc<ChainSpec>) {
+        self.chain_spec = chain_spec;
     }
-
 
     async fn blob_store(&self) -> Option<Arc<dyn BlobStore>> {
         self.blob_store.read().await.clone()
@@ -113,7 +112,7 @@ impl<ChainSpec> EngineSszProxyHandle<ChainSpec> {
 
 /// A tower layer that intercepts SSZ Engine API routes under `/engine/v2`.
 #[derive(Clone, Debug, Default)]
-pub struct EngineSszProxyLayer< ChainSpec> {
+pub struct EngineSszProxyLayer<ChainSpec> {
     handle: EngineSszProxyHandle<ChainSpec>,
 }
 
