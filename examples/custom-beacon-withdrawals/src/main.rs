@@ -11,7 +11,8 @@ use reth_ethereum::{
     cli::interface::Cli,
     evm::{
         primitives::{
-            block::StateDB, Evm, EvmEnv, EvmEnvFor, ExecutionCtxFor, InspectorFor,
+            block::{DatabaseCommit, StateDB},
+            Evm, EvmEnv, EvmEnvFor, ExecutionCtxFor, InspectorFor,
             NextBlockEnvAttributes,
         },
         EthBlockAssembler, EthEvm2Config,
