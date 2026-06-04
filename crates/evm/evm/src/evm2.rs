@@ -35,7 +35,7 @@ use alloy_evm::{
 };
 use alloy_primitives::{
     map::{AddressMap, B256Map, HashMap},
-    Address, Bytes, B256, U256,
+    Address, Bytes, B256, KECCAK256_EMPTY, U256,
 };
 use core::{error::Error, fmt, ptr::NonNull};
 use evm2::{
@@ -154,7 +154,11 @@ where
         &mut self,
         address: &alloy_primitives::Address,
     ) -> Result<Option<Evm2AccountInfo>, Self::Error> {
-        self.inner.basic(*address).map(|info| info.map(account_info_to_evm2))
+        let Some(info) = self.inner.basic(*address)? else {
+            return Ok(None);
+        };
+        account_info_to_evm2_with_loaded_code(info, |code_hash| self.inner.code_by_hash(code_hash))
+            .map(Some)
     }
 
     fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Evm2Bytecode, Self::Error> {
@@ -269,8 +273,10 @@ where
 {
     // SAFETY: The vtable functions are installed for the same `DB` used to create the pointer.
     let db = unsafe { &mut *ptr.cast::<DB>().as_ptr() };
-    db.basic(*address)
-        .map(|info| info.map(account_info_to_evm2))
+    let info = db.basic(*address).map_err(|err| Evm2DatabaseRefError(Box::new(err)))?;
+    let Some(info) = info else { return Ok(None) };
+    account_info_to_evm2_with_loaded_code(info, |code_hash| db.code_by_hash(code_hash))
+        .map(Some)
         .map_err(|err| Evm2DatabaseRefError(Box::new(err)))
 }
 
@@ -324,8 +330,10 @@ where
 {
     // SAFETY: The vtable functions are installed for the same `DB` used to create the pointer.
     let db = unsafe { &mut *ptr.cast::<DB>().as_ptr() };
-    db.basic(*address)
-        .map(|info| info.map(account_info_to_evm2))
+    let info = db.basic(*address).map_err(|err| Evm2DatabaseRefError(Box::new(err)))?;
+    let Some(info) = info else { return Ok(None) };
+    account_info_to_evm2_with_loaded_code(info, |code_hash| db.code_by_hash(code_hash))
+        .map(Some)
         .map_err(|err| Evm2DatabaseRefError(Box::new(err)))
 }
 
@@ -749,6 +757,19 @@ pub fn account_info_to_evm2(info: AccountInfo) -> Evm2AccountInfo {
         code: info.code.map(bytecode_to_evm2),
         _non_exhaustive: (),
     }
+}
+
+fn account_info_to_evm2_with_loaded_code<E>(
+    mut info: AccountInfo,
+    mut code_by_hash: impl FnMut(B256) -> Result<Bytecode, E>,
+) -> Result<Evm2AccountInfo, E> {
+    if info.code.is_none() &&
+        info.code_hash != B256::ZERO &&
+        info.code_hash != KECCAK256_EMPTY
+    {
+        info.code = Some(code_by_hash(info.code_hash)?);
+    }
+    Ok(account_info_to_evm2(info))
 }
 
 fn storage_from_evm2(storage: StorageChangeSet) -> StorageWithOriginalValues {
@@ -1608,6 +1629,22 @@ where
     fn commit_transaction(&mut self, output: Self::Result) -> GasOutput {
         let Evm2TxExecutionResult { evm2_result, evm_state, blob_gas_used, tx_type, .. } = output;
         let gas_used = evm2_result.gas_used;
+        {
+            let target = Address::from([
+                0xff, 0x29, 0x25, 0xf4, 0xcd, 0x8b, 0xed, 0x5e, 0xac, 0xbf, 0xb1, 0xf5, 0xc2,
+                0x6d, 0x08, 0xf8, 0x09, 0x22, 0xb6, 0xca,
+            ]);
+            if evm2_result.state_changes.accounts.contains_key(&target) ||
+                evm2_result.state_changes.storage.contains_key(&target)
+            {
+                eprintln!(
+                    "evm2 tx gas={gas_used} target_account={:?} target_storage={:?} revm_state={:?}",
+                    evm2_result.state_changes.accounts.get(&target),
+                    evm2_result.state_changes.storage.get(&target),
+                    evm_state.get(&target)
+                );
+            }
+        }
 
         self.evm2.result.cumulative_tx_gas_used =
             self.evm2.result.cumulative_tx_gas_used.saturating_add(gas_used);
@@ -2350,6 +2387,25 @@ mod tests {
         fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
             self.ext.block_hash(number)
         }
+    }
+
+    #[test]
+    fn evm2_database_loads_account_code() {
+        let address = address!("0x0000000000000000000000000000000000000021");
+        let code = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]));
+        let code_hash = code.hash_slow();
+        let mut db = CacheDB::new(EmptyDB::default());
+        db.contracts.insert(code_hash, code);
+        db.accounts.insert(
+            address,
+            AccountInfo { code_hash, code: None, ..Default::default() },
+        );
+
+        let mut db = Evm2Database::new(db);
+        let account = Evm2DatabaseTrait::get_account(&mut db, &address).unwrap().unwrap();
+
+        assert_eq!(account.code_hash, code_hash);
+        assert!(account.code.is_some());
     }
 
     #[test]
