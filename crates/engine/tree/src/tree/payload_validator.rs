@@ -129,6 +129,7 @@ use reth_engine_primitives::{
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
     block::BlockExecutor,
+    database::State,
     execute::{alloy_block_execution_result_to_reth, revm_bundle_to_evm2, ExecutableTxFor},
     ConfigureEvm, EvmEnvFor, ExecutionCtxFor, OnStateHook, SpecFor,
 };
@@ -148,11 +149,10 @@ use reth_provider::{
     StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
     StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_revm::db::{states::bundle_state::BundleRetention, State};
 use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm::context::Block as _;
+use revm::{context::Block as _, database::states::bundle_state::BundleRetention};
 use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
