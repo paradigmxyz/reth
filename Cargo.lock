@@ -10594,7 +10594,6 @@ dependencies = [
  "reth-storage-errors",
  "reth-tokio-util",
  "reth-trie-common",
- "revm-database",
  "serde_json",
  "tokio",
  "tokio-stream",

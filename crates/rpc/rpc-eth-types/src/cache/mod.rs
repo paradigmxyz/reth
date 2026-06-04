@@ -618,7 +618,17 @@ where
                                     let _permit = rate_limiter.acquire().await;
                                     let res = provider
                                         .bal_store()
-                                        .revm_bal_by_hash(block_hash)
+                                        .get_decoded_by_hash(block_hash)
+                                        .and_then(|maybe_bal| {
+                                            maybe_bal
+                                                .map(|decoded| {
+                                                    decoded.try_map(|bal| {
+                                                        RevmBal::try_from(Vec::from(bal))
+                                                            .map_err(ProviderError::other)
+                                                    })
+                                                })
+                                                .transpose()
+                                        })
                                         .map(|maybe_bal| maybe_bal.map(CachedRevmBal::new));
                                     action_sender.send_bal(res);
                                 });
@@ -1226,15 +1236,9 @@ mod tests {
         }
 
         fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
-            Ok(block_hashes.iter().map(|_| None).collect())
-        }
-
-        fn revm_bal_by_hash(
-            &self,
-            _block_hash: BlockHash,
-        ) -> ProviderResult<Option<DecodedBal<Arc<RevmBal>>>> {
             self.fetches.fetch_add(1, Ordering::SeqCst);
-            Ok(Some(test_decoded_revm_bal()))
+            let raw = test_decoded_revm_bal().as_raw().clone();
+            Ok(block_hashes.iter().map(|_| Some(raw.clone())).collect())
         }
 
         fn bal_stream(&self) -> reth_storage_api::BalNotificationStream {
