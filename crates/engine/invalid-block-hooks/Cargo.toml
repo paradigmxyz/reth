@@ -12,9 +12,6 @@ workspace = true
 
 [dependencies]
 # reth
-revm.workspace = true
-revm-bytecode.workspace = true
-revm-database.workspace = true
 reth-engine-primitives.workspace = true
 reth-evm.workspace = true
 reth-execution-types.workspace = true
@@ -49,4 +46,5 @@ reth-evm-ethereum.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-revm = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
+revm-bytecode.workspace = true
 tempfile.workspace = true
