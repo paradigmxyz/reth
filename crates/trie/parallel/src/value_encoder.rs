@@ -65,8 +65,6 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
         /// Shared storage proof calculator for synchronous fallback when dispatched proof has no
         /// root.
         storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
-        /// Cache to store computed storage roots for future reuse.
-        cached_storage_roots: Arc<DashMap<B256, B256>>,
     },
     /// The storage root was found in cache.
     FromCache { account: Account, root: B256 },
@@ -136,7 +134,6 @@ where
                 storage_proof_results,
                 stats,
                 storage_calculator,
-                cached_storage_roots,
             } => {
                 let hashed_address = *hashed_address;
                 let account = *account;
@@ -174,7 +171,6 @@ where
                             .compute_root_hash(&[root_node])?
                             .expect("storage_root_node returns a node at empty path");
 
-                        cached_storage_roots.insert(hashed_address, storage_root);
                         storage_root
                     }
                 };
@@ -313,7 +309,6 @@ where
                 storage_proof_results: self.storage_proof_results.clone(),
                 stats: self.stats.clone(),
                 storage_calculator: self.storage_calculator.clone(),
-                cached_storage_roots: self.cached_storage_roots.clone(),
             }
         }
 
