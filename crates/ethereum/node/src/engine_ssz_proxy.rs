@@ -18,7 +18,7 @@ use alloy_rpc_types_engine::{
 };
 use http_body_util::BodyExt;
 use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::{ EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_payload_primitives::EngineObjectValidationError;
@@ -49,10 +49,10 @@ const STATUS_SERVICE_UNAVAILABLE: u16 = 503;
 const MAX_BLOB_LIMIT: usize = 128;
 
 /// Shared handle used by [`EngineSszProxyLayer`].
-pub struct EngineSszProxyHandle<C = ChainSpec> {
+pub struct EngineSszProxyHandle<ChainSpec> {
     engine: Arc<RwLock<Option<ConsensusEngineHandle<EthEngineTypes>>>>,
     blob_store: Arc<RwLock<Option<Arc<dyn BlobStore>>>>,
-    chain_spec: Arc<RwLock<Option<Arc<C>>>>,
+    chain_spec:  Arc<ChainSpec>,
 }
 
 impl<C> Clone for EngineSszProxyHandle<C> {
@@ -81,7 +81,7 @@ impl<C> Default for EngineSszProxyHandle<C> {
     }
 }
 
-impl<C> EngineSszProxyHandle<C> {
+impl<ChainSpec> EngineSszProxyHandle<ChainSpec> {
     /// Sets the consensus engine handle used by the proxy.
     pub async fn set_engine(&self, engine: ConsensusEngineHandle<EthEngineTypes>) {
         *self.engine.write().await = Some(engine);
@@ -106,27 +106,27 @@ impl<C> EngineSszProxyHandle<C> {
         self.blob_store.read().await.clone()
     }
 
-    async fn chain_spec(&self) -> Option<Arc<C>> {
-        self.chain_spec.read().await.clone()
+    async fn chain_spec(&self) -> Arc<ChainSpec> {
+        self.chain_spec
     }
 }
 
 /// A tower layer that intercepts SSZ Engine API routes under `/engine/v2`.
 #[derive(Clone, Debug, Default)]
-pub struct EngineSszProxyLayer<C = ChainSpec> {
-    handle: EngineSszProxyHandle<C>,
+pub struct EngineSszProxyLayer< ChainSpec> {
+    handle: EngineSszProxyHandle<ChainSpec>,
 }
 
-impl<C> EngineSszProxyLayer<C> {
+impl<ChainSpec> EngineSszProxyLayer<ChainSpec> {
     /// Creates a new proxy layer and a handle for setting the engine after node launch.
-    pub fn new() -> (Self, EngineSszProxyHandle<C>) {
+    pub fn new() -> (Self, EngineSszProxyHandle<ChainSpec>) {
         let handle = EngineSszProxyHandle::default();
         (Self { handle: handle.clone() }, handle)
     }
 }
 
-impl<S, C> Layer<S> for EngineSszProxyLayer<C> {
-    type Service = EngineSszProxyService<S, C>;
+impl<S, ChainSpec> Layer<S> for EngineSszProxyLayer<ChainSpec> {
+    type Service = EngineSszProxyService<S, ChainSpec>;
 
     fn layer(&self, inner: S) -> Self::Service {
         EngineSszProxyService { inner, handle: self.handle.clone() }
@@ -135,16 +135,16 @@ impl<S, C> Layer<S> for EngineSszProxyLayer<C> {
 
 /// The service produced by [`EngineSszProxyLayer`].
 #[derive(Clone, Debug)]
-pub struct EngineSszProxyService<S, C = ChainSpec> {
+pub struct EngineSszProxyService<S, ChainSpec> {
     inner: S,
-    handle: EngineSszProxyHandle<C>,
+    handle: EngineSszProxyHandle<ChainSpec>,
 }
 
-impl<S, C> Service<HttpRequest> for EngineSszProxyService<S, C>
+impl<S, ChainSpec> Service<HttpRequest> for EngineSszProxyService<S, ChainSpec>
 where
     S: Service<HttpRequest, Response = HttpResponse, Error = BoxError> + Send + Clone,
     S::Future: Send + 'static,
-    C: EthereumHardforks + Send + Sync + 'static,
+    ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
     type Response = HttpResponse;
     type Error = BoxError;
