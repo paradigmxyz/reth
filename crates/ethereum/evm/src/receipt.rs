@@ -1,8 +1,11 @@
+use alloc::vec::Vec;
 use alloy_consensus::TxType;
 use alloy_evm::eth::receipt_builder::{ReceiptBuilder, ReceiptBuilderCtx};
+use core::mem;
 use evm2::TxResult;
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::Evm;
+use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Evm2BundleState};
 
 /// A builder that operates on Reth primitive types, specifically [`TransactionSigned`] and
 /// [`Receipt`].
@@ -23,6 +26,37 @@ impl RethReceiptBuilder {
             success: result.status,
             cumulative_gas_used,
             logs: result.state_changes.logs,
+        }
+    }
+
+    /// Builds a block execution output from evm2 transaction results.
+    pub fn build_evm2_block_output(
+        &self,
+        block_number: u64,
+        txs: impl IntoIterator<Item = (TxType, TxResult)>,
+    ) -> BlockExecutionOutput<Receipt> {
+        let mut receipts = Vec::new();
+        let mut state_changes = Vec::new();
+        let mut cumulative_gas_used = 0;
+
+        for (tx_type, mut result) in txs {
+            cumulative_gas_used += result.gas_used;
+            let logs = mem::take(&mut result.state_changes.logs);
+            receipts.push(Receipt { tx_type, success: result.status, cumulative_gas_used, logs });
+            state_changes.push(result.state_changes);
+        }
+
+        let mut state = Evm2BundleState::new(block_number);
+        state.append_block(state_changes);
+
+        BlockExecutionOutput {
+            result: BlockExecutionResult {
+                receipts,
+                requests: Default::default(),
+                gas_used: cumulative_gas_used,
+                blob_gas_used: 0,
+            },
+            state,
         }
     }
 }
@@ -47,7 +81,8 @@ impl ReceiptBuilder for RethReceiptBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{address, Log, LogData, B256};
+    use alloy_primitives::{address, Log, LogData, B256, U256};
+    use evm2::evm::{AccountInfo, Tracked};
 
     #[test]
     fn builds_receipt_from_evm2_tx_result() {
@@ -65,5 +100,40 @@ mod tests {
         assert!(receipt.success);
         assert_eq!(receipt.cumulative_gas_used, 42);
         assert_eq!(receipt.logs, vec![log]);
+    }
+
+    #[test]
+    fn builds_block_output_from_evm2_tx_results() {
+        let address = address!("0000000000000000000000000000000000000001");
+        let log =
+            Log { address, data: LogData::new_unchecked(vec![B256::ZERO], Default::default()) };
+        let mut result = TxResult::default();
+        result.status = true;
+        result.gas_used = 21_000;
+        result.state_changes.logs.push(log.clone());
+        result.state_changes.accounts.insert(
+            address,
+            Tracked {
+                original: None,
+                current: Some(AccountInfo {
+                    balance: U256::from(1),
+                    nonce: 1,
+                    code_hash: B256::ZERO,
+                    code: None,
+                    _non_exhaustive: (),
+                }),
+                _non_exhaustive: (),
+            },
+        );
+
+        let output = RethReceiptBuilder.build_evm2_block_output(7, [(TxType::Legacy, result)]);
+
+        assert_eq!(output.result.gas_used, 21_000);
+        assert_eq!(output.result.receipts[0].logs, vec![log]);
+        assert_eq!(output.state.first_block(), 7);
+        assert_eq!(
+            output.state.accounts().get(&address).unwrap().current.as_ref().unwrap().nonce,
+            1
+        );
     }
 }
