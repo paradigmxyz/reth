@@ -3,7 +3,7 @@
 use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
-use alloy_eip7928::{compute_block_access_list_hash, BlockAccessList};
+use alloy_eip7928::BlockAccessList;
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory, GasOutput};
 use alloy_evm::{
@@ -29,12 +29,9 @@ use reth_primitives_traits::{
 use reth_storage_api::StateProvider;
 pub use reth_storage_errors::provider::ProviderError;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
-use revm::{
-    database::{
-        states::{bundle_state::BundleRetention, reverts::AccountInfoRevert, RevertToSlot},
-        BundleState, State,
-    },
-    state::bal::Bal,
+use revm::database::{
+    states::{bundle_state::BundleRetention, reverts::AccountInfoRevert, RevertToSlot},
+    BundleState, State,
 };
 
 /// A type that knows how to execute a block. It is assumed to operate on a
@@ -499,7 +496,8 @@ where
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.executor.apply_pre_execution_changes().map_err(BlockExecutionError::other)?;
-        self.executor.evm_mut().db_mut().bump_bal_index();
+        // BAL execution is Amsterdam-only and remains stubbed for the evm2 pre-Amsterdam path.
+        // self.executor.evm_mut().db_mut().bump_bal_index();
 
         Ok(())
     }
@@ -516,7 +514,8 @@ where
             .map_err(BlockExecutionError::other)?
         {
             self.transactions.push(tx);
-            self.executor.evm_mut().db_mut().bump_bal_index();
+            // BAL execution is Amsterdam-only and remains stubbed for the evm2 pre-Amsterdam path.
+            // self.executor.evm_mut().db_mut().bump_bal_index();
             Ok(Some(gas_used))
         } else {
             Ok(None)
@@ -533,9 +532,12 @@ where
 
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);
-        let block_access_list = db.take_built_alloy_bal();
-        let block_access_list_hash =
-            block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal.as_slice()));
+        let block_access_list = None;
+        let block_access_list_hash = None;
+        // BAL execution is Amsterdam-only and remains stubbed for the evm2 pre-Amsterdam path.
+        // let block_access_list = db.take_built_alloy_bal();
+        // let block_access_list_hash =
+        //     block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal.as_slice()));
         let bundle_state = revm_bundle_to_evm2(db.bundle_state.clone(), self.parent.number() + 1);
 
         let hashed_state = state.hashed_post_state(&bundle_state);
@@ -617,30 +619,38 @@ where
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
+        if block.header().block_access_list_hash().is_some() {
+            return Err(BlockValidationError::msg(
+                "block access lists are unsupported by the evm2 execution path",
+            )
+            .into())
+        }
+
         let mut executor = self
             .strategy_factory
             .executor_for_block(&mut self.db, block)
             .map_err(BlockExecutionError::other)?;
 
-        let has_bal = block.header().block_access_list_hash().is_some();
-
-        if has_bal {
-            executor.evm_mut().db_mut().bal_state.bal_builder = Some(Bal::new());
-        } else {
-            executor.evm_mut().db_mut().bal_state.bal_builder = None;
-        }
+        // BAL execution is Amsterdam-only and remains stubbed for the evm2 pre-Amsterdam path.
+        // let has_bal = block.header().block_access_list_hash().is_some();
+        //
+        // if has_bal {
+        //     executor.evm_mut().db_mut().bal_state.bal_builder = Some(Bal::new());
+        // } else {
+        //     executor.evm_mut().db_mut().bal_state.bal_builder = None;
+        // }
 
         executor.apply_pre_execution_changes().map_err(BlockExecutionError::other)?;
 
-        if has_bal {
-            executor.evm_mut().db_mut().bump_bal_index();
-        }
+        // if has_bal {
+        //     executor.evm_mut().db_mut().bump_bal_index();
+        // }
 
         for tx in block.transactions_recovered() {
             executor.execute_transaction(tx).map_err(BlockExecutionError::other)?;
-            if has_bal {
-                executor.evm_mut().db_mut().bump_bal_index();
-            }
+            // if has_bal {
+            //     executor.evm_mut().db_mut().bump_bal_index();
+            // }
         }
 
         let result = executor.apply_post_execution_changes().map_err(BlockExecutionError::other)?;
@@ -682,7 +692,9 @@ where
     }
 
     fn take_bal(&mut self) -> Option<BlockAccessList> {
-        self.db.take_built_alloy_bal()
+        // BAL execution is Amsterdam-only and remains stubbed for the evm2 pre-Amsterdam path.
+        // self.db.take_built_alloy_bal()
+        None
     }
 }
 
