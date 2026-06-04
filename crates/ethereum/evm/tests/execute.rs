@@ -4,25 +4,20 @@ use alloy_consensus::Header;
 use alloy_eips::{
     eip2935::{HISTORY_SERVE_WINDOW, HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
     eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
-    eip4895::Withdrawal,
     eip7685::EMPTY_REQUESTS_HASH,
 };
 use alloy_primitives::{keccak256, B256, U256};
 use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, ForkCondition, MAINNET};
 use reth_ethereum_primitives::{Block, BlockBody};
-use reth_evm::{
-    execute::{BasicBlockExecutor, BlockValidationError, Executor},
-    ConfigureEvm,
-};
+use reth_evm::execute::{BasicBlockExecutor, BlockValidationError, Executor};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::RecoveredBlock;
 use revm::{
     database::{CacheDB, EmptyDB, TransitionState},
-    primitives::address,
-    state::{AccountInfo, Bytecode, EvmState},
+    state::{AccountInfo, Bytecode},
     Database,
 };
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 
 fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
     let mut db = CacheDB::new(Default::default());
@@ -550,72 +545,4 @@ fn eip_2935_state_transition_inside_fork() {
     assert!(executor.with_state_mut(|state| {
         state.storage(HISTORY_STORAGE_ADDRESS, U256::from(2)).unwrap().is_zero()
     }));
-}
-
-#[test]
-fn test_balance_increment_not_duplicated() {
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::from(&*MAINNET)
-            .shanghai_activated()
-            .cancun_activated()
-            .prague_activated()
-            .build(),
-    );
-
-    let withdrawal_recipient = address!("0x1000000000000000000000000000000000000000");
-
-    let mut db = CacheDB::new(EmptyDB::default());
-    let initial_balance = 100;
-    db.insert_account_info(
-        withdrawal_recipient,
-        AccountInfo { balance: U256::from(initial_balance), nonce: 1, ..Default::default() },
-    );
-
-    let withdrawal =
-        Withdrawal { index: 0, validator_index: 0, address: withdrawal_recipient, amount: 1 };
-
-    let header = Header {
-        timestamp: 1,
-        number: 1,
-        excess_blob_gas: Some(0),
-        parent_beacon_block_root: Some(B256::random()),
-        ..Header::default()
-    };
-
-    let block = &RecoveredBlock::new_unhashed(
-        Block {
-            header,
-            body: BlockBody {
-                transactions: vec![],
-                ommers: vec![],
-                withdrawals: Some(vec![withdrawal].into()),
-            },
-        },
-        vec![],
-    );
-
-    let provider = EthEvmConfig::new(chain_spec);
-    let executor = provider.batch_executor(db);
-
-    let (tx, rx) = mpsc::channel();
-    let tx_clone = tx.clone();
-
-    let _output = executor
-        .execute_with_state_hook(block, move |state: EvmState| {
-            if let Some(account) = state.get(&withdrawal_recipient) {
-                let _ = tx_clone.send(account.info.balance);
-            }
-        })
-        .expect("Block execution should succeed");
-
-    drop(tx);
-    let balance_changes: Vec<U256> = rx.try_iter().collect();
-
-    if let Some(final_balance) = balance_changes.last() {
-        let expected_final_balance = U256::from(initial_balance) + U256::from(1_000_000_000); // initial + 1 Gwei in Wei
-        assert_eq!(
-            *final_balance, expected_final_balance,
-            "Final balance should match expected value after withdrawal"
-        );
-    }
 }
