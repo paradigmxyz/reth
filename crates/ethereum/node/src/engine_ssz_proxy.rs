@@ -161,7 +161,7 @@ where
     }
 
     fn call(&mut self, request: HttpRequest) -> Self::Future {
-        if !request.uri().path().starts_with("/engine/") {
+        if !request.uri().path().starts_with("/engine/v2/") {
             let fut = self.inner.call(request);
             return Box::pin(fut)
         }
