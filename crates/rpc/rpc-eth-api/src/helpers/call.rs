@@ -208,8 +208,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         )
                         .map_err(map_err)?
                     } else {
-                        let evm = this.evm_config().evm_with_env(&mut db, evm_env);
-                        let mut builder = this.evm_config().create_block_builder(evm, &parent, ctx);
+                        let mut builder = this
+                            .evm_config()
+                            .create_block_builder_with_state_and_env(
+                                &mut db, evm_env, &parent, ctx,
+                            );
 
                         if let Some(ref state_overrides) = state_overrides {
                             simulate::apply_precompile_overrides(
