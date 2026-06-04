@@ -414,7 +414,7 @@ fn generate_sidebar_ts(
         _ => "cliSidebar",
     };
 
-    let mut ts_code = String::from("import type { SidebarItem } from \"./types\";\n\n");
+    let mut ts_code = String::from("import { SidebarItem } from \"vocs\";\n\n");
     ts_code.push_str(&format!("export const {}: SidebarItem = {{\n", var_name));
     ts_code.push_str(&format!("    text: \"{}\",\n", root_name));
     ts_code.push_str(&format!("    link: \"/cli/{}\",\n", root_name));

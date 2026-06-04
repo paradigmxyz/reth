@@ -3,7 +3,6 @@ import { writeFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
 import { redirects, basePath } from '../redirects.config'
 // Base path for the site
-const DIST_DIR = './docs/dist'
 
 function generateRedirectHtml(targetPath: string): string {
   return `<!DOCTYPE html>
@@ -38,10 +37,10 @@ Object.entries(redirects).forEach(([from, to]) => {
   }
   
   paths.forEach(path => {
-    const filePath = join(DIST_DIR, path)
+    const filePath = join('./docs/dist', path)
     if (!path.includes('.')) {
       // It's a directory path, create index.html
-      const indexPath = join(DIST_DIR, path, 'index.html')
+      const indexPath = join('./docs/dist', path, 'index.html')
       mkdirSync(dirname(indexPath), { recursive: true })
       writeFileSync(indexPath, generateRedirectHtml(finalTarget))
     } else {

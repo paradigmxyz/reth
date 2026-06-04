@@ -8,28 +8,7 @@ async function fixSearchIndex() {
   
   try {
     // 1. Find the search index file
-    let files: string[];
-    try {
-      files = await readdir(vocsDir);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        for (const assetsDir of [join(distDir, 'assets'), join(distDir, 'public', 'assets')]) {
-          try {
-            const assets = await readdir(assetsDir);
-            const searchIndexFile = assets.find(f => f.startsWith('search-index-') && f.endsWith('.json'));
-            if (searchIndexFile) {
-              console.log(`✅ Vocs 2 search index found at ${join(assetsDir, searchIndexFile)}; no legacy fix needed.`);
-              return;
-            }
-          } catch (assetsError) {
-            if ((assetsError as NodeJS.ErrnoException).code !== 'ENOENT') {
-              throw assetsError;
-            }
-          }
-        }
-      }
-      throw error;
-    }
+    const files = await readdir(vocsDir);
     const searchIndexFile = files.find(f => f.startsWith('search-index-') && f.endsWith('.json'));
     
     if (!searchIndexFile) {
