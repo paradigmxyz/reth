@@ -1,14 +1,10 @@
-use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TxHashRef, BlockHeader};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
-use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U64};
-use alloy_rlp::{Decodable, Encodable};
+use alloy_primitives::{hex::decode, Address, Bytes, B256, U64};
+use alloy_rlp::Encodable;
 use alloy_rpc_types::BlockTransactionsKind;
 use alloy_rpc_types_debug::ExecutionWitness;
-use alloy_rpc_types_eth::{
-    state::EvmOverrides, Account, AccountInfo, BlockError, Bundle, Index, StateContext,
-};
+use alloy_rpc_types_eth::{Account, AccountInfo, Bundle, Index, StateContext};
 use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
@@ -16,37 +12,26 @@ use async_trait::async_trait;
 use futures::Stream;
 use jsonrpsee::core::RpcResult;
 use parking_lot::RwLock;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_engine_primitives::ConsensusEngineEvent;
-use reth_errors::RethError;
-use reth_evm::{block::BlockExecutor, execute::Executor, ConfigureEvm, EvmEnvFor};
-use reth_primitives_traits::{
-    Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
-};
-use reth_revm::{db::State, witness::ExecutionWitnessRecord};
+use reth_primitives_traits::{Block as BlockTrait, BlockTy, ReceiptWithBloom, RecoveredBlock};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
+    FromEthApiError, RpcConvert, RpcNodeCore,
 };
-use reth_rpc_eth_types::{EthApiError, StateCacheDb};
+use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
-    BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
-    ReceiptProviderIdExt, StateProviderFactory, StateRootProvider, StorageRootProvider,
+    BlockIdReader, BlockReaderIdExt, HeaderProvider, ReceiptProviderIdExt, StateProviderFactory,
     TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_transaction_pool::TransactionPool;
-use reth_trie_common::{
-    updates::TrieUpdates, ExecutionWitnessMode, HashedPostState, HashedStorage,
-};
-use revm::{database::states::bundle_state::BundleRetention, Database, DatabaseCommit};
-use revm_inspectors::tracing::{DebugInspector, TransactionContext};
+use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostState};
 use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, sync::Arc};
-use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 use tokio_stream::StreamExt;
 
 /// `debug` API implementation.
@@ -101,6 +86,47 @@ where
 
 // === impl DebugApi ===
 
+impl<Eth> DebugApi<Eth>
+where
+    Eth: TraceExt,
+{
+    /// Returns the code associated with a given hash at the specified block ID. If no code is
+    /// found, it returns None. If no block ID is provided, it defaults to the latest block.
+    pub async fn debug_code_by_hash(
+        &self,
+        hash: B256,
+        block_id: Option<BlockId>,
+    ) -> Result<Option<Bytes>, Eth::Error> {
+        Ok(self
+            .provider()
+            .state_by_block_id(block_id.unwrap_or_default())
+            .map_err(Eth::Error::from_eth_err)?
+            .bytecode_by_hash(&hash)
+            .map_err(Eth::Error::from_eth_err)?
+            .map(|b| b.original_bytes()))
+    }
+
+    /// Returns the state root of the `HashedPostState` on top of the state for the given block with
+    /// trie updates.
+    async fn debug_state_root_with_updates(
+        &self,
+        hashed_state: HashedPostState,
+        block_id: Option<BlockId>,
+    ) -> Result<(B256, TrieUpdates), Eth::Error> {
+        self.inner
+            .eth_api
+            .spawn_blocking_io(move |this| {
+                let state = this
+                    .provider()
+                    .state_by_block_id(block_id.unwrap_or_default())
+                    .map_err(Eth::Error::from_eth_err)?;
+                state.state_root_with_updates(hashed_state).map_err(Eth::Error::from_eth_err)
+            })
+            .await
+    }
+}
+
+#[cfg(any())]
 impl<Eth> DebugApi<Eth>
 where
     Eth: TraceExt,
@@ -757,6 +783,11 @@ where
     }
 }
 
+fn unsupported_debug<T>() -> RpcResult<T> {
+    Err(EthApiError::Unsupported("debug execution API is unsupported by the evm2 execution path")
+        .into())
+}
+
 #[async_trait]
 impl<Eth> DebugApiServer<RpcTxReq<Eth::NetworkTypes>> for DebugApi<Eth>
 where
@@ -873,10 +904,11 @@ where
     /// Handler for `debug_traceChain`
     async fn debug_trace_chain(
         &self,
-        _start_exclusive: BlockNumberOrTag,
-        _end_inclusive: BlockNumberOrTag,
+        start_exclusive: BlockNumberOrTag,
+        end_inclusive: BlockNumberOrTag,
     ) -> RpcResult<Vec<BlockTraceResult>> {
-        Err(internal_rpc_err("unimplemented"))
+        let _ = (start_exclusive, end_inclusive);
+        unsupported_debug()
     }
 
     /// Handler for `debug_traceBlock`
@@ -885,10 +917,8 @@ where
         rlp_block: Bytes,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_trace_raw_block(self, rlp_block, opts.unwrap_or_default())
-            .await
-            .map_err(Into::into)
+        let _ = (rlp_block, opts);
+        unsupported_debug()
     }
 
     /// Handler for `debug_traceBlockByHash`
@@ -897,10 +927,8 @@ where
         block: B256,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_trace_block(self, block.into(), opts.unwrap_or_default())
-            .await
-            .map_err(Into::into)
+        let _ = (block, opts);
+        unsupported_debug()
     }
 
     /// Handler for `debug_traceBlockByNumber`
@@ -909,10 +937,8 @@ where
         block: BlockNumberOrTag,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_trace_block(self, block.into(), opts.unwrap_or_default())
-            .await
-            .map_err(Into::into)
+        let _ = (block, opts);
+        unsupported_debug()
     }
 
     /// Handler for `debug_traceTransaction`
@@ -921,10 +947,8 @@ where
         tx_hash: B256,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<GethTrace> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_trace_transaction(self, tx_hash, opts.unwrap_or_default())
-            .await
-            .map_err(Into::into)
+        let _ = (tx_hash, opts);
+        unsupported_debug()
     }
 
     /// Handler for `debug_traceCall`
@@ -934,10 +958,8 @@ where
         block_id: Option<BlockId>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<GethTrace> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_trace_call(self, request, block_id, opts.unwrap_or_default())
-            .await
-            .map_err(Into::into)
+        let _ = (request, block_id, opts);
+        unsupported_debug()
     }
 
     async fn debug_trace_call_many(
@@ -946,8 +968,8 @@ where
         state_context: Option<StateContext>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<Vec<GethTrace>>> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_trace_call_many(self, bundles, state_context, opts).await.map_err(Into::into)
+        let _ = (bundles, state_context, opts);
+        unsupported_debug()
     }
 
     /// Handler for `debug_executionWitness`
@@ -956,8 +978,8 @@ where
         block: BlockNumberOrTag,
         mode: Option<ExecutionWitnessMode>,
     ) -> RpcResult<ExecutionWitness> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_execution_witness(self, block, mode).await.map_err(Into::into)
+        let _ = (block, mode);
+        unsupported_debug()
     }
 
     /// Handler for `debug_executionWitnessByBlockHash`
@@ -966,8 +988,8 @@ where
         hash: B256,
         mode: Option<ExecutionWitnessMode>,
     ) -> RpcResult<ExecutionWitness> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_execution_witness_by_block_hash(self, hash, mode).await.map_err(Into::into)
+        let _ = (hash, mode);
+        unsupported_debug()
     }
 
     /// Handler for `debug_accountAt`
@@ -977,8 +999,8 @@ where
         tx_index: Index,
         address: Address,
     ) -> RpcResult<Option<Account>> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_account_at(self, block_id, tx_index, address).await.map_err(Into::into)
+        let _ = (block_id, tx_index, address);
+        unsupported_debug()
     }
 
     /// Handler for `debug_accountInfoAt`
@@ -988,8 +1010,8 @@ where
         tx_index: Index,
         address: Address,
     ) -> RpcResult<Option<AccountInfo>> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_account_info_at(self, block_id, tx_index, address).await.map_err(Into::into)
+        let _ = (block_id, tx_index, address);
+        unsupported_debug()
     }
 
     async fn debug_account_range(
@@ -1107,8 +1129,8 @@ where
         block_hash: B256,
         _opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<B256>> {
-        let _permit = self.acquire_trace_permit().await;
-        self.intermediate_roots(block_hash).await.map_err(Into::into)
+        let _ = block_hash;
+        unsupported_debug()
     }
 
     async fn debug_mem_stats(&self) -> RpcResult<()> {
@@ -1179,22 +1201,8 @@ where
         block_hash: B256,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
-        let _permit = self.acquire_trace_permit().await;
-        let entry = self
-            .inner
-            .bad_block_store
-            .get(block_hash)
-            .ok_or_else(|| internal_rpc_err("bad block not found in cache"))?;
-
-        let evm_env = self
-            .eth_api()
-            .evm_config()
-            .evm_env(entry.block.header())
-            .map_err(RethError::other)
-            .to_rpc_result()?;
-
-        let opts = opts.map(|o| o.tracing_options).unwrap_or_default();
-        self.trace_block(entry.block.clone(), evm_env, opts).await.map_err(Into::into)
+        let _ = (block_hash, opts);
+        unsupported_debug()
     }
 }
 
@@ -1214,6 +1222,7 @@ struct DebugApiInner<Eth: RpcNodeCore> {
     /// The implementation of `eth` API
     eth_api: Eth,
     // restrict the number of concurrent calls to blocking calls
+    #[expect(dead_code)]
     blocking_task_guard: BlockingTaskGuard,
     /// Cache for bad blocks.
     bad_block_store: BadBlockStore<BlockTy<Eth::Primitives>>,
@@ -1263,6 +1272,7 @@ impl<B: BlockTrait> BadBlockStore<B> {
     }
 
     /// Returns the bad block entry with the given hash, if cached.
+    #[expect(dead_code)]
     fn get(&self, hash: B256) -> Option<BadBlockEntry<B>> {
         let guard = self.inner.read();
         guard.iter().find(|entry| entry.block.hash() == hash).cloned()
