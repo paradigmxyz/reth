@@ -275,9 +275,14 @@ where
         .with_bal_builder_if(has_bal)
         .build();
 
+    let evm_env = evm_config.evm_env(reorg_target.header()).map_err(RethError::other)?;
     let ctx = evm_config.context_for_block(&reorg_target).map_err(RethError::other)?;
-    let evm = evm_config.evm_for_block(&mut state, &reorg_target).map_err(RethError::other)?;
-    let mut builder = evm_config.create_block_builder(evm, &reorg_target_parent, ctx);
+    let mut builder = evm_config.create_block_builder_with_state_and_env(
+        &mut state,
+        evm_env,
+        &reorg_target_parent,
+        ctx,
+    );
 
     builder.apply_pre_execution_changes()?;
 
