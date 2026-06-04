@@ -1,7 +1,9 @@
 //! Conversion helpers for feeding Reth Ethereum primitives into evm2.
 
 use alloy_consensus::{transaction::Recovered, BlockHeader};
+use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{BlockNumber, BlockTimestamp, U256};
+use alloy_rpc_types_engine::ExecutionData;
 use evm2::{env::BlockEnv, ethereum::RecoveredTxEnvelope, SpecId};
 use reth_chainspec::EthereumHardforks;
 use reth_ethereum_primitives::TransactionSigned;
@@ -59,6 +61,14 @@ where
 
 /// Converts an Ethereum header into evm2's block environment.
 pub fn evm2_block_env<H: BlockHeader>(header: &H) -> BlockEnv {
+    evm2_block_env_with_blob_params(header, None)
+}
+
+/// Converts an Ethereum header into evm2's block environment with chain blob parameters.
+pub fn evm2_block_env_with_blob_params<H: BlockHeader>(
+    header: &H,
+    blob_params: Option<BlobParams>,
+) -> BlockEnv {
     BlockEnv {
         number: U256::from(header.number()),
         beneficiary: header.beneficiary(),
@@ -70,11 +80,39 @@ pub fn evm2_block_env<H: BlockHeader>(header: &H) -> BlockEnv {
             .mix_hash()
             .map(|hash| U256::from_be_slice(hash.as_slice()))
             .unwrap_or_default(),
-        blob_basefee: U256::ZERO,
+        blob_basefee: blob_basefee(header.excess_blob_gas(), blob_params),
         slot_num: U256::ZERO,
         ext: (),
         _non_exhaustive: (),
     }
+}
+
+/// Converts engine execution payload data into evm2's block environment.
+pub fn evm2_payload_block_env(
+    payload: &ExecutionData,
+    blob_params: Option<BlobParams>,
+) -> BlockEnv {
+    let payload = &payload.payload;
+    BlockEnv {
+        number: U256::from(payload.block_number()),
+        beneficiary: payload.fee_recipient(),
+        timestamp: U256::from(payload.timestamp()),
+        gas_limit: U256::from(payload.gas_limit()),
+        basefee: U256::from(payload.saturated_base_fee_per_gas()),
+        difficulty: U256::ZERO,
+        prevrandao: U256::from_be_slice(payload.as_v1().prev_randao.as_slice()),
+        blob_basefee: blob_basefee(payload.excess_blob_gas(), blob_params),
+        slot_num: U256::from(payload.as_v4().map(|v4| v4.slot_number).unwrap_or_default()),
+        ext: (),
+        _non_exhaustive: (),
+    }
+}
+
+fn blob_basefee(excess_blob_gas: Option<u64>, blob_params: Option<BlobParams>) -> U256 {
+    excess_blob_gas
+        .zip(blob_params)
+        .map(|(excess_blob_gas, params)| U256::from(params.calc_blob_fee(excess_blob_gas)))
+        .unwrap_or_default()
 }
 
 /// Converts an owned recovered Reth Ethereum transaction into evm2's recovered envelope.
@@ -103,4 +141,31 @@ pub fn evm2_recovered_tx(tx: Recovered<TransactionSigned>) -> RecoveredTxEnvelop
 /// Converts a borrowed recovered Reth Ethereum transaction into evm2's recovered envelope.
 pub fn evm2_recovered_tx_ref(tx: Recovered<&TransactionSigned>) -> RecoveredTxEnvelope {
     evm2_recovered_tx(Recovered::new_unchecked((*tx.inner()).clone(), tx.signer()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::Header;
+    use alloy_eips::eip7840::BlobParams;
+
+    #[test]
+    fn evm2_block_env_uses_blob_params_for_blob_basefee() {
+        let blob_params = BlobParams::cancun();
+        let excess_blob_gas = 1_000_000;
+        let header = Header { excess_blob_gas: Some(excess_blob_gas), ..Default::default() };
+
+        let env = evm2_block_env_with_blob_params(&header, Some(blob_params));
+
+        assert_eq!(env.blob_basefee, U256::from(blob_params.calc_blob_fee(excess_blob_gas)));
+    }
+
+    #[test]
+    fn evm2_block_env_defaults_blob_basefee_without_blob_context() {
+        let header = Header { excess_blob_gas: Some(1_000_000), ..Default::default() };
+
+        let env = evm2_block_env(&header);
+
+        assert_eq!(env.blob_basefee, U256::ZERO);
+    }
 }
