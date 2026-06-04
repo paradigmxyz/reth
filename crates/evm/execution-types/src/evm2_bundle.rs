@@ -217,7 +217,10 @@ impl Evm2BundleState {
 
         for (address, change) in accounts {
             if let Some(account) = &change.current &&
-                let Some(bytecode) = &account.code
+                let Some(bytecode) = &account.code &&
+                !bytecode.is_empty() &&
+                !account.code_hash.is_zero() &&
+                account.code_hash != KECCAK_EMPTY
             {
                 self.contracts.entry(account.code_hash).or_insert_with(|| bytecode.clone());
             }
@@ -903,6 +906,26 @@ mod tests {
         bundle.append_block([tx]);
 
         assert_eq!(bundle.contracts().get(&code_hash), Some(&bytecode));
+    }
+
+    #[test]
+    fn bundle_does_not_index_empty_embedded_bytecode() {
+        let address = address!("0000000000000000000000000000000000000001");
+        let code_hash = b256!("0x1111111111111111111111111111111111111111111111111111111111111111");
+        let mut bundle = Evm2BundleState::new(1);
+
+        let mut account = account(1);
+        account.code_hash = code_hash;
+        account.code = Some(Bytecode::default());
+
+        let mut tx = StateChanges::default();
+        tx.accounts.insert(
+            address,
+            Tracked { original: None, current: Some(account), _non_exhaustive: () },
+        );
+        bundle.append_block([tx]);
+
+        assert!(!bundle.contracts().contains_key(&code_hash));
     }
 
     fn account(nonce: u64) -> AccountInfo {
