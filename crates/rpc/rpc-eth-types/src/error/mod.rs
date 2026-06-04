@@ -2,8 +2,6 @@
 
 pub mod api;
 use alloy_eips::BlockId;
-#[cfg(any())]
-use alloy_evm::{call::CallError, overrides::StateOverrideError};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
 use alloy_sol_types::{ContractError, RevertReason};
@@ -21,15 +19,7 @@ use reth_transaction_pool::error::{
     PoolError, PoolErrorKind, PoolTransactionError, RawPoolTransactionError,
 };
 #[cfg(any())]
-use revm::{
-    context_interface::result::{
-        EVMError, HaltReason, InvalidHeader, InvalidTransaction, OutOfGasError,
-    },
-    database::bal::EvmDatabaseError,
-    state::bal::BalError,
-};
-#[cfg(any())]
-use revm_inspectors::tracing::{DebugInspectorError, MuxError};
+use revm::{database::bal::EvmDatabaseError, state::bal::BalError};
 use std::convert::Infallible;
 use tokio::sync::oneshot::error::RecvError;
 
@@ -168,8 +158,8 @@ pub enum EthApiError {
     #[error(transparent)]
     /// Call Input error when both `data` and `input` fields are set and not equal.
     TransactionInputError(#[from] TransactionInputError),
-    /// Evm generic purpose error.
-    #[error("Revm error: {0}")]
+    /// EVM generic purpose error.
+    #[error("EVM error: {0}")]
     EvmCustom(String),
     /// Bytecode override is invalid.
     ///
@@ -181,10 +171,6 @@ pub enum EthApiError {
     /// Error encountered when converting a transaction type
     #[error(transparent)]
     TransactionConversionError(#[from] TransactionConversionError),
-    /// Error thrown when tracing with a muxTracer fails
-    #[cfg(any())]
-    #[error(transparent)]
-    MuxTracerError(#[from] MuxError),
     /// Error thrown when waiting for transaction confirmation times out
     #[error(
         "Transaction {hash} was added to the mempool but wasn't confirmed within {duration:?}."
@@ -258,24 +244,6 @@ impl EthApiError {
         }
     }
 
-    /// Converts the given [`StateOverrideError`] into a new [`EthApiError`] instance.
-    #[cfg(any())]
-    pub fn from_state_overrides_err<E>(err: StateOverrideError<E>) -> Self
-    where
-        E: Into<Self>,
-    {
-        err.into()
-    }
-
-    /// Converts the given [`CallError`] into a new [`EthApiError`] instance.
-    #[cfg(any())]
-    pub fn from_call_err<E>(err: CallError<E>) -> Self
-    where
-        E: Into<Self>,
-    {
-        err.into()
-    }
-
     /// Converts this error into the rpc error object.
     pub fn into_rpc_err(self) -> jsonrpsee_types::error::ErrorObject<'static> {
         self.into()
@@ -339,8 +307,6 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             err @ EthApiError::TransactionInputError(_) => invalid_params_rpc_err(err.to_string()),
             EthApiError::PrunedHistoryUnavailable => rpc_error_with_code(4444, error.to_string()),
             EthApiError::Other(err) => err.to_rpc_error(),
-            #[cfg(any())]
-            EthApiError::MuxTracerError(msg) => internal_rpc_err(msg.to_string()),
             EthApiError::BatchTxRecvError(err) => internal_rpc_err(err.to_string()),
             EthApiError::BatchTxSendError => {
                 internal_rpc_err("Batch transaction sender channel closed".to_string())
@@ -358,42 +324,6 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::BlockAccessListNotAvailablePreAmsterdam => {
                 rpc_error_with_code(4445, error.to_string())
             }
-        }
-    }
-}
-
-#[cfg(any())]
-impl<E> From<CallError<E>> for EthApiError
-where
-    E: Into<Self>,
-{
-    fn from(value: CallError<E>) -> Self {
-        match value {
-            CallError::Database(err) => err.into(),
-            CallError::InsufficientFunds(insufficient_funds_error) => {
-                Self::InvalidTransaction(RpcInvalidTransactionError::InsufficientFunds {
-                    cost: insufficient_funds_error.cost,
-                    balance: insufficient_funds_error.balance,
-                })
-            }
-        }
-    }
-}
-
-#[cfg(any())]
-impl<E> From<StateOverrideError<E>> for EthApiError
-where
-    E: Into<Self>,
-{
-    fn from(value: StateOverrideError<E>) -> Self {
-        match value {
-            StateOverrideError::InvalidBytecode(bytecode_decode_error) => {
-                Self::InvalidBytecode(bytecode_decode_error.to_string())
-            }
-            StateOverrideError::BothStateAndStateDiff(address) => {
-                Self::BothStateAndStateDiffInOverride(address)
-            }
-            StateOverrideError::Database(err) => err.into(),
         }
     }
 }
@@ -418,40 +348,6 @@ impl From<BalError> for EthApiError {
     }
 }
 
-#[cfg(any())]
-impl From<revm_inspectors::tracing::js::JsInspectorError> for EthApiError {
-    fn from(error: revm_inspectors::tracing::js::JsInspectorError) -> Self {
-        match error {
-            err @ revm_inspectors::tracing::js::JsInspectorError::JsError(_) => {
-                Self::InternalJsTracerError(err.to_string())
-            }
-            err => Self::InvalidParams(err.to_string()),
-        }
-    }
-}
-
-#[cfg(any())]
-impl<Err> From<DebugInspectorError<Err>> for EthApiError
-where
-    Err: core::error::Error + Send + Sync + 'static,
-{
-    fn from(error: DebugInspectorError<Err>) -> Self {
-        match error {
-            DebugInspectorError::InvalidTracerConfig => Self::InvalidTracerConfig,
-            DebugInspectorError::UnsupportedTracer => Self::Unsupported("unsupported tracer"),
-            DebugInspectorError::JsTracerNotEnabled => {
-                Self::Unsupported("JS Tracer is not enabled")
-            }
-            DebugInspectorError::MuxInspector(err) => err.into(),
-            DebugInspectorError::Database(err) => Self::Internal(RethError::other(err)),
-            #[cfg(feature = "js-tracer")]
-            DebugInspectorError::JsInspector(err) => err.into(),
-            #[allow(unreachable_patterns)]
-            _ => Self::Unsupported("unsupported tracer error"),
-        }
-    }
-}
-
 impl From<RethError> for EthApiError {
     fn from(error: RethError) -> Self {
         match error {
@@ -466,13 +362,6 @@ impl From<BlockExecutionError> for EthApiError {
         match error {
             BlockExecutionError::Validation(validation_error) => match validation_error {
                 BlockValidationError::InvalidTx { error, .. } => {
-                    #[cfg(any())]
-                    if let Some(invalid_tx) = error.as_any().downcast_ref::<InvalidTransaction>() {
-                        return Self::InvalidTransaction(RpcInvalidTransactionError::from(
-                            invalid_tx.clone(),
-                        ))
-                    }
-
                     if let Some(invalid_tx) =
                         error.as_any().downcast_ref::<InvalidTransactionError>()
                     {
@@ -517,50 +406,6 @@ impl From<reth_errors::ProviderError> for EthApiError {
     }
 }
 
-#[cfg(any())]
-impl From<InvalidHeader> for EthApiError {
-    fn from(value: InvalidHeader) -> Self {
-        match value {
-            InvalidHeader::ExcessBlobGasNotSet => Self::ExcessBlobGasNotSet,
-            InvalidHeader::PrevrandaoNotSet => Self::PrevrandaoNotSet,
-        }
-    }
-}
-
-#[cfg(any())]
-impl<T, TxError> From<EVMError<T, TxError>> for EthApiError
-where
-    T: Into<Self>,
-    TxError: reth_evm::InvalidTxError,
-{
-    fn from(err: EVMError<T, TxError>) -> Self {
-        match err {
-            EVMError::Transaction(invalid_tx) => {
-                if let Some(eth_tx_err) = invalid_tx.as_invalid_tx_err() {
-                    // Handle the special NonceTooLow case
-                    match eth_tx_err {
-                        InvalidTransaction::NonceTooLow { tx, state } => {
-                            Self::InvalidTransaction(RpcInvalidTransactionError::NonceTooLow {
-                                tx: *tx,
-                                state: *state,
-                            })
-                        }
-                        _ => RpcInvalidTransactionError::from(eth_tx_err.clone()).into(),
-                    }
-                } else {
-                    // For custom transaction errors that don't wrap InvalidTransaction,
-                    // convert to a custom error message
-                    Self::EvmCustom(invalid_tx.to_string())
-                }
-            }
-            EVMError::Header(err) => err.into(),
-            EVMError::Database(err) => err.into(),
-            EVMError::Custom(err) => Self::EvmCustom(err),
-            EVMError::CustomAny(err) => Self::EvmCustom(err.to_string()),
-        }
-    }
-}
-
 impl From<RecoveryError> for EthApiError {
     fn from(_: RecoveryError) -> Self {
         Self::InvalidTransactionSignature
@@ -595,7 +440,7 @@ impl From<Infallible> for EthApiError {
 ///
 /// These error variants can be thrown when the transaction is checked prior to execution.
 ///
-/// These variants also cover all errors that can be thrown by revm.
+/// These variants also cover execution-layer transaction validation errors.
 ///
 /// ## Nomenclature
 ///
@@ -774,32 +619,6 @@ impl RpcInvalidTransactionError {
         }
     }
 
-    /// Converts the halt error
-    ///
-    /// Takes the configured gas limit of the transaction which is attached to the error
-    #[cfg(any())]
-    pub fn halt(reason: HaltReason, gas_limit: u64) -> Self {
-        match reason {
-            HaltReason::OutOfGas(err) => Self::out_of_gas(err, gas_limit),
-            HaltReason::NonceOverflow => Self::NonceMaxValue,
-            err => Self::EvmHalt(err),
-        }
-    }
-
-    /// Converts the out of gas error
-    #[cfg(any())]
-    pub const fn out_of_gas(reason: OutOfGasError, gas_limit: u64) -> Self {
-        match reason {
-            OutOfGasError::Basic | OutOfGasError::ReentrancySentry => {
-                Self::BasicOutOfGas(gas_limit)
-            }
-            OutOfGasError::Memory => Self::MemoryOutOfGas(gas_limit),
-            OutOfGasError::MemoryLimit => Self::MemoryLimitOutOfGas,
-            OutOfGasError::Precompile => Self::PrecompileOutOfGas(gas_limit),
-            OutOfGasError::InvalidOperand => Self::InvalidOperandOutOfGas(gas_limit),
-        }
-    }
-
     /// Converts this error into the rpc error object.
     pub fn into_rpc_err(self) -> jsonrpsee_types::error::ErrorObject<'static> {
         self.into()
@@ -819,68 +638,6 @@ impl From<RpcInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'s
             }
             RpcInvalidTransactionError::Other(err) => err.to_rpc_error(),
             err => rpc_err(err.error_code(), err.to_string(), None),
-        }
-    }
-}
-
-#[cfg(any())]
-impl From<InvalidTransaction> for RpcInvalidTransactionError {
-    fn from(err: InvalidTransaction) -> Self {
-        match err {
-            InvalidTransaction::InvalidChainId | InvalidTransaction::MissingChainId => {
-                Self::InvalidChainId
-            }
-            InvalidTransaction::PriorityFeeGreaterThanMaxFee => Self::TipAboveFeeCap,
-            InvalidTransaction::GasPriceLessThanBasefee => Self::FeeCapTooLow,
-            InvalidTransaction::CallerGasLimitMoreThanBlock |
-            InvalidTransaction::TxGasLimitGreaterThanCap { .. } => {
-                // tx.gas > block.gas_limit
-                Self::GasTooHigh
-            }
-            InvalidTransaction::CallGasCostMoreThanGasLimit { .. } => {
-                // tx.gas < cost
-                Self::GasTooLow
-            }
-            InvalidTransaction::GasFloorMoreThanGasLimit { .. } => {
-                // Post prague EIP-7623 tx floor calldata gas cost > tx.gas_limit
-                // where floor gas is the minimum amount of gas that will be spent
-                // In other words, the tx's gas limit is lower that the minimum gas requirements of
-                // the tx's calldata
-                Self::GasTooLow
-            }
-            InvalidTransaction::RejectCallerWithCode => Self::SenderNoEOA,
-            InvalidTransaction::LackOfFundForMaxFee { fee, balance } => {
-                Self::InsufficientFunds { cost: *fee, balance: *balance }
-            }
-            InvalidTransaction::OverflowPaymentInTransaction => Self::GasUintOverflow,
-            InvalidTransaction::NonceOverflowInTransaction => Self::NonceMaxValue,
-            InvalidTransaction::CreateInitCodeSizeLimit => Self::MaxInitCodeSizeExceeded,
-            InvalidTransaction::NonceTooHigh { .. } => Self::NonceTooHigh,
-            InvalidTransaction::NonceTooLow { tx, state } => Self::NonceTooLow { tx, state },
-            InvalidTransaction::AccessListNotSupported => Self::AccessListNotSupported,
-            InvalidTransaction::MaxFeePerBlobGasNotSupported => Self::MaxFeePerBlobGasNotSupported,
-            InvalidTransaction::BlobVersionedHashesNotSupported => {
-                Self::BlobVersionedHashesNotSupported
-            }
-            InvalidTransaction::BlobGasPriceGreaterThanMax { .. } => Self::BlobFeeCapTooLow,
-            InvalidTransaction::EmptyBlobs => Self::BlobTransactionMissingBlobHashes,
-            InvalidTransaction::BlobVersionNotSupported => Self::BlobHashVersionMismatch,
-            InvalidTransaction::TooManyBlobs { have, .. } => Self::TooManyBlobs { have },
-            InvalidTransaction::BlobCreateTransaction => Self::BlobTransactionIsCreate,
-            InvalidTransaction::AuthorizationListNotSupported => {
-                Self::AuthorizationListNotSupported
-            }
-            InvalidTransaction::AuthorizationListInvalidFields |
-            InvalidTransaction::EmptyAuthorizationList => Self::AuthorizationListInvalidFields,
-            InvalidTransaction::Eip2930NotSupported |
-            InvalidTransaction::Eip1559NotSupported |
-            InvalidTransaction::Eip4844NotSupported |
-            InvalidTransaction::Eip7702NotSupported |
-            InvalidTransaction::Eip7873NotSupported => Self::TxTypeNotSupported,
-            InvalidTransaction::Eip7873MissingTarget => {
-                Self::other(internal_rpc_err(err.to_string()))
-            }
-            InvalidTransaction::Str(_) => Self::other(internal_rpc_err(err.to_string())),
         }
     }
 }
@@ -934,7 +691,7 @@ pub struct RevertError {
 impl RevertError {
     /// Wraps the output bytes
     ///
-    /// Note: this is intended to wrap a revm output
+    /// Note: this is intended to wrap an EVM revert output
     pub fn new(output: Bytes) -> Self {
         if output.is_empty() {
             Self { output: None }
