@@ -17,9 +17,7 @@ pub use chain::*;
 mod execute;
 pub use execute::*;
 
-#[cfg(feature = "evm2")]
 mod evm2_bundle;
-#[cfg(feature = "evm2")]
 pub use evm2_bundle::*;
 
 mod execution_outcome;

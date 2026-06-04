@@ -1,8 +1,32 @@
+use crate::Evm2BundleState;
+use alloc::vec::Vec;
+use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Address, B256, U256};
 use reth_primitives_traits::{Account, Bytecode};
-use revm::database::{states::BundleState, BundleAccount};
 
-pub use alloy_evm::block::BlockExecutionResult;
+/// The result of executing a block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockExecutionResult<T> {
+    /// All the receipts of the transactions in the block.
+    pub receipts: Vec<T>,
+    /// All the EIP-7685 requests in the block.
+    pub requests: Requests,
+    /// The total gas used by the block.
+    pub gas_used: u64,
+    /// Blob gas used by the block.
+    pub blob_gas_used: u64,
+}
+
+impl<T> Default for BlockExecutionResult<T> {
+    fn default() -> Self {
+        Self {
+            receipts: Default::default(),
+            requests: Default::default(),
+            gas_used: 0,
+            blob_gas_used: 0,
+        }
+    }
+}
 
 /// [`BlockExecutionResult`] combined with state.
 #[derive(
@@ -23,30 +47,33 @@ pub struct BlockExecutionOutput<T> {
     #[deref_mut]
     pub result: BlockExecutionResult<T>,
     /// The changed state of the block after execution.
-    pub state: BundleState,
+    pub state: Evm2BundleState,
 }
 
 impl<T> BlockExecutionOutput<T> {
     /// Return bytecode if known.
     pub fn bytecode(&self, code_hash: &B256) -> Option<Bytecode> {
-        self.state.bytecode(code_hash).map(Bytecode)
+        self.state.bytecode(code_hash)
     }
 
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
-        self.state.account(address).map(|a| a.info.as_ref().map(Into::into))
+        self.state.account(address)
     }
 
-    /// Returns the state [`BundleAccount`] for the given address.
-    pub fn account_state(&self, address: &Address) -> Option<&BundleAccount> {
-        self.state.account(address)
+    /// Returns the state account change for the given address.
+    pub fn account_state(
+        &self,
+        address: &Address,
+    ) -> Option<&evm2::evm::Tracked<Option<evm2::evm::AccountInfo>>> {
+        self.state.accounts().get(address)
     }
 
     /// Get storage if value is known.
     ///
     /// This means that depending on status we can potentially return `U256::ZERO`.
     pub fn storage(&self, address: &Address, storage_key: U256) -> Option<U256> {
-        self.state.account(address).and_then(|a| a.storage_slot(storage_key))
+        self.state.storage_slot(address, storage_key)
     }
 }
 
