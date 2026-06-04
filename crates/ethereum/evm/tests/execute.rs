@@ -1,26 +1,21 @@
 //! Execution tests.
 
-use alloy_consensus::{constants::ETH_TO_WEI, Header, TxLegacy};
+use alloy_consensus::Header;
 use alloy_eips::{
     eip2935::{HISTORY_SERVE_WINDOW, HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
     eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
     eip4895::Withdrawal,
-    eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     eip7685::EMPTY_REQUESTS_HASH,
 };
-use alloy_primitives::{b256, fixed_bytes, keccak256, Bytes, TxKind, B256, U256};
+use alloy_primitives::{keccak256, B256, U256};
 use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, ForkCondition, MAINNET};
-use reth_ethereum_primitives::{Block, BlockBody, Transaction};
+use reth_ethereum_primitives::{Block, BlockBody};
 use reth_evm::{
     execute::{BasicBlockExecutor, BlockValidationError, Executor},
     ConfigureEvm,
 };
 use reth_evm_ethereum::EthEvmConfig;
-use reth_execution_types::BlockExecutionResult;
-use reth_primitives_traits::{
-    crypto::secp256k1::public_key_to_address, Block as _, RecoveredBlock,
-};
-use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
+use reth_primitives_traits::RecoveredBlock;
 use revm::{
     database::{CacheDB, EmptyDB, TransitionState},
     primitives::address,
@@ -41,25 +36,6 @@ fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
     };
 
     db.insert_account_info(BEACON_ROOTS_ADDRESS, beacon_root_contract_account);
-
-    db
-}
-
-fn create_database_with_withdrawal_requests_contract() -> CacheDB<EmptyDB> {
-    let mut db = CacheDB::new(Default::default());
-
-    let withdrawal_requests_contract_account = AccountInfo {
-        nonce: 1,
-        balance: U256::ZERO,
-        code_hash: keccak256(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone()),
-        code: Some(Bytecode::new_raw(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone())),
-        account_id: None,
-    };
-
-    db.insert_account_info(
-        WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS,
-        withdrawal_requests_contract_account,
-    );
 
     db
 }
@@ -574,75 +550,6 @@ fn eip_2935_state_transition_inside_fork() {
     assert!(executor.with_state_mut(|state| {
         state.storage(HISTORY_STORAGE_ADDRESS, U256::from(2)).unwrap().is_zero()
     }));
-}
-
-#[test]
-fn eip_7002() {
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::from(&*MAINNET)
-            .shanghai_activated()
-            .cancun_activated()
-            .prague_activated()
-            .build(),
-    );
-
-    let mut db = create_database_with_withdrawal_requests_contract();
-
-    let sender_key_pair = generators::generate_key(&mut generators::rng());
-    let sender_address = public_key_to_address(sender_key_pair.public_key());
-
-    db.insert_account_info(
-        sender_address,
-        AccountInfo { nonce: 1, balance: U256::from(ETH_TO_WEI), ..Default::default() },
-    );
-
-    // https://github.com/lightclient/sys-asm/blob/9282bdb9fd64e024e27f60f507486ffb2183cba2/test/Withdrawal.t.sol.in#L36
-    let validator_public_key = fixed_bytes!(
-            "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-        );
-    let withdrawal_amount = fixed_bytes!("0203040506070809");
-    let input: Bytes = [&validator_public_key[..], &withdrawal_amount[..]].concat().into();
-    assert_eq!(input.len(), 56);
-
-    let mut header = chain_spec.genesis_header().clone();
-    header.gas_limit = 1_500_000;
-    // measured
-    header.gas_used = 135_856;
-    header.receipts_root =
-        b256!("0xb31a3e47b902e9211c4d349af4e4c5604ce388471e79ca008907ae4616bb0ed3");
-
-    let tx = sign_tx_with_key_pair(
-        sender_key_pair,
-        Transaction::Legacy(TxLegacy {
-            chain_id: Some(chain_spec.chain.id()),
-            nonce: 1,
-            gas_price: header.base_fee_per_gas.unwrap().into(),
-            gas_limit: header.gas_used,
-            to: TxKind::Call(WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS),
-            // `MIN_WITHDRAWAL_REQUEST_FEE`
-            value: U256::from(2),
-            input,
-        }),
-    );
-
-    let provider = EthEvmConfig::new(chain_spec);
-
-    let mut executor = provider.batch_executor(db);
-
-    let BlockExecutionResult { receipts, requests, .. } = executor
-        .execute_one(
-            &Block { header, body: BlockBody { transactions: vec![tx], ..Default::default() } }
-                .try_into_recovered()
-                .unwrap(),
-        )
-        .unwrap();
-
-    let receipt = receipts.first().unwrap();
-    assert!(receipt.success);
-
-    // There should be exactly one entry with withdrawal requests
-    assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0][0], 1);
 }
 
 #[test]

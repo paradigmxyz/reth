@@ -521,7 +521,7 @@ mod tests {
     use super::*;
     use alloc::collections::BTreeMap;
     use alloy_consensus::{SignableTransaction, TxLegacy};
-    use alloy_eips::eip4895::Withdrawal;
+    use alloy_eips::{eip4895::Withdrawal, eip7002::WITHDRAWAL_REQUEST_PREDEPLOY_CODE};
     use alloy_primitives::{address, Address, Bytes, Signature, TxKind, B256, U256};
     use core::convert::Infallible;
     use evm2::{
@@ -768,6 +768,63 @@ mod tests {
             ]
         );
         assert!(output.result.receipts.is_empty());
+    }
+
+    #[test]
+    fn executes_withdrawal_request_contract_with_evm2() {
+        let caller = address!("0000000000000000000000000000000000000001");
+        let mut database = TestDatabase::default();
+        database.accounts.insert(
+            caller,
+            AccountInfo::default().with_nonce(1).with_balance(U256::from(ETH_TO_WEI)),
+        );
+        database.accounts.insert(
+            WITHDRAWAL_REQUEST_ADDRESS,
+            AccountInfo::default()
+                .with_nonce(1)
+                .with_code(Bytecode::new_raw(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone())),
+        );
+
+        let validator_public_key = [0x11; 48];
+        let withdrawal_amount = [0x22; 8];
+        let input =
+            Bytes::from([validator_public_key.as_slice(), withdrawal_amount.as_slice()].concat());
+        let transaction = Recovered::new_unchecked(
+            TransactionSigned::Legacy(
+                TxLegacy {
+                    nonce: 1,
+                    gas_price: 1,
+                    gas_limit: 135_856,
+                    to: TxKind::Call(WITHDRAWAL_REQUEST_ADDRESS),
+                    value: U256::from(2),
+                    input,
+                    ..Default::default()
+                }
+                .into_signed(Signature::test_signature()),
+            ),
+            caller,
+        );
+
+        let output = execute_evm2_block_with_context(
+            SpecId::PRAGUE,
+            BlockEnv { gas_limit: U256::from(1_500_000), ..Default::default() },
+            database,
+            1,
+            [transaction],
+            Evm2BlockExecutionContext {
+                system_calls: Some(Evm2BlockSystemCalls {
+                    parent_hash: B256::ZERO,
+                    parent_beacon_block_root: Some(B256::ZERO),
+                }),
+                ommers: None,
+                withdrawals: None,
+            },
+        )
+        .expect("withdrawal request transaction succeeds");
+
+        assert!(output.result.receipts.first().unwrap().success);
+        assert_eq!(output.result.requests.len(), 1);
+        assert_eq!(output.result.requests[0][0], WITHDRAWAL_REQUEST_TYPE);
     }
 
     fn return_byte_code(value: u8) -> Bytecode {
