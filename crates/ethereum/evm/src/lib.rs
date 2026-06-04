@@ -77,11 +77,13 @@ pub use evm2_convert::{
 
 mod evm2_executor;
 pub use evm2_executor::{
-    execute_evm2_block, execute_evm2_block_with_withdrawals, Evm2ExecutionError,
+    execute_evm2_block, execute_evm2_block_with_context, execute_evm2_block_with_withdrawals,
+    Evm2BlockExecutionContext, Evm2BlockSystemCalls, Evm2ExecutionError,
 };
 #[cfg(feature = "std")]
 pub use evm2_executor::{
     execute_evm2_block_with_state_provider, execute_evm2_block_with_state_provider_and_withdrawals,
+    execute_evm2_block_with_state_provider_context,
 };
 
 mod receipt;
