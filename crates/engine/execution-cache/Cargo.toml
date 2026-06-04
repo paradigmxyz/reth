@@ -21,20 +21,17 @@ reth-execution-types.workspace = true
 reth-metrics = { workspace = true, features = ["common"] }
 reth-primitives-traits = { workspace = true, features = ["std"] }
 reth-provider.workspace = true
-reth-revm.workspace = true
 reth-trie.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
 alloy-primitives = { workspace = true, features = ["rand"] }
+evm2.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
-reth-revm = { workspace = true, features = ["test-utils"] }
-revm-state.workspace = true
 
 [features]
 test-utils = [
     "reth-primitives-traits/test-utils",
-    "reth-revm/test-utils",
     "reth-provider/test-utils",
     "reth-trie/test-utils",
 ]

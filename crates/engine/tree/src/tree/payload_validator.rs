@@ -128,8 +128,9 @@ use reth_engine_primitives::{
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
-    block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
-    OnStateHook, SpecFor,
+    block::BlockExecutor,
+    execute::{alloy_block_execution_result_to_reth, revm_bundle_to_evm2, ExecutableTxFor},
+    ConfigureEvm, EvmEnvFor, ExecutionCtxFor, OnStateHook, SpecFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
 use reth_payload_primitives::{
@@ -147,10 +148,11 @@ use reth_provider::{
     StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
     StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
+use reth_revm::db::{states::bundle_state::BundleRetention, State};
 use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
+use revm::context::Block as _;
 use revm_primitives::{Address, KECCAK_EMPTY};
 use std::{
     collections::HashMap,
@@ -1138,6 +1140,7 @@ where
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
         let has_bal = env.decoded_bal.is_some();
+        let block_number = env.evm_env.block_env.number().to::<u64>();
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
@@ -1201,7 +1204,8 @@ where
         let post_exec_start = Instant::now();
         let (_evm, result) = debug_span!(target: "engine::tree", "BlockExecutor::finish")
             .in_scope(|| executor.finish())
-            .map(|(evm, result)| (evm.into_db(), result))?;
+            .map(|(evm, result)| (evm.into_db(), result))
+            .map_err(BlockExecutionError::other)?;
         self.metrics.record_post_execution(post_exec_start.elapsed());
 
         // Merge transitions into bundle state
@@ -1209,7 +1213,10 @@ where
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
 
         let built_bal = if has_bal { db.take_built_alloy_bal() } else { None };
-        let output = BlockExecutionOutput { result, state: db.take_bundle() };
+        let output = BlockExecutionOutput {
+            result: alloy_block_execution_result_to_reth(result),
+            state: revm_bundle_to_evm2(db.take_bundle(), block_number),
+        };
 
         let execution_duration = execution_start.elapsed();
         self.metrics.record_block_execution(&output, execution_duration);
@@ -1358,7 +1365,8 @@ where
         // Apply pre-execution changes (e.g., beacon root update)
         let pre_exec_start = Instant::now();
         debug_span!(target: "engine::tree", "pre_execution")
-            .in_scope(|| executor.apply_pre_execution_changes())?;
+            .in_scope(|| executor.apply_pre_execution_changes())
+            .map_err(BlockExecutionError::other)?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
 
         // Bump BAL index after pre-execution changes (EIP-7928: index 0 is pre-execution)
@@ -1399,7 +1407,7 @@ where
             }
 
             let tx_start = Instant::now();
-            executor.execute_transaction(tx)?;
+            executor.execute_transaction(tx).map_err(BlockExecutionError::other)?;
             self.metrics.record_transaction_execution(tx_start.elapsed());
 
             // advance the shared counter so prewarm workers skip already-executed txs
@@ -2030,47 +2038,63 @@ where
         let code_bytes_read = provider_stats.total_code_fetched_bytes();
 
         // Write stats from BundleState (final state changes)
-        let accounts_changed = output.state.state.len();
-        let accounts_deleted =
-            output.state.state.values().filter(|acc| acc.was_destroyed()).count();
-        let storage_slots_changed =
-            output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
-        let storage_slots_deleted = output
+        let accounts_changed = output.state.accounts().len();
+        let accounts_deleted = output
             .state
-            .state
-            .values()
-            .flat_map(|account| account.storage.values())
-            .filter(|slot| {
-                slot.present_value.is_zero() && !slot.previous_or_original_value.is_zero()
+            .accounts()
+            .iter()
+            .filter(|(address, acc)| {
+                acc.current.is_none() ||
+                    output.state.storage().get(*address).is_some_and(|storage| storage.wipe)
             })
             .count();
+        let storage_slots_changed =
+            output.state.storage().values().map(|storage| storage.slots.len()).sum::<usize>();
+        let storage_slots_deleted = output
+            .state
+            .storage()
+            .values()
+            .flat_map(|storage| storage.slots.values())
+            .filter(|slot| slot.current.is_zero() && !slot.original.is_zero())
+            .count();
 
-        // Helper: check if account represents a new contract deployment
-        let is_new_deployment = |acc: &BundleAccount| -> bool {
-            let has_code_now = acc.info.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
-            let had_no_code_before = acc
-                .original_info
-                .as_ref()
-                .map(|info| info.code_hash == KECCAK_EMPTY)
-                .unwrap_or(true);
-            has_code_now && had_no_code_before
-        };
-
-        let bytecodes_changed =
-            output.state.state.values().filter(|acc| is_new_deployment(acc)).count();
+        let bytecodes_changed = output
+            .state
+            .accounts()
+            .values()
+            .filter(|acc| {
+                let has_code_now =
+                    acc.current.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
+                let had_no_code_before = acc
+                    .original
+                    .as_ref()
+                    .map(|info| info.code_hash == KECCAK_EMPTY)
+                    .unwrap_or(true);
+                has_code_now && had_no_code_before
+            })
+            .count();
 
         // Unique new code hashes to count actual bytes persisted (deduplicated)
         let unique_new_code_hashes: B256Set = output
             .state
-            .state
+            .accounts()
             .values()
-            .filter(|acc| is_new_deployment(acc))
-            .filter_map(|acc| acc.info.as_ref().map(|info| info.code_hash))
+            .filter(|acc| {
+                let has_code_now =
+                    acc.current.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
+                let had_no_code_before = acc
+                    .original
+                    .as_ref()
+                    .map(|info| info.code_hash == KECCAK_EMPTY)
+                    .unwrap_or(true);
+                has_code_now && had_no_code_before
+            })
+            .filter_map(|acc| acc.current.as_ref().map(|info| info.code_hash))
             .collect();
         let code_bytes_written: usize = unique_new_code_hashes
             .iter()
             .filter_map(|hash| {
-                output.state.contracts.get(hash).map(|bytecode| bytecode.original_bytes().len())
+                output.state.contracts().get(hash).map(|bytecode| bytecode.original_bytes().len())
             })
             .sum();
 
@@ -2082,27 +2106,30 @@ where
         // EIP-7702 delegation tracking from bytecode changes
         // Count new EIP-7702 bytecodes as delegations set
         let eip7702_delegations_set =
-            output.state.contracts.values().filter(|bytecode| bytecode.is_eip7702()).count();
+            output.state.contracts().values().filter(|bytecode| bytecode.is_eip7702()).count();
         // Delegations cleared: accounts where bytecode changed FROM EIP-7702 TO empty
         // This detects when an EIP-7702 delegation is removed by setting code to empty
         // Note: Clearing a delegation does NOT destroy the account - it just empties the
         // bytecode
         let eip7702_delegations_cleared = output
             .state
-            .state
+            .accounts()
             .values()
             .filter(|acc| {
                 // Check if original bytecode was EIP-7702
                 let original_was_eip7702 = acc
-                    .original_info
+                    .original
                     .as_ref()
                     .and_then(|info| info.code.as_ref())
                     .map(|bytecode| bytecode.is_eip7702())
                     .unwrap_or(false);
 
                 // Check if current code is empty (delegation cleared)
-                let code_now_empty =
-                    acc.info.as_ref().map(|info| info.code_hash == KECCAK_EMPTY).unwrap_or(false);
+                let code_now_empty = acc
+                    .current
+                    .as_ref()
+                    .map(|info| info.code_hash == KECCAK_EMPTY)
+                    .unwrap_or(false);
 
                 original_was_eip7702 && code_now_empty
             })
