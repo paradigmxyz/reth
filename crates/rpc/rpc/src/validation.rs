@@ -1,48 +1,34 @@
-use alloy_consensus::{
-    BlobTransactionValidationError, BlockHeader, EnvKzgSettings, Transaction, TxReceipt,
-};
-use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
-use alloy_eips::eip7685::RequestsOrHash;
-use alloy_primitives::{map::AddressSet, Address, B256, U256};
+use alloy_consensus::BlobTransactionValidationError;
+use alloy_primitives::{map::AddressSet, Address, B256};
 use alloy_rpc_types_beacon::relay::{
-    BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
+    BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
     BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
     BuilderBlockValidationRequestV5, BuilderBlockValidationRequestV6,
 };
-use alloy_rpc_types_engine::{
-    BlobsBundleV1, BlobsBundleV2, CancunPayloadFields, ExecutionData, ExecutionPayload,
-    ExecutionPayloadSidecar, PraguePayloadFields,
-};
+use alloy_rpc_types_engine::ExecutionData;
 use async_trait::async_trait;
 use core::fmt;
 use jsonrpsee::core::RpcResult;
 use jsonrpsee_types::error::ErrorObject;
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_consensus::{Consensus, FullConsensus};
-use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
+use reth_consensus::FullConsensus;
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
-use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_execution_types::BlockExecutionOutput;
+use reth_evm::ConfigureEvm;
 use reth_metrics::{
     metrics,
     metrics::{gauge, Gauge},
     Metrics,
 };
 use reth_node_api::{NewPayloadError, PayloadTypes};
-use reth_primitives_traits::{
-    constants::GAS_LIMIT_BOUND_DIVISOR, BlockBody, GotExpected, NodePrimitives, RecoveredBlock,
-    SealedBlock, SealedHeaderFor,
-};
-use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
+use reth_primitives_traits::{GotExpected, NodePrimitives};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
+use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
-use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::Runtime;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::RwLock;
 use tracing::warn;
 
 /// The type that implements the `validation` rpc namespace trait
@@ -77,7 +63,7 @@ where
             evm_config,
             disallow,
             validation_window,
-            cached_state: Default::default(),
+            cached_state: RwLock::new(Default::default()),
             task_spawner,
             metrics: Default::default(),
         });
@@ -91,27 +77,10 @@ where
         Self { inner }
     }
 
-    /// Returns the cached reads for the given head hash.
-    async fn cached_reads(&self, head: B256) -> CachedReads {
-        let cache = self.inner.cached_state.read().await;
-        if cache.0 == head {
-            cache.1.clone()
-        } else {
-            Default::default()
-        }
-    }
-
-    /// Updates the cached state for the given head hash.
-    async fn update_cached_reads(&self, head: B256, cached_state: CachedReads) {
-        let mut cache = self.inner.cached_state.write().await;
-        if cache.0 == head {
-            cache.1.extend(cached_state);
-        } else {
-            *cache = (head, cached_state)
-        }
-    }
+    // The previous revm-backed validation cache used `reth_revm::cached::CachedReads` here.
 }
 
+#[cfg(any())]
 impl<Provider, E, T> ValidationApi<Provider, E, T>
 where
     Provider: BlockReaderIdExt<Header = <E::Primitives as NodePrimitives>::BlockHeader>
@@ -529,16 +498,19 @@ where
     }
 }
 
+fn unsupported_builder_validation() -> RpcResult<()> {
+    Err(EthApiError::Unsupported(
+        "builder submission validation is unsupported by the evm2 execution path",
+    )
+    .into())
+}
+
 #[async_trait]
 impl<Provider, E, T> BlockSubmissionValidationApiServer for ValidationApi<Provider, E, T>
 where
-    Provider: BlockReaderIdExt<Header = <E::Primitives as NodePrimitives>::BlockHeader>
-        + ChainSpecProvider<ChainSpec: EthereumHardforks>
-        + StateProviderFactory
-        + Clone
-        + 'static,
-    E: ConfigureEvm + 'static,
-    T: PayloadTypes<ExecutionData = ExecutionData>,
+    Provider: Send + Sync + 'static,
+    E: ConfigureEvm + Send + Sync + 'static,
+    T: PayloadTypes<ExecutionData = ExecutionData> + Send + Sync + 'static,
 {
     async fn validate_builder_submission_v1(
         &self,
@@ -561,17 +533,8 @@ where
         &self,
         request: BuilderBlockValidationRequestV3,
     ) -> RpcResult<()> {
-        let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking_task(async move {
-            let result = Self::validate_builder_submission_v3(&this, request)
-                .await
-                .map_err(ErrorObject::from);
-            let _ = tx.send(result);
-        });
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        let _ = request;
+        unsupported_builder_validation()
     }
 
     /// Validates a block submitted to the relay
@@ -579,17 +542,8 @@ where
         &self,
         request: BuilderBlockValidationRequestV4,
     ) -> RpcResult<()> {
-        let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking_task(async move {
-            let result = Self::validate_builder_submission_v4(&this, request)
-                .await
-                .map_err(ErrorObject::from);
-            let _ = tx.send(result);
-        });
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        let _ = request;
+        unsupported_builder_validation()
     }
 
     /// Validates a block submitted to the relay
@@ -597,17 +551,8 @@ where
         &self,
         request: BuilderBlockValidationRequestV5,
     ) -> RpcResult<()> {
-        let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking_task(async move {
-            let result = Self::validate_builder_submission_v5(&this, request)
-                .await
-                .map_err(ErrorObject::from);
-            let _ = tx.send(result);
-        });
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        let _ = request;
+        unsupported_builder_validation()
     }
 
     /// Validates a block submitted to the relay
@@ -615,40 +560,38 @@ where
         &self,
         request: BuilderBlockValidationRequestV6,
     ) -> RpcResult<()> {
-        let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking_task(async move {
-            let result = Self::validate_builder_submission_v6(&this, request)
-                .await
-                .map_err(ErrorObject::from);
-            let _ = tx.send(result);
-        });
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        let _ = request;
+        unsupported_builder_validation()
     }
 }
 
 pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     /// The provider that can interact with the chain.
+    #[expect(dead_code)]
     provider: Provider,
     /// Consensus implementation.
+    #[expect(dead_code)]
     consensus: Arc<dyn FullConsensus<E::Primitives>>,
     /// Execution payload validator.
+    #[expect(dead_code)]
     payload_validator:
         Arc<dyn PayloadValidator<T, Block = <E::Primitives as NodePrimitives>::Block>>,
     /// Block executor factory.
+    #[expect(dead_code)]
     evm_config: E,
     /// Set of disallowed addresses
     disallow: AddressSet,
     /// The maximum block distance - parent to latest - allowed for validation
+    #[expect(dead_code)]
     validation_window: u64,
     /// Cached state reads to avoid redundant disk I/O across multiple validation attempts
     /// targeting the same state. Stores a tuple of (`block_hash`, `cached_reads`) for the
     /// latest head block state. Uses async `RwLock` to safely handle concurrent validation
     /// requests.
-    cached_state: RwLock<(B256, CachedReads)>,
+    #[expect(dead_code)]
+    cached_state: RwLock<(B256, ())>,
     /// Task spawner for blocking operations
+    #[expect(dead_code)]
     task_spawner: Runtime,
     /// Validation metrics
     metrics: ValidationMetrics,
