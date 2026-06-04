@@ -7,6 +7,8 @@ use reth_storage_api::{AccountReader, BlockHashReader, BytecodeReader, StateProv
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 
+pub use revm::database::State;
+
 /// A helper trait responsible for providing state necessary for EVM execution.
 pub trait EvmStateProvider {
     /// Get basic account information.
