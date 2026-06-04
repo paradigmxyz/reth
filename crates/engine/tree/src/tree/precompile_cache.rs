@@ -19,7 +19,7 @@ use reth_evm::{
     precompiles::{DynPrecompile, Precompile, PrecompileInput},
 };
 use reth_primitives_traits::dashmap::DashMap;
-use std::{hash::Hash, sync::Arc};
+use std::{fmt, hash::Hash, sync::Arc};
 use tracing::error;
 
 /// Default max cache size for [`PrecompileCache`]
@@ -244,6 +244,20 @@ where
     caches: PrecompileCacheMap<S>,
     spec_id: S,
     metrics: Option<CachedPrecompileMetrics>,
+}
+
+impl<S> fmt::Debug for Evm2CachedPrecompiles<S>
+where
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Evm2CachedPrecompiles")
+            .field("precompiles", &self.precompiles)
+            .field("caches", &self.caches)
+            .field("spec_id", &self.spec_id)
+            .field("metrics", &self.metrics.as_ref().map(|_| "<metrics>"))
+            .finish()
+    }
 }
 
 impl<S> Evm2CachedPrecompiles<S>
