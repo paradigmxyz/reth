@@ -157,7 +157,12 @@ impl TrieUpdates {
     }
 
     /// Converts trie updates into [`TrieUpdatesSorted`].
-    pub fn into_sorted(mut self) -> TrieUpdatesSorted {
+    pub fn into_sorted(self) -> TrieUpdatesSorted {
+        self.into_sorted_with_total_len().0
+    }
+
+    /// Converts trie updates into [`TrieUpdatesSorted`] and returns its total update count.
+    pub fn into_sorted_with_total_len(mut self) -> (TrieUpdatesSorted, usize) {
         let mut account_nodes = self
             .account_nodes
             .drain()
@@ -170,18 +175,32 @@ impl TrieUpdates {
 
         account_nodes.extend(self.removed_nodes.drain().map(|path| (path, None)));
         account_nodes.sort_unstable_by_key(|a| a.0);
+        let mut total_len = account_nodes.len();
 
         let storage_tries = self
             .storage_tries
             .drain()
-            .map(|(hashed_address, updates)| (hashed_address, updates.into_sorted()))
+            .map(|(hashed_address, updates)| {
+                let (updates, len) = updates.into_sorted_with_total_len();
+                total_len += len;
+                (hashed_address, updates)
+            })
             .collect();
-        TrieUpdatesSorted { account_nodes, storage_tries }
+
+        (TrieUpdatesSorted { account_nodes, storage_tries }, total_len)
     }
 
     /// Creates a sorted copy without consuming self.
     /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
     pub fn clone_into_sorted(&self) -> TrieUpdatesSorted {
+        self.clone_into_sorted_with_total_len().0
+    }
+
+    /// Creates a sorted copy and returns its total update count.
+    ///
+    /// More efficient than calling [`TrieUpdatesSorted::total_len`] after conversion because the
+    /// storage lengths are accumulated while the storage maps are already being visited.
+    pub fn clone_into_sorted_with_total_len(&self) -> (TrieUpdatesSorted, usize) {
         let mut account_nodes = self
             .account_nodes
             .iter()
@@ -196,13 +215,19 @@ impl TrieUpdates {
                 .map(|path| (*path, None)),
         );
         account_nodes.sort_unstable_by_key(|a| a.0);
+        let mut total_len = account_nodes.len();
 
         let storage_tries = self
             .storage_tries
             .iter()
-            .map(|(&hashed_address, updates)| (hashed_address, updates.clone_into_sorted()))
+            .map(|(&hashed_address, updates)| {
+                let (updates, len) = updates.clone_into_sorted_with_total_len();
+                total_len += len;
+                (hashed_address, updates)
+            })
             .collect();
-        TrieUpdatesSorted { account_nodes, storage_tries }
+
+        (TrieUpdatesSorted { account_nodes, storage_tries }, total_len)
     }
 
     /// Converts trie updates into [`TrieUpdatesSortedRef`].
@@ -361,7 +386,12 @@ impl StorageTrieUpdates {
     }
 
     /// Convert storage trie updates into [`StorageTrieUpdatesSorted`].
-    pub fn into_sorted(mut self) -> StorageTrieUpdatesSorted {
+    pub fn into_sorted(self) -> StorageTrieUpdatesSorted {
+        self.into_sorted_with_total_len().0
+    }
+
+    /// Convert storage trie updates into [`StorageTrieUpdatesSorted`] and returns its update count.
+    pub fn into_sorted_with_total_len(mut self) -> (StorageTrieUpdatesSorted, usize) {
         let mut storage_nodes = self
             .storage_nodes
             .into_iter()
@@ -374,13 +404,19 @@ impl StorageTrieUpdates {
 
         storage_nodes.extend(self.removed_nodes.into_iter().map(|path| (path, None)));
         storage_nodes.sort_unstable_by_key(|a| a.0);
+        let total_len = storage_nodes.len();
 
-        StorageTrieUpdatesSorted { is_deleted: self.is_deleted, storage_nodes }
+        (StorageTrieUpdatesSorted { is_deleted: self.is_deleted, storage_nodes }, total_len)
     }
 
     /// Creates a sorted copy without consuming self.
     /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
     pub fn clone_into_sorted(&self) -> StorageTrieUpdatesSorted {
+        self.clone_into_sorted_with_total_len().0
+    }
+
+    /// Creates a sorted copy and returns its update count.
+    pub fn clone_into_sorted_with_total_len(&self) -> (StorageTrieUpdatesSorted, usize) {
         let mut storage_nodes = self
             .storage_nodes
             .iter()
@@ -395,8 +431,9 @@ impl StorageTrieUpdates {
                 .map(|path| (*path, None)),
         );
         storage_nodes.sort_unstable_by_key(|a| a.0);
+        let total_len = storage_nodes.len();
 
-        StorageTrieUpdatesSorted { is_deleted: self.is_deleted, storage_nodes }
+        (StorageTrieUpdatesSorted { is_deleted: self.is_deleted, storage_nodes }, total_len)
     }
 
     /// Convert storage trie updates into [`StorageTrieUpdatesSortedRef`].

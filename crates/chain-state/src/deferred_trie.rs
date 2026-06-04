@@ -30,6 +30,10 @@ pub struct ComputedTrieData {
     pub hashed_state: Arc<HashedPostStateSorted>,
     /// Sorted trie updates produced by state root computation.
     pub trie_updates: Arc<TrieUpdatesSorted>,
+    /// Total number of sorted hashed post-state updates.
+    pub hashed_state_len: usize,
+    /// Total number of sorted trie updates.
+    pub trie_updates_len: usize,
 }
 
 /// Metrics for deferred trie computation.
@@ -102,30 +106,36 @@ impl DeferredTrieData {
         let _span = debug_span!(target: "engine::tree::deferred_trie", "sort_inputs").entered();
 
         #[cfg(feature = "rayon")]
-        let (sorted_hashed_state, sorted_trie_updates) = rayon::join(
-            || match Arc::try_unwrap(hashed_state) {
-                Ok(state) => state.into_sorted(),
-                Err(arc) => arc.clone_into_sorted(),
-            },
-            || match Arc::try_unwrap(trie_updates) {
-                Ok(updates) => updates.into_sorted(),
-                Err(arc) => arc.clone_into_sorted(),
-            },
-        );
+        let ((sorted_hashed_state, hashed_state_len), (sorted_trie_updates, trie_updates_len)) =
+            rayon::join(
+                || match Arc::try_unwrap(hashed_state) {
+                    Ok(state) => state.into_sorted_with_total_len(),
+                    Err(arc) => arc.clone_into_sorted_with_total_len(),
+                },
+                || match Arc::try_unwrap(trie_updates) {
+                    Ok(updates) => updates.into_sorted_with_total_len(),
+                    Err(arc) => arc.clone_into_sorted_with_total_len(),
+                },
+            );
 
         #[cfg(not(feature = "rayon"))]
-        let (sorted_hashed_state, sorted_trie_updates) = (
+        let ((sorted_hashed_state, hashed_state_len), (sorted_trie_updates, trie_updates_len)) = (
             match Arc::try_unwrap(hashed_state) {
-                Ok(state) => state.into_sorted(),
-                Err(arc) => arc.clone_into_sorted(),
+                Ok(state) => state.into_sorted_with_total_len(),
+                Err(arc) => arc.clone_into_sorted_with_total_len(),
             },
             match Arc::try_unwrap(trie_updates) {
-                Ok(updates) => updates.into_sorted(),
-                Err(arc) => arc.clone_into_sorted(),
+                Ok(updates) => updates.into_sorted_with_total_len(),
+                Err(arc) => arc.clone_into_sorted_with_total_len(),
             },
         );
 
-        ComputedTrieData::new(Arc::new(sorted_hashed_state), Arc::new(sorted_trie_updates))
+        ComputedTrieData::new_with_lengths(
+            Arc::new(sorted_hashed_state),
+            Arc::new(sorted_trie_updates),
+            hashed_state_len,
+            trie_updates_len,
+        )
     }
 
     /// Returns trie data, computing synchronously if the async task hasn't completed.
@@ -152,11 +162,23 @@ impl DeferredTrieData {
 
 impl ComputedTrieData {
     /// Construct sorted trie data for one block.
-    pub const fn new(
+    pub fn new(
         hashed_state: Arc<HashedPostStateSorted>,
         trie_updates: Arc<TrieUpdatesSorted>,
     ) -> Self {
-        Self { hashed_state, trie_updates }
+        let hashed_state_len = hashed_state.total_len();
+        let trie_updates_len = trie_updates.total_len();
+        Self { hashed_state, trie_updates, hashed_state_len, trie_updates_len }
+    }
+
+    /// Construct sorted trie data with precomputed update counts.
+    pub const fn new_with_lengths(
+        hashed_state: Arc<HashedPostStateSorted>,
+        trie_updates: Arc<TrieUpdatesSorted>,
+        hashed_state_len: usize,
+        trie_updates_len: usize,
+    ) -> Self {
+        Self { hashed_state, trie_updates, hashed_state_len, trie_updates_len }
     }
 }
 

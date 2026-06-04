@@ -327,31 +327,53 @@ impl HashedPostState {
 
     /// Converts hashed post state into [`HashedPostStateSorted`].
     pub fn into_sorted(self) -> HashedPostStateSorted {
+        self.into_sorted_with_total_len().0
+    }
+
+    /// Converts hashed post state into [`HashedPostStateSorted`] and returns its total update
+    /// count.
+    pub fn into_sorted_with_total_len(self) -> (HashedPostStateSorted, usize) {
         let mut accounts: Vec<_> = self.accounts.into_iter().collect();
         accounts.sort_unstable_by_key(|(address, _)| *address);
+        let mut total_len = accounts.len();
 
         let storages = self
             .storages
             .into_iter()
-            .map(|(hashed_address, storage)| (hashed_address, storage.into_sorted()))
+            .map(|(hashed_address, storage)| {
+                total_len += storage.storage.len();
+                (hashed_address, storage.into_sorted())
+            })
             .collect();
 
-        HashedPostStateSorted { accounts, storages }
+        (HashedPostStateSorted { accounts, storages }, total_len)
     }
 
     /// Creates a sorted copy without consuming self.
     /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
     pub fn clone_into_sorted(&self) -> HashedPostStateSorted {
+        self.clone_into_sorted_with_total_len().0
+    }
+
+    /// Creates a sorted copy and returns its total update count.
+    ///
+    /// More efficient than calling [`HashedPostStateSorted::total_len`] after conversion because
+    /// the storage lengths are accumulated while the storage maps are already being visited.
+    pub fn clone_into_sorted_with_total_len(&self) -> (HashedPostStateSorted, usize) {
         let mut accounts: Vec<_> = self.accounts.iter().map(|(&k, &v)| (k, v)).collect();
         accounts.sort_unstable_by_key(|(address, _)| *address);
+        let mut total_len = accounts.len();
 
         let storages = self
             .storages
             .iter()
-            .map(|(&hashed_address, storage)| (hashed_address, storage.clone_into_sorted()))
+            .map(|(&hashed_address, storage)| {
+                total_len += storage.storage.len();
+                (hashed_address, storage.clone_into_sorted())
+            })
             .collect();
 
-        HashedPostStateSorted { accounts, storages }
+        (HashedPostStateSorted { accounts, storages }, total_len)
     }
 
     /// Clears the account and storage maps of this `HashedPostState`.

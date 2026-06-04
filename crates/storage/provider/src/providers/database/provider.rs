@@ -5097,7 +5097,7 @@ mod tests {
                     },
                     state: bundle,
                 }),
-                ComputedTrieData { hashed_state: Arc::new(hashed_state), ..Default::default() },
+                ComputedTrieData::new(Arc::new(hashed_state), Arc::new(Default::default())),
             );
             blocks.push(executed);
         }

@@ -313,8 +313,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             receipts.into_iter().flatten().collect()
         };
 
-        let trie_data =
-            ComputedTrieData { hashed_state: Arc::new(hashed_state), ..Default::default() };
+        let trie_data = ComputedTrieData::new(Arc::new(hashed_state), Arc::new(Default::default()));
 
         let block_hash = recovered.hash();
         let executed = ExecutedBlock::new(

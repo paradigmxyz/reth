@@ -1852,10 +1852,10 @@ where
                 // Record sizes of the computed trie data
                 block_validation_metrics
                     .hashed_post_state_size
-                    .record(computed.hashed_state.total_len() as f64);
+                    .record(computed.hashed_state_len as f64);
                 block_validation_metrics
                     .trie_updates_sorted_size
-                    .record(computed.trie_updates.total_len() as f64);
+                    .record(computed.trie_updates_len as f64);
                 // Compute and cache changesets using the computed trie_updates.
                 // Use the pre-created provider to avoid races with changeset cache
                 // eviction that can happen between task spawn and execution.
