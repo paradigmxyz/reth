@@ -3772,6 +3772,7 @@ dependencies = [
  "eyre",
  "reth-engine-tree",
  "reth-ethereum",
+ "reth-evm",
  "reth-trie",
  "serde_json",
  "tokio",
@@ -3928,6 +3929,7 @@ dependencies = [
  "eyre",
  "futures-util",
  "reth-ethereum",
+ "reth-rpc-api",
 ]
 
 [[package]]

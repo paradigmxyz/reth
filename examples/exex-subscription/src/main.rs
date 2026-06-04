@@ -113,14 +113,14 @@ async fn my_exex<Node: FullNodeComponents>(
                         let execution_outcome = new.execution_outcome();
 
                         for (address, senders) in subscriptions.iter_mut() {
-                            for change in &execution_outcome.bundle.state {
-                                if change.0 == address {
-                                    for (key, slot) in &change.1.storage {
+                            for (changed_address, storage) in execution_outcome.bundle.storage() {
+                                if changed_address == address {
+                                    for (key, slot) in &storage.slots {
                                         let diff = StorageDiff {
-                                            address: *change.0,
+                                            address: *changed_address,
                                             key: *key,
-                                            old_value: slot.original_value(),
-                                            new_value: slot.present_value(),
+                                            old_value: slot.original,
+                                            new_value: slot.current,
                                         };
                                         // Send diff to all the active subscribers
                                         senders.retain(|sender| sender.send(diff).is_ok());

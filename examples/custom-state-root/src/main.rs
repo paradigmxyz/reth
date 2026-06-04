@@ -35,6 +35,7 @@ use reth_ethereum::{
     tasks::Runtime,
     EthPrimitives,
 };
+use reth_evm::{ConfigureEvm, ConfigureEvm2BlockExecutor, ConfigureEvm2Engine};
 use reth_trie::updates::TrieUpdates;
 
 // ---------------------------------------------------------------------------
@@ -63,7 +64,9 @@ where
         Types = EthereumNode,
         Evm: reth_ethereum::node::builder::ConfigureEngineEvm<
             alloy_rpc_types_engine::ExecutionData,
-        >,
+        > + ConfigureEvm2Engine<alloy_rpc_types_engine::ExecutionData>
+                 + ConfigureEvm2BlockExecutor<Primitives = EthPrimitives>
+                 + ConfigureEvm<Primitives = EthPrimitives>,
     >,
 {
     type EngineValidator = BasicEngineValidator<
