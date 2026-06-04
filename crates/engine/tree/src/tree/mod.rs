@@ -1382,7 +1382,9 @@ where
             .map(|b| b.recovered_block().num_hash())
             .expect("Checked non-empty persisting blocks");
 
-        debug!(target: "engine::tree", count=blocks_to_persist.len(), blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
+        let first_num_hash = blocks_to_persist.first().map(|block| block.recovered_block().num_hash());
+        let last_num_hash = blocks_to_persist.last().map(|block| block.recovered_block().num_hash());
+        debug!(target: "engine::tree", count=blocks_to_persist.len(), first=?first_num_hash, last=?last_num_hash, highest=?highest_num_hash, "Persisting blocks");
         let (tx, rx) = crossbeam_channel::bounded(1);
         let _ = self.persistence.save_blocks(blocks_to_persist, tx);
 
