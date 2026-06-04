@@ -18,10 +18,18 @@ use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
     PoolError, PoolErrorKind, PoolTransactionError, RawPoolTransactionError,
 };
-#[cfg(any())]
-use revm::{database::bal::EvmDatabaseError, state::bal::BalError};
 use std::convert::Infallible;
 use tokio::sync::oneshot::error::RecvError;
+
+#[cfg(any())]
+enum EvmDatabaseError<E> {
+    Bal(BalError),
+    Database(E),
+}
+
+#[cfg(any())]
+#[derive(Debug)]
+struct BalError;
 
 /// A trait to convert an error to an RPC error.
 pub trait ToRpcError: core::error::Error + Send + Sync + 'static {
