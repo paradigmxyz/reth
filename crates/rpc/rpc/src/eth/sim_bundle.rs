@@ -345,7 +345,7 @@ where
                     let ResultAndState { result, state } = execute_tx_env_for::<Eth::Evm, _>(
                         &mut db, spec, block_env.clone(), &tx_env,
                     )
-                        .map_err(Eth::Error::from_evm_err)?;
+                    .map_err(Eth::Error::from_eth_err)?;
 
                     if !result.is_success() && !item.can_revert {
                         return Err(EthApiError::InvalidParams(
