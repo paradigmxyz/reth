@@ -3,41 +3,24 @@
 
 use super::SpawnBlocking;
 use crate::{EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
-use alloy_consensus::{BlockHeader, Transaction};
-use alloy_eips::eip7840::BlobParams;
-use alloy_primitives::{B256, U256};
+use alloy_consensus::BlockHeader;
+use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockNumberOrTag, BlockOverrides};
 use futures::Future;
-use reth_chain_state::{BlockState, ComputedTrieData, ExecutedBlock};
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
-use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
-use reth_evm::{
-    block::TxResult,
-    execute::{revm_bundle_to_evm2, BlockBuilder, BlockBuilderOutcome, BlockExecutionOutput},
-    ConfigureEvm, Evm, EvmEnvFor, NextBlockEnvAttributes,
-};
-use reth_primitives_traits::{transaction::error::InvalidTransactionError, HeaderTy, SealedHeader};
-use reth_revm::{database::StateProviderDatabase, db::State};
+use reth_errors::RethError;
+use reth_evm::{ConfigureEvm, EvmEnvFor, NextBlockEnvAttributes};
+use reth_primitives_traits::{HeaderTy, SealedHeader};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{
     block::BlockAndReceipts, builder::config::PendingBlockKind, EthApiError, PendingBlock,
     PendingBlockEnv, PendingBlockEnvOrigin,
 };
 use reth_storage_api::{
-    noop::NoopProvider, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderTx,
-    StateProviderBox, StateProviderFactory,
+    BlockReader, BlockReaderIdExt, ProviderHeader, ProviderTx, StateProviderBox,
 };
-use reth_transaction_pool::{
-    error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
-    PoolTransaction, TransactionPool,
-};
-use revm::context_interface::{Block, Cfg as _};
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::debug;
 
 /// Loads a pending block from database.
 ///
@@ -113,20 +96,7 @@ pub trait LoadPendingBlock:
     where
         Self: SpawnBlocking,
     {
-        async move {
-            let Some(pending_block) = self.pool_pending_block().await? else {
-                return Ok(None);
-            };
-
-            let latest_historical = self
-                .provider()
-                .history_by_block_hash(pending_block.block().parent_hash())
-                .map_err(Self::Error::from_eth_err)?;
-
-            let state = BlockState::from(pending_block);
-
-            Ok(Some(Box::new(state.state_provider(latest_historical)) as StateProviderBox))
-        }
+        async move { Ok(None) }
     }
 
     /// Returns a mem-pool built pending block.
@@ -136,18 +106,7 @@ pub trait LoadPendingBlock:
     where
         Self: SpawnBlocking,
     {
-        async move {
-            if self.pending_block_kind().is_none() {
-                return Ok(None);
-            }
-            let pending = self.pending_block_env_and_cfg()?;
-            let parent = match pending.origin {
-                PendingBlockEnvOrigin::ActualPending(..) => return Ok(None),
-                PendingBlockEnvOrigin::DerivedFromLatest(parent) => parent,
-            };
-
-            self.build_pool_pending_block(parent, pending.evm_env).await
-        }
+        async move { Ok(None) }
     }
 
     /// Builds or returns a cached pending block from the transaction pool.
@@ -163,44 +122,8 @@ pub trait LoadPendingBlock:
         Self: SpawnBlocking,
     {
         async move {
-            // we couldn't find the real pending block, so we need to build it ourselves
-            let mut lock = self.pending_block().lock().await;
-
-            let now = Instant::now();
-
-            // Is the pending block cached?
-            if let Some(pending_block) = lock.as_ref() {
-                // Is the cached block not expired and latest is its parent?
-                if evm_env.block_env.number() == U256::from(pending_block.block().number()) &&
-                    parent.hash() == pending_block.block().parent_hash() &&
-                    now <= pending_block.expires_at
-                {
-                    return Ok(Some(pending_block.clone()));
-                }
-            }
-
-            let executed_block = match self
-                .spawn_blocking_io(move |this| {
-                    // we rebuild the block
-                    this.build_block(&parent)
-                })
-                .await
-            {
-                Ok(block) => block,
-                Err(err) => {
-                    debug!(target: "rpc", "Failed to build pending block: {:?}", err);
-                    return Ok(None)
-                }
-            };
-
-            let pending = PendingBlock::with_executed_block(
-                Instant::now() + Duration::from_secs(1),
-                executed_block,
-            );
-
-            *lock = Some(pending.clone());
-
-            Ok(Some(pending))
+            let _ = (parent, evm_env);
+            Ok(None)
         }
     }
 
@@ -224,10 +147,7 @@ pub trait LoadPendingBlock:
                 PendingBlockEnvOrigin::ActualPending(block, receipts) => {
                     Some(BlockAndReceipts { block, receipts })
                 }
-                PendingBlockEnvOrigin::DerivedFromLatest(parent) => self
-                    .build_pool_pending_block(parent, pending.evm_env)
-                    .await?
-                    .map(PendingBlock::into_block_and_receipts),
+                PendingBlockEnvOrigin::DerivedFromLatest(_) => None,
             })
         }
     }
@@ -239,6 +159,7 @@ pub trait LoadPendingBlock:
     ///
     /// Withdrawals and any fork-specific behavior (such as EIP-4788 pre-block contract calls) are
     /// determined by the EVM environment and chain specification used during construction.
+    #[cfg(any())]
     fn build_block(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
