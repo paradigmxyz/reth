@@ -1,20 +1,42 @@
 //! Database adapters for payload building.
 
 use alloy_primitives::{
-    map::{AddressMap, B256Map, Entry, HashMap, U256Map},
-    Address, B256, U256,
+    map::{AddressMap, B256Map, HashMap, U256Map},
+    Address, Bytes, B256, U256,
 };
-use core::cell::RefCell;
-pub use revm::{bytecode::Bytecode, state::AccountInfo};
-use revm::{Database, DatabaseRef};
 
-/// A container type that caches reads from an underlying [`DatabaseRef`].
-///
-/// This is intended to be used in conjunction with `revm::database::State` during payload
-/// building which repeatedly accesses the same data.
-///
-/// [`CachedReads::as_db_mut`] transforms this type into a [`Database`] implementation that uses
-/// [`CachedReads`] as a caching layer for operations, and records any cache misses.
+/// Cached bytecode for payload pre-cache bookkeeping.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub struct Bytecode(Bytes);
+
+impl Bytecode {
+    /// Creates cached bytecode from raw bytes.
+    pub const fn new_raw(bytes: Bytes) -> Self {
+        Self(bytes)
+    }
+
+    /// Returns the original bytecode bytes.
+    pub fn original_bytes(&self) -> Bytes {
+        self.0.clone()
+    }
+}
+
+/// Cached account information for payload pre-cache bookkeeping.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub struct AccountInfo {
+    /// Account balance.
+    pub balance: U256,
+    /// Account nonce.
+    pub nonce: u64,
+    /// Account code hash.
+    pub code_hash: B256,
+    /// Optional account id retained for compatibility with the previous cache shape.
+    pub account_id: Option<u64>,
+    /// Optional cached bytecode.
+    pub code: Option<Bytecode>,
+}
+
+/// A container type that caches reads for payload pre-cache bookkeeping.
 #[derive(Debug, Clone, Default)]
 pub struct CachedReads {
     /// Block state account with storage.
@@ -28,12 +50,12 @@ pub struct CachedReads {
 // === impl CachedReads ===
 
 impl CachedReads {
-    /// Gets a [`DatabaseRef`] that will cache reads from the given database.
-    pub const fn as_db<DB>(&mut self, db: DB) -> CachedReadsDBRef<'_, DB> {
-        self.as_db_mut(db).into_db()
+    /// Gets a placeholder database wrapper for parked revm-backed call sites.
+    pub const fn as_db<DB>(&mut self, db: DB) -> CachedReadsDb<'_, DB> {
+        CachedReadsDb { cached: self, db }
     }
 
-    /// Gets a mutable [`Database`] that will cache reads from the underlying database.
+    /// Gets a placeholder mutable database wrapper for parked revm-backed call sites.
     pub const fn as_db_mut<DB>(&mut self, db: DB) -> CachedReadsDbMut<'_, DB> {
         CachedReadsDbMut { cached: self, db }
     }
@@ -53,11 +75,16 @@ impl CachedReads {
     }
 }
 
-/// A [`Database`] that caches reads inside [`CachedReads`].
-///
-/// The lifetime parameter `'a` is tied to the lifetime of the underlying [`CachedReads`] instance.
-/// This ensures that the cache remains valid for the entire duration this wrapper is used.
-/// The original [`CachedReads`] must outlive this wrapper to prevent use-after-free.
+/// Placeholder cache wrapper retained for parked revm-backed call sites.
+#[derive(Debug)]
+pub struct CachedReadsDb<'a, DB> {
+    /// The cache of reads.
+    pub cached: &'a mut CachedReads,
+    /// The underlying database.
+    pub db: DB,
+}
+
+/// Placeholder mutable cache wrapper retained for parked revm-backed call sites.
 #[derive(Debug)]
 pub struct CachedReadsDbMut<'a, DB> {
     /// The cache of reads.
@@ -67,13 +94,12 @@ pub struct CachedReadsDbMut<'a, DB> {
 }
 
 impl<'a, DB> CachedReadsDbMut<'a, DB> {
-    /// Converts this [`Database`] implementation into a [`DatabaseRef`] that will still cache
-    /// reads.
-    pub const fn into_db(self) -> CachedReadsDBRef<'a, DB> {
-        CachedReadsDBRef { inner: RefCell::new(self) }
+    /// Converts this mutable wrapper into an immutable placeholder wrapper.
+    pub fn into_db(self) -> CachedReadsDb<'a, DB> {
+        CachedReadsDb { cached: self.cached, db: self.db }
     }
 
-    /// Returns access to wrapped [`DatabaseRef`].
+    /// Returns access to wrapped database.
     pub const fn inner(&self) -> &DB {
         &self.db
     }
@@ -88,94 +114,6 @@ where
     }
 }
 
-impl<DB: DatabaseRef> Database for CachedReadsDbMut<'_, DB> {
-    type Error = <DB as DatabaseRef>::Error;
-
-    fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        let basic = match self.cached.accounts.entry(address) {
-            Entry::Occupied(entry) => entry.get().info.clone(),
-            Entry::Vacant(entry) => {
-                entry.insert(CachedAccount::new(self.db.basic_ref(address)?)).info.clone()
-            }
-        };
-        Ok(basic)
-    }
-
-    fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        let code = match self.cached.contracts.entry(code_hash) {
-            Entry::Occupied(entry) => entry.get().clone(),
-            Entry::Vacant(entry) => entry.insert(self.db.code_by_hash_ref(code_hash)?).clone(),
-        };
-        Ok(code)
-    }
-
-    fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        match self.cached.accounts.entry(address) {
-            Entry::Occupied(mut acc_entry) => match acc_entry.get_mut().storage.entry(index) {
-                Entry::Occupied(entry) => Ok(*entry.get()),
-                Entry::Vacant(entry) => Ok(*entry.insert(self.db.storage_ref(address, index)?)),
-            },
-            Entry::Vacant(acc_entry) => {
-                // The account needs to be loaded before slots can be accessed.
-                let info = self.db.basic_ref(address)?;
-                let (account, value) = if info.is_some() {
-                    let value = self.db.storage_ref(address, index)?;
-                    let mut account = CachedAccount::new(info);
-                    account.storage.insert(index, value);
-                    (account, value)
-                } else {
-                    (CachedAccount::new(info), U256::ZERO)
-                };
-                acc_entry.insert(account);
-                Ok(value)
-            }
-        }
-    }
-
-    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
-        let hash = match self.cached.block_hashes.entry(number) {
-            Entry::Occupied(entry) => *entry.get(),
-            Entry::Vacant(entry) => *entry.insert(self.db.block_hash_ref(number)?),
-        };
-        Ok(hash)
-    }
-}
-
-/// A [`DatabaseRef`] that caches reads inside [`CachedReads`].
-///
-/// This is intended to be used as the [`DatabaseRef`] for `revm::database::State` for repeated
-/// payload build jobs.
-///
-/// The lifetime parameter `'a` matches the lifetime of the underlying [`CachedReadsDbMut`], which
-/// in turn is tied to the [`CachedReads`] cache. [`RefCell`] is used here to provide interior
-/// mutability for the [`DatabaseRef`] trait (which requires `&self`), while the lifetime ensures
-/// the cache remains valid throughout the wrapper's usage.
-#[derive(Debug)]
-pub struct CachedReadsDBRef<'a, DB> {
-    /// The inner cache reads db mut.
-    pub inner: RefCell<CachedReadsDbMut<'a, DB>>,
-}
-
-impl<DB: DatabaseRef> DatabaseRef for CachedReadsDBRef<'_, DB> {
-    type Error = <DB as DatabaseRef>::Error;
-
-    fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        self.inner.borrow_mut().basic(address)
-    }
-
-    fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        self.inner.borrow_mut().code_by_hash(code_hash)
-    }
-
-    fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        self.inner.borrow_mut().storage(address, index)
-    }
-
-    fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
-        self.inner.borrow_mut().block_hash(number)
-    }
-}
-
 /// Cached account contains the account state with storage but lacks the account status.
 #[derive(Debug, Clone)]
 pub struct CachedAccount {
@@ -186,7 +124,8 @@ pub struct CachedAccount {
 }
 
 impl CachedAccount {
-    fn new(info: Option<AccountInfo>) -> Self {
+    /// Creates a cached account with no storage slots.
+    pub fn new(info: Option<AccountInfo>) -> Self {
         Self { info, storage: U256Map::default() }
     }
 }
