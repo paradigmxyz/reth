@@ -164,6 +164,9 @@ impl<R: Read + Seek> StreamReader<R> for EreReader<R> {
     }
 
     /// Returns an iterator over the [`BlockTuple`]s streamed from `reader`.
+    ///
+    /// Assumes the reader is positioned past the version record; a fresh reader at offset 0 will
+    /// bucket the leading version entry as an unrecognized `other` entry.
     fn iter(self) -> EreBlockTupleIterator<R> {
         EreBlockTupleIterator::new(self.reader)
     }
@@ -194,12 +197,12 @@ impl<R: Read + Seek> EreReader<R> {
 
         validate_blocks_and_index(&blocks, &index)?;
 
-        let mut group = EreGroup::new(blocks, accumulator, index.clone());
+        let id = EreId::new(network_name, index.starting_number(), index.block_count() as u32);
+
+        let mut group = EreGroup::new(blocks, accumulator, index);
         for entry in other_entries {
             group.add_entry(entry);
         }
-
-        let id = EreId::new(network_name, index.starting_number(), index.block_count() as u32);
 
         Ok(EreFile::new(group, id))
     }
@@ -233,15 +236,10 @@ impl<W: Write> StreamWriter<W> for EreWriter<W> {
         self.write_version()?;
 
         let blocks = &file.group.blocks;
-        if blocks.len() > MAX_BLOCKS_PER_ERE {
-            return Err(E2sError::Ssz(format!(
-                "ere file cannot contain more than {MAX_BLOCKS_PER_ERE} blocks"
-            )));
-        }
 
-        // Reject input the reader could not load back: non-uniform optional components would write
-        // a partial section, and an index that disagrees with the blocks would mislead
-        // lookups.
+        // Reject input the reader could not load back: too many blocks, non-uniform optional
+        // components (which would write a partial section), or an index disagreeing with the
+        // blocks.
         validate_blocks_and_index(blocks, &file.group.index)?;
 
         for block in blocks {
@@ -287,6 +285,7 @@ impl<W: Write> StreamWriter<W> for EreWriter<W> {
 }
 
 /// Enforce the `ere` layout invariants tying `blocks` to `index`:
+/// - `blocks.len() <= MAX_BLOCKS_PER_ERE` — the per-file block ceiling;
 /// - `index.block_count() == blocks.len()` — the index spans exactly the serialized blocks;
 /// - every optional component (receipts, total-difficulty, proof) is set on all blocks or none, so
 ///   each per-type section has length `0` or `blocks.len()`;
@@ -299,6 +298,13 @@ fn validate_blocks_and_index(
     blocks: &[BlockTuple],
     index: &DynamicBlockIndex,
 ) -> Result<(), E2sError> {
+    if blocks.len() > MAX_BLOCKS_PER_ERE {
+        return Err(E2sError::Ssz(format!(
+            "ere file cannot contain more than {MAX_BLOCKS_PER_ERE} blocks, got {}",
+            blocks.len()
+        )));
+    }
+
     if index.block_count() != blocks.len() {
         return Err(E2sError::Ssz(format!(
             "ere index covers {} blocks but the file has {}",
@@ -672,6 +678,16 @@ mod tests {
         ];
         let index = DynamicBlockIndex::new(0, 3, vec![0, 1, 2, 3, 4, 5]);
         let file = EreFile::new(EreGroup::new(blocks, None, index), EreId::new("testnet", 0, 2));
+
+        let err = EreWriter::new(&mut Vec::new()).write_file(&file);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_ere_write_rejects_too_many_blocks() {
+        // One block over the per-file ceiling must be rejected before any record is written.
+        let file =
+            create_test_ere_file(0, MAX_BLOCKS_PER_ERE + 1, "testnet", false, false, false, false);
 
         let err = EreWriter::new(&mut Vec::new()).write_file(&file);
         assert!(err.is_err());
