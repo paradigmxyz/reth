@@ -13,18 +13,16 @@ use alloy_evm::overrides::{apply_block_overrides, apply_state_overrides, Overrid
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_eth::{
-    simulate::{SimBlock, SimulatePayload, SimulatedBlock},
+    simulate::{SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
     BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
 use futures::Future;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
-    block::BlockExecutor, env::BlockEnvironment, execute::BlockBuilder, ConfigureEvm, Evm,
-    EvmEnvFor, HaltReasonFor, InspectorFor, TransactionEnvMut, TxEnvFor,
+    block::BlockExecutor, env::BlockEnvironment, ConfigureEvm, Evm, EvmEnvFor, HaltReasonFor,
+    InspectorFor, TransactionEnvMut, TxEnvFor,
 };
-use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
 use reth_revm::{
     cancelled::CancelOnDrop,
@@ -33,18 +31,14 @@ use reth_revm::{
 };
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
-    cache::db::StateProviderTraitObjWrapper,
-    error::{AsEthApiError, FromEthApiError},
-    simulate::{self, EthSimulateError},
-    EthApiError, StateCacheDb,
+    cache::db::StateProviderTraitObjWrapper, error::FromEthApiError, EthApiError, StateCacheDb,
 };
-use reth_storage_api::{BlockIdReader, ProviderTx, StateProviderBox};
+use reth_storage_api::{ProviderTx, StateProviderBox};
 use revm::{
     context::Block,
     context_interface::{result::ResultAndState, Transaction},
     Database, DatabaseCommit,
 };
-use std::collections::BTreeMap;
 use tracing::{trace, warn};
 
 /// Result type for `eth_simulateV1` RPC method.
@@ -72,39 +66,49 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         payload: SimulatePayload<RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>>,
         block: Option<BlockId>,
     ) -> impl Future<Output = SimulatedBlocksResult<Self::NetworkTypes, Self::Error>> + Send {
-        async move {
-            if payload.block_state_calls.len() > self.max_simulate_blocks() as usize {
-                return Err(EthApiError::other(EthSimulateError::TooManyBlocks).into())
+        #[cfg(not(any()))]
+        {
+            let _ = (payload, block);
+            return async move {
+                Err(Self::Error::from_eth_err(EthApiError::Unsupported(
+                    "eth_simulateV1 is unsupported by the evm2 execution path",
+                )))
             }
+        }
 
-            let block = block.unwrap_or_default();
+        #[cfg(any())]
+        {
+            async move {
+                if payload.block_state_calls.len() > self.max_simulate_blocks() as usize {
+                    return Err(EthApiError::other(EthSimulateError::TooManyBlocks).into())
+                }
 
-            let SimulatePayload {
-                block_state_calls,
-                trace_transfers,
-                validation,
-                return_full_transactions,
-            } = payload;
+                let block = block.unwrap_or_default();
 
-            if block_state_calls.is_empty() {
-                return Err(EthApiError::InvalidParams(String::from("calls are empty.")).into())
-            }
+                let SimulatePayload {
+                    block_state_calls,
+                    trace_transfers,
+                    validation,
+                    return_full_transactions,
+                } = payload;
 
-            let _permit = self.acquire_owned_blocking_io().await;
+                if block_state_calls.is_empty() {
+                    return Err(EthApiError::InvalidParams(String::from("calls are empty.")).into())
+                }
 
-            let base_block = self
-                .recovered_block(block)
-                .await?
-                .ok_or_else(|| EthApiError::other(EthSimulateError::BlockNotFound { block }))?;
-            let parent = base_block.sealed_header().clone();
-            let max_simulate_blocks = self.max_simulate_blocks();
+                let _permit = self.acquire_owned_blocking_io().await;
 
-            self.spawn_with_state_at_block(block, move |this, db| {
-                let state_provider = db.database.0 .0;
-                let mut db = State::builder()
-                    .with_database(StateProviderDatabase::new(&state_provider))
-                    .with_bundle_update()
-                    .build();
+                let base_block =
+                    self.recovered_block(block).await?.ok_or(EthApiError::HeaderNotFound(block))?;
+                let parent = base_block.sealed_header().clone();
+                let max_simulate_blocks = self.max_simulate_blocks();
+
+                self.spawn_with_state_at_block(block, move |this, db| {
+                    let state_provider = db.database.0 .0;
+                    let mut db = State::builder()
+                        .with_database(StateProviderDatabase::new(&state_provider))
+                        .with_bundle_update()
+                        .build();
                 let mut parent = parent;
 
                 let chain_id = this.provider().chain_spec().chain_id();
@@ -276,6 +280,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 Ok(blocks)
             })
             .await
+            }
         }
     }
 
@@ -286,12 +291,26 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         block_number: Option<BlockId>,
         overrides: EvmOverrides,
     ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send {
-        async move {
-            let _permit = self.acquire_owned_blocking_io().await;
-            let res =
-                self.transact_call_at(request, block_number.unwrap_or_default(), overrides).await?;
+        #[cfg(not(any()))]
+        {
+            let _ = (request, block_number, overrides);
+            return async move {
+                Err(Self::Error::from_eth_err(EthApiError::Unsupported(
+                    "eth_call is unsupported by the evm2 execution path",
+                )))
+            }
+        }
 
-            Self::Error::ensure_success(res.result)
+        #[cfg(any())]
+        {
+            async move {
+                let _permit = self.acquire_owned_blocking_io().await;
+                let res = self
+                    .transact_call_at(request, block_number.unwrap_or_default(), overrides)
+                    .await?;
+
+                Self::Error::ensure_success(res.result)
+            }
         }
     }
 
@@ -301,139 +320,156 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         &self,
         bundles: Vec<Bundle<RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>>>,
         state_context: Option<StateContext>,
-        mut state_override: Option<StateOverride>,
+        state_override: Option<StateOverride>,
     ) -> impl Future<Output = Result<Vec<Vec<EthCallResponse>>, Self::Error>> + Send {
-        async move {
-            // Check if the vector of bundles is empty
-            if bundles.is_empty() {
-                return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into());
+        #[cfg(not(any()))]
+        {
+            let _ = (bundles, state_context, state_override);
+            return async move {
+                Err(Self::Error::from_eth_err(EthApiError::Unsupported(
+                    "eth_callMany is unsupported by the evm2 execution path",
+                )))
             }
+        }
 
-            let _permit = self.acquire_owned_blocking_io().await;
+        #[cfg(any())]
+        {
+            async move {
+                // Check if the vector of bundles is empty
+                if bundles.is_empty() {
+                    return Err(
+                        EthApiError::InvalidParams(String::from("bundles are empty.")).into()
+                    );
+                }
 
-            let StateContext { transaction_index, block_number } =
-                state_context.unwrap_or_default();
-            let transaction_index = transaction_index.unwrap_or_default();
+                let _permit = self.acquire_owned_blocking_io().await;
 
-            let mut target_block = block_number.unwrap_or_default();
-            let is_block_target_pending = target_block.is_pending();
+                let StateContext { transaction_index, block_number } =
+                    state_context.unwrap_or_default();
+                let transaction_index = transaction_index.unwrap_or_default();
 
-            // if it's not pending, we should always use block_hash over block_number to ensure that
-            // different provider calls query data related to the same block.
-            if !is_block_target_pending {
-                let Some(block_hash) = self
-                    .provider()
-                    .block_hash_for_id(target_block)
-                    .map_err(Self::Error::from_eth_err::<ProviderError>)?
-                else {
-                    return Err(EthApiError::HeaderNotFound(target_block).into())
-                };
-                target_block = block_hash.into();
-            }
+                let mut target_block = block_number.unwrap_or_default();
+                let is_block_target_pending = target_block.is_pending();
 
-            let block = self
-                .recovered_block(target_block)
-                .await?
-                .ok_or(EthApiError::HeaderNotFound(target_block))?;
-            let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
+                // if it's not pending, we should always use block_hash over block_number to ensure
+                // that different provider calls query data related to the same
+                // block.
+                if !is_block_target_pending {
+                    let Some(block_hash) = self
+                        .provider()
+                        .block_hash_for_id(target_block)
+                        .map_err(Self::Error::from_eth_err::<ProviderError>)?
+                    else {
+                        return Err(EthApiError::HeaderNotFound(target_block).into())
+                    };
+                    target_block = block_hash.into();
+                }
 
-            // we're essentially replaying the transactions in the block here, hence we need the
-            // state that points to the beginning of the block, which is the state at
-            // the parent block
-            let mut at = block.parent_hash();
-            let mut replay_block_txs = true;
+                let block = self
+                    .recovered_block(target_block)
+                    .await?
+                    .ok_or(EthApiError::HeaderNotFound(target_block))?;
+                let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
 
-            let num_txs =
-                transaction_index.index().unwrap_or_else(|| block.body().transactions().len());
-            // but if all transactions are to be replayed, we can use the state at the block itself,
-            // however only if we're not targeting the pending block, because for pending we can't
-            // rely on the block's state being available
-            if !is_block_target_pending && num_txs == block.body().transactions().len() {
-                at = block.hash();
-                replay_block_txs = false;
-            }
+                // we're essentially replaying the transactions in the block here, hence we need the
+                // state that points to the beginning of the block, which is the state at
+                // the parent block
+                let mut at = block.parent_hash();
+                let mut replay_block_txs = true;
 
-            self.spawn_with_state_at_block(at, move |this, mut db| {
-                let mut all_results = Vec::with_capacity(bundles.len());
+                let num_txs =
+                    transaction_index.index().unwrap_or_else(|| block.body().transactions().len());
+                // but if all transactions are to be replayed, we can use the state at the block
+                // itself, however only if we're not targeting the pending block,
+                // because for pending we can't rely on the block's state being
+                // available
+                if !is_block_target_pending && num_txs == block.body().transactions().len() {
+                    at = block.hash();
+                    replay_block_txs = false;
+                }
 
-                if replay_block_txs {
-                    let mut executor = RpcNodeCore::evm_config(&this)
-                        .executor_for_block(&mut db, block.sealed_block())
-                        .map_err(RethError::other)
-                        .map_err(Self::Error::from_eth_err)?;
-                    executor
-                        .apply_pre_execution_changes()
-                        .map_err(reth_errors::BlockExecutionError::other)
-                        .map_err(Self::Error::from_eth_err)?;
-                    for tx in block.transactions_recovered().take(num_txs) {
+                self.spawn_with_state_at_block(at, move |this, mut db| {
+                    let mut all_results = Vec::with_capacity(bundles.len());
+
+                    if replay_block_txs {
+                        let mut executor = RpcNodeCore::evm_config(&this)
+                            .executor_for_block(&mut db, block.sealed_block())
+                            .map_err(RethError::other)
+                            .map_err(Self::Error::from_eth_err)?;
                         executor
-                            .execute_transaction(tx)
+                            .apply_pre_execution_changes()
                             .map_err(reth_errors::BlockExecutionError::other)
                             .map_err(Self::Error::from_eth_err)?;
-                    }
-                }
-
-                // transact all bundles
-                for (bundle_index, bundle) in bundles.into_iter().enumerate() {
-                    let Bundle { transactions, block_override } = bundle;
-                    if transactions.is_empty() {
-                        // Skip empty bundles
-                        continue;
+                        for tx in block.transactions_recovered().take(num_txs) {
+                            executor
+                                .execute_transaction(tx)
+                                .map_err(reth_errors::BlockExecutionError::other)
+                                .map_err(Self::Error::from_eth_err)?;
+                        }
                     }
 
-                    let mut bundle_results = Vec::with_capacity(transactions.len());
-                    let block_overrides = block_override.map(Box::new);
-
-                    // transact all transactions in the bundle
-                    for (tx_index, tx) in transactions.into_iter().enumerate() {
-                        // Apply overrides, state overrides are only applied for the first tx in the
-                        // request
-                        let overrides =
-                            EvmOverrides::new(state_override.take(), block_overrides.clone());
-
-                        let (current_evm_env, prepared_tx) = this
-                            .prepare_call_env(evm_env.clone(), tx, &mut db, overrides)
-                            .map_err(|err| {
-                                Self::Error::from_eth_err(EthApiError::call_many_error(
-                                    bundle_index,
-                                    tx_index,
-                                    err.into(),
-                                ))
-                            })?;
-                        let res = this.transact(&mut db, current_evm_env, prepared_tx).map_err(
-                            |err| {
-                                Self::Error::from_eth_err(EthApiError::call_many_error(
-                                    bundle_index,
-                                    tx_index,
-                                    err.into(),
-                                ))
-                            },
-                        )?;
-
-                        match Self::Error::ensure_success(res.result) {
-                            Ok(output) => {
-                                bundle_results
-                                    .push(EthCallResponse { value: Some(output), error: None });
-                            }
-                            Err(err) => {
-                                bundle_results.push(EthCallResponse {
-                                    value: None,
-                                    error: Some(err.to_string()),
-                                });
-                            }
+                    // transact all bundles
+                    for (bundle_index, bundle) in bundles.into_iter().enumerate() {
+                        let Bundle { transactions, block_override } = bundle;
+                        if transactions.is_empty() {
+                            // Skip empty bundles
+                            continue;
                         }
 
-                        // Commit state changes after each transaction to allow subsequent calls to
-                        // see the updates
-                        db.commit(res.state);
+                        let mut bundle_results = Vec::with_capacity(transactions.len());
+                        let block_overrides = block_override.map(Box::new);
+
+                        // transact all transactions in the bundle
+                        for (tx_index, tx) in transactions.into_iter().enumerate() {
+                            // Apply overrides, state overrides are only applied for the first tx in
+                            // the request
+                            let overrides =
+                                EvmOverrides::new(state_override.take(), block_overrides.clone());
+
+                            let (current_evm_env, prepared_tx) = this
+                                .prepare_call_env(evm_env.clone(), tx, &mut db, overrides)
+                                .map_err(|err| {
+                                    Self::Error::from_eth_err(EthApiError::call_many_error(
+                                        bundle_index,
+                                        tx_index,
+                                        err.into(),
+                                    ))
+                                })?;
+                            let res = this
+                                .transact(&mut db, current_evm_env, prepared_tx)
+                                .map_err(|err| {
+                                    Self::Error::from_eth_err(EthApiError::call_many_error(
+                                        bundle_index,
+                                        tx_index,
+                                        err.into(),
+                                    ))
+                                })?;
+
+                            match Self::Error::ensure_success(res.result) {
+                                Ok(output) => {
+                                    bundle_results
+                                        .push(EthCallResponse { value: Some(output), error: None });
+                                }
+                                Err(err) => {
+                                    bundle_results.push(EthCallResponse {
+                                        value: None,
+                                        error: Some(err.to_string()),
+                                    });
+                                }
+                            }
+
+                            // Commit state changes after each transaction to allow subsequent calls
+                            // to see the updates
+                            db.commit(res.state);
+                        }
+
+                        all_results.push(bundle_results);
                     }
 
-                    all_results.push(bundle_results);
-                }
-
-                Ok(all_results)
-            })
-            .await
+                    Ok(all_results)
+                })
+                .await
+            }
         }
     }
 
