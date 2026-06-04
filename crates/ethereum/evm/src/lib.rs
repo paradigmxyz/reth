@@ -341,6 +341,10 @@ where
         EthExecutorSpec + EthChainSpec<Header = Header> + EthereumHardforks + Hardforks + 'static,
     EvmF: Clone + Debug + Send + Sync + Unpin + 'static,
 {
+    fn evm2_chain_id(&self) -> u64 {
+        self.chain_spec.chain_id()
+    }
+
     fn evm2_spec_for_header(&self, header: &Header) -> Result<evm2::SpecId, Self::Error> {
         Ok(evm2_spec(self.chain_spec.as_ref(), header))
     }
@@ -425,6 +429,7 @@ where
             .map(|(signer, tx)| Recovered::new_unchecked(tx.clone(), *signer))
             .collect::<Vec<_>>();
         let context = Evm2BlockExecutionContext {
+            chain_id: self.chain_spec.chain_id(),
             system_calls: Some(Evm2BlockSystemCalls {
                 parent_hash: header.parent_hash,
                 parent_beacon_block_root: header.parent_beacon_block_root,
@@ -464,6 +469,7 @@ where
             .map(|(signer, tx)| Recovered::new_unchecked(tx.clone(), *signer))
             .collect::<Vec<_>>();
         let context = Evm2BlockExecutionContext {
+            chain_id: self.chain_spec.chain_id(),
             system_calls: Some(Evm2BlockSystemCalls {
                 parent_hash: header.parent_hash,
                 parent_beacon_block_root: header.parent_beacon_block_root,

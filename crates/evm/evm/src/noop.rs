@@ -148,6 +148,10 @@ impl<Inner, T> crate::ConfigureEvm2Engine<T> for NoopEvmConfig<Inner>
 where
     Inner: crate::ConfigureEvm2Engine<T>,
 {
+    fn evm2_chain_id(&self) -> u64 {
+        self.inner().evm2_chain_id()
+    }
+
     fn evm2_spec_for_header(
         &self,
         header: &HeaderTy<Self::Primitives>,
