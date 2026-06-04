@@ -36,6 +36,7 @@ reth-consensus.workspace = true
 reth-chain-state.workspace = true
 reth-errors.workspace = true
 reth-storage-errors.workspace = true
+reth-storage-api.workspace = true
 
 # alloy
 alloy-rpc-types = { workspace = true, features = ["engine"] }
@@ -43,7 +44,6 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
-alloy-evm.workspace = true
 
 # tracing
 tracing.workspace = true
@@ -55,10 +55,9 @@ async-trait.workspace = true
 derive_more.workspace = true
 crossbeam-channel.workspace = true
 tokio = { workspace = true, features = ["sync"] }
-revm.workspace = true
-revm-primitives.workspace = true
 alloy-hardforks.workspace = true
 metrics.workspace = true
+evm2.workspace = true
 
 # std
 eyre.workspace = true
@@ -72,8 +71,6 @@ default = [
     "min-trace-logs",
     "otlp",
     "otlp-logs",
-    "revm/optional_no_base_fee",
-    "revm/portable",
     "js-tracer",
 ]
 
@@ -102,9 +99,7 @@ asm-keccak = [
     "reth-ethereum-cli/asm-keccak",
     "reth-node-ethereum/asm-keccak",
     "alloy-primitives/asm-keccak",
-    "alloy-evm/asm-keccak",
-    "revm/asm-keccak",
-    "revm-primitives/asm-keccak",
+    "evm2/asm-keccak",
 ]
 
 keccak-cache-global = [
