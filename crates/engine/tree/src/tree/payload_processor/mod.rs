@@ -514,9 +514,11 @@ where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
         let mode = if parallel_bal_execution {
-            PrewarmMode::BlockAccessList(
-                env.decoded_bal.clone().expect("BAL dispatch implies decoded BAL"),
-            )
+            warn!(
+                target: "engine::tree::payload_processor",
+                "BAL prewarming is unsupported in the evm2 pre-Amsterdam path"
+            );
+            PrewarmMode::Skipped
         } else if self.disable_transaction_prewarming ||
             env.transaction_count < SMALL_BLOCK_TX_THRESHOLD
         {
