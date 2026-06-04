@@ -574,12 +574,12 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"PlainAccountState\"}[$interval]))",
+          "expr": "avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"HashedAccounts\"}[$interval]))",
           "instant": false,
-          "interval": "$interval",
-          "legendFormat": "Account",
+          "legendFormat": "Flat accounts",
           "range": true,
-          "refId": "A"
+          "refId": "A",
+          "interval": "$interval"
         },
         {
           "datasource": {
@@ -587,13 +587,12 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"PlainStorageState\"}[$interval]))",
-          "hide": false,
+          "expr": "avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"HashedStorages\"}[$interval]))",
           "instant": false,
-          "interval": "$interval",
-          "legendFormat": "Storage",
+          "legendFormat": "Flat storage",
           "range": true,
-          "refId": "B"
+          "refId": "B",
+          "interval": "$interval"
         },
         {
           "datasource": {
@@ -602,12 +601,11 @@
           },
           "editorMode": "code",
           "expr": "avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"Bytecodes\"}[$interval]))",
-          "hide": false,
           "instant": false,
-          "interval": "$interval",
           "legendFormat": "Bytecodes",
           "range": true,
-          "refId": "C"
+          "refId": "C",
+          "interval": "$interval"
         },
         {
           "datasource": {
@@ -615,13 +613,25 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"PlainAccountState\"}[$interval])) + avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"PlainStorageState\"}[$interval])) + avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"Bytecodes\"}[$interval]))",
-          "hide": false,
+          "expr": "sum(delta(reth_db_table_size{instance=~\"$instance\", table=~\"AccountsTrie|StoragesTrie\"}[$interval]))",
           "instant": false,
-          "interval": "$interval",
+          "legendFormat": "Trie",
+          "range": true,
+          "refId": "D",
+          "interval": "$interval"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(delta(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"}[$interval]))",
+          "instant": false,
           "legendFormat": "Total",
           "range": true,
-          "refId": "D"
+          "refId": "E",
+          "interval": "$interval"
         }
       ],
       "title": "State Growth (interval = ${interval})",
@@ -714,12 +724,12 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_db_table_size{instance=~\"$instance\", table=\"PlainAccountState\"})",
+          "expr": "sum(reth_db_table_size{instance=~\"$instance\", table=\"HashedAccounts\"})",
           "instant": false,
-          "interval": "$interval",
-          "legendFormat": "Account",
+          "legendFormat": "Flat accounts",
           "range": true,
-          "refId": "A"
+          "refId": "A",
+          "interval": "$interval"
         },
         {
           "datasource": {
@@ -727,13 +737,12 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_db_table_size{instance=~\"$instance\", table=\"PlainStorageState\"})",
-          "hide": false,
+          "expr": "sum(reth_db_table_size{instance=~\"$instance\", table=\"HashedStorages\"})",
           "instant": false,
-          "interval": "$interval",
-          "legendFormat": "Storage",
+          "legendFormat": "Flat storage",
           "range": true,
-          "refId": "B"
+          "refId": "B",
+          "interval": "$interval"
         },
         {
           "datasource": {
@@ -742,12 +751,11 @@
           },
           "editorMode": "code",
           "expr": "sum(reth_db_table_size{instance=~\"$instance\", table=\"Bytecodes\"})",
-          "hide": false,
           "instant": false,
-          "interval": "$interval",
           "legendFormat": "Bytecodes",
           "range": true,
-          "refId": "C"
+          "refId": "C",
+          "interval": "$interval"
         },
         {
           "datasource": {
@@ -755,17 +763,236 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_db_table_size{instance=~\"$instance\", table=~\"PlainAccountState|PlainStorageState|Bytecodes\"})",
-          "hide": false,
+          "expr": "sum(reth_db_table_size{instance=~\"$instance\", table=~\"AccountsTrie|StoragesTrie\"})",
           "instant": false,
-          "interval": "$interval",
+          "legendFormat": "Trie",
+          "range": true,
+          "refId": "D",
+          "interval": "$interval"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"})",
+          "instant": false,
           "legendFormat": "Total",
           "range": true,
-          "refId": "D"
+          "refId": "E",
+          "interval": "$interval"
         }
       ],
       "title": "State Size",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 14
+      },
+      "id": 198,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 20
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "10.1.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"}) + (sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"}) - sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"} offset 7d)) / 7 * 7",
+          "instant": true,
+          "legendFormat": "Projected total state",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Projected Total State Size in 7d",
+      "transparent": true,
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 14
+      },
+      "id": 199,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 20
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "10.1.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"}) + (sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"}) - sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"} offset 7d)) / 7 * 14",
+          "instant": true,
+          "legendFormat": "Projected total state",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Projected Total State Size in 14d",
+      "transparent": true,
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 14
+      },
+      "id": 200,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 20
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "10.1.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"}) + (sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"}) - sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"} offset 7d)) / 7 * 30",
+          "instant": true,
+          "legendFormat": "Projected total state",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Projected Total State Size in 30d",
+      "transparent": true,
+      "type": "stat"
     },
     {
       "datasource": {
@@ -830,7 +1057,7 @@
         "h": 10,
         "w": 12,
         "x": 0,
-        "y": 14
+        "y": 18
       },
       "id": 1,
       "options": {
@@ -852,15 +1079,15 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"PlainAccountState\"}[$interval]))",
+          "expr": "avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"HashedAccounts\"}[$interval]))",
           "instant": false,
-          "interval": "$interval",
           "legendFormat": "__auto",
           "range": true,
-          "refId": "A"
+          "refId": "A",
+          "interval": "$interval"
         }
       ],
-      "title": "Account State Growth (interval = ${interval})",
+      "title": "Flat Account State Growth (interval = ${interval})",
       "type": "timeseries"
     },
     {
@@ -926,7 +1153,7 @@
         "h": 10,
         "w": 12,
         "x": 12,
-        "y": 14
+        "y": 18
       },
       "id": 2,
       "options": {
@@ -948,15 +1175,15 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"PlainStorageState\"}[$interval]))",
+          "expr": "avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"HashedStorages\"}[$interval]))",
           "instant": false,
-          "interval": "$interval",
           "legendFormat": "__auto",
           "range": true,
-          "refId": "A"
+          "refId": "A",
+          "interval": "$interval"
         }
       ],
-      "title": "Storage State Growth (interval = ${interval})",
+      "title": "Flat Storage State Growth (interval = ${interval})",
       "type": "timeseries"
     },
     {
@@ -1022,7 +1249,7 @@
         "h": 10,
         "w": 12,
         "x": 0,
-        "y": 24
+        "y": 28
       },
       "id": 9,
       "options": {
@@ -1046,13 +1273,109 @@
           "editorMode": "code",
           "expr": "avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"Bytecodes\"}[$interval]))",
           "instant": false,
-          "interval": "$interval",
           "legendFormat": "__auto",
           "range": true,
-          "refId": "A"
+          "refId": "A",
+          "interval": "$interval"
         }
       ],
-      "title": "Bytecodes Growth (interval = ${interval})",
+      "title": "Contract Code Growth (interval = ${interval})",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "id": 201,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(delta(reth_db_table_size{instance=~\"$instance\", table=~\"AccountsTrie|StoragesTrie\"}[$interval]))",
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A",
+          "interval": "$interval"
+        }
+      ],
+      "title": "Trie State Growth (interval = ${interval})",
       "type": "timeseries"
     },
     {
@@ -1061,7 +1384,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 34
+        "y": 38
       },
       "id": 8,
       "panels": [],
@@ -1131,7 +1454,7 @@
         "h": 10,
         "w": 12,
         "x": 0,
-        "y": 35
+        "y": 39
       },
       "id": 12,
       "options": {
@@ -1278,7 +1601,7 @@
         "h": 10,
         "w": 12,
         "x": 12,
-        "y": 35
+        "y": 39
       },
       "id": 14,
       "options": {
@@ -1420,7 +1743,7 @@
         "h": 10,
         "w": 12,
         "x": 0,
-        "y": 45
+        "y": 49
       },
       "id": 3,
       "options": {
@@ -1516,7 +1839,7 @@
         "h": 10,
         "w": 12,
         "x": 12,
-        "y": 45
+        "y": 49
       },
       "id": 5,
       "options": {
@@ -1612,7 +1935,7 @@
         "h": 10,
         "w": 12,
         "x": 0,
-        "y": 55
+        "y": 59
       },
       "id": 4,
       "options": {
