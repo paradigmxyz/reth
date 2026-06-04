@@ -15,6 +15,7 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ExecutionPayloadV4,
     ForkchoiceState, PayloadAttributes, PraguePayloadFields,
 };
+use http::{header::CONTENT_TYPE, HeaderValue, StatusCode};
 use http_body_util::BodyExt;
 use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
 use reth_chainspec::EthereumHardforks;
@@ -172,7 +173,7 @@ where
         }
 
         let handle = self.handle.clone();
-        Box::pin(async move { Ok(handle_engine_ssz_request(handle, request).await) })
+        Box::pin(async move { Ok(handle.handle_request(request).await) })
     }
 }
 
@@ -767,7 +768,10 @@ mod tests {
     #[test]
     fn parses_fork_scoped_get_payload_endpoint() {
         let SszEngineApiRoute::GetPayload(fork, payload_id) =
-            parse_engine_path("/engine/v2/prague/payloads/0x1234567890abcdef").unwrap()
+            EngineSszProxyHandle::parse_engine_path(
+                "/engine/v2/prague/payloads/0x1234567890abcdef",
+            )
+            .unwrap()
         else {
             panic!("expected get payload route")
         };
@@ -784,7 +788,7 @@ mod tests {
 
     #[test]
     fn rejects_legacy_version_scoped_endpoint() {
-        assert!(parse_engine_path("/engine/v4/payloads").is_none());
+        assert!(EngineSszProxyHandle::parse_engine_path("/engine/v4/payloads").is_none());
     }
 
     #[test]

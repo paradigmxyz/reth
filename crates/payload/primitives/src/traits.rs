@@ -96,9 +96,7 @@ pub trait PayloadAttributes:
     ///
     /// `Some` for payload attributes that specify the desired gas limit, `None` if the builder
     /// should use its configured target.
-    fn target_gas_limit(&self) -> Option<u64> {
-        None
-    }
+    fn target_gas_limit(&self) -> Option<u64>;
 }
 
 impl PayloadAttributes for EthPayloadAttributes {
@@ -244,6 +242,7 @@ mod tests {
             .unwrap(),
             withdrawals: None,
             parent_beacon_block_root: None,
+            target_gas_limit: None,
             slot_number: None,
             target_gas_limit: None,
         };
@@ -283,6 +282,7 @@ mod tests {
                 },
             ]),
             parent_beacon_block_root: None,
+            target_gas_limit: None,
             slot_number: None,
             target_gas_limit: None,
         };
@@ -317,6 +317,7 @@ mod tests {
                 )
                 .unwrap(),
             ),
+            target_gas_limit: None,
             slot_number: None,
             target_gas_limit: None,
         };
