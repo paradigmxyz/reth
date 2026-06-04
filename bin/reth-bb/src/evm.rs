@@ -2,12 +2,8 @@
 //!
 //! Provides [`BbBlockExecutor`] and [`BbBlockExecutorFactory`] which handle
 //! segment boundaries within big-block payloads.
-//!
-//! [`BbBlockExecutor`] wraps [`EthBlockExecutor`] and intercepts
-//! `execute_transaction` to apply segment-boundary changes.
 
 use crate::evm_config::BigBlockSegment;
-use alloy_consensus::TransactionEnvelope;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::B256;
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
@@ -17,7 +13,8 @@ use reth_evm::{
         ExecutableTx, GasOutput, StateDB,
     },
     context::{BlockEnv, EVMError, HaltReason, TxEnv},
-    eth::{EthBlockExecutionCtx, EthBlockExecutor, EthEvmContext, EthTxResult},
+    eth::EthBlockExecutionCtx,
+    evm2::{Evm2RethBlockExecutor, Evm2TxExecutionResult, RethEvm2ReceiptBuilder},
     hardfork::SpecId,
     inspector::Inspector,
     interpreter::InterpreterResult,
@@ -25,7 +22,6 @@ use reth_evm::{
     precompiles::PrecompilesMap,
     Database, EthEvm, EthEvmFactory, Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
-use reth_evm_ethereum::RethReceiptBuilder;
 use tracing::{debug, trace};
 
 // ---------------------------------------------------------------------------
@@ -120,7 +116,7 @@ pub(crate) type BalIndexBumper<DB> = fn(&mut DB);
 /// strict less-than reads can see those boundary writes.
 pub(crate) type BalIndexSetter<DB> = fn(&mut DB, u64);
 
-/// Block executor that wraps [`EthBlockExecutor`] and handles segment-boundary
+/// Block executor that wraps [`Evm2RethBlockExecutor`] and handles segment-boundary
 /// changes for big-block execution.
 ///
 /// At segment boundaries, the inner executor is finished (applying its
@@ -132,13 +128,15 @@ pub(crate) type BalIndexSetter<DB> = fn(&mut DB, u64);
 /// is used (preserving correct GASLIMIT opcode behavior). Accumulated offsets
 /// are applied to receipts and totals in `finish()`.
 #[expect(missing_debug_implementations)]
-pub struct BbBlockExecutor<'a, DB, I, P, Spec>
+pub struct BbBlockExecutor<'a, DB, I, P>
 where
     DB: Database,
 {
     /// The inner executor. `None` transiently during `apply_segment_boundary`.
-    inner: Option<EthBlockExecutor<'a, EthEvm<DB, I, P>, Spec, RethReceiptBuilder>>,
+    inner: Option<Evm2RethBlockExecutor<'a, EthEvm<DB, I, P>, RethEvm2ReceiptBuilder>>,
     plan: BbEvmPlan<'a>,
+    receipt_builder: RethEvm2ReceiptBuilder,
+    dao_fork_block: Option<u64>,
     /// Requests accumulated from segments that have been finished at
     /// boundaries. Merged into the final result in `finish()`.
     accumulated_requests: Requests,
@@ -165,12 +163,11 @@ where
     initialized: bool,
 }
 
-impl<'a, DB, I, P, Spec> BbBlockExecutor<'a, DB, I, P, Spec>
+impl<'a, DB, I, P> BbBlockExecutor<'a, DB, I, P>
 where
     DB: StateDB,
-    I: Inspector<EthEvmContext<DB>>,
-    P: PrecompileProvider<EthEvmContext<DB>, Output = InterpreterResult>,
-    Spec: reth_evm::eth::spec::EthExecutorSpec + Clone,
+    I: Inspector<<EthEvmFactory as EvmFactory>::Context<DB>>,
+    P: PrecompileProvider<<EthEvmFactory as EvmFactory>::Context<DB>, Output = InterpreterResult>,
     EthEvm<DB, I, P>: Evm<
         DB = DB,
         Tx = TxEnv,
@@ -185,17 +182,24 @@ where
     pub(crate) fn new(
         evm: EthEvm<DB, I, P>,
         plan: BbEvmPlan<'a>,
-        spec: Spec,
-        receipt_builder: RethReceiptBuilder,
+        receipt_builder: RethEvm2ReceiptBuilder,
+        dao_fork_block: Option<u64>,
         block_hash_seeder: Option<BlockHashSeeder<DB>>,
         bal_index_reader: Option<BalIndexReader<DB>>,
         bal_index_bumper: Option<BalIndexBumper<DB>>,
         bal_index_setter: Option<BalIndexSetter<DB>>,
     ) -> Self {
-        let inner = EthBlockExecutor::new(evm, plan.segments[0].ctx.clone(), spec, receipt_builder);
+        let inner = Evm2RethBlockExecutor::new(
+            evm,
+            plan.segments[0].ctx.clone(),
+            receipt_builder,
+            dao_fork_block,
+        );
         Self {
             inner: Some(inner),
             plan,
+            receipt_builder,
+            dao_fork_block,
             accumulated_requests: Requests::default(),
             gas_used_offset: 0,
             blob_gas_used_offset: 0,
@@ -256,23 +260,23 @@ where
         cfg_env.disable_base_fee = true;
 
         let inner = self.inner.as_mut().expect("inner executor must exist");
-        let evm_ctx = inner.evm.ctx_mut();
+        let evm_ctx = inner.evm_mut().ctx_mut();
         evm_ctx.block = block_env;
         evm_ctx.cfg = cfg_env;
-        inner.ctx = segment.ctx.clone();
+        *inner.ctx_mut() = segment.ctx.clone();
 
         self.reseed_block_hashes_for(block_number);
 
         Ok(())
     }
 
-    const fn inner(&self) -> &EthBlockExecutor<'a, EthEvm<DB, I, P>, Spec, RethReceiptBuilder> {
+    fn inner(&self) -> &Evm2RethBlockExecutor<'a, EthEvm<DB, I, P>, RethEvm2ReceiptBuilder> {
         self.inner.as_ref().expect("inner executor must exist")
     }
 
-    const fn inner_mut(
+    fn inner_mut(
         &mut self,
-    ) -> &mut EthBlockExecutor<'a, EthEvm<DB, I, P>, Spec, RethReceiptBuilder> {
+    ) -> &mut Evm2RethBlockExecutor<'a, EthEvm<DB, I, P>, RethEvm2ReceiptBuilder> {
         self.inner.as_mut().expect("inner executor must exist")
     }
 
@@ -309,12 +313,10 @@ where
 
         // Finish the inner executor for the completed segment. This applies
         // post-execution system calls (EIP-7002/7251) and withdrawal balance
-        // increments via EthBlockExecutor::finish() at the current bal_index
+        // increments via Evm2RethBlockExecutor::finish() at the current bal_index
         // (= K, the boundary's "post-N slot").
         let mut inner = self.inner.take().expect("inner executor must exist");
-        inner.ctx = prev_segment.ctx.clone();
-        let spec = inner.spec.clone();
-        let receipt_builder = inner.receipt_builder;
+        *inner.ctx_mut() = prev_segment.ctx.clone();
 
         if let Some(bumper) = self.bal_index_bumper {
             bumper(inner.evm_mut().db_mut());
@@ -352,18 +354,22 @@ where
         );
 
         // Swap EVM env to the next segment's values (using real gas_limit).
-        let ctx = evm.ctx_mut();
-        ctx.block = new_block_env;
-        ctx.cfg = new_cfg_env;
+        let evm_ctx = evm.ctx_mut();
+        evm_ctx.block = new_block_env;
+        evm_ctx.cfg = new_cfg_env;
 
         // Build a new inner executor for the next segment. gas_used starts
         // at 0 so the per-transaction gas check uses this segment's real
         // gas_limit correctly.
-        let mut new_inner =
-            EthBlockExecutor::new(evm, new_segment.ctx.clone(), spec, receipt_builder);
+        let mut new_inner = Evm2RethBlockExecutor::new(
+            evm,
+            new_segment.ctx.clone(),
+            self.receipt_builder,
+            self.dao_fork_block,
+        );
 
         // Carry forward receipts from prior segments.
-        new_inner.receipts = result.receipts;
+        new_inner.set_receipts(result.receipts);
 
         self.inner = Some(new_inner);
 
@@ -383,12 +389,11 @@ where
     }
 }
 
-impl<'a, DB, I, P, Spec> BlockExecutor for BbBlockExecutor<'a, DB, I, P, Spec>
+impl<'a, DB, I, P> BlockExecutor for BbBlockExecutor<'a, DB, I, P>
 where
     DB: StateDB,
-    I: Inspector<EthEvmContext<DB>>,
-    P: PrecompileProvider<EthEvmContext<DB>, Output = InterpreterResult>,
-    Spec: reth_evm::eth::spec::EthExecutorSpec + Clone,
+    I: Inspector<<EthEvmFactory as EvmFactory>::Context<DB>>,
+    P: PrecompileProvider<<EthEvmFactory as EvmFactory>::Context<DB>, Output = InterpreterResult>,
     EthEvm<DB, I, P>: Evm<
         DB = DB,
         Tx = TxEnv,
@@ -403,7 +408,7 @@ where
     type Receipt = Receipt;
     type Evm = EthEvm<DB, I, P>;
     type DB = DB;
-    type Result = EthTxResult<HaltReason, alloy_consensus::TxType>;
+    type Result = Evm2TxExecutionResult;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         // Init swaps the EVM's block_env and executor ctx to the starting
@@ -451,7 +456,7 @@ where
         mut self,
     ) -> Result<(Self::Evm, BlockExecutionResult<Self::Receipt>), BlockExecutionError> {
         // Swap the inner executor's ctx to the last segment's ctx so that
-        // EthBlockExecutor::finish() applies the correct withdrawal balance
+        // Evm2RethBlockExecutor::finish() applies the correct withdrawal balance
         // increments and post-execution system calls.
         let last_seg = self.plan.segments.last().unwrap();
         let last_ctx = EthBlockExecutionCtx {
@@ -463,7 +468,7 @@ where
             tx_count_hint: last_seg.ctx.tx_count_hint,
             slot_number: last_seg.ctx.slot_number,
         };
-        self.inner_mut().ctx = last_ctx;
+        *self.inner_mut().ctx_mut() = last_ctx;
         let inner = self.inner.take().expect("inner executor must exist");
         let (evm, mut result) = inner.finish()?;
 
@@ -532,18 +537,24 @@ where
 /// boundary-aware big-block execution.
 #[derive(Debug, Clone)]
 pub struct BbBlockExecutorFactory<Spec> {
-    receipt_builder: RethReceiptBuilder,
+    receipt_builder: RethEvm2ReceiptBuilder,
     spec: Spec,
     evm_factory: EthEvmFactory,
+    dao_fork_block: Option<u64>,
 }
 
 impl<Spec> BbBlockExecutorFactory<Spec> {
     pub const fn new(
-        receipt_builder: RethReceiptBuilder,
+        receipt_builder: RethEvm2ReceiptBuilder,
         spec: Spec,
         evm_factory: EthEvmFactory,
     ) -> Self {
-        Self { receipt_builder, spec, evm_factory }
+        Self { receipt_builder, spec, evm_factory, dao_fork_block: None }
+    }
+
+    pub const fn with_dao_fork_block(mut self, dao_fork_block: Option<u64>) -> Self {
+        self.dao_fork_block = dao_fork_block;
+        self
     }
 
     pub const fn evm_factory(&self) -> &EthEvmFactory {
@@ -554,7 +565,7 @@ impl<Spec> BbBlockExecutorFactory<Spec> {
         &self.spec
     }
 
-    pub const fn receipt_builder(&self) -> &RethReceiptBuilder {
+    pub const fn receipt_builder(&self) -> &RethEvm2ReceiptBuilder {
         &self.receipt_builder
     }
 
@@ -566,17 +577,16 @@ impl<Spec> BbBlockExecutorFactory<Spec> {
         bal_index_reader: Option<BalIndexReader<DB>>,
         bal_index_bumper: Option<BalIndexBumper<DB>>,
         bal_index_setter: Option<BalIndexSetter<DB>>,
-    ) -> BbBlockExecutor<'a, DB, I, PrecompilesMap, &'a Spec>
+    ) -> BbBlockExecutor<'a, DB, I, PrecompilesMap>
     where
-        Spec: reth_evm::eth::spec::EthExecutorSpec,
         DB: StateDB,
-        I: Inspector<EthEvmContext<DB>>,
+        I: Inspector<<EthEvmFactory as EvmFactory>::Context<DB>>,
     {
         BbBlockExecutor::new(
             evm,
             plan,
-            &self.spec,
             self.receipt_builder,
+            self.dao_fork_block,
             block_hash_seeder,
             bal_index_reader,
             bal_index_bumper,
@@ -587,19 +597,16 @@ impl<Spec> BbBlockExecutorFactory<Spec> {
 
 impl<Spec> BlockExecutorFactory for BbBlockExecutorFactory<Spec>
 where
-    Spec: reth_evm::eth::spec::EthExecutorSpec + 'static,
+    Spec: Send + Sync + 'static,
     TxEnv: FromRecoveredTx<TransactionSigned> + FromTxWithEncoded<TransactionSigned>,
 {
     type EvmFactory = EthEvmFactory;
     type ExecutionCtx<'a> = BbEvmPlan<'a>;
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
-    type TxExecutionResult = EthTxResult<
-        <EthEvmFactory as EvmFactory>::HaltReason,
-        <TransactionSigned as TransactionEnvelope>::TxType,
-    >;
-    type Executor<'a, DB: StateDB, I: Inspector<EthEvmContext<DB>>> =
-        BbBlockExecutor<'a, DB, I, PrecompilesMap, &'a Spec>;
+    type TxExecutionResult = Evm2TxExecutionResult;
+    type Executor<'a, DB: StateDB, I: Inspector<<EthEvmFactory as EvmFactory>::Context<DB>>> =
+        BbBlockExecutor<'a, DB, I, PrecompilesMap>;
 
     fn evm_factory(&self) -> &Self::EvmFactory {
         &self.evm_factory
@@ -612,8 +619,17 @@ where
     ) -> Self::Executor<'a, DB, I>
     where
         DB: StateDB,
-        I: Inspector<EthEvmContext<DB>>,
+        I: Inspector<<EthEvmFactory as EvmFactory>::Context<DB>>,
     {
-        BbBlockExecutor::new(evm, ctx, &self.spec, self.receipt_builder, None, None, None, None)
+        BbBlockExecutor::new(
+            evm,
+            ctx,
+            self.receipt_builder,
+            self.dao_fork_block,
+            None,
+            None,
+            None,
+            None,
+        )
     }
 }

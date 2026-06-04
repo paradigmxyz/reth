@@ -15,7 +15,7 @@ use reth_chainspec::{ChainSpec, EthExecutorSpec, EthereumHardforks};
 use reth_consensus::noop::NoopConsensus;
 use reth_ethereum_cli::{chainspec::EthereumChainSpecParser, interface::Cli};
 use reth_ethereum_primitives::{Block, EthPrimitives};
-use reth_evm_ethereum::EthEvmConfig;
+use reth_evm_ethereum::EthEvm2Config;
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, NewPayloadError, NodeTypes, PayloadTypes, PayloadValidator,
 };
@@ -136,7 +136,7 @@ where
     type EVM = BbEvmConfig<<Node::Types as NodeTypes>::ChainSpec>;
 
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
-        Ok(BbEvmConfig::new(EthEvmConfig::new(ctx.chain_spec())))
+        Ok(BbEvmConfig::new(EthEvm2Config::new(ctx.chain_spec())))
     }
 }
 

@@ -1,6 +1,6 @@
 //! Big-block EVM configuration.
 //!
-//! Wraps [`EthEvmConfig`] to create executors that handle multi-segment
+//! Wraps [`EthEvm2Config`] to create executors that handle multi-segment
 //! big-block execution internally. At transaction boundaries defined by
 //! [`BigBlockData`], the executor swaps the EVM environment (block env,
 //! cfg env) and applies pre/post execution changes for each segment.
@@ -16,20 +16,23 @@ use alloy_primitives::{Address, Bytes, B256};
 use alloy_rpc_types::engine::ExecutionData;
 use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthExecutorSpec as RethEthExecutorSpec};
-use reth_ethereum_forks::Hardforks;
+use reth_ethereum_forks::{EthereumHardfork, Hardforks};
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm::{
     block::BlockExecutorFor,
     database::{Database, State},
-    eth::{spec::EthExecutorSpec as AlloyEthExecutorSpec, EthBlockExecutionCtx, EthEvmFactory},
+    eth::EthBlockExecutionCtx,
     execute::BlockAssembler,
     hardfork::SpecId,
     ConfigureEngineEvm, ConfigureEvm, EvmEnv, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor,
     NextBlockEnvAttributes,
+    EthEvmFactory,
 };
-use reth_evm_ethereum::{AlloyChainSpec, EthEvmConfig, RethReceiptBuilder};
+use reth_evm::evm2::RethEvm2ReceiptBuilder;
+use reth_evm_ethereum::EthEvm2Config;
 use reth_execution_types::BlockAccessIndex;
 use reth_primitives_traits::{SealedBlock, SealedHeader, SignedTransaction, TxTy};
+use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 // Execution plan types
@@ -52,7 +55,7 @@ pub(crate) struct BigBlockSegment<'a> {
 
 /// EVM configuration for big-block execution.
 ///
-/// Wraps [`EthEvmConfig`]. When a big-block payload is received, the plan is
+/// Wraps [`EthEvm2Config`]. When a big-block payload is received, the plan is
 /// staged on the [`BbBlockExecutorFactory`]
 /// and consumed when the executor is created. Block hashes for inter-segment
 /// BLOCKHASH resolution are reseeded into `State::block_hashes` at each
@@ -61,25 +64,26 @@ pub(crate) struct BigBlockSegment<'a> {
 #[derive(Debug, Clone)]
 pub struct BbEvmConfig<C = ChainSpec> {
     /// The inner Ethereum EVM configuration (used for env computation).
-    pub inner: EthEvmConfig<C>,
+    pub inner: EthEvm2Config<C>,
     /// Block executor factory for big-block execution.
-    executor_factory: BbBlockExecutorFactory<AlloyChainSpec<C>>,
+    executor_factory: BbBlockExecutorFactory<Arc<C>>,
     /// Block assembler.
     block_assembler: BbBlockAssembler,
 }
 
 impl<C> BbEvmConfig<C> {
     /// Creates a new big-block EVM configuration.
-    pub fn new(inner: EthEvmConfig<C>) -> Self
+    pub fn new(inner: EthEvm2Config<C>) -> Self
     where
-        C: Clone,
+        C: Hardforks,
     {
         let chain_spec = inner.chain_spec().clone();
         let executor_factory = BbBlockExecutorFactory::new(
-            RethReceiptBuilder::default(),
-            AlloyChainSpec::new(chain_spec),
+            RethEvm2ReceiptBuilder,
+            chain_spec.clone(),
             EthEvmFactory::default(),
-        );
+        )
+        .with_dao_fork_block(chain_spec.fork(EthereumHardfork::Dao).block_number());
 
         Self { inner, executor_factory, block_assembler: Default::default() }
     }
@@ -108,7 +112,7 @@ fn seed_state_block_hashes<DB>(state: &mut &mut State<DB>, hashes: &[(u64, B256)
 /// generic [`BbBlockExecutor`](crate::evm::BbBlockExecutor) can pick its
 /// starting segment without a trait bound on `DB`.
 const fn read_bal_index<DB>(state: &&mut State<DB>) -> u64 {
-    state.bal_state.bal_index().get()
+    state.bal_state.bal_index.get()
 }
 
 /// Bumps the BAL index on a `&mut State<DB>`.
@@ -143,7 +147,7 @@ where
     type Primitives = EthPrimitives;
     type Error = Infallible;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
-    type BlockExecutorFactory = BbBlockExecutorFactory<AlloyChainSpec<C>>;
+    type BlockExecutorFactory = BbBlockExecutorFactory<Arc<C>>;
     type BlockAssembler = BbBlockAssembler;
 
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
@@ -310,8 +314,7 @@ where
 #[derive(Debug, Default, Clone)]
 pub struct BbBlockAssembler;
 
-impl<Spec: AlloyEthExecutorSpec + 'static> BlockAssembler<BbBlockExecutorFactory<Spec>>
-    for BbBlockAssembler
+impl<Spec: Send + Sync + 'static> BlockAssembler<BbBlockExecutorFactory<Spec>> for BbBlockAssembler
 {
     type Block = Block;
 

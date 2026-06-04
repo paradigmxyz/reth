@@ -1581,6 +1581,16 @@ where
             dao_fork_block,
         }
     }
+
+    /// Returns the block execution context.
+    pub const fn ctx_mut(&mut self) -> &mut EthBlockExecutionCtx<'a> {
+        &mut self.ctx
+    }
+
+    /// Replaces accumulated receipts.
+    pub fn set_receipts(&mut self, receipts: Vec<R::Receipt>) {
+        self.evm2.result.receipts = receipts;
+    }
 }
 
 impl<E, R> BlockExecutor for Evm2RethBlockExecutor<'_, E, R>
