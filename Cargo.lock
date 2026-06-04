@@ -8501,7 +8501,6 @@ dependencies = [
 name = "reth-engine-util"
 version = "2.3.0"
 dependencies = [
- "alloy-consensus",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "eyre",
