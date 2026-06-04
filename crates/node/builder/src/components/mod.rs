@@ -23,6 +23,7 @@ pub use pool::*;
 
 use crate::{ConfigureEvm, FullNodeTypes};
 use reth_consensus::FullConsensus;
+use reth_evm::ConfigureEvm2BlockExecutor;
 use reth_network::types::NetPrimitivesFor;
 use reth_network_api::FullNetwork;
 use reth_node_api::{NodeTypes, PrimitivesTy, TxTy};
@@ -40,7 +41,8 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Debug + Unpin + Send + Sync 
     type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<T::Types>>> + Unpin;
 
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
-    type Evm: ConfigureEvm<Primitives = <T::Types as NodeTypes>::Primitives>;
+    type Evm: ConfigureEvm<Primitives = <T::Types as NodeTypes>::Primitives>
+        + ConfigureEvm2BlockExecutor;
 
     /// The consensus type of the node.
     type Consensus: FullConsensus<<T::Types as NodeTypes>::Primitives> + Clone + Unpin + 'static;
@@ -95,7 +97,8 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
-    EVM: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + 'static,
+    EVM:
+        ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + ConfigureEvm2BlockExecutor + 'static,
     Cons: FullConsensus<PrimitivesTy<Node::Types>> + Clone + Unpin + 'static,
 {
     type Pool = Pool;

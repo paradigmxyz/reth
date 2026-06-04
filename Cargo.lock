@@ -3654,7 +3654,6 @@ name = "example-custom-beacon-withdrawals"
 version = "0.0.0"
 dependencies = [
  "alloy-eips",
- "alloy-evm",
  "alloy-sol-types",
  "eyre",
  "reth-ethereum",
@@ -3695,7 +3694,6 @@ dependencies = [
 name = "example-custom-evm"
 version = "0.0.0"
 dependencies = [
- "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
@@ -3709,7 +3707,6 @@ name = "example-custom-inspector"
 version = "0.0.0"
 dependencies = [
  "alloy-eips",
- "alloy-evm",
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "clap",
@@ -3899,7 +3896,6 @@ dependencies = [
 name = "example-precompile-cache"
 version = "0.0.0"
 dependencies = [
- "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
