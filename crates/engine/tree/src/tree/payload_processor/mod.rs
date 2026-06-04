@@ -46,7 +46,7 @@ use std::{
         Arc,
     },
 };
-use tracing::{debug, debug_span, instrument, trace, warn, Span};
+use tracing::{debug, debug_span, info, instrument, trace, warn, Span};
 
 pub mod bal;
 pub mod multiproof;
@@ -189,7 +189,7 @@ impl PrivateSparseTrieSnapshot {
             self.sparse_state_trie
                 .clone_with_updates(state_root, state_root, &TrieUpdates::default());
         let clone_elapsed = clone_start.elapsed();
-        debug!(
+        info!(
             target: "engine::tree::payload_processor",
             %state_root,
             cloned = preserved.is_some(),
@@ -815,7 +815,7 @@ impl StateRootSpawner {
             self.sparse_state_trie
                 .clone_with_updates(state_root, state_root, &TrieUpdates::default());
         let clone_elapsed = clone_start.elapsed();
-        debug!(
+        info!(
             target: "engine::tree::payload_processor",
             %state_root,
             cloned = preserved.is_some(),

@@ -1898,7 +1898,8 @@ where
         state: &EngineApiTreeState<N>,
         changeset_cache: ChangesetCache,
     ) -> OverlayBuilder<N> {
-        let state_trie_overlays = state.tree_state.state_trie_overlays.detached_snapshot();
+        let state_trie_overlays =
+            state.tree_state.state_trie_overlays.detached_block_snapshot();
         OverlayBuilder::new(parent_hash, changeset_cache)
             .with_state_trie_overlay_manager(state_trie_overlays)
     }
@@ -2390,7 +2391,8 @@ where
     ) -> RethResult<Option<StateRootHandle>> {
         if let Some(executed_parent) = state.tree_state.executed_block_by_hash(parent_hash) {
             let prepare_start = Instant::now();
-            let state_trie_overlays = state.tree_state.state_trie_overlays.detached_snapshot();
+            let state_trie_overlays =
+                state.tree_state.state_trie_overlays.detached_block_snapshot();
             state_trie_overlays.insert_block(executed_parent.clone());
             let computed_trie_data = executed_parent.trie_data();
             let mut parent_trie_updates = TrieUpdates::default();
@@ -2481,7 +2483,7 @@ where
                 "started deferred payload-builder sparse trie fulfillment"
             );
             let overlay_start = Instant::now();
-            let state_trie_overlays = state_trie_overlays.detached_snapshot();
+            let state_trie_overlays = state_trie_overlays.detached_block_snapshot();
             state_trie_overlays.insert_block(executed_parent);
             let overlay_elapsed = overlay_start.elapsed();
 

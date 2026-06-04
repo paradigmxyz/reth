@@ -192,6 +192,32 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         snapshot
     }
 
+    /// Returns a detached snapshot of the current overlay graph without copying cached overlays.
+    ///
+    /// Builder-side sparse-trie prep must not wait on the live overlay cache. This snapshot keeps
+    /// immutable block/trie data available and lets the builder fill a private overlay cache.
+    pub fn detached_block_snapshot(&self) -> Self {
+        let snapshot = Self {
+            blocks: Default::default(),
+            overlays: Default::default(),
+            #[cfg(feature = "rayon")]
+            worker_pool: self.worker_pool.clone(),
+            metrics: self.metrics.clone(),
+        };
+
+        for entry in self.blocks.iter() {
+            snapshot.blocks.insert(*entry.key(), entry.value().clone());
+        }
+
+        debug!(
+            target: "chain_state::state_trie_overlay",
+            blocks = snapshot.blocks.len(),
+            "created detached state trie overlay manager block snapshot"
+        );
+
+        snapshot
+    }
+
     /// Removes blocks from the live block graph and prunes cached overlays that can no longer be
     /// built from the remaining blocks.
     #[tracing::instrument(
@@ -320,42 +346,41 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
             None => ComputeOverlayInput::MergeBlocks(blocks),
         };
 
-        // The vacant entry is the cache-fill gate: racing callers block instead of recomputing.
-        let input = match self.overlays.entry(key) {
-            Entry::Occupied(entry) => {
-                self.metrics.overlay_cache_reuses.increment(1);
-                span.record("cache_reused", true);
-                return Ok(Arc::clone(entry.get()))
+        // Compute outside the cache entry lock. Racing callers can duplicate work, but builder
+        // prep must not hold validation's live overlay cache while sorting deferred trie data.
+        let computed = {
+            #[cfg(feature = "rayon")]
+            {
+                if let Some(worker_pool) = &self.worker_pool {
+                    let compute_span = span.clone();
+                    let metrics = self.metrics.clone();
+                    Arc::new(worker_pool.install_fn(move || {
+                        let _guard = compute_span.enter();
+                        compute_overlay(compute_input, anchor_hash, &metrics)
+                    }))
+                } else {
+                    Arc::new(compute_overlay(compute_input, anchor_hash, &self.metrics))
+                }
             }
-            Entry::Vacant(entry) => {
-                self.metrics.overlay_cache_fills.increment(1);
-                let input = {
-                    #[cfg(feature = "rayon")]
-                    {
-                        if let Some(worker_pool) = &self.worker_pool {
-                            let compute_span = span;
-                            let metrics = self.metrics.clone();
-                            Arc::new(worker_pool.install_fn(move || {
-                                let _guard = compute_span.enter();
-                                compute_overlay(compute_input, anchor_hash, &metrics)
-                            }))
-                        } else {
-                            Arc::new(compute_overlay(compute_input, anchor_hash, &self.metrics))
-                        }
-                    }
 
-                    #[cfg(not(feature = "rayon"))]
-                    {
-                        Arc::new(compute_overlay(compute_input, anchor_hash, &self.metrics))
-                    }
-                };
-
-                entry.insert(Arc::clone(&input));
-                input
+            #[cfg(not(feature = "rayon"))]
+            {
+                Arc::new(compute_overlay(compute_input, anchor_hash, &self.metrics))
             }
         };
 
-        Ok(input)
+        match self.overlays.entry(key) {
+            Entry::Occupied(entry) => {
+                self.metrics.overlay_cache_reuses.increment(1);
+                span.record("cache_reused", true);
+                Ok(Arc::clone(entry.get()))
+            }
+            Entry::Vacant(entry) => {
+                self.metrics.overlay_cache_fills.increment(1);
+                entry.insert(Arc::clone(&computed));
+                Ok(computed)
+            }
+        }
     }
 
     /// Returns `preferred_anchor` if it is on the parent chain, otherwise the first missing parent.
