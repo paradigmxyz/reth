@@ -25,7 +25,6 @@ pub use alloy_chains::{Chain, ChainKind, NamedChain};
 /// Re-export for convenience
 pub use reth_ethereum_forks::*;
 
-pub use alloy_evm::EvmLimitParams;
 pub use api::EthChainSpec;
 pub use info::ChainInfo;
 #[cfg(any(test, feature = "test-utils"))]
@@ -33,8 +32,30 @@ pub use spec::test_fork_ids;
 pub use spec::{
     blob_params_to_schedule, create_chain_config, mainnet_chain_config, make_genesis_header,
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, ChainSpecProvider,
-    DepositContract, ForkBaseFeeParams, DEV, HOLESKY, HOODI, MAINNET, SEPOLIA,
+    DepositContract, EthExecutorSpec, ForkBaseFeeParams, DEV, HOLESKY, HOODI, MAINNET, SEPOLIA,
 };
+
+/// Parameters for EVM execution limits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EvmLimitParams {
+    /// Maximum bytecode size for deployed contracts.
+    pub max_code_size: usize,
+    /// Maximum initcode size for CREATE transactions.
+    pub max_initcode_size: usize,
+    /// Transaction gas limit cap.
+    pub tx_gas_limit_cap: Option<u64>,
+}
+
+impl EvmLimitParams {
+    /// Returns the Osaka EVM limit params.
+    pub const fn osaka() -> Self {
+        Self {
+            max_code_size: 0x6000,
+            max_initcode_size: 0xc000,
+            tx_gas_limit_cap: Some(16_777_216),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
