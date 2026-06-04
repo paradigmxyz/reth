@@ -7,14 +7,17 @@
 use alloy_eips::eip7685::{Requests, RequestsOrHash};
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
-    ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ExecutionPayloadV4,
-    ForkchoiceState, PayloadAttributes, PraguePayloadFields,
+    CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV2,
+    ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5,
+    ExecutionPayloadEnvelopeV6, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV2,
+    ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, PayloadAttributes, PayloadId,
+    PraguePayloadFields,
 };
 use http_body_util::BodyExt;
 use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
 use reth_engine_primitives::ConsensusEngineHandle;
-use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_ethereum_engine_primitives::{EthBuiltPayload, EthEngineTypes};
+use reth_payload_builder::PayloadStore;
 use std::{
     future::Future,
     pin::Pin,
@@ -39,6 +42,7 @@ const STATUS_SERVICE_UNAVAILABLE: u16 = 503;
 #[derive(Clone, Debug, Default)]
 pub struct EngineSszProxyHandle {
     engine: Arc<RwLock<Option<ConsensusEngineHandle<EthEngineTypes>>>>,
+    payload_store: Arc<RwLock<Option<Arc<PayloadStore<EthEngineTypes>>>>>,
 }
 
 impl EngineSszProxyHandle {
@@ -47,8 +51,17 @@ impl EngineSszProxyHandle {
         *self.engine.write().await = Some(engine);
     }
 
+    /// Sets the payload store used by the proxy.
+    pub async fn set_payload_store(&self, payload_store: PayloadStore<EthEngineTypes>) {
+        *self.payload_store.write().await = Some(Arc::new(payload_store));
+    }
+
     async fn engine(&self) -> Option<ConsensusEngineHandle<EthEngineTypes>> {
         self.engine.read().await.clone()
+    }
+
+    async fn payload_store(&self) -> Option<Arc<PayloadStore<EthEngineTypes>>> {
+        self.payload_store.read().await.clone()
     }
 }
 
@@ -105,42 +118,89 @@ where
     }
 }
 
+/// Supported Engine API SSZ routes, scoped by fork for versioning.
+enum SszEngineApiRoute {
+    /// Route for `engine_newPayloadV{1,2,3,4,5}` endpoints.
+    NewPayload(EngineSszFork),
+    /// Route for `engine_getPayloadV{1,2,3,4,5,6}` endpoints.
+    GetPayload(EngineSszFork, PayloadId),
+    /// Route for `engine_forkchoiceUpdatedV{1,2,3,4}` endpoints.
+    ForkchoiceUpdated(EngineSszFork),
+}
+
 async fn handle_engine_ssz_request(
     handle: EngineSszProxyHandle,
     request: HttpRequest,
 ) -> HttpResponse {
-    if request.method().as_str() != "POST" {
-        return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
-    }
-
+    let method = request.method().clone();
     let path = request.uri().path().to_owned();
-    let Some((fork, resource)) = parse_engine_path(&path) else {
+    let Some(route) = parse_engine_path(&path) else {
         return text_response(STATUS_NOT_FOUND, "unknown engine ssz endpoint")
     };
 
-    let Ok(body) = request.into_body().collect().await.map(|body| body.to_bytes()) else {
-        return text_response(STATUS_BAD_REQUEST, "failed to read request body")
-    };
-
-    let Some(engine) = handle.engine().await else {
-        return text_response(STATUS_SERVICE_UNAVAILABLE, "engine handle unavailable")
-    };
-
-    match resource {
-        "payloads" => handle_new_payload(engine, fork.payloads_version(), &body).await,
-        "forkchoice" => handle_forkchoice_updated(engine, fork.forkchoice_version(), &body).await,
-        _ => text_response(STATUS_NOT_FOUND, "unknown engine ssz endpoint"),
+    match (method.as_str(), route) {
+        ("POST", SszEngineApiRoute::NewPayload(fork)) => {
+            let Ok(body) = request.into_body().collect().await.map(|body| body.to_bytes()) else {
+                return text_response(STATUS_BAD_REQUEST, "failed to read request body")
+            };
+            let Some(engine) = handle.engine().await else {
+                return text_response(STATUS_SERVICE_UNAVAILABLE, "engine handle unavailable")
+            };
+            handle_new_payload(engine, fork.payloads_version(), &body).await
+        }
+        ("POST", SszEngineApiRoute::ForkchoiceUpdated(fork)) => {
+            let Ok(body) = request.into_body().collect().await.map(|body| body.to_bytes()) else {
+                return text_response(STATUS_BAD_REQUEST, "failed to read request body")
+            };
+            let Some(engine) = handle.engine().await else {
+                return text_response(STATUS_SERVICE_UNAVAILABLE, "engine handle unavailable")
+            };
+            handle_forkchoice_updated(engine, fork.forkchoice_version(), &body).await
+        }
+        ("GET", SszEngineApiRoute::GetPayload(fork, payload_id)) => {
+            let Some(payload_store) = handle.payload_store().await else {
+                return text_response(STATUS_SERVICE_UNAVAILABLE, "payload store unavailable")
+            };
+            handle_get_payload(payload_store, fork.get_payload_version(), payload_id).await
+        }
+        _ => text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed"),
     }
 }
 
-fn parse_engine_path(path: &str) -> Option<(EngineSszFork, &str)> {
+fn parse_engine_path(path: &str) -> Option<SszEngineApiRoute> {
     let mut segments = path.trim_start_matches('/').split('/');
-    match (segments.next(), segments.next(), segments.next(), segments.next(), segments.next()) {
-        (Some("engine"), Some("v2"), Some(fork), Some(resource), None) => {
-            Some((fork.parse().ok()?, resource))
+    match (
+        segments.next(),
+        segments.next(),
+        segments.next(),
+        segments.next(),
+        segments.next(),
+        segments.next(),
+    ) {
+        (Some("engine"), Some("v2"), Some(fork), Some("payloads"), None, None) => {
+            Some(SszEngineApiRoute::NewPayload(fork.parse().ok()?))
+        }
+        (Some("engine"), Some("v2"), Some(fork), Some("payloads"), Some(payload_id), None) => {
+            Some(SszEngineApiRoute::GetPayload(fork.parse().ok()?, parse_payload_id(payload_id)?))
+        }
+        (Some("engine"), Some("v2"), Some(fork), Some("forkchoice"), None, None) => {
+            Some(SszEngineApiRoute::ForkchoiceUpdated(fork.parse().ok()?))
         }
         _ => None,
     }
+}
+
+fn parse_payload_id(value: &str) -> Option<PayloadId> {
+    let value = value.strip_prefix("0x")?;
+    if value.len() != 16 {
+        return None
+    }
+
+    let mut bytes = [0u8; 8];
+    for (idx, byte) in bytes.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&value[idx * 2..idx * 2 + 2], 16).ok()?;
+    }
+    Some(PayloadId::new(bytes))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -170,6 +230,17 @@ impl EngineSszFork {
             Self::Shanghai => 2,
             Self::Cancun | Self::Prague | Self::Osaka => 3,
             Self::Amsterdam => 4,
+        }
+    }
+
+    const fn get_payload_version(self) -> u8 {
+        match self {
+            Self::Paris => 1,
+            Self::Shanghai => 2,
+            Self::Cancun => 3,
+            Self::Prague => 4,
+            Self::Osaka => 5,
+            Self::Amsterdam => 6,
         }
     }
 }
@@ -203,6 +274,44 @@ async fn handle_new_payload(
     match engine.new_payload(payload).await {
         Ok(status) => ssz_response(status),
         Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+    }
+}
+
+async fn handle_get_payload(
+    payload_store: Arc<PayloadStore<EthEngineTypes>>,
+    version: u8,
+    payload_id: PayloadId,
+) -> HttpResponse {
+    let payload = match payload_store.resolve(payload_id).await {
+        Some(Ok(payload)) => payload,
+        Some(Err(err)) => return text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+        None => return text_response(STATUS_NOT_FOUND, "unknown payload"),
+    };
+
+    encode_get_payload_response(version, payload)
+}
+
+fn encode_get_payload_response(version: u8, payload: EthBuiltPayload) -> HttpResponse {
+    match version {
+        1 => ssz_response(ExecutionPayloadV1::from(payload)),
+        2 => ssz_response(ExecutionPayloadEnvelopeV2::from(payload)),
+        3 => match ExecutionPayloadEnvelopeV3::try_from(payload) {
+            Ok(payload) => ssz_response(payload),
+            Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+        },
+        4 => match ExecutionPayloadEnvelopeV4::try_from(payload) {
+            Ok(payload) => ssz_response(payload),
+            Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+        },
+        5 => match ExecutionPayloadEnvelopeV5::try_from(payload) {
+            Ok(payload) => ssz_response(payload),
+            Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+        },
+        6 => match ExecutionPayloadEnvelopeV6::try_from(payload) {
+            Ok(payload) => ssz_response(payload),
+            Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+        },
+        _ => text_response(STATUS_BAD_REQUEST, "unsupported getPayload endpoint version"),
     }
 }
 
@@ -380,22 +489,45 @@ mod tests {
 
     #[test]
     fn parses_fork_scoped_payload_endpoint() {
-        let (fork, resource) = parse_engine_path("/engine/v2/prague/payloads").unwrap();
+        let SszEngineApiRoute::NewPayload(fork) =
+            parse_engine_path("/engine/v2/prague/payloads").unwrap()
+        else {
+            panic!("expected new payload route")
+        };
         assert_eq!(fork, EngineSszFork::Prague);
-        assert_eq!(resource, "payloads");
         assert_eq!(fork.payloads_version(), 4);
     }
 
     #[test]
+    fn parses_fork_scoped_get_payload_endpoint() {
+        let SszEngineApiRoute::GetPayload(fork, payload_id) =
+            parse_engine_path("/engine/v2/prague/payloads/0x1234567890abcdef").unwrap()
+        else {
+            panic!("expected get payload route")
+        };
+        assert_eq!(fork, EngineSszFork::Prague);
+        assert_eq!(fork.get_payload_version(), 4);
+        assert_eq!(payload_id, PayloadId::new([0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef]));
+    }
+
+    #[test]
     fn parses_fork_scoped_forkchoice_endpoint() {
-        let (fork, resource) = parse_engine_path("/engine/v2/amsterdam/forkchoice").unwrap();
+        let SszEngineApiRoute::ForkchoiceUpdated(fork) =
+            parse_engine_path("/engine/v2/amsterdam/forkchoice").unwrap()
+        else {
+            panic!("expected forkchoice route")
+        };
         assert_eq!(fork, EngineSszFork::Amsterdam);
-        assert_eq!(resource, "forkchoice");
         assert_eq!(fork.forkchoice_version(), 4);
     }
 
     #[test]
     fn rejects_legacy_version_scoped_endpoint() {
         assert!(parse_engine_path("/engine/v4/payloads").is_none());
+    }
+
+    #[test]
+    fn rejects_get_payload_endpoint_with_extra_segments() {
+        assert!(parse_engine_path("/engine/v2/prague/payloads/0x1234567890abcdef/extra").is_none());
     }
 }
