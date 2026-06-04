@@ -516,7 +516,6 @@ where
     type Provider = OverlayStateProvider<F::Provider>;
 
     /// Create a read-only [`OverlayStateProvider`].
-    #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
     fn database_provider_ro(&self) -> ProviderResult<OverlayStateProvider<F::Provider>> {
         let overall_start = Instant::now();
 
