@@ -8,6 +8,8 @@ use crate::tree::{
     ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
     WaitForCaches,
 };
+#[cfg(any())]
+use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
@@ -553,11 +555,27 @@ where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
         let mode = if parallel_bal_execution {
-            warn!(
-                target: "engine::tree::payload_processor",
-                "BAL prewarming is unsupported in the evm2 pre-Amsterdam path"
-            );
-            PrewarmMode::Skipped
+            #[cfg(any())]
+            {
+                if let Some(decoded_bal) = env.decoded_bal.clone() {
+                    PrewarmMode::BlockAccessList(decoded_bal)
+                } else {
+                    warn!(
+                        target: "engine::tree::payload_processor",
+                        "BAL prewarming requested without a decoded block access list"
+                    );
+                    PrewarmMode::Skipped
+                }
+            }
+
+            #[cfg(not(any()))]
+            {
+                warn!(
+                    target: "engine::tree::payload_processor",
+                    "BAL prewarming is unsupported in the evm2 pre-Amsterdam path"
+                );
+                PrewarmMode::Skipped
+            }
         } else if self.disable_transaction_prewarming ||
             env.transaction_count < SMALL_BLOCK_TX_THRESHOLD
         {
@@ -1033,6 +1051,9 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Withdrawals included in the block.
     /// Used to generate prefetch targets for withdrawal addresses.
     pub withdrawals: Option<Vec<Withdrawal>>,
+    /// Decoded block access list for Amsterdam BAL prewarming.
+    #[cfg(any())]
+    pub decoded_bal: Option<Arc<DecodedBal>>,
 }
 
 impl<Evm: ConfigureEvm> ExecutionEnv<Evm>
@@ -1050,6 +1071,8 @@ where
             transaction_count: 0,
             gas_used: 0,
             withdrawals: None,
+            #[cfg(any())]
+            decoded_bal: None,
         }
     }
 }

@@ -109,6 +109,8 @@ use crate::tree::{
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
+#[cfg(any())]
+use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{map::B256Set, Address, B256, KECCAK256_EMPTY as KECCAK_EMPTY};
@@ -543,6 +545,11 @@ where
             .in_scope(|| self.evm_env_for(&input))
             .map_err(NewPayloadError::other)?;
 
+        #[cfg(any())]
+        let decoded_bal = input.try_decoded_access_list().map_err(|err| {
+            NewPayloadError::other(format!("failed to decode block access list: {err}"))
+        })?;
+
         if input.has_block_access_list() {
             return Err(InsertBlockError::new(
                 validated_block.try_into_inner().expect("sole handle")?,
@@ -562,7 +569,8 @@ where
             transaction_count: input.transaction_count(),
             gas_used: input.gas_used(),
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
-            decoded_bal: decoded_bal.as_ref().map(Arc::clone),
+            #[cfg(any())]
+            decoded_bal,
         };
 
         // Plan the strategy used for state root computation.
@@ -2310,6 +2318,22 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(payload) => payload.block_access_list().is_some(),
             Self::Block(_) => false,
+        }
+    }
+
+    /// Decodes the payload block access list.
+    ///
+    /// Amsterdam BAL execution is parked for the active evm2 pre-Amsterdam path. Keep the original
+    /// decoded handoff here so the BAL path can be re-enabled without rediscovering the boundary
+    /// between payload validation and prewarming.
+    #[cfg(any())]
+    pub fn try_decoded_access_list(&self) -> Result<Option<Arc<DecodedBal>>, alloy_rlp::Error> {
+        match self {
+            Self::Payload(payload) => payload
+                .block_access_list()
+                .map(|encoded| alloy_rlp::decode(encoded.as_ref()).map(Arc::new))
+                .transpose(),
+            Self::Block(_) => Ok(None),
         }
     }
 
