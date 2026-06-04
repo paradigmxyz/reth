@@ -21,6 +21,10 @@ pub mod cancelled;
 /// Contains glue code for integrating reth database into revm's [Database].
 pub mod database;
 
+/// Contains glue code for integrating reth database into evm2's database API.
+#[cfg(feature = "evm2")]
+pub mod evm2;
+
 pub use revm::{database as db, inspector};
 
 /// Common test helpers

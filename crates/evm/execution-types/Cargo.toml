@@ -16,6 +16,7 @@ reth-primitives-traits.workspace = true
 reth-trie-common.workspace = true
 
 revm.workspace = true
+evm2 = { workspace = true, optional = true }
 
 # alloy
 alloy-evm.workspace = true
@@ -43,6 +44,7 @@ serde = [
     "dep:serde",
     "rand/serde",
     "revm/serde",
+    "evm2?/serde",
     "alloy-eips/serde",
     "alloy-primitives/serde",
     "reth-primitives-traits/serde",
@@ -62,6 +64,7 @@ std = [
     "alloy-eips/std",
     "alloy-primitives/std",
     "revm/std",
+    "evm2?/std",
     "serde?/std",
     "reth-primitives-traits/std",
     "alloy-consensus/std",
@@ -72,3 +75,4 @@ std = [
     "alloy-evm/std",
     "alloy-rlp?/std",
 ]
+evm2 = ["dep:evm2"]
