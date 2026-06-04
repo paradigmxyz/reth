@@ -6,6 +6,7 @@ use alloy_primitives::{b256, Address, TxKind, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN_TRANSACTION_GAS};
 use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction};
 use reth_evm::{
+    database::StateProviderDatabase,
     execute::{BlockExecutionOutput, Executor},
     ConfigureEvm,
 };
@@ -16,7 +17,6 @@ use reth_provider::{
     providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProvider,
     ProviderFactory,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_testing_utils::generators::sign_tx_with_key_pair;
 use reth_trie_common::KeccakKeyHasher;
 use secp256k1::Keypair;
@@ -69,10 +69,9 @@ where
     let provider = provider_factory.provider()?;
 
     // Execute the block to produce a block execution output
-    let mut block_execution_output = EthEvmConfig::ethereum(chain_spec)
+    let block_execution_output = EthEvmConfig::ethereum(chain_spec)
         .batch_executor(StateProviderDatabase::new(LatestStateProvider::new(provider)))
         .execute(block)?;
-    block_execution_output.state.reverts.sort();
 
     // Convert the block execution output to an execution outcome for committing to the database
     let execution_outcome = to_execution_outcome(block.number(), &block_execution_output);
@@ -204,8 +203,7 @@ where
     let executor =
         evm_config.batch_executor(StateProviderDatabase::new(LatestStateProvider::new(provider)));
 
-    let mut execution_outcome = executor.execute_batch(vec![&block1, &block2])?;
-    execution_outcome.state_mut().reverts.sort();
+    let execution_outcome = executor.execute_batch(vec![&block1, &block2])?;
 
     // Commit the block's execution outcome to the database
     let hashed_state = execution_outcome.hash_state_slow::<KeccakKeyHasher>().into_sorted();

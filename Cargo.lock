@@ -8986,7 +8986,6 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-prune-types",
- "reth-revm",
  "reth-stages-api",
  "reth-tasks",
  "reth-testing-utils",
