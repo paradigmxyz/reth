@@ -43,7 +43,7 @@ use crate::tree::{
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     multiproof::{StateRootComputeOutcome, StateRootHandle},
     payload_processor::PayloadProcessor,
-    precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
+    precompile_cache::{CachedPrecompileMetrics, Evm2CachedPrecompiles, PrecompileCacheMap},
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
@@ -70,6 +70,7 @@ use reth_engine_primitives::{
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
     database::State,
+    evm2::{precompiles_for_spec, spec_id_from_revm},
     execute::{BlockExecutor, ExecutableTx, ExecutableTxFor},
     ConfigureEvm, Database, Evm as EvmTrait, EvmEnvFor, ExecutionCtxFor, OnStateHook, RecoveredTx,
     SpecFor, StateHookExt,
@@ -1033,6 +1034,7 @@ where
         V: PayloadValidator<T, Block = N::Block>,
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
+        SpecFor<Evm>: Into<reth_evm::hardfork::SpecId>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
@@ -1058,21 +1060,12 @@ where
 
         if !self.config.precompile_cache_disabled() {
             let _span = debug_span!(target: "engine::tree", "setup_precompile_cache").entered();
-            executor.evm_mut().precompiles_mut().map_cacheable_precompiles(
-                |address, precompile| {
-                    let metrics = self
-                        .precompile_cache_metrics
-                        .entry(*address)
-                        .or_insert_with(|| CachedPrecompileMetrics::new_with_address(*address))
-                        .clone();
-                    CachedPrecompile::wrap(
-                        precompile,
-                        self.precompile_cache_map.cache_for_address(*address),
-                        spec_id,
-                        Some(metrics),
-                    )
-                },
-            );
+            executor.set_precompiles(Evm2CachedPrecompiles::new(
+                precompiles_for_spec(spec_id_from_revm(spec_id.into())),
+                self.precompile_cache_map.clone(),
+                spec_id,
+                None,
+            ));
         }
 
         let transaction_count = input.transaction_count();

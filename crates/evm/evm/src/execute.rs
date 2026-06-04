@@ -18,6 +18,7 @@ use alloy_evm::{
     EvmEnv, RecoveredTx, ToTxEnv,
 };
 use alloy_primitives::{map::AddressHashSet, Address, B256};
+use evm2::{evm::precompile::PrecompileProvider, BaseEvmTypes};
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
@@ -363,6 +364,13 @@ pub trait BlockExecutor {
 
     /// Returns recorded receipts.
     fn receipts(&self) -> &[Self::Receipt];
+
+    /// Replaces the executor's evm2 precompile provider, if supported.
+    fn set_precompiles<P>(&mut self, _precompiles: P)
+    where
+        P: PrecompileProvider<BaseEvmTypes>,
+    {
+    }
 
     /// Executes all transactions in a block.
     fn execute_block(

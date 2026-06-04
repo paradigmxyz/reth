@@ -1760,6 +1760,13 @@ where
     fn receipts(&self) -> &[Self::Receipt] {
         &self.evm2.result.receipts
     }
+
+    fn set_precompiles<P>(&mut self, precompiles: P)
+    where
+        P: PrecompileProvider<evm2::BaseEvmTypes>,
+    {
+        self.evm2.set_precompiles(precompiles);
+    }
 }
 
 /// Direct evm2 block executor that accumulates reth execution output.
