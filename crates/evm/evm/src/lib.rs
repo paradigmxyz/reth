@@ -482,15 +482,28 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         self.block_executor_factory().create_executor(evm, ctx)
     }
 
+    /// Creates a strategy with a DB state borrow and EVM environment.
+    fn create_executor_with_state_and_env<'a, 'db, DB>(
+        &'a self,
+        db: &'db mut State<DB>,
+        evm_env: EvmEnvFor<Self>,
+        ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
+    ) -> BlockExecutorFor<'a, Self::BlockExecutorFactory, &'db mut State<DB>>
+    where
+        DB: Database,
+    {
+        self.block_executor_factory().create_executor_with_env(db, evm_env, ctx)
+    }
+
     /// Creates a strategy for execution of a given block.
     fn executor_for_block<'a, DB: Database>(
         &'a self,
         db: &'a mut State<DB>,
         block: &'a SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutorForEvm<'a, Self, DB>, Self::Error> {
-        let evm = self.evm_for_block(db, block.header())?;
+        let evm_env = self.evm_env(block.header())?;
         let ctx = self.context_for_block(block)?;
-        Ok(self.create_executor(evm, ctx))
+        Ok(self.create_executor_with_state_and_env(db, evm_env, ctx))
     }
 
     /// Creates a [`BlockBuilder`]. Should be used when building a new block.
@@ -520,6 +533,26 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     {
         BasicBlockBuilder {
             executor: self.create_executor(evm, ctx.clone()),
+            ctx,
+            assembler: self.block_assembler(),
+            parent,
+            transactions: Vec::new(),
+        }
+    }
+
+    /// Creates a [`BlockBuilder`] with a DB state borrow and EVM environment.
+    fn create_block_builder_with_state_and_env<'a, DB>(
+        &'a self,
+        db: &'a mut State<DB>,
+        evm_env: EvmEnvFor<Self>,
+        parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
+        ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
+    ) -> impl BlockBuilder<Primitives = Self::Primitives, Executor = BlockExecutorForEvm<'a, Self, DB>>
+    where
+        DB: Database,
+    {
+        BasicBlockBuilder {
+            executor: self.create_executor_with_state_and_env(db, evm_env, ctx.clone()),
             ctx,
             assembler: self.block_assembler(),
             parent,
@@ -566,9 +599,8 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         Self::Error,
     > {
         let evm_env = self.next_evm_env(parent, &attributes)?;
-        let evm = self.evm_with_env(db, evm_env);
         let ctx = self.context_for_next_block(parent, attributes)?;
-        Ok(self.create_block_builder(evm, parent, ctx))
+        Ok(self.create_block_builder_with_state_and_env(db, evm_env, parent, ctx))
     }
 
     /// Returns a new [`Executor`] for executing blocks.

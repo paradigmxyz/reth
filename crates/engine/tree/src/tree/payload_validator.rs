@@ -1048,11 +1048,11 @@ where
         let (spec_id, mut executor) = {
             let _span = debug_span!(target: "engine::tree", "create_evm").entered();
             let spec_id = *env.evm_env.spec_id();
-            let evm = self.evm_config.evm_with_env(&mut db, env.evm_env);
             let ctx = self
                 .execution_ctx_for(input)
                 .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
-            let executor = self.evm_config.create_executor(evm, ctx);
+            let executor =
+                self.evm_config.create_executor_with_state_and_env(&mut db, env.evm_env, ctx);
             (spec_id, executor)
         };
 

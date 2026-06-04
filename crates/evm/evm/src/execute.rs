@@ -511,6 +511,23 @@ pub trait BlockExecutorFactory: 'static {
     where
         DB: StateDB,
         I: Inspector<<Self::EvmFactory as EvmFactory>::Context<DB>>;
+
+    /// Creates an executor with the given database, environment, and execution context.
+    fn create_executor_with_env<'a, DB>(
+        &'a self,
+        db: DB,
+        evm_env: EvmEnv<
+            <Self::EvmFactory as EvmFactory>::Spec,
+            <Self::EvmFactory as EvmFactory>::BlockEnv,
+        >,
+        ctx: Self::ExecutionCtx<'a>,
+    ) -> Self::Executor<'a, DB, NoOpInspector>
+    where
+        DB: StateDB,
+    {
+        let evm = self.evm_factory().create_evm(db, evm_env);
+        self.create_executor(evm, ctx)
+    }
 }
 
 impl<T> BlockExecutorFactory for T
