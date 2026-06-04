@@ -4065,16 +4065,41 @@ mod tests {
     use reth_chain_state::ExecutedBlock;
     use reth_db_api::models::StorageSettings;
     use reth_ethereum_primitives::Receipt;
-    use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
+    use reth_execution_types::{
+        AccountRevertInit, BlockExecutionOutput, BlockExecutionResult, Evm2BlockReverts,
+        Evm2StorageReverts,
+    };
     use reth_primitives_traits::SealedBlock;
     use reth_storage_api::MetadataWriter;
     use reth_testing_utils::generators::{self, random_block, BlockParams};
-    use reth_trie::{
-        HashedPostState, KeccakKeyHasher, Nibbles, StoredNibbles, StoredNibblesSubKey,
-    };
-    use revm_database::BundleState;
-    use revm_state::AccountInfo;
+    use reth_trie::{KeccakKeyHasher, Nibbles, StoredNibbles, StoredNibblesSubKey};
     use std::{sync::mpsc, time::Duration};
+
+    fn single_account_bundle(
+        block_number: u64,
+        address: Address,
+        account: Account,
+        storage: BTreeMap<U256, (U256, U256)>,
+    ) -> Evm2BundleState {
+        Evm2BundleState::new_init(
+            block_number,
+            [(address, (None, Some(account), storage.clone()))],
+            [Evm2BlockReverts {
+                accounts: AddressMap::from_iter([(address, None)]),
+                storage: AddressMap::from_iter([(
+                    address,
+                    Evm2StorageReverts {
+                        slots: storage
+                            .into_iter()
+                            .map(|(slot, (original, _))| (slot, original))
+                            .collect(),
+                        ..Default::default()
+                    },
+                )]),
+            }],
+            [],
+        )
+    }
 
     #[test]
     fn test_receipts_by_block_range_empty_range() {
@@ -5014,9 +5039,6 @@ mod tests {
     #[test]
     fn test_write_state_and_historical_read_hashed() {
         use reth_storage_api::StateProvider;
-        use reth_trie::{HashedPostState, KeccakKeyHasher};
-        use revm_database::BundleState;
-        use revm_state::AccountInfo;
 
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
@@ -5047,15 +5069,12 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
 
-        let bundle = BundleState::builder(1..=1)
-            .state_present_account_info(
-                address,
-                AccountInfo { nonce: 1, balance: U256::from(10), ..Default::default() },
-            )
-            .state_storage(address, HashMap::from_iter([(slot, (U256::ZERO, U256::from(10)))]))
-            .revert_account_info(1, address, Some(None))
-            .revert_storage(1, address, vec![(slot, U256::ZERO)])
-            .build();
+        let bundle = single_account_bundle(
+            1,
+            address,
+            Account { nonce: 1, balance: U256::from(10), bytecode_hash: None },
+            BTreeMap::from_iter([(slot, (U256::ZERO, U256::from(10)))]),
+        );
 
         let execution_outcome = ExecutionOutcome::new(bundle.clone(), vec![vec![]], 1, Vec::new());
 
@@ -5079,8 +5098,7 @@ mod tests {
             )
             .unwrap();
 
-        let hashed_state =
-            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle.state()).into_sorted();
+        let hashed_state = bundle.hashed_post_state::<KeccakKeyHasher>().into_sorted();
         provider_rw.write_hashed_state(&hashed_state).unwrap();
 
         let plain_storage_entries = provider_rw
@@ -5128,8 +5146,6 @@ mod tests {
     }
 
     fn run_save_blocks_and_verify(mode: StorageMode) {
-        use alloy_primitives::map::{FbBuildHasher, HashMap};
-
         let factory = create_test_provider_factory();
 
         match mode {
@@ -5170,18 +5186,19 @@ mod tests {
         let mut parent_hash = B256::ZERO;
 
         for block_num in 1..=num_blocks {
-            let mut builder = BundleState::builder(block_num..=block_num);
+            let mut accounts = Vec::new();
+            let mut account_reverts = AddressMap::default();
+            let mut storage_reverts = AddressMap::default();
 
             for acct_idx in 0..accounts_per_block {
                 let address = Address::with_last_byte((block_num * 10 + acct_idx as u64) as u8);
-                let info = AccountInfo {
+                let account = Account {
                     nonce: block_num,
                     balance: U256::from(block_num * 100 + acct_idx as u64),
-                    ..Default::default()
+                    bytecode_hash: None,
                 };
 
-                let storage: HashMap<U256, (U256, U256), FbBuildHasher<32>> = (1..=
-                    slots_per_account as u64)
+                let storage: BTreeMap<U256, (U256, U256)> = (1..=slots_per_account as u64)
                     .map(|s| {
                         (
                             U256::from(s + acct_idx as u64 * 100),
@@ -5190,21 +5207,28 @@ mod tests {
                     })
                     .collect();
 
-                let revert_storage: Vec<(U256, U256)> = (1..=slots_per_account as u64)
-                    .map(|s| (U256::from(s + acct_idx as u64 * 100), U256::ZERO))
-                    .collect();
-
-                builder = builder
-                    .state_present_account_info(address, info)
-                    .revert_account_info(block_num, address, Some(None))
-                    .state_storage(address, storage)
-                    .revert_storage(block_num, address, revert_storage);
+                account_reverts.insert(address, None);
+                storage_reverts.insert(
+                    address,
+                    Evm2StorageReverts {
+                        slots: storage
+                            .iter()
+                            .map(|(slot, (original, _))| (*slot, *original))
+                            .collect(),
+                        ..Default::default()
+                    },
+                );
+                accounts.push((address, (None, Some(account), storage)));
             }
 
-            let bundle = builder.build();
+            let bundle = Evm2BundleState::new_init(
+                block_num,
+                accounts,
+                [Evm2BlockReverts { accounts: account_reverts, storage: storage_reverts }],
+                [],
+            );
 
-            let hashed_state =
-                HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle.state()).into_sorted();
+            let hashed_state = bundle.hashed_post_state::<KeccakKeyHasher>().into_sorted();
 
             let header = Header {
                 number: block_num,
@@ -5458,15 +5482,12 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
 
-        let bundle = BundleState::builder(1..=1)
-            .state_present_account_info(
-                address,
-                AccountInfo { nonce: 1, balance: U256::from(10), ..Default::default() },
-            )
-            .state_storage(address, HashMap::from_iter([(slot, (U256::ZERO, U256::from(10)))]))
-            .revert_account_info(1, address, Some(None))
-            .revert_storage(1, address, vec![(slot, U256::ZERO)])
-            .build();
+        let bundle = single_account_bundle(
+            1,
+            address,
+            Account { nonce: 1, balance: U256::from(10), bytecode_hash: None },
+            BTreeMap::from_iter([(slot, (U256::ZERO, U256::from(10)))]),
+        );
 
         let execution_outcome = ExecutionOutcome::new(bundle.clone(), vec![vec![]], 1, Vec::new());
 
@@ -5482,8 +5503,7 @@ mod tests {
             )
             .unwrap();
 
-        let hashed_state =
-            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle.state()).into_sorted();
+        let hashed_state = bundle.hashed_post_state::<KeccakKeyHasher>().into_sorted();
         provider_rw.write_hashed_state(&hashed_state).unwrap();
 
         let hashed_account = provider_rw
