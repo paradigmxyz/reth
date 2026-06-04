@@ -44,7 +44,6 @@ use revm::{
     context_interface::{result::ResultAndState, Transaction},
     Database, DatabaseCommit,
 };
-use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
 use std::collections::BTreeMap;
 use tracing::{trace, warn};
 
@@ -198,6 +197,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     };
 
                     let (result, results) = if trace_transfers {
+                        #[cfg(any())]
+                        {
                         // prepare inspector to capture transfer inside the evm so they are recorded
                         // and included in logs
                         let inspector = TransferInspector::new(false).with_logs(true);
@@ -224,6 +225,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             this.converter(),
                         )
                         .map_err(map_err)?
+                        }
+                        #[cfg(not(any()))]
+                        {
+                            return Err(Self::Error::from_eth_err(EthApiError::Unsupported(
+                                "eth_simulateV1 transfer tracing is unsupported by the evm2 execution path",
+                            )))
+                        }
                     } else {
                         let evm = this.evm_config().evm_with_env(&mut db, evm_env);
                         let mut builder = this.evm_config().create_block_builder(evm, &parent, ctx);
@@ -463,70 +471,84 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     where
         Self: Trace,
     {
-        self.spawn_blocking_io_fut(async move |this| {
-            let state = this.state_at_block_id(at).await?;
-            let mut db = State::builder().with_database(StateProviderDatabase::new(state)).build();
+        #[cfg(any())]
+        {
+            self.spawn_blocking_io_fut(async move |this| {
+                let state = this.state_at_block_id(at).await?;
+                let mut db =
+                    State::builder().with_database(StateProviderDatabase::new(state)).build();
 
-            if let Some(state_overrides) = state_override {
-                apply_state_overrides(state_overrides, &mut db)
-                    .map_err(Self::Error::from_eth_err)?;
+                if let Some(state_overrides) = state_override {
+                    apply_state_overrides(state_overrides, &mut db)
+                        .map_err(Self::Error::from_eth_err)?;
+                }
+
+                // Read fields from request before consuming it in create_txn_env
+                let request_has_gas_limit = request.as_ref().gas_limit().is_some();
+                let initial = request.as_ref().access_list().cloned().unwrap_or_default();
+
+                let mut tx_env = this.create_txn_env(&evm_env, request, &mut db)?;
+
+                // we want to disable this in eth_createAccessList, since this is common practice
+                // used by other node impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
+                evm_env.cfg_env.disable_block_gas_limit = true;
+
+                // The basefee should be ignored for eth_createAccessList
+                // See:
+                // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
+                evm_env.cfg_env.disable_base_fee = true;
+
+                // Disabled because eth_createAccessList is sometimes used with non-eoa senders
+                evm_env.cfg_env.disable_eip3607 = true;
+
+                // Disable additional fee charges (e.g. L2 operator fees),
+                // consistent with prepare_call_env and estimate_gas_with.
+                evm_env.cfg_env.disable_fee_charge = true;
+
+                // Disable EIP-7825 transaction gas limit cap so that the gas limit
+                // fallback (block gas limit) is not rejected when it exceeds the
+                // per-tx cap (2^24 ≈ 16.7M post-Osaka).
+                evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
+
+                if !request_has_gas_limit && tx_env.gas_price() > 0 {
+                    let cap = this.caller_gas_allowance(&mut db, &evm_env, &tx_env)?;
+                    // no gas limit was provided in the request, so we need to cap the request's gas
+                    // limit
+                    tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit()));
+                }
+
+                let mut inspector = AccessListInspector::new(initial);
+
+                let result =
+                    this.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
+                let access_list = inspector.into_access_list();
+                let gas_used = result.result.tx_gas_used();
+                tx_env.set_access_list(access_list.clone());
+                if let Err(err) = Self::Error::ensure_success(result.result) {
+                    return Ok(AccessListResult {
+                        access_list,
+                        gas_used: U256::from(gas_used),
+                        error: Some(err.to_string()),
+                    });
+                }
+
+                // transact again to get the exact gas used
+                let result = this.transact(&mut db, evm_env, tx_env)?;
+                let gas_used = result.result.tx_gas_used();
+                let error = Self::Error::ensure_success(result.result).err().map(|e| e.to_string());
+
+                Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
+            })
+        }
+        #[cfg(not(any()))]
+        {
+            let _ = (&mut evm_env, at, request, state_override);
+            async move {
+                Err(Self::Error::from_eth_err(EthApiError::Unsupported(
+                    "eth_createAccessList is unsupported by the evm2 execution path",
+                )))
             }
-
-            // Read fields from request before consuming it in create_txn_env
-            let request_has_gas_limit = request.as_ref().gas_limit().is_some();
-            let initial = request.as_ref().access_list().cloned().unwrap_or_default();
-
-            let mut tx_env = this.create_txn_env(&evm_env, request, &mut db)?;
-
-            // we want to disable this in eth_createAccessList, since this is common practice used
-            // by other node impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
-            evm_env.cfg_env.disable_block_gas_limit = true;
-
-            // The basefee should be ignored for eth_createAccessList
-            // See:
-            // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
-            evm_env.cfg_env.disable_base_fee = true;
-
-            // Disabled because eth_createAccessList is sometimes used with non-eoa senders
-            evm_env.cfg_env.disable_eip3607 = true;
-
-            // Disable additional fee charges (e.g. L2 operator fees),
-            // consistent with prepare_call_env and estimate_gas_with.
-            evm_env.cfg_env.disable_fee_charge = true;
-
-            // Disable EIP-7825 transaction gas limit cap so that the gas limit
-            // fallback (block gas limit) is not rejected when it exceeds the
-            // per-tx cap (2^24 ≈ 16.7M post-Osaka).
-            evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
-
-            if !request_has_gas_limit && tx_env.gas_price() > 0 {
-                let cap = this.caller_gas_allowance(&mut db, &evm_env, &tx_env)?;
-                // no gas limit was provided in the request, so we need to cap the request's gas
-                // limit
-                tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit()));
-            }
-
-            let mut inspector = AccessListInspector::new(initial);
-
-            let result = this.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
-            let access_list = inspector.into_access_list();
-            let gas_used = result.result.tx_gas_used();
-            tx_env.set_access_list(access_list.clone());
-            if let Err(err) = Self::Error::ensure_success(result.result) {
-                return Ok(AccessListResult {
-                    access_list,
-                    gas_used: U256::from(gas_used),
-                    error: Some(err.to_string()),
-                });
-            }
-
-            // transact again to get the exact gas used
-            let result = this.transact(&mut db, evm_env, tx_env)?;
-            let gas_used = result.result.tx_gas_used();
-            let error = Self::Error::ensure_success(result.result).err().map(|e| e.to_string());
-
-            Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
-        })
+        }
     }
 }
 
