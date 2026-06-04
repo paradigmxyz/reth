@@ -760,8 +760,16 @@ pub trait Call:
                 }
 
                 let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
-
-                let res = executor.evm_mut().transact(tx_env).map_err(Self::Error::from_evm_err)?;
+                let block_env = block_env_from_revm(executor.block_env().clone());
+                let tx_env = ethereum_tx_env_from_revm(&tx_env);
+                let res = execute_tx_env_for::<Self::Evm, _>(
+                    executor.db_mut(),
+                    *executor.cfg_env().spec(),
+                    block_env,
+                    &tx_env,
+                )
+                .map_err(RethError::other)
+                .map_err(Self::Error::from_eth_err)?;
                 drop(executor);
                 f(tx_info, res, db)
             })
