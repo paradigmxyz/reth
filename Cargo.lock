@@ -10649,7 +10649,6 @@ dependencies = [
  "reth-stages-types",
  "reth-storage-api",
  "reth-trie",
- "revm",
  "tokio",
  "tracing",
 ]
