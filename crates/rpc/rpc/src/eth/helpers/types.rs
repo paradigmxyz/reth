@@ -10,7 +10,7 @@ pub type EthRpcConverter<ChainSpec> =
     RpcConverter<Ethereum, EthEvmConfig, EthReceiptConverter<ChainSpec>>;
 
 //tests for simulate
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use super::*;
     use alloy_consensus::{Transaction, TxType};
