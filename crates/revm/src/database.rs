@@ -66,11 +66,13 @@ pub struct StateProviderDatabase<DB>(pub DB);
 
 impl<DB> StateProviderDatabase<DB> {
     /// Create new State with generic `StateProvider`.
+    #[inline]
     pub const fn new(db: DB) -> Self {
         Self(db)
     }
 
     /// Consume State and return inner `StateProvider`.
+    #[inline]
     pub fn into_inner(self) -> DB {
         self.0
     }
@@ -83,6 +85,7 @@ impl<DB> core::fmt::Debug for StateProviderDatabase<DB> {
 }
 
 impl<DB> AsRef<DB> for StateProviderDatabase<DB> {
+    #[inline]
     fn as_ref(&self) -> &DB {
         self
     }
@@ -91,12 +94,14 @@ impl<DB> AsRef<DB> for StateProviderDatabase<DB> {
 impl<DB> Deref for StateProviderDatabase<DB> {
     type Target = DB;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
 impl<DB> DerefMut for StateProviderDatabase<DB> {
+    #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
@@ -109,6 +114,7 @@ impl<DB: EvmStateProvider> Database for StateProviderDatabase<DB> {
     ///
     /// Returns `Ok` with `Some(AccountInfo)` if the account exists,
     /// `None` if it doesn't, or an error if encountered.
+    #[inline]
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         self.basic_ref(address)
     }
@@ -116,6 +122,7 @@ impl<DB: EvmStateProvider> Database for StateProviderDatabase<DB> {
     /// Retrieves the bytecode associated with a given code hash.
     ///
     /// Returns `Ok` with the bytecode if found, or the default bytecode otherwise.
+    #[inline]
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
         self.code_by_hash_ref(code_hash)
     }
@@ -123,6 +130,7 @@ impl<DB: EvmStateProvider> Database for StateProviderDatabase<DB> {
     /// Retrieves the storage value at a specific index for a given address.
     ///
     /// Returns `Ok` with the storage value, or the default value if not found.
+    #[inline]
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
         self.storage_ref(address, index)
     }
@@ -131,6 +139,7 @@ impl<DB: EvmStateProvider> Database for StateProviderDatabase<DB> {
     ///
     /// Returns `Ok` with the block hash if found, or the default hash otherwise.
     /// Note: It safely casts the `number` to `u64`.
+    #[inline]
     fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
         self.block_hash_ref(number)
     }
@@ -143,6 +152,7 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     ///
     /// Returns `Ok` with `Some(AccountInfo)` if the account exists,
     /// `None` if it doesn't, or an error if encountered.
+    #[inline]
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         Ok(self.basic_account(&address)?.map(Into::into))
     }
@@ -150,6 +160,7 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     /// Retrieves the bytecode associated with a given code hash.
     ///
     /// Returns `Ok` with the bytecode if found, or the default bytecode otherwise.
+    #[inline]
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
         Ok(self.bytecode_by_hash(&code_hash)?.unwrap_or_default().0)
     }
@@ -157,6 +168,7 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     /// Retrieves the storage value at a specific index for a given address.
     ///
     /// Returns `Ok` with the storage value, or the default value if not found.
+    #[inline]
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
         Ok(self.0.storage(address, B256::new(index.to_be_bytes()))?.unwrap_or_default())
     }
@@ -164,6 +176,7 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     /// Retrieves the block hash for a given block number.
     ///
     /// Returns `Ok` with the block hash if found, or the default hash otherwise.
+    #[inline]
     fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
         // Get the block hash or default hash with an attempt to convert U256 block number to u64
         Ok(self.0.block_hash(number)?.unwrap_or_default())
