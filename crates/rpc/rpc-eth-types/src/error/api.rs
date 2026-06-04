@@ -1,11 +1,18 @@
 //! Helper traits to wrap generic l1 errors, in network specific error type configured in
 //! `reth_rpc_eth_api::EthApiTypes`.
 
-use crate::{simulate::EthSimulateError, EthApiError, RevertError};
+#[cfg(any())]
+use crate::RevertError;
+use crate::{simulate::EthSimulateError, EthApiError};
+#[cfg(any())]
 use alloy_primitives::Bytes;
+#[cfg(any())]
 use reth_errors::ProviderError;
+#[cfg(any())]
 use reth_evm::{ConfigureEvm, EvmErrorFor, HaltReasonFor};
+#[cfg(any())]
 use reth_revm::db::bal::EvmDatabaseError;
+#[cfg(any())]
 use revm::{context::result::ExecutionResult, context_interface::result::HaltReason};
 
 use super::RpcInvalidTransactionError;
@@ -111,6 +118,14 @@ impl AsEthApiError for EthApiError {
 }
 
 /// Helper trait to convert from revm errors.
+#[cfg(not(any()))]
+pub trait FromEvmError<Evm>: FromEthApiError {}
+
+#[cfg(not(any()))]
+impl<T, Evm> FromEvmError<Evm> for T where T: FromEthApiError {}
+
+/// Helper trait to convert from revm errors.
+#[cfg(any())]
 pub trait FromEvmError<Evm: ConfigureEvm>:
     From<EvmErrorFor<Evm, EvmDatabaseError<ProviderError>>>
     + FromEvmHalt<HaltReasonFor<Evm>>
@@ -133,6 +148,7 @@ pub trait FromEvmError<Evm: ConfigureEvm>:
     }
 }
 
+#[cfg(any())]
 impl<T, Evm> FromEvmError<Evm> for T
 where
     T: From<EvmErrorFor<Evm, EvmDatabaseError<ProviderError>>>
@@ -143,11 +159,13 @@ where
 }
 
 /// Helper trait to convert from revm errors.
+#[cfg(any())]
 pub trait FromEvmHalt<Halt> {
     /// Converts from EVM halt to this type.
     fn from_evm_halt(halt: Halt, gas_limit: u64) -> Self;
 }
 
+#[cfg(any())]
 impl FromEvmHalt<HaltReason> for EthApiError {
     fn from_evm_halt(halt: HaltReason, gas_limit: u64) -> Self {
         RpcInvalidTransactionError::halt(halt, gas_limit).into()
@@ -155,6 +173,7 @@ impl FromEvmHalt<HaltReason> for EthApiError {
 }
 
 /// Helper trait to construct errors from unexpected reverts.
+#[cfg(any())]
 pub trait FromRevert {
     /// Constructs an error from revert bytes.
     ///
@@ -162,6 +181,7 @@ pub trait FromRevert {
     fn from_revert(output: Bytes) -> Self;
 }
 
+#[cfg(any())]
 impl FromRevert for EthApiError {
     fn from_revert(output: Bytes) -> Self {
         RpcInvalidTransactionError::Revert(RevertError::new(output)).into()

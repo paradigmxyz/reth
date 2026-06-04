@@ -32,7 +32,6 @@ reth-trie.workspace = true
 alloy-chains.workspace = true
 alloy-eip7928.workspace = true
 alloy-eips.workspace = true
-alloy-evm = { workspace = true, features = ["overrides", "call-util"] }
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-sol-types.workspace = true
@@ -41,7 +40,6 @@ alloy-rpc-client = { workspace = true, features = ["reqwest"] }
 alloy-rpc-types-eth.workspace = true
 alloy-serde.workspace = true
 revm.workspace = true
-revm-inspectors.workspace = true
 
 # rpc
 jsonrpsee-core.workspace = true
@@ -72,4 +70,4 @@ reth-storage-api = { workspace = true, features = ["std"] }
 serde_json.workspace = true
 
 [features]
-js-tracer = ["revm-inspectors/js-tracer"]
+js-tracer = []

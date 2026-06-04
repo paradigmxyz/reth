@@ -2,6 +2,7 @@
 
 pub mod api;
 use alloy_eips::BlockId;
+#[cfg(any())]
 use alloy_evm::{call::CallError, overrides::StateOverrideError};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
@@ -11,6 +12,7 @@ pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
 use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed::RecoveryError};
+#[cfg(any())]
 use reth_revm::db::bal::EvmDatabaseError;
 use reth_rpc_convert::{CallFeesError, EthTxEnvError, TransactionConversionError};
 use reth_rpc_server_types::result::{
@@ -20,12 +22,14 @@ use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
     PoolError, PoolErrorKind, PoolTransactionError, RawPoolTransactionError,
 };
+#[cfg(any())]
 use revm::{
     context_interface::result::{
         EVMError, HaltReason, InvalidHeader, InvalidTransaction, OutOfGasError,
     },
     state::bal::BalError,
 };
+#[cfg(any())]
 use revm_inspectors::tracing::{DebugInspectorError, MuxError};
 use std::convert::Infallible;
 use tokio::sync::oneshot::error::RecvError;
@@ -179,6 +183,7 @@ pub enum EthApiError {
     #[error(transparent)]
     TransactionConversionError(#[from] TransactionConversionError),
     /// Error thrown when tracing with a muxTracer fails
+    #[cfg(any())]
     #[error(transparent)]
     MuxTracerError(#[from] MuxError),
     /// Error thrown when waiting for transaction confirmation times out
@@ -255,6 +260,7 @@ impl EthApiError {
     }
 
     /// Converts the given [`StateOverrideError`] into a new [`EthApiError`] instance.
+    #[cfg(any())]
     pub fn from_state_overrides_err<E>(err: StateOverrideError<E>) -> Self
     where
         E: Into<Self>,
@@ -263,6 +269,7 @@ impl EthApiError {
     }
 
     /// Converts the given [`CallError`] into a new [`EthApiError`] instance.
+    #[cfg(any())]
     pub fn from_call_err<E>(err: CallError<E>) -> Self
     where
         E: Into<Self>,
@@ -333,6 +340,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             err @ EthApiError::TransactionInputError(_) => invalid_params_rpc_err(err.to_string()),
             EthApiError::PrunedHistoryUnavailable => rpc_error_with_code(4444, error.to_string()),
             EthApiError::Other(err) => err.to_rpc_error(),
+            #[cfg(any())]
             EthApiError::MuxTracerError(msg) => internal_rpc_err(msg.to_string()),
             EthApiError::BatchTxRecvError(err) => internal_rpc_err(err.to_string()),
             EthApiError::BatchTxSendError => {
@@ -355,6 +363,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     }
 }
 
+#[cfg(any())]
 impl<E> From<CallError<E>> for EthApiError
 where
     E: Into<Self>,
@@ -372,6 +381,7 @@ where
     }
 }
 
+#[cfg(any())]
 impl<E> From<StateOverrideError<E>> for EthApiError
 where
     E: Into<Self>,
@@ -414,6 +424,7 @@ impl From<EthTxEnvError> for EthApiError {
     }
 }
 
+#[cfg(any())]
 impl<E> From<EvmDatabaseError<E>> for EthApiError
 where
     E: Into<Self>,
@@ -426,13 +437,14 @@ where
     }
 }
 
+#[cfg(any())]
 impl From<BalError> for EthApiError {
     fn from(err: BalError) -> Self {
         Self::EvmCustom(format!("bal error: {:?}", err))
     }
 }
 
-#[cfg(feature = "js-tracer")]
+#[cfg(any())]
 impl From<revm_inspectors::tracing::js::JsInspectorError> for EthApiError {
     fn from(error: revm_inspectors::tracing::js::JsInspectorError) -> Self {
         match error {
@@ -444,6 +456,7 @@ impl From<revm_inspectors::tracing::js::JsInspectorError> for EthApiError {
     }
 }
 
+#[cfg(any())]
 impl<Err> From<DebugInspectorError<Err>> for EthApiError
 where
     Err: core::error::Error + Send + Sync + 'static,
@@ -479,11 +492,14 @@ impl From<BlockExecutionError> for EthApiError {
         match error {
             BlockExecutionError::Validation(validation_error) => match validation_error {
                 BlockValidationError::InvalidTx { error, .. } => {
+                    #[cfg(any())]
                     if let Some(invalid_tx) = error.as_any().downcast_ref::<InvalidTransaction>() {
-                        Self::InvalidTransaction(RpcInvalidTransactionError::from(
+                        return Self::InvalidTransaction(RpcInvalidTransactionError::from(
                             invalid_tx.clone(),
                         ))
-                    } else if let Some(invalid_tx) =
+                    }
+
+                    if let Some(invalid_tx) =
                         error.as_any().downcast_ref::<InvalidTransactionError>()
                     {
                         Self::InvalidTransaction(RpcInvalidTransactionError::from(
@@ -527,6 +543,7 @@ impl From<reth_errors::ProviderError> for EthApiError {
     }
 }
 
+#[cfg(any())]
 impl From<InvalidHeader> for EthApiError {
     fn from(value: InvalidHeader) -> Self {
         match value {
@@ -536,6 +553,7 @@ impl From<InvalidHeader> for EthApiError {
     }
 }
 
+#[cfg(any())]
 impl<T, TxError> From<EVMError<T, TxError>> for EthApiError
 where
     T: Into<Self>,
@@ -707,8 +725,8 @@ pub enum RpcInvalidTransactionError {
     #[error(transparent)]
     Revert(RevertError),
     /// Unspecific EVM halt error.
-    #[error("EVM error: {0:?}")]
-    EvmHalt(HaltReason),
+    #[error("EVM error: {0}")]
+    EvmHalt(String),
     /// Invalid chain id set for the transaction.
     #[error("invalid chain ID")]
     InvalidChainId,
@@ -785,6 +803,7 @@ impl RpcInvalidTransactionError {
     /// Converts the halt error
     ///
     /// Takes the configured gas limit of the transaction which is attached to the error
+    #[cfg(any())]
     pub fn halt(reason: HaltReason, gas_limit: u64) -> Self {
         match reason {
             HaltReason::OutOfGas(err) => Self::out_of_gas(err, gas_limit),
@@ -794,6 +813,7 @@ impl RpcInvalidTransactionError {
     }
 
     /// Converts the out of gas error
+    #[cfg(any())]
     pub const fn out_of_gas(reason: OutOfGasError, gas_limit: u64) -> Self {
         match reason {
             OutOfGasError::Basic | OutOfGasError::ReentrancySentry => {
@@ -829,6 +849,7 @@ impl From<RpcInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'s
     }
 }
 
+#[cfg(any())]
 impl From<InvalidTransaction> for RpcInvalidTransactionError {
     fn from(err: InvalidTransaction) -> Self {
         match err {
@@ -1150,8 +1171,8 @@ pub enum SignError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::b256;
     use alloy_sol_types::{Revert, SolError};
-    use revm::primitives::b256;
 
     #[test]
     fn timed_out_error() {
