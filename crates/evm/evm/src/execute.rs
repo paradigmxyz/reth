@@ -28,9 +28,12 @@ use reth_primitives_traits::{
 use reth_storage_api::StateProvider;
 pub use reth_storage_errors::provider::ProviderError;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
-use revm::database::{
-    states::{bundle_state::BundleRetention, reverts::AccountInfoRevert, RevertToSlot},
-    BundleState, State,
+use revm::{
+    context_interface::Block as _,
+    database::{
+        states::{bundle_state::BundleRetention, reverts::AccountInfoRevert, RevertToSlot},
+        BundleState, State,
+    },
 };
 
 /// A type that knows how to execute a block. It is assumed to operate on a
@@ -412,6 +415,26 @@ pub trait BlockBuilder {
     /// Helper to access inner [`BlockExecutor::Evm`].
     fn evm(&self) -> &<Self::Executor as BlockExecutor>::Evm {
         self.executor().evm()
+    }
+
+    /// Returns the configured block gas limit.
+    fn block_gas_limit(&self) -> u64 {
+        self.evm().block().gas_limit()
+    }
+
+    /// Returns the configured base fee.
+    fn block_base_fee(&self) -> u64 {
+        self.evm().block().basefee()
+    }
+
+    /// Returns the configured blob gas price, if enabled for the block.
+    fn block_blob_gasprice(&self) -> Option<u128> {
+        self.evm().block().blob_gasprice()
+    }
+
+    /// Returns the configured per-transaction gas limit cap override.
+    fn tx_gas_limit_cap(&self) -> Option<u64> {
+        self.evm().cfg_env().tx_gas_limit_cap
     }
 
     /// Consumes the type and returns the underlying [`BlockExecutor`].
