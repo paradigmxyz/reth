@@ -21,6 +21,7 @@ use crate::{
     TransactionsProvider, TransactionsProviderExt, TrieWriter,
 };
 use alloy_consensus::{
+    constants::KECCAK_EMPTY,
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
     BlockHeader, TxReceipt,
 };
@@ -48,7 +49,9 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     BlockNumberList,
 };
-use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
+use reth_execution_types::{
+    BlockExecutionOutput, BlockExecutionResult, Chain, Evm2BundleState, ExecutionOutcome,
+};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, FastInstant as Instant, RecoveredBlock,
@@ -70,8 +73,11 @@ use reth_trie::{
     HashedPostStateSorted,
 };
 use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
-use revm_database::states::{
-    PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
+use revm_database::{
+    bytecode::Bytecode as RevmBytecode,
+    state::AccountInfo as RevmAccountInfo,
+    states::{PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset},
+    RevertToSlot,
 };
 use smallvec::SmallVec;
 use std::{
@@ -100,6 +106,93 @@ impl CommitOrder {
     pub const fn is_unwind(&self) -> bool {
         matches!(self, Self::Unwind)
     }
+}
+
+fn evm2_bundle_to_plain_state_and_reverts(
+    bundle: &Evm2BundleState,
+    is_value_known: OriginalValuesKnown,
+) -> (StateChangeset, PlainStateReverts) {
+    let mut accounts = Vec::with_capacity(bundle.accounts().len());
+    let mut storage = Vec::with_capacity(bundle.storage().len());
+
+    for (address, account) in bundle.accounts() {
+        if is_value_known.is_not_known() || account.original != account.current {
+            accounts.push((
+                *address,
+                account.current.as_ref().map(|info| RevmAccountInfo {
+                    balance: info.balance,
+                    nonce: info.nonce,
+                    code_hash: info.code_hash,
+                    account_id: None,
+                    code: None,
+                }),
+            ));
+        }
+    }
+
+    for (address, account_storage) in bundle.storage() {
+        let mut changed_storage = Vec::with_capacity(account_storage.slots.len());
+        for (key, slot) in &account_storage.slots {
+            let wipe_and_not_zero = account_storage.wipe && !slot.current.is_zero();
+            let not_wiped_and_changed = !account_storage.wipe && slot.original != slot.current;
+            if is_value_known.is_not_known() || wipe_and_not_zero || not_wiped_and_changed {
+                changed_storage.push((*key, slot.current));
+            }
+        }
+
+        if !changed_storage.is_empty() || account_storage.wipe {
+            storage.push(PlainStorageChangeset {
+                address: *address,
+                wipe_storage: account_storage.wipe,
+                storage: changed_storage,
+            });
+        }
+    }
+
+    let contracts = bundle
+        .contracts()
+        .iter()
+        .filter(|(hash, _)| **hash != KECCAK_EMPTY)
+        .map(|(hash, bytecode)| (*hash, RevmBytecode::new_raw(bytecode.original_bytes())))
+        .collect();
+
+    let mut reverts = PlainStateReverts::with_capacity(bundle.block_reverts().len());
+    for block_reverts in bundle.block_reverts() {
+        reverts.accounts.push(
+            block_reverts
+                .accounts
+                .iter()
+                .map(|(address, account)| {
+                    (
+                        *address,
+                        account.as_ref().map(|info| RevmAccountInfo {
+                            balance: info.balance,
+                            nonce: info.nonce,
+                            code_hash: info.code_hash,
+                            account_id: None,
+                            code: None,
+                        }),
+                    )
+                })
+                .collect(),
+        );
+        reverts.storage.push(
+            block_reverts
+                .storage
+                .iter()
+                .map(|(address, storage)| PlainStorageRevert {
+                    address: *address,
+                    wiped: false,
+                    storage_revert: storage
+                        .iter()
+                        .map(|(key, value)| (*key, RevertToSlot::Some(*value)))
+                        .collect(),
+                })
+                .collect(),
+        );
+    }
+
+    (StateChangeset { accounts, storage, contracts }, reverts)
 }
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
@@ -2451,14 +2544,18 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             // are written elsewhere. Only bytecodes need MDBX writes, so skip the expensive
             // to_plain_state_and_reverts conversion that iterates all accounts and storage.
             self.write_bytecodes(
-                execution_outcome.state().contracts.iter().map(|(h, b)| (*h, Bytecode(b.clone()))),
+                execution_outcome
+                    .state()
+                    .contracts()
+                    .iter()
+                    .map(|(h, b)| (*h, Bytecode(RevmBytecode::new_raw(b.original_bytes())))),
             )?;
             return Ok(());
         }
 
         let first_block = execution_outcome.first_block();
         let (plain_state, reverts) =
-            execution_outcome.state().to_plain_state_and_reverts(is_value_known);
+            evm2_bundle_to_plain_state_and_reverts(execution_outcome.state(), is_value_known);
 
         self.write_state_reverts(reverts, first_block, config)?;
         self.write_state_changes(plain_state)?;
