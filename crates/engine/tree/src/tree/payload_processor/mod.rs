@@ -1085,13 +1085,13 @@ mod tests {
     use reth_evm::OnStateHook;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_cache::CachedStatus;
+    use reth_execution_types::Evm2BundleState;
     use reth_primitives_traits::{Account, Recovered, StorageEntry};
     use reth_provider::{
         providers::{BlockchainProvider, OverlayBuilder, OverlayStateProviderFactory},
         test_utils::create_test_provider_factory_with_chain_spec,
         ChainSpecProvider, HashingWriter,
     };
-    use reth_revm::db::BundleState;
     use reth_testing_utils::generators;
     use reth_trie::{test_utils::state_root, HashedPostState};
     use reth_trie_db::ChangesetCache;
@@ -1195,7 +1195,7 @@ mod tests {
             block: BlockNumHash { hash: block_hash, number: 1 },
             parent: parent_hash,
         };
-        let bundle_state = BundleState::default();
+        let bundle_state = Evm2BundleState::default();
 
         // Cache should be empty initially
         assert!(payload_processor.execution_cache.get_cache_for(block_hash).is_none());
@@ -1231,7 +1231,7 @@ mod tests {
             block: BlockNumHash { hash: block3_hash, number: 3 },
             parent: wrong_parent,
         };
-        let bundle_state = BundleState::default();
+        let bundle_state = Evm2BundleState::default();
 
         payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
 
@@ -1267,18 +1267,23 @@ mod tests {
             .expect("expected parent cache checkout to succeed");
 
         let polluted_address = Address::random();
-        let bundle_state = BundleState::builder(2..=2)
-            .state_present_account_info(
+        let bundle_state = Evm2BundleState::new_init(
+            2,
+            [(
                 polluted_address,
-                AccountInfo {
-                    balance: U256::from(1337),
-                    nonce: 7,
-                    code_hash: KECCAK_EMPTY,
-                    code: None,
-                    account_id: None,
-                },
-            )
-            .build();
+                (
+                    None,
+                    Some(Account {
+                        balance: U256::from(1337),
+                        nonce: 7,
+                        bytecode_hash: Some(KECCAK_EMPTY),
+                    }),
+                    Default::default(),
+                ),
+            )],
+            [],
+            [],
+        );
 
         // Make parent match the cached slot so we bypass the parent-mismatch guard and exercise
         // the in-use guard specifically.
