@@ -7972,8 +7972,6 @@ dependencies = [
  "reth-tasks",
  "reth-testing-utils",
  "reth-trie",
- "revm-database",
- "revm-state",
  "serde",
  "tokio",
  "tokio-stream",

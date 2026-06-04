@@ -7,11 +7,10 @@ use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue, B256, U256};
 use auto_impl::auto_impl;
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::{Evm2BundleState, ExecutionOutcome};
 use reth_primitives_traits::Bytecode;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::HashedPostState;
-use revm_database::BundleState;
 
 /// This just receives state, or [`ExecutionOutcome`], from the provider
 #[auto_impl::auto_impl(&, Arc, Box)]
@@ -97,8 +96,8 @@ impl<T: AccountReader + BytecodeReader> AccountInfoReader for T {}
 /// Trait that provides the hashed state from various sources.
 #[auto_impl(&, Arc, Box)]
 pub trait HashedPostStateProvider {
-    /// Returns the `HashedPostState` of the provided [`BundleState`].
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState;
+    /// Returns the `HashedPostState` of the provided [`Evm2BundleState`].
+    fn hashed_post_state(&self, bundle_state: &Evm2BundleState) -> HashedPostState;
 }
 
 /// Trait for reading bytecode associated with a given code hash.

@@ -24,7 +24,7 @@ reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
 revm-database.workspace = true
 reth-ethereum-primitives.workspace = true
-evm2.workspace = true
+evm2 = { workspace = true, optional = true }
 
 # ethereum
 alloy-eips.workspace = true
@@ -55,6 +55,7 @@ std = [
     "revm-database/std",
     "reth-ethereum-primitives/std",
     "reth-execution-types/std",
+    "dep:evm2",
     "evm2/std",
     "reth-prune-types/std",
     "reth-storage-errors/std",
