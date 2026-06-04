@@ -23,7 +23,7 @@ use jsonrpsee::RpcModule;
 use parking_lot::Mutex;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
-use reth_evm::ConfigureEvm2BlockExecutor;
+use reth_evm::{ConfigureEvm, ConfigureEvm2BlockExecutor};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
     NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
@@ -415,6 +415,7 @@ impl<Node: FullNodeComponents, EthApi: EthApiTypes> RpcHandle<Node, EthApi> {
     ) -> AdminApi<Node::Network, <Node::Types as NodeTypes>::ChainSpec, Node::Pool>
     where
         <Node::Types as NodeTypes>::ChainSpec: EthereumHardforks,
+        Node::Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
     {
         self.rpc_registry.registry.admin_api()
     }
@@ -938,6 +939,7 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
     RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
 where
     N: FullNodeComponents,
+    N::Evm: ConfigureEvm<Primitives = PrimitivesTy<N::Types>>,
     N::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
     EB: EngineApiBuilder<N>,
@@ -1243,6 +1245,7 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware> NodeAddOns<N>
     for RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
 where
     N: FullNodeComponents,
+    N::Evm: ConfigureEvm<Primitives = PrimitivesTy<N::Types>>,
     <N as FullNodeTypes>::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
     PVB: PayloadValidatorBuilder<N>,
@@ -1297,8 +1300,10 @@ pub struct EthApiCtx<'a, N: FullNodeTypes> {
     pub engine_handle: ConsensusEngineHandle<<N::Types as NodeTypes>::Payload>,
 }
 
-impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks>>>
-    EthApiCtx<'a, N>
+impl<'a, N> EthApiCtx<'a, N>
+where
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks>>,
+    N::Evm: ConfigureEvm<Primitives = PrimitivesTy<N::Types>>,
 {
     /// Provides a [`EthApiBuilder`] with preconfigured config and components.
     pub fn eth_api_builder(self) -> reth_rpc::EthApiBuilder<N, EthRpcConverterFor<N>> {
@@ -1450,7 +1455,8 @@ where
             <<Node::Types as NodeTypes>::Payload as PayloadTypes>::ExecutionData,
         > + ConfigureEvm2Engine<
             <<Node::Types as NodeTypes>::Payload as PayloadTypes>::ExecutionData,
-        > + ConfigureEvm2BlockExecutor<Primitives = PrimitivesTy<Node::Types>>,
+        > + ConfigureEvm2BlockExecutor<Primitives = PrimitivesTy<Node::Types>>
+                 + ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
     >,
     PrimitivesTy<Node::Types>: reth_node_api::NodePrimitives<
         SignedTx = EthereumTxEnvelope<TxEip4844>,
