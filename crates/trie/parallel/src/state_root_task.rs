@@ -2,11 +2,18 @@
 
 use crate::root::ParallelStateRootError;
 use alloy_eip7928::BlockAccessList;
-use alloy_primitives::{keccak256, B256};
+#[cfg(any())]
+use alloy_primitives::keccak256;
+use alloy_primitives::B256;
+#[cfg(any())]
 use derive_more::derive::Deref;
-use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2};
+#[cfg(any())]
+use reth_trie::HashedStorage;
+use reth_trie::{updates::TrieUpdates, HashedPostState, MultiProofTargetsV2};
+#[cfg(any())]
 use revm_state::EvmState;
 use std::sync::Arc;
+#[cfg(any())]
 use tracing::trace;
 
 /// Messages used internally by the multi proof task.
@@ -15,6 +22,7 @@ pub enum StateRootMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargetsV2),
     /// New state update from transaction execution with its source
+    #[cfg(any())]
     StateUpdate(EvmState),
     /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
     HashedStateUpdate(HashedPostState),
@@ -95,6 +103,7 @@ impl StateRootHandle {
     /// Returns a state hook that streams state updates to the background state root task.
     ///
     /// The hook must be dropped after execution completes to signal the end of state updates.
+    #[cfg(any())]
     pub fn state_hook(&self) -> impl FnMut(&EvmState) + use<> {
         let sender = StateHookSender::new(self.updates_tx.clone());
 
@@ -143,8 +152,10 @@ impl StateRootHandle {
 /// This should trigger once the block has been executed (after) the last state update has been
 /// sent. This triggers the exit condition of the multi proof task.
 #[derive(Deref, Debug)]
+#[cfg(any())]
 pub struct StateHookSender(crossbeam_channel::Sender<StateRootMessage>);
 
+#[cfg(any())]
 impl StateHookSender {
     /// Creates a new [`StateHookSender`] wrapping the given channel sender.
     pub const fn new(inner: crossbeam_channel::Sender<StateRootMessage>) -> Self {
@@ -152,6 +163,7 @@ impl StateHookSender {
     }
 }
 
+#[cfg(any())]
 impl Drop for StateHookSender {
     fn drop(&mut self) {
         // Send completion signal when the sender is dropped
@@ -160,6 +172,7 @@ impl Drop for StateHookSender {
 }
 
 /// Converts [`EvmState`] to [`HashedPostState`] by keccak256-hashing addresses and storage slots.
+#[cfg(any())]
 pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
     let mut hashed_state = HashedPostState::with_capacity(update.len());
 

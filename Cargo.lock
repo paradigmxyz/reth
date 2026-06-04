@@ -10693,7 +10693,6 @@ dependencies = [
  "reth-trie",
  "reth-trie-db",
  "reth-trie-sparse",
- "revm-state",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
