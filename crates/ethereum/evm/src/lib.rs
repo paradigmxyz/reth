@@ -70,6 +70,9 @@ pub mod execute {
 mod build;
 pub use build::EthBlockAssembler;
 
+mod evm2_convert;
+pub use evm2_convert::{evm2_recovered_tx, evm2_recovered_tx_ref};
+
 mod receipt;
 pub use receipt::RethReceiptBuilder;
 
