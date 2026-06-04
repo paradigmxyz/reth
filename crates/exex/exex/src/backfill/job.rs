@@ -1,5 +1,5 @@
 use crate::StreamBackfillJob;
-use reth_evm::ConfigureEvm;
+use reth_evm::{database::StateProviderDatabase, ConfigureEvm};
 use std::{
     collections::BTreeMap,
     ops::RangeInclusive,
@@ -17,7 +17,6 @@ use reth_provider::{
     TransactionVariant,
 };
 use reth_prune_types::PruneModes;
-use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ExecutionStageThresholds;
 use reth_tracing::tracing::{debug, trace};
 
@@ -288,8 +287,7 @@ mod tests {
         // Assert that the backfill job produced the same chain as we got before when we were
         // executing only the first block
         assert_eq!(chains.len(), 1);
-        let mut chain = chains.into_iter().next().unwrap();
-        chain.execution_outcome_mut().bundle.reverts.sort();
+        let chain = chains.into_iter().next().unwrap();
         assert_eq!(chain.blocks(), &[(1, block.clone())].into());
         assert_eq!(chain.execution_outcome(), &execution_outcome);
 
@@ -327,8 +325,7 @@ mod tests {
         // Assert that the backfill job single block iterator produces the expected output for each
         // block
         for (i, res) in blocks_and_outcomes.into_iter().enumerate() {
-            let (block, mut execution_output) = res?;
-            execution_output.state.reverts.sort();
+            let (block, execution_output) = res?;
 
             let expected_block = blocks_and_execution_outcomes[i].0.clone();
             let expected_output = &blocks_and_execution_outcomes[i].1;
@@ -378,11 +375,9 @@ mod tests {
             "should produce same number of block results"
         );
 
-        for (i, ((pipeline_block, pipeline_output), (backfill_block, mut backfill_output))) in
+        for (i, ((pipeline_block, pipeline_output), (backfill_block, backfill_output))) in
             pipeline_results.iter().zip(backfill_results).enumerate()
         {
-            backfill_output.state.reverts.sort();
-
             assert_eq!(
                 backfill_block, *pipeline_block,
                 "block {i} mismatch between pipeline and backfill"
@@ -483,13 +478,11 @@ mod tests {
         // Assert two chains, each with one block
         assert_eq!(chains.len(), 2);
 
-        let mut chain1 = chains[0].clone();
-        chain1.execution_outcome_mut().bundle.reverts.sort();
+        let chain1 = chains[0].clone();
         assert_eq!(chain1.blocks(), &[(1, block1)].into());
         assert_eq!(chain1.execution_outcome(), &to_execution_outcome(1, &output1));
 
-        let mut chain2 = chains[1].clone();
-        chain2.execution_outcome_mut().bundle.reverts.sort();
+        let chain2 = chains[1].clone();
         assert_eq!(chain2.blocks(), &[(2, block2)].into());
         assert_eq!(chain2.execution_outcome(), &to_execution_outcome(2, &output2));
 
