@@ -48,7 +48,7 @@ use crate::{
 use alloy_primitives::B256;
 use reth_config::config::StageConfig;
 use reth_consensus::FullConsensus;
-use reth_evm::ConfigureEvm;
+use reth_evm::{ConfigureEvm, ConfigureEvm2BlockExecutor};
 use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader};
 use reth_primitives_traits::{Block, NodePrimitives};
 use reth_provider::HeaderSyncGapProvider;
@@ -138,7 +138,7 @@ where
 
 impl<P, H, B, E> DefaultStages<P, H, B, E>
 where
-    E: ConfigureEvm,
+    E: ConfigureEvm + ConfigureEvm2BlockExecutor,
     H: HeaderDownloader,
     B: BodyDownloader,
 {
@@ -165,7 +165,7 @@ where
     P: HeaderSyncGapProvider + 'static,
     H: HeaderDownloader + 'static,
     B: BodyDownloader + 'static,
-    E: ConfigureEvm,
+    E: ConfigureEvm + ConfigureEvm2BlockExecutor,
     OnlineStages<P, H, B>: StageSet<Provider>,
     OfflineStages<E>: StageSet<Provider>,
 {
@@ -299,7 +299,7 @@ where
 /// - [`PruneStage`]
 #[derive(Debug)]
 #[non_exhaustive]
-pub struct OfflineStages<E: ConfigureEvm> {
+pub struct OfflineStages<E: ConfigureEvm + ConfigureEvm2BlockExecutor> {
     /// Executor factory needs for execution stage
     evm_config: E,
     /// Consensus instance for validating blocks.
@@ -310,7 +310,7 @@ pub struct OfflineStages<E: ConfigureEvm> {
     prune_modes: PruneModes,
 }
 
-impl<E: ConfigureEvm> OfflineStages<E> {
+impl<E: ConfigureEvm + ConfigureEvm2BlockExecutor> OfflineStages<E> {
     /// Create a new set of offline stages with default values.
     pub const fn new(
         evm_config: E,
@@ -324,7 +324,7 @@ impl<E: ConfigureEvm> OfflineStages<E> {
 
 impl<E, Provider> StageSet<Provider> for OfflineStages<E>
 where
-    E: ConfigureEvm,
+    E: ConfigureEvm + ConfigureEvm2BlockExecutor,
     ExecutionStages<E>: StageSet<Provider>,
     PruneSenderRecoveryStage: Stage<Provider>,
     HashingStages: StageSet<Provider>,
@@ -360,7 +360,7 @@ where
 /// A set containing all stages that are required to execute pre-existing block data.
 #[derive(Debug)]
 #[non_exhaustive]
-pub struct ExecutionStages<E: ConfigureEvm> {
+pub struct ExecutionStages<E: ConfigureEvm + ConfigureEvm2BlockExecutor> {
     /// Executor factory that will create executors.
     evm_config: E,
     /// Consensus instance for validating blocks.
@@ -371,7 +371,7 @@ pub struct ExecutionStages<E: ConfigureEvm> {
     sender_recovery_prune_mode: Option<PruneMode>,
 }
 
-impl<E: ConfigureEvm> ExecutionStages<E> {
+impl<E: ConfigureEvm + ConfigureEvm2BlockExecutor> ExecutionStages<E> {
     /// Create a new set of execution stages with default values.
     pub const fn new(
         executor_provider: E,
@@ -385,7 +385,7 @@ impl<E: ConfigureEvm> ExecutionStages<E> {
 
 impl<E, Provider> StageSet<Provider> for ExecutionStages<E>
 where
-    E: ConfigureEvm + 'static,
+    E: ConfigureEvm + ConfigureEvm2BlockExecutor + 'static,
     SenderRecoveryStage: Stage<Provider>,
     ExecutionStage<E>: Stage<Provider>,
 {

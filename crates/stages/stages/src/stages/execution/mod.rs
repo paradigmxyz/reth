@@ -6,9 +6,7 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_config::config::ExecutionConfig;
 use reth_consensus::FullConsensus;
 use reth_db::{static_file::HeaderMask, tables};
-use reth_evm::{
-    database::StateProviderDatabase, execute::Executor, metrics::ExecutorMetrics, ConfigureEvm,
-};
+use reth_evm::{metrics::ExecutorMetrics, ConfigureEvm, ConfigureEvm2BlockExecutor};
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
@@ -70,7 +68,7 @@ mod slot_preimages;
 #[derive(Debug)]
 pub struct ExecutionStage<E>
 where
-    E: ConfigureEvm,
+    E: ConfigureEvm + ConfigureEvm2BlockExecutor,
 {
     /// The stage's internal block executor
     evm_config: E,
@@ -99,7 +97,7 @@ where
 
 impl<E> ExecutionStage<E>
 where
-    E: ConfigureEvm,
+    E: ConfigureEvm + ConfigureEvm2BlockExecutor,
 {
     /// Create new execution stage with specified config.
     pub fn new(
@@ -262,7 +260,7 @@ where
 
 impl<E, Provider> Stage<Provider> for ExecutionStage<E>
 where
-    E: ConfigureEvm,
+    E: ConfigureEvm + ConfigureEvm2BlockExecutor,
     Provider: DBProvider
         + BlockReader<
             Block = <E::Primitives as NodePrimitives>::Block,
@@ -303,9 +301,6 @@ where
 
         self.ensure_consistency(provider, input.checkpoint().block_number, None)?;
 
-        let db = StateProviderDatabase(LatestStateProviderRef::new(provider));
-        let mut executor = self.evm_config.batch_executor(db);
-
         // Progress tracking
         let mut stage_progress = start_block;
         let mut stage_checkpoint = execution_checkpoint(
@@ -318,20 +313,13 @@ where
         let mut fetch_block_duration = Duration::default();
         let mut execution_duration = Duration::default();
 
-        let mut last_block = start_block;
-        let mut last_execution_duration = Duration::default();
-        let mut last_cumulative_gas = 0;
-        let mut last_log_instant = Instant::now();
-        let log_duration = Duration::from_secs(10);
-
         debug!(target: "sync::stages::execution", start = start_block, end = max_block, "Executing range");
 
         // Execute block range
         let mut cumulative_gas = 0;
-        let batch_start = Instant::now();
 
         let mut blocks = Vec::new();
-        let mut results = Vec::new();
+        let mut state: Option<ExecutionOutcome<<E::Primitives as NodePrimitives>::Receipt>> = None;
         for block_number in start_block..=max_block {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -351,12 +339,18 @@ where
             // Execute the block
             let execute_start = Instant::now();
 
-            let result = self.metrics.metered_one(&block, |input| {
-                executor.execute_one(input).map_err(|error| StageError::Block {
-                    block: Box::new(block.block_with_parent()),
-                    error: BlockErrorKind::Execution(error),
-                })
+            let output = self.metrics.metered_one(&block, |input| {
+                let state_provider = LatestStateProviderRef::new(provider);
+                self.evm_config
+                    .execute_evm2_block_with_state_provider_ref(&state_provider, input)
+                    .map_err(|error| StageError::Block {
+                        block: Box::new(block.block_with_parent()),
+                        error: BlockErrorKind::Execution(
+                            reth_evm::execute::BlockExecutionError::msg(error),
+                        ),
+                    })
             })?;
+            let result = output.result.clone();
 
             if let Err(err) =
                 self.consensus.validate_block_post_execution(&block, &result, None, None)
@@ -366,25 +360,14 @@ where
                     error: BlockErrorKind::Validation(err),
                 })
             }
-            results.push(result);
+            let block_state = ExecutionOutcome::single(block_number, output);
+            if let Some(state) = &mut state {
+                state.extend(block_state);
+            } else {
+                state = Some(block_state);
+            }
 
             execution_duration += execute_start.elapsed();
-
-            // Log execution throughput
-            if last_log_instant.elapsed() >= log_duration {
-                info!(
-                    target: "sync::stages::execution",
-                    start = last_block,
-                    end = block_number,
-                    throughput = format_gas_throughput(cumulative_gas - last_cumulative_gas, execution_duration - last_execution_duration),
-                    "Executed block range"
-                );
-
-                last_block = block_number + 1;
-                last_execution_duration = execution_duration;
-                last_cumulative_gas = cumulative_gas;
-                last_log_instant = Instant::now();
-            }
 
             stage_progress = block_number;
             stage_checkpoint.progress.processed += block.header().gas_used();
@@ -394,27 +377,15 @@ where
                 blocks.push(block);
             }
 
-            // Check if we should commit now
-            if self.thresholds.is_end_of_batch(
-                block_number - start_block,
-                executor.size_hint() as u64,
-                cumulative_gas,
-                batch_start.elapsed(),
-            ) {
-                break
-            }
+            // evm2 execution currently accumulates state per block. Commit after one block so the
+            // next stage iteration reads the just-written state instead of relying on revm's old
+            // in-memory batch overlay.
+            break
         }
 
         // prepare execution output for writing
         let time = Instant::now();
-        let mut state = ExecutionOutcome::from_blocks(
-            start_block,
-            reth_evm::execute::revm_bundle_to_evm2(
-                executor.into_state().take_bundle(),
-                start_block,
-            ),
-            results,
-        );
+        let mut state = state.expect("execution loop processed at least one block");
         let write_preparation_duration = time.elapsed();
 
         // log the gas per second for the range we just executed

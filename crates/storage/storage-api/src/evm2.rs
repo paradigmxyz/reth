@@ -2,7 +2,11 @@
 
 use crate::{AccountReader, BlockHashReader, BytecodeReader, StateProvider};
 use alloy_primitives::{Address, BlockNumber, B256, U256};
-use core::ops::{Deref, DerefMut};
+use core::{
+    mem,
+    ops::{Deref, DerefMut},
+    ptr::NonNull,
+};
 use evm2::{
     bytecode::Bytecode,
     evm::{AccountInfo, Database},
@@ -76,6 +80,77 @@ where
     fn get_block_hash(&mut self, number: &Word) -> Result<Option<B256>, Self::Error> {
         let number = u256_to_u64_saturating(*number);
         <DB as BlockHashReader>::block_hash(&self.0, number)
+    }
+}
+
+/// An evm2 [`Database`] implementation backed by a borrowed Reth [`StateProvider`].
+///
+/// evm2 database objects must be `'static` for downcasting. This adapter is only valid while the
+/// borrowed provider passed to [`Self::new`] is alive and must not escape the synchronous execution
+/// call that created it.
+#[derive(Clone, Copy)]
+pub struct BorrowedEvm2StateProviderDatabase {
+    provider: NonNull<dyn StateProvider>,
+}
+
+impl BorrowedEvm2StateProviderDatabase {
+    /// Creates a new borrowed evm2 database adapter.
+    ///
+    /// # Safety
+    ///
+    /// The returned adapter erases the lifetime of `provider` to satisfy evm2's [`Database`]
+    /// downcasting requirements. It must not be used after `provider` is dropped and must not
+    /// escape the synchronous execution call that created it.
+    pub unsafe fn new(provider: &dyn StateProvider) -> Self {
+        let provider = NonNull::from(provider);
+        // SAFETY: The caller guarantees the erased lifetime remains valid for every use of the
+        // returned adapter.
+        let provider = unsafe {
+            mem::transmute::<NonNull<dyn StateProvider + '_>, NonNull<dyn StateProvider + 'static>>(
+                provider,
+            )
+        };
+        Self { provider }
+    }
+
+    fn provider(&self) -> &dyn StateProvider {
+        // SAFETY: `provider` is created from a valid shared reference in `new`. Callers must keep
+        // that provider alive for the duration of synchronous evm2 execution.
+        unsafe { self.provider.as_ref() }
+    }
+}
+
+impl core::fmt::Debug for BorrowedEvm2StateProviderDatabase {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("BorrowedEvm2StateProviderDatabase").finish_non_exhaustive()
+    }
+}
+
+// SAFETY: The adapter only exposes shared `StateProvider` reads and is used for synchronous evm2
+// execution. Sending it is sound under the same assumptions as sending the underlying borrowed
+// provider reference for read-only access.
+unsafe impl Send for BorrowedEvm2StateProviderDatabase {}
+
+impl Database for BorrowedEvm2StateProviderDatabase {
+    type Error = ProviderError;
+
+    fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
+        Ok(AccountReader::basic_account(self.provider(), address)?.map(account_to_evm2))
+    }
+
+    fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Bytecode, Self::Error> {
+        Ok(BytecodeReader::bytecode_by_hash(self.provider(), code_hash)?
+            .map(|bytecode| Bytecode::new_raw(bytecode.original_bytes()))
+            .unwrap_or_default())
+    }
+
+    fn get_storage(&mut self, address: &Address, key: &Word) -> Result<Word, Self::Error> {
+        Ok(self.provider().storage(*address, B256::new(key.to_be_bytes()))?.unwrap_or_default())
+    }
+
+    fn get_block_hash(&mut self, number: &Word) -> Result<Option<B256>, Self::Error> {
+        let number = u256_to_u64_saturating(*number);
+        BlockHashReader::block_hash(self.provider(), number)
     }
 }
 

@@ -68,6 +68,16 @@ pub trait ConfigureEvm2BlockExecutor: ConfigureEvm {
     >
     where
         DB: StateProvider + Send + 'static;
+
+    /// Executes a recovered block using evm2 against a borrowed state provider.
+    fn execute_evm2_block_with_state_provider_ref(
+        &self,
+        state_provider: &dyn StateProvider,
+        block: &RecoveredBlock<BlockTy<Self::Primitives>>,
+    ) -> Result<
+        BlockExecutionOutput<ReceiptTy<Self::Primitives>>,
+        Box<dyn core::error::Error + Send + Sync>,
+    >;
 }
 
 /// Converts a raw transaction into an executable transaction.
