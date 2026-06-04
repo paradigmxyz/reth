@@ -18,7 +18,7 @@ use alloy_rpc_types_eth::{
     BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
 use futures::Future;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
     block::BlockExecutor, env::BlockEnvironment, execute::BlockBuilder, ConfigureEvm, Evm,
@@ -149,6 +149,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     // matching spec behavior where MixDigest is zero-initialized.
                     // If user provides an override, it will be applied by apply_block_overrides.
                     evm_env.block_env.inner_mut().prevrandao = Some(B256::ZERO);
+                    if !this
+                        .provider()
+                        .chain_spec()
+                        .is_paris_active_at_block(evm_env.block_env.number().saturating_to())
+                    {
+                        evm_env.block_env.inner_mut().difficulty = parent.difficulty();
+                    }
 
                     if let Some(block_overrides) = block_overrides {
                         // ensure we don't allow uncapped gas limit per block
