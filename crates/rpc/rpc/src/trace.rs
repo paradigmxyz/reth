@@ -1,45 +1,26 @@
-use alloy_consensus::BlockHeader as _;
 use alloy_eips::BlockId;
-use alloy_evm::block::calc::{base_block_reward_pre_merge, block_reward, ommer_reward};
-use alloy_primitives::{
-    map::{HashMap, HashSet},
-    Address, BlockHash, Bytes, B256, U256,
-};
-use alloy_rpc_types_eth::{
-    state::{EvmOverrides, StateOverride},
-    BlockOverrides, Index,
-};
+#[cfg(any())]
+use alloy_primitives::{map::HashMap, Address, BlockHash};
+use alloy_primitives::{map::HashSet, Bytes, B256};
+use alloy_rpc_types_eth::{state::StateOverride, BlockOverrides, Index};
 use alloy_rpc_types_trace::{
     filter::TraceFilter,
     opcode::{BlockOpcodeGas, TransactionOpcodeGas},
     parity::*,
-    tracerequest::TraceCallRequest,
 };
 use async_trait::async_trait;
 use futures::StreamExt;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_evm::ConfigureEvm;
-use reth_primitives_traits::{BlockBody, BlockHeader};
+#[cfg(any())]
+use reth_primitives_traits::BlockHeader;
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_convert::RpcTxReq;
-use reth_rpc_eth_api::{
-    helpers::{Call, LoadPendingBlock, LoadTransaction, Trace, TraceExt},
-    FromEthApiError, RpcNodeCore,
-};
-use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction, EthConfig};
-use reth_storage_api::{BlockNumReader, BlockReader};
+use reth_rpc_eth_api::helpers::TraceExt;
+use reth_rpc_eth_types::{EthApiError, EthConfig};
 use reth_tasks::pool::BlockingTaskGuard;
-use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
-use revm::DatabaseCommit;
-use revm_inspectors::{
-    opcode::OpcodeGasInspector,
-    storage::StorageInspector,
-    tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
-};
+#[cfg(any())]
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// Maximum number of `trace_filter` blocks replayed concurrently.
 const TRACE_FILTER_BLOCK_BUFFER_SIZE: usize = 4;
@@ -66,28 +47,19 @@ impl<Eth> TraceApi<Eth> {
         Self { inner }
     }
 
-    /// Acquires a permit to execute a tracing call.
-    async fn acquire_trace_permit(
-        &self,
-    ) -> std::result::Result<OwnedSemaphorePermit, AcquireError> {
-        self.inner.blocking_task_guard.clone().acquire_owned().await
-    }
-
     /// Access the underlying `Eth` API.
     pub fn eth_api(&self) -> &Eth {
         &self.inner.eth_api
     }
 }
 
-impl<Eth: RpcNodeCore> TraceApi<Eth> {
-    /// Access the underlying provider.
-    pub fn provider(&self) -> &Eth::Provider {
-        self.inner.eth_api.provider()
-    }
+fn unsupported_trace<T>() -> RpcResult<T> {
+    Err(EthApiError::Unsupported("trace API is unsupported by the evm2 execution path").into())
 }
 
 // === impl TraceApi === //
 
+#[cfg(any())]
 impl<Eth> TraceApi<Eth>
 where
     // tracing methods do _not_ read from mempool, hence no `LoadBlock` trait
@@ -337,6 +309,7 @@ where
     }
 }
 
+#[cfg(any())]
 impl<Eth> TraceApi<Eth>
 where
     // tracing methods read from mempool, hence `LoadBlock` trait bound via
@@ -690,10 +663,8 @@ where
         state_overrides: Option<StateOverride>,
         block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<TraceResults> {
-        let _permit = self.acquire_trace_permit().await;
-        let request =
-            TraceCallRequest { call, trace_types, block_id, state_overrides, block_overrides };
-        Ok(Self::trace_call(self, request).await.map_err(Into::into)?)
+        let _ = (call, trace_types, block_id, state_overrides, block_overrides);
+        unsupported_trace()
     }
 
     /// Handler for `trace_callMany`
@@ -702,8 +673,8 @@ where
         calls: Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
     ) -> RpcResult<Vec<TraceResults>> {
-        let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_call_many(self, calls, block_id).await.map_err(Into::into)?)
+        let _ = (calls, block_id);
+        unsupported_trace()
     }
 
     /// Handler for `trace_rawTransaction`
@@ -713,10 +684,8 @@ where
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
     ) -> RpcResult<TraceResults> {
-        let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_raw_transaction(self, data, trace_types, block_id)
-            .await
-            .map_err(Into::into)?)
+        let _ = (data, trace_types, block_id);
+        unsupported_trace()
     }
 
     /// Handler for `trace_replayBlockTransactions`
@@ -725,10 +694,8 @@ where
         block_id: BlockId,
         trace_types: HashSet<TraceType>,
     ) -> RpcResult<Option<Vec<TraceResultsWithTransactionHash>>> {
-        let _permit = self.acquire_trace_permit().await;
-        Ok(Self::replay_block_transactions(self, block_id, trace_types)
-            .await
-            .map_err(Into::into)?)
+        let _ = (block_id, trace_types);
+        unsupported_trace()
     }
 
     /// Handler for `trace_replayTransaction`
@@ -737,8 +704,8 @@ where
         transaction: B256,
         trace_types: HashSet<TraceType>,
     ) -> RpcResult<TraceResults> {
-        let _permit = self.acquire_trace_permit().await;
-        Ok(Self::replay_transaction(self, transaction, trace_types).await.map_err(Into::into)?)
+        let _ = (transaction, trace_types);
+        unsupported_trace()
     }
 
     /// Handler for `trace_block`
@@ -746,8 +713,8 @@ where
         &self,
         block_id: BlockId,
     ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>> {
-        let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_block(self, block_id).await.map_err(Into::into)?)
+        let _ = block_id;
+        unsupported_trace()
     }
 
     /// Handler for `trace_filter`
@@ -757,7 +724,8 @@ where
     /// # Limitations
     /// This currently requires block filter fields, since reth does not have address indices yet.
     async fn trace_filter(&self, filter: TraceFilter) -> RpcResult<Vec<LocalizedTransactionTrace>> {
-        Ok(Self::trace_filter(self, filter).await.map_err(Into::into)?)
+        let _ = filter;
+        unsupported_trace()
     }
 
     /// Returns transaction trace at given index.
@@ -767,10 +735,8 @@ where
         hash: B256,
         indices: Vec<Index>,
     ) -> RpcResult<Option<LocalizedTransactionTrace>> {
-        let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_get(self, hash, indices.into_iter().map(Into::into).collect())
-            .await
-            .map_err(Into::into)?)
+        let _ = (hash, indices);
+        unsupported_trace()
     }
 
     /// Handler for `trace_transaction`
@@ -778,8 +744,8 @@ where
         &self,
         hash: B256,
     ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>> {
-        let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_transaction(self, hash).await.map_err(Into::into)?)
+        let _ = hash;
+        unsupported_trace()
     }
 
     /// Handler for `trace_transactionOpcodeGas`
@@ -787,14 +753,14 @@ where
         &self,
         tx_hash: B256,
     ) -> RpcResult<Option<TransactionOpcodeGas>> {
-        let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_transaction_opcode_gas(self, tx_hash).await.map_err(Into::into)?)
+        let _ = tx_hash;
+        unsupported_trace()
     }
 
     /// Handler for `trace_blockOpcodeGas`
     async fn trace_block_opcode_gas(&self, block_id: BlockId) -> RpcResult<Option<BlockOpcodeGas>> {
-        let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_block_opcode_gas(self, block_id).await.map_err(Into::into)?)
+        let _ = block_id;
+        unsupported_trace()
     }
 }
 
@@ -813,13 +779,16 @@ struct TraceApiInner<Eth> {
     /// Access to commonly used code of the `eth` namespace
     eth_api: Eth,
     // restrict the number of concurrent calls to `trace_*`
+    #[expect(dead_code)]
     blocking_task_guard: BlockingTaskGuard,
     // eth config settings
+    #[expect(dead_code)]
     eth_config: EthConfig,
 }
 
 /// Response type for storage tracing that contains all accessed storage slots
 /// for a transaction.
+#[cfg(any())]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionStorageAccess {
@@ -834,6 +803,7 @@ pub struct TransactionStorageAccess {
 }
 
 /// Response type for storage tracing that contains all accessed storage slots
+#[cfg(any())]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockStorageAccess {
@@ -847,6 +817,7 @@ pub struct BlockStorageAccess {
 
 /// Helper to construct a [`LocalizedTransactionTrace`] that describes a reward to the block
 /// beneficiary.
+#[cfg(any())]
 fn reward_trace<H: BlockHeader>(
     block_hash: BlockHash,
     header: &H,
