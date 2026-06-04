@@ -14,7 +14,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_ethereum_primitives::{Block, BlockBody, Transaction};
-use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
+use reth_evm::ConfigureEvm2BlockExecutor;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
@@ -338,9 +338,9 @@ async fn run_pipeline_forward_and_unwind(
         // Execute in a scope so state_provider is dropped before we use provider for writes
         let output = {
             let state_provider = provider.latest();
-            let db = StateProviderDatabase::new(&*state_provider);
-            let executor = evm_config.batch_executor(db);
-            executor.execute(&block_with_senders)?
+            evm_config
+                .execute_evm2_block_with_state_provider_ref(&*state_provider, &block_with_senders)
+                .map_err(|err| eyre::eyre!(err.to_string()))?
         };
 
         let gas_used = output.gas_used;
