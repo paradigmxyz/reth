@@ -1,7 +1,7 @@
 //! Helpers for testing.
 
 use crate::{ConfigureEvm, EvmEnvFor};
-use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader};
+use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader, TxTy};
 
 /// A no-op EVM config that panics on any call. Used as a typesystem hack to satisfy
 /// [`ConfigureEvm`] bounds.
@@ -120,5 +120,15 @@ where
 
     fn evm2_block_env_for_payload(&self, payload: &T) -> Result<evm2::env::BlockEnv, Self::Error> {
         self.inner().evm2_block_env_for_payload(payload)
+    }
+
+    fn evm2_recovered_txs_for_payload(
+        &self,
+        payload: &T,
+    ) -> Result<
+        alloc::vec::Vec<alloy_consensus::transaction::Recovered<TxTy<Self::Primitives>>>,
+        alloc::boxed::Box<dyn core::error::Error + Send + Sync>,
+    > {
+        self.inner().evm2_recovered_txs_for_payload(payload)
     }
 }

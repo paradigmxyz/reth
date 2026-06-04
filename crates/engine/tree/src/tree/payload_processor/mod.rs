@@ -88,6 +88,9 @@ pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 /// prewarm workers exceeds the execution time saved.
 pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
 
+/// Transaction prewarming still depends on the old revm/alloy-evm execution path.
+const DISABLE_REVM_TRANSACTION_PREWARMING: bool = true;
+
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorTx<Evm, I> = RecoveredTx<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
 
@@ -536,6 +539,10 @@ where
                 );
                 PrewarmMode::Skipped
             }
+        } else if DISABLE_REVM_TRANSACTION_PREWARMING {
+            // Transaction prewarming still executes through the old revm/alloy-evm path. Keep it
+            // disabled while the active sync execution path is evm2-native.
+            PrewarmMode::Skipped
         } else if self.disable_transaction_prewarming ||
             env.transaction_count < SMALL_BLOCK_TX_THRESHOLD
         {

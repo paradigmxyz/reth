@@ -13,9 +13,10 @@ pub use reth_rpc_builder::{
 pub use reth_trie_db::ChangesetCache;
 
 use crate::{
-    invalid_block_hook::InvalidBlockHookExt, ConfigureEngineEvm, ConsensusEngineEvent,
-    ConsensusEngineHandle,
+    invalid_block_hook::InvalidBlockHookExt, ConfigureEngineEvm, ConfigureEvm2Engine,
+    ConsensusEngineEvent, ConsensusEngineHandle,
 };
+use alloy_consensus::{EthereumReceipt, EthereumTxEnvelope, TxEip4844};
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
 use jsonrpsee::RpcModule;
@@ -1446,7 +1447,13 @@ where
     Node: FullNodeComponents<
         Evm: ConfigureEngineEvm<
             <<Node::Types as NodeTypes>::Payload as PayloadTypes>::ExecutionData,
+        > + ConfigureEvm2Engine<
+            <<Node::Types as NodeTypes>::Payload as PayloadTypes>::ExecutionData,
         >,
+    >,
+    PrimitivesTy<Node::Types>: reth_node_api::NodePrimitives<
+        SignedTx = EthereumTxEnvelope<TxEip4844>,
+        Receipt = EthereumReceipt,
     >,
     EV: PayloadValidatorBuilder<Node>,
     EV::Validator: reth_engine_primitives::PayloadValidator<

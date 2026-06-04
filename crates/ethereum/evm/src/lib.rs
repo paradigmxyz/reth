@@ -17,8 +17,8 @@
 
 extern crate alloc;
 
-use alloc::{borrow::Cow, sync::Arc};
-use alloy_consensus::Header;
+use alloc::{borrow::Cow, sync::Arc, vec::Vec};
+use alloy_consensus::{transaction::Recovered, Header};
 use alloy_evm::{
     eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
     EthEvmFactory, FromRecoveredTx, FromTxWithEncoded,
@@ -498,6 +498,23 @@ where
             payload,
             self.chain_spec().blob_params_at_timestamp(payload.payload.timestamp()),
         ))
+    }
+
+    fn evm2_recovered_txs_for_payload(
+        &self,
+        payload: &ExecutionData,
+    ) -> Result<Vec<Recovered<TransactionSigned>>, Box<dyn core::error::Error + Send + Sync>> {
+        payload
+            .payload
+            .transactions()
+            .iter()
+            .map(|tx| {
+                let tx =
+                    TransactionSigned::decode_2718_exact(tx.as_ref()).map_err(AnyError::new)?;
+                let signer = tx.try_recover().map_err(AnyError::new)?;
+                Ok(tx.with_signer(signer))
+            })
+            .collect()
     }
 }
 

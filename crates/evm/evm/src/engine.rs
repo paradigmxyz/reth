@@ -1,5 +1,6 @@
 use crate::{execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor, TxEnvFor};
-use alloy_consensus::transaction::Either;
+use alloc::{boxed::Box, vec::Vec};
+use alloy_consensus::transaction::{Either, Recovered};
 use alloy_evm::{block::ExecutableTxParts, RecoveredTx};
 use rayon::prelude::*;
 use reth_primitives_traits::{HeaderTy, TxTy};
@@ -44,6 +45,12 @@ pub trait ConfigureEvm2Engine<ExecutionData>: ConfigureEngineEvm<ExecutionData> 
         &self,
         payload: &ExecutionData,
     ) -> Result<evm2::env::BlockEnv, Self::Error>;
+
+    /// Returns recovered transactions for evm2-native payload execution.
+    fn evm2_recovered_txs_for_payload(
+        &self,
+        payload: &ExecutionData,
+    ) -> Result<Vec<Recovered<TxTy<Self::Primitives>>>, Box<dyn core::error::Error + Send + Sync>>;
 }
 
 /// Converts a raw transaction into an executable transaction.
