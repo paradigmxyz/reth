@@ -1,20 +1,7 @@
 //! Helper traits to wrap generic l1 errors, in network specific error type configured in
 //! `reth_rpc_eth_api::EthApiTypes`.
 
-#[cfg(any())]
-use crate::RevertError;
 use crate::{simulate::EthSimulateError, EthApiError};
-#[cfg(any())]
-use alloy_primitives::Bytes;
-#[cfg(any())]
-use reth_errors::ProviderError;
-#[cfg(any())]
-use reth_evm::{ConfigureEvm, EvmErrorFor, HaltReasonFor};
-#[cfg(any())]
-use revm::{
-    context::result::ExecutionResult, context_interface::result::HaltReason,
-    database::bal::EvmDatabaseError,
-};
 
 use super::RpcInvalidTransactionError;
 
@@ -118,73 +105,7 @@ impl AsEthApiError for EthApiError {
     }
 }
 
-/// Helper trait to convert from revm errors.
-#[cfg(not(any()))]
+/// Helper trait to convert from EVM errors.
 pub trait FromEvmError<Evm>: FromEthApiError {}
 
-#[cfg(not(any()))]
 impl<T, Evm> FromEvmError<Evm> for T where T: FromEthApiError {}
-
-/// Helper trait to convert from revm errors.
-#[cfg(any())]
-pub trait FromEvmError<Evm: ConfigureEvm>:
-    From<EvmErrorFor<Evm, EvmDatabaseError<ProviderError>>>
-    + FromEvmHalt<HaltReasonFor<Evm>>
-    + FromRevert
-{
-    /// Converts from EVM error to this type.
-    fn from_evm_err(err: EvmErrorFor<Evm, EvmDatabaseError<ProviderError>>) -> Self {
-        err.into()
-    }
-
-    /// Ensures the execution result is successful or returns an error,
-    fn ensure_success(result: ExecutionResult<HaltReasonFor<Evm>>) -> Result<Bytes, Self> {
-        match result {
-            ExecutionResult::Success { output, .. } => Ok(output.into_data()),
-            ExecutionResult::Revert { output, .. } => Err(Self::from_revert(output)),
-            ExecutionResult::Halt { reason, gas, .. } => {
-                Err(Self::from_evm_halt(reason, gas.tx_gas_used()))
-            }
-        }
-    }
-}
-
-#[cfg(any())]
-impl<T, Evm> FromEvmError<Evm> for T
-where
-    T: From<EvmErrorFor<Evm, EvmDatabaseError<ProviderError>>>
-        + FromEvmHalt<HaltReasonFor<Evm>>
-        + FromRevert,
-    Evm: ConfigureEvm,
-{
-}
-
-/// Helper trait to convert from revm errors.
-#[cfg(any())]
-pub trait FromEvmHalt<Halt> {
-    /// Converts from EVM halt to this type.
-    fn from_evm_halt(halt: Halt, gas_limit: u64) -> Self;
-}
-
-#[cfg(any())]
-impl FromEvmHalt<HaltReason> for EthApiError {
-    fn from_evm_halt(halt: HaltReason, gas_limit: u64) -> Self {
-        RpcInvalidTransactionError::halt(halt, gas_limit).into()
-    }
-}
-
-/// Helper trait to construct errors from unexpected reverts.
-#[cfg(any())]
-pub trait FromRevert {
-    /// Constructs an error from revert bytes.
-    ///
-    /// This is only invoked when revert was unexpected (`eth_call`, `eth_estimateGas`, etc).
-    fn from_revert(output: Bytes) -> Self;
-}
-
-#[cfg(any())]
-impl FromRevert for EthApiError {
-    fn from_revert(output: Bytes) -> Self {
-        RpcInvalidTransactionError::Revert(RevertError::new(output)).into()
-    }
-}
