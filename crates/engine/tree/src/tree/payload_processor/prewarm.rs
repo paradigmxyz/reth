@@ -289,7 +289,7 @@ where
             execution_cache.update_with_guard(|cached| {
                 // consumes the `SavedCache` held by the prewarming task, which releases its usage
                 // guard
-                let caches = saved_cache.cache().clone();
+                let caches = saved_cache.into_cache();
                 let new_cache = SavedCache::new(hash, caches);
 
                 // Insert state into cache while holding the lock

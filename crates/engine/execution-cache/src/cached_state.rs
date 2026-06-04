@@ -1016,6 +1016,11 @@ impl SavedCache {
         &self.caches
     }
 
+    /// Consumes this saved cache and returns the underlying [`ExecutionCache`].
+    pub fn into_cache(self) -> ExecutionCache {
+        self.caches
+    }
+
     /// Updates the cache metrics (size/capacity/collisions) from the stats handlers.
     pub fn update_metrics(&self, metrics: Option<&CachedStateCacheMetrics>) {
         if let Some(metrics) = metrics {
