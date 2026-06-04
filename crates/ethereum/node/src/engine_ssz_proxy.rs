@@ -97,7 +97,7 @@ impl<ChainSpec> EngineSszProxyHandle<ChainSpec> {
     }
 
     /// Sets the chain spec used for getBlobs fork validation.
-    pub async fn set_chain_spec(&self, chain_spec: Arc<ChainSpec>) {
+    pub async fn set_chain_spec(&mut self, chain_spec: Arc<ChainSpec>) {
         self.chain_spec = chain_spec;
     }
 
@@ -324,9 +324,8 @@ where
         &self,
         versioned_hashes: Vec<B256>,
     ) -> EngineApiResult<Vec<Option<BlobAndProofV1>>> {
-        let chain_spec = self.chain_spec().await.ok_or_else(engine_unavailable)?;
         let current_timestamp = current_timestamp();
-        if chain_spec.is_osaka_active_at_timestamp(current_timestamp) {
+        if self.chain_spec().is_osaka_active_at_timestamp(current_timestamp) {
             return Err(unsupported_fork())
         }
 
@@ -345,9 +344,8 @@ where
         &self,
         versioned_hashes: Vec<B256>,
     ) -> EngineApiResult<Option<Vec<BlobAndProofV2>>> {
-        let chain_spec = self.chain_spec().await.ok_or_else(engine_unavailable)?;
         let current_timestamp = current_timestamp();
-        if !chain_spec.is_osaka_active_at_timestamp(current_timestamp) {
+        if !self.chain_spec.is_osaka_active_at_timestamp(current_timestamp) {
             return Err(unsupported_fork())
         }
 
@@ -366,9 +364,8 @@ where
         &self,
         versioned_hashes: Vec<B256>,
     ) -> EngineApiResult<Option<Vec<Option<BlobAndProofV2>>>> {
-        let chain_spec = self.chain_spec().await.ok_or_else(engine_unavailable)?;
         let current_timestamp = current_timestamp();
-        if !chain_spec.is_osaka_active_at_timestamp(current_timestamp) {
+        if !self.chain_spec.is_osaka_active_at_timestamp(current_timestamp) {
             return Err(unsupported_fork())
         }
 
@@ -394,9 +391,8 @@ where
         versioned_hashes: Vec<B256>,
         indices_bitarray: B128,
     ) -> EngineApiResult<Option<Vec<Option<BlobCellsAndProofsV1>>>> {
-        let chain_spec = self.chain_spec().await.ok_or_else(engine_unavailable)?;
         let current_timestamp = current_timestamp();
-        if !chain_spec.is_amsterdam_active_at_timestamp(current_timestamp) {
+        if !self.chain_spec.is_amsterdam_active_at_timestamp(current_timestamp) {
             return Err(unsupported_fork())
         }
 
