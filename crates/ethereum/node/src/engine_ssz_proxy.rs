@@ -61,7 +61,6 @@ impl<C> Clone for EngineSszProxyHandle<C> {
             engine: self.engine.clone(),
             blob_store: self.blob_store.clone(),
             chain_spec: self.chain_spec.clone(),
-            is_syncing: self.is_syncing.clone(),
         }
     }
 }
@@ -78,7 +77,6 @@ impl<C> Default for EngineSszProxyHandle<C> {
             engine: Default::default(),
             blob_store: Default::default(),
             chain_spec: Default::default(),
-            is_syncing: Default::default(),
         }
     }
 }
@@ -103,10 +101,6 @@ impl<C> EngineSszProxyHandle<C> {
         *self.chain_spec.write().await = Some(chain_spec);
     }
 
-    /// Sets the sync-state callback used by getBlobs V3/V4 null responses.
-    pub async fn set_is_syncing(&self, is_syncing: impl Fn() -> bool + Send + Sync + 'static) {
-        *self.is_syncing.write().await = Some(Arc::new(is_syncing));
-    }
 
     async fn blob_store(&self) -> Option<Arc<dyn BlobStore>> {
         self.blob_store.read().await.clone()
