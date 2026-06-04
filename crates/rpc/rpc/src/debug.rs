@@ -565,24 +565,40 @@ where
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
         mode: ExecutionWitnessMode,
     ) -> Result<ExecutionWitness, Eth::Error> {
-        let block_number = block.header().number();
-        self.eth_api()
-            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
-                let block_executor = eth_api.evm_config().executor(&mut db);
+        #[cfg(not(any()))]
+        {
+            let _ = (block, mode);
+            return Err(Eth::Error::from_eth_err(EthApiError::Unsupported(
+                "debug execution witnesses are unsupported by the evm2 execution path",
+            )))
+        }
 
-                let mut witness_record = ExecutionWitnessRecord::default();
+        #[cfg(any())]
+        {
+            let block_number = block.header().number();
+            self.eth_api()
+                .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                    let block_executor = eth_api.evm_config().executor(&mut db);
 
-                let _ = block_executor
-                    .execute_with_state_closure(&block, |statedb: &State<_>| {
-                        witness_record.record_executed_state(statedb, mode);
-                    })
-                    .map_err(|err| EthApiError::Internal(err.into()))?;
+                    let mut witness_record = ExecutionWitnessRecord::default();
 
-                Ok(witness_record
-                    .into_execution_witness(&db.database.0, eth_api.provider(), block_number, mode)
-                    .map_err(EthApiError::from)?)
-            })
-            .await
+                    let _ = block_executor
+                        .execute_with_state_closure(&block, |statedb: &State<_>| {
+                            witness_record.record_executed_state(statedb, mode);
+                        })
+                        .map_err(|err| EthApiError::Internal(err.into()))?;
+
+                    Ok(witness_record
+                        .into_execution_witness(
+                            &db.database.0,
+                            eth_api.provider(),
+                            block_number,
+                            mode,
+                        )
+                        .map_err(EthApiError::from)?)
+                })
+                .await
+        }
     }
 
     /// Returns account information, including the storage root, after replaying the block through
@@ -593,6 +609,15 @@ where
         tx_index: Index,
         address: Address,
     ) -> Result<Option<Account>, Eth::Error> {
+        #[cfg(not(any()))]
+        {
+            let _ = (block_id, tx_index, address);
+            return Err(Eth::Error::from_eth_err(EthApiError::Unsupported(
+                "debug account replay is unsupported by the evm2 execution path",
+            )))
+        }
+
+        #[cfg(any())]
         self.replay_block_until(block_id, tx_index, move |db| Self::account(db, address))
             .await
             .map(Option::flatten)
@@ -606,11 +631,21 @@ where
         tx_index: Index,
         address: Address,
     ) -> Result<Option<AccountInfo>, Eth::Error> {
+        #[cfg(not(any()))]
+        {
+            let _ = (block_id, tx_index, address);
+            return Err(Eth::Error::from_eth_err(EthApiError::Unsupported(
+                "debug account replay is unsupported by the evm2 execution path",
+            )))
+        }
+
+        #[cfg(any())]
         self.replay_block_until(block_id, tx_index, move |db| Self::account_info(db, address)).await
     }
 
     /// Replays a block through the transaction at the given index and calls `f` with the resulting
     /// state.
+    #[cfg(any())]
     async fn replay_block_until<F, R>(
         &self,
         block_id: BlockId,
@@ -662,6 +697,7 @@ where
     }
 
     /// Retrieves the account's balance, nonce, code hash, and storage root from the given state.
+    #[cfg(any())]
     fn account(db: &mut StateCacheDb, address: Address) -> Result<Option<Account>, Eth::Error> {
         let account = db.basic(address).map_err(Eth::Error::from_eth_err)?;
         let Some(account) = account else { return Ok(None) };
@@ -689,6 +725,7 @@ where
     }
 
     /// Retrieves the account's balance, nonce, and code from the given state.
+    #[cfg(any())]
     fn account_info<DB>(db: &mut DB, address: Address) -> Result<AccountInfo, Eth::Error>
     where
         DB: Database,

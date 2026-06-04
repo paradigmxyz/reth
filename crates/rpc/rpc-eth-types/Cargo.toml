@@ -21,7 +21,6 @@ reth-metrics.workspace = true
 reth-ethereum-primitives = { workspace = true, features = ["rpc"] }
 reth-primitives-traits = { workspace = true, features = ["rpc-compat"] }
 reth-storage-api.workspace = true
-reth-revm.workspace = true
 reth-rpc-server-types.workspace = true
 reth-rpc-convert.workspace = true
 reth-tasks.workspace = true
@@ -30,7 +29,6 @@ reth-trie.workspace = true
 
 # ethereum
 alloy-chains.workspace = true
-alloy-eip7928.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
@@ -39,7 +37,6 @@ alloy-transport.workspace = true
 alloy-rpc-client = { workspace = true, features = ["reqwest"] }
 alloy-rpc-types-eth.workspace = true
 alloy-serde.workspace = true
-revm.workspace = true
 
 # rpc
 jsonrpsee-core.workspace = true

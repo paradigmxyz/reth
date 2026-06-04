@@ -3,14 +3,18 @@
 use super::{EthStateCacheConfig, MultiConsumerLruCache};
 use crate::block::CachedTransaction;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
+#[cfg(any())]
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{Address, TxHash, B256};
+#[cfg(any())]
+use alloy_primitives::Address;
+use alloy_primitives::{TxHash, B256};
 use futures::{stream::FuturesOrdered, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::Chain;
 use reth_primitives_traits::{Block, BlockBody, InMemorySize, NodePrimitives, RecoveredBlock};
+#[cfg(any())]
 use reth_revm::{
     bytecode::Bytecode,
     primitives::{StorageKey, StorageValue},
@@ -277,6 +281,7 @@ impl<N: NodePrimitives> EthStateCache<N> {
     /// Requests the revm BAL for the block hash.
     ///
     /// Returns `None` if the BAL does not exist.
+    #[cfg(any())]
     pub async fn get_bal(
         &self,
         block_hash: B256,
@@ -616,6 +621,9 @@ where
                                     ActionSender::new(CacheKind::Bal, block_hash, action_tx);
                                 this.action_task_spawner.spawn_blocking_task(async move {
                                     let _permit = rate_limiter.acquire().await;
+                                    let _ = provider;
+                                    let res = Ok(None);
+                                    #[cfg(any())]
                                     let res = provider
                                         .bal_store()
                                         .get_decoded_by_hash(block_hash)
@@ -752,6 +760,7 @@ enum CacheAction<B: Block, R> {
         block_hash: B256,
         response_tx: ReceiptsResponseSender<R>,
     },
+    #[expect(dead_code)]
     GetBal {
         block_hash: B256,
         response_tx: BalResponseSender,
@@ -935,8 +944,9 @@ pub async fn cache_new_blocks_task<St, N: NodePrimitives>(
 
 /// Cached decoded revm BAL.
 #[derive(Clone, Debug)]
-pub(crate) struct CachedRevmBal(Arc<DecodedBal<Arc<RevmBal>>>);
+pub(crate) struct CachedRevmBal;
 
+#[cfg(any())]
 impl CachedRevmBal {
     /// Creates a cached revm BAL from an owned decoded BAL.
     #[inline]
@@ -947,33 +957,36 @@ impl CachedRevmBal {
 
 impl InMemorySize for CachedRevmBal {
     fn size(&self) -> usize {
-        core::mem::size_of::<Self>() + decoded_revm_bal_size(&self.0)
+        core::mem::size_of::<Self>()
     }
 }
 
-fn decoded_revm_bal_size(bal: &DecodedBal<Arc<RevmBal>>) -> usize {
-    core::mem::size_of::<DecodedBal<Arc<RevmBal>>>() +
-        bal.as_raw().len() +
-        revm_bal_size(bal.as_bal())
+#[cfg(any())]
+fn decoded_revm_bal_size(bal: &DecodedBal<RevmBal>) -> usize {
+    core::mem::size_of::<DecodedBal<RevmBal>>() + bal.as_raw().len() + revm_bal_size(bal.as_bal())
 }
 
-fn revm_bal_size(bal: &Arc<RevmBal>) -> usize {
+#[cfg(any())]
+fn revm_bal_size(bal: &RevmBal) -> usize {
     core::mem::size_of::<RevmBal>() +
         bal.accounts.capacity() * core::mem::size_of::<(Address, RevmAccountBal)>() +
         bal.accounts.values().map(revm_account_bal_heap_size).sum::<usize>()
 }
 
+#[cfg(any())]
 fn revm_account_bal_heap_size(account: &RevmAccountBal) -> usize {
     revm_account_info_bal_heap_size(&account.account_info) +
         revm_storage_bal_heap_size(&account.storage)
 }
 
+#[cfg(any())]
 fn revm_account_info_bal_heap_size(account_info: &RevmAccountInfoBal) -> usize {
     revm_bal_writes_heap_size(&account_info.nonce, |_| 0) +
         revm_bal_writes_heap_size(&account_info.balance, |_| 0) +
         revm_bal_writes_heap_size(&account_info.code, revm_code_write_heap_size)
 }
 
+#[cfg(any())]
 fn revm_storage_bal_heap_size(storage: &RevmStorageBal) -> usize {
     storage.storage.len() * core::mem::size_of::<(StorageKey, RevmBalWrites<StorageValue>)>() +
         storage
@@ -983,6 +996,7 @@ fn revm_storage_bal_heap_size(storage: &RevmStorageBal) -> usize {
             .sum::<usize>()
 }
 
+#[cfg(any())]
 fn revm_bal_writes_heap_size<T, F>(writes: &RevmBalWrites<T>, mut item_heap_size: F) -> usize
 where
     T: PartialEq + Clone,
@@ -992,6 +1006,7 @@ where
         writes.writes.iter().map(|(_, item)| item_heap_size(item)).sum::<usize>()
 }
 
+#[cfg(any())]
 fn revm_code_write_heap_size((_, bytecode): &(B256, Bytecode)) -> usize {
     bytecode.bytes_ref().len()
 }
@@ -999,21 +1014,36 @@ fn revm_code_write_heap_size((_, bytecode): &(B256, Bytecode)) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{transaction::TransactionMeta, Header};
+    #[cfg(any())]
+    use alloy_consensus::transaction::TransactionMeta;
+    use alloy_consensus::Header;
+    #[cfg(any())]
     use alloy_eip7928::BlockAccessIndex;
+    #[cfg(any())]
     use alloy_eips::{BlockHashOrNumber, NumHash};
-    use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, Signature, TxHash, TxNumber};
+    use alloy_primitives::{Address, Signature};
+    #[cfg(any())]
+    use alloy_primitives::{BlockHash, BlockNumber, Bytes, TxHash, TxNumber};
+    #[cfg(any())]
     use core::ops::{RangeBounds, RangeInclusive};
+    #[cfg(any())]
     use reth_db_models::StoredBlockBodyIndices;
+    #[cfg(any())]
+    use reth_ethereum_primitives::Receipt;
     use reth_ethereum_primitives::{
-        Block, BlockBody, EthPrimitives, Receipt, Transaction, TransactionSigned,
+        Block, BlockBody, EthPrimitives, Transaction, TransactionSigned,
     };
-    use reth_primitives_traits::{RecoveredBlock, SealedHeader};
+    use reth_primitives_traits::RecoveredBlock;
+    #[cfg(any())]
+    use reth_primitives_traits::SealedHeader;
+    use reth_storage_api::noop::NoopProvider;
+    #[cfg(any())]
     use reth_storage_api::{
-        noop::NoopProvider, BalProvider, BalStore, BalStoreHandle, BlockBodyIndicesProvider,
-        BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider, ReceiptProvider,
+        BalProvider, BalStore, BalStoreHandle, BlockBodyIndicesProvider, BlockHashReader,
+        BlockNumReader, BlockReader, BlockSource, HeaderProvider, ReceiptProvider,
         TransactionVariant, TransactionsProvider,
     };
+    #[cfg(any())]
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn test_service() -> EthStateCacheService<NoopProvider, Runtime> {
@@ -1032,8 +1062,9 @@ mod tests {
         service
     }
 
-    fn test_decoded_revm_bal() -> DecodedBal<Arc<RevmBal>> {
-        DecodedBal::new(Arc::new(RevmBal::default()), Bytes::from_static(&[0xc0]))
+    #[cfg(any())]
+    fn test_decoded_revm_bal() -> DecodedBal<RevmBal> {
+        DecodedBal::new(RevmBal::default(), Bytes::from_static(&[0xc0]))
     }
 
     fn test_block() -> RecoveredBlock<Block> {
@@ -1098,6 +1129,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(any())]
     fn reorg_evicts_cached_bal() {
         let mut service = test_service();
         let block_hash = B256::repeat_byte(0x44);
@@ -1111,6 +1143,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(any())]
     fn reorg_forwards_bal_to_queued_requests() {
         let mut service = test_service();
         let block_hash = B256::repeat_byte(0x55);
@@ -1127,6 +1160,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(any())]
     fn cached_revm_bal_size_accounts_for_nested_allocations() {
         let mut account = RevmAccountBal::default();
         account.account_info.nonce.writes.push((BlockAccessIndex::new(1), 1));
@@ -1156,6 +1190,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(any())]
     async fn get_bal_uses_cached_revm_bal() {
         let fetches = Arc::new(AtomicUsize::default());
         let provider = TestBalProvider::new(fetches.clone());
@@ -1180,6 +1215,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(any())]
     async fn concurrent_get_bal_requests_share_fetch() {
         let fetches = Arc::new(AtomicUsize::default());
         let provider = TestBalProvider::new(fetches.clone());
@@ -1205,16 +1241,19 @@ mod tests {
     }
 
     #[derive(Clone, Debug, Default)]
+    #[cfg(any())]
     struct TestBalProvider {
         bal_store: BalStoreHandle,
     }
 
+    #[cfg(any())]
     impl TestBalProvider {
         fn new(fetches: Arc<AtomicUsize>) -> Self {
             Self { bal_store: BalStoreHandle::new(TestBalStore { fetches }) }
         }
     }
 
+    #[cfg(any())]
     impl BalProvider for TestBalProvider {
         fn bal_store(&self) -> &BalStoreHandle {
             &self.bal_store
@@ -1222,10 +1261,12 @@ mod tests {
     }
 
     #[derive(Debug)]
+    #[cfg(any())]
     struct TestBalStore {
         fetches: Arc<AtomicUsize>,
     }
 
+    #[cfg(any())]
     impl BalStore for TestBalStore {
         fn insert(&self, _num_hash: NumHash, _bal: reth_storage_api::RawBal) -> ProviderResult<()> {
             Ok(())
@@ -1246,6 +1287,7 @@ mod tests {
         }
     }
 
+    #[cfg(any())]
     impl BlockHashReader for TestBalProvider {
         fn block_hash(&self, _number: BlockNumber) -> ProviderResult<Option<B256>> {
             Ok(None)
@@ -1260,6 +1302,7 @@ mod tests {
         }
     }
 
+    #[cfg(any())]
     impl BlockNumReader for TestBalProvider {
         fn chain_info(&self) -> ProviderResult<reth_chainspec::ChainInfo> {
             Ok(reth_chainspec::ChainInfo::default())
@@ -1278,6 +1321,7 @@ mod tests {
         }
     }
 
+    #[cfg(any())]
     impl HeaderProvider for TestBalProvider {
         type Header = Header;
 
@@ -1312,6 +1356,7 @@ mod tests {
         }
     }
 
+    #[cfg(any())]
     impl BlockBodyIndicesProvider for TestBalProvider {
         fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
             Ok(None)
@@ -1325,6 +1370,7 @@ mod tests {
         }
     }
 
+    #[cfg(any())]
     impl TransactionsProvider for TestBalProvider {
         type Transaction = TransactionSigned;
 
@@ -1387,6 +1433,7 @@ mod tests {
         }
     }
 
+    #[cfg(any())]
     impl ReceiptProvider for TestBalProvider {
         type Receipt = Receipt;
 
@@ -1420,6 +1467,7 @@ mod tests {
         }
     }
 
+    #[cfg(any())]
     impl BlockReader for TestBalProvider {
         type Block = Block;
 

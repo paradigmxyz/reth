@@ -22,7 +22,9 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                 .recovered_block(block_id)
                 .await?
                 .ok_or_else(|| EthApiError::HeaderNotFound(block_id))?;
+            let _ = block;
 
+            #[cfg(any())]
             if let Some(cached_bal) =
                 self.cache().get_bal(block.hash()).await.map_err(Self::Error::from_eth_err)?
             {
@@ -93,14 +95,26 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                 .recovered_block(block_id)
                 .await?
                 .ok_or_else(|| EthApiError::HeaderNotFound(block_id))?;
+            let _ = block;
 
+            #[cfg(any())]
             if let Some(cached_bal) =
                 self.cache().get_bal(block.hash()).await.map_err(Self::Error::from_eth_err)?
             {
                 return Ok(Some(cached_bal.as_raw().clone()))
             }
 
-            Ok(self.get_block_access_list(block_id).await?.map(|bal| alloy_rlp::encode(bal).into()))
+            Err(Self::Error::from_eth_err(EthApiError::Unsupported(
+                "raw block access lists are unsupported by the evm2 execution path",
+            )))
+
+            // The previous revm-backed cached/raw BAL path is intentionally kept out of the
+            // compiled evm2 path. Restore this block when BAL execution is wired through evm2:
+            //
+            // Ok(self
+            //     .get_block_access_list(block_id)
+            //     .await?
+            //     .map(|bal| alloy_rlp::encode(bal).into()))
         }
     }
 }
