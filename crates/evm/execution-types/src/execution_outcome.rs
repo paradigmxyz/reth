@@ -1,25 +1,24 @@
-use crate::{BlockExecutionOutput, BlockExecutionResult};
-use alloc::{vec, vec::Vec};
+use crate::{
+    evm2_bundle::account_to_info, BlockExecutionOutput, BlockExecutionResult, Evm2BlockReverts,
+    Evm2BundleState,
+};
+use alloc::{collections::BTreeMap, vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{
     logs_bloom,
     map::{AddressMap, B256Map, HashMap},
     Address, BlockNumber, Bloom, Log, B256, U256,
 };
+use evm2::evm::{AccountInfo, Tracked};
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
-use reth_trie_common::{HashedPostState, KeyHasher};
-use revm::{
-    database::{states::BundleState, BundleAccount},
-    state::AccountInfo,
-};
 
-/// Type used to initialize revms bundle state.
+/// Type used to initialize bundle state.
 pub type BundleStateInit = AddressMap<(Option<Account>, Option<Account>, B256Map<(U256, U256)>)>;
 
-/// Types used inside `RevertsInit` to initialize revms reverts.
+/// Types used inside `RevertsInit` to initialize reverts.
 pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
 
-/// Type used to initialize revms reverts.
+/// Type used to initialize reverts.
 pub type RevertsInit = HashMap<BlockNumber, AddressMap<AccountRevertInit>>;
 
 /// Represents a changed account
@@ -48,7 +47,7 @@ impl ChangedAccount {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ExecutionOutcome<T = reth_ethereum_primitives::Receipt> {
     /// Bundle state with reverts.
-    pub bundle: BundleState,
+    pub bundle: Evm2BundleState,
     /// The collection of receipts.
     /// Outer vector stores receipts for each block sequentially.
     /// The inner vector stores receipts ordered by transaction number.
@@ -81,7 +80,7 @@ impl<T> ExecutionOutcome<T> {
     /// This constructor initializes a new `ExecutionOutcome` instance with the provided
     /// bundle state, receipts, first block number, and EIP-7685 requests.
     pub const fn new(
-        bundle: BundleState,
+        bundle: Evm2BundleState,
         receipts: Vec<Vec<T>>,
         first_block: BlockNumber,
         requests: Vec<Requests>,
@@ -105,27 +104,33 @@ impl<T> ExecutionOutcome<T> {
         let mut reverts = revert_init.into_iter().collect::<Vec<_>>();
         reverts.sort_unstable_by_key(|a| a.0);
 
-        // initialize revm bundle
-        let bundle = BundleState::new(
+        let bundle = Evm2BundleState::new_init(
+            first_block,
             state_init.into_iter().map(|(address, (original, present, storage))| {
                 (
                     address,
-                    original.map(Into::into),
-                    present.map(Into::into),
-                    storage.into_iter().map(|(k, s)| (k.into(), s)).collect(),
+                    (original, present, storage.into_iter().map(|(k, s)| (k.into(), s)).collect()),
                 )
             }),
-            reverts.into_iter().map(|(_, reverts)| {
-                // does not need to be sorted, it is done when taking reverts.
-                reverts.into_iter().map(|(address, (original, storage))| {
-                    (
-                        address,
-                        original.map(|i| i.map(Into::into)),
-                        storage.into_iter().map(|entry| (entry.key.into(), entry.value)),
-                    )
-                })
+            reverts.into_iter().map(|(_, reverts)| Evm2BlockReverts {
+                accounts: reverts
+                    .iter()
+                    .filter_map(|(address, (original, _))| {
+                        original.map(|account| (*address, account.map(account_to_info)))
+                    })
+                    .collect(),
+                storage: reverts
+                    .into_iter()
+                    .filter_map(|(address, (_, storage))| {
+                        let storage = storage
+                            .into_iter()
+                            .map(|entry| (U256::from_be_bytes(entry.key.0), entry.value))
+                            .collect::<BTreeMap<_, _>>();
+                        (!storage.is_empty()).then_some((address, storage))
+                    })
+                    .collect(),
             }),
-            contracts_init.into_iter().map(|(code_hash, bytecode)| (code_hash, bytecode.0)),
+            contracts_init,
         );
 
         Self { bundle, receipts, first_block, requests }
@@ -144,7 +149,7 @@ impl<T> ExecutionOutcome<T> {
     /// Creates a new `ExecutionOutcome` from multiple [`BlockExecutionResult`]s.
     pub fn from_blocks(
         first_block: u64,
-        bundle: BundleState,
+        bundle: Evm2BundleState,
         results: Vec<BlockExecutionResult<T>>,
     ) -> Self {
         let mut value = Self {
@@ -160,13 +165,13 @@ impl<T> ExecutionOutcome<T> {
         value
     }
 
-    /// Return revm bundle state.
-    pub const fn state(&self) -> &BundleState {
+    /// Return bundle state.
+    pub const fn state(&self) -> &Evm2BundleState {
         &self.bundle
     }
 
-    /// Returns mutable revm bundle state.
-    pub const fn state_mut(&mut self) -> &mut BundleState {
+    /// Returns mutable bundle state.
+    pub const fn state_mut(&mut self) -> &mut Evm2BundleState {
         &mut self.bundle
     }
 
@@ -177,40 +182,43 @@ impl<T> ExecutionOutcome<T> {
 
     /// Return iterator over all accounts
     pub fn accounts_iter(&self) -> impl Iterator<Item = (Address, Option<&AccountInfo>)> {
-        self.bundle.state().iter().map(|(a, acc)| (*a, acc.info.as_ref()))
+        self.bundle.accounts_iter()
     }
 
-    /// Return iterator over all [`BundleAccount`]s in the bundle
-    pub fn bundle_accounts_iter(&self) -> impl Iterator<Item = (Address, &BundleAccount)> {
-        self.bundle.state().iter().map(|(a, acc)| (*a, acc))
+    /// Return iterator over all account changes in the bundle.
+    pub fn bundle_accounts_iter(
+        &self,
+    ) -> impl Iterator<Item = (Address, &Tracked<Option<AccountInfo>>)> {
+        self.bundle.accounts().iter().map(|(a, acc)| (*a, acc))
     }
 
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
-        self.bundle.account(address).map(|a| a.info.as_ref().map(Into::into))
+        self.bundle.account(address)
     }
 
-    /// Returns the state [`BundleAccount`] for the given account.
-    pub fn account_state(&self, address: &Address) -> Option<&BundleAccount> {
-        self.bundle.account(address)
+    /// Returns the state account change for the given account.
+    pub fn account_state(&self, address: &Address) -> Option<&Tracked<Option<AccountInfo>>> {
+        self.bundle.accounts().get(address)
     }
 
     /// Get storage if value is known.
     ///
     /// This means that depending on status we can potentially return `U256::ZERO`.
     pub fn storage(&self, address: &Address, storage_key: U256) -> Option<U256> {
-        self.bundle.account(address).and_then(|a| a.storage_slot(storage_key))
+        self.bundle.storage_slot(address, storage_key)
     }
 
     /// Return bytecode if known.
     pub fn bytecode(&self, code_hash: &B256) -> Option<Bytecode> {
-        self.bundle.bytecode(code_hash).map(Bytecode)
+        self.bundle.bytecode(code_hash)
     }
 
     /// Returns [`HashedPostState`] for this execution outcome.
     /// See [`HashedPostState::from_bundle_state`] for more info.
-    pub fn hash_state_slow<KH: KeyHasher>(&self) -> HashedPostState {
-        HashedPostState::from_bundle_state::<KH>(&self.bundle.state)
+    pub fn hash_state_slow<KH>(&self) -> reth_trie_common::HashedPostState {
+        let _ = core::marker::PhantomData::<KH>;
+        todo!("hashed post state from evm2 bundle")
     }
 
     /// Transform block number to the index of block.
@@ -299,7 +307,7 @@ impl<T> ExecutionOutcome<T> {
         // remove requests
         self.requests.truncate(new_len);
         // Revert last n reverts.
-        self.bundle.revert(rm_trx);
+        self.bundle.revert_blocks(rm_trx);
 
         true
     }
@@ -333,7 +341,7 @@ impl<T> ExecutionOutcome<T> {
         if at_idx < higher_state.requests.len() {
             higher_state.requests = higher_state.requests.split_off(at_idx);
         }
-        higher_state.bundle.take_n_reverts(at_idx);
+        higher_state.bundle.drop_first_reverts(at_idx);
         higher_state.first_block = at;
 
         (Some(lower_state), higher_state)
@@ -350,18 +358,18 @@ impl<T> ExecutionOutcome<T> {
         self.requests.extend(other.requests);
     }
 
-    /// Prepends present the state with the given `BundleState`.
+    /// Prepends present the state with the given bundle state.
     /// It adds changes from the given state but does not override any existing changes.
     ///
     /// Reverts and receipts are not updated.
-    pub fn prepend_state(&mut self, mut other: BundleState) {
-        let other_len = other.reverts.len();
+    pub fn prepend_state(&mut self, mut other: Evm2BundleState) {
+        let other_len = other.block_reverts().len();
         // take this bundle
         let this_bundle = core::mem::take(&mut self.bundle);
         // extend other bundle with this
         other.extend(this_bundle);
         // discard other reverts
-        other.take_n_reverts(other_len);
+        other.drop_first_reverts(other_len);
         // swap bundles
         core::mem::swap(&mut self.bundle, &mut other)
     }
@@ -424,11 +432,11 @@ impl<T> From<(BlockExecutionOutput<T>, BlockNumber)> for ExecutionOutcome<T> {
 
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
+    use crate::Evm2BundleState;
     use alloc::{borrow::Cow, vec::Vec};
     use alloy_eips::eip7685::Requests;
     use alloy_primitives::{BlockNumber, Bytes};
     use reth_primitives_traits::Receipt;
-    use revm::database::BundleState;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -449,7 +457,7 @@ pub(super) mod serde_bincode_compat {
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
     pub struct ExecutionOutcome<'a> {
-        bundle: Cow<'a, BundleState>,
+        bundle: Cow<'a, Evm2BundleState>,
         receipts: Vec<Vec<Bytes>>,
         first_block: BlockNumber,
         #[expect(clippy::owned_cow)]
@@ -567,17 +575,10 @@ pub(super) mod serde_bincode_compat {
 mod tests {
     use super::*;
     use alloy_consensus::TxType;
-    use alloy_primitives::{bytes, Address, LogData, B256};
+    use alloy_primitives::{bytes, Address, LogData};
 
     #[test]
     fn test_initialization() {
-        // Create a new BundleState object with initial data
-        let bundle = BundleState::new(
-            vec![(Address::new([2; 20]), None, Some(AccountInfo::default()), HashMap::default())],
-            vec![vec![(Address::new([2; 20]), None, vec![])]],
-            vec![],
-        );
-
         // Create a Receipts object with a vector of receipt vectors
         let receipts = vec![vec![Some(reth_ethereum_primitives::Receipt {
             tx_type: TxType::Legacy,
@@ -591,6 +592,34 @@ mod tests {
 
         // Define the first block number
         let first_block = 123;
+
+        // Create a BundleStateInit object and insert initial data
+        let mut state_init: BundleStateInit = AddressMap::default();
+        state_init
+            .insert(Address::new([2; 20]), (None, Some(Account::default()), B256Map::default()));
+
+        // Create an AddressMap for account reverts and insert initial data
+        let mut revert_inner: AddressMap<AccountRevertInit> = AddressMap::default();
+        revert_inner.insert(Address::new([2; 20]), (Some(None), vec![]));
+
+        // Create a RevertsInit object and insert the revert_inner data
+        let mut revert_init: RevertsInit = HashMap::default();
+        revert_init.insert(first_block, revert_inner);
+
+        let bundle = Evm2BundleState::new_init(
+            first_block,
+            state_init.clone().into_iter().map(|(address, (original, present, storage))| {
+                (
+                    address,
+                    (original, present, storage.into_iter().map(|(k, s)| (k.into(), s)).collect()),
+                )
+            }),
+            vec![Evm2BlockReverts {
+                accounts: AddressMap::from_iter([(Address::new([2; 20]), None)]),
+                storage: Default::default(),
+            }],
+            vec![],
+        );
 
         // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
@@ -606,19 +635,6 @@ mod tests {
             ExecutionOutcome::new(bundle, receipts.clone(), first_block, requests.clone()),
             exec_res
         );
-
-        // Create a BundleStateInit object and insert initial data
-        let mut state_init: BundleStateInit = AddressMap::default();
-        state_init
-            .insert(Address::new([2; 20]), (None, Some(Account::default()), B256Map::default()));
-
-        // Create an AddressMap for account reverts and insert initial data
-        let mut revert_inner: AddressMap<AccountRevertInit> = AddressMap::default();
-        revert_inner.insert(Address::new([2; 20]), (None, vec![]));
-
-        // Create a RevertsInit object and insert the revert_inner data
-        let mut revert_init: RevertsInit = HashMap::default();
-        revert_init.insert(123, revert_inner);
 
         // Assert that creating a new ExecutionOutcome using the new_init method matches
         // exec_res
@@ -935,52 +951,29 @@ mod tests {
         let address2 = Address::random();
         let address3 = Address::random();
 
-        // Set up account info with some changes
-        let account_info1 = AccountInfo {
-            nonce: 1,
-            balance: U256::from(100),
-            code_hash: B256::ZERO,
-            code: None,
-            account_id: None,
-        };
-        let account_info2 = AccountInfo {
-            nonce: 2,
-            balance: U256::from(200),
-            code_hash: B256::ZERO,
-            code: None,
-            account_id: None,
-        };
-
-        // Set up the bundle state with these accounts
-        let mut bundle_state = BundleState::default();
-        bundle_state.state.insert(
-            address1,
-            BundleAccount {
-                info: Some(account_info1),
-                storage: Default::default(),
-                original_info: Default::default(),
-                status: Default::default(),
-            },
-        );
-        bundle_state.state.insert(
-            address2,
-            BundleAccount {
-                info: Some(account_info2),
-                storage: Default::default(),
-                original_info: Default::default(),
-                status: Default::default(),
-            },
-        );
-
-        // Unchanged account
-        bundle_state.state.insert(
-            address3,
-            BundleAccount {
-                info: None,
-                storage: Default::default(),
-                original_info: Default::default(),
-                status: Default::default(),
-            },
+        let bundle_state = Evm2BundleState::new_init(
+            0,
+            vec![
+                (
+                    address1,
+                    (
+                        None,
+                        Some(Account { nonce: 1, balance: U256::from(100), bytecode_hash: None }),
+                        BTreeMap::default(),
+                    ),
+                ),
+                (
+                    address2,
+                    (
+                        None,
+                        Some(Account { nonce: 2, balance: U256::from(200), bytecode_hash: None }),
+                        BTreeMap::default(),
+                    ),
+                ),
+                (address3, (None, None, BTreeMap::default())),
+            ],
+            vec![],
+            vec![],
         );
 
         let execution_outcome: ExecutionOutcome = ExecutionOutcome {

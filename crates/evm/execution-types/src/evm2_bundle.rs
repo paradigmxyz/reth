@@ -3,12 +3,13 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 use alloy_primitives::{
     map::{AddressMap, B256Map},
-    BlockNumber, U256,
+    Address, BlockNumber, B256, U256,
 };
 use evm2::{
     bytecode::Bytecode,
     evm::{AccountInfo, StateChanges, StorageChangeSet, Tracked},
 };
+use reth_primitives_traits::{Account, Bytecode as RethBytecode};
 
 /// Bundle state built from evm2 per-transaction state changes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -24,6 +25,45 @@ impl Evm2BundleState {
     /// Creates an empty bundle state beginning at `first_block`.
     pub fn new(first_block: BlockNumber) -> Self {
         Self { first_block, ..Default::default() }
+    }
+
+    /// Creates a bundle from Reth account, storage, revert, and bytecode initialization data.
+    pub fn new_init(
+        first_block: BlockNumber,
+        accounts: impl IntoIterator<
+            Item = (Address, (Option<Account>, Option<Account>, BTreeMap<U256, (U256, U256)>)),
+        >,
+        block_reverts: impl IntoIterator<Item = Evm2BlockReverts>,
+        contracts: impl IntoIterator<Item = (B256, RethBytecode)>,
+    ) -> Self {
+        let mut bundle = Self::new(first_block);
+        bundle.accounts = accounts
+            .into_iter()
+            .map(|(address, (original, current, storage))| {
+                for (slot, (original, current)) in storage {
+                    bundle
+                        .storage
+                        .entry(address)
+                        .or_default()
+                        .slots
+                        .insert(slot, Tracked { original, current, _non_exhaustive: () });
+                }
+                (
+                    address,
+                    Tracked {
+                        original: original.map(account_to_info),
+                        current: current.map(account_to_info),
+                        _non_exhaustive: (),
+                    },
+                )
+            })
+            .collect();
+        bundle.block_reverts = block_reverts.into_iter().collect();
+        bundle.contracts = contracts
+            .into_iter()
+            .map(|(hash, bytecode)| (hash, Bytecode::new_raw(bytecode.original_bytes())))
+            .collect();
+        bundle
     }
 
     /// Returns the first block covered by this bundle.
@@ -51,6 +91,28 @@ impl Evm2BundleState {
         &self.block_reverts
     }
 
+    /// Return bytecode if known.
+    pub fn bytecode(&self, code_hash: &B256) -> Option<RethBytecode> {
+        self.contracts
+            .get(code_hash)
+            .map(|bytecode| RethBytecode::new_raw(bytecode.original_bytes()))
+    }
+
+    /// Get account if account is known.
+    pub fn account(&self, address: &Address) -> Option<Option<Account>> {
+        self.accounts.get(address).map(|account| account.current.as_ref().map(account_info_to_reth))
+    }
+
+    /// Get storage if value is known.
+    pub fn storage_slot(&self, address: &Address, storage_key: U256) -> Option<U256> {
+        self.storage.get(address)?.slots.get(&storage_key).map(|slot| slot.current)
+    }
+
+    /// Return iterator over all accounts.
+    pub fn accounts_iter(&self) -> impl Iterator<Item = (Address, Option<&AccountInfo>)> {
+        self.accounts.iter().map(|(address, account)| (*address, account.current.as_ref()))
+    }
+
     /// Appends a block worth of evm2 transaction state changes.
     pub fn append_block(&mut self, txs: impl IntoIterator<Item = StateChanges>) {
         let mut block_reverts = Evm2BlockReverts::default();
@@ -73,6 +135,19 @@ impl Evm2BundleState {
         {
             self.apply_reverts(reverts);
         }
+    }
+
+    /// Extends this bundle with another bundle built on top of it.
+    pub fn extend(&mut self, other: Self) {
+        self.accounts.extend(other.accounts);
+        self.storage.extend(other.storage);
+        self.contracts.extend(other.contracts);
+        self.block_reverts.extend(other.block_reverts);
+    }
+
+    /// Drops the first `n` block revert entries.
+    pub fn drop_first_reverts(&mut self, n: usize) {
+        self.block_reverts.drain(..n.min(self.block_reverts.len()));
     }
 
     fn append_transaction(&mut self, changes: StateChanges, block_reverts: &mut Evm2BlockReverts) {
@@ -163,10 +238,276 @@ impl From<StorageChangeSet> for Evm2StorageChangeSet {
     }
 }
 
+fn account_info_to_reth(info: &AccountInfo) -> Account {
+    Account {
+        nonce: info.nonce,
+        balance: info.balance,
+        bytecode_hash: (!info.code_hash.is_zero()).then_some(info.code_hash),
+    }
+}
+
+pub(crate) fn account_to_info(account: Account) -> AccountInfo {
+    AccountInfo {
+        balance: account.balance,
+        nonce: account.nonce,
+        code_hash: account.get_bytecode_hash(),
+        code: None,
+        _non_exhaustive: (),
+    }
+}
+
+#[cfg(feature = "serde")]
+mod serde_impl {
+    use super::*;
+    use alloy_primitives::Bytes;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    #[derive(Serialize, Deserialize)]
+    struct BundleStateSerde {
+        accounts: AddressMap<TrackedSerde<Option<AccountInfoSerde>>>,
+        storage: AddressMap<StorageChangeSetSerde>,
+        contracts: B256Map<Bytes>,
+        block_reverts: Vec<BlockRevertsSerde>,
+        first_block: BlockNumber,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct StorageChangeSetSerde {
+        wipe: bool,
+        slots: BTreeMap<U256, TrackedSerde<U256>>,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct BlockRevertsSerde {
+        accounts: AddressMap<Option<AccountInfoSerde>>,
+        storage: AddressMap<BTreeMap<U256, U256>>,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct TrackedSerde<T> {
+        original: T,
+        current: T,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct AccountInfoSerde {
+        balance: U256,
+        nonce: u64,
+        code_hash: B256,
+        code: Option<Bytes>,
+    }
+
+    impl Serialize for Evm2BundleState {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            BundleStateSerde::from(self).serialize(serializer)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Evm2BundleState {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            BundleStateSerde::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    impl Serialize for Evm2StorageChangeSet {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            StorageChangeSetSerde::from(self).serialize(serializer)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Evm2StorageChangeSet {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            StorageChangeSetSerde::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    impl Serialize for Evm2BlockReverts {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            BlockRevertsSerde::from(self).serialize(serializer)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Evm2BlockReverts {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            BlockRevertsSerde::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    impl From<&Evm2BundleState> for BundleStateSerde {
+        fn from(value: &Evm2BundleState) -> Self {
+            Self {
+                accounts: value
+                    .accounts
+                    .iter()
+                    .map(|(address, account)| (*address, tracked_account_to_serde(account)))
+                    .collect(),
+                storage: value
+                    .storage
+                    .iter()
+                    .map(|(address, storage)| (*address, StorageChangeSetSerde::from(storage)))
+                    .collect(),
+                contracts: value
+                    .contracts
+                    .iter()
+                    .map(|(hash, bytecode)| (*hash, bytecode.original_bytes()))
+                    .collect(),
+                block_reverts: value.block_reverts.iter().map(BlockRevertsSerde::from).collect(),
+                first_block: value.first_block,
+            }
+        }
+    }
+
+    impl From<BundleStateSerde> for Evm2BundleState {
+        fn from(value: BundleStateSerde) -> Self {
+            Self {
+                accounts: value
+                    .accounts
+                    .into_iter()
+                    .map(|(address, account)| (address, tracked_account_from_serde(account)))
+                    .collect(),
+                storage: value
+                    .storage
+                    .into_iter()
+                    .map(|(address, storage)| (address, storage.into()))
+                    .collect(),
+                contracts: value
+                    .contracts
+                    .into_iter()
+                    .map(|(hash, bytecode)| (hash, Bytecode::new_raw(bytecode)))
+                    .collect(),
+                block_reverts: value.block_reverts.into_iter().map(Into::into).collect(),
+                first_block: value.first_block,
+            }
+        }
+    }
+
+    impl From<&Evm2StorageChangeSet> for StorageChangeSetSerde {
+        fn from(value: &Evm2StorageChangeSet) -> Self {
+            Self {
+                wipe: value.wipe,
+                slots: value
+                    .slots
+                    .iter()
+                    .map(|(key, slot)| (*key, TrackedSerde::from(slot)))
+                    .collect(),
+            }
+        }
+    }
+
+    impl From<StorageChangeSetSerde> for Evm2StorageChangeSet {
+        fn from(value: StorageChangeSetSerde) -> Self {
+            Self {
+                wipe: value.wipe,
+                slots: value.slots.into_iter().map(|(key, slot)| (key, slot.into())).collect(),
+            }
+        }
+    }
+
+    impl From<&Evm2BlockReverts> for BlockRevertsSerde {
+        fn from(value: &Evm2BlockReverts) -> Self {
+            Self {
+                accounts: value
+                    .accounts
+                    .iter()
+                    .map(|(address, account)| {
+                        (*address, account.as_ref().map(AccountInfoSerde::from))
+                    })
+                    .collect(),
+                storage: value.storage.clone(),
+            }
+        }
+    }
+
+    impl From<BlockRevertsSerde> for Evm2BlockReverts {
+        fn from(value: BlockRevertsSerde) -> Self {
+            Self {
+                accounts: value
+                    .accounts
+                    .into_iter()
+                    .map(|(address, account)| (address, account.map(Into::into)))
+                    .collect(),
+                storage: value.storage,
+            }
+        }
+    }
+
+    impl<T: Clone> From<&Tracked<T>> for TrackedSerde<T> {
+        fn from(value: &Tracked<T>) -> Self {
+            Self { original: value.original.clone(), current: value.current.clone() }
+        }
+    }
+
+    impl<T> From<TrackedSerde<T>> for Tracked<T> {
+        fn from(value: TrackedSerde<T>) -> Self {
+            Self { original: value.original, current: value.current, _non_exhaustive: () }
+        }
+    }
+
+    fn tracked_account_to_serde(
+        value: &Tracked<Option<AccountInfo>>,
+    ) -> TrackedSerde<Option<AccountInfoSerde>> {
+        TrackedSerde {
+            original: value.original.as_ref().map(AccountInfoSerde::from),
+            current: value.current.as_ref().map(AccountInfoSerde::from),
+        }
+    }
+
+    fn tracked_account_from_serde(
+        value: TrackedSerde<Option<AccountInfoSerde>>,
+    ) -> Tracked<Option<AccountInfo>> {
+        Tracked {
+            original: value.original.map(Into::into),
+            current: value.current.map(Into::into),
+            _non_exhaustive: (),
+        }
+    }
+
+    impl From<&AccountInfo> for AccountInfoSerde {
+        fn from(value: &AccountInfo) -> Self {
+            Self {
+                balance: value.balance,
+                nonce: value.nonce,
+                code_hash: value.code_hash,
+                code: value.code.as_ref().map(Bytecode::original_bytes),
+            }
+        }
+    }
+
+    impl From<AccountInfoSerde> for AccountInfo {
+        fn from(value: AccountInfoSerde) -> Self {
+            Self {
+                balance: value.balance,
+                nonce: value.nonce,
+                code_hash: value.code_hash,
+                code: value.code.map(Bytecode::new_raw),
+                _non_exhaustive: (),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{address, b256, B256};
+    use alloy_primitives::{address, b256};
 
     #[test]
     fn bundle_keeps_first_original_and_latest_current() {

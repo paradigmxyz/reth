@@ -681,10 +681,11 @@ pub(super) mod serde_bincode_compat {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{Evm2BlockReverts, Evm2BundleState};
     use alloy_consensus::TxType;
     use alloy_primitives::{Address, B256};
     use reth_ethereum_primitives::Receipt;
-    use revm::{database::BundleState, primitives::HashMap, state::AccountInfo};
+    use reth_primitives_traits::Account;
 
     #[test]
     fn chain_append() {
@@ -721,14 +722,13 @@ mod tests {
     #[test]
     fn test_number_split() {
         let execution_outcome1: ExecutionOutcome = ExecutionOutcome::new(
-            BundleState::new(
+            Evm2BundleState::new_init(
+                1,
                 vec![(
                     Address::new([2; 20]),
-                    None,
-                    Some(AccountInfo::default()),
-                    HashMap::default(),
+                    (None, Some(Account::default()), BTreeMap::default()),
                 )],
-                vec![vec![(Address::new([2; 20]), None, vec![])]],
+                vec![Evm2BlockReverts::default()],
                 vec![],
             ),
             vec![vec![]],
@@ -737,14 +737,13 @@ mod tests {
         );
 
         let execution_outcome2 = ExecutionOutcome::new(
-            BundleState::new(
+            Evm2BundleState::new_init(
+                2,
                 vec![(
                     Address::new([3; 20]),
-                    None,
-                    Some(AccountInfo::default()),
-                    HashMap::default(),
+                    (None, Some(Account::default()), BTreeMap::default()),
                 )],
-                vec![vec![(Address::new([3; 20]), None, vec![])]],
+                vec![Evm2BlockReverts::default()],
                 vec![],
             ),
             vec![vec![]],
