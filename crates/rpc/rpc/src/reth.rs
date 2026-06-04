@@ -11,14 +11,10 @@ use reth_chain_state::{
     PersistedBlockSubscriptions,
 };
 use reth_errors::{RethError, RethResult};
-use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_api::{RethApiServer, RethJitAction};
 use reth_rpc_eth_types::{EthApiError, EthResult};
-use reth_storage_api::{
-    BlockReader, BlockReaderIdExt, ChangeSetReader, StateProviderFactory, TransactionVariant,
-};
+use reth_storage_api::{BlockReader, BlockReaderIdExt, ChangeSetReader, StateProviderFactory};
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use serde::Serialize;
 use tokio::sync::oneshot;
@@ -105,6 +101,7 @@ where
     }
 }
 
+#[cfg(any())]
 impl<N, Provider, EvmConfig> RethApi<Provider, EvmConfig>
 where
     N: NodePrimitives,
@@ -185,6 +182,13 @@ where
     }
 }
 
+fn unsupported_block_execution_outcome<T>() -> RpcResult<T> {
+    Err(EthApiError::Unsupported(
+        "reth_getBlockExecutionOutcome is unsupported by the evm2 execution path",
+    )
+    .into())
+}
+
 #[async_trait]
 impl<Provider, EvmConfig> RethApiServer for RethApi<Provider, EvmConfig>
 where
@@ -196,7 +200,7 @@ where
         + ForkChoiceSubscriptions<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>
         + PersistedBlockSubscriptions
         + 'static,
-    EvmConfig: ConfigureEvm<Primitives = Provider::Primitives> + 'static,
+    EvmConfig: Send + Sync + 'static,
 {
     /// Handler for `reth_getBalanceChangesInBlock`
     async fn reth_get_balance_changes_in_block(
@@ -212,16 +216,8 @@ where
         block_id: BlockId,
         count: Option<U64>,
     ) -> RpcResult<Option<serde_json::Value>> {
-        let outcome = Self::block_execution_outcome(self, block_id, count).await?;
-        match outcome {
-            Some(outcome) => {
-                let value = serde_json::to_value(&outcome).map_err(|e| {
-                    EthApiError::Internal(reth_errors::RethError::msg(e.to_string()))
-                })?;
-                Ok(Some(value))
-            }
-            None => Ok(None),
-        }
+        let _ = (block_id, count);
+        unsupported_block_execution_outcome()
     }
 
     /// Handler for `reth_jit`
@@ -400,6 +396,7 @@ struct RethApiInner<Provider, EvmConfig> {
     /// The EVM configuration used to create block executors.
     evm_config: EvmConfig,
     /// Guard to restrict the number of concurrent block re-execution requests.
+    #[expect(dead_code)]
     blocking_task_guard: BlockingTaskGuard,
     /// The type that can spawn tasks which would otherwise block.
     task_spawner: Runtime,
