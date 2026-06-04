@@ -56,12 +56,12 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                     .map_err(Self::Error::from_eth_err)?;
 
                 executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
-                executor.evm_mut().db_mut().bump_bal_index();
+                executor.db_mut().bump_bal_index();
 
                 // replay all transactions prior to the targeted transaction
                 for block_tx in block_txs {
                     executor.execute_transaction(block_tx).map_err(Self::Error::from_eth_err)?;
-                    executor.evm_mut().db_mut().bump_bal_index();
+                    executor.db_mut().bump_bal_index();
                 }
 
                 executor.apply_post_execution_changes().map_err(EthApiError::from)?;

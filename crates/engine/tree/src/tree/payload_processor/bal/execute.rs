@@ -147,7 +147,7 @@ where
 
             gas_tracker.validate_tx_limit(output.tx_gas_limit)?;
             gas_tracker.record_result(output.result.result());
-            canonical_executor.evm_mut().db_mut().bump_bal_index();
+            canonical_executor.db_mut().bump_bal_index();
 
             let _ = canonical_executor.commit_transaction(output.result);
             senders.push(output.signer);
@@ -163,7 +163,7 @@ where
         }
         drop(abort_guard);
 
-        canonical_executor.evm_mut().db_mut().bump_bal_index();
+        canonical_executor.db_mut().bump_bal_index();
         let block_result = canonical_executor.apply_post_execution_changes()?;
         (block_result, senders)
     };
@@ -413,7 +413,7 @@ mod tests {
             let mut executor =
                 evm_config.executor_for_block(&mut state, &block).expect("build executor");
             executor.apply_pre_execution_changes().expect("pre-exec");
-            executor.evm_mut().db_mut().bump_bal_index();
+            executor.db_mut().bump_bal_index();
             executor.apply_post_execution_changes().expect("post-exec");
         }
         state.take_built_alloy_bal().expect("with_bal_builder was set")
@@ -545,12 +545,12 @@ mod tests {
                 evm_config.executor_for_block(&mut state, block).expect("build executor");
             executor.apply_pre_execution_changes().expect("pre-exec");
             for (i, tx) in txs.into_iter().enumerate() {
-                executor.evm_mut().db_mut().bump_bal_index();
+                executor.db_mut().bump_bal_index();
                 executor
                     .execute_transaction(tx)
                     .unwrap_or_else(|e| panic!("tx {i} failed during reference build: {e:?}"));
             }
-            executor.evm_mut().db_mut().bump_bal_index();
+            executor.db_mut().bump_bal_index();
             executor.apply_post_execution_changes().expect("post-exec");
         }
         state.take_built_alloy_bal().expect("with_bal_builder was set")
@@ -708,12 +708,12 @@ mod tests {
                 evm_config.executor_for_block(&mut state, block).expect("build serial executor");
             executor.apply_pre_execution_changes().expect("serial pre-exec");
             for (i, tx) in txs.iter().cloned().enumerate() {
-                executor.evm_mut().db_mut().bump_bal_index();
+                executor.db_mut().bump_bal_index();
                 executor
                     .execute_transaction(tx)
                     .unwrap_or_else(|e| panic!("serial tx {i} failed: {e:?}"));
             }
-            executor.evm_mut().db_mut().bump_bal_index();
+            executor.db_mut().bump_bal_index();
             executor.apply_post_execution_changes().expect("serial post-exec")
         };
 

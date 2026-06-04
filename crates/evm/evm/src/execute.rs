@@ -279,7 +279,7 @@ pub trait BlockExecutor {
     where
         <Self::Evm as Evm>::DB: BalIndexedDatabase,
     {
-        self.evm_mut().db_mut().set_bal_index(tx_index as u64 + 1);
+        self.db_mut().set_bal_index(tx_index as u64 + 1);
         self.execute_transaction_with_result_closure(tx, f)
     }
 
@@ -338,6 +338,16 @@ pub trait BlockExecutor {
 
     /// Exposes immutable reference to EVM.
     fn evm(&self) -> &Self::Evm;
+
+    /// Exposes mutable reference to the executor state database.
+    fn db_mut(&mut self) -> &mut <Self::Evm as Evm>::DB {
+        self.evm_mut().db_mut()
+    }
+
+    /// Exposes immutable reference to the executor state database.
+    fn db(&self) -> &<Self::Evm as Evm>::DB {
+        self.evm().db()
+    }
 
     /// Returns recorded receipts.
     fn receipts(&self) -> &[Self::Receipt];
@@ -993,6 +1003,16 @@ pub trait BlockBuilder {
         self.executor().evm()
     }
 
+    /// Helper to access inner executor state mutably.
+    fn db_mut(&mut self) -> &mut <<Self::Executor as BlockExecutor>::Evm as Evm>::DB {
+        self.executor_mut().db_mut()
+    }
+
+    /// Helper to access inner executor state.
+    fn db(&self) -> &<<Self::Executor as BlockExecutor>::Evm as Evm>::DB {
+        self.executor().db()
+    }
+
     /// Consumes the type and returns the underlying [`BlockExecutor`].
     fn into_executor(self) -> Self::Executor;
 }
@@ -1076,7 +1096,7 @@ where
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         BlockExecutor::apply_pre_execution_changes(&mut self.executor)?;
-        BlockExecutor::evm_mut(&mut self.executor).db_mut().bump_bal_index();
+        BlockExecutor::db_mut(&mut self.executor).bump_bal_index();
 
         Ok(())
     }
@@ -1091,7 +1111,7 @@ where
             self.executor.execute_transaction_with_commit_condition((tx_env, &tx), f)?
         {
             self.transactions.push(tx);
-            BlockExecutor::evm_mut(&mut self.executor).db_mut().bump_bal_index();
+            BlockExecutor::db_mut(&mut self.executor).bump_bal_index();
             Ok(Some(gas_used))
         } else {
             Ok(None)
@@ -1200,21 +1220,21 @@ where
         let has_bal = block.header().block_access_list_hash().is_some();
 
         if has_bal {
-            BlockExecutor::evm_mut(&mut executor).db_mut().bal_state.bal_builder = Some(Bal::new());
+            BlockExecutor::db_mut(&mut executor).bal_state.bal_builder = Some(Bal::new());
         } else {
-            BlockExecutor::evm_mut(&mut executor).db_mut().bal_state.bal_builder = None;
+            BlockExecutor::db_mut(&mut executor).bal_state.bal_builder = None;
         }
 
         BlockExecutor::apply_pre_execution_changes(&mut executor)?;
 
         if has_bal {
-            BlockExecutor::evm_mut(&mut executor).db_mut().bump_bal_index();
+            BlockExecutor::db_mut(&mut executor).bump_bal_index();
         }
 
         for tx in block.transactions_recovered() {
             BlockExecutor::execute_transaction(&mut executor, tx)?;
             if has_bal {
-                BlockExecutor::evm_mut(&mut executor).db_mut().bump_bal_index();
+                BlockExecutor::db_mut(&mut executor).bump_bal_index();
             }
         }
 
@@ -1239,9 +1259,7 @@ where
             .executor_for_block(&mut self.db, block)
             .map_err(BlockExecutionError::other)?;
 
-        BlockExecutor::evm_mut(&mut executor)
-            .db_mut()
-            .set_reth_state_hook(Some(Box::new(state_hook)));
+        BlockExecutor::db_mut(&mut executor).set_reth_state_hook(Some(Box::new(state_hook)));
 
         let result = BlockExecutor::execute_block(executor, block.transactions_recovered());
 

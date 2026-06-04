@@ -352,7 +352,7 @@ where
             default_gas_limit,
             builder.evm().block().basefee(),
             chain_id,
-            builder.evm_mut().db_mut(),
+            builder.db_mut(),
             converter,
         )?;
         // Create transaction with an empty envelope.
