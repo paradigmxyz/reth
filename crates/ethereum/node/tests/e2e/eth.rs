@@ -330,10 +330,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
         .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
         .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
         .header(reqwest::header::ACCEPT, "application/octet-stream")
-        .body(
-            (payload, Vec::<B256>::new(), B256::ZERO, envelope.execution_requests.take())
-                .as_ssz_bytes(),
-        )
+        .body((payload, B256::ZERO, envelope.execution_requests.take()).as_ssz_bytes())
         .send()
         .await?;
     assert_eq!(new_payload_response.status(), reqwest::StatusCode::OK);
