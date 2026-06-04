@@ -297,7 +297,7 @@ pub fn execute_transactions<S, T>(
     EthApiError,
 >
 where
-    S: BlockBuilder<Executor: BlockExecutor<Evm: Evm<DB: Database<Error: Into<EthApiError>>>>>,
+    S: BlockBuilder<Executor: BlockExecutor<DB: Database<Error: Into<EthApiError>>>>,
     T: RpcConvert<Primitives = S::Primitives>,
 {
     builder.apply_pre_execution_changes()?;
