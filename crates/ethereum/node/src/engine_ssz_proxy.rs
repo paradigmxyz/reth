@@ -4,8 +4,11 @@
 //!
 //! [EIP-8178]: https://eips.ethereum.org/EIPS/eip-8178
 
-use alloy_eips::eip7685::{Requests, RequestsOrHash};
-use alloy_primitives::{Bytes, B256};
+use alloy_eips::{
+    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
+    eip7685::{Requests, RequestsOrHash},
+};
+use alloy_primitives::{Bytes, B128, B256};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
     ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ExecutionPayloadV4,
@@ -13,13 +16,18 @@ use alloy_rpc_types_engine::{
 };
 use http_body_util::BodyExt;
 use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_payload_primitives::EngineObjectValidationError;
+use reth_rpc_engine_api::{EngineApiError, EngineApiResult};
+use reth_transaction_pool::BlobStore;
 use std::{
     future::Future,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::SystemTime,
 };
 use tokio::sync::RwLock;
 use tower::{BoxError, Layer, Service};
@@ -35,13 +43,44 @@ const STATUS_METHOD_NOT_ALLOWED: u16 = 405;
 const STATUS_INTERNAL_SERVER_ERROR: u16 = 500;
 const STATUS_SERVICE_UNAVAILABLE: u16 = 503;
 
+const MAX_BLOB_LIMIT: usize = 128;
+
 /// Shared handle used by [`EngineSszProxyLayer`].
-#[derive(Clone, Debug, Default)]
-pub struct EngineSszProxyHandle {
+pub struct EngineSszProxyHandle<C = ChainSpec> {
     engine: Arc<RwLock<Option<ConsensusEngineHandle<EthEngineTypes>>>>,
+    blob_store: Arc<RwLock<Option<Arc<dyn BlobStore>>>>,
+    chain_spec: Arc<RwLock<Option<Arc<C>>>>,
 }
 
-impl EngineSszProxyHandle {
+impl<C> Clone for EngineSszProxyHandle<C> {
+    fn clone(&self) -> Self {
+        Self {
+            engine: self.engine.clone(),
+            blob_store: self.blob_store.clone(),
+            chain_spec: self.chain_spec.clone(),
+            is_syncing: self.is_syncing.clone(),
+        }
+    }
+}
+
+impl<C> std::fmt::Debug for EngineSszProxyHandle<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EngineSszProxyHandle").finish_non_exhaustive()
+    }
+}
+
+impl<C> Default for EngineSszProxyHandle<C> {
+    fn default() -> Self {
+        Self {
+            engine: Default::default(),
+            blob_store: Default::default(),
+            chain_spec: Default::default(),
+            is_syncing: Default::default(),
+        }
+    }
+}
+
+impl<C> EngineSszProxyHandle<C> {
     /// Sets the consensus engine handle used by the proxy.
     pub async fn set_engine(&self, engine: ConsensusEngineHandle<EthEngineTypes>) {
         *self.engine.write().await = Some(engine);
@@ -50,24 +89,47 @@ impl EngineSszProxyHandle {
     async fn engine(&self) -> Option<ConsensusEngineHandle<EthEngineTypes>> {
         self.engine.read().await.clone()
     }
+
+    /// Sets the blob store used by the proxy for handling blob requests.
+    pub async fn set_blob_store(&self, blob_store: impl BlobStore) {
+        *self.blob_store.write().await = Some(Arc::new(blob_store));
+    }
+
+    /// Sets the chain spec used for getBlobs fork validation.
+    pub async fn set_chain_spec(&self, chain_spec: Arc<C>) {
+        *self.chain_spec.write().await = Some(chain_spec);
+    }
+
+    /// Sets the sync-state callback used by getBlobs V3/V4 null responses.
+    pub async fn set_is_syncing(&self, is_syncing: impl Fn() -> bool + Send + Sync + 'static) {
+        *self.is_syncing.write().await = Some(Arc::new(is_syncing));
+    }
+
+    async fn blob_store(&self) -> Option<Arc<dyn BlobStore>> {
+        self.blob_store.read().await.clone()
+    }
+
+    async fn chain_spec(&self) -> Option<Arc<C>> {
+        self.chain_spec.read().await.clone()
+    }
 }
 
 /// A tower layer that intercepts SSZ Engine API routes under `/engine/v2`.
 #[derive(Clone, Debug, Default)]
-pub struct EngineSszProxyLayer {
-    handle: EngineSszProxyHandle,
+pub struct EngineSszProxyLayer<C = ChainSpec> {
+    handle: EngineSszProxyHandle<C>,
 }
 
-impl EngineSszProxyLayer {
+impl<C> EngineSszProxyLayer<C> {
     /// Creates a new proxy layer and a handle for setting the engine after node launch.
-    pub fn new() -> (Self, EngineSszProxyHandle) {
+    pub fn new() -> (Self, EngineSszProxyHandle<C>) {
         let handle = EngineSszProxyHandle::default();
         (Self { handle: handle.clone() }, handle)
     }
 }
 
-impl<S> Layer<S> for EngineSszProxyLayer {
-    type Service = EngineSszProxyService<S>;
+impl<S, C> Layer<S> for EngineSszProxyLayer<C> {
+    type Service = EngineSszProxyService<S, C>;
 
     fn layer(&self, inner: S) -> Self::Service {
         EngineSszProxyService { inner, handle: self.handle.clone() }
@@ -76,15 +138,16 @@ impl<S> Layer<S> for EngineSszProxyLayer {
 
 /// The service produced by [`EngineSszProxyLayer`].
 #[derive(Clone, Debug)]
-pub struct EngineSszProxyService<S> {
+pub struct EngineSszProxyService<S, C = ChainSpec> {
     inner: S,
-    handle: EngineSszProxyHandle,
+    handle: EngineSszProxyHandle<C>,
 }
 
-impl<S> Service<HttpRequest> for EngineSszProxyService<S>
+impl<S, C> Service<HttpRequest> for EngineSszProxyService<S, C>
 where
     S: Service<HttpRequest, Response = HttpResponse, Error = BoxError> + Send + Clone,
     S::Future: Send + 'static,
+    C: EthereumHardforks + Send + Sync + 'static,
 {
     type Response = HttpResponse;
     type Error = BoxError;
@@ -95,7 +158,7 @@ where
     }
 
     fn call(&mut self, request: HttpRequest) -> Self::Future {
-        if !request.uri().path().starts_with("/engine/v2/") {
+        if !request.uri().path().starts_with("/engine/") {
             let fut = self.inner.call(request);
             return Box::pin(fut)
         }
@@ -106,7 +169,7 @@ where
 }
 
 async fn handle_engine_ssz_request(
-    handle: EngineSszProxyHandle,
+    handle: EngineSszProxyHandle<impl EthereumHardforks + Send + Sync + 'static>,
     request: HttpRequest,
 ) -> HttpResponse {
     if request.method().as_str() != "POST" {
@@ -114,7 +177,7 @@ async fn handle_engine_ssz_request(
     }
 
     let path = request.uri().path().to_owned();
-    let Some((fork, resource)) = parse_engine_path(&path) else {
+    let Some(endpoint) = parse_engine_path(&path) else {
         return text_response(STATUS_NOT_FOUND, "unknown engine ssz endpoint")
     };
 
@@ -122,25 +185,47 @@ async fn handle_engine_ssz_request(
         return text_response(STATUS_BAD_REQUEST, "failed to read request body")
     };
 
-    let Some(engine) = handle.engine().await else {
-        return text_response(STATUS_SERVICE_UNAVAILABLE, "engine handle unavailable")
-    };
-
-    match resource {
-        "payloads" => handle_new_payload(engine, fork.payloads_version(), &body).await,
-        "forkchoice" => handle_forkchoice_updated(engine, fork.forkchoice_version(), &body).await,
-        _ => text_response(STATUS_NOT_FOUND, "unknown engine ssz endpoint"),
+    match endpoint {
+        EngineSszEndpoint::Payloads(fork) => {
+            let Some(engine) = handle.engine().await else {
+                return text_response(STATUS_SERVICE_UNAVAILABLE, "engine handle unavailable")
+            };
+            handle_new_payload(engine, fork.payloads_version(), &body).await
+        }
+        EngineSszEndpoint::Forkchoice(fork) => {
+            let Some(engine) = handle.engine().await else {
+                return text_response(STATUS_SERVICE_UNAVAILABLE, "engine handle unavailable")
+            };
+            handle_forkchoice_updated(engine, fork.forkchoice_version(), &body).await
+        }
+        EngineSszEndpoint::Blobs(version) => handle_get_blobs(handle, version, &body).await,
     }
 }
 
-fn parse_engine_path(path: &str) -> Option<(EngineSszFork, &str)> {
+fn parse_engine_path(path: &str) -> Option<EngineSszEndpoint> {
     let mut segments = path.trim_start_matches('/').split('/');
     match (segments.next(), segments.next(), segments.next(), segments.next(), segments.next()) {
-        (Some("engine"), Some("v2"), Some(fork), Some(resource), None) => {
-            Some((fork.parse().ok()?, resource))
+        (Some("engine"), Some("v2"), Some(fork), Some("payloads"), None) => {
+            Some(EngineSszEndpoint::Payloads(fork.parse().ok()?))
+        }
+        (Some("engine"), Some("v2"), Some(fork), Some("forkchoice"), None) => {
+            Some(EngineSszEndpoint::Forkchoice(fork.parse().ok()?))
+        }
+        (Some("engine"), Some("v2"), Some(fork), Some("blobs"), None) => {
+            Some(EngineSszEndpoint::Blobs(fork.parse::<EngineSszFork>().ok()?.blobs_version()?))
+        }
+        (Some("engine"), version, Some("blobs"), None, None) => {
+            Some(EngineSszEndpoint::Blobs(parse_method_version(version?)?))
         }
         _ => None,
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EngineSszEndpoint {
+    Payloads(EngineSszFork),
+    Forkchoice(EngineSszFork),
+    Blobs(u8),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -172,6 +257,15 @@ impl EngineSszFork {
             Self::Amsterdam => 4,
         }
     }
+
+    const fn blobs_version(self) -> Option<u8> {
+        match self {
+            Self::Paris | Self::Shanghai => None,
+            Self::Cancun | Self::Prague => Some(1),
+            Self::Osaka => Some(3),
+            Self::Amsterdam => Some(4),
+        }
+    }
 }
 
 impl std::str::FromStr for EngineSszFork {
@@ -188,6 +282,10 @@ impl std::str::FromStr for EngineSszFork {
             _ => Err(()),
         }
     }
+}
+
+fn parse_method_version(version: &str) -> Option<u8> {
+    version.strip_prefix('v')?.parse().ok().filter(|version| (1..=4).contains(version))
 }
 
 async fn handle_new_payload(
@@ -220,6 +318,195 @@ async fn handle_forkchoice_updated(
         Ok(updated) => ssz_response(updated),
         Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
     }
+}
+
+impl<C> EngineSszProxyHandle<C>
+where
+    C: EthereumHardforks,
+{
+    async fn get_blobs_v1(
+        &self,
+        versioned_hashes: Vec<B256>,
+    ) -> EngineApiResult<Vec<Option<BlobAndProofV1>>> {
+        let chain_spec = self.chain_spec().await.ok_or_else(engine_unavailable)?;
+        let current_timestamp = current_timestamp();
+        if chain_spec.is_osaka_active_at_timestamp(current_timestamp) {
+            return Err(unsupported_fork())
+        }
+
+        if versioned_hashes.len() > MAX_BLOB_LIMIT {
+            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
+        }
+
+        self.blob_store()
+            .await
+            .ok_or_else(engine_unavailable)?
+            .get_by_versioned_hashes_v1(&versioned_hashes)
+            .map_err(|err| EngineApiError::Internal(Box::new(err)))
+    }
+
+    async fn get_blobs_v2(
+        &self,
+        versioned_hashes: Vec<B256>,
+    ) -> EngineApiResult<Option<Vec<BlobAndProofV2>>> {
+        let chain_spec = self.chain_spec().await.ok_or_else(engine_unavailable)?;
+        let current_timestamp = current_timestamp();
+        if !chain_spec.is_osaka_active_at_timestamp(current_timestamp) {
+            return Err(unsupported_fork())
+        }
+
+        if versioned_hashes.len() > MAX_BLOB_LIMIT {
+            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
+        }
+
+        self.blob_store()
+            .await
+            .ok_or_else(engine_unavailable)?
+            .get_by_versioned_hashes_v2(&versioned_hashes)
+            .map_err(|err| EngineApiError::Internal(Box::new(err)))
+    }
+
+    async fn get_blobs_v3(
+        &self,
+        versioned_hashes: Vec<B256>,
+    ) -> EngineApiResult<Option<Vec<Option<BlobAndProofV2>>>> {
+        let chain_spec = self.chain_spec().await.ok_or_else(engine_unavailable)?;
+        let current_timestamp = current_timestamp();
+        if !chain_spec.is_osaka_active_at_timestamp(current_timestamp) {
+            return Err(unsupported_fork())
+        }
+
+        if versioned_hashes.len() > MAX_BLOB_LIMIT {
+            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
+        }
+
+        // // Spec requires returning `null` if syncing.
+        // if self.is_syncing().await {
+        //     return Ok(None)
+        // }
+
+        self.blob_store()
+            .await
+            .ok_or_else(engine_unavailable)?
+            .get_by_versioned_hashes_v3(&versioned_hashes)
+            .map(Some)
+            .map_err(|err| EngineApiError::Internal(Box::new(err)))
+    }
+
+    async fn get_blobs_v4(
+        &self,
+        versioned_hashes: Vec<B256>,
+        indices_bitarray: B128,
+    ) -> EngineApiResult<Option<Vec<Option<BlobCellsAndProofsV1>>>> {
+        let chain_spec = self.chain_spec().await.ok_or_else(engine_unavailable)?;
+        let current_timestamp = current_timestamp();
+        if !chain_spec.is_amsterdam_active_at_timestamp(current_timestamp) {
+            return Err(unsupported_fork())
+        }
+
+        if versioned_hashes.len() > MAX_BLOB_LIMIT {
+            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
+        }
+
+        // // Spec requires returning `null` if syncing.
+        // if self.is_syncing().await {
+        //     return Ok(None)
+        // }
+
+        self.blob_store()
+            .await
+            .ok_or_else(engine_unavailable)?
+            .get_by_versioned_hashes_v4(&versioned_hashes, indices_bitarray)
+            .map(Some)
+            .map_err(|err| EngineApiError::Internal(Box::new(err)))
+    }
+}
+
+/// Handles SSZ `engine_getBlobsV*` requests with the native Engine API blob provider.
+async fn handle_get_blobs(
+    handler: EngineSszProxyHandle<impl EthereumHardforks + Send + Sync + 'static>,
+    version: u8,
+    body: &[u8],
+) -> HttpResponse {
+    match version {
+        1 => {
+            let hashes = match decode_blob_hashes_request(body) {
+                Ok(hashes) => hashes,
+                Err(err) => return text_response(STATUS_BAD_REQUEST, err),
+            };
+            match handler.get_blobs_v1(hashes).await {
+                Ok(response) => ssz_response(response),
+                Err(err) => engine_error_response(err),
+            }
+        }
+        2 => {
+            let hashes = match decode_blob_hashes_request(body) {
+                Ok(hashes) => hashes,
+                Err(err) => return text_response(STATUS_BAD_REQUEST, err),
+            };
+            match handler.get_blobs_v2(hashes).await {
+                Ok(Some(response)) => ssz_response(response),
+                Ok(None) => no_content_response(),
+                Err(err) => engine_error_response(err),
+            }
+        }
+        3 => {
+            let hashes = match decode_blob_hashes_request(body) {
+                Ok(hashes) => hashes,
+                Err(err) => return text_response(STATUS_BAD_REQUEST, err),
+            };
+            match handler.get_blobs_v3(hashes).await {
+                Ok(Some(response)) => ssz_response(response),
+                Ok(None) => no_content_response(),
+                Err(err) => engine_error_response(err),
+            }
+        }
+        4 => {
+            let (hashes, indices_bitarray) = match decode_blob_cells_request(body) {
+                Ok(request) => request,
+                Err(err) => return text_response(STATUS_BAD_REQUEST, err),
+            };
+            match handler.get_blobs_v4(hashes, indices_bitarray).await {
+                Ok(Some(response)) => ssz_response(response),
+                Ok(None) => no_content_response(),
+                Err(err) => engine_error_response(err),
+            }
+        }
+        _ => text_response(STATUS_NOT_FOUND, "unsupported blobs endpoint version"),
+    }
+}
+
+/// Decodes the common getBlobs request container with only versioned hashes.
+fn decode_blob_hashes_request(body: &[u8]) -> Result<Vec<B256>, &'static str> {
+    decode_one::<Vec<B256>>(body).map_err(|_| "invalid ssz")
+}
+
+/// Decodes the Amsterdam getBlobs request container with hashes and a cell index mask.
+fn decode_blob_cells_request(body: &[u8]) -> Result<(Vec<B256>, B128), &'static str> {
+    <(Vec<B256>, B128) as ssz::Decode>::from_ssz_bytes(body).map_err(|_| "invalid ssz")
+}
+
+fn engine_error_response(error: EngineApiError) -> HttpResponse {
+    let status = match error {
+        EngineApiError::BlobRequestTooLarge { .. } => 413,
+        EngineApiError::EngineObjectValidationError(
+            EngineObjectValidationError::UnsupportedFork,
+        ) => STATUS_BAD_REQUEST,
+        _ => STATUS_INTERNAL_SERVER_ERROR,
+    };
+    text_response(status, error.to_string())
+}
+
+fn current_timestamp() -> u64 {
+    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs()
+}
+
+fn unsupported_fork() -> EngineApiError {
+    EngineApiError::EngineObjectValidationError(EngineObjectValidationError::UnsupportedFork)
+}
+
+fn engine_unavailable() -> EngineApiError {
+    EngineApiError::Internal(Box::new(std::io::Error::other("engine ssz blob context unavailable")))
 }
 
 fn decode_new_payload_request(version: u8, body: &[u8]) -> Result<ExecutionData, &'static str> {
@@ -366,6 +653,10 @@ fn ssz_response<T: ssz::Encode>(value: T) -> HttpResponse {
         .expect("valid response")
 }
 
+fn no_content_response() -> HttpResponse {
+    HttpResponse::builder().status(204).body(HttpBody::empty()).expect("valid response")
+}
+
 fn text_response(status: u16, body: impl Into<String>) -> HttpResponse {
     HttpResponse::builder()
         .status(status)
@@ -380,18 +671,23 @@ mod tests {
 
     #[test]
     fn parses_fork_scoped_payload_endpoint() {
-        let (fork, resource) = parse_engine_path("/engine/v2/prague/payloads").unwrap();
-        assert_eq!(fork, EngineSszFork::Prague);
-        assert_eq!(resource, "payloads");
-        assert_eq!(fork.payloads_version(), 4);
+        let endpoint = parse_engine_path("/engine/v2/prague/payloads").unwrap();
+        assert_eq!(endpoint, EngineSszEndpoint::Payloads(EngineSszFork::Prague));
     }
 
     #[test]
     fn parses_fork_scoped_forkchoice_endpoint() {
-        let (fork, resource) = parse_engine_path("/engine/v2/amsterdam/forkchoice").unwrap();
-        assert_eq!(fork, EngineSszFork::Amsterdam);
-        assert_eq!(resource, "forkchoice");
-        assert_eq!(fork.forkchoice_version(), 4);
+        let endpoint = parse_engine_path("/engine/v2/amsterdam/forkchoice").unwrap();
+        assert_eq!(endpoint, EngineSszEndpoint::Forkchoice(EngineSszFork::Amsterdam));
+    }
+
+    #[test]
+    fn parses_blob_endpoints() {
+        let endpoint = parse_engine_path("/engine/v2/amsterdam/blobs").unwrap();
+        assert_eq!(endpoint, EngineSszEndpoint::Blobs(4));
+
+        let endpoint = parse_engine_path("/engine/v3/blobs").unwrap();
+        assert_eq!(endpoint, EngineSszEndpoint::Blobs(3));
     }
 
     #[test]
