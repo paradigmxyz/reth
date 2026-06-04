@@ -10011,6 +10011,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-debug",
  "reth-ethereum-forks",
+ "reth-execution-types",
  "reth-primitives-traits",
  "reth-storage-api",
  "reth-storage-errors",
