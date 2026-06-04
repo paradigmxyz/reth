@@ -298,26 +298,10 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
             }
             Entry::Vacant(entry) => {
                 self.metrics.overlay_cache_fills.increment(1);
-                let input = {
-                    #[cfg(feature = "rayon")]
-                    {
-                        if let Some(worker_pool) = &self.worker_pool {
-                            let compute_span = span;
-                            let metrics = self.metrics.clone();
-                            Arc::new(worker_pool.install_fn(move || {
-                                let _guard = compute_span.enter();
-                                compute_overlay(compute_input, anchor_hash, &metrics)
-                            }))
-                        } else {
-                            Arc::new(compute_overlay(compute_input, anchor_hash, &self.metrics))
-                        }
-                    }
-
-                    #[cfg(not(feature = "rayon"))]
-                    {
-                        Arc::new(compute_overlay(compute_input, anchor_hash, &self.metrics))
-                    }
-                };
+                // Keep the cache-fill gate, but avoid waiting for a worker from this pool while
+                // holding the DashMap entry lock. Optimistic precompute jobs may be blocked on
+                // this same shard.
+                let input = Arc::new(compute_overlay(compute_input, anchor_hash, &self.metrics));
 
                 entry.insert(Arc::clone(&input));
                 input
