@@ -26,8 +26,6 @@ alloy-rlp.workspace = true
 derive_more.workspace = true
 thiserror.workspace = true
 
-revm-database-interface.workspace = true
-
 [features]
 default = ["std"]
 std = [
@@ -37,7 +35,6 @@ std = [
     "derive_more/std",
     "reth-primitives-traits/std",
     "thiserror/std",
-    "revm-database-interface/std",
     "reth-prune-types/std",
     "reth-static-file-types/std",
     "reth-codecs/std",

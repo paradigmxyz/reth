@@ -10402,7 +10402,6 @@ dependencies = [
  "reth-primitives-traits",
  "reth-prune-types",
  "reth-static-file-types",
- "revm-database-interface",
  "thiserror 2.0.18",
 ]
 
