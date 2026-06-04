@@ -547,8 +547,7 @@ where
         // back into the cache. On a glance it seems to be always useful to do this. However,
         // in practice, for the serial/non-BAL execution, it's not needed and is net negative:
         //
-        // - It's not necessary because the revm machinery provides layer of caching itself. That
-        //   means a value for a miss will be recorded in revm's cache.
+        // - It's not necessary because the execution layer already tracks the accessed state.
         // - Inserting back into the cache is not free.
         // - After execution, the execution post-state will be dumped into the execution cache as
         //   whole anyway.
@@ -1139,95 +1138,6 @@ where
             .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
 
         (receipt_tx, result_rx)
-    }
-
-    /// Executes transactions and collects senders, streaming receipts to a background task.
-    ///
-    /// This method handles:
-    /// - Applying pre-execution changes (e.g., beacon root updates)
-    /// - Executing each transaction with timing metrics
-    /// - Streaming receipts to the receipt root computation task
-    /// - Collecting transaction senders for later use
-    ///
-    /// Returns the executor (for finalization) and the collected senders.
-    #[cfg(any())]
-    fn execute_transactions<'a, E, Tx, InnerTx, Err, DB>(
-        &self,
-        mut executor: E,
-        transaction_count: usize,
-        transactions: impl Iterator<Item = Result<Tx, Err>>,
-        receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
-        executed_tx_index: &AtomicUsize,
-    ) -> Result<(E, Vec<Address>), BlockExecutionError>
-    where
-        E: BlockExecutor<Receipt = N::Receipt, Evm: alloy_evm::Evm<DB = &'a mut State<DB>>>,
-        Tx: alloy_evm::block::ExecutableTx<E> + alloy_evm::RecoveredTx<InnerTx>,
-        InnerTx: TxHashRef,
-        DB: revm::Database + 'a,
-        Err: core::error::Error + Send + Sync + 'static,
-    {
-        let mut senders = Vec::with_capacity(transaction_count);
-
-        // Apply pre-execution changes (e.g., beacon root update)
-        let pre_exec_start = Instant::now();
-        debug_span!(target: "engine::tree", "pre_execution")
-            .in_scope(|| executor.apply_pre_execution_changes())
-            .map_err(BlockExecutionError::other)?;
-        self.metrics.record_pre_execution(pre_exec_start.elapsed());
-
-        // Execute transactions
-        let exec_span = debug_span!(target: "engine::tree", "execution").entered();
-        let mut transactions = transactions.into_iter();
-        // Some executors may execute transactions that do not append receipts during the
-        // main loop (e.g., system transactions whose receipts are added during finalization).
-        // In that case, invoking the callback on every transaction would resend the previous
-        // receipt with the same index and can panic the ordered root builder.
-        let mut last_sent_len = 0usize;
-        loop {
-            // Measure time spent waiting for next transaction from iterator
-            // (e.g., parallel signature recovery)
-            let wait_start = Instant::now();
-            let Some(tx_result) = transactions.next() else { break };
-            self.metrics.record_transaction_wait(wait_start.elapsed());
-
-            let tx = tx_result.map_err(BlockExecutionError::other)?;
-            let tx_signer = *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(&tx);
-
-            senders.push(tx_signer);
-
-            let _enter = tracing::enabled!(target: "engine::tree", Level::TRACE).then(|| {
-                tracing::trace_span!(
-                    target: "engine::tree",
-                    "execute tx",
-                    tx_index = senders.len() - 1,
-                )
-                .entered()
-            });
-            if tracing::enabled!(target: "engine::tree", Level::TRACE) {
-                trace!(target: "engine::tree", "Executing transaction");
-            }
-
-            let tx_start = Instant::now();
-            executor.execute_transaction(tx).map_err(BlockExecutionError::other)?;
-            self.metrics.record_transaction_execution(tx_start.elapsed());
-
-            // advance the shared counter so prewarm workers skip already-executed txs
-            executed_tx_index.store(senders.len(), Ordering::Relaxed);
-
-            let current_len = executor.receipts().len();
-            if current_len > last_sent_len {
-                last_sent_len = current_len;
-                // Send the latest receipt to the background task for incremental root computation.
-                if let Some(receipt) = executor.receipts().last() {
-                    let tx_index = current_len - 1;
-                    let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
-                }
-            }
-        }
-
-        drop(exec_span);
-
-        Ok((executor, senders))
     }
 
     /// Compute state root for the given hashed post state in parallel.
