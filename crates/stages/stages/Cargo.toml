@@ -36,7 +36,6 @@ reth-prune.workspace = true
 reth-prune-types.workspace = true
 reth-storage-api.workspace = true
 reth-storage-errors.workspace = true
-reth-revm.workspace = true
 reth-stages-api.workspace = true
 reth-static-file-types.workspace = true
 reth-tasks.workspace = true
@@ -109,7 +108,6 @@ test-utils = [
     "reth-evm/test-utils",
     "reth-downloaders/test-utils",
     "reth-primitives-traits/test-utils",
-    "reth-revm/test-utils",
     "reth-codecs/test-utils",
     "reth-db-api/test-utils",
     "reth-trie-db/test-utils",
