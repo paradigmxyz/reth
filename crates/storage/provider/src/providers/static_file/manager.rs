@@ -461,9 +461,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         for (block, &first_tx) in blocks.iter().zip(tx_nums) {
             let b = block.recovered_block();
             w.increment_block(b.number())?;
-            for (i, tx) in b.body().transactions().iter().enumerate() {
-                w.append_transaction(first_tx + i as u64, tx)?;
-            }
+            w.append_transactions((first_tx..).zip(b.body().transactions().iter()))?;
         }
         Ok(())
     }
