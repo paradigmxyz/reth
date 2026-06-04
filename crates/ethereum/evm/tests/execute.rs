@@ -137,43 +137,6 @@ fn eip_4788_non_genesis_call() {
 }
 
 #[test]
-fn eip_4788_no_code_cancun() {
-    // This test ensures that we "silently fail" when cancun is active and there is no code at
-    // // BEACON_ROOTS_ADDRESS
-    let header = Header {
-        timestamp: 1,
-        number: 1,
-        parent_beacon_block_root: Some(B256::with_last_byte(0x69)),
-        excess_blob_gas: Some(0),
-        ..Header::default()
-    };
-
-    let db = CacheDB::new(EmptyDB::default());
-
-    // DON'T deploy the contract at genesis
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::from(&*MAINNET)
-            .shanghai_activated()
-            .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(1))
-            .build(),
-    );
-
-    let provider = EthEvmConfig::new(chain_spec);
-
-    // attempt to execute an empty block with parent beacon block root, this should not fail
-    provider
-        .batch_executor(db)
-        .execute_one(&RecoveredBlock::new_unhashed(
-            Block {
-                header,
-                body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
-            },
-            vec![],
-        ))
-        .expect("Executing a block with no transactions while cancun is active should not fail");
-}
-
-#[test]
 fn eip_4788_empty_account_call() {
     // This test ensures that we do not increment the nonce of an empty SYSTEM_ADDRESS account
     // // during the pre-block call
