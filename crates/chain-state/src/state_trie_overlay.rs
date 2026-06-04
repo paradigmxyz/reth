@@ -450,31 +450,27 @@ fn compute_overlay<N: NodePrimitives>(
 }
 
 fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSorted {
-    let trie_data = blocks.iter().map(ExecutedBlock::trie_data).collect::<Vec<_>>();
+    let mut trie_updates = Vec::with_capacity(blocks.len());
+    let mut hashed_states = Vec::with_capacity(blocks.len());
+    for block in &blocks {
+        let trie_data = block.trie_data();
+        trie_updates.push(trie_data.trie_updates);
+        hashed_states.push(trie_data.hashed_state);
+    }
 
     #[cfg(feature = "rayon")]
     let (nodes, state) = rayon::join(
-        || {
-            TrieUpdatesSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.trie_updates)),
-            )
-        },
-        || {
-            HashedPostStateSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.hashed_state)),
-            )
-        },
+        || TrieUpdatesSorted::merge_slice(&trie_updates),
+        || HashedPostStateSorted::merge_slice(&hashed_states),
     );
 
     #[cfg(not(feature = "rayon"))]
     let (nodes, state) = (
-        TrieUpdatesSorted::merge_batch(trie_data.iter().map(|data| Arc::clone(&data.trie_updates))),
-        HashedPostStateSorted::merge_batch(
-            trie_data.iter().map(|data| Arc::clone(&data.hashed_state)),
-        ),
+        TrieUpdatesSorted::merge_slice(&trie_updates),
+        HashedPostStateSorted::merge_slice(&hashed_states),
     );
 
-    TrieInputSorted::new(nodes, state, Default::default())
+    TrieInputSorted::new(Arc::new(nodes), Arc::new(state), Default::default())
 }
 
 fn extend_overlay(
