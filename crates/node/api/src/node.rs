@@ -6,7 +6,7 @@ use reth_basic_payload_builder::PayloadBuilder;
 use reth_consensus::FullConsensus;
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_primitives::{ConsensusEngineEvent, ConsensusEngineHandle};
-use reth_evm::ConfigureEvm;
+use reth_evm::ConfigureEvm2BlockExecutor;
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
 use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter, TxTy};
@@ -68,7 +68,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Types>>> + Unpin;
 
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
-    type Evm: ConfigureEvm<Primitives = <Self::Types as NodeTypes>::Primitives>;
+    type Evm: ConfigureEvm2BlockExecutor<Primitives = <Self::Types as NodeTypes>::Primitives>;
 
     /// The consensus type of the node.
     type Consensus: FullConsensus<<Self::Types as NodeTypes>::Primitives> + Clone + Unpin + 'static;
