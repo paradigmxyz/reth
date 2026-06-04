@@ -4,9 +4,9 @@ use alloy_primitives::{Address, BlockNumber, B256, U256};
 use core::ops::{Deref, DerefMut};
 use reth_primitives_traits::Account;
 use reth_storage_api::{AccountReader, BlockHashReader, BytecodeReader, StateProvider};
-use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
+use reth_storage_errors::provider::ProviderResult;
 
+#[cfg(any())]
 pub use revm::database::State;
 
 /// A helper trait responsible for providing state necessary for EVM execution.
@@ -93,42 +93,49 @@ impl<DB> DerefMut for StateProviderDatabase<DB> {
     }
 }
 
-impl<DB: EvmStateProvider> Database for StateProviderDatabase<DB> {
-    type Error = ProviderError;
+#[cfg(any())]
+mod revm_database {
+    use super::*;
+    use reth_storage_errors::provider::ProviderError;
+    use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 
-    fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        self.basic_ref(address)
+    impl<DB: EvmStateProvider> Database for StateProviderDatabase<DB> {
+        type Error = ProviderError;
+
+        fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+            self.basic_ref(address)
+        }
+
+        fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+            self.code_by_hash_ref(code_hash)
+        }
+
+        fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
+            self.storage_ref(address, index)
+        }
+
+        fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+            self.block_hash_ref(number)
+        }
     }
 
-    fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        self.code_by_hash_ref(code_hash)
-    }
+    impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
+        type Error = <Self as Database>::Error;
 
-    fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        self.storage_ref(address, index)
-    }
+        fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+            Ok(self.basic_account(&address)?.map(Into::into))
+        }
 
-    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
-        self.block_hash_ref(number)
-    }
-}
+        fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+            Ok(self.bytecode_by_hash(&code_hash)?.unwrap_or_default().0)
+        }
 
-impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
-    type Error = <Self as Database>::Error;
+        fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
+            Ok(self.0.storage(address, B256::new(index.to_be_bytes()))?.unwrap_or_default())
+        }
 
-    fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        Ok(self.basic_account(&address)?.map(Into::into))
-    }
-
-    fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        Ok(self.bytecode_by_hash(&code_hash)?.unwrap_or_default().0)
-    }
-
-    fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        Ok(self.0.storage(address, B256::new(index.to_be_bytes()))?.unwrap_or_default())
-    }
-
-    fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
-        Ok(self.0.block_hash(number)?.unwrap_or_default())
+        fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
+            Ok(self.0.block_hash(number)?.unwrap_or_default())
+        }
     }
 }
