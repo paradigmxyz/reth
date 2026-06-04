@@ -34,6 +34,7 @@ use revm::{
     context::{result::ResultAndState, Block},
     database::{states::bundle_state::BundleRetention, State},
 };
+use revm_primitives::hardfork::SpecId;
 use revm_state::bal::Bal as RevmBal;
 use std::sync::Arc;
 
@@ -112,10 +113,12 @@ where
     let block_gas_limit = evm_env.block_env.gas_limit();
     let enable_amsterdam_eip8037 = evm_env.cfg_env.enable_amsterdam_eip8037;
     let tx_gas_limit_cap = evm_env.cfg_env.tx_gas_limit_cap;
+    let is_bogota_active = Into::<SpecId>::into(*evm_env.spec_id()).is_enabled_in(SpecId::BOGOTA);
     let mut canonical_state = State::builder()
         .with_database(make_db(false)?)
         .with_bundle_update()
         .with_bal_builder()
+        .with_bal_storage_root_if(is_bogota_active)
         .build();
 
     let (block_result, senders) = {
@@ -171,7 +174,7 @@ where
         (block_result, senders)
     };
 
-    let built_bal = take_built_bal_and_validate(&mut canonical_state, bal)?;
+    let built_bal = take_built_bal_and_validate(&mut canonical_state, bal, is_bogota_active)?;
 
     canonical_state.merge_transitions(BundleRetention::Reverts);
     Ok((
@@ -207,6 +210,7 @@ fn convert_alloy_to_revm_bal(bal: &AlloyBal) -> Result<Arc<RevmBal>, BalExecutio
 fn take_built_bal_and_validate<DB>(
     canonical_state: &mut State<DB>,
     received_bal: &AlloyBal,
+    is_bogota_active: bool,
 ) -> Result<BlockAccessList, BalExecutionError>
 where
     DB: Database,
@@ -214,7 +218,9 @@ where
     let built_bal = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
     // Validate that the built BAL matches the received BAL in terms of storage roots for accounts
     // that specify them.(eip 8268)
-    validate_storage_roots(received_bal.as_slice(), built_bal.as_slice())?;
+    if is_bogota_active {
+        validate_storage_roots(received_bal.as_slice(), built_bal.as_slice())?;
+    }
     if tracing::enabled!(target: "engine::tree::payload_processor::bal", tracing::Level::DEBUG) &&
         built_bal.as_slice() != received_bal.as_slice()
     {
@@ -574,6 +580,10 @@ mod tests {
             .with_database(&mut db)
             .with_bundle_update()
             .with_bal_builder()
+            .with_bal_storage_root_if(
+                Into::<SpecId>::into(*evm_config.evm_env(block.header()).unwrap().spec_id())
+                    .is_enabled_in(SpecId::BOGOTA),
+            )
             .build();
 
         {
@@ -1071,13 +1081,15 @@ mod tests {
     fn rejects_account_changes_with_wrong_storage_root() {
         use alloy_consensus::TxLegacy;
         use alloy_primitives::{Bytes, TxKind};
-        use reth_chainspec::MAINNET;
+        use reth_chainspec::{ChainSpecBuilder, MAINNET};
         use reth_ethereum_primitives::Transaction;
         use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
         use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
         use revm::primitives::keccak256;
 
-        let evm_config = EthEvmConfig::mainnet();
+        let evm_config = EthEvmConfig::new(Arc::new(
+            ChainSpecBuilder::from(&*MAINNET).bogota_activated().build(),
+        ));
         let sstore_contract = alloy_primitives::Address::from([0x55; 20]);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
 

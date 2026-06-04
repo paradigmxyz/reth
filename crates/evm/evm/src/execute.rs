@@ -24,6 +24,7 @@ pub use reth_storage_errors::provider::ProviderError;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::{
     database::{states::bundle_state::BundleRetention, BundleState, State},
+    primitives::hardfork::SpecId,
     state::bal::Bal,
 };
 
@@ -598,11 +599,17 @@ where
             .map_err(BlockExecutionError::other)?;
 
         let has_bal = block.header().block_access_list_hash().is_some();
+        let evm_env =
+            self.strategy_factory.evm_env(block.header()).map_err(BlockExecutionError::other)?;
+        let is_bogota_active =
+            Into::<SpecId>::into(*evm_env.spec_id()).is_enabled_in(SpecId::BOGOTA);
 
         if has_bal {
             executor.evm_mut().db_mut().bal_state.bal_builder = Some(Bal::new());
+            executor.evm_mut().db_mut().bal_state.storage_root_enabled = is_bogota_active;
         } else {
             executor.evm_mut().db_mut().bal_state.bal_builder = None;
+            executor.evm_mut().db_mut().bal_state.storage_root_enabled = false;
         }
 
         executor.apply_pre_execution_changes()?;

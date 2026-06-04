@@ -90,7 +90,7 @@ use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State}
 use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm_primitives::{Address, KECCAK_EMPTY};
+use revm_primitives::{hardfork::SpecId, Address, KECCAK_EMPTY};
 use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
@@ -1034,11 +1034,14 @@ where
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
         let has_bal = env.decoded_bal.is_some();
+        let is_bogota_active =
+            Into::<SpecId>::into(*env.evm_env.spec_id()).is_enabled_in(SpecId::BOGOTA);
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
                 .with_bundle_update()
                 .with_bal_builder_if(has_bal)
+                .with_bal_storage_root_if(is_bogota_active)
                 .build()
         });
 
