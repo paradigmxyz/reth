@@ -19,7 +19,7 @@ use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives_traits::{
     block::Block as _, BlockBody as _, BlockTy, HeaderTy, SealedBlock, SignedTransaction,
 };
-use reth_revm::{database::StateProviderDatabase, db::State};
+use reth_revm::{database::StateProviderDatabase, db::State, primitives::hardfork::SpecId};
 use reth_storage_api::{errors::ProviderError, BlockReader, StateProviderFactory};
 use std::{
     collections::VecDeque,
@@ -268,8 +268,8 @@ where
 
     // Configure state
     let has_bal = reorg_target.header().block_access_list_hash().is_some();
-    let is_bogota_active =
-        provider.chain_spec().is_bogota_active_at_timestamp(reorg_target.header().timestamp());
+    let evm_env = evm_config.evm_env(reorg_target.header()).map_err(RethError::other)?;
+    let is_bogota_active = Into::<SpecId>::into(*evm_env.spec_id()).is_enabled_in(SpecId::BOGOTA);
     let state_provider = provider.state_by_block_hash(reorg_target.header().parent_hash())?;
     let mut state = State::builder()
         .with_database_ref(StateProviderDatabase::new(&state_provider))

@@ -601,6 +601,7 @@ where
 
         if has_bal {
             executor.evm_mut().db_mut().bal_state.bal_builder = Some(Bal::new());
+            tracing::info!("Bal state:{:?}", executor.evm().db().bal_state);
         } else {
             executor.evm_mut().db_mut().bal_state.bal_builder = None;
         }
