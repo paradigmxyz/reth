@@ -1,10 +1,14 @@
 //! HTTP SSZ transport proxy for the authenticated Engine API server.
 //!
-//! Implements the [EIP-8178] SSZ Engine API routes under `/engine`.
+//! Implements the [EIP-8178] SSZ Engine API routes under `/engine/v2`.
 //!
 //! [EIP-8178]: https://eips.ethereum.org/EIPS/eip-8178
 
-use alloy_eips::eip7685::{Requests, RequestsOrHash};
+use alloy_consensus::{Transaction, TxEnvelope};
+use alloy_eips::{
+    eip2718::Decodable2718,
+    eip7685::{Requests, RequestsOrHash},
+};
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
@@ -15,6 +19,7 @@ use http_body_util::BodyExt;
 use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_ethereum_engine_primitives::EthEngineTypes;
+use ssz::Decode;
 use std::{
     future::Future,
     pin::Pin,
@@ -52,7 +57,7 @@ impl EngineSszProxyHandle {
     }
 }
 
-/// A tower layer that intercepts SSZ Engine API routes under `/engine`.
+/// A tower layer that intercepts SSZ Engine API routes under `/engine/v2`.
 #[derive(Clone, Debug, Default)]
 pub struct EngineSszProxyLayer {
     handle: EngineSszProxyHandle,
@@ -95,7 +100,7 @@ where
     }
 
     fn call(&mut self, request: HttpRequest) -> Self::Future {
-        if !request.uri().path().starts_with("/engine/") {
+        if !request.uri().path().starts_with("/engine/v2/") {
             let fut = self.inner.call(request);
             return Box::pin(fut)
         }
@@ -114,7 +119,7 @@ async fn handle_engine_ssz_request(
     }
 
     let path = request.uri().path().to_owned();
-    let Some((version, resource)) = parse_engine_path(&path) else {
+    let Some((fork, resource)) = parse_engine_path(&path) else {
         return text_response(STATUS_NOT_FOUND, "unknown engine ssz endpoint")
     };
 
@@ -127,20 +132,66 @@ async fn handle_engine_ssz_request(
     };
 
     match resource {
-        "payloads" => handle_new_payload(engine, version, &body).await,
-        "forkchoice" => handle_forkchoice_updated(engine, version, &body).await,
+        "payloads" => handle_new_payload(engine, fork.payloads_version(), &body).await,
+        "forkchoice" => handle_forkchoice_updated(engine, fork.forkchoice_version(), &body).await,
         _ => text_response(STATUS_NOT_FOUND, "unknown engine ssz endpoint"),
     }
 }
 
-fn parse_engine_path(path: &str) -> Option<(u8, &str)> {
+fn parse_engine_path(path: &str) -> Option<(EngineSszFork, &str)> {
     let mut segments = path.trim_start_matches('/').split('/');
-    match (segments.next(), segments.next(), segments.next(), segments.next()) {
-        (Some("engine"), Some(version), Some(resource), None) => {
-            let version = version.strip_prefix('v')?.parse().ok()?;
-            Some((version, resource))
+    match (segments.next(), segments.next(), segments.next(), segments.next(), segments.next()) {
+        (Some("engine"), Some("v2"), Some(fork), Some(resource), None) => {
+            Some((fork.parse().ok()?, resource))
         }
         _ => None,
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EngineSszFork {
+    Paris,
+    Shanghai,
+    Cancun,
+    Prague,
+    Osaka,
+    Amsterdam,
+}
+
+impl EngineSszFork {
+    const fn payloads_version(self) -> u8 {
+        match self {
+            Self::Paris => 1,
+            Self::Shanghai => 2,
+            Self::Cancun => 3,
+            Self::Prague | Self::Osaka => 4,
+            Self::Amsterdam => 5,
+        }
+    }
+
+    const fn forkchoice_version(self) -> u8 {
+        match self {
+            Self::Paris => 1,
+            Self::Shanghai => 2,
+            Self::Cancun | Self::Prague | Self::Osaka => 3,
+            Self::Amsterdam => 4,
+        }
+    }
+}
+
+impl std::str::FromStr for EngineSszFork {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "paris" => Ok(Self::Paris),
+            "shanghai" => Ok(Self::Shanghai),
+            "cancun" => Ok(Self::Cancun),
+            "prague" => Ok(Self::Prague),
+            "osaka" => Ok(Self::Osaka),
+            "amsterdam" => Ok(Self::Amsterdam),
+            _ => Err(()),
+        }
     }
 }
 
@@ -177,8 +228,6 @@ async fn handle_forkchoice_updated(
 }
 
 fn decode_new_payload_request(version: u8, body: &[u8]) -> Result<ExecutionData, &'static str> {
-    use ssz::Decode;
-
     match version {
         1 => {
             let execution_payload =
@@ -191,28 +240,26 @@ fn decode_new_payload_request(version: u8, body: &[u8]) -> Result<ExecutionData,
             Ok(ExecutionData::new(execution_payload.into(), ExecutionPayloadSidecar::none()))
         }
         3 => {
-            let (execution_payload, expected_blob_versioned_hashes, parent_beacon_block_root) =
-                <(ExecutionPayloadV3, Vec<B256>, B256)>::from_ssz_bytes(body)
-                    .map_err(|_| "invalid ssz")?;
+            let (execution_payload, parent_beacon_block_root) =
+                <(ExecutionPayloadV3, B256)>::from_ssz_bytes(body).map_err(|_| "invalid ssz")?;
+            let versioned_hashes = calculate_versioned_hashes(
+                &execution_payload.payload_inner.payload_inner.transactions,
+            )?;
             let sidecar = ExecutionPayloadSidecar::v3(CancunPayloadFields {
                 parent_beacon_block_root,
-                versioned_hashes: expected_blob_versioned_hashes,
+                versioned_hashes,
             });
             Ok(ExecutionData::new(execution_payload.into(), sidecar))
         }
         4 => {
-            let (
-                execution_payload,
-                expected_blob_versioned_hashes,
-                parent_beacon_block_root,
-                execution_requests,
-            ) = <(ExecutionPayloadV3, Vec<B256>, B256, Vec<Bytes>)>::from_ssz_bytes(body)
-                .map_err(|_| "invalid ssz")?;
+            let (execution_payload, parent_beacon_block_root, execution_requests) =
+                <(ExecutionPayloadV3, B256, Vec<Bytes>)>::from_ssz_bytes(body)
+                    .map_err(|_| "invalid ssz")?;
+            let versioned_hashes = calculate_versioned_hashes(
+                &execution_payload.payload_inner.payload_inner.transactions,
+            )?;
             let sidecar = ExecutionPayloadSidecar::v4(
-                CancunPayloadFields {
-                    parent_beacon_block_root,
-                    versioned_hashes: expected_blob_versioned_hashes,
-                },
+                CancunPayloadFields { parent_beacon_block_root, versioned_hashes },
                 PraguePayloadFields::new(RequestsOrHash::Requests(Requests::new(
                     execution_requests,
                 ))),
@@ -220,18 +267,14 @@ fn decode_new_payload_request(version: u8, body: &[u8]) -> Result<ExecutionData,
             Ok(ExecutionData::new(execution_payload.into(), sidecar))
         }
         5 => {
-            let (
-                execution_payload,
-                expected_blob_versioned_hashes,
-                parent_beacon_block_root,
-                execution_requests,
-            ) = <(ExecutionPayloadV4, Vec<B256>, B256, Vec<Bytes>)>::from_ssz_bytes(body)
-                .map_err(|_| "invalid ssz")?;
+            let (execution_payload, parent_beacon_block_root, execution_requests) =
+                <(ExecutionPayloadV4, B256, Vec<Bytes>)>::from_ssz_bytes(body)
+                    .map_err(|_| "invalid ssz")?;
+            let versioned_hashes = calculate_versioned_hashes(
+                &execution_payload.payload_inner.payload_inner.payload_inner.transactions,
+            )?;
             let sidecar = ExecutionPayloadSidecar::v4(
-                CancunPayloadFields {
-                    parent_beacon_block_root,
-                    versioned_hashes: expected_blob_versioned_hashes,
-                },
+                CancunPayloadFields { parent_beacon_block_root, versioned_hashes },
                 PraguePayloadFields::new(RequestsOrHash::Requests(Requests::new(
                     execution_requests,
                 ))),
@@ -242,12 +285,23 @@ fn decode_new_payload_request(version: u8, body: &[u8]) -> Result<ExecutionData,
     }
 }
 
+fn calculate_versioned_hashes(transactions: &[Bytes]) -> Result<Vec<B256>, &'static str> {
+    let mut versioned_hashes = Vec::new();
+    for transaction in transactions {
+        let transaction =
+            TxEnvelope::decode_2718_exact(transaction.as_ref()).map_err(|_| "invalid tx")?;
+        if let Some(hashes) = transaction.blob_versioned_hashes() {
+            versioned_hashes.extend_from_slice(hashes);
+        }
+    }
+
+    Ok(versioned_hashes)
+}
+
 fn decode_forkchoice_request(
     version: u8,
     body: &[u8],
 ) -> Result<(ForkchoiceState, Option<PayloadAttributes>), &'static str> {
-    use ssz::Decode;
-
     match version {
         1..=4 => {
             let (forkchoice_state, payload_attributes) =
@@ -326,4 +380,30 @@ fn text_response(status: u16, body: impl Into<String>) -> HttpResponse {
         .header(CONTENT_TYPE, TEXT_PLAIN)
         .body(HttpBody::from(body.into()))
         .expect("valid response")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_fork_scoped_payload_endpoint() {
+        let (fork, resource) = parse_engine_path("/engine/v2/prague/payloads").unwrap();
+        assert_eq!(fork, EngineSszFork::Prague);
+        assert_eq!(resource, "payloads");
+        assert_eq!(fork.payloads_version(), 4);
+    }
+
+    #[test]
+    fn parses_fork_scoped_forkchoice_endpoint() {
+        let (fork, resource) = parse_engine_path("/engine/v2/amsterdam/forkchoice").unwrap();
+        assert_eq!(fork, EngineSszFork::Amsterdam);
+        assert_eq!(resource, "forkchoice");
+        assert_eq!(fork.forkchoice_version(), 4);
+    }
+
+    #[test]
+    fn rejects_legacy_version_scoped_endpoint() {
+        assert!(parse_engine_path("/engine/v4/payloads").is_none());
+    }
 }

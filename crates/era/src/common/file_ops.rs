@@ -114,6 +114,8 @@ pub trait FileReader: StreamReader<File> {
     }
 }
 
+impl<T: StreamReader<File>> FileReader for T {}
+
 /// [`StreamWriter`] for writing era-format files
 pub trait StreamWriter<W: Write>: Sized {
     /// The file type this writer handles
@@ -172,26 +174,28 @@ pub enum EraFileType {
     /// Execution layer ERA1 file, `.era1`
     /// Contains execution blocks pre-merge
     Era1,
+    /// Execution layer ERE file, `.ere`
+    /// Contains execution blocks for both pre-merge and post-merge
+    Ere,
 }
 
 impl EraFileType {
+    /// All file types. No extension is a suffix of another, so `from_filename`'s suffix match is
+    /// order-independent.
+    const ALL: [Self; 3] = [Self::Era, Self::Era1, Self::Ere];
+
     /// Get the file extension for this type, dot included
     pub const fn extension(&self) -> &'static str {
         match self {
             Self::Era => ".era",
             Self::Era1 => ".era1",
+            Self::Ere => ".ere",
         }
     }
 
     /// Detect file type from a filename
     pub fn from_filename(filename: &str) -> Option<Self> {
-        if filename.ends_with(".era") {
-            Some(Self::Era)
-        } else if filename.ends_with(".era1") {
-            Some(Self::Era1)
-        } else {
-            None
-        }
+        Self::ALL.into_iter().find(|ty| filename.ends_with(ty.extension()))
     }
 
     /// Generate era file name.
@@ -210,24 +214,20 @@ impl EraFileType {
         era_count: u64,
     ) -> String {
         let hash = format_hash(hash);
-
-        if include_era_count {
-            format!(
-                "{}-{:05}-{:05}-{}{}",
-                network_name,
-                era_number,
-                era_count,
-                hash,
-                self.extension()
-            )
-        } else {
-            format!("{}-{:05}-{}{}", network_name, era_number, hash, self.extension())
-        }
+        // Custom exports insert an `-<era-count>` segment between the era number and the hash.
+        let era_count = if include_era_count { format!("-{era_count:05}") } else { String::new() };
+        format!("{network_name}-{era_number:05}{era_count}-{hash}{}", self.extension())
     }
 
-    /// Detect file type from URL
-    /// By default, it assumes `Era` type
+    /// Detect file type from a URL, defaulting to `Era`.
+    ///
+    /// Resolves by file extension when the URL names a file; otherwise falls back to the `era1`
+    /// host/path substring.
     pub fn from_url(url: &str) -> Self {
+        let file_url = url.split(['?', '#']).next().unwrap_or(url);
+        if let Some(ty) = Self::from_filename(file_url) {
+            return ty;
+        }
         if url.contains("era1") {
             Self::Era1
         } else {
@@ -241,5 +241,60 @@ pub fn format_hash(hash: Option<[u8; 4]>) -> String {
     match hash {
         Some(h) => format!("{:02x}{:02x}{:02x}{:02x}", h[0], h[1], h[2], h[3]),
         None => "00000000".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_from_url_detection() {
+        // A URL that names a file resolves by its extension, regardless of the rest of the path.
+        assert_eq!(
+            EraFileType::from_url("https://host/mainnet-00000-abcd1234.ere"),
+            EraFileType::Ere
+        );
+        assert_eq!(
+            EraFileType::from_url("https://host/mainnet-00000-abcd1234.era1"),
+            EraFileType::Era1
+        );
+        assert_eq!(
+            EraFileType::from_url("https://host/mainnet-00000-abcd1234.era"),
+            EraFileType::Era
+        );
+
+        // An ERE file under a path/mirror containing `era1` still resolves by its `.ere` extension.
+        assert_eq!(
+            EraFileType::from_url("https://host/era1/mainnet-00000-abcd1234.ere"),
+            EraFileType::Ere
+        );
+
+        // Directory/index endpoints have no file extension and fall back to the host/path
+        // substring.
+        assert_eq!(EraFileType::from_url("https://mainnet.era1.nimbus.team/"), EraFileType::Era1);
+        assert_eq!(EraFileType::from_url("https://era.ithaca.xyz/"), EraFileType::Era);
+    }
+
+    #[test]
+    fn test_from_filename_detection() {
+        assert_eq!(
+            EraFileType::from_filename("mainnet-00000-abcd1234.era"),
+            Some(EraFileType::Era)
+        );
+        assert_eq!(
+            EraFileType::from_filename("mainnet-00000-abcd1234.era1"),
+            Some(EraFileType::Era1)
+        );
+        assert_eq!(
+            EraFileType::from_filename("mainnet-00000-abcd1234.ere"),
+            Some(EraFileType::Ere)
+        );
+        // Profile postfixes don't change extension detection.
+        assert_eq!(
+            EraFileType::from_filename("mainnet-00000-abcd1234-noproofs.ere"),
+            Some(EraFileType::Ere)
+        );
+        assert_eq!(EraFileType::from_filename("mainnet-00000-abcd1234.txt"), None);
     }
 }

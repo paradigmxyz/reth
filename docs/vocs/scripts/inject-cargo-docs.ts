@@ -2,7 +2,8 @@ import { promises as fs } from 'fs';
 import { glob } from 'glob';
 
 const CARGO_DOCS_PATH = '../../target/doc';
-const VOCS_DIST_PATH = './docs/dist/docs';
+const VOCS_DIST_ROOT = './docs/dist/public';
+const VOCS_DIST_PATH = `${VOCS_DIST_ROOT}/docs`;
 const BASE_PATH = '/docs';
 
 async function injectCargoDocs() {
@@ -19,7 +20,7 @@ async function injectCargoDocs() {
 
   // Check if Vocs dist exists
   try {
-    await fs.access('./docs/dist');
+    await fs.access(VOCS_DIST_ROOT);
   } catch {
     console.error('Error: Vocs dist not found. Please run: bun run build');
     process.exit(1);
@@ -43,7 +44,7 @@ async function injectCargoDocs() {
     // Extract the current crate name and module path from the file path
     // Remove the base path to get the relative path within the docs
     const relativePath = file.startsWith('./') ? file.slice(2) : file;
-    const docsRelativePath = relativePath.replace(/^docs\/dist\/docs\//, '');
+    const docsRelativePath = relativePath.replace(/^docs\/dist\/public\/docs\//, '');
     const pathParts = docsRelativePath.split('/');
     const fileName = pathParts[pathParts.length - 1];
     
