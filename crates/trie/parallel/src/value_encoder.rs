@@ -248,44 +248,26 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
         }
     }
 
-    /// Consume [`Self`] and return all collected storage proofs along with accumulated stats.
+    /// Consumes [`Self`] without waiting for remaining dispatched storage proof receivers.
     ///
-    /// This method collects any remaining dispatched proofs that weren't consumed during proof
-    /// calculation and includes their wait time in the returned stats.
-    ///
-    /// # Panics
-    ///
-    /// This method panics if any deferred encoders produced by [`Self::deferred_encoder`] have not
-    /// been dropped.
-    pub(crate) fn finalize(
+    /// This returns any proof receivers that were not needed while constructing account proofs so
+    /// a coordinator outside the account worker can wait for them.
+    pub(crate) fn finish_without_waiting(
         self,
-    ) -> Result<(B256Map<Vec<ProofTrieNodeV2>>, ValueEncoderStats), StateProofError> {
-        let mut storage_proof_results = Rc::into_inner(self.storage_proof_results)
+    ) -> (
+        B256Map<Vec<ProofTrieNodeV2>>,
+        B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
+        ValueEncoderStats,
+    ) {
+        let storage_proof_results = Rc::into_inner(self.storage_proof_results)
             .expect("no deferred encoders are still allocated")
             .into_inner();
 
-        let mut stats = Rc::into_inner(self.stats)
+        let stats = Rc::into_inner(self.stats)
             .expect("no deferred encoders are still allocated")
             .into_inner();
 
-        // Any remaining dispatched proofs need to have their results collected.
-        // These are proofs that were pre-dispatched but not consumed during proof calculation.
-        for (hashed_address, rx) in &self.dispatched {
-            let wait_start = Instant::now();
-            let result = rx
-                .recv()
-                .map_err(|_| {
-                    StateProofError::Database(DatabaseError::Other(format!(
-                        "Storage proof channel closed for {hashed_address:?}",
-                    )))
-                })?
-                .result?;
-            stats.storage_wait_time += wait_start.elapsed();
-
-            storage_proof_results.insert(*hashed_address, result.proof);
-        }
-
-        Ok((storage_proof_results, stats))
+        (storage_proof_results, self.dispatched, stats)
     }
 }
 

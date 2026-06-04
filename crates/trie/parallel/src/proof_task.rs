@@ -38,7 +38,7 @@ use alloy_primitives::{
     B256, U256,
 };
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use reth_execution_errors::StateProofError;
+use reth_execution_errors::trie::StateProofError;
 use reth_primitives_traits::{dashmap::DashMap, FastInstant as Instant};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
 use reth_storage_errors::db::DatabaseError;
@@ -361,7 +361,7 @@ impl ProofWorkerHandle {
                 let ProofResultContext { sender: result_tx, state, start_time: start } =
                     input.into_proof_result_sender();
 
-                let _ = result_tx.send(ProofResultMessage {
+                let _ = result_tx.send(ProofWorkerResultMessage {
                     result: Err(ParallelStateRootError::Provider(error.clone())),
                     elapsed: start.elapsed(),
                     state,
@@ -464,11 +464,10 @@ where
     }
 }
 
-/// Channel used by worker threads to deliver `ProofResultMessage` items back to
-/// `SparseTrieCacheTask`.
+/// Channel used by account worker threads to deliver proof work back to the orchestrator.
 ///
-/// Workers use this sender to deliver proof results directly to `SparseTrieCacheTask`.
-pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
+/// The account worker does not wait for storage worker receivers before sending on this channel.
+pub type ProofWorkerResultSender = CrossbeamSender<ProofWorkerResultMessage>;
 
 /// Message containing a completed proof result with metadata for direct delivery to
 /// `SparseTrieCacheTask`.
@@ -485,6 +484,63 @@ pub struct ProofResultMessage {
     pub state: HashedPostState,
 }
 
+/// Message containing account proof work from an account worker.
+///
+/// This may still contain storage proof receivers that need to be awaited by a coordinator.
+#[derive(Debug)]
+pub struct ProofWorkerResultMessage {
+    /// The account worker result.
+    pub result: Result<PartialDecodedMultiProofV2, ParallelStateRootError>,
+    /// Time elapsed from request dispatch until the account worker finished its part.
+    pub elapsed: Duration,
+    /// Original state update that triggered this proof.
+    pub state: HashedPostState,
+}
+
+impl ProofWorkerResultMessage {
+    /// Waits for any outstanding storage proof responses and converts this into the regular proof
+    /// result message expected by the sparse trie task.
+    pub fn finalize(self) -> ProofResultMessage {
+        let Self { result, elapsed, state } = self;
+        let result = result.and_then(PartialDecodedMultiProofV2::finalize);
+        ProofResultMessage { result, elapsed, state }
+    }
+}
+
+/// Account proofs plus storage proof state that may still need to be collected.
+#[derive(Debug)]
+pub struct PartialDecodedMultiProofV2 {
+    /// Account proof nodes already computed by the account worker.
+    account_proofs: Vec<ProofTrieNodeV2>,
+    /// Storage proof nodes already collected while encoding account values.
+    storage_proofs: B256Map<Vec<ProofTrieNodeV2>>,
+    /// Storage proof receivers that should be awaited outside the account worker.
+    pending_storage_proofs: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
+}
+
+impl PartialDecodedMultiProofV2 {
+    /// Collects pending storage proofs and returns a complete decoded multiproof.
+    fn finalize(mut self) -> Result<DecodedMultiProofV2, ParallelStateRootError> {
+        for (hashed_address, rx) in self.pending_storage_proofs {
+            let result = rx
+                .recv()
+                .map_err(|_| {
+                    ParallelStateRootError::Other(format!(
+                        "Storage proof channel closed for {hashed_address:?}",
+                    ))
+                })?
+                .result
+                .map_err(|err| ParallelStateRootError::Other(err.to_string()))?;
+            self.storage_proofs.insert(hashed_address, result.proof);
+        }
+
+        Ok(DecodedMultiProofV2 {
+            account_proofs: self.account_proofs,
+            storage_proofs: self.storage_proofs,
+        })
+    }
+}
+
 /// Context for sending proof calculation results back to `SparseTrieCacheTask`.
 ///
 /// This struct contains all context needed to send and track proof calculation results.
@@ -492,7 +548,7 @@ pub struct ProofResultMessage {
 #[derive(Debug, Clone)]
 pub struct ProofResultContext {
     /// Channel sender for result delivery
-    pub sender: ProofResultSender,
+    pub sender: ProofWorkerResultSender,
     /// Original state update that triggered this proof
     pub state: HashedPostState,
     /// Calculation start time for measuring elapsed duration
@@ -502,7 +558,7 @@ pub struct ProofResultContext {
 impl ProofResultContext {
     /// Creates a new proof result context.
     pub const fn new(
-        sender: ProofResultSender,
+        sender: ProofWorkerResultSender,
         state: HashedPostState,
         start_time: Instant,
     ) -> Self {
@@ -963,7 +1019,7 @@ where
         v2_account_calculator: &mut V2AccountProofCalculator<'a, Provider>,
         v2_storage_calculator: Rc<RefCell<V2StorageProofCalculator<'a, Provider>>>,
         targets: MultiProofTargetsV2,
-    ) -> Result<(DecodedMultiProofV2, ValueEncoderStats), ParallelStateRootError>
+    ) -> Result<(PartialDecodedMultiProofV2, ValueEncoderStats), ParallelStateRootError>
     where
         Provider: TrieCursorFactory + HashedCursorFactory + 'a,
     {
@@ -991,9 +1047,11 @@ where
         let account_proofs =
             v2_account_calculator.proof(&mut value_encoder, &mut account_targets)?;
 
-        let (storage_proofs, value_encoder_stats) = value_encoder.finalize()?;
+        let (storage_proofs, pending_storage_proofs, value_encoder_stats) =
+            value_encoder.finish_without_waiting();
 
-        let proof = DecodedMultiProofV2 { account_proofs, storage_proofs };
+        let proof =
+            PartialDecodedMultiProofV2 { account_proofs, storage_proofs, pending_storage_proofs };
 
         Ok((proof, value_encoder_stats))
     }
@@ -1031,7 +1089,7 @@ where
         *account_proofs_processed += 1;
 
         // Send result to SparseTrieCacheTask
-        if result_tx.send(ProofResultMessage { result, elapsed: total_elapsed, state }).is_err() {
+        if result_tx.send(ProofWorkerResultMessage { result, elapsed: total_elapsed, state }).is_err() {
             trace!(
                 target: "trie::proof_task",
                 worker_id=self.worker_id,
