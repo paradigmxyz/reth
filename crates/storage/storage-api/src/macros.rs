@@ -55,7 +55,7 @@ macro_rules! delegate_provider_impls {
                 #[cfg(feature = "lattice-state-root")]
                 fn lattice_accumulator_seed(&self) -> reth_storage_api::errors::provider::ProviderResult<reth_trie::lattice::LatticeAccumulatorUpdates>;
                 #[cfg(feature = "lattice-state-root")]
-                fn lattice_storage_accumulator(&self, hashed_address: alloy_primitives::B256) -> reth_storage_api::errors::provider::ProviderResult<Option<reth_trie::lattice::LatticeHashState>>;
+                fn lattice_account_storage(&self, hashed_address: alloy_primitives::B256) -> reth_storage_api::errors::provider::ProviderResult<Vec<(alloy_primitives::B256, alloy_primitives::U256)>>;
                 fn state_root_from_nodes_with_updates(&self, input: reth_trie::TrieInput) -> reth_storage_api::errors::provider::ProviderResult<(alloy_primitives::B256, reth_trie::updates::TrieUpdates)>;
             }
             StorageRootProvider $(where [$($generics)*])? {

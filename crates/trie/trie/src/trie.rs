@@ -19,7 +19,7 @@ use alloy_trie::proof::AddedRemovedKeys;
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives_traits::Account;
 #[cfg(feature = "lattice-state-root")]
-use reth_trie_common::lattice::{LatticeStateRoot, LatticeStorageRoot};
+use reth_trie_common::lattice::LatticeRoot;
 use tracing::{debug, instrument, trace, Span};
 
 /// The default updates after which root algorithms should return intermediate progress rather than
@@ -372,7 +372,7 @@ fn lattice_root<H>(hashed_cursor_factory: &H) -> Result<(B256, usize), StateRoot
 where
     H: HashedCursorFactory,
 {
-    let mut state_root = LatticeStateRoot::default();
+    let mut lattice_root = LatticeRoot::default();
     let mut hashed_entries_walked = 0;
 
     let mut account_cursor = hashed_cursor_factory.hashed_account_cursor()?;
@@ -380,22 +380,22 @@ where
     while let Some((hashed_address, account)) = account_entry {
         hashed_entries_walked += 1;
 
-        let mut storage_root = LatticeStorageRoot::default();
+        lattice_root.add_account(hashed_address, account);
+
         let mut storage_cursor = hashed_cursor_factory.hashed_storage_cursor(hashed_address)?;
         let mut storage_entry = storage_cursor.seek(B256::ZERO)?;
         while let Some((hashed_slot, value)) = storage_entry {
             hashed_entries_walked += 1;
             if !value.is_zero() {
-                storage_root.add_slot(hashed_slot, value);
+                lattice_root.add_slot(hashed_address, hashed_slot, value);
             }
             storage_entry = storage_cursor.next()?;
         }
 
-        state_root.add_account(hashed_address, account, storage_root.root());
         account_entry = account_cursor.next()?;
     }
 
-    Ok((state_root.root(), hashed_entries_walked))
+    Ok((lattice_root.root(), hashed_entries_walked))
 }
 
 /// Contains state mutated during state root calculation and storage root result handling.

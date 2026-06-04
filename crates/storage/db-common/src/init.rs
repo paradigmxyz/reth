@@ -1212,40 +1212,31 @@ fn rebuild_lattice_accumulators<Provider>(provider: &Provider) -> Result<B256, I
 where
     Provider: DBProvider<Tx: DbTx + DbTxMut>,
 {
-    use reth_trie::lattice::{LatticeStateRoot, LatticeStorageRoot};
+    use reth_trie::lattice::LatticeRoot;
 
     let tx = provider.tx_ref();
-    let mut state_root = LatticeStateRoot::default();
-    let mut storage_updates = B256Map::default();
+    let mut lattice_root = LatticeRoot::default();
 
     let mut account_cursor = tx.cursor_read::<tables::HashedAccounts>()?;
     let mut account_entry = account_cursor.seek(B256::ZERO)?;
     while let Some((hashed_address, account)) = account_entry {
-        let mut storage_root = LatticeStorageRoot::default();
+        lattice_root.add_account(hashed_address, account);
+
         let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorages>()?;
         for entry in storage_cursor.walk_dup(Some(hashed_address), None)? {
             let (_, StorageEntry { key, value }) = entry?;
             if !value.is_zero() {
-                storage_root.add_slot(key, value);
+                lattice_root.add_slot(hashed_address, key, value);
             }
-        }
-
-        state_root.add_account(hashed_address, account, storage_root.root());
-        if !storage_root.is_zero() {
-            storage_updates.insert(hashed_address, storage_root.state());
         }
 
         account_entry = account_cursor.next()?;
     }
 
     tx.clear::<tables::LatticeStorageAccumulators>()?;
-    tx.put::<tables::LatticeStateAccumulator>(0, state_root.state().into_vec())?;
-    let mut storage_write_cursor = tx.cursor_write::<tables::LatticeStorageAccumulators>()?;
-    for (hashed_address, storage_state) in storage_updates {
-        storage_write_cursor.upsert(hashed_address, &storage_state.into_vec())?;
-    }
+    tx.put::<tables::LatticeStateAccumulator>(0, lattice_root.state().into_vec())?;
 
-    Ok(state_root.root())
+    Ok(lattice_root.root())
 }
 
 /// Computes the state root (from scratch) with periodic commits to free MDBX dirty pages.

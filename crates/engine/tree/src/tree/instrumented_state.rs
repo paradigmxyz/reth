@@ -234,11 +234,11 @@ impl<S: StateRootProvider> StateRootProvider for InstrumentedStateProvider<S> {
     }
 
     #[cfg(feature = "lattice-state-root")]
-    fn lattice_storage_accumulator(
+    fn lattice_account_storage(
         &self,
         hashed_address: B256,
-    ) -> ProviderResult<Option<reth_trie::lattice::LatticeHashState>> {
-        self.state_provider.lattice_storage_accumulator(hashed_address)
+    ) -> ProviderResult<Vec<(B256, alloy_primitives::U256)>> {
+        self.state_provider.lattice_account_storage(hashed_address)
     }
 
     fn state_root_from_nodes_with_updates(

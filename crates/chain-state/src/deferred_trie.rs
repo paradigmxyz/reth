@@ -227,7 +227,6 @@ impl ComputedTrieData {
             #[cfg(feature = "lattice-state-root")]
             lattice_accumulator_updates: Arc::new(LatticeAccumulatorUpdates {
                 state: reth_trie::lattice::LatticeHashState::default(),
-                storage: alloy_primitives::map::B256Map::default(),
             }),
         }
     }

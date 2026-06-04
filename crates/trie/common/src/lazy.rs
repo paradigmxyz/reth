@@ -39,7 +39,6 @@ impl SortedTrieData {
             #[cfg(feature = "lattice-state-root")]
             lattice_accumulator_updates: Arc::new(LatticeAccumulatorUpdates {
                 state: crate::lattice::LatticeHashState::default(),
-                storage: alloy_primitives::map::B256Map::default(),
             }),
         }
     }

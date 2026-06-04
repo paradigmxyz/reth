@@ -169,11 +169,39 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
     }
 
     #[cfg(feature = "lattice-state-root")]
-    fn lattice_storage_accumulator(
+    fn lattice_account_storage(
         &self,
         hashed_address: B256,
-    ) -> ProviderResult<Option<reth_trie::lattice::LatticeHashState>> {
-        self.historical.lattice_storage_accumulator(hashed_address)
+    ) -> ProviderResult<Vec<(B256, alloy_primitives::U256)>> {
+        let mut storage = self
+            .historical
+            .lattice_account_storage(hashed_address)?
+            .into_iter()
+            .collect::<alloy_primitives::map::B256Map<_>>();
+
+        for block in self.in_memory.iter().rev() {
+            for (address, account) in &block.execution_outcome().state.state {
+                if keccak256(address) != hashed_address {
+                    continue
+                }
+
+                if account.was_destroyed() {
+                    storage.clear();
+                }
+
+                for (slot, value) in &account.storage {
+                    let hashed_slot = keccak256(slot.to_be_bytes::<32>());
+                    let present_value = value.present_value();
+                    if present_value.is_zero() {
+                        storage.remove(&hashed_slot);
+                    } else {
+                        storage.insert(hashed_slot, present_value);
+                    }
+                }
+            }
+        }
+
+        Ok(storage.into_iter().collect())
     }
 
     fn state_root_from_nodes_with_updates(

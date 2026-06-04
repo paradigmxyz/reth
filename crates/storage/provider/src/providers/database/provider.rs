@@ -749,11 +749,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     for block in &blocks {
                         let lattice_updates = block.trie_data().lattice_accumulator_updates;
                         merged_lattice_updates.state = lattice_updates.state.clone();
-                        merged_lattice_updates.storage.extend(lattice_updates.storage.iter().map(
-                            |(hashed_address, storage_state)| {
-                                (*hashed_address, storage_state.clone())
-                            },
-                        ));
                     }
                     if merged_lattice_updates.is_empty() {
                         self.rebuild_lattice_accumulators()?;
@@ -1437,19 +1432,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             crate::providers::state::lattice::lattice_state_accumulator_key(),
             updates.state.clone().into_vec(),
         )?;
-
-        let mut storage_cursor =
-            self.tx_ref().cursor_write::<tables::LatticeStorageAccumulators>()?;
-        for (hashed_address, storage_state) in &updates.storage {
-            if storage_cursor.seek_exact(*hashed_address)?.is_some() {
-                storage_cursor.delete_current()?;
-            }
-
-            if let Some(storage_state) = storage_state {
-                let encoded = storage_state.clone().into_vec();
-                storage_cursor.upsert(*hashed_address, &encoded)?;
-            }
-        }
+        self.tx_ref().clear::<tables::LatticeStorageAccumulators>()?;
 
         Ok(())
     }
@@ -1458,7 +1441,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     fn rebuild_lattice_accumulators(&self) -> ProviderResult<()> {
         let updates =
             crate::providers::state::lattice::rebuild_lattice_accumulators(self.tx_ref())?;
-        self.tx_ref().clear::<tables::LatticeStorageAccumulators>()?;
         self.write_lattice_accumulator_updates(&updates)
     }
 
