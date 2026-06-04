@@ -13,7 +13,7 @@
 
 use crate::tree::{
     payload_processor::multiproof::StateRootMessage,
-    precompile_cache::{CachedPrecompile, PrecompileCacheMap},
+    precompile_cache::{Evm2CachedPrecompiles, PrecompileCacheMap},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
     PayloadExecutionCache, SavedCache, StateProviderBuilder,
 };
@@ -26,9 +26,12 @@ use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{
     database::{State, StateProviderDatabase},
+    evm2::{
+        block_env_from_revm, create_evm2, ethereum_tx_env_from_revm, precompiles_for_spec,
+        spec_id_from_revm, Evm2TransactionExecutor,
+    },
     execute::ExecutableTxFor,
-    ConfigureEvm, Evm, EvmFor,
-    RecoveredTx, SpecFor,
+    ConfigureEvm, RecoveredTx, SpecFor,
 };
 use reth_execution_types::EvmState;
 use reth_metrics::Metrics;
@@ -88,6 +91,7 @@ where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
+    SpecFor<Evm>: Into<reth_evm::hardfork::SpecId>,
 {
     /// Initializes the task with the given transactions pending execution
     pub fn new(
@@ -231,7 +235,8 @@ where
             let start = Instant::now();
 
             let (tx_env, tx) = tx.into_parts();
-            let res = match evm.transact(tx_env) {
+            let tx_env = ethereum_tx_env_from_revm(&tx_env);
+            let res = match evm.executor.execute_tx_env(&tx_env) {
                 Ok(res) => res,
                 Err(err) => {
                     trace!(
@@ -555,13 +560,24 @@ where
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
 type PrewarmEvmState<Evm> =
-    Option<EvmFor<Evm, State<StateProviderDatabase<StateProviderBox>>>>;
+    Option<PrewarmExecutorState<Evm>>;
+
+/// Per-thread evm2 executor state used by prewarm workers.
+#[derive(Debug)]
+struct PrewarmExecutorState<Evm>
+where
+    Evm: ConfigureEvm,
+{
+    executor: Evm2TransactionExecutor,
+    _marker: core::marker::PhantomData<fn() -> Evm>,
+}
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
+    SpecFor<Evm>: Into<reth_evm::hardfork::SpecId>,
 {
     /// Creates a per-thread EVM for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
@@ -597,23 +613,22 @@ where
         // transactions in the block can still be prewarmed
         evm_env.cfg_env.disable_balance_check = true;
 
-        // create a new executor and disable nonce checks in the env
-        let spec_id = *evm_env.spec_id();
-        let mut evm = self.evm_config.evm_with_env(state_provider, evm_env);
+        let spec = *evm_env.spec_id();
+        let evm2_spec = spec_id_from_revm(spec.into());
+        let block_env = block_env_from_revm(evm_env.block_env);
+        let mut executor =
+            Evm2TransactionExecutor::new(create_evm2(state_provider, evm2_spec, block_env));
 
         if !self.precompile_cache_disabled {
-            // Only cache pure precompiles to avoid issues with stateful precompiles
-            evm.precompiles_mut().map_cacheable_precompiles(|address, precompile| {
-                CachedPrecompile::wrap(
-                    precompile,
-                    self.precompile_cache_map.cache_for_address(*address),
-                    spec_id,
-                    None, // No metrics for prewarm
-                )
-            });
+            executor.set_precompiles(Evm2CachedPrecompiles::new(
+                precompiles_for_spec(evm2_spec),
+                self.precompile_cache_map.clone(),
+                spec,
+                None,
+            ));
         }
 
-        Some(evm)
+        Some(PrewarmExecutorState { executor, _marker: core::marker::PhantomData })
     }
 
     /// Returns `true` if prewarming should stop.

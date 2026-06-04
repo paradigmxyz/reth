@@ -44,6 +44,7 @@ use evm2::{
     env::BlockEnv as Evm2BlockEnv,
     ethereum::{ethereum_tx_registry, EthereumTxEnv, RecoveredTxEnvelope},
     evm::{
+        precompile::PrecompileProvider,
         AccountInfo as Evm2AccountInfo, Database as Evm2DatabaseTrait, Db as Evm2Db,
         DbErrorCode as Evm2DbErrorCode, Evm as Evm2, StateChanges, StorageChangeSet,
         TxResult as Evm2TxResult, BEACON_ROOTS_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS,
@@ -1779,6 +1780,26 @@ where
             output: Evm2ExecutionOutput::default(),
             result: Evm2BlockExecutionResult::default(),
         }
+    }
+
+    /// Replaces the executor's precompile provider.
+    pub fn set_precompiles(&mut self, precompiles: impl PrecompileProvider<evm2::BaseEvmTypes>) {
+        self.evm.set_precompiles(precompiles);
+    }
+
+    /// Executes one Ethereum transaction environment and returns reth-compatible output.
+    pub fn execute_tx_env(
+        &mut self,
+        tx: &EthereumTxEnv,
+    ) -> Result<ResultAndState<HaltReason>, BlockExecutionError> {
+        let evm2_result = evm2::ethereum::transact_tx_env(&mut self.evm, tx).map_err(|err| {
+            BlockExecutionError::msg(format_args!("evm2 transaction execution failed: {err}"))
+        })?;
+        let evm_state =
+            evm_state_from_evm2_with_accounts(self, evm2_result.state_changes.clone())?;
+        let mut result = evm2_result_to_revm_result(&evm2_result);
+        result.state = evm_state;
+        Ok(result)
     }
 
     /// Executes one recovered Ethereum transaction, merges its output, and returns its receipt.

@@ -4,6 +4,15 @@ use alloy_primitives::{
     map::{DefaultHashBuilder, FbBuildHasher},
     Address, Bytes,
 };
+use evm2::{
+    evm::{precompile::PrecompileProvider, Evm as Evm2},
+    interpreter::GasTracker,
+    precompiles::{
+        PrecompileError as Evm2PrecompileError, PrecompileResult as Evm2PrecompileResult,
+        Precompiles as Evm2Precompiles,
+    },
+    BaseEvmTypes,
+};
 use moka::policy::EvictionPolicy;
 use reth_evm::{
     precompile::{PrecompileId, PrecompileOutput, PrecompileResult},
@@ -56,7 +65,7 @@ where
                 .initial_capacity(MAX_CACHE_SIZE as usize)
                 .eviction_policy(EvictionPolicy::lru())
                 .weigher(|key: &Bytes, value: &CacheEntry<S>| {
-                    (key.len() + value.output.bytes.len()) as u32
+                    (key.len() + value.bytes.len()) as u32
                 })
                 .build_with_hasher(Default::default()),
         )
@@ -83,13 +92,14 @@ where
 /// We intentionally do not cache non-successful statuses or errors.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CacheEntry<S> {
-    output: PrecompileOutput,
+    bytes: Bytes,
+    gas_used: u64,
     spec: S,
 }
 
 impl<S> CacheEntry<S> {
     const fn gas_used(&self) -> u64 {
-        self.output.gas_used
+        self.gas_used
     }
 
     /// Converts the cache entry to a precompile result. Accepts state gas reservoir as input.
@@ -97,9 +107,7 @@ impl<S> CacheEntry<S> {
     /// All cached precompiles are not expected to access/created state and thus reservoir is always
     /// kept as is.
     fn to_precompile_result(&self, reservoir: u64) -> PrecompileResult {
-        let mut output = self.output.clone();
-        output.reservoir = reservoir;
-        Ok(output)
+        Ok(PrecompileOutput::new(self.gas_used, self.bytes.clone(), reservoir))
     }
 }
 
@@ -209,7 +217,11 @@ where
                 } else {
                     let size = self.cache.insert(
                         Bytes::copy_from_slice(calldata),
-                        CacheEntry { output: output.clone(), spec: self.spec_id.clone() },
+                        CacheEntry {
+                            bytes: output.bytes.clone(),
+                            gas_used: output.gas_used,
+                            spec: self.spec_id.clone(),
+                        },
                     );
                     self.set_precompile_cache_size_metric(size as f64);
                     self.increment_by_one_precompile_cache_misses();
@@ -219,6 +231,117 @@ where
                 self.increment_by_one_precompile_errors();
             }
         }
+        result
+    }
+}
+
+/// evm2 precompile provider that caches successful pure precompile calls.
+#[derive(Clone)]
+pub struct Evm2CachedPrecompiles<S>
+where
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+{
+    precompiles: Evm2Precompiles,
+    caches: PrecompileCacheMap<S>,
+    spec_id: S,
+    metrics: Option<CachedPrecompileMetrics>,
+}
+
+impl<S> Evm2CachedPrecompiles<S>
+where
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+{
+    /// Creates an evm2 cached precompile provider.
+    pub fn new(
+        precompiles: Evm2Precompiles,
+        caches: PrecompileCacheMap<S>,
+        spec_id: S,
+        metrics: Option<CachedPrecompileMetrics>,
+    ) -> Self {
+        Self { precompiles, caches, spec_id, metrics }
+    }
+
+    fn increment_by_one_precompile_cache_hits(&self) {
+        if let Some(metrics) = &self.metrics {
+            metrics.precompile_cache_hits.increment(1);
+        }
+    }
+
+    fn increment_by_one_precompile_cache_misses(&self) {
+        if let Some(metrics) = &self.metrics {
+            metrics.precompile_cache_misses.increment(1);
+        }
+    }
+
+    fn set_precompile_cache_size_metric(&self, to: f64) {
+        if let Some(metrics) = &self.metrics {
+            metrics.precompile_cache_size.set(to);
+        }
+    }
+
+    fn increment_by_one_precompile_errors(&self) {
+        if let Some(metrics) = &self.metrics {
+            metrics.precompile_errors.increment(1);
+        }
+    }
+}
+
+impl<S> PrecompileProvider<BaseEvmTypes> for Evm2CachedPrecompiles<S>
+where
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+{
+    fn warm_addresses(&self) -> Vec<Address> {
+        self.precompiles.as_map().addresses().collect()
+    }
+
+    fn contains(&self, address: &Address) -> bool {
+        self.precompiles.as_map().contains(address)
+    }
+
+    fn execute(
+        &mut self,
+        evm: &mut Evm2<BaseEvmTypes>,
+        address: Address,
+        input: &[u8],
+        gas: &mut GasTracker,
+    ) -> Option<Evm2PrecompileResult> {
+        let cache = self.caches.cache_for_address(address);
+        if let Some(entry) = cache.get(input, self.spec_id.clone()) {
+            if let Err(err) = gas.spend(entry.gas_used()) {
+                return Some(Err(Evm2PrecompileError::from(err)));
+            }
+            self.increment_by_one_precompile_cache_hits();
+            return Some(Ok(evm2::evm::precompile::PrecompileOutput::new(entry.bytes.clone())));
+        }
+
+        let before = *gas;
+        let result = self.precompiles.execute(evm, address, input, gas);
+
+        match &result {
+            Some(Ok(output)) => {
+                if gas.reservoir() != before.reservoir() {
+                    error!(target: "engine::tree", ?address, "cacheable evm2 precompile decremented reservoir, skipping cache insertion");
+                } else if gas.state_gas_spent() != before.state_gas_spent() {
+                    error!(target: "engine::tree", ?address, "cacheable evm2 precompile used state gas, skipping cache insertion");
+                } else {
+                    let size = cache.insert(
+                        Bytes::copy_from_slice(input),
+                        CacheEntry {
+                            bytes: Bytes::copy_from_slice(output.bytes()),
+                            gas_used: gas.spent().saturating_sub(before.spent()),
+                            spec: self.spec_id.clone(),
+                        },
+                    );
+                    self.set_precompile_cache_size_metric(size as f64);
+                    self.increment_by_one_precompile_cache_misses();
+                }
+            }
+            Some(Err(_)) => {
+                self.increment_by_one_precompile_errors();
+            }
+            None => {}
+        }
+
         result
     }
 }
