@@ -3,14 +3,13 @@
 use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
-use alloy_eip7928::BlockAccessList;
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory, GasOutput};
 use alloy_evm::{
     block::{CommitChanges, ExecutableTxParts},
     Evm, EvmEnv, EvmFactory, RecoveredTx, ToTxEnv,
 };
-use alloy_primitives::{map::AddressMap, Address, B256};
+use alloy_primitives::{map::AddressMap, Address, Bytes, B256};
 use evm2::{
     bytecode::Bytecode,
     evm::{AccountInfo, Tracked},
@@ -169,8 +168,8 @@ pub trait Executor<DB: Database>: Sized {
     /// This is used to optimize DB commits depending on the size of the state.
     fn size_hint(&self) -> usize;
 
-    /// Takes built [`BlockAccessList`] from executor.
-    fn take_bal(&mut self) -> Option<BlockAccessList>;
+    /// Takes the encoded block access list from executor.
+    fn take_bal(&mut self) -> Option<Bytes>;
 }
 
 /// Input for block building. Consumed by [`BlockAssembler`].
@@ -333,8 +332,10 @@ pub struct BlockBuilderOutcome<N: NodePrimitives> {
     pub trie_updates: TrieUpdates,
     /// The built block.
     pub block: RecoveredBlock<N::Block>,
-    /// Block access list built during execution (EIP-7928, Amsterdam).
-    pub block_access_list: Option<BlockAccessList>,
+    /// Encoded block access list built during execution (EIP-7928, Amsterdam).
+    ///
+    /// This is always `None` in the active evm2 pre-Amsterdam path.
+    pub block_access_list: Option<Bytes>,
 }
 
 /// A type that knows how to execute and build a block.
@@ -691,9 +692,8 @@ where
         self.db.bundle_state.size_hint()
     }
 
-    fn take_bal(&mut self) -> Option<BlockAccessList> {
+    fn take_bal(&mut self) -> Option<Bytes> {
         // BAL execution is Amsterdam-only and remains stubbed for the evm2 pre-Amsterdam path.
-        // self.db.take_built_alloy_bal()
         None
     }
 }
@@ -912,7 +912,7 @@ mod tests {
             0
         }
 
-        fn take_bal(&mut self) -> Option<BlockAccessList> {
+        fn take_bal(&mut self) -> Option<Bytes> {
             None
         }
     }
