@@ -153,14 +153,14 @@ where
                             &res.evm2_result,
                             &mut evm2_db,
                         )
-                        .map_err(RethError::other)
+                        .map_err(RethError::msg)
                         .map_err(Eth::Error::from_eth_err)?;
 
                     results.push(TraceResult::Success { result, tx_hash: Some(tx_hash) });
                     if transactions.peek().is_some() {
                         inspector
                             .fuse()
-                            .map_err(RethError::other)
+                            .map_err(RethError::msg)
                             .map_err(Eth::Error::from_eth_err)?;
                         // need to apply the state changes of this transaction before executing the
                         // next transaction
@@ -278,7 +278,7 @@ where
                         &res.evm2_result,
                         &mut evm2_db,
                     )
-                    .map_err(RethError::other)
+                    .map_err(RethError::msg)
                     .map_err(Eth::Error::from_eth_err)?;
 
                 Ok(trace)
@@ -334,7 +334,7 @@ where
                         &res.evm2_result,
                         &mut evm2_db,
                     )
-                    .map_err(RethError::other)
+                    .map_err(RethError::msg)
                     .map_err(Eth::Error::from_eth_err)?;
                 Ok(trace)
             })
@@ -405,7 +405,7 @@ where
                         &res.evm2_result,
                         &mut evm2_db,
                     )
-                    .map_err(RethError::other)
+                    .map_err(RethError::msg)
                     .map_err(Eth::Error::from_eth_err)?;
 
                 Ok(trace)
@@ -508,7 +508,7 @@ where
                                 &res.evm2_result,
                                 &mut create_evm2_db_ref(&mut db),
                             )
-                            .map_err(RethError::other)
+                            .map_err(RethError::msg)
                             .map_err(Eth::Error::from_eth_err)?;
 
                         // If there is more transactions, commit the database
@@ -516,7 +516,7 @@ where
                         if transactions.peek().is_some() || bundles.peek().is_some() {
                             inspector
                                 .fuse()
-                                .map_err(RethError::other)
+                                .map_err(RethError::msg)
                                 .map_err(Eth::Error::from_eth_err)?;
                             db.commit(res.result.state);
                         }
