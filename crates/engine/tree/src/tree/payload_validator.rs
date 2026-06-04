@@ -101,18 +101,17 @@
 use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
-    multiproof::{StateRootComputeOutcome, StateRootHandle},
+    multiproof::{StateRootComputeOutcome, StateRootHandle, StateRootMessage},
     payload_processor::{PayloadProcessor, PayloadProcessorSpawnOptions},
-    precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
+    precompile_cache::PrecompileCacheMap,
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
-    PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
+    PayloadHandle, StateProviderBuilder, TreeConfig, WaitForCaches,
 };
-use alloy_consensus::transaction::{Either, TxHashRef};
+use alloy_consensus::transaction::Either;
 #[cfg(any())]
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
-use alloy_evm::Evm;
 use alloy_primitives::{map::B256Set, Address, B256, KECCAK256_EMPTY as KECCAK_EMPTY};
 use reth_tasks::LazyHandle;
 #[cfg(feature = "trie-debug")]
@@ -125,14 +124,13 @@ use reth_chain_state::{
 };
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
-    ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
+    ConfigureEvm2Engine, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
-use reth_evm::{
-    block::BlockExecutor,
-    database::State,
-    execute::{alloy_block_execution_result_to_reth, revm_bundle_to_evm2, ExecutableTxFor},
-    ConfigureEvm, EvmEnvFor, ExecutionCtxFor, OnStateHook, SpecFor,
+use reth_ethereum_primitives::{Receipt, TransactionSigned};
+use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor};
+use reth_evm_ethereum::{
+    execute_evm2_block_with_state_provider_context, Evm2BlockExecutionContext, Evm2BlockSystemCalls,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
 use reth_payload_primitives::{
@@ -151,20 +149,15 @@ use reth_provider::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
+use reth_trie_common::KeccakKeyHasher;
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm::{context::Block as _, database::states::bundle_state::BundleRetention};
 use std::{
-    collections::HashMap,
     panic::{self, AssertUnwindSafe},
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        mpsc::RecvTimeoutError,
-        Arc,
-    },
+    sync::{atomic::Ordering, mpsc::RecvTimeoutError, Arc},
     time::Duration,
 };
-use tracing::{debug, debug_span, error, info, instrument, trace, warn, Level, Span};
+use tracing::{debug, debug_span, error, info, instrument, trace, warn, Span};
 
 pub use crate::tree::types::ValidationOutcome;
 
@@ -285,10 +278,6 @@ where
     config: TreeConfig,
     /// Payload processor for state root computation.
     payload_processor: PayloadProcessor<Evm>,
-    /// Precompile cache map.
-    precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
-    /// Precompile cache metrics.
-    precompile_cache_metrics: HashMap<alloy_primitives::Address, CachedPrecompileMetrics>,
     /// Hook to call when invalid blocks are encountered.
     #[debug(skip)]
     invalid_block_hook: Box<dyn InvalidBlockHook<Evm::Primitives>>,
@@ -349,8 +338,6 @@ where
             consensus,
             evm_config,
             payload_processor,
-            precompile_cache_map,
-            precompile_cache_metrics: HashMap::new(),
             config,
             invalid_block_hook,
             metrics: EngineApiMetrics::default(),
@@ -389,7 +376,7 @@ where
     ) -> Result<EvmEnvFor<Evm>, Evm::Error>
     where
         V: PayloadValidator<T, Block = N::Block>,
-        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
+        Evm: ConfigureEvm2Engine<T::ExecutionData, Primitives = N>,
     {
         match input {
             BlockOrPayload::Payload(payload) => Ok(self.evm_config.evm_env_for_payload(payload)?),
@@ -404,7 +391,7 @@ where
     ) -> Result<impl ExecutableTxIterator<Evm>, NewPayloadError>
     where
         V: PayloadValidator<T, Block = N::Block>,
-        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
+        Evm: ConfigureEvm2Engine<T::ExecutionData, Primitives = N>,
     {
         Ok(match input {
             BlockOrPayload::Payload(payload) => {
@@ -429,7 +416,7 @@ where
     ) -> Result<ExecutionCtxFor<'a, Evm>, Evm::Error>
     where
         V: PayloadValidator<T, Block = N::Block>,
-        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
+        Evm: ConfigureEvm2Engine<T::ExecutionData, Primitives = N>,
     {
         match input {
             BlockOrPayload::Payload(payload) => Ok(self.evm_config.context_for_payload(payload)?),
@@ -460,7 +447,8 @@ where
     ) -> InsertPayloadResult<N>
     where
         V: PayloadValidator<T, Block = N::Block> + Clone,
-        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
+        Evm: ConfigureEvm2Engine<T::ExecutionData, Primitives = N>,
+        N: NodePrimitives<SignedTx = TransactionSigned, Receipt = Receipt>,
     {
         let parent_hash = input.parent_hash();
         let _jit_pause = JitPauseGuard::new(&self.evm_config);
@@ -546,9 +534,12 @@ where
             .map_err(NewPayloadError::other)?;
 
         #[cfg(any())]
-        let decoded_bal = input.try_decoded_access_list().map_err(|err| {
-            NewPayloadError::other(format!("failed to decode block access list: {err}"))
-        })?;
+        let decoded_bal = input
+            .try_decoded_access_list()
+            .map_err(|err| {
+                NewPayloadError::other(format!("failed to decode block access list: {err}"))
+            })
+            .map_err(BlockExecutionError::other)?;
 
         if input.has_block_access_list() {
             return Err(InsertBlockError::new(
@@ -1117,88 +1108,90 @@ where
         InsertBlockErrorKind,
     >
     where
-        S: StateProvider + Send,
+        S: StateProvider + Send + 'static,
         Err: core::error::Error + Send + Sync + 'static,
         V: PayloadValidator<T, Block = N::Block>,
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
-        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
+        T::ExecutionData: ExecutionPayload,
+        Evm: ConfigureEvm2Engine<T::ExecutionData, Primitives = N>,
+        N: NodePrimitives<SignedTx = TransactionSigned, Receipt = Receipt>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
-
-        let block_number = env.evm_env.block_env.number().to::<u64>();
-        let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
-            State::builder()
-                .with_database(StateProviderDatabase::new(state_provider))
-                .with_bundle_update()
-                .build()
-        });
-
-        let (spec_id, mut executor) = {
-            let _span = debug_span!(target: "engine::tree", "create_evm").entered();
-            let spec_id = *env.evm_env.spec_id();
-            let evm_config = self.evm_config.clone().with_jit_support();
-            let evm = evm_config.evm_with_env(&mut db, env.evm_env);
-            let ctx = self
-                .execution_ctx_for(input)
-                .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
-            let executor = self.evm_config.create_executor(evm, ctx);
-            (spec_id, executor)
-        };
-
-        if !self.config.precompile_cache_disabled() {
-            let _span = debug_span!(target: "engine::tree", "setup_precompile_cache").entered();
-            executor.evm_mut().precompiles_mut().map_cacheable_precompiles(
-                |address, precompile| {
-                    let metrics = self
-                        .precompile_cache_metrics
-                        .entry(*address)
-                        .or_insert_with(|| CachedPrecompileMetrics::new_with_address(*address))
-                        .clone();
-                    CachedPrecompile::wrap(
-                        precompile,
-                        self.precompile_cache_map.cache_for_address(*address),
-                        spec_id,
-                        Some(metrics),
-                    )
-                },
-            );
-        }
 
         let transaction_count = input.transaction_count();
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
-        executor.evm_mut().db_mut().set_state_hook(
-            handle.state_hook().map(|hook| Box::new(hook) as Box<dyn OnStateHook + 'static>),
-        );
-
         let execution_start = Instant::now();
 
-        // Execute all transactions and finalize
-        let (executor, senders) = self.execute_transactions(
-            executor,
-            transaction_count,
-            handle.iter_transactions(),
-            &receipt_tx,
-            &executed_tx_index,
-        )?;
+        let transactions = match input {
+            BlockOrPayload::Payload(payload) => self
+                .evm_config
+                .evm2_recovered_txs_for_payload(payload)
+                .map_err(InsertBlockErrorKind::Other)?,
+            BlockOrPayload::Block(block) => block
+                .body()
+                .clone_transactions()
+                .into_iter()
+                .map(|tx| tx.try_into_recovered().map_err(BlockExecutionError::other))
+                .collect::<Result<Vec<_>, _>>()?,
+        };
+        let senders = transactions.iter().map(|tx| tx.signer()).collect();
+        executed_tx_index.store(transactions.len(), Ordering::Relaxed);
+
+        let spec_id = match input {
+            BlockOrPayload::Payload(payload) => self
+                .evm_config
+                .evm2_spec_for_payload(payload)
+                .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?,
+            BlockOrPayload::Block(block) => self
+                .evm_config
+                .evm2_spec_for_header(block.header())
+                .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?,
+        };
+        let block_env = match input {
+            BlockOrPayload::Payload(payload) => self
+                .evm_config
+                .evm2_block_env_for_payload(payload)
+                .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?,
+            BlockOrPayload::Block(block) => self
+                .evm_config
+                .evm2_block_env_for_header(block.header())
+                .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?,
+        };
+        let block_number = block_env.number.to::<u64>();
+        let context = Evm2BlockExecutionContext {
+            system_calls: Some(Evm2BlockSystemCalls {
+                parent_hash: input.parent_hash(),
+                parent_beacon_block_root: input.parent_beacon_block_root(),
+            }),
+            withdrawals: env.withdrawals.as_deref(),
+        };
+
+        let output = debug_span!(target: "engine::tree", "execute_evm2_block")
+            .in_scope(|| {
+                execute_evm2_block_with_state_provider_context(
+                    spec_id,
+                    block_env,
+                    state_provider,
+                    block_number,
+                    transactions,
+                    context,
+                )
+            })
+            .map_err(BlockExecutionError::other)?;
+
+        for (index, receipt) in output.result.receipts.iter().cloned().enumerate() {
+            receipt_tx
+                .send(IndexedReceipt::new(index, receipt))
+                .map_err(|_| BlockExecutionError::msg("receipt root task closed"))?;
+        }
         drop(receipt_tx);
 
-        // Finish execution and get the result
-        let post_exec_start = Instant::now();
-        let (_evm, result) = debug_span!(target: "engine::tree", "BlockExecutor::finish")
-            .in_scope(|| executor.finish())
-            .map(|(evm, result)| (evm.into_db(), result))
-            .map_err(BlockExecutionError::other)?;
-        self.metrics.record_post_execution(post_exec_start.elapsed());
-
-        // Merge transitions into bundle state
-        debug_span!(target: "engine::tree", "merge_transitions")
-            .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
-
-        let output = BlockExecutionOutput {
-            result: alloy_block_execution_result_to_reth(result),
-            state: revm_bundle_to_evm2(db.take_bundle(), block_number),
-        };
+        if let Some(updates_tx) = handle.sparse_trie_updates_tx() {
+            let hashed_state = output.state.hashed_post_state::<KeccakKeyHasher>();
+            let _ = updates_tx.send(StateRootMessage::HashedStateUpdate(hashed_state));
+            let _ = updates_tx.send(StateRootMessage::FinishedStateUpdates);
+        }
 
         let execution_duration = execution_start.elapsed();
         self.metrics.record_block_execution(&output, execution_duration);
@@ -1232,6 +1225,7 @@ where
     /// - Collecting transaction senders for later use
     ///
     /// Returns the executor (for finalization) and the collected senders.
+    #[cfg(any())]
     fn execute_transactions<'a, E, Tx, InnerTx, Err, DB>(
         &self,
         mut executor: E,
@@ -1646,7 +1640,7 @@ where
         skip_all,
         fields(?strategy, parallel_bal_execution = options.parallel_bal_execution)
     )]
-    fn spawn_payload_processor<T: ExecutableTxIterator<Evm>>(
+    fn spawn_payload_processor<T>(
         &mut self,
         env: ExecutionEnv<Evm>,
         txs: T,
@@ -1661,7 +1655,10 @@ where
             N::Receipt,
         >,
         InsertBlockErrorKind,
-    > {
+    >
+    where
+        T: ExecutableTxIterator<Evm>,
+    {
         let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
             options;
         match strategy {
@@ -2152,9 +2149,9 @@ where
         + HashedPostStateProvider
         + Clone
         + 'static,
-    N: NodePrimitives,
+    N: NodePrimitives<SignedTx = TransactionSigned, Receipt = Receipt>,
     V: PayloadValidator<Types, Block = N::Block> + Clone,
-    Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N> + 'static,
+    Evm: ConfigureEvm2Engine<Types::ExecutionData, Primitives = N> + 'static,
     Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
 {
     fn validate_payload_attributes_against_header(
@@ -2284,6 +2281,17 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(payload) => payload.parent_hash(),
             Self::Block(block) => block.parent_hash(),
+        }
+    }
+
+    /// Returns the parent beacon block root for the payload or block.
+    pub fn parent_beacon_block_root(&self) -> Option<B256>
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.parent_beacon_block_root(),
+            Self::Block(block) => block.header().parent_beacon_block_root(),
         }
     }
 
