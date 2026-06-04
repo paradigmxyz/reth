@@ -1,6 +1,6 @@
 //! HTTP SSZ transport proxy for the authenticated Engine API server.
 //!
-//! Implements the [EIP-8178] SSZ Engine API routes under `/engine`.
+//! Implements the [EIP-8178] SSZ Engine API routes under `/engine/v2`.
 //!
 //! [EIP-8178]: https://eips.ethereum.org/EIPS/eip-8178
 
@@ -52,7 +52,7 @@ impl EngineSszProxyHandle {
     }
 }
 
-/// A tower layer that intercepts SSZ Engine API routes under `/engine`.
+/// A tower layer that intercepts SSZ Engine API routes under `/engine/v2`.
 #[derive(Clone, Debug, Default)]
 pub struct EngineSszProxyLayer {
     handle: EngineSszProxyHandle,
@@ -95,7 +95,7 @@ where
     }
 
     fn call(&mut self, request: HttpRequest) -> Self::Future {
-        if !request.uri().path().starts_with("/engine/") {
+        if !request.uri().path().starts_with("/engine/v2/") {
             let fut = self.inner.call(request);
             return Box::pin(fut)
         }
@@ -114,7 +114,7 @@ async fn handle_engine_ssz_request(
     }
 
     let path = request.uri().path().to_owned();
-    let Some((version, resource)) = parse_engine_path(&path) else {
+    let Some((fork, resource)) = parse_engine_path(&path) else {
         return text_response(STATUS_NOT_FOUND, "unknown engine ssz endpoint")
     };
 
@@ -127,20 +127,66 @@ async fn handle_engine_ssz_request(
     };
 
     match resource {
-        "payloads" => handle_new_payload(engine, version, &body).await,
-        "forkchoice" => handle_forkchoice_updated(engine, version, &body).await,
+        "payloads" => handle_new_payload(engine, fork.payloads_version(), &body).await,
+        "forkchoice" => handle_forkchoice_updated(engine, fork.forkchoice_version(), &body).await,
         _ => text_response(STATUS_NOT_FOUND, "unknown engine ssz endpoint"),
     }
 }
 
-fn parse_engine_path(path: &str) -> Option<(u8, &str)> {
+fn parse_engine_path(path: &str) -> Option<(EngineSszFork, &str)> {
     let mut segments = path.trim_start_matches('/').split('/');
-    match (segments.next(), segments.next(), segments.next(), segments.next()) {
-        (Some("engine"), Some(version), Some(resource), None) => {
-            let version = version.strip_prefix('v')?.parse().ok()?;
-            Some((version, resource))
+    match (segments.next(), segments.next(), segments.next(), segments.next(), segments.next()) {
+        (Some("engine"), Some("v2"), Some(fork), Some(resource), None) => {
+            Some((fork.parse().ok()?, resource))
         }
         _ => None,
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EngineSszFork {
+    Paris,
+    Shanghai,
+    Cancun,
+    Prague,
+    Osaka,
+    Amsterdam,
+}
+
+impl EngineSszFork {
+    const fn payloads_version(self) -> u8 {
+        match self {
+            Self::Paris => 1,
+            Self::Shanghai => 2,
+            Self::Cancun => 3,
+            Self::Prague | Self::Osaka => 4,
+            Self::Amsterdam => 5,
+        }
+    }
+
+    const fn forkchoice_version(self) -> u8 {
+        match self {
+            Self::Paris => 1,
+            Self::Shanghai => 2,
+            Self::Cancun | Self::Prague | Self::Osaka => 3,
+            Self::Amsterdam => 4,
+        }
+    }
+}
+
+impl std::str::FromStr for EngineSszFork {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "paris" => Ok(Self::Paris),
+            "shanghai" => Ok(Self::Shanghai),
+            "cancun" => Ok(Self::Cancun),
+            "prague" => Ok(Self::Prague),
+            "osaka" => Ok(Self::Osaka),
+            "amsterdam" => Ok(Self::Amsterdam),
+            _ => Err(()),
+        }
     }
 }
 
@@ -326,4 +372,30 @@ fn text_response(status: u16, body: impl Into<String>) -> HttpResponse {
         .header(CONTENT_TYPE, TEXT_PLAIN)
         .body(HttpBody::from(body.into()))
         .expect("valid response")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_fork_scoped_payload_endpoint() {
+        let (fork, resource) = parse_engine_path("/engine/v2/prague/payloads").unwrap();
+        assert_eq!(fork, EngineSszFork::Prague);
+        assert_eq!(resource, "payloads");
+        assert_eq!(fork.payloads_version(), 4);
+    }
+
+    #[test]
+    fn parses_fork_scoped_forkchoice_endpoint() {
+        let (fork, resource) = parse_engine_path("/engine/v2/amsterdam/forkchoice").unwrap();
+        assert_eq!(fork, EngineSszFork::Amsterdam);
+        assert_eq!(resource, "forkchoice");
+        assert_eq!(fork.forkchoice_version(), 4);
+    }
+
+    #[test]
+    fn rejects_legacy_version_scoped_endpoint() {
+        assert!(parse_engine_path("/engine/v4/payloads").is_none());
+    }
 }
