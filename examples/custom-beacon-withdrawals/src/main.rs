@@ -14,7 +14,7 @@ use reth_ethereum::{
             block::StateDB, Evm, EvmEnv, EvmEnvFor, ExecutionCtxFor, InspectorFor,
             NextBlockEnvAttributes,
         },
-        AlloyChainSpec, EthBlockAssembler, EthEvmConfig, RethReceiptBuilder,
+        EthBlockAssembler, EthEvm2Config,
     },
     node::{
         api::{ConfigureEngineEvm, ConfigureEvm, ExecutableTxIterator, FullNodeTypes, NodeTypes},
@@ -24,7 +24,7 @@ use reth_ethereum::{
     },
     primitives::{Header, SealedBlock, SealedHeader},
     rpc::types::engine::ExecutionData,
-    Block, EthPrimitives, Receipt, TransactionSigned, TxType,
+    Block, EthPrimitives, Receipt, TransactionSigned,
 };
 use reth_evm::{
     block::{
@@ -33,10 +33,11 @@ use reth_evm::{
     },
     context::{Block as _, TxEnv},
     database::DatabaseCommit,
-    eth::{EthBlockExecutionCtx, EthBlockExecutor, EthTxResult},
+    eth::EthBlockExecutionCtx,
+    evm2::{Evm2RethBlockExecutor, Evm2TxExecutionResult, RethEvm2ReceiptBuilder},
     hardfork::SpecId,
     precompiles::PrecompilesMap,
-    EthEvm, EthEvmFactory, EvmFactory,
+    EthEvm, EthEvmFactory,
 };
 use std::fmt::Display;
 
@@ -76,7 +77,7 @@ where
     type EVM = CustomEvmConfig;
 
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
-        let evm_config = CustomEvmConfig { inner: EthEvmConfig::new(ctx.chain_spec()) };
+        let evm_config = CustomEvmConfig { inner: EthEvm2Config::new(ctx.chain_spec()) };
 
         Ok(evm_config)
     }
@@ -84,7 +85,7 @@ where
 
 #[derive(Debug, Clone)]
 pub struct CustomEvmConfig {
-    inner: EthEvmConfig,
+    inner: EthEvm2Config,
 }
 
 impl BlockExecutorFactory for CustomEvmConfig {
@@ -92,12 +93,12 @@ impl BlockExecutorFactory for CustomEvmConfig {
     type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
-    type TxExecutionResult = EthTxResult<<EthEvmFactory as EvmFactory>::HaltReason, TxType>;
+    type TxExecutionResult = Evm2TxExecutionResult;
     type Executor<'a, DB: StateDB, I: InspectorFor<Self, DB>> =
-        CustomBlockExecutor<'a, EthEvm<DB, I, PrecompilesMap>>;
+        CustomBlockExecutor<'a, DB, I>;
 
     fn evm_factory(&self) -> &Self::EvmFactory {
-        self.inner.evm_factory()
+        self.inner.block_executor_factory().evm_factory()
     }
 
     fn create_executor<'a, DB, I>(
@@ -109,21 +110,14 @@ impl BlockExecutorFactory for CustomEvmConfig {
         DB: StateDB,
         I: InspectorFor<Self, DB>,
     {
-        CustomBlockExecutor {
-            inner: EthBlockExecutor::new(
-                evm,
-                ctx,
-                self.inner.executor_factory.spec(),
-                self.inner.executor_factory.receipt_builder(),
-            ),
-        }
+        CustomBlockExecutor { inner: self.inner.executor_factory.create_executor(evm, ctx) }
     }
 }
 
 impl ConfigureEvm for CustomEvmConfig {
-    type Primitives = <EthEvmConfig as ConfigureEvm>::Primitives;
-    type Error = <EthEvmConfig as ConfigureEvm>::Error;
-    type NextBlockEnvCtx = <EthEvmConfig as ConfigureEvm>::NextBlockEnvCtx;
+    type Primitives = <EthEvm2Config as ConfigureEvm>::Primitives;
+    type Error = <EthEvm2Config as ConfigureEvm>::Error;
+    type NextBlockEnvCtx = <EthEvm2Config as ConfigureEvm>::NextBlockEnvCtx;
     type BlockExecutorFactory = Self;
     type BlockAssembler = EthBlockAssembler<ChainSpec>;
 
@@ -187,20 +181,22 @@ impl ConfigureEngineEvm<ExecutionData> for CustomEvmConfig {
     }
 }
 
-pub struct CustomBlockExecutor<'a, Evm> {
+pub struct CustomBlockExecutor<'a, DB: StateDB, I> {
     /// Inner Ethereum execution strategy.
-    inner: EthBlockExecutor<'a, Evm, &'a AlloyChainSpec<ChainSpec>, &'a RethReceiptBuilder>,
+    inner: Evm2RethBlockExecutor<'a, EthEvm<DB, I, PrecompilesMap>, RethEvm2ReceiptBuilder>,
 }
 
-impl<E> BlockExecutor for CustomBlockExecutor<'_, E>
+impl<DB, I> BlockExecutor for CustomBlockExecutor<'_, DB, I>
 where
-    E: Evm<DB: StateDB, Tx = TxEnv>,
+    DB: StateDB,
+    I: InspectorFor<CustomEvmConfig, DB>,
+    EthEvm<DB, I, PrecompilesMap>: Evm<DB = DB, Tx = TxEnv>,
 {
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
-    type Evm = E;
-    type DB = E::DB;
-    type Result = EthTxResult<E::HaltReason, TxType>;
+    type Evm = EthEvm<DB, I, PrecompilesMap>;
+    type DB = DB;
+    type Result = Evm2TxExecutionResult;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.inner.apply_pre_execution_changes()
@@ -222,7 +218,7 @@ where
     }
 
     fn finish(mut self) -> Result<(Self::Evm, BlockExecutionResult<Receipt>), BlockExecutionError> {
-        if let Some(withdrawals) = self.inner.ctx.withdrawals.clone() {
+        if let Some(withdrawals) = self.inner.ctx_mut().withdrawals.clone() {
             apply_withdrawals_contract_call(withdrawals.as_ref(), self.inner.evm_mut())?;
         }
 
