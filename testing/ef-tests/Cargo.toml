@@ -25,7 +25,7 @@ reth-db-api.workspace = true
 reth-db-common.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-evm.workspace = true
-reth-evm-ethereum.workspace = true
+reth-evm-ethereum = { workspace = true, features = ["std"] }
 reth-ethereum-consensus.workspace = true
 reth-tracing.workspace = true
 reth-trie.workspace = true
