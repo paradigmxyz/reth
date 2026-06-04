@@ -10,12 +10,13 @@ use alloy_eips::eip4895::{Withdrawal, Withdrawals};
 use alloy_primitives::Signature;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices, tables};
 use reth_ethereum_primitives::{BlockBody, Receipt, Transaction, TransactionSigned, TxType};
+use reth_execution_types::{
+    Evm2AccountInfo, Evm2BlockReverts, Evm2BundleState, Evm2StorageReverts,
+};
 use reth_node_types::NodeTypes;
 use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
-use revm_database::BundleState;
-use revm_state::AccountInfo;
-use std::{str::FromStr, sync::LazyLock};
+use std::{collections::BTreeMap, str::FromStr, sync::LazyLock};
 
 /// Assert genesis block
 pub fn assert_genesis_block<DB: Database, N: NodeTypes>(
@@ -169,20 +170,47 @@ pub fn genesis() -> SealedBlock<reth_ethereum_primitives::Block> {
 fn bundle_state_root(execution_outcome: &ExecutionOutcome) -> B256 {
     state_root_unhashed(execution_outcome.bundle_accounts_iter().filter_map(
         |(address, account)| {
-            account.info.as_ref().map(|info| {
+            account.current.as_ref().map(|info| {
                 (
                     address,
-                    Account::from(info).into_trie_account(storage_root_unhashed(
-                        account
-                            .storage
-                            .iter()
-                            .filter(|(_, value)| !value.present_value.is_zero())
-                            .map(|(slot, value)| ((*slot).into(), value.present_value)),
+                    account_info_to_reth(info).into_trie_account(storage_root_unhashed(
+                        execution_outcome
+                            .state()
+                            .storage()
+                            .get(&address)
+                            .into_iter()
+                            .flat_map(|storage| storage.slots.iter())
+                            .filter(|(_, value)| !value.current.is_zero())
+                            .map(|(slot, value)| ((*slot).into(), value.current)),
                     )),
                 )
             })
         },
     ))
+}
+
+fn test_account(nonce: u64, balance: U256) -> Account {
+    Account { nonce, balance, bytecode_hash: None }
+}
+
+fn account_info_to_reth(info: &Evm2AccountInfo) -> Account {
+    Account { nonce: info.nonce, balance: info.balance, bytecode_hash: None }
+}
+
+fn execution_outcome(
+    number: BlockNumber,
+    accounts: impl IntoIterator<
+        Item = (Address, (Option<Account>, Option<Account>, BTreeMap<U256, (U256, U256)>)),
+    >,
+    block_reverts: Evm2BlockReverts,
+    receipts: Vec<Receipt>,
+) -> ExecutionOutcome {
+    ExecutionOutcome::new(
+        Evm2BundleState::new_init(number, accounts, [block_reverts], []),
+        vec![receipts],
+        number,
+        Vec::new(),
+    )
 }
 
 /// Block one that points to genesis
@@ -193,17 +221,26 @@ fn block1(
     let account1: Address = [0x60; 20].into();
     let account2: Address = [0x61; 20].into();
     let slot = U256::from(5);
-    let info = AccountInfo { nonce: 1, balance: U256::from(10), ..Default::default() };
+    let info = test_account(1, U256::from(10));
+    let mut block_reverts = Evm2BlockReverts::default();
+    block_reverts.accounts.insert(account1, None);
+    block_reverts.accounts.insert(account2, None);
 
-    let execution_outcome = ExecutionOutcome::new(
-        BundleState::builder(number..=number)
-            .state_present_account_info(account1, info.clone())
-            .revert_account_info(number, account1, Some(None))
-            .state_present_account_info(account2, info)
-            .revert_account_info(number, account2, Some(None))
-            .state_storage(account1, HashMap::from_iter([(slot, (U256::ZERO, U256::from(10)))]))
-            .build(),
-        vec![vec![Receipt {
+    let execution_outcome = execution_outcome(
+        number,
+        [
+            (
+                account1,
+                (
+                    None,
+                    Some(info.clone()),
+                    BTreeMap::from_iter([(slot, (U256::ZERO, U256::from(10)))]),
+                ),
+            ),
+            (account2, (None, Some(info), Default::default())),
+        ],
+        block_reverts,
+        vec![Receipt {
             tx_type: TxType::Eip2930,
             success: true,
             cumulative_gas_used: 300,
@@ -212,9 +249,7 @@ fn block1(
                 vec![B256::with_last_byte(1), B256::with_last_byte(2)],
                 Bytes::default(),
             )],
-        }]],
-        number,
-        Vec::new(),
+        }],
     );
 
     let state_root = bundle_state_root(&execution_outcome);
@@ -244,19 +279,38 @@ fn block2(
     let slot = U256::from(5);
 
     let execution_outcome = ExecutionOutcome::new(
-        BundleState::builder(number..=number)
-            .state_present_account_info(
+        Evm2BundleState::new_init(
+            number,
+            [(
                 account,
-                AccountInfo { nonce: 3, balance: U256::from(20), ..Default::default() },
-            )
-            .state_storage(account, HashMap::from_iter([(slot, (U256::ZERO, U256::from(15)))]))
-            .revert_account_info(
-                number,
-                account,
-                Some(Some(AccountInfo { nonce: 1, balance: U256::from(10), ..Default::default() })),
-            )
-            .revert_storage(number, account, Vec::from([(slot, U256::from(10))]))
-            .build(),
+                (
+                    Some(test_account(1, U256::from(10))),
+                    Some(test_account(3, U256::from(20))),
+                    BTreeMap::from_iter([(slot, (U256::from(10), U256::from(15)))]),
+                ),
+            )],
+            [Evm2BlockReverts {
+                accounts: HashMap::from_iter([(
+                    account,
+                    Some(Evm2AccountInfo {
+                        nonce: 1,
+                        balance: U256::from(10),
+                        code_hash: alloy_primitives::KECCAK256_EMPTY,
+                        code: None,
+                        _non_exhaustive: (),
+                    }),
+                )]),
+                storage: HashMap::from_iter([(
+                    account,
+                    Evm2StorageReverts {
+                        wiped: false,
+                        previous_wipe: false,
+                        slots: BTreeMap::from_iter([(slot, U256::from(10))]),
+                    },
+                )]),
+            }],
+            [],
+        ),
         vec![vec![Receipt {
             tx_type: TxType::Eip1559,
             success: false,
@@ -300,27 +354,28 @@ fn block3(
     let address_range = 1..=20;
     let slot_range = 1..=100;
 
-    let mut bundle_state_builder = BundleState::builder(number..=number);
+    let mut accounts = Vec::new();
+    let mut block_reverts = Evm2BlockReverts::default();
     for idx in address_range {
         let address = Address::with_last_byte(idx);
-        bundle_state_builder = bundle_state_builder
-            .state_present_account_info(
-                address,
-                AccountInfo { nonce: 1, balance: U256::from(idx), ..Default::default() },
-            )
-            .state_storage(
-                address,
+        accounts.push((
+            address,
+            (
+                None,
+                Some(test_account(1, U256::from(idx))),
                 slot_range
                     .clone()
                     .map(|slot| (U256::from(slot), (U256::ZERO, U256::from(slot))))
                     .collect(),
-            )
-            .revert_account_info(number, address, Some(None))
-            .revert_storage(number, address, Vec::new());
+            ),
+        ));
+        block_reverts.accounts.insert(address, None);
     }
-    let execution_outcome = ExecutionOutcome::new(
-        bundle_state_builder.build(),
-        vec![vec![Receipt {
+    let execution_outcome = execution_outcome(
+        number,
+        accounts,
+        block_reverts,
+        vec![Receipt {
             tx_type: TxType::Eip1559,
             success: true,
             cumulative_gas_used: 400,
@@ -329,9 +384,7 @@ fn block3(
                 vec![B256::with_last_byte(3), B256::with_last_byte(4)],
                 Bytes::default(),
             )],
-        }]],
-        number,
-        Vec::new(),
+        }],
     );
 
     let mut extended = prev_execution_outcome.clone();
@@ -358,52 +411,62 @@ fn block4(
     let address_range = 1..=20;
     let slot_range = 1..=100;
 
-    let mut bundle_state_builder = BundleState::builder(number..=number);
+    let mut accounts = Vec::new();
+    let mut block_reverts = Evm2BlockReverts::default();
     for idx in address_range {
         let address = Address::with_last_byte(idx);
-        // increase balance for every even account and destroy every odd
-        bundle_state_builder = if idx.is_multiple_of(2) {
-            bundle_state_builder
-                .state_present_account_info(
-                    address,
-                    AccountInfo { nonce: 1, balance: U256::from(idx * 2), ..Default::default() },
-                )
-                .state_storage(
-                    address,
-                    slot_range
-                        .clone()
-                        .map(|slot| (U256::from(slot), (U256::from(slot), U256::from(slot * 2))))
-                        .collect(),
-                )
-        } else {
-            bundle_state_builder.state_address(address).state_storage(
-                address,
+        let current =
+            if idx.is_multiple_of(2) { Some(test_account(1, U256::from(idx * 2))) } else { None };
+        accounts.push((
+            address,
+            (
+                Some(test_account(1, U256::from(idx))),
+                current,
                 slot_range
                     .clone()
-                    .map(|slot| (U256::from(slot), (U256::from(slot), U256::ZERO)))
+                    .map(|slot| {
+                        (
+                            U256::from(slot),
+                            (
+                                U256::from(slot),
+                                if idx.is_multiple_of(2) {
+                                    U256::from(slot * 2)
+                                } else {
+                                    U256::ZERO
+                                },
+                            ),
+                        )
+                    })
                     .collect(),
-            )
-        };
-        // record previous account info
-        bundle_state_builder = bundle_state_builder
-            .revert_account_info(
-                number,
-                address,
-                Some(Some(AccountInfo {
-                    nonce: 1,
-                    balance: U256::from(idx),
-                    ..Default::default()
-                })),
-            )
-            .revert_storage(
-                number,
-                address,
-                slot_range.clone().map(|slot| (U256::from(slot), U256::from(slot))).collect(),
-            );
+            ),
+        ));
+        block_reverts.accounts.insert(
+            address,
+            Some(Evm2AccountInfo {
+                nonce: 1,
+                balance: U256::from(idx),
+                code_hash: alloy_primitives::KECCAK256_EMPTY,
+                code: None,
+                _non_exhaustive: (),
+            }),
+        );
+        block_reverts.storage.insert(
+            address,
+            Evm2StorageReverts {
+                wiped: false,
+                previous_wipe: false,
+                slots: slot_range
+                    .clone()
+                    .map(|slot| (U256::from(slot), U256::from(slot)))
+                    .collect(),
+            },
+        );
     }
-    let execution_outcome = ExecutionOutcome::new(
-        bundle_state_builder.build(),
-        vec![vec![Receipt {
+    let execution_outcome = execution_outcome(
+        number,
+        accounts,
+        block_reverts,
+        vec![Receipt {
             tx_type: TxType::Eip1559,
             success: true,
             cumulative_gas_used: 400,
@@ -412,9 +475,7 @@ fn block4(
                 vec![B256::with_last_byte(3), B256::with_last_byte(4)],
                 Bytes::default(),
             )],
-        }]],
-        number,
-        Vec::new(),
+        }],
     );
 
     let mut extended = prev_execution_outcome.clone();
@@ -441,49 +502,65 @@ fn block5(
     let address_range = 1..=20;
     let slot_range = 1..=100;
 
-    let mut bundle_state_builder = BundleState::builder(number..=number);
+    let mut accounts = Vec::new();
+    let mut block_reverts = Evm2BlockReverts::default();
     for idx in address_range {
         let address = Address::with_last_byte(idx);
-        // update every even account and recreate every odd only with half of slots
-        bundle_state_builder = bundle_state_builder
-            .state_present_account_info(
-                address,
-                AccountInfo { nonce: 1, balance: U256::from(idx * 2), ..Default::default() },
-            )
-            .state_storage(
-                address,
+        accounts.push((
+            address,
+            (
+                idx.is_multiple_of(2).then(|| test_account(1, U256::from(idx * 2))),
+                Some(test_account(1, U256::from(idx * 2))),
                 slot_range
                     .clone()
                     .take(50)
-                    .map(|slot| (U256::from(slot), (U256::from(slot), U256::from(slot * 4))))
+                    .map(|slot| {
+                        (
+                            U256::from(slot),
+                            (
+                                if idx.is_multiple_of(2) {
+                                    U256::from(slot * 2)
+                                } else {
+                                    U256::ZERO
+                                },
+                                U256::from(slot * 4),
+                            ),
+                        )
+                    })
                     .collect(),
+            ),
+        ));
+        if idx.is_multiple_of(2) {
+            block_reverts.accounts.insert(
+                address,
+                Some(Evm2AccountInfo {
+                    nonce: 1,
+                    balance: U256::from(idx * 2),
+                    code_hash: alloy_primitives::KECCAK256_EMPTY,
+                    code: None,
+                    _non_exhaustive: (),
+                }),
             );
-        bundle_state_builder = if idx.is_multiple_of(2) {
-            bundle_state_builder
-                .revert_account_info(
-                    number,
-                    address,
-                    Some(Some(AccountInfo {
-                        nonce: 1,
-                        balance: U256::from(idx * 2),
-                        ..Default::default()
-                    })),
-                )
-                .revert_storage(
-                    number,
-                    address,
-                    slot_range
+            block_reverts.storage.insert(
+                address,
+                Evm2StorageReverts {
+                    wiped: false,
+                    previous_wipe: false,
+                    slots: slot_range
                         .clone()
                         .map(|slot| (U256::from(slot), U256::from(slot * 2)))
                         .collect(),
-                )
+                },
+            );
         } else {
-            bundle_state_builder.revert_address(number, address)
-        };
+            block_reverts.accounts.insert(address, None);
+        }
     }
-    let execution_outcome = ExecutionOutcome::new(
-        bundle_state_builder.build(),
-        vec![vec![Receipt {
+    let execution_outcome = execution_outcome(
+        number,
+        accounts,
+        block_reverts,
+        vec![Receipt {
             tx_type: TxType::Eip1559,
             success: true,
             cumulative_gas_used: 400,
@@ -492,9 +569,7 @@ fn block5(
                 vec![B256::with_last_byte(3), B256::with_last_byte(4)],
                 Bytes::default(),
             )],
-        }]],
-        number,
-        Vec::new(),
+        }],
     );
 
     let mut extended = prev_execution_outcome.clone();

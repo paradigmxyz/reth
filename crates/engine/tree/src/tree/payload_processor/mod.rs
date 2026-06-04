@@ -21,11 +21,11 @@ use reth_evm::{
     ConfigureEvm, ConvertTx, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook,
     SpecFor, TxEnvFor,
 };
+use reth_execution_types::Evm2BundleState;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader,
 };
-use reth_revm::db::BundleState;
 use reth_tasks::{utils::increase_thread_priority, ForEachOrdered, Runtime};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, HashedPostState,
@@ -740,7 +740,7 @@ where
     pub fn on_inserted_executed_block(
         &self,
         block_with_parent: BlockWithParent,
-        bundle_state: &BundleState,
+        bundle_state: &Evm2BundleState,
     ) {
         let cache_state_metrics = self.cache_state_metrics.clone();
         self.execution_cache.update_with_guard(|cached| {
@@ -857,9 +857,16 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     ///
     /// Returns `None` when BAL-driven hashed state streaming feeds the sparse trie task.
     pub fn state_hook(&self) -> Option<impl OnStateHook> {
-        self.install_state_hook
-            .then(|| self.state_root_handle.as_ref().map(|handle| handle.state_hook()))
-            .flatten()
+        if self.install_state_hook {
+            self.state_root_handle.as_ref().map(|handle| {
+                let sender = StateHookSender::new(handle.updates_tx().clone());
+                move |state: &revm_state::EvmState| {
+                    let _ = sender.send(StateRootMessage::StateUpdate(state.clone()));
+                }
+            })
+        } else {
+            None
+        }
     }
 
     /// Returns a clone of the sender that streams updates into the sparse-trie task. The BAL

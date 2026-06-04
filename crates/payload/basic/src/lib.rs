@@ -222,12 +222,30 @@ where
         let committed = new_state.committed();
         let new_execution_outcome = committed.execution_outcome();
         for (addr, acc) in new_execution_outcome.bundle_accounts_iter() {
-            if let Some(info) = acc.info.clone() {
+            if let Some(info) = acc.current.clone() {
                 // we want pre cache existing accounts and their storage
                 // this only includes changed accounts and storage but is better than nothing
-                let storage =
-                    acc.storage.iter().map(|(key, slot)| (*key, slot.present_value)).collect();
-                cached.insert_account(addr, info, storage);
+                let storage = new_execution_outcome
+                    .state()
+                    .storage()
+                    .get(&addr)
+                    .map(|storage| {
+                        storage.slots.iter().map(|(key, slot)| (*key, slot.current)).collect()
+                    })
+                    .unwrap_or_default();
+                cached.insert_account(
+                    addr,
+                    reth_revm::revm::state::AccountInfo {
+                        balance: info.balance,
+                        nonce: info.nonce,
+                        code_hash: info.code_hash,
+                        account_id: None,
+                        code: info.code.map(|code| {
+                            reth_revm::revm::bytecode::Bytecode::new_raw(code.original_bytes())
+                        }),
+                    },
+                    storage,
+                );
             }
         }
 

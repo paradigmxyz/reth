@@ -686,7 +686,8 @@ where
     }
 }
 
-fn alloy_block_execution_result_to_reth<T>(
+/// Converts an alloy block execution result into Reth's local execution result type.
+pub fn alloy_block_execution_result_to_reth<T>(
     result: alloy_evm::block::BlockExecutionResult<T>,
 ) -> BlockExecutionResult<T> {
     let alloy_evm::block::BlockExecutionResult { receipts, requests, gas_used, blob_gas_used } =
@@ -694,7 +695,8 @@ fn alloy_block_execution_result_to_reth<T>(
     BlockExecutionResult { receipts, requests, gas_used, blob_gas_used }
 }
 
-fn revm_bundle_to_evm2(bundle: BundleState, first_block: u64) -> Evm2BundleState {
+/// Converts a revm bundle into Reth's evm2-backed bundle state type.
+pub fn revm_bundle_to_evm2(bundle: BundleState, first_block: u64) -> Evm2BundleState {
     let BundleState { state, contracts, reverts, .. } = bundle;
 
     let accounts = state

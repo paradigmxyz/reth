@@ -11,6 +11,8 @@
 
 extern crate alloc;
 
+pub use evm2::evm::AccountInfo as Evm2AccountInfo;
+
 mod chain;
 pub use chain::*;
 

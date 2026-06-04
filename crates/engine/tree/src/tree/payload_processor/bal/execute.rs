@@ -25,7 +25,10 @@ use alloy_evm::{
 };
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
+use reth_evm::{
+    execute::{alloy_block_execution_result_to_reth, revm_bundle_to_evm2, ExecutableTxFor},
+    ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor,
+};
 use reth_primitives_traits::ReceiptTy;
 use reth_provider::BlockExecutionOutput;
 use reth_tasks::Runtime;
@@ -109,6 +112,7 @@ where
     let input_bal_revm = convert_alloy_to_revm_bal(bal)?;
 
     let block_gas_limit = evm_env.block_env.gas_limit();
+    let block_number = evm_env.block_env.number();
     let enable_amsterdam_eip8037 = evm_env.cfg_env.enable_amsterdam_eip8037;
     let tx_gas_limit_cap = evm_env.cfg_env.tx_gas_limit_cap;
     let mut canonical_state = State::builder()
@@ -173,8 +177,12 @@ where
     let built_bal = take_built_bal_and_log_divergence(&mut canonical_state, bal);
 
     canonical_state.merge_transitions(BundleRetention::Reverts);
+    let block_result = alloy_block_execution_result_to_reth(block_result);
     Ok((
-        BlockExecutionOutput { state: canonical_state.take_bundle(), result: block_result },
+        BlockExecutionOutput {
+            state: revm_bundle_to_evm2(canonical_state.take_bundle(), block_number.to::<u64>()),
+            result: block_result,
+        },
         senders,
         built_bal,
     ))
