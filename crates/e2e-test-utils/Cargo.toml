@@ -14,6 +14,7 @@ workspace = true
 reth-chainspec.workspace = true
 reth-tracing.workspace = true
 reth-db = { workspace = true, features = ["test-utils"] }
+reth-evm.workspace = true
 reth-network-api.workspace = true
 reth-network-p2p.workspace = true
 reth-rpc-server-types.workspace = true

@@ -8328,6 +8328,7 @@ dependencies = [
  "reth-engine-local",
  "reth-engine-primitives",
  "reth-ethereum-primitives",
+ "reth-evm",
  "reth-execution-types",
  "reth-network-api",
  "reth-network-p2p",
