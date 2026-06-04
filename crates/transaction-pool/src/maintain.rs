@@ -479,7 +479,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                     continue
                 }
 
-                let mut changed_accounts = Vec::with_capacity(state.state().len());
+                let mut changed_accounts = Vec::with_capacity(state.state().accounts().len());
                 for acc in state.changed_accounts() {
                     // we can always clear the dirty flag for this account
                     dirty_addresses.remove(&acc.address);

@@ -20,6 +20,7 @@ reth-storage-api.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
 
+evm2.workspace = true
 revm.workspace = true
 
 # alloy
@@ -46,6 +47,7 @@ std = [
     "alloy-eips/std",
     "alloy-primitives/std",
     "alloy-consensus/std",
+    "evm2/std",
     "revm/std",
     "alloy-evm/std",
     "reth-execution-errors/std",

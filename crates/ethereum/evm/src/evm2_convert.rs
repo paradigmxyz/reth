@@ -82,24 +82,25 @@ pub fn evm2_recovered_tx(tx: Recovered<TransactionSigned>) -> RecoveredTxEnvelop
     let (tx, signer) = tx.into_parts();
     match tx {
         TransactionSigned::Legacy(tx) => {
-            RecoveredTxEnvelope::Legacy(Recovered::new_unchecked(tx, signer))
+            RecoveredTxEnvelope::Legacy(Recovered::new_unchecked(tx.strip_signature(), signer))
         }
         TransactionSigned::Eip2930(tx) => {
-            RecoveredTxEnvelope::Eip2930(Recovered::new_unchecked(tx, signer))
+            RecoveredTxEnvelope::Eip2930(Recovered::new_unchecked(tx.strip_signature(), signer))
         }
         TransactionSigned::Eip1559(tx) => {
-            RecoveredTxEnvelope::Eip1559(Recovered::new_unchecked(tx, signer))
+            RecoveredTxEnvelope::Eip1559(Recovered::new_unchecked(tx.strip_signature(), signer))
         }
-        TransactionSigned::Eip4844(tx) => {
-            RecoveredTxEnvelope::Eip4844(Recovered::new_unchecked(tx.into(), signer))
-        }
+        TransactionSigned::Eip4844(tx) => RecoveredTxEnvelope::Eip4844(Recovered::new_unchecked(
+            tx.strip_signature().into(),
+            signer,
+        )),
         TransactionSigned::Eip7702(tx) => {
-            RecoveredTxEnvelope::Eip7702(Recovered::new_unchecked(tx, signer))
+            RecoveredTxEnvelope::Eip7702(Recovered::new_unchecked(tx.strip_signature(), signer))
         }
     }
 }
 
 /// Converts a borrowed recovered Reth Ethereum transaction into evm2's recovered envelope.
 pub fn evm2_recovered_tx_ref(tx: Recovered<&TransactionSigned>) -> RecoveredTxEnvelope {
-    evm2_recovered_tx(Recovered::new_unchecked(tx.inner().clone(), tx.signer()))
+    evm2_recovered_tx(Recovered::new_unchecked((*tx.inner()).clone(), tx.signer()))
 }

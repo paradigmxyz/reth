@@ -28,6 +28,17 @@ impl Evm2BundleState {
         Self { first_block, ..Default::default() }
     }
 
+    /// Creates a bundle from already converted evm2 state components.
+    pub fn from_parts(
+        first_block: BlockNumber,
+        accounts: AddressMap<Tracked<Option<AccountInfo>>>,
+        storage: AddressMap<Evm2StorageChangeSet>,
+        contracts: B256Map<Bytecode>,
+        block_reverts: Vec<Evm2BlockReverts>,
+    ) -> Self {
+        Self { accounts, storage, contracts, block_reverts, first_block }
+    }
+
     /// Creates a bundle from Reth account, storage, revert, and bytecode initialization data.
     pub fn new_init(
         first_block: BlockNumber,
