@@ -6,6 +6,7 @@ use alloy_rpc_types::{Block, Header, Receipt, Transaction, TransactionRequest};
 use eyre::OptionExt;
 use reth_chainspec::EthChainSpec;
 use reth_engine_primitives::InvalidBlockHook;
+use reth_evm::ConfigureEvm2BlockExecutor;
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_node_core::{
     args::InvalidBlockHookType,
@@ -32,6 +33,7 @@ pub trait InvalidBlockHookExt {
 impl<N> InvalidBlockHookExt for AddOnsContext<'_, N>
 where
     N: FullNodeComponents,
+    N::Evm: ConfigureEvm2BlockExecutor<Primitives = <N::Types as NodeTypes>::Primitives>,
 {
     type Primitives = <N::Types as NodeTypes>::Primitives;
 
@@ -78,7 +80,7 @@ where
         + Send
         + Sync
         + 'static,
-    E: reth_evm::ConfigureEvm<Primitives = N> + Clone + 'static,
+    E: ConfigureEvm2BlockExecutor<Primitives = N> + Clone + 'static,
 {
     use reth_engine_primitives::{InvalidBlockHooks, NoopInvalidBlockHook};
     use reth_invalid_block_hooks::InvalidBlockWitnessHook;

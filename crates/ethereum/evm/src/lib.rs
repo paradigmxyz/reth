@@ -546,6 +546,8 @@ where
         + Unpin
         + 'static,
 {
+    type Primitives = EthPrimitives;
+
     fn execute_evm2_block_with_state_provider<DB>(
         &self,
         state_provider: DB,

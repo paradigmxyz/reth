@@ -12,7 +12,7 @@ use reth_db::{init_db, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis_with_settings;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_eth_wire::NetPrimitivesFor;
-use reth_evm::{noop::NoopEvmConfig, ConfigureEvm, ConfigureEvm2BlockExecutor};
+use reth_evm::{noop::NoopEvmConfig, ConfigureEvm2BlockExecutor};
 use reth_network::NetworkEventListenerProvider;
 use reth_node_api::FullNodeTypesAdapter;
 use reth_node_builder::{
@@ -306,21 +306,22 @@ type FullTypesAdapter<T> = FullNodeTypesAdapter<
 /// Helper trait with a common set of requirements for the
 /// [`NodeTypes`] in CLI.
 pub trait CliNodeTypes: Node<FullTypesAdapter<Self>> + NodeTypesForProvider {
-    type Evm: ConfigureEvm<Primitives = Self::Primitives> + ConfigureEvm2BlockExecutor;
+    type Evm: ConfigureEvm2BlockExecutor<Primitives = Self::Primitives>;
     type NetworkPrimitives: NetPrimitivesFor<Self::Primitives>;
 }
 
 impl<N> CliNodeTypes for N
 where
     N: Node<FullTypesAdapter<Self>> + NodeTypesForProvider,
+    <<N::ComponentsBuilder as NodeComponentsBuilder<FullTypesAdapter<Self>>>::Components as NodeComponents<
+        FullTypesAdapter<Self>,
+    >>::Evm: ConfigureEvm2BlockExecutor<Primitives = Self::Primitives>,
 {
     type Evm = <<N::ComponentsBuilder as NodeComponentsBuilder<FullTypesAdapter<Self>>>::Components as NodeComponents<FullTypesAdapter<Self>>>::Evm;
     type NetworkPrimitives = <<<N::ComponentsBuilder as NodeComponentsBuilder<FullTypesAdapter<Self>>>::Components as NodeComponents<FullTypesAdapter<Self>>>::Network as NetworkEventListenerProvider>::Primitives;
 }
 
-type EvmFor<N> = <<<N as Node<FullTypesAdapter<N>>>::ComponentsBuilder as NodeComponentsBuilder<
-    FullTypesAdapter<N>,
->>::Components as NodeComponents<FullTypesAdapter<N>>>::Evm;
+type EvmFor<N> = <N as CliNodeTypes>::Evm;
 
 type ConsensusFor<N> =
     <<<N as Node<FullTypesAdapter<N>>>::ComponentsBuilder as NodeComponentsBuilder<
@@ -328,14 +329,20 @@ type ConsensusFor<N> =
     >>::Components as NodeComponents<FullTypesAdapter<N>>>::Consensus;
 
 /// Helper trait aggregating components required for the CLI.
-pub trait CliNodeComponents<N: CliNodeTypes>: Send + Sync + 'static {
+pub trait CliNodeComponents<N: CliNodeTypes>: Send + Sync + 'static
+where
+    EvmFor<N>: ConfigureEvm2BlockExecutor<Primitives = N::Primitives>,
+{
     /// Returns the configured EVM.
     fn evm_config(&self) -> &EvmFor<N>;
     /// Returns the consensus implementation.
     fn consensus(&self) -> &ConsensusFor<N>;
 }
 
-impl<N: CliNodeTypes> CliNodeComponents<N> for (EvmFor<N>, ConsensusFor<N>) {
+impl<N: CliNodeTypes> CliNodeComponents<N> for (EvmFor<N>, ConsensusFor<N>)
+where
+    EvmFor<N>: ConfigureEvm2BlockExecutor<Primitives = N::Primitives>,
+{
     fn evm_config(&self) -> &EvmFor<N> {
         &self.0
     }
@@ -348,6 +355,8 @@ impl<N: CliNodeTypes> CliNodeComponents<N> for (EvmFor<N>, ConsensusFor<N>) {
 /// Helper trait alias for an [`FnOnce`] producing [`CliNodeComponents`].
 pub trait CliComponentsBuilder<N: CliNodeTypes>:
     FnOnce(Arc<N::ChainSpec>) -> Self::Components + Send + Sync + 'static
+where
+    EvmFor<N>: ConfigureEvm2BlockExecutor<Primitives = N::Primitives>,
 {
     type Components: CliNodeComponents<N>;
 }
@@ -356,6 +365,7 @@ impl<N: CliNodeTypes, F, Comp> CliComponentsBuilder<N> for F
 where
     F: FnOnce(Arc<N::ChainSpec>) -> Comp + Send + Sync + 'static,
     Comp: CliNodeComponents<N>,
+    EvmFor<N>: ConfigureEvm2BlockExecutor<Primitives = N::Primitives>,
 {
     type Components = Comp;
 }

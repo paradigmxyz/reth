@@ -54,7 +54,7 @@ impl<N: NodePrimitives> Debug for ExExContextDyn<N> {
 impl<Node> From<ExExContext<Node>> for ExExContextDyn<PrimitivesTy<Node::Types>>
 where
     Node: FullNodeComponents<Types: NodeTypes<Primitives: NodePrimitives>>,
-    Node::Evm: ConfigureEvm2BlockExecutor,
+    Node::Evm: ConfigureEvm2BlockExecutor<Primitives = PrimitivesTy<Node::Types>>,
     Node::Provider: Debug + BlockReader,
 {
     fn from(ctx: ExExContext<Node>) -> Self {

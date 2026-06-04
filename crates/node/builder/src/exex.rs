@@ -3,11 +3,16 @@
 use std::future::Future;
 
 use futures::{future::BoxFuture, FutureExt};
+use reth_evm::ConfigureEvm2BlockExecutor;
 use reth_exex::ExExContext;
-use reth_node_api::FullNodeComponents;
+use reth_node_api::{FullNodeComponents, PrimitivesTy};
 
 /// A trait for launching an `ExEx`.
-pub trait LaunchExEx<Node: FullNodeComponents>: Send {
+pub trait LaunchExEx<Node>: Send
+where
+    Node: FullNodeComponents,
+    Node::Evm: ConfigureEvm2BlockExecutor<Primitives = PrimitivesTy<Node::Types>>,
+{
     /// Launches the `ExEx`.
     ///
     /// The `ExEx` should be able to run independently and emit events on the channels provided in
@@ -22,7 +27,11 @@ pub trait LaunchExEx<Node: FullNodeComponents>: Send {
 pub type BoxExEx = BoxFuture<'static, eyre::Result<()>>;
 
 /// A version of [`LaunchExEx`] that returns a boxed future. Makes the trait object-safe.
-pub trait BoxedLaunchExEx<Node: FullNodeComponents>: Send {
+pub trait BoxedLaunchExEx<Node>: Send
+where
+    Node: FullNodeComponents,
+    Node::Evm: ConfigureEvm2BlockExecutor<Primitives = PrimitivesTy<Node::Types>>,
+{
     /// Launches the `ExEx` and returns a boxed future.
     fn launch(self: Box<Self>, ctx: ExExContext<Node>)
         -> BoxFuture<'static, eyre::Result<BoxExEx>>;
@@ -35,6 +44,7 @@ impl<E, Node> BoxedLaunchExEx<Node> for E
 where
     E: LaunchExEx<Node> + Send + 'static,
     Node: FullNodeComponents,
+    Node::Evm: ConfigureEvm2BlockExecutor<Primitives = PrimitivesTy<Node::Types>>,
 {
     fn launch(
         self: Box<Self>,
@@ -53,6 +63,7 @@ where
 impl<Node, F, Fut, E> LaunchExEx<Node> for F
 where
     Node: FullNodeComponents,
+    Node::Evm: ConfigureEvm2BlockExecutor<Primitives = PrimitivesTy<Node::Types>>,
     F: FnOnce(ExExContext<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<E>> + Send,
     E: Future<Output = eyre::Result<()>> + Send,

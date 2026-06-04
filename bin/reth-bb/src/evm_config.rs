@@ -549,6 +549,8 @@ where
     Self: ConfigureEvm<Primitives = EthPrimitives>,
     EthEvmConfig<C>: ConfigureEvm2BlockExecutor<Primitives = EthPrimitives>,
 {
+    type Primitives = EthPrimitives;
+
     fn execute_evm2_block_with_state_provider<DB>(
         &self,
         state_provider: DB,
