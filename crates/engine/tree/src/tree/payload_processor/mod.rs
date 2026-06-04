@@ -8,7 +8,6 @@ use crate::tree::{
     ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
     WaitForCaches,
 };
-use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
@@ -1034,9 +1033,6 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Withdrawals included in the block.
     /// Used to generate prefetch targets for withdrawal addresses.
     pub withdrawals: Option<Vec<Withdrawal>>,
-    /// Optional decoded BAL for the block.
-    /// Unsupported by the active evm2 pre-Amsterdam execution path.
-    pub decoded_bal: Option<Arc<DecodedBal>>,
 }
 
 impl<Evm: ConfigureEvm> ExecutionEnv<Evm>
@@ -1054,7 +1050,6 @@ where
             transaction_count: 0,
             gas_used: 0,
             withdrawals: None,
-            decoded_bal: None,
         }
     }
 }
