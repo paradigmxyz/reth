@@ -1,54 +1,15 @@
 //! Helper aliases when working with [`ConfigureEvm`] and the traits in this crate.
 
 use crate::ConfigureEvm;
-use alloy_evm::{
-    block::{BlockExecutorFactory, BlockExecutorFor},
-    Database, EvmEnv, EvmFactory,
-};
-use revm::{database::State, inspector::NoOpInspector, Inspector};
 
-/// Helper to access [`EvmFactory`] for a given [`ConfigureEvm`].
-pub type EvmFactoryFor<Evm> =
-    <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory;
+/// Helper to access the evm2 spec for a given [`ConfigureEvm`].
+pub type SpecFor<Evm> = <Evm as ConfigureEvm>::Spec;
 
-/// Helper to access [`EvmFactory::Spec`] for a given [`ConfigureEvm`].
-pub type SpecFor<Evm> = <EvmFactoryFor<Evm> as EvmFactory>::Spec;
+/// Type alias for the configured EVM environment.
+pub type EvmEnvFor<Evm> = <Evm as ConfigureEvm>::EvmEnv;
 
-/// Helper to access [`EvmFactory::BlockEnv`] for a given [`ConfigureEvm`].
-pub type BlockEnvFor<Evm> = <EvmFactoryFor<Evm> as EvmFactory>::BlockEnv;
+/// Type alias for the configured transaction environment.
+pub type TxEnvFor<Evm> = <Evm as ConfigureEvm>::TxEnv;
 
-/// Helper to access [`EvmFactory::Evm`] for a given [`ConfigureEvm`].
-pub type EvmFor<Evm, DB, I = NoOpInspector> = <EvmFactoryFor<Evm> as EvmFactory>::Evm<DB, I>;
-
-/// Helper to access [`EvmFactory::Error`] for a given [`ConfigureEvm`].
-pub type EvmErrorFor<Evm, DB> = <EvmFactoryFor<Evm> as EvmFactory>::Error<DB>;
-
-/// Helper to access [`EvmFactory::Context`] for a given [`ConfigureEvm`].
-pub type EvmContextFor<Evm, DB> = <EvmFactoryFor<Evm> as EvmFactory>::Context<DB>;
-
-/// Helper to access [`EvmFactory::HaltReason`] for a given [`ConfigureEvm`].
-pub type HaltReasonFor<Evm> = <EvmFactoryFor<Evm> as EvmFactory>::HaltReason;
-
-/// Helper to access [`EvmFactory::Tx`] for a given [`ConfigureEvm`].
-pub type TxEnvFor<Evm> = <EvmFactoryFor<Evm> as EvmFactory>::Tx;
-
-/// Helper to access [`BlockExecutorFactory::ExecutionCtx`] for a given [`ConfigureEvm`].
-pub type ExecutionCtxFor<'a, Evm> =
-    <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>;
-
-/// Helper to access [`alloy_evm::block::BlockExecutor`] for a given [`ConfigureEvm`].
-pub type BlockExecutorForEvm<'a, Evm, DB, I = NoOpInspector> =
-    BlockExecutorFor<'a, <Evm as ConfigureEvm>::BlockExecutorFactory, &'a mut State<DB>, I>;
-
-/// Type alias for [`EvmEnv`] for a given [`ConfigureEvm`].
-pub type EvmEnvFor<Evm> = EvmEnv<SpecFor<Evm>, BlockEnvFor<Evm>>;
-
-/// Helper trait to bound [`Inspector`] for a [`ConfigureEvm`].
-pub trait InspectorFor<Evm: ConfigureEvm, DB: Database>: Inspector<EvmContextFor<Evm, DB>> {}
-impl<T, Evm, DB> InspectorFor<Evm, DB> for T
-where
-    Evm: ConfigureEvm,
-    DB: Database,
-    T: Inspector<EvmContextFor<Evm, DB>>,
-{
-}
+/// Helper to access the configured execution context.
+pub type ExecutionCtxFor<'a, Evm> = <Evm as ConfigureEvm>::ExecutionCtx<'a>;

@@ -1,10 +1,4 @@
-//! EVM config for vanilla ethereum.
-//!
-//! # Revm features
-//!
-//! This crate does __not__ enforce specific revm features such as `blst` or `c-kzg`, which are
-//! critical for revm's evm internals, it is the responsibility of the implementer to ensure the
-//! proper features are selected.
+//! EVM config for vanilla Ethereum.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -20,52 +14,62 @@ extern crate alloc;
 #[cfg(feature = "std")]
 use alloc::vec::Vec;
 use alloc::{borrow::Cow, sync::Arc};
+use alloy_consensus::{transaction::Recovered, Header};
+use alloy_eips::eip4895::Withdrawal;
 #[cfg(feature = "std")]
-use alloy_consensus::transaction::Recovered;
-use alloy_consensus::Header;
-use alloy_evm::{
-    eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
-    EthEvmFactory, FromRecoveredTx, FromTxWithEncoded,
-};
-#[cfg(feature = "jit")]
-use core::any::Any;
-use core::{convert::Infallible, fmt::Debug};
+use alloy_eips::Decodable2718;
+use alloy_primitives::{Bytes, B256, U256};
+#[cfg(feature = "std")]
+use alloy_rpc_types_engine::ExecutionData;
+use core::{convert::Infallible, fmt::Debug, marker::PhantomData};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthExecutorSpec, MAINNET};
+use reth_ethereum_forks::{EthereumHardforks, Hardforks};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
-use reth_evm::{
-    eth::NextEvmEnvAttributes, precompiles::PrecompilesMap, ConfigureEvm, EvmEnv, EvmFactory,
-    JitBackend, NextBlockEnvAttributes, TransactionEnvMut,
-};
-#[cfg(feature = "std")]
-use reth_primitives_traits::{BlockBody, RecoveredBlock};
-use reth_primitives_traits::{SealedBlock, SealedHeader};
-use revm::{context::BlockEnv, primitives::hardfork::SpecId};
-
 #[cfg(feature = "std")]
 use reth_evm::{
     ConfigureEngineEvm, ConfigureEvm2BlockExecutor, ConfigureEvm2Engine, ExecutableTxIterator,
 };
-#[allow(unused_imports)]
-use {
-    alloy_eips::Decodable2718,
-    alloy_primitives::{Bytes, U256},
-    alloy_rpc_types_engine::ExecutionData,
-    reth_chainspec::EthereumHardforks,
-    reth_evm::{EvmEnvFor, ExecutionCtxFor},
-    reth_primitives_traits::{constants::MAX_TX_GAS_LIMIT_OSAKA, SignedTransaction, TxTy},
-    reth_storage_errors::any::AnyError,
-    revm::context::CfgEnv,
-    revm::context_interface::block::BlobExcessGasAndPrice,
-};
+use reth_evm::{ConfigureEvm, EvmEnvFor, NextBlockEnvAttributes};
+#[cfg(feature = "std")]
+use reth_primitives_traits::SignedTransaction;
+#[cfg(feature = "std")]
+use reth_primitives_traits::{BlockBody, RecoveredBlock};
+use reth_primitives_traits::{SealedBlock, SealedHeader};
+#[cfg(feature = "std")]
+use reth_storage_errors::any::AnyError;
 
-pub use alloy_evm::EthEvm;
+/// Legacy Ethereum EVM type placeholder.
+pub type EthEvm<DB = (), I = (), P = ()> = PhantomData<(DB, I, P)>;
 
-mod config;
-pub use config::{revm_spec, revm_spec_by_timestamp_and_block_number};
-use reth_ethereum_forks::Hardforks;
+/// Configured Ethereum EVM environment for the evm2 path.
+#[derive(Debug, Clone, Default)]
+pub struct EthEvmEnv {
+    /// Active evm2 spec.
+    pub spec: evm2::SpecId,
+    /// evm2 block environment.
+    pub block: evm2::env::BlockEnv,
+}
 
-/// Helper type with backwards compatible methods to obtain Ethereum executor
-/// providers.
+/// Ethereum block execution context.
+#[derive(Debug, Clone)]
+pub struct EthBlockExecutionCtx<'a> {
+    /// Optional transaction count hint.
+    pub tx_count_hint: Option<usize>,
+    /// Parent block hash.
+    pub parent_hash: B256,
+    /// Parent beacon block root.
+    pub parent_beacon_block_root: Option<B256>,
+    /// Ommer headers.
+    pub ommers: &'a [Header],
+    /// Withdrawals.
+    pub withdrawals: Option<Cow<'a, [Withdrawal]>>,
+    /// Extra data for the built block.
+    pub extra_data: Bytes,
+    /// Optional slot number for post-Amsterdam payloads.
+    pub slot_number: Option<u64>,
+}
+
+/// Helper type with backwards compatible methods to obtain Ethereum executor providers.
 #[doc(hidden)]
 pub mod execute {
     use crate::EthEvmConfig;
@@ -103,22 +107,18 @@ mod test_utils;
 #[cfg(feature = "test-utils")]
 pub use test_utils::*;
 
-pub mod factory;
-
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone)]
-pub struct EthEvmConfig<C = ChainSpec, EvmFactory = EthEvmFactory> {
-    /// Inner [`EthBlockExecutorFactory`].
-    pub executor_factory:
-        EthBlockExecutorFactory<RethReceiptBuilder, EthExecutorSpecAdapter<C>, EvmFactory>,
-    /// Ethereum block assembler.
+pub struct EthEvmConfig<C = ChainSpec, EvmFactory = ()> {
+    /// Ethereum block assembler placeholder.
     pub block_assembler: EthBlockAssembler<C>,
     /// Chain specification.
     pub chain_spec: Arc<C>,
+    _evm_factory: PhantomData<EvmFactory>,
 }
 
 impl EthEvmConfig {
-    /// Creates a new Ethereum EVM configuration for the ethereum mainnet.
+    /// Creates a new Ethereum EVM configuration for Ethereum mainnet.
     pub fn mainnet() -> Self {
         Self::ethereum(MAINNET.clone())
     }
@@ -132,21 +132,17 @@ impl<ChainSpec> EthEvmConfig<ChainSpec> {
 
     /// Creates a new Ethereum EVM configuration.
     pub fn ethereum(chain_spec: Arc<ChainSpec>) -> Self {
-        Self::new_with_evm_factory(chain_spec, EthEvmFactory::default())
+        Self::new_with_evm_factory(chain_spec, ())
     }
 }
 
 impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory> {
-    /// Creates a new Ethereum EVM configuration with the given chain spec and EVM factory.
-    pub fn new_with_evm_factory(chain_spec: Arc<ChainSpec>, evm_factory: EvmFactory) -> Self {
+    /// Creates a new Ethereum EVM configuration with the given EVM factory placeholder.
+    pub fn new_with_evm_factory(chain_spec: Arc<ChainSpec>, _evm_factory: EvmFactory) -> Self {
         Self {
             block_assembler: EthBlockAssembler::new(chain_spec.clone()),
-            executor_factory: EthBlockExecutorFactory::new(
-                RethReceiptBuilder::default(),
-                EthExecutorSpecAdapter::new(chain_spec.clone()),
-                evm_factory,
-            ),
             chain_spec,
+            _evm_factory: PhantomData,
         }
     }
 
@@ -162,14 +158,14 @@ where
 {
     /// Returns the evm2 spec id for the provided block header.
     pub fn evm2_spec_for_header(&self, header: &Header) -> evm2::SpecId {
-        evm2_spec(self.chain_spec(), header)
+        evm2_spec(self.chain_spec.as_ref(), header)
     }
 
     /// Returns the evm2 block environment for the provided block header.
     pub fn evm2_block_env_for_header(&self, header: &Header) -> evm2::env::BlockEnv {
         evm2_block_env_with_blob_params(
             header,
-            self.chain_spec().blob_params_at_timestamp(header.timestamp),
+            self.chain_spec.as_ref().blob_params_at_timestamp(header.timestamp),
         )
     }
 
@@ -177,7 +173,7 @@ where
     #[cfg(feature = "std")]
     pub fn evm2_spec_for_payload(&self, payload: &ExecutionData) -> evm2::SpecId {
         evm2_spec_by_timestamp_and_block_number(
-            self.chain_spec(),
+            self.chain_spec.as_ref(),
             payload.payload.timestamp(),
             payload.payload.block_number(),
         )
@@ -188,151 +184,75 @@ where
     pub fn evm2_block_env_for_payload(&self, payload: &ExecutionData) -> evm2::env::BlockEnv {
         evm2_payload_block_env(
             payload,
-            self.chain_spec().blob_params_at_timestamp(payload.payload.timestamp()),
+            self.chain_spec.as_ref().blob_params_at_timestamp(payload.payload.timestamp()),
         )
-    }
-}
-
-/// Adapter that lets alloy's Ethereum block executor read Reth chain specs without making the
-/// chainspec crate depend on alloy-evm.
-#[derive(Debug, Clone)]
-pub struct EthExecutorSpecAdapter<C> {
-    chain_spec: Arc<C>,
-}
-
-impl<C> EthExecutorSpecAdapter<C> {
-    /// Creates a new adapter.
-    pub const fn new(chain_spec: Arc<C>) -> Self {
-        Self { chain_spec }
-    }
-}
-
-impl<C> reth_ethereum_forks::EthereumHardforks for EthExecutorSpecAdapter<C>
-where
-    C: reth_ethereum_forks::EthereumHardforks,
-{
-    fn ethereum_fork_activation(
-        &self,
-        fork: reth_ethereum_forks::EthereumHardfork,
-    ) -> reth_ethereum_forks::ForkCondition {
-        self.chain_spec.ethereum_fork_activation(fork)
-    }
-}
-
-impl<C> alloy_evm::eth::spec::EthExecutorSpec for EthExecutorSpecAdapter<C>
-where
-    C: EthExecutorSpec,
-{
-    fn deposit_contract_address(&self) -> Option<alloy_primitives::Address> {
-        self.chain_spec.deposit_contract_address()
     }
 }
 
 impl<ChainSpec, EvmF> ConfigureEvm for EthEvmConfig<ChainSpec, EvmF>
 where
     ChainSpec: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
-    EvmF: EvmFactory<
-            Tx: TransactionEnvMut
-                    + FromRecoveredTx<TransactionSigned>
-                    + FromTxWithEncoded<TransactionSigned>,
-            Spec = SpecId,
-            BlockEnv = BlockEnv,
-            Precompiles = PrecompilesMap,
-        > + Clone
-        + Debug
-        + Send
-        + Sync
-        + Unpin
-        + 'static,
+    EvmF: Clone + Debug + Send + Sync + Unpin + 'static,
 {
     type Primitives = EthPrimitives;
     type Error = Infallible;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
-    type BlockExecutorFactory =
-        EthBlockExecutorFactory<RethReceiptBuilder, EthExecutorSpecAdapter<ChainSpec>, EvmF>;
-    type BlockAssembler = EthBlockAssembler<ChainSpec>;
-
-    fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
-        &self.executor_factory
-    }
-
-    fn block_assembler(&self) -> &Self::BlockAssembler {
-        &self.block_assembler
-    }
-
-    fn with_jit_support_enabled(self, enabled: bool) -> Self
+    type Spec = evm2::SpecId;
+    type EvmEnv = EthEvmEnv;
+    type TxEnv = Recovered<TransactionSigned>;
+    type ExecutionCtx<'a>
+        = EthBlockExecutionCtx<'a>
     where
-        Self: Sized,
-    {
-        #[cfg(feature = "jit")]
-        {
-            let mut this = self;
-            let mut evm_factory = this.executor_factory.evm_factory().clone();
-            if let Some(factory) =
-                (&mut evm_factory as &mut dyn Any).downcast_mut::<factory::RethEvmFactory>()
-            {
-                factory.set_jit_support(enabled);
-            }
-            this.executor_factory = EthBlockExecutorFactory::new(
-                *this.executor_factory.receipt_builder(),
-                this.executor_factory.spec().clone(),
-                evm_factory,
-            );
-            this
-        }
+        Self: 'a;
 
-        #[cfg(not(feature = "jit"))]
-        {
-            let _ = enabled;
-            self
-        }
-    }
-
-    fn jit_backend(&self) -> Option<&dyn JitBackend> {
-        #[cfg(feature = "jit")]
-        if let Some(factory) = (self.executor_factory.evm_factory() as &dyn Any)
-            .downcast_ref::<factory::RethEvmFactory>()
-        {
-            return Some(factory);
-        }
-
-        None
-    }
-
-    fn evm_env(&self, header: &Header) -> Result<EvmEnv<SpecId>, Self::Error> {
-        Ok(EvmEnv::for_eth_block(
-            header,
-            self.chain_spec(),
-            self.chain_spec().chain().id(),
-            self.chain_spec().blob_params_at_timestamp(header.timestamp),
-        ))
+    fn evm_env(&self, header: &Header) -> Result<EvmEnvFor<Self>, Self::Error> {
+        Ok(EthEvmEnv {
+            spec: evm2_spec(self.chain_spec.as_ref(), header),
+            block: evm2_block_env_with_blob_params(
+                header,
+                self.chain_spec.as_ref().blob_params_at_timestamp(header.timestamp),
+            ),
+        })
     }
 
     fn next_evm_env(
         &self,
         parent: &Header,
         attributes: &NextBlockEnvAttributes,
-    ) -> Result<EvmEnv, Self::Error> {
-        Ok(EvmEnv::for_eth_next_block(
-            parent,
-            NextEvmEnvAttributes {
-                timestamp: attributes.timestamp,
-                suggested_fee_recipient: attributes.suggested_fee_recipient,
-                prev_randao: attributes.prev_randao,
-                gas_limit: attributes.gas_limit,
-                slot_number: attributes.slot_number,
-            },
-            self.chain_spec().next_block_base_fee(parent, attributes.timestamp).unwrap_or_default(),
-            self.chain_spec(),
-            self.chain_spec().chain().id(),
-            self.chain_spec().blob_params_at_timestamp(attributes.timestamp),
-        ))
+    ) -> Result<EvmEnvFor<Self>, Self::Error> {
+        let base_fee = self
+            .chain_spec
+            .as_ref()
+            .next_block_base_fee(parent, attributes.timestamp)
+            .unwrap_or_default();
+        let header = Header {
+            parent_hash: parent.hash_slow(),
+            beneficiary: attributes.suggested_fee_recipient,
+            timestamp: attributes.timestamp,
+            number: parent.number + 1,
+            gas_limit: attributes.gas_limit,
+            base_fee_per_gas: Some(base_fee),
+            mix_hash: attributes.prev_randao,
+            slot_number: attributes.slot_number,
+            ..Default::default()
+        };
+
+        Ok(EthEvmEnv {
+            spec: evm2_spec(self.chain_spec.as_ref(), &header),
+            block: evm2_block_env_with_blob_params(
+                &header,
+                self.chain_spec.as_ref().blob_params_at_timestamp(attributes.timestamp),
+            ),
+        })
     }
 
     fn context_for_block<'a>(
         &self,
         block: &'a SealedBlock<Block>,
-    ) -> Result<EthBlockExecutionCtx<'a>, Self::Error> {
+    ) -> Result<EthBlockExecutionCtx<'a>, Self::Error>
+    where
+        Self: 'a,
+    {
         Ok(EthBlockExecutionCtx {
             tx_count_hint: Some(block.transaction_count()),
             parent_hash: block.header().parent_hash,
@@ -344,11 +264,14 @@ where
         })
     }
 
-    fn context_for_next_block(
-        &self,
-        parent: &SealedHeader,
+    fn context_for_next_block<'a>(
+        &'a self,
+        parent: &'a SealedHeader,
         attributes: Self::NextBlockEnvCtx,
-    ) -> Result<EthBlockExecutionCtx<'_>, Self::Error> {
+    ) -> Result<EthBlockExecutionCtx<'a>, Self::Error>
+    where
+        Self: 'a,
+    {
         Ok(EthBlockExecutionCtx {
             tx_count_hint: None,
             parent_hash: parent.hash(),
@@ -365,72 +288,26 @@ where
 impl<ChainSpec, EvmF> ConfigureEngineEvm<ExecutionData> for EthEvmConfig<ChainSpec, EvmF>
 where
     ChainSpec: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
-    EvmF: EvmFactory<
-            Tx: TransactionEnvMut
-                    + FromRecoveredTx<TransactionSigned>
-                    + FromTxWithEncoded<TransactionSigned>,
-            Spec = SpecId,
-            BlockEnv = BlockEnv,
-            Precompiles = PrecompilesMap,
-        > + Clone
-        + Debug
-        + Send
-        + Sync
-        + Unpin
-        + 'static,
+    EvmF: Clone + Debug + Send + Sync + Unpin + 'static,
 {
     fn evm_env_for_payload(&self, payload: &ExecutionData) -> Result<EvmEnvFor<Self>, Self::Error> {
-        let timestamp = payload.payload.timestamp();
-        let block_number = payload.payload.block_number();
-
-        let blob_params = self.chain_spec().blob_params_at_timestamp(timestamp);
-        let spec =
-            revm_spec_by_timestamp_and_block_number(self.chain_spec(), timestamp, block_number);
-
-        // configure evm env based on parent block
-        let mut cfg_env = CfgEnv::new()
-            .with_chain_id(self.chain_spec().chain().id())
-            .with_spec_and_mainnet_gas_params(spec);
-
-        if let Some(blob_params) = &blob_params {
-            cfg_env.set_max_blobs_per_tx(blob_params.max_blobs_per_tx);
-        }
-
-        if self.chain_spec().is_osaka_active_at_timestamp(timestamp) {
-            cfg_env.tx_gas_limit_cap = Some(MAX_TX_GAS_LIMIT_OSAKA);
-        }
-
-        // derive the EIP-4844 blob fees from the header's `excess_blob_gas` and the current
-        // blobparams
-        let blob_excess_gas_and_price =
-            payload.payload.excess_blob_gas().zip(blob_params).map(|(excess_blob_gas, params)| {
-                let blob_gasprice = params.calc_blob_fee(excess_blob_gas);
-                BlobExcessGasAndPrice { excess_blob_gas, blob_gasprice }
-            });
-
-        let block_env = BlockEnv {
-            number: U256::from(block_number),
-            beneficiary: payload.payload.fee_recipient(),
-            timestamp: U256::from(timestamp),
-            difficulty: if spec >= SpecId::MERGE {
-                U256::ZERO
-            } else {
-                payload.payload.as_v1().prev_randao.into()
-            },
-            prevrandao: (spec >= SpecId::MERGE).then(|| payload.payload.as_v1().prev_randao),
-            gas_limit: payload.payload.gas_limit(),
-            basefee: payload.payload.saturated_base_fee_per_gas(),
-            blob_excess_gas_and_price,
-            slot_num: payload.payload.as_v4().map(|v4| v4.slot_number).unwrap_or_default(),
-        };
-
-        Ok(EvmEnv { cfg_env, block_env })
+        Ok(EthEvmEnv {
+            spec: evm2_spec_by_timestamp_and_block_number(
+                self.chain_spec.as_ref(),
+                payload.payload.timestamp(),
+                payload.payload.block_number(),
+            ),
+            block: evm2_payload_block_env(
+                payload,
+                self.chain_spec.as_ref().blob_params_at_timestamp(payload.payload.timestamp()),
+            ),
+        })
     }
 
     fn context_for_payload<'a>(
         &self,
         payload: &'a ExecutionData,
-    ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
+    ) -> Result<reth_evm::ExecutionCtxFor<'a, Self>, Self::Error> {
         Ok(EthBlockExecutionCtx {
             tx_count_hint: Some(payload.payload.transactions().len()),
             parent_hash: payload.parent_hash(),
@@ -448,8 +325,7 @@ where
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
         let txs = payload.payload.transactions().clone();
         let convert = |tx: Bytes| {
-            let tx =
-                TxTy::<Self::Primitives>::decode_2718_exact(tx.as_ref()).map_err(AnyError::new)?;
+            let tx = TransactionSigned::decode_2718_exact(tx.as_ref()).map_err(AnyError::new)?;
             let signer = tx.try_recover().map_err(AnyError::new)?;
             Ok::<_, AnyError>(tx.with_signer(signer))
         };
@@ -463,22 +339,10 @@ impl<ChainSpec, EvmF> ConfigureEvm2Engine<ExecutionData> for EthEvmConfig<ChainS
 where
     ChainSpec:
         EthExecutorSpec + EthChainSpec<Header = Header> + EthereumHardforks + Hardforks + 'static,
-    EvmF: EvmFactory<
-            Tx: TransactionEnvMut
-                    + FromRecoveredTx<TransactionSigned>
-                    + FromTxWithEncoded<TransactionSigned>,
-            Spec = SpecId,
-            BlockEnv = BlockEnv,
-            Precompiles = PrecompilesMap,
-        > + Clone
-        + Debug
-        + Send
-        + Sync
-        + Unpin
-        + 'static,
+    EvmF: Clone + Debug + Send + Sync + Unpin + 'static,
 {
     fn evm2_spec_for_header(&self, header: &Header) -> Result<evm2::SpecId, Self::Error> {
-        Ok(evm2_spec(self.chain_spec(), header))
+        Ok(evm2_spec(self.chain_spec.as_ref(), header))
     }
 
     fn evm2_block_env_for_header(
@@ -487,13 +351,13 @@ where
     ) -> Result<evm2::env::BlockEnv, Self::Error> {
         Ok(evm2_block_env_with_blob_params(
             header,
-            self.chain_spec().blob_params_at_timestamp(header.timestamp),
+            self.chain_spec.as_ref().blob_params_at_timestamp(header.timestamp),
         ))
     }
 
     fn evm2_spec_for_payload(&self, payload: &ExecutionData) -> Result<evm2::SpecId, Self::Error> {
         Ok(evm2_spec_by_timestamp_and_block_number(
-            self.chain_spec(),
+            self.chain_spec.as_ref(),
             payload.payload.timestamp(),
             payload.payload.block_number(),
         ))
@@ -505,14 +369,17 @@ where
     ) -> Result<evm2::env::BlockEnv, Self::Error> {
         Ok(evm2_payload_block_env(
             payload,
-            self.chain_spec().blob_params_at_timestamp(payload.payload.timestamp()),
+            self.chain_spec.as_ref().blob_params_at_timestamp(payload.payload.timestamp()),
         ))
     }
 
     fn evm2_recovered_txs_for_payload(
         &self,
         payload: &ExecutionData,
-    ) -> Result<Vec<Recovered<TransactionSigned>>, Box<dyn core::error::Error + Send + Sync>> {
+    ) -> Result<
+        Vec<Recovered<TransactionSigned>>,
+        alloc::boxed::Box<dyn core::error::Error + Send + Sync>,
+    > {
         payload
             .payload
             .transactions()
@@ -523,7 +390,11 @@ where
                 let signer = tx.try_recover().map_err(AnyError::new)?;
                 Ok(tx.with_signer(signer))
             })
-            .collect()
+            .collect::<Result<Vec<_>, AnyError>>()
+            .map_err(|err| {
+                alloc::boxed::Box::new(err)
+                    as alloc::boxed::Box<dyn core::error::Error + Send + Sync>
+            })
     }
 }
 
@@ -532,19 +403,7 @@ impl<ChainSpec, EvmF> ConfigureEvm2BlockExecutor for EthEvmConfig<ChainSpec, Evm
 where
     ChainSpec:
         EthExecutorSpec + EthChainSpec<Header = Header> + EthereumHardforks + Hardforks + 'static,
-    EvmF: EvmFactory<
-            Tx: TransactionEnvMut
-                    + FromRecoveredTx<TransactionSigned>
-                    + FromTxWithEncoded<TransactionSigned>,
-            Spec = SpecId,
-            BlockEnv = BlockEnv,
-            Precompiles = PrecompilesMap,
-        > + Clone
-        + Debug
-        + Send
-        + Sync
-        + Unpin
-        + 'static,
+    EvmF: Clone + Debug + Send + Sync + Unpin + 'static,
 {
     type Primitives = EthPrimitives;
 
@@ -554,7 +413,7 @@ where
         block: &RecoveredBlock<Block>,
     ) -> Result<
         reth_execution_types::BlockExecutionOutput<reth_ethereum_primitives::Receipt>,
-        Box<dyn core::error::Error + Send + Sync>,
+        alloc::boxed::Box<dyn core::error::Error + Send + Sync>,
     >
     where
         DB: reth_storage_api::StateProvider + Send + 'static,
@@ -575,17 +434,19 @@ where
         };
 
         execute_evm2_block_with_state_provider_context(
-            evm2_spec(self.chain_spec(), header),
+            evm2_spec(self.chain_spec.as_ref(), header),
             evm2_block_env_with_blob_params(
                 header,
-                self.chain_spec().blob_params_at_timestamp(header.timestamp),
+                self.chain_spec.as_ref().blob_params_at_timestamp(header.timestamp),
             ),
             state_provider,
             header.number,
             transactions,
             context,
         )
-        .map_err(|err| Box::new(err) as Box<dyn core::error::Error + Send + Sync>)
+        .map_err(|err| {
+            alloc::boxed::Box::new(err) as alloc::boxed::Box<dyn core::error::Error + Send + Sync>
+        })
     }
 
     fn execute_evm2_block_with_state_provider_ref(
@@ -594,7 +455,7 @@ where
         block: &RecoveredBlock<Block>,
     ) -> Result<
         reth_execution_types::BlockExecutionOutput<reth_ethereum_primitives::Receipt>,
-        Box<dyn core::error::Error + Send + Sync>,
+        alloc::boxed::Box<dyn core::error::Error + Send + Sync>,
     > {
         let header = block.header();
         let transactions = block
@@ -612,24 +473,25 @@ where
         };
 
         execute_evm2_block_with_borrowed_state_provider_context(
-            evm2_spec(self.chain_spec(), header),
+            evm2_spec(self.chain_spec.as_ref(), header),
             evm2_block_env_with_blob_params(
                 header,
-                self.chain_spec().blob_params_at_timestamp(header.timestamp),
+                self.chain_spec.as_ref().blob_params_at_timestamp(header.timestamp),
             ),
             state_provider,
             header.number,
             transactions,
             context,
         )
-        .map_err(|err| Box::new(err) as Box<dyn core::error::Error + Send + Sync>)
+        .map_err(|err| {
+            alloc::boxed::Box::new(err) as alloc::boxed::Box<dyn core::error::Error + Send + Sync>
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::Header;
     use alloy_genesis::Genesis;
     use reth_chainspec::{Chain, ChainSpec};
 
@@ -648,34 +510,5 @@ mod tests {
         let env = EthEvmConfig::new(Arc::new(chain_spec)).evm2_block_env_for_header(&header);
 
         assert_eq!(env.blob_basefee, U256::from(blob_params.calc_blob_fee(excess_blob_gas)));
-    }
-
-    #[cfg(feature = "jit")]
-    #[test]
-    fn test_jit_support_downcast_updates_reth_factory() {
-        let evm_config = EthEvmConfig::new_with_evm_factory(
-            MAINNET.clone(),
-            factory::RethEvmFactory::disabled(),
-        );
-
-        assert!(evm_config.jit_backend().is_some());
-        assert!(!evm_config.executor_factory.evm_factory().jit_support_enabled());
-
-        let evm_config = evm_config.with_jit_support();
-        assert!(evm_config.executor_factory.evm_factory().jit_support_enabled());
-
-        let evm_config = evm_config.with_jit_support_enabled(false);
-        assert!(!evm_config.executor_factory.evm_factory().jit_support_enabled());
-    }
-
-    #[cfg(feature = "jit")]
-    #[test]
-    fn test_jit_support_downcast_ignores_plain_factory() {
-        let evm_config = EthEvmConfig::mainnet();
-
-        assert!(evm_config.jit_backend().is_none());
-
-        let evm_config = evm_config.with_jit_support();
-        assert!(evm_config.jit_backend().is_none());
     }
 }

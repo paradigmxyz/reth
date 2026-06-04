@@ -50,12 +50,12 @@ pub struct CachedReads {
 // === impl CachedReads ===
 
 impl CachedReads {
-    /// Gets a placeholder database wrapper for parked revm-backed call sites.
+    /// Gets a placeholder database wrapper for parked legacy executor call sites.
     pub const fn as_db<DB>(&mut self, db: DB) -> CachedReadsDb<'_, DB> {
         CachedReadsDb { cached: self, db }
     }
 
-    /// Gets a placeholder mutable database wrapper for parked revm-backed call sites.
+    /// Gets a placeholder mutable database wrapper for parked legacy executor call sites.
     pub const fn as_db_mut<DB>(&mut self, db: DB) -> CachedReadsDbMut<'_, DB> {
         CachedReadsDbMut { cached: self, db }
     }
@@ -75,7 +75,7 @@ impl CachedReads {
     }
 }
 
-/// Placeholder cache wrapper retained for parked revm-backed call sites.
+/// Placeholder cache wrapper retained for parked legacy executor call sites.
 #[derive(Debug)]
 pub struct CachedReadsDb<'a, DB> {
     /// The cache of reads.
@@ -84,7 +84,7 @@ pub struct CachedReadsDb<'a, DB> {
     pub db: DB,
 }
 
-/// Placeholder mutable cache wrapper retained for parked revm-backed call sites.
+/// Placeholder mutable cache wrapper retained for parked legacy executor call sites.
 #[derive(Debug)]
 pub struct CachedReadsDbMut<'a, DB> {
     /// The cache of reads.

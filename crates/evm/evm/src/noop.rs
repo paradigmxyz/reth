@@ -44,16 +44,13 @@ where
     type Primitives = Inner::Primitives;
     type Error = Inner::Error;
     type NextBlockEnvCtx = Inner::NextBlockEnvCtx;
-    type BlockExecutorFactory = Inner::BlockExecutorFactory;
-    type BlockAssembler = Inner::BlockAssembler;
-
-    fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
-        self.inner().block_executor_factory()
-    }
-
-    fn block_assembler(&self) -> &Self::BlockAssembler {
-        self.inner().block_assembler()
-    }
+    type Spec = Inner::Spec;
+    type EvmEnv = Inner::EvmEnv;
+    type TxEnv = Inner::TxEnv;
+    type ExecutionCtx<'a>
+        = Inner::ExecutionCtx<'a>
+    where
+        Self: 'a;
 
     fn evm_env(&self, header: &HeaderTy<Self::Primitives>) -> Result<EvmEnvFor<Self>, Self::Error> {
         self.inner().evm_env(header)
@@ -70,15 +67,21 @@ where
     fn context_for_block<'a>(
         &self,
         block: &'a SealedBlock<BlockTy<Self::Primitives>>,
-    ) -> Result<crate::ExecutionCtxFor<'a, Self>, Self::Error> {
+    ) -> Result<crate::ExecutionCtxFor<'a, Self>, Self::Error>
+    where
+        Self: 'a,
+    {
         self.inner().context_for_block(block)
     }
 
-    fn context_for_next_block(
-        &self,
-        parent: &SealedHeader<HeaderTy<Self::Primitives>>,
+    fn context_for_next_block<'a>(
+        &'a self,
+        parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
         attributes: Self::NextBlockEnvCtx,
-    ) -> Result<crate::ExecutionCtxFor<'_, Self>, Self::Error> {
+    ) -> Result<crate::ExecutionCtxFor<'a, Self>, Self::Error>
+    where
+        Self: 'a,
+    {
         self.inner().context_for_next_block(parent, attributes)
     }
 }

@@ -411,16 +411,13 @@ where
     type Primitives = EthPrimitives;
     type Error = Infallible;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
-    type BlockExecutorFactory = <EthEvmConfig<C> as ConfigureEvm>::BlockExecutorFactory;
-    type BlockAssembler = <EthEvmConfig<C> as ConfigureEvm>::BlockAssembler;
-
-    fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
-        self.inner.block_executor_factory()
-    }
-
-    fn block_assembler(&self) -> &Self::BlockAssembler {
-        self.inner.block_assembler()
-    }
+    type Spec = <EthEvmConfig<C> as ConfigureEvm>::Spec;
+    type EvmEnv = <EthEvmConfig<C> as ConfigureEvm>::EvmEnv;
+    type TxEnv = <EthEvmConfig<C> as ConfigureEvm>::TxEnv;
+    type ExecutionCtx<'a>
+        = <EthEvmConfig<C> as ConfigureEvm>::ExecutionCtx<'a>
+    where
+        Self: 'a;
 
     fn evm_env(&self, header: &HeaderTy<Self::Primitives>) -> Result<EvmEnvFor<Self>, Self::Error> {
         self.inner.evm_env(header)
@@ -437,15 +434,21 @@ where
     fn context_for_block<'a>(
         &self,
         block: &'a SealedBlock<BlockTy<Self::Primitives>>,
-    ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
+    ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error>
+    where
+        Self: 'a,
+    {
         self.inner.context_for_block(block)
     }
 
-    fn context_for_next_block(
-        &self,
-        parent: &SealedHeader<HeaderTy<Self::Primitives>>,
+    fn context_for_next_block<'a>(
+        &'a self,
+        parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
         attributes: Self::NextBlockEnvCtx,
-    ) -> Result<ExecutionCtxFor<'_, Self>, Self::Error> {
+    ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error>
+    where
+        Self: 'a,
+    {
         self.inner.context_for_next_block(parent, attributes)
     }
 }
