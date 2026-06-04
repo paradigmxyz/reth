@@ -9076,7 +9076,6 @@ dependencies = [
  "reth-testing-utils",
  "reth-tracing",
  "reth-trie",
- "revm-bytecode",
  "serde",
  "serde_json",
  "tempfile",

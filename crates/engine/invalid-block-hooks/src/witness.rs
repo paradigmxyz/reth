@@ -427,6 +427,7 @@ mod tests {
     use alloy_primitives::{map::AddressMap, Address, Bytes, B256, U256};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::EthPrimitives;
+    use reth_evm::cached::Bytecode as EvmBytecode;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_types::{Evm2BlockReverts, Evm2StorageReverts};
     use reth_primitives_traits::{Account, Bytecode as RethBytecode};
@@ -434,7 +435,6 @@ mod tests {
     use tempfile::TempDir;
 
     use reth_testing_utils::generators::{self, random_block, random_eoa_accounts, BlockParams};
-    use revm_bytecode::Bytecode as RevmBytecode;
 
     /// Creates a test bundle state with realistic accounts, contracts, and reverts.
     fn create_bundle_state() -> Evm2BundleState {
@@ -525,7 +525,7 @@ mod tests {
             state
                 .cache
                 .contracts
-                .insert(*code_hash, RevmBytecode::new_raw(bytecode.original_bytes()));
+                .insert(*code_hash, EvmBytecode::new_raw(bytecode.original_bytes()));
         }
 
         // Call the collect function
