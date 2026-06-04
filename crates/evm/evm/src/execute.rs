@@ -465,6 +465,15 @@ pub trait ExecutorTx<Executor: BlockExecutor> {
     fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>);
 }
 
+/// Converts a prepared executable transaction wrapper back into its recovered transaction.
+pub trait IntoRecoveredTx<InnerTx> {
+    /// Recovered transaction type.
+    type Recovered;
+
+    /// Converts this wrapper into the recovered transaction it contains.
+    fn into_recovered_tx(self) -> Self::Recovered;
+}
+
 impl<Executor: BlockExecutor> ExecutorTx<Executor>
     for WithEncoded<Recovered<Executor::Transaction>>
 {
@@ -494,6 +503,33 @@ where
 {
     fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>) {
         (self.tx_env, Arc::unwrap_or_clone(self.tx))
+    }
+}
+
+impl<T> IntoRecoveredTx<T> for Recovered<T> {
+    type Recovered = Self;
+
+    fn into_recovered_tx(self) -> Self::Recovered {
+        self
+    }
+}
+
+impl<T> IntoRecoveredTx<T> for WithEncoded<Recovered<T>> {
+    type Recovered = Recovered<T>;
+
+    fn into_recovered_tx(self) -> Self::Recovered {
+        self.1
+    }
+}
+
+impl<TxEnv, T, InnerTx> IntoRecoveredTx<InnerTx> for WithTxEnv<TxEnv, T>
+where
+    T: IntoRecoveredTx<InnerTx> + Clone,
+{
+    type Recovered = T::Recovered;
+
+    fn into_recovered_tx(self) -> Self::Recovered {
+        Arc::unwrap_or_clone(self.tx).into_recovered_tx()
     }
 }
 
