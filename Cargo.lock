@@ -10048,7 +10048,6 @@ name = "reth-rpc-convert"
 version = "2.3.0"
 dependencies = [
  "alloy-consensus",
- "alloy-evm",
  "alloy-json-rpc",
  "alloy-network",
  "alloy-primitives",

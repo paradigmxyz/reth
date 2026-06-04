@@ -14,7 +14,7 @@ use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
 use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed::RecoveryError};
 #[cfg(any())]
 use reth_revm::db::bal::EvmDatabaseError;
-use reth_rpc_convert::{CallFeesError, EthTxEnvError, TransactionConversionError};
+use reth_rpc_convert::TransactionConversionError;
 use reth_rpc_server_types::result::{
     block_id_to_str, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
@@ -395,31 +395,6 @@ where
                 Self::BothStateAndStateDiffInOverride(address)
             }
             StateOverrideError::Database(err) => err.into(),
-        }
-    }
-}
-
-impl From<EthTxEnvError> for EthApiError {
-    fn from(value: EthTxEnvError) -> Self {
-        match value {
-            EthTxEnvError::CallFees(CallFeesError::BlobTransactionMissingBlobHashes) => {
-                Self::InvalidTransaction(
-                    RpcInvalidTransactionError::BlobTransactionMissingBlobHashes,
-                )
-            }
-            EthTxEnvError::CallFees(CallFeesError::FeeCapTooLow) => {
-                Self::InvalidTransaction(RpcInvalidTransactionError::FeeCapTooLow)
-            }
-            EthTxEnvError::CallFees(CallFeesError::ConflictingFeeFieldsInRequest) => {
-                Self::ConflictingFeeFieldsInRequest
-            }
-            EthTxEnvError::CallFees(CallFeesError::TipAboveFeeCap) => {
-                Self::InvalidTransaction(RpcInvalidTransactionError::TipAboveFeeCap)
-            }
-            EthTxEnvError::CallFees(CallFeesError::TipVeryHigh) => {
-                Self::InvalidTransaction(RpcInvalidTransactionError::TipVeryHigh)
-            }
-            EthTxEnvError::Input(err) => Self::TransactionInputError(err),
         }
     }
 }
