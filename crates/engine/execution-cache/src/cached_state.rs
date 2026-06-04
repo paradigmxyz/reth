@@ -759,6 +759,14 @@ impl ExecutionCache {
         let storage_capacity = Self::bytes_to_entries(storage_cache_size, STORAGE_CACHE_ENTRY_SIZE);
         let account_capacity = Self::bytes_to_entries(account_cache_size, ACCOUNT_CACHE_ENTRY_SIZE);
 
+        Self::with_capacities(code_capacity, storage_capacity, account_capacity)
+    }
+
+    fn with_capacities(
+        code_capacity: usize,
+        storage_capacity: usize,
+        account_capacity: usize,
+    ) -> Self {
         let code_stats = Arc::new(CacheStatsHandler::new(code_capacity));
         let storage_stats = Arc::new(CacheStatsHandler::new(storage_capacity));
         let account_stats = Arc::new(CacheStatsHandler::new(account_capacity));
@@ -775,6 +783,15 @@ impl ExecutionCache {
             account_stats,
             selfdestruct_encountered: Once::new(),
         }))
+    }
+
+    /// Creates an empty cache with the same capacities as this cache.
+    pub fn empty_like(&self) -> Self {
+        Self::with_capacities(
+            self.0.code_stats.capacity(),
+            self.0.storage_stats.capacity(),
+            self.0.account_stats.capacity(),
+        )
     }
 
     /// Gets code from cache, or inserts using the provided function.
@@ -1026,6 +1043,11 @@ impl SavedCache {
         &self.caches
     }
 
+    /// Creates an empty saved cache with the same capacities and a new associated block hash.
+    pub fn empty_like(&self, hash: B256) -> Self {
+        Self::new(hash, self.caches.empty_like())
+    }
+
     /// Updates the cache metrics (size/capacity/collisions) from the stats handlers.
     pub fn update_metrics(&self, metrics: Option<&CachedStateCacheMetrics>) {
         if let Some(metrics) = metrics {
@@ -1173,6 +1195,33 @@ mod tests {
         assert!(cache.is_available());
         assert!(shared.is_available());
         assert_eq!(cache.executed_block_hash(), shared.executed_block_hash());
+    }
+
+    #[test]
+    fn test_saved_cache_empty_like_preserves_capacities() {
+        let execution_cache = ExecutionCache::new(1000);
+        execution_cache.insert_account(Address::random(), None);
+        execution_cache.insert_storage(
+            Address::random(),
+            StorageKey::random(),
+            Some(U256::from(1)),
+        );
+        let cache = SavedCache::new(B256::from([3u8; 32]), execution_cache);
+
+        let empty = cache.empty_like(B256::from([4u8; 32]));
+
+        assert_eq!(empty.executed_block_hash(), B256::from([4u8; 32]));
+        assert_eq!(empty.cache().0.code_stats.capacity(), cache.cache().0.code_stats.capacity());
+        assert_eq!(
+            empty.cache().0.storage_stats.capacity(),
+            cache.cache().0.storage_stats.capacity()
+        );
+        assert_eq!(
+            empty.cache().0.account_stats.capacity(),
+            cache.cache().0.account_stats.capacity()
+        );
+        assert_eq!(empty.cache().0.storage_stats.size(), 0);
+        assert_eq!(empty.cache().0.account_stats.size(), 0);
     }
 
     #[test]
