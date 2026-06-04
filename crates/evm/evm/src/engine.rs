@@ -29,6 +29,9 @@ pub trait ConfigureEngineEvm<ExecutionData>: ConfigureEvm {
 
 /// [`ConfigureEvm`] extension exposing evm2-native environments for engine execution.
 pub trait ConfigureEvm2Engine<ExecutionData>: ConfigureEngineEvm<ExecutionData> {
+    /// Returns the chain id used by evm2 for transaction validation and the `CHAINID` opcode.
+    fn evm2_chain_id(&self) -> u64;
+
     /// Returns the evm2 spec id for the given block header.
     fn evm2_spec_for_header(
         &self,

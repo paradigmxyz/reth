@@ -1083,6 +1083,7 @@ where
         };
         let block_number = block_env.number.to::<u64>();
         let context = Evm2BlockExecutionContext {
+            chain_id: self.evm_config.evm2_chain_id(),
             system_calls: Some(Evm2BlockSystemCalls {
                 parent_hash: input.parent_hash(),
                 parent_beacon_block_root: input.parent_beacon_block_root(),

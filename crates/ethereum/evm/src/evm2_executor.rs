@@ -16,7 +16,7 @@ use evm2::{
         CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
     },
     registry::HandlerError,
-    BaseEvmTypes, Evm, Precompiles, SpecId,
+    BaseEvmTypes, Evm, ExecutionConfig, Precompiles, SpecId, Version,
 };
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_execution_types::{BlockExecutionOutput, Evm2BundleState};
@@ -76,14 +76,22 @@ where
 impl<E> core::error::Error for Evm2ExecutionError<E> where E: core::error::Error + Send + 'static {}
 
 /// Additional block-level execution context for evm2.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct Evm2BlockExecutionContext<'a> {
+    /// Chain id used for transaction validation and the `CHAINID` opcode.
+    pub chain_id: u64,
     /// Pre-block system calls to run before transaction execution.
     pub system_calls: Option<Evm2BlockSystemCalls>,
     /// Pre-merge ommer headers included in the block.
     pub ommers: Option<&'a [Header]>,
     /// Post-block withdrawals to apply after transaction execution.
     pub withdrawals: Option<&'a [Withdrawal]>,
+}
+
+impl Default for Evm2BlockExecutionContext<'_> {
+    fn default() -> Self {
+        Self { chain_id: 1, system_calls: None, ommers: None, withdrawals: None }
+    }
 }
 
 /// Inputs required by Ethereum pre-block system calls.
@@ -134,7 +142,7 @@ where
         database,
         block_number,
         transactions,
-        Evm2BlockExecutionContext { system_calls: None, ommers: None, withdrawals },
+        Evm2BlockExecutionContext { chain_id: 1, system_calls: None, ommers: None, withdrawals },
     )
 }
 
@@ -151,7 +159,10 @@ where
     DB: Database + 'static,
 {
     let block_beneficiary = block_env.beneficiary;
-    let mut evm = Evm::<BaseEvmTypes>::new(
+    let mut version = Version::new(spec_id);
+    version.chain_id = context.chain_id;
+    let mut evm = Evm::<BaseEvmTypes>::new_with_execution_config(
+        ExecutionConfig::for_spec_and_version(spec_id, version),
         spec_id,
         block_env,
         ethereum_tx_registry(spec_id),
@@ -674,6 +685,7 @@ mod tests {
             1,
             core::iter::empty::<Recovered<TransactionSigned>>(),
             Evm2BlockExecutionContext {
+                chain_id: 1,
                 system_calls: Some(Evm2BlockSystemCalls {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: None,
@@ -697,6 +709,7 @@ mod tests {
             0,
             core::iter::empty::<Recovered<TransactionSigned>>(),
             Evm2BlockExecutionContext {
+                chain_id: 1,
                 system_calls: Some(Evm2BlockSystemCalls {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: Some(root),
@@ -732,6 +745,7 @@ mod tests {
             1,
             core::iter::empty::<Recovered<TransactionSigned>>(),
             Evm2BlockExecutionContext {
+                chain_id: 1,
                 system_calls: Some(Evm2BlockSystemCalls {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: Some(parent_beacon_block_root),
@@ -770,6 +784,7 @@ mod tests {
             1,
             core::iter::empty::<Recovered<TransactionSigned>>(),
             Evm2BlockExecutionContext {
+                chain_id: 1,
                 system_calls: Some(Evm2BlockSystemCalls {
                     parent_hash,
                     parent_beacon_block_root: Some(B256::ZERO),
@@ -796,6 +811,7 @@ mod tests {
             1,
             core::iter::empty::<Recovered<TransactionSigned>>(),
             Evm2BlockExecutionContext {
+                chain_id: 1,
                 system_calls: Some(Evm2BlockSystemCalls {
                     parent_hash: B256::from([2u8; 32]),
                     parent_beacon_block_root: Some(B256::ZERO),
@@ -830,6 +846,7 @@ mod tests {
             1,
             core::iter::empty::<Recovered<TransactionSigned>>(),
             Evm2BlockExecutionContext {
+                chain_id: 1,
                 system_calls: Some(Evm2BlockSystemCalls {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: Some(B256::ZERO),
@@ -892,6 +909,7 @@ mod tests {
             1,
             [transaction],
             Evm2BlockExecutionContext {
+                chain_id: 1,
                 system_calls: Some(Evm2BlockSystemCalls {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: Some(B256::ZERO),

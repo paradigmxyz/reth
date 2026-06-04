@@ -273,6 +273,7 @@ where
             },
         ),
         Evm2BlockExecutionContext {
+            chain_id: chain_spec.chain_id(),
             system_calls: Some(Evm2BlockSystemCalls {
                 parent_hash: parent_header.hash(),
                 parent_beacon_block_root: attributes.parent_beacon_block_root(),
