@@ -13,8 +13,9 @@ use reth_evm::{
     context::{Block, ResultAndState},
     database::{DatabaseCommit, DatabaseRef},
     env::BlockEnvironment,
+    evm2::{block_env_from_revm, ethereum_tx_env_from_revm, execute_tx_env_for},
     overrides::apply_block_overrides,
-    ConfigureEvm, Evm,
+    ConfigureEvm,
 };
 use reth_primitives_traits::Recovered;
 use reth_rpc_api::MevSimApiServer;
@@ -308,6 +309,8 @@ where
 
                 // apply overrides
                 apply_block_overrides(block_overrides, &mut db, evm_env.block_env.inner_mut());
+                let spec = *evm_env.spec_id();
+                let block_env = block_env_from_revm(evm_env.block_env);
 
                 let initial_coinbase_balance = DatabaseRef::basic_ref(&db, coinbase)
                     .map_err(EthApiError::from_eth_err)?
@@ -320,7 +323,6 @@ where
                 let mut refundable_value = U256::ZERO;
                 let mut flat_logs: Vec<Vec<Log>> = Vec::new();
 
-                let mut evm = eth_api.evm_config().evm_with_env(db, evm_env);
                 let mut log_index = 0;
 
                 for (tx_index, item) in flattened_bundle.iter().enumerate() {
@@ -338,8 +340,11 @@ where
                         .into());
                     }
 
-                    let ResultAndState { result, state } = evm
-                        .transact(eth_api.evm_config().tx_env(&item.tx))
+                    let tx_env = eth_api.evm_config().tx_env(&item.tx);
+                    let tx_env = ethereum_tx_env_from_revm(&tx_env);
+                    let ResultAndState { result, state } = execute_tx_env_for::<Eth::Evm, _>(
+                        &mut db, spec, block_env.clone(), &tx_env,
+                    )
                         .map_err(Eth::Error::from_evm_err)?;
 
                     if !result.is_success() && !item.can_revert {
@@ -393,7 +398,7 @@ where
                     }
 
                     // Apply state changes
-                    evm.db_mut().commit(state);
+                    db.commit(state);
                 }
 
                 let body_logs =

@@ -10,7 +10,8 @@ use reth_evm::{
     context::{Block, ResultAndState},
     database::{DatabaseCommit, DatabaseRef},
     env::BlockEnvironment,
-    ConfigureEvm, Evm,
+    evm2::{block_env_from_revm, ethereum_tx_env_from_revm, execute_tx_env_for},
+    ConfigureEvm,
 };
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
@@ -143,9 +144,11 @@ where
         evm_env.block_env.inner_mut().number = U256::from(block_number);
 
         self.eth_api()
-            .spawn_with_state_at_block(at, move |eth_api, db| {
+            .spawn_with_state_at_block(at, move |eth_api, mut db| {
                 let coinbase = evm_env.block_env.beneficiary();
                 let basefee = evm_env.block_env.basefee();
+                let spec = *evm_env.spec_id();
+                let block_env = block_env_from_revm(evm_env.block_env);
 
                 let initial_coinbase = db
                     .basic_ref(coinbase)
@@ -157,8 +160,6 @@ where
                 let mut total_gas_used = 0u64;
                 let mut total_gas_fees = U256::ZERO;
                 let mut hasher = Keccak256::new();
-
-                let mut evm = eth_api.evm_config().evm_with_env(db, evm_env);
 
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut transactions = transactions.into_iter().peekable();
@@ -182,8 +183,11 @@ where
                     };
 
                     hasher.update(*tx.tx_hash());
-                    let ResultAndState { result, state } = evm
-                        .transact(eth_api.evm_config().tx_env(&tx))
+                    let tx_env = eth_api.evm_config().tx_env(&tx);
+                    let tx_env = ethereum_tx_env_from_revm(&tx_env);
+                    let ResultAndState { result, state } = execute_tx_env_for::<Eth::Evm, _>(
+                        &mut db, spec, block_env.clone(), &tx_env,
+                    )
                         .map_err(Eth::Error::from_evm_err)?;
 
                     let gas_price = tx
@@ -233,7 +237,7 @@ where
                     if transactions.peek().is_some() {
                         // need to apply the state changes of this call before executing
                         // the next call
-                        evm.db_mut().commit(state)
+                        db.commit(state)
                     }
                 }
 
