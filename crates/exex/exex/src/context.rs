@@ -1,5 +1,6 @@
 use crate::{ExExContextDyn, ExExEvent, ExExNotifications, ExExNotificationsStream};
 use alloy_eips::BlockNumHash;
+use reth_evm::ConfigureEvm2BlockExecutor;
 use reth_exex_types::ExExHead;
 use reth_node_api::{FullNodeComponents, NodePrimitives, NodeTypes, PrimitivesTy};
 use reth_node_core::node_config::NodeConfig;
@@ -59,6 +60,7 @@ where
 impl<Node> ExExContext<Node>
 where
     Node: FullNodeComponents,
+    Node::Evm: ConfigureEvm2BlockExecutor,
     Node::Provider: Debug + BlockReader,
     Node::Types: NodeTypes<Primitives: NodePrimitives>,
 {
@@ -71,6 +73,7 @@ where
 impl<Node> ExExContext<Node>
 where
     Node: FullNodeComponents,
+    Node::Evm: ConfigureEvm2BlockExecutor,
     Node::Types: NodeTypes<Primitives: NodePrimitives>,
 {
     /// Returns the transaction pool of the node.
@@ -134,6 +137,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::ExExContext;
+    use reth_evm::ConfigureEvm2BlockExecutor;
     use reth_exex_types::ExExHead;
     use reth_node_api::FullNodeComponents;
     use reth_provider::BlockReader;
@@ -148,6 +152,7 @@ mod tests {
 
         impl<Node: FullNodeComponents> ExEx<Node>
         where
+            Node::Evm: ConfigureEvm2BlockExecutor,
             Node::Provider: BlockReader,
         {
             async fn _test_bounds(mut self) -> eyre::Result<()> {

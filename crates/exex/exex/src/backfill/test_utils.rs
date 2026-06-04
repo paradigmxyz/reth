@@ -5,11 +5,7 @@ use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{b256, Address, TxKind, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN_TRANSACTION_GAS};
 use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction};
-use reth_evm::{
-    database::StateProviderDatabase,
-    execute::{BlockExecutionOutput, Executor},
-    ConfigureEvm,
-};
+use reth_evm::{execute::BlockExecutionOutput, ConfigureEvm2BlockExecutor};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
@@ -68,10 +64,10 @@ where
 {
     let provider = provider_factory.provider()?;
 
-    // Execute the block to produce a block execution output
+    // Execute the block to produce a block execution output.
     let block_execution_output = EthEvmConfig::ethereum(chain_spec)
-        .batch_executor(StateProviderDatabase::new(LatestStateProvider::new(provider)))
-        .execute(block)?;
+        .execute_evm2_block_with_state_provider(LatestStateProvider::new(provider), block)
+        .map_err(|err| eyre::eyre!(err.to_string()))?;
 
     // Convert the block execution output to an execution outcome for committing to the database
     let execution_outcome = to_execution_outcome(block.number(), &block_execution_output);
@@ -192,28 +188,34 @@ where
     N: ProviderNodeTypes,
     N::Primitives: NodePrimitives<
         Block = reth_ethereum_primitives::Block,
+        BlockBody = reth_ethereum_primitives::BlockBody,
         Receipt = reth_ethereum_primitives::Receipt,
     >,
 {
-    let (block1, block2) = blocks(chain_spec.clone(), key_pair)?;
+    let outputs = blocks_and_execution_outputs(provider_factory, chain_spec, key_pair)?;
+    let first_block = outputs.first().map(|(block, _)| block.number()).unwrap_or_default();
+    let mut blocks = Vec::with_capacity(outputs.len());
+    let mut receipts = Vec::with_capacity(outputs.len());
+    let mut requests = Vec::with_capacity(outputs.len());
+    let mut bundle: Option<reth_execution_types::Evm2BundleState> = None;
 
-    let provider = provider_factory.provider()?;
+    for (block, output) in outputs {
+        let BlockExecutionOutput { result, state } = output;
+        blocks.push(block);
+        receipts.push(result.receipts);
+        requests.push(result.requests);
+        match &mut bundle {
+            Some(bundle) => bundle.extend(state),
+            None => bundle = Some(state),
+        }
+    }
 
-    let evm_config = EthEvmConfig::new(chain_spec);
-    let executor =
-        evm_config.batch_executor(StateProviderDatabase::new(LatestStateProvider::new(provider)));
+    let execution_outcome = ExecutionOutcome {
+        bundle: bundle.unwrap_or_else(|| reth_execution_types::Evm2BundleState::new(first_block)),
+        receipts,
+        first_block,
+        requests,
+    };
 
-    let execution_outcome = executor.execute_batch(vec![&block1, &block2])?;
-
-    // Commit the block's execution outcome to the database
-    let hashed_state = execution_outcome.hash_state_slow::<KeccakKeyHasher>().into_sorted();
-    let provider_rw = provider_factory.provider_rw()?;
-    provider_rw.append_blocks_with_state(
-        vec![block1.clone(), block2.clone()],
-        &execution_outcome,
-        hashed_state,
-    )?;
-    provider_rw.commit()?;
-
-    Ok((vec![block1, block2], execution_outcome))
+    Ok((blocks, execution_outcome))
 }

@@ -8,7 +8,7 @@ use futures::{
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
     execute::{BlockExecutionError, BlockExecutionOutput},
-    ConfigureEvm,
+    ConfigureEvm2BlockExecutor,
 };
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::RecoveredBlock;
@@ -118,7 +118,7 @@ where
 
 impl<E, P> Stream for StreamBackfillJob<E, P, SingleBlockStreamItem<E::Primitives>>
 where
-    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
+    E: ConfigureEvm2BlockExecutor<Primitives: NodePrimitives<Block = P::Block>> + 'static,
     P: BlockReader + StateProviderFactory + Clone + Unpin + 'static,
 {
     type Item = BackfillJobResult<SingleBlockStreamItem<E::Primitives>>;
@@ -151,7 +151,7 @@ where
 
 impl<E, P> Stream for StreamBackfillJob<E, P, BatchBlockStreamItem<E::Primitives>>
 where
-    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
+    E: ConfigureEvm2BlockExecutor<Primitives: NodePrimitives<Block = P::Block>> + 'static,
     P: BlockReader + StateProviderFactory + Clone + Unpin + 'static,
 {
     type Item = BackfillJobResult<BatchBlockStreamItem<E::Primitives>>;
@@ -217,7 +217,7 @@ impl<E, P> From<SingleBlockBackfillJob<E, P>> for StreamBackfillJob<E, P, Single
 
 impl<E, P> From<BackfillJob<E, P>> for StreamBackfillJob<E, P, BatchBlockStreamItem<E::Primitives>>
 where
-    E: ConfigureEvm,
+    E: ConfigureEvm2BlockExecutor,
 {
     fn from(job: BackfillJob<E, P>) -> Self {
         let batch_size = job.thresholds.max_blocks.map_or(DEFAULT_BATCH_SIZE, |max| max as usize);

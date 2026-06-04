@@ -3,7 +3,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use futures::{Stream, StreamExt};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::ConfigureEvm;
+use reth_evm::{ConfigureEvm, ConfigureEvm2BlockExecutor};
 use reth_exex_types::ExExHead;
 use reth_node_api::NodePrimitives;
 use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
@@ -116,7 +116,10 @@ where
 impl<P, E> ExExNotificationsStream<E::Primitives> for ExExNotifications<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + Clone + Unpin + 'static,
+    E: ConfigureEvm2BlockExecutor<Primitives: NodePrimitives<Block = P::Block>>
+        + Clone
+        + Unpin
+        + 'static,
 {
     fn set_without_head(&mut self) {
         let current = std::mem::replace(&mut self.inner, ExExNotificationsInner::Invalid);
@@ -173,7 +176,7 @@ where
 impl<P, E> Stream for ExExNotifications<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
+    E: ConfigureEvm2BlockExecutor<Primitives: NodePrimitives<Block = P::Block>> + 'static,
 {
     type Item = eyre::Result<ExExNotification<E::Primitives>>;
 
@@ -337,7 +340,10 @@ where
 impl<P, E> ExExNotificationsWithHead<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + Clone + Unpin + 'static,
+    E: ConfigureEvm2BlockExecutor<Primitives: NodePrimitives<Block = P::Block>>
+        + Clone
+        + Unpin
+        + 'static,
 {
     /// Checks if the ExEx head is on the canonical chain.
     ///
@@ -427,7 +433,10 @@ where
 impl<P, E> Stream for ExExNotificationsWithHead<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + Clone + Unpin + 'static,
+    E: ConfigureEvm2BlockExecutor<Primitives: NodePrimitives<Block = P::Block>>
+        + Clone
+        + Unpin
+        + 'static,
 {
     type Item = eyre::Result<ExExNotification<E::Primitives>>;
 

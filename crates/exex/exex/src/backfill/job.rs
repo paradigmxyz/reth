@@ -1,5 +1,5 @@
 use crate::StreamBackfillJob;
-use reth_evm::{database::StateProviderDatabase, ConfigureEvm};
+use reth_evm::ConfigureEvm2BlockExecutor;
 use std::{
     collections::BTreeMap,
     ops::RangeInclusive,
@@ -9,7 +9,8 @@ use std::{
 use alloy_consensus::BlockHeader;
 use alloy_primitives::BlockNumber;
 use reth_ethereum_primitives::Receipt;
-use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput, Executor};
+use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput};
+use reth_execution_types::Evm2BundleState;
 use reth_node_api::{Block as _, BlockBody as _, NodePrimitives};
 use reth_primitives_traits::{format_gas_throughput, RecoveredBlock, SignedTransaction};
 use reth_provider::{
@@ -39,7 +40,7 @@ pub struct BackfillJob<E, P> {
 
 impl<E, P> Iterator for BackfillJob<E, P>
 where
-    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
+    E: ConfigureEvm2BlockExecutor<Primitives: NodePrimitives<Block = P::Block>> + 'static,
     P: HeaderProvider + BlockReader<Transaction: SignedTransaction> + StateProviderFactory,
 {
     type Item = BackfillJobResult<Chain<E::Primitives>>;
@@ -55,7 +56,7 @@ where
 
 impl<E, P> BackfillJob<E, P>
 where
-    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
+    E: ConfigureEvm2BlockExecutor<Primitives: NodePrimitives<Block = P::Block>> + 'static,
     P: BlockReader<Transaction: SignedTransaction> + HeaderProvider + StateProviderFactory,
 {
     /// Converts the backfill job into a single block backfill job.
@@ -75,12 +76,6 @@ where
             "Executing block range"
         );
 
-        let mut executor = self.evm_config.batch_executor(StateProviderDatabase::new(
-            self.provider
-                .history_by_block_number(self.range.start().saturating_sub(1))
-                .map_err(BlockExecutionError::other)?,
-        ));
-
         let mut fetch_block_duration = Duration::default();
         let mut execution_duration = Duration::default();
         let mut cumulative_gas = 0;
@@ -88,6 +83,7 @@ where
 
         let mut blocks = Vec::new();
         let mut results = Vec::new();
+        let mut bundle: Option<Evm2BundleState> = None;
         for block_number in self.range.clone() {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -115,15 +111,28 @@ where
             let (header, body) = block.split_sealed_header_body();
             let block = P::Block::new_sealed(header, body).with_senders(senders);
 
-            results.push(executor.execute_one(&block)?);
+            let state_provider = self
+                .provider
+                .history_by_block_number(block_number.saturating_sub(1))
+                .map_err(BlockExecutionError::other)?;
+            let output = self
+                .evm_config
+                .execute_evm2_block_with_state_provider(state_provider, &block)
+                .map_err(evm2_execution_error)?;
             execution_duration += execute_start.elapsed();
+
+            match &mut bundle {
+                Some(bundle) => bundle.extend(output.state),
+                None => bundle = Some(output.state),
+            }
+            results.push(output.result);
 
             // Seal the block back and save it
             blocks.push(block);
             // Check if we should commit now
             if self.thresholds.is_end_of_batch(
                 block_number - *self.range.start() + 1,
-                executor.size_hint() as u64,
+                bundle.as_ref().map(bundle_size_hint).unwrap_or_default() as u64,
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
@@ -145,10 +154,7 @@ where
 
         let outcome = ExecutionOutcome::from_blocks(
             first_block_number,
-            reth_evm::execute::revm_bundle_to_evm2(
-                executor.into_state().take_bundle(),
-                first_block_number,
-            ),
+            bundle.expect("blocks should not be empty"),
             results,
         );
         let chain = Chain::new(blocks, outcome, BTreeMap::new());
@@ -170,7 +176,7 @@ pub struct SingleBlockBackfillJob<E, P> {
 
 impl<E, P> Iterator for SingleBlockBackfillJob<E, P>
 where
-    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
+    E: ConfigureEvm2BlockExecutor<Primitives: NodePrimitives<Block = P::Block>> + 'static,
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
     type Item = BackfillJobResult<(
@@ -185,7 +191,7 @@ where
 
 impl<E, P> SingleBlockBackfillJob<E, P>
 where
-    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
+    E: ConfigureEvm2BlockExecutor<Primitives: NodePrimitives<Block = P::Block>> + 'static,
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
     /// Converts the single block backfill job into a stream.
@@ -215,19 +221,30 @@ where
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))
             .map_err(BlockExecutionError::other)?;
 
-        // Configure the executor to use the previous block's state.
-        let executor = self.evm_config.batch_executor(StateProviderDatabase::new(
-            self.provider
-                .history_by_block_number(block_number.saturating_sub(1))
-                .map_err(BlockExecutionError::other)?,
-        ));
+        let state_provider = self
+            .provider
+            .history_by_block_number(block_number.saturating_sub(1))
+            .map_err(BlockExecutionError::other)?;
 
         trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.body().transaction_count(), "Executing block");
 
-        let block_execution_output = executor.execute(&block_with_senders)?;
+        let block_execution_output = self
+            .evm_config
+            .execute_evm2_block_with_state_provider(state_provider, &block_with_senders)
+            .map_err(evm2_execution_error)?;
 
         Ok((block_with_senders, block_execution_output))
     }
+}
+
+fn bundle_size_hint(bundle: &Evm2BundleState) -> usize {
+    bundle.accounts().len() +
+        bundle.storage().values().map(|storage| storage.slots.len()).sum::<usize>() +
+        bundle.contracts().len()
+}
+
+fn evm2_execution_error(error: Box<dyn core::error::Error + Send + Sync>) -> BlockExecutionError {
+    BlockExecutionError::other(std::io::Error::other(error.to_string()))
 }
 
 impl<E, P> From<BackfillJob<E, P>> for SingleBlockBackfillJob<E, P> {
