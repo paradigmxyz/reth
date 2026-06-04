@@ -8886,6 +8886,7 @@ dependencies = [
  "reth-execution-types",
  "reth-metrics",
  "reth-primitives-traits",
+ "reth-storage-api",
  "reth-storage-errors",
  "reth-testing-utils",
  "revm",

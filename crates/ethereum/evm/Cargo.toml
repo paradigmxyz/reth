@@ -20,6 +20,7 @@ reth-ethereum-primitives.workspace = true
 revm.workspace = true
 reth-evm.workspace = true
 reth-storage-errors.workspace = true
+reth-storage-api = { workspace = true, optional = true }
 evm2.workspace = true
 
 # Alloy
@@ -58,6 +59,8 @@ std = [
     "reth-ethereum-primitives/std",
     "alloy-rpc-types-engine/std",
     "reth-storage-errors/std",
+    "dep:reth-storage-api",
+    "reth-storage-api/std",
 ]
 jit = [
     "std",
