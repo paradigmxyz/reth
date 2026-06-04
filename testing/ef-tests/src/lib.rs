@@ -7,8 +7,6 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use reth_revm as _;
-
 pub mod case;
 pub mod result;
 pub mod suite;

@@ -7,24 +7,23 @@ use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::BlockHashOrNumber;
 #[cfg(any())]
-use alloy_primitives::Address;
+use alloy_primitives::{Address, StorageKey, StorageValue};
 use alloy_primitives::{TxHash, B256};
 use futures::{stream::FuturesOrdered, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::Chain;
 use reth_primitives_traits::{Block, BlockBody, InMemorySize, NodePrimitives, RecoveredBlock};
+use reth_storage_api::{BalProvider, BlockReader, TransactionVariant};
+use reth_tasks::Runtime;
 #[cfg(any())]
-use reth_revm::{
+use revm::{
     bytecode::Bytecode,
-    primitives::{StorageKey, StorageValue},
     state::bal::{
         AccountBal as RevmAccountBal, AccountInfoBal as RevmAccountInfoBal, Bal as RevmBal,
         BalWrites as RevmBalWrites, StorageBal as RevmStorageBal,
     },
 };
-use reth_storage_api::{BalProvider, BlockReader, TransactionVariant};
-use reth_tasks::Runtime;
 use schnellru::{ByLength, Limiter, LruMap};
 use std::{
     future::Future,
