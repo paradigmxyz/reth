@@ -47,6 +47,9 @@ use std::{
 };
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
+// Block-level access list execution is Amsterdam-only and out of scope for the evm2
+// pre-Amsterdam sync path. Keep the implementation in-tree, but do not compile it.
+#[cfg(any())]
 pub mod bal;
 pub(crate) mod bal_prewarm_pool;
 pub mod multiproof;
@@ -319,15 +322,6 @@ where
             config,
             pending_sparse_trie_prune,
         );
-        // BAL blocks only bypass the normal execution state hook when the validator decided that
-        // the parallel BAL executor will consume this block. If not, treat the BAL as absent here
-        // so the block follows today's sequential execution and transaction-prewarm path.
-        //
-        // In the parallel BAL path, prewarm owns BAL-derived sparse-trie updates and optional
-        // BAL state prefetching. State-cache disabled mode still uses the BAL executor, but
-        // `saved_cache` is absent below, so prewarm skips cache-backed state prefetching.
-        // `disable_bal_batch_io` controls the prefetch half when a cache exists.
-        let install_state_hook = !parallel_bal_execution;
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
@@ -338,7 +332,7 @@ where
 
         PayloadHandle {
             state_root_handle: Some(state_root_handle),
-            install_state_hook,
+            install_state_hook: !parallel_bal_execution,
             prewarm_handle,
             transactions: execution_rx,
             _span: span,
@@ -547,10 +541,6 @@ where
     }
 
     /// Spawn prewarming optionally wired to the sparse trie task for target updates.
-    ///
-    /// `parallel_bal_execution` is true when the BAL execute path will execute this block. In
-    /// that case prewarm runs in BAL mode: it streams BAL-derived sparse-trie updates and,
-    /// unless `disable_bal_batch_io` is set, prefetches BAL-declared state into the shared cache.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_caching_with<P>(
         &self,
@@ -1043,7 +1033,7 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Used to generate prefetch targets for withdrawal addresses.
     pub withdrawals: Option<Vec<Withdrawal>>,
     /// Optional decoded BAL for the block.
-    /// Used to validate and optimize execution.
+    /// Unsupported by the active evm2 pre-Amsterdam execution path.
     pub decoded_bal: Option<Arc<DecodedBal>>,
 }
 
