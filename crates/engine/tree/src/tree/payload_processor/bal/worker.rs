@@ -7,7 +7,7 @@ use reth_errors::BlockExecutionError;
 use reth_evm::{
     database::State,
     execute::{BlockExecutor, BlockExecutorFactory, ExecutableTxFor},
-    ConfigureEvm, Database, Evm as EvmTrait, EvmEnvFor, ExecutionCtxFor,
+    ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor,
 };
 use reth_execution_types::Bal as ExecutionBal;
 use std::sync::Arc;

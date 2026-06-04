@@ -7,7 +7,7 @@ use reth_errors::RethError;
 use reth_evm::{
     database::{State, StateProviderDatabase},
     execute::BlockExecutor,
-    ConfigureEvm, Evm,
+    ConfigureEvm,
 };
 use reth_rpc_eth_types::{
     cache::db::StateProviderTraitObjWrapper, error::FromEthApiError, EthApiError,

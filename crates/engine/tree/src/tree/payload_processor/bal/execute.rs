@@ -26,7 +26,7 @@ use reth_evm::{
     context::{Block, ResultAndState},
     database::State,
     execute::{BlockExecutor, ExecutableTxFor, TxResult},
-    ConfigureEvm, Database, Evm as EvmTrait, EvmEnvFor, ExecutionCtxFor,
+    ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor,
 };
 use reth_execution_types::{Bal as ExecutionBal, BundleRetention};
 use reth_primitives_traits::ReceiptTy;
