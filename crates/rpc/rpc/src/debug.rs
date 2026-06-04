@@ -131,7 +131,7 @@ where
 
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
                 let mut inspector = DebugInspector::new(opts)
-                    .map_err(RethError::other)
+                    .map_err(RethError::msg)
                     .map_err(Eth::Error::from_eth_err)?;
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = *tx.tx_hash();
@@ -261,7 +261,7 @@ where
                 let tx_env = eth_api.evm_config().tx_env(&tx);
 
                 let inspector = DebugInspector::new(opts)
-                    .map_err(RethError::other)
+                    .map_err(RethError::msg)
                     .map_err(Eth::Error::from_eth_err)?;
                 let (mut inspector, res) =
                     eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), inspector)?;
@@ -321,7 +321,7 @@ where
         self.eth_api()
             .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
                 let inspector = DebugInspector::new(tracing_options)
-                    .map_err(RethError::other)
+                    .map_err(RethError::msg)
                     .map_err(Eth::Error::from_eth_err)?;
                 let (mut inspector, res) =
                     this.eth_api().inspect(&mut *db, evm_env.clone(), tx_env.clone(), inspector)?;
@@ -392,7 +392,7 @@ where
                     eth_api.prepare_call_env(evm_env, call, &mut db, overrides)?;
 
                 let inspector = DebugInspector::new(tracing_options)
-                    .map_err(RethError::other)
+                    .map_err(RethError::msg)
                     .map_err(Eth::Error::from_eth_err)?;
                 let (mut inspector, res) =
                     eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), inspector)?;
@@ -480,7 +480,7 @@ where
                 // Trace all bundles
                 let mut bundles = bundles.into_iter().peekable();
                 let mut inspector = DebugInspector::new(tracing_options.clone())
-                    .map_err(RethError::other)
+                    .map_err(RethError::msg)
                     .map_err(Eth::Error::from_eth_err)?;
                 while let Some(bundle) = bundles.next() {
                     let mut results = Vec::with_capacity(bundle.transactions.len());
