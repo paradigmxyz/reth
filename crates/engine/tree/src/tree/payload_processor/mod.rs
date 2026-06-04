@@ -46,7 +46,7 @@ use std::{
         Arc,
     },
 };
-use tracing::{debug, debug_span, info, instrument, trace, warn, Span};
+use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
 pub mod bal;
 pub mod multiproof;
@@ -177,35 +177,6 @@ pub(crate) struct StateRootSpawner {
     sparse_trie_max_hot_accounts: usize,
     /// Whether sparse trie cache pruning is fully disabled.
     disable_sparse_trie_cache_pruning: bool,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct PrivateSparseTrieSnapshot {
-    sparse_state_trie: SharedPreservedSparseTrie,
-}
-
-impl PrivateSparseTrieSnapshot {
-    fn new(sparse_state_trie: SharedPreservedSparseTrie) -> Self {
-        Self { sparse_state_trie }
-    }
-
-    pub(crate) fn clone_at_root(&self, state_root: B256) -> Self {
-        let clone_start = Instant::now();
-        let preserved = self.sparse_state_trie.clone_with_updates(
-            state_root,
-            state_root,
-            &TrieUpdates::default(),
-        );
-        let clone_elapsed = clone_start.elapsed();
-        info!(
-            target: "engine::tree::payload_processor",
-            %state_root,
-            cloned = preserved.is_some(),
-            ?clone_elapsed,
-            "cloned private sparse-trie snapshot at root"
-        );
-        Self::new(SharedPreservedSparseTrie::new(preserved))
-    }
 }
 
 const VALIDATION_SPARSE_TRIE_WORKER_NAME: &str = "sparse-trie";
@@ -840,59 +811,6 @@ impl StateRootSpawner {
             config,
             PAYLOAD_BUILDER_SPARSE_TRIE_WORKER_NAME,
             SharedPreservedSparseTrie::new(preserved),
-            Some(self.payload_builder_sparse_tries.clone()),
-        )
-    }
-
-    /// Creates a private sparse-trie snapshot anchored at `state_root`.
-    ///
-    /// The returned snapshot is detached from validation's shared sparse-trie cache. Tasks spawned
-    /// from it can advance speculative state without blocking validation's cache publication.
-    pub(crate) fn private_sparse_trie_snapshot(
-        &self,
-        state_root: B256,
-    ) -> PrivateSparseTrieSnapshot {
-        let clone_start = Instant::now();
-        let preserved = self.sparse_state_trie.clone_with_updates(
-            state_root,
-            state_root,
-            &TrieUpdates::default(),
-        );
-        let clone_elapsed = clone_start.elapsed();
-        info!(
-            target: "engine::tree::payload_processor",
-            %state_root,
-            cloned = preserved.is_some(),
-            ?clone_elapsed,
-            "cloned private sparse-trie snapshot from shared cache"
-        );
-        PrivateSparseTrieSnapshot::new(SharedPreservedSparseTrie::new(preserved))
-    }
-
-    /// Spawns a state-root computation pipeline backed by a caller-owned private sparse-trie
-    /// snapshot.
-    pub(crate) fn spawn_state_root_with_private_sparse_trie<F>(
-        &self,
-        multiproof_provider_factory: F,
-        parent_state_root: B256,
-        halve_workers: bool,
-        config: &TreeConfig,
-        snapshot: PrivateSparseTrieSnapshot,
-    ) -> StateRootHandle
-    where
-        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-            + Clone
-            + Send
-            + Sync
-            + 'static,
-    {
-        self.spawn_state_root_with_preserved_sparse_trie(
-            multiproof_provider_factory,
-            parent_state_root,
-            halve_workers,
-            config,
-            PAYLOAD_BUILDER_SPARSE_TRIE_WORKER_NAME,
-            snapshot.sparse_state_trie,
             Some(self.payload_builder_sparse_tries.clone()),
         )
     }
