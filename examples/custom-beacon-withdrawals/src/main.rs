@@ -230,6 +230,12 @@ where
         self.inner.finish()
     }
 
+    fn finish_with_db(
+        self,
+    ) -> Result<(Self::DB, BlockExecutionResult<Self::Receipt>), BlockExecutionError> {
+        self.finish().map(|(evm, result)| (evm.into_db(), result))
+    }
+
     fn evm_mut(&mut self) -> &mut Self::Evm {
         self.inner.evm_mut()
     }

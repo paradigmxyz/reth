@@ -328,6 +328,14 @@ pub trait BlockExecutor {
         self,
     ) -> Result<(Self::Evm, BlockExecutionResult<Self::Receipt>), BlockExecutionError>;
 
+    /// Applies post execution changes and returns the executor database with block execution
+    /// result.
+    fn finish_with_db(
+        self,
+    ) -> Result<(Self::DB, BlockExecutionResult<Self::Receipt>), BlockExecutionError>
+    where
+        Self: Sized;
+
     /// Applies post execution changes and returns only the execution result.
     fn apply_post_execution_changes(
         self,
@@ -434,6 +442,14 @@ where
     ) -> Result<(Self::Evm, BlockExecutionResult<Self::Receipt>), BlockExecutionError> {
         AlloyBlockExecutor::finish(self)
             .map(|(evm, result)| (evm, convert_alloy_block_execution_result(result)))
+            .map_err(convert_alloy_block_execution_error)
+    }
+
+    fn finish_with_db(
+        self,
+    ) -> Result<(Self::DB, BlockExecutionResult<Self::Receipt>), BlockExecutionError> {
+        AlloyBlockExecutor::finish(self)
+            .map(|(evm, result)| (evm.into_db(), convert_alloy_block_execution_result(result)))
             .map_err(convert_alloy_block_execution_error)
     }
 
