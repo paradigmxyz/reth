@@ -216,9 +216,10 @@ impl<T> ExecutionOutcome<T> {
 
     /// Returns [`HashedPostState`] for this execution outcome.
     /// See [`HashedPostState::from_bundle_state`] for more info.
-    pub fn hash_state_slow<KH>(&self) -> reth_trie_common::HashedPostState {
-        let _ = core::marker::PhantomData::<KH>;
-        todo!("hashed post state from evm2 bundle")
+    pub fn hash_state_slow<KH: reth_trie_common::KeyHasher>(
+        &self,
+    ) -> reth_trie_common::HashedPostState {
+        self.bundle.hashed_post_state::<KH>()
     }
 
     /// Transform block number to the index of block.
