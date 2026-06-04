@@ -1522,20 +1522,23 @@ mod tests {
         test_utils::create_test_provider_factory, BlockWriter,
     };
     use alloy_eips::BlockHashOrNumber;
-    use alloy_primitives::B256;
+    use alloy_primitives::{map::AddressMap, Address, B256, KECCAK256_EMPTY, U256};
     use itertools::Itertools;
     use rand::Rng;
     use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
     use reth_db_api::models::AccountBeforeTx;
     use reth_ethereum_primitives::Block;
-    use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
-    use reth_primitives_traits::{RecoveredBlock, SealedBlock};
+    use reth_execution_types::{
+        BlockExecutionOutput, BlockExecutionResult, Evm2AccountInfo, Evm2BlockReverts,
+        Evm2BundleState, Evm2StorageReverts, ExecutionOutcome,
+    };
+    use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock};
     use reth_storage_api::{BlockReader, BlockSource, ChangeSetReader, StateReader};
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
     };
-    use revm_database::BundleState;
     use std::{
+        collections::BTreeMap,
         ops::{Bound, Range, RangeBounds},
         sync::Arc,
     };
@@ -1573,6 +1576,52 @@ mod tests {
         );
         let (database_blocks, in_memory_blocks) = blocks.split_at(database_blocks);
         (database_blocks.to_vec(), in_memory_blocks.to_vec())
+    }
+
+    fn account_to_evm2(account: Account) -> Evm2AccountInfo {
+        Evm2AccountInfo {
+            balance: account.balance,
+            nonce: account.nonce,
+            code_hash: account.bytecode_hash.unwrap_or(KECCAK256_EMPTY),
+            code: None,
+            _non_exhaustive: (),
+        }
+    }
+
+    fn evm2_revert(
+        changes: impl IntoIterator<Item = (Address, Option<Account>, Vec<(U256, U256)>)>,
+    ) -> Evm2BlockReverts {
+        let mut accounts = AddressMap::default();
+        let mut storage = AddressMap::default();
+        for (address, account, storage_revert) in changes {
+            accounts.insert(address, account.map(account_to_evm2));
+            if !storage_revert.is_empty() {
+                storage.insert(
+                    address,
+                    Evm2StorageReverts {
+                        slots: storage_revert.into_iter().collect(),
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+
+        Evm2BlockReverts { accounts, storage }
+    }
+
+    fn single_account_bundle(
+        first_block: u64,
+        address: Address,
+        account: Account,
+        storage: impl IntoIterator<Item = (U256, (U256, U256))>,
+        reverts: impl IntoIterator<Item = Evm2BlockReverts>,
+    ) -> Evm2BundleState {
+        Evm2BundleState::new_init(
+            first_block,
+            [(address, (None, Some(account), BTreeMap::from_iter(storage)))],
+            reverts,
+            [],
+        )
     }
 
     #[test]
@@ -1839,16 +1888,19 @@ mod tests {
                 .map(|b| b.try_recover().expect("failed to seal block with senders"))
                 .collect(),
             &ExecutionOutcome {
-                bundle: BundleState::new(
+                bundle: Evm2BundleState::new_init(
+                    first_database_block,
                     database_state.into_iter().map(|(address, (account, _))| {
-                        (address, None, Some(account.into()), Default::default())
+                        (address, (None, Some(account), BTreeMap::default()))
                     }),
                     database_changesets.iter().map(|block_changesets| {
-                        block_changesets.iter().map(|(address, account, _)| {
-                            (*address, Some(Some((*account).into())), [])
-                        })
+                        let mut accounts = AddressMap::default();
+                        for (address, account, _) in block_changesets {
+                            accounts.insert(*address, Some(account_to_evm2(*account)));
+                        }
+                        Evm2BlockReverts { accounts, storage: AddressMap::default() }
                     }),
-                    Vec::new(),
+                    [],
                 ),
                 first_block: first_database_block,
                 ..Default::default()
@@ -1871,13 +1923,20 @@ mod tests {
                             senders,
                         )),
                         execution_output: Arc::new(BlockExecutionOutput {
-                            state: BundleState::new(
+                            state: Evm2BundleState::new_init(
+                                first_in_memory_block,
                                 in_memory_state.into_iter().map(|(address, (account, _))| {
-                                    (address, None, Some(account.into()), Default::default())
+                                    (address, (None, Some(account), BTreeMap::default()))
                                 }),
-                                [in_memory_changesets.iter().map(|(address, account, _)| {
-                                    (*address, Some(Some((*account).into())), Vec::new())
-                                })],
+                                [Evm2BlockReverts {
+                                    accounts: in_memory_changesets
+                                        .iter()
+                                        .map(|(address, account, _)| {
+                                            (*address, Some(account_to_evm2(*account)))
+                                        })
+                                        .collect(),
+                                    storage: AddressMap::default(),
+                                }],
                                 [],
                             ),
                             result: BlockExecutionResult {
@@ -1924,7 +1983,6 @@ mod tests {
         use reth_db_api::{models::StorageSettings, tables, transaction::DbTxMut};
         use reth_primitives_traits::StorageEntry;
         use reth_storage_api::StorageSettingsCache;
-        use std::collections::HashMap;
 
         let address = alloy_primitives::Address::with_last_byte(1);
         let account = reth_primitives_traits::Account {
@@ -1952,17 +2010,15 @@ mod tests {
                 .map(|b| b.try_recover().expect("failed to seal block with senders"))
                 .collect(),
             &ExecutionOutcome {
-                bundle: BundleState::new(
-                    [(address, None, Some(account.into()), {
-                        let mut s = HashMap::default();
-                        s.insert(slot, (U256::ZERO, U256::from(100)));
-                        s
-                    })],
+                bundle: single_account_bundle(
+                    0,
+                    address,
+                    account,
+                    [(slot, (U256::ZERO, U256::from(100)))],
                     [
-                        Vec::new(),
-                        vec![(address, Some(Some(account.into())), vec![(slot, U256::ZERO)])],
+                        Evm2BlockReverts::default(),
+                        evm2_revert([(address, Some(account), vec![(slot, U256::ZERO)])]),
                     ],
-                    [],
                 ),
                 first_block: 0,
                 ..Default::default()
@@ -1983,14 +2039,12 @@ mod tests {
 
         let outcome = consistent_provider.get_state(1)?.expect("should return execution outcome");
 
-        let state = &outcome.bundle.state;
-        let account_state = state.get(&address).expect("should have account in bundle state");
-        let storage = &account_state.storage;
+        let storage = outcome.bundle.storage().get(&address).expect("should have account storage");
 
-        let storage_slot = storage.get(&slot).expect("should have the slot in storage");
+        let storage_slot = storage.slots.get(&slot).expect("should have the slot in storage");
 
         assert_eq!(
-            storage_slot.present_value,
+            storage_slot.current,
             U256::from(100),
             "present_value should be 100 (the actual value in PlainStorageState)"
         );
@@ -2003,7 +2057,6 @@ mod tests {
         use alloy_primitives::U256;
         use reth_db_api::models::StorageSettings;
         use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
-        use std::collections::HashMap;
 
         let mut rng = generators::rng();
         let factory = create_test_provider_factory();
@@ -2026,14 +2079,12 @@ mod tests {
                 .map(|b| b.try_recover().expect("failed to seal block with senders"))
                 .collect(),
             &ExecutionOutcome {
-                bundle: BundleState::new(
-                    [(address, None, Some(account.into()), {
-                        let mut s = HashMap::default();
-                        s.insert(slot, (U256::ZERO, U256::from(100)));
-                        s
-                    })],
-                    [[(address, Some(Some(account.into())), vec![(slot, U256::ZERO)])]],
-                    [],
+                bundle: single_account_bundle(
+                    0,
+                    address,
+                    account,
+                    [(slot, (U256::ZERO, U256::from(100)))],
+                    [evm2_revert([(address, Some(account), vec![(slot, U256::ZERO)])])],
                 ),
                 first_block: 0,
                 ..Default::default()
@@ -2053,14 +2104,12 @@ mod tests {
                     senders,
                 )),
                 execution_output: Arc::new(BlockExecutionOutput {
-                    state: BundleState::new(
-                        [(address, None, Some(account.into()), {
-                            let mut s = HashMap::default();
-                            s.insert(slot, (U256::from(100), U256::from(200)));
-                            s
-                        })],
-                        [[(address, Some(Some(account.into())), vec![(slot, U256::from(100))])]],
-                        [],
+                    state: single_account_bundle(
+                        in_mem_block.number,
+                        address,
+                        account,
+                        [(slot, (U256::from(100), U256::from(200)))],
+                        [evm2_revert([(address, Some(account), vec![(slot, U256::from(100))])])],
                     ),
                     result: BlockExecutionResult {
                         receipts: Default::default(),
@@ -2102,7 +2151,6 @@ mod tests {
         use alloy_primitives::U256;
         use reth_db_api::models::StorageSettings;
         use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
-        use std::collections::HashMap;
 
         let mut rng = generators::rng();
         let factory = create_test_provider_factory();
@@ -2125,17 +2173,15 @@ mod tests {
                 .map(|b| b.try_recover().expect("failed to seal block with senders"))
                 .collect(),
             &ExecutionOutcome {
-                bundle: BundleState::new(
-                    [(address, None, Some(account.into()), {
-                        let mut s = HashMap::default();
-                        s.insert(slot, (U256::ZERO, U256::from(100)));
-                        s
-                    })],
-                    vec![
-                        vec![(address, Some(Some(account.into())), vec![(slot, U256::ZERO)])],
-                        vec![],
+                bundle: single_account_bundle(
+                    0,
+                    address,
+                    account,
+                    [(slot, (U256::ZERO, U256::from(100)))],
+                    [
+                        evm2_revert([(address, Some(account), vec![(slot, U256::ZERO)])]),
+                        Evm2BlockReverts::default(),
                     ],
-                    [],
                 ),
                 first_block: 0,
                 ..Default::default()
@@ -2155,14 +2201,12 @@ mod tests {
                     senders,
                 )),
                 execution_output: Arc::new(BlockExecutionOutput {
-                    state: BundleState::new(
-                        [(address, None, Some(account.into()), {
-                            let mut s = HashMap::default();
-                            s.insert(slot, (U256::from(100), U256::from(200)));
-                            s
-                        })],
-                        [[(address, Some(Some(account.into())), vec![(slot, U256::from(100))])]],
-                        [],
+                    state: single_account_bundle(
+                        in_mem_block.number,
+                        address,
+                        account,
+                        [(slot, (U256::from(100), U256::from(200)))],
+                        [evm2_revert([(address, Some(account), vec![(slot, U256::from(100))])])],
                     ),
                     result: BlockExecutionResult {
                         receipts: Default::default(),

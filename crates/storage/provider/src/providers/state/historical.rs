@@ -880,12 +880,15 @@ mod tests {
         AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, RocksDBProviderFactory,
         StateProvider,
     };
-    use alloy_primitives::{address, b256, Address, B256, U256};
+    use alloy_primitives::{address, b256, map::AddressMap, Address, B256, KECCAK256_EMPTY, U256};
     use reth_db_api::{
         models::{storage_sharded_key::StorageShardedKey, AccountBeforeTx, ShardedKey},
         tables,
         transaction::{DbTx, DbTxMut},
         BlockNumberList,
+    };
+    use reth_execution_types::{
+        Evm2AccountInfo, Evm2BlockReverts, Evm2BundleState, Evm2StorageReverts,
     };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{
@@ -895,11 +898,43 @@ mod tests {
     };
     use reth_storage_errors::provider::ProviderError;
     use reth_trie_db::ChangesetCache;
+    use std::collections::BTreeMap;
 
     const ADDRESS: Address = address!("0x0000000000000000000000000000000000000001");
     const HIGHER_ADDRESS: Address = address!("0x0000000000000000000000000000000000000005");
     const STORAGE: B256 =
         b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
+
+    fn account_to_evm2(account: Account) -> Evm2AccountInfo {
+        Evm2AccountInfo {
+            balance: account.balance,
+            nonce: account.nonce,
+            code_hash: account.bytecode_hash.unwrap_or(KECCAK256_EMPTY),
+            code: None,
+            _non_exhaustive: (),
+        }
+    }
+
+    fn evm2_revert(
+        changes: impl IntoIterator<Item = (Address, Option<Account>, Vec<(U256, U256)>)>,
+    ) -> Evm2BlockReverts {
+        let mut accounts = AddressMap::default();
+        let mut storage = AddressMap::default();
+        for (address, account, storage_revert) in changes {
+            accounts.insert(address, account.map(account_to_evm2));
+            if !storage_revert.is_empty() {
+                storage.insert(
+                    address,
+                    Evm2StorageReverts {
+                        slots: storage_revert.into_iter().collect(),
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+
+        Evm2BlockReverts { accounts, storage }
+    }
 
     const fn assert_state_provider<T: StateProvider>() {}
     #[expect(dead_code)]
@@ -1316,17 +1351,13 @@ mod tests {
         use reth_db_api::models::StorageSettings;
         use reth_execution_types::ExecutionOutcome;
         use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
-        use revm_database::BundleState;
-        use std::collections::HashMap;
 
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
 
         let slot = U256::from_be_bytes(*STORAGE);
-        let account: revm_state::AccountInfo =
-            Account { nonce: 1, balance: U256::from(1000), bytecode_hash: None }.into();
-        let higher_account: revm_state::AccountInfo =
-            Account { nonce: 1, balance: U256::from(2000), bytecode_hash: None }.into();
+        let account = Account { nonce: 1, balance: U256::from(1000), bytecode_hash: None };
+        let higher_account = Account { nonce: 1, balance: U256::from(2000), bytecode_hash: None };
 
         let mut rng = generators::rng();
         let blocks = random_block_range(
@@ -1335,27 +1366,27 @@ mod tests {
             BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
         );
 
-        let mut addr_storage = HashMap::default();
+        let mut addr_storage = BTreeMap::default();
         addr_storage.insert(slot, (U256::ZERO, U256::from(100)));
-        let mut higher_storage = HashMap::default();
+        let mut higher_storage = BTreeMap::default();
         higher_storage.insert(slot, (U256::ZERO, U256::from(1000)));
 
-        type Revert = Vec<(Address, Option<Option<revm_state::AccountInfo>>, Vec<(U256, U256)>)>;
+        type Revert = Vec<(Address, Option<Account>, Vec<(U256, U256)>)>;
         let mut reverts: Vec<Revert> = vec![Vec::new(); 16];
 
-        reverts[3] = vec![(ADDRESS, Some(Some(account.clone())), vec![(slot, U256::ZERO)])];
-        reverts[4] =
-            vec![(HIGHER_ADDRESS, Some(Some(higher_account.clone())), vec![(slot, U256::ZERO)])];
-        reverts[7] = vec![(ADDRESS, Some(Some(account.clone())), vec![(slot, U256::from(7))])];
-        reverts[10] = vec![(ADDRESS, Some(Some(account.clone())), vec![(slot, U256::from(10))])];
-        reverts[15] = vec![(ADDRESS, Some(Some(account.clone())), vec![(slot, U256::from(15))])];
+        reverts[3] = vec![(ADDRESS, Some(account.clone()), vec![(slot, U256::ZERO)])];
+        reverts[4] = vec![(HIGHER_ADDRESS, Some(higher_account.clone()), vec![(slot, U256::ZERO)])];
+        reverts[7] = vec![(ADDRESS, Some(account.clone()), vec![(slot, U256::from(7))])];
+        reverts[10] = vec![(ADDRESS, Some(account.clone()), vec![(slot, U256::from(10))])];
+        reverts[15] = vec![(ADDRESS, Some(account.clone()), vec![(slot, U256::from(15))])];
 
-        let bundle = BundleState::new(
+        let bundle = Evm2BundleState::new_init(
+            0,
             [
-                (ADDRESS, None, Some(account), addr_storage),
-                (HIGHER_ADDRESS, None, Some(higher_account), higher_storage),
+                (ADDRESS, (None, Some(account), addr_storage)),
+                (HIGHER_ADDRESS, (None, Some(higher_account), higher_storage)),
             ],
-            reverts,
+            reverts.into_iter().map(evm2_revert),
             [],
         );
 

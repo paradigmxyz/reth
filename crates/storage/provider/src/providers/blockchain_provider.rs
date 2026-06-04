@@ -807,7 +807,7 @@ mod tests {
         BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksMode,
     };
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
-    use alloy_primitives::{BlockNumber, TxNumber, B256};
+    use alloy_primitives::{map::AddressMap, BlockNumber, TxNumber, B256, KECCAK256_EMPTY};
     use itertools::Itertools;
     use rand::Rng;
     use reth_chain_state::{
@@ -819,9 +819,10 @@ mod tests {
     use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Block, Receipt};
     use reth_execution_types::{
-        BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome,
+        BlockExecutionOutput, BlockExecutionResult, Chain, Evm2AccountInfo, Evm2BlockReverts,
+        Evm2BundleState, ExecutionOutcome,
     };
-    use reth_primitives_traits::{RecoveredBlock, SealedBlock, SignerRecoverable};
+    use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock, SignerRecoverable};
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
@@ -832,7 +833,7 @@ mod tests {
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
         random_receipt, BlockParams, BlockRangeParams,
     };
-    use revm_database::{BundleState, OriginalValuesKnown};
+    use revm_database::OriginalValuesKnown;
     use std::{
         collections::BTreeMap,
         ops::{Bound, Range, RangeBounds},
@@ -874,6 +875,16 @@ mod tests {
         );
         let (database_blocks, in_memory_blocks) = blocks.split_at(database_blocks);
         (database_blocks.to_vec(), in_memory_blocks.to_vec())
+    }
+
+    fn account_to_evm2(account: Account) -> Evm2AccountInfo {
+        Evm2AccountInfo {
+            balance: account.balance,
+            nonce: account.nonce,
+            code_hash: account.bytecode_hash.unwrap_or(KECCAK256_EMPTY),
+            code: None,
+            _non_exhaustive: (),
+        }
     }
 
     #[expect(clippy::type_complexity)]
@@ -946,7 +957,7 @@ mod tests {
                             gas_used: 0,
                             blob_gas_used: 0,
                         },
-                        state: BundleState::default(),
+                        state: Evm2BundleState::default(),
                     };
 
                     ExecutedBlock {
@@ -1701,16 +1712,19 @@ mod tests {
                 .map(|b| b.try_recover().expect("failed to seal block with senders"))
                 .collect(),
             &ExecutionOutcome {
-                bundle: BundleState::new(
+                bundle: Evm2BundleState::new_init(
+                    first_database_block,
                     database_state.into_iter().map(|(address, (account, _))| {
-                        (address, None, Some(account.into()), Default::default())
+                        (address, (None, Some(account), BTreeMap::default()))
                     }),
                     database_changesets.iter().map(|block_changesets| {
-                        block_changesets.iter().map(|(address, account, _)| {
-                            (*address, Some(Some((*account).into())), [])
-                        })
+                        let mut accounts = AddressMap::default();
+                        for (address, account, _) in block_changesets {
+                            accounts.insert(*address, Some(account_to_evm2(*account)));
+                        }
+                        Evm2BlockReverts { accounts, storage: AddressMap::default() }
                     }),
-                    Vec::new(),
+                    [],
                 ),
                 first_block: first_database_block,
                 ..Default::default()
@@ -1733,13 +1747,20 @@ mod tests {
                             senders,
                         )),
                         execution_output: Arc::new(BlockExecutionOutput {
-                            state: BundleState::new(
+                            state: Evm2BundleState::new_init(
+                                first_in_memory_block,
                                 in_memory_state.into_iter().map(|(address, (account, _))| {
-                                    (address, None, Some(account.into()), Default::default())
+                                    (address, (None, Some(account), BTreeMap::default()))
                                 }),
-                                [in_memory_changesets.iter().map(|(address, account, _)| {
-                                    (*address, Some(Some((*account).into())), Vec::new())
-                                })],
+                                [Evm2BlockReverts {
+                                    accounts: in_memory_changesets
+                                        .iter()
+                                        .map(|(address, account, _)| {
+                                            (*address, Some(account_to_evm2(*account)))
+                                        })
+                                        .collect(),
+                                    storage: AddressMap::default(),
+                                }],
                                 [],
                             ),
                             result: BlockExecutionResult {
