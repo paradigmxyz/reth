@@ -1,79 +1,121 @@
 #!/usr/bin/env bun
-import { readdir, copyFile, readFile, writeFile } from 'fs/promises';
+import { createHash } from 'crypto';
+import { mkdir, readdir, readFile, unlink, writeFile } from 'fs/promises';
 import { join } from 'path';
+
+type SearchIndex = {
+  documentIds?: Record<string, string>;
+  storedFields?: Record<string, { href?: unknown }>;
+  [key: string]: unknown;
+};
 
 async function fixSearchIndex() {
   const distDir = 'docs/dist';
-  const vocsDir = join(distDir, '.vocs');
+  const publicDir = join(distDir, 'public');
+  const publicAssetsDir = join(publicDir, 'assets');
   
   try {
-    // 1. Find the search index file
-    let files: string[];
-    try {
-      files = await readdir(vocsDir);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        for (const assetsDir of [join(distDir, 'assets'), join(distDir, 'public', 'assets')]) {
-          try {
-            const assets = await readdir(assetsDir);
-            const searchIndexFile = assets.find(f => f.startsWith('search-index-') && f.endsWith('.json'));
-            if (searchIndexFile) {
-              console.log(`✅ Vocs 2 search index found at ${join(assetsDir, searchIndexFile)}; no legacy fix needed.`);
-              return;
-            }
-          } catch (assetsError) {
-            if ((assetsError as NodeJS.ErrnoException).code !== 'ENOENT') {
-              throw assetsError;
-            }
-          }
-        }
-      }
-      throw error;
-    }
-    const searchIndexFile = files.find(f => f.startsWith('search-index-') && f.endsWith('.json'));
-    
-    if (!searchIndexFile) {
-      console.error('❌ No search index file found in .vocs directory');
+    const source = await findSearchIndex(distDir, publicAssetsDir);
+    if (!source) {
+      console.error('No Vocs search index file found');
       process.exit(1);
       return;
     }
-    
-    console.log(`📁 Found search index: ${searchIndexFile}`);
-    
-    // 2. Copy search index to root of dist
-    const sourcePath = join(vocsDir, searchIndexFile);
-    const destPath = join(distDir, searchIndexFile);
-    await copyFile(sourcePath, destPath);
-    console.log(`✅ Copied search index to root: ${destPath}`);
-    
-    // 3. Find and update all HTML and JS files that reference the search index
-    const htmlFiles = await findFiles(distDir, '.html');
-    const jsFiles = await findFiles(distDir, '.js');
-    console.log(`📝 Found ${htmlFiles.length} HTML files and ${jsFiles.length} JS files to update`);
-    
-    // 4. Replace references in all files
+
+    console.log(`Found search index: ${join(source.dir, source.file)}`);
+
+    await mkdir(publicAssetsDir, { recursive: true });
+    const sourcePath = join(source.dir, source.file);
+    let jsonText = await readFile(sourcePath, 'utf-8');
+    const json = JSON.parse(jsonText) as SearchIndex;
+    const normalizedCount = normalizeDocumentIds(json);
+    jsonText = JSON.stringify(json);
+
+    const hash = createHash('md5').update(jsonText).digest('hex').slice(0, 12);
+    const searchIndexFile = `search-index-${hash}.json`;
+    const destPath = join(publicAssetsDir, searchIndexFile);
+    await writeFile(destPath, jsonText);
+    await removeStaleSearchIndexes(publicAssetsDir, searchIndexFile);
+
+    console.log(`Wrote public search index: ${destPath}`);
+    if (normalizedCount > 0) {
+      console.log(`Normalized ${normalizedCount} search result ids`);
+    }
+
+    const htmlFiles = await findFiles(publicDir, '.html');
+    const jsFiles = await findFiles(publicDir, '.js');
+    console.log(`Found ${htmlFiles.length} HTML files and ${jsFiles.length} JS files to update`);
+
     const allFiles = [...htmlFiles, ...jsFiles];
     for (const file of allFiles) {
       const content = await readFile(file, 'utf-8');
-      
-      // Replace /.vocs/search-index-*.json with /search-index-*.json
       const updatedContent = content.replace(
-        /\/.vocs\/search-index-[a-f0-9]+\.json/g,
-        `/${searchIndexFile}`
+        /\/(?:\.vocs|assets)\/search-index-[A-Za-z0-9_-]+\.json/g,
+        `/assets/${searchIndexFile}`
       );
       
       if (content !== updatedContent) {
         await writeFile(file, updatedContent);
-        console.log(`  ✓ Updated ${file}`);
+        console.log(`  Updated ${file}`);
       }
     }
     
-    console.log('✨ Search index fix complete!');
+    console.log('Search index fix complete!');
     
   } catch (error) {
-    console.error('❌ Error fixing search index:', error);
+    console.error('Error fixing search index:', error);
     process.exit(1);
   }
+}
+
+async function removeStaleSearchIndexes(publicAssetsDir: string, keepFile: string): Promise<void> {
+  const files = await readdir(publicAssetsDir);
+  await Promise.all(
+    files
+      .filter((file) => file.startsWith('search-index-') && file.endsWith('.json') && file !== keepFile)
+      .map((file) => unlink(join(publicAssetsDir, file))),
+  );
+}
+
+async function findSearchIndex(
+  distDir: string,
+  publicAssetsDir: string,
+): Promise<{ dir: string; file: string } | undefined> {
+  const candidateDirs = [
+    publicAssetsDir,
+    join(distDir, 'server', 'assets'),
+    join(distDir, '.vocs'),
+    join(distDir, 'assets'),
+  ];
+
+  for (const dir of candidateDirs) {
+    let files: string[];
+    try {
+      files = await readdir(dir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw error;
+    }
+
+    const file = files.find((entry) => entry.startsWith('search-index-') && entry.endsWith('.json'));
+    if (file) return { dir, file };
+  }
+}
+
+function normalizeDocumentIds(searchIndex: SearchIndex): number {
+  const { documentIds, storedFields } = searchIndex;
+  if (!documentIds || !storedFields) return 0;
+
+  let normalizedCount = 0;
+  for (const [id, currentId] of Object.entries(documentIds)) {
+    const href = storedFields[id]?.href;
+    if (typeof href !== 'string' || href.length === 0 || currentId === href) continue;
+
+    documentIds[id] = href;
+    normalizedCount++;
+  }
+
+  return normalizedCount;
 }
 
 async function findFiles(dir: string, extension: string, files: string[] = []): Promise<string[]> {
@@ -83,8 +125,8 @@ async function findFiles(dir: string, extension: string, files: string[] = []): 
   for (const entry of entries) {
     const fullPath = join(dir, entry.name);
     
-    // Skip .vocs, docs, and _site directories
-    if (entry.name === '.vocs' || entry.name === 'docs' || entry.name === '_site') continue;
+    // Skip injected rustdocs and internal build directories
+    if (entry.name === 'docs' || entry.name === '_site') continue;
     
     if (entry.isDirectory()) {
       files = await findFiles(fullPath, extension, files);
