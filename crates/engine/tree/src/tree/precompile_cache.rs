@@ -236,7 +236,6 @@ where
 }
 
 /// evm2 precompile provider that caches successful pure precompile calls.
-#[derive(Clone)]
 pub struct Evm2CachedPrecompiles<S>
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
