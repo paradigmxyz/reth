@@ -318,7 +318,7 @@ where
     let BlockBuilderOutcome { block, block_access_list, .. } =
         builder.finish(&state_provider, None)?;
 
-    let encoded_bal: Option<Bytes> = block_access_list.map(|bal| alloy_rlp::encode(&bal).into());
+    let encoded_bal: Option<Bytes> = block_access_list;
 
     Ok((block.into_sealed_block(), encoded_bal))
 }
