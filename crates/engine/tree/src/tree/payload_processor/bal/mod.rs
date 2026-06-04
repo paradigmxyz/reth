@@ -1,12 +1,8 @@
-//! BAL-driven parallel block execution.
+//! BAL-driven parallel block execution placeholders.
 //!
-//! The engine uses this path when an Amsterdam block carries a decoded EIP-7928
-//! Block-Level Access List (BAL). Workers execute transactions against revm's BAL state. The
-//! main thread commits worker results to a canonical executor in transaction order.
-//!
-//! Consensus validation checks the BAL item-cost bound before this path runs. This path validates
-//! the rebuilt block-level BAL hash after post-execution. It does not yet run per-transaction
-//! fragment checks. It does not yet report rich undeclared-access diagnostics.
+//! Block-Level Access List execution is Amsterdam-only and out of scope for the active evm2
+//! pre-Amsterdam sync path. Keep the module boundary in place so Amsterdam support can be rebuilt
+//! here without reintroducing the old executor backend.
 
 mod ordered_outputs;
 mod worker;
