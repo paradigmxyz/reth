@@ -878,6 +878,20 @@ fn bundle_account_has_nonzero_storage_after(
         .any(|(key, slot)| !account.storage.contains_key(key) && !slot.current.is_zero())
 }
 
+fn bundle_account_info_with_code(
+    bundle: &BundleState,
+    account: &BundleAccount,
+) -> Option<AccountInfo> {
+    let mut info = account.info.clone()?;
+    if info.code.is_none() &&
+        info.code_hash != B256::ZERO &&
+        info.code_hash != KECCAK256_EMPTY
+    {
+        info.code = bundle.bytecode(&info.code_hash);
+    }
+    Some(info)
+}
+
 /// Converts a single `evm2` transaction or system-call state change set into a bundle.
 pub fn bundle_state_from_evm2(changes: StateChanges) -> BundleState {
     let mut state = AddressMap::<BundleAccount>::default();
@@ -1030,6 +1044,13 @@ where
                 account
             }
         };
+        if revm_account.info.code.is_none() &&
+            revm_account.info.code_hash != B256::ZERO &&
+            revm_account.info.code_hash != KECCAK256_EMPTY &&
+            let Some(bytecode) = executor.output.bundle.bytecode(&revm_account.info.code_hash)
+        {
+            revm_account.info.code = Some(bytecode);
+        }
         revm_account.mark_touch();
         if is_created || storage_wiped {
             revm_account.mark_created();
@@ -2116,7 +2137,7 @@ where
     ) -> Result<Option<AccountInfo>, Evm2BlockExecutionError> {
         if let Some(account) = self.output.bundle.account(&address) {
             if account.info.is_some() {
-                return Ok(account.info.clone());
+                return Ok(bundle_account_info_with_code(&self.output.bundle, account));
             }
             if account.was_destroyed() {
                 return Ok(None);
@@ -3275,6 +3296,78 @@ mod tests {
         };
 
         db.commit(evm_state_from_evm2_with_accounts(&mut executor, changes).unwrap());
+        db.merge_transitions(BundleRetention::Reverts);
+
+        assert!(db.bundle_state.bytecode(&code_hash).is_some());
+    }
+
+    #[test]
+    fn evm2_revm_state_keeps_created_code_after_later_change() {
+        let address = address!("0x0000000000000000000000000000000000000022");
+        let code = Evm2Bytecode::new_legacy(Bytes::from_static(&[0x60, 0x00]));
+        let code_hash = code.hash_slow();
+        let evm = create_evm2_from_revm_env(
+            EmptyDB::default(),
+            RevmSpecId::FRONTIER,
+            BlockEnv::default(),
+        );
+        let mut executor = Evm2TransactionExecutor::new(evm);
+        let mut db = State::builder()
+            .with_database(CacheDB::new(EmptyDB::default()))
+            .with_bundle_update()
+            .build();
+        let created = StateChanges {
+            accounts: core::iter::once((
+                address,
+                Tracked {
+                    original: None,
+                    current: Some(Evm2AccountInfo {
+                        balance: U256::ZERO,
+                        nonce: 1,
+                        code_hash,
+                        code: Some(Evm2Bytecode::new()),
+                        _non_exhaustive: (),
+                    }),
+                    _non_exhaustive: (),
+                },
+            ))
+            .collect(),
+            storage: Default::default(),
+            code: core::iter::once((code_hash, code)).collect(),
+            logs: Vec::new(),
+            _non_exhaustive: (),
+        };
+        db.commit(evm_state_from_evm2_with_accounts(&mut executor, created.clone()).unwrap());
+        executor.output.merge_state_changes(created);
+
+        let changed = StateChanges {
+            accounts: core::iter::once((
+                address,
+                Tracked {
+                    original: Some(Evm2AccountInfo {
+                        balance: U256::ZERO,
+                        nonce: 1,
+                        code_hash,
+                        code: None,
+                        _non_exhaustive: (),
+                    }),
+                    current: Some(Evm2AccountInfo {
+                        balance: U256::from(1),
+                        nonce: 1,
+                        code_hash,
+                        code: None,
+                        _non_exhaustive: (),
+                    }),
+                    _non_exhaustive: (),
+                },
+            ))
+            .collect(),
+            storage: Default::default(),
+            code: Default::default(),
+            logs: Vec::new(),
+            _non_exhaustive: (),
+        };
+        db.commit(evm_state_from_evm2_with_accounts(&mut executor, changed).unwrap());
         db.merge_transitions(BundleRetention::Reverts);
 
         assert!(db.bundle_state.bytecode(&code_hash).is_some());
