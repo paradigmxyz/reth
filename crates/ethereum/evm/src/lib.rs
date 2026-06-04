@@ -493,6 +493,7 @@ where
 mod tests {
     use super::*;
     use alloy_genesis::Genesis;
+    use alloy_primitives::U256;
     use reth_chainspec::{Chain, ChainSpec};
 
     #[test]
