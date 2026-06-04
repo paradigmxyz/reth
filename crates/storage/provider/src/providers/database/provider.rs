@@ -182,8 +182,9 @@ fn evm2_bundle_to_plain_state_and_reverts(
                 .iter()
                 .map(|(address, storage)| PlainStorageRevert {
                     address: *address,
-                    wiped: false,
+                    wiped: storage.wiped,
                     storage_revert: storage
+                        .slots
                         .iter()
                         .map(|(key, value)| (*key, RevertToSlot::Some(*value)))
                         .collect(),
