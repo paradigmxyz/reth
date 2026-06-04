@@ -25,7 +25,10 @@ impl ProofV2Target {
 
     /// Returns the key the target was initialized with.
     pub fn key(&self) -> B256 {
-        B256::from_slice(&self.key_nibbles.pack())
+        debug_assert_eq!(self.key_nibbles.len(), 64);
+        let mut packed = [0u8; 32];
+        self.key_nibbles.pack_to(&mut packed);
+        B256::from(packed)
     }
 
     /// Only match trie nodes whose path is at least this long.
