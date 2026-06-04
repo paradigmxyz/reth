@@ -1,6 +1,6 @@
+pub use alloy_eips::eip1559::calculate_block_gas_limit;
 use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
 use alloy_primitives::Bytes;
-use reth_primitives_traits::constants::GAS_LIMIT_BOUND_DIVISOR;
 
 /// Settings for the Ethereum builder.
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -65,15 +65,46 @@ impl EthereumBuilderConfig {
     /// Returns the gas limit for the next block based
     /// on parent and desired gas limits.
     pub fn gas_limit(&self, parent_gas_limit: u64) -> u64 {
-        calculate_block_gas_limit(parent_gas_limit, self.desired_gas_limit)
+        self.gas_limit_with_target(parent_gas_limit, None)
+    }
+
+    /// Returns the gas limit for the next block based on the parent gas limit and an optional
+    /// target from payload attributes.
+    pub fn gas_limit_with_target(
+        &self,
+        parent_gas_limit: u64,
+        target_gas_limit: Option<u64>,
+    ) -> u64 {
+        calculate_block_gas_limit(
+            parent_gas_limit,
+            target_gas_limit.unwrap_or(self.desired_gas_limit),
+        )
     }
 }
 
-/// Calculate the gas limit for the next block based on parent and desired gas limits.
-/// Ref: <https://github.com/ethereum/go-ethereum/blob/88cbfab332c96edfbe99d161d9df6a40721bd786/core/block_validator.go#L166>
-pub fn calculate_block_gas_limit(parent_gas_limit: u64, desired_gas_limit: u64) -> u64 {
-    let delta = (parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR).saturating_sub(1);
-    let min_gas_limit = parent_gas_limit - delta;
-    let max_gas_limit = parent_gas_limit + delta;
-    desired_gas_limit.clamp(min_gas_limit, max_gas_limit)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gas_limit_uses_payload_target_when_present() {
+        let parent_gas_limit = 30_000_000;
+        let target_gas_limit = parent_gas_limit - 100;
+        let config = EthereumBuilderConfig::new().with_gas_limit(parent_gas_limit + 100);
+
+        assert_eq!(
+            config.gas_limit_with_target(parent_gas_limit, Some(target_gas_limit)),
+            target_gas_limit
+        );
+    }
+
+    #[test]
+    fn gas_limit_falls_back_to_configured_target() {
+        let parent_gas_limit = 30_000_000;
+        let desired_gas_limit = parent_gas_limit + 100;
+        let config = EthereumBuilderConfig::new().with_gas_limit(desired_gas_limit);
+
+        assert_eq!(config.gas_limit_with_target(parent_gas_limit, None), desired_gas_limit);
+        assert_eq!(config.gas_limit(parent_gas_limit), desired_gas_limit);
+    }
 }

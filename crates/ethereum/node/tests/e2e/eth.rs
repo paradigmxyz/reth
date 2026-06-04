@@ -21,8 +21,8 @@ use reth_tasks::Runtime;
 use ssz::{Decode, Encode};
 use std::sync::Arc;
 
-const ENGINE_NEW_PAYLOAD_V4_ROUTE: &str = "/engine/v4/payloads";
-const ENGINE_FORKCHOICE_UPDATED_V3_ROUTE: &str = "/engine/v3/forkchoice";
+const ENGINE_PRAGUE_PAYLOADS_ROUTE: &str = "/engine/v2/prague/payloads";
+const ENGINE_PRAGUE_FORKCHOICE_ROUTE: &str = "/engine/v2/prague/forkchoice";
 
 #[tokio::test]
 async fn can_run_eth_node() -> eyre::Result<()> {
@@ -326,7 +326,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
     let auth_header = secret_to_bearer_header(auth_server.jwt_secret());
 
     let new_payload_response = client
-        .post(format!("{auth_url}{ENGINE_NEW_PAYLOAD_V4_ROUTE}"))
+        .post(format!("{auth_url}{ENGINE_PRAGUE_PAYLOADS_ROUTE}"))
         .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
         .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
         .header(reqwest::header::ACCEPT, "application/octet-stream")
@@ -342,7 +342,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
     assert_eq!(status.status, PayloadStatusEnum::Valid);
 
     let fcu_response = client
-        .post(format!("{auth_url}{ENGINE_FORKCHOICE_UPDATED_V3_ROUTE}"))
+        .post(format!("{auth_url}{ENGINE_PRAGUE_FORKCHOICE_ROUTE}"))
         .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
         .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
         .header(reqwest::header::ACCEPT, "application/octet-stream")

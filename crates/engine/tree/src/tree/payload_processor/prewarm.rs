@@ -14,8 +14,8 @@
 use crate::tree::{
     payload_processor::multiproof::StateRootMessage,
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
-    CachedStateMetrics, CachedStateProvider, ExecutionEnv, PayloadExecutionCache, SavedCache,
-    StateProviderBuilder,
+    CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
+    PayloadExecutionCache, SavedCache, StateProviderBuilder,
 };
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
@@ -279,7 +279,7 @@ where
 
         let Self {
             execution_cache,
-            ctx: PrewarmContext { env, metrics, cache_metrics, saved_cache, .. },
+            ctx: PrewarmContext { env, metrics, cache_state_metrics, saved_cache, .. },
             ..
         } = self;
         let hash = env.hash;
@@ -301,7 +301,7 @@ where
                     return;
                 }
 
-                new_cache.update_metrics(cache_metrics.as_ref());
+                new_cache.update_metrics(cache_state_metrics.as_ref());
 
                 if valid_block_rx.recv().is_ok() {
                     // Replace the shared cache with the new one; the previous cache (if any) is
@@ -411,9 +411,7 @@ where
                     }
                     WorkerPool::with_worker_mut(|worker| {
                         let provider = worker
-                            .get_or_init::<Option<CachedStateProvider<StateProviderBox, true>>>(
-                                || None,
-                            );
+                            .get_or_init::<Option<CachedStateProvider<StateProviderBox>>>(|| None);
                         ctx.prefetch_bal_storage(&parent_span, provider, account);
                     });
                 });
@@ -530,6 +528,8 @@ where
     /// Metrics for the execution cache.
     /// Metrics for the execution cache. `None` disables metrics recording.
     pub cache_metrics: Option<CachedStateMetrics>,
+    /// Metrics for shared execution cache state. `None` disables metrics recording.
+    pub cache_state_metrics: Option<CachedStateCacheMetrics>,
     /// An atomic bool that tells prewarm tasks to not start any more execution.
     pub terminate_execution: Arc<AtomicBool>,
     /// Shared counter tracking the next transaction index to be executed by the main execution
@@ -576,11 +576,7 @@ where
         // Use the caches to create a new provider with caching
         if let Some(saved_cache) = &self.saved_cache {
             let caches = saved_cache.cache().clone();
-            state_provider = Box::new(CachedStateProvider::new_prewarm(
-                state_provider,
-                caches,
-                self.cache_metrics.clone().unwrap_or_default(),
-            ));
+            state_provider = Box::new(CachedStateProvider::new_prewarm(state_provider, caches));
         }
 
         let state_provider = StateProviderDatabase::new(state_provider);
@@ -686,11 +682,7 @@ where
             {
                 (false, Some(saved)) => {
                     let caches = saved.cache().clone();
-                    Box::new(CachedStateProvider::new_prewarm(
-                        inner,
-                        caches,
-                        self.cache_metrics.clone().unwrap_or_default(),
-                    ))
+                    Box::new(CachedStateProvider::new_prewarm(inner, caches))
                 }
                 _ => Box::new(inner),
             };
@@ -754,7 +746,7 @@ where
     fn prefetch_bal_storage(
         &self,
         parent_span: &Span,
-        provider: &mut Option<CachedStateProvider<reth_provider::StateProviderBox, true>>,
+        provider: &mut Option<CachedStateProvider<reth_provider::StateProviderBox>>,
         account: &alloy_eip7928::AccountChanges,
     ) {
         if self.disable_bal_batch_io ||
@@ -787,11 +779,7 @@ where
                 let saved_cache =
                     self.saved_cache.as_ref().expect("BAL prewarm should only run with cache");
                 let caches = saved_cache.cache().clone();
-                slot.insert(CachedStateProvider::new_prewarm(
-                    built,
-                    caches,
-                    self.cache_metrics.clone().unwrap_or_default(),
-                ))
+                slot.insert(CachedStateProvider::new_prewarm(built, caches))
             }
         };
 

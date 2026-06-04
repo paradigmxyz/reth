@@ -71,6 +71,7 @@ pub struct DefaultRpcServerArgs {
     auth_ipc_path: String,
     disable_auth_server: bool,
     rpc_jwtsecret: Option<JwtSecret>,
+    rpc_disable_metrics: bool,
     rpc_max_request_size: MaxU32,
     rpc_max_response_size: MaxU32,
     rpc_max_subscriptions_per_connection: MaxU32,
@@ -231,6 +232,12 @@ impl DefaultRpcServerArgs {
         self
     }
 
+    /// Set whether to disable RPC request metrics by default
+    pub const fn with_rpc_disable_metrics(mut self, v: bool) -> Self {
+        self.rpc_disable_metrics = v;
+        self
+    }
+
     /// Set the default max request size
     pub const fn with_rpc_max_request_size(mut self, v: MaxU32) -> Self {
         self.rpc_max_request_size = v;
@@ -382,6 +389,7 @@ impl Default for DefaultRpcServerArgs {
             auth_ipc_path: constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string(),
             disable_auth_server: false,
             rpc_jwtsecret: None,
+            rpc_disable_metrics: false,
             rpc_max_request_size: RPC_DEFAULT_MAX_REQUEST_SIZE_MB.into(),
             rpc_max_response_size: RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into(),
             rpc_max_subscriptions_per_connection: RPC_DEFAULT_MAX_SUBS_PER_CONN.into(),
@@ -510,6 +518,10 @@ pub struct RpcServerArgs {
     /// `--authrpc.jwtsecret`.
     #[arg(long = "rpc.jwtsecret", value_name = "HEX", global = true, required = false, default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_jwtsecret.as_ref().map(|v| format!("{:?}", v).into())))]
     pub rpc_jwtsecret: Option<JwtSecret>,
+
+    /// Disable built-in RPC request metrics.
+    #[arg(long = "rpc.disable-metrics", default_value_t = DefaultRpcServerArgs::get_global().rpc_disable_metrics)]
+    pub rpc_disable_metrics: bool,
 
     /// Set the maximum RPC request payload size for both HTTP and WS in megabytes.
     #[arg(long = "rpc.max-request-size", alias = "rpc-max-request-size", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_request_size)]
@@ -650,8 +662,8 @@ pub struct RpcServerArgs {
 
     /// Override the gas limit used by `testing_buildBlockV1`.
     ///
-    /// When set, `testing_buildBlockV1` will use this value instead of inheriting
-    /// the parent block's gas limit. Accepts short notation: K for thousand, M for
+    /// When set, `testing_buildBlockV1` will use this exact value instead of moving toward the
+    /// payload builder's configured gas limit. Accepts short notation: K for thousand, M for
     /// million, G for billion (e.g., 1G = 1 billion).
     #[arg(long = "testing.gas-limit", value_name = "GAS_LIMIT", hide = true)]
     pub testing_gas_limit: Option<u64>,
@@ -828,6 +840,7 @@ impl Default for RpcServerArgs {
             auth_ipc_path,
             disable_auth_server,
             rpc_jwtsecret,
+            rpc_disable_metrics,
             rpc_max_request_size,
             rpc_max_response_size,
             rpc_max_subscriptions_per_connection,
@@ -872,6 +885,7 @@ impl Default for RpcServerArgs {
             auth_ipc_path,
             disable_auth_server,
             rpc_jwtsecret,
+            rpc_disable_metrics,
             rpc_max_request_size,
             rpc_max_response_size,
             rpc_max_subscriptions_per_connection,
@@ -982,6 +996,16 @@ mod tests {
     }
 
     #[test]
+    fn test_rpc_disable_metrics_arg() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert!(!args.rpc_disable_metrics);
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.disable-metrics"]).args;
+        assert!(args.rpc_disable_metrics);
+    }
+
+    #[test]
     fn test_rpc_tx_fee_cap_parse_integer() {
         let args = CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.txfeecap", "2"]).args;
         let expected = 2_000_000_000_000_000_000u128; // 2 ETH in wei
@@ -1038,6 +1062,7 @@ mod tests {
                 )
                 .unwrap(),
             ),
+            rpc_disable_metrics: false,
             rpc_max_request_size: 15u32.into(),
             rpc_max_response_size: 160u32.into(),
             rpc_max_subscriptions_per_connection: 1024u32.into(),

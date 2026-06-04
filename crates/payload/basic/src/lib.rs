@@ -125,6 +125,10 @@ impl<Client, Builder> BasicPayloadJobGenerator<Client, Builder> {
     /// Returns the pre-cached reads for the given parent header if it matches the cached state's
     /// block.
     fn maybe_pre_cached(&self, parent: B256) -> Option<CachedReads> {
+        if !self.config.pre_cache_state {
+            return None
+        }
+
         self.pre_cached.as_ref().filter(|pc| pc.block == parent).map(|pc| pc.cached.clone())
     }
 }
@@ -193,6 +197,11 @@ where
     }
 
     fn on_new_state<N: NodePrimitives>(&mut self, new_state: CanonStateNotification<N>) {
+        if !self.config.pre_cache_state {
+            self.pre_cached = None;
+            return
+        }
+
         let mut cached = CachedReads::default();
 
         // extract the state from the notification and put it into the cache
@@ -260,6 +269,8 @@ pub struct BasicPayloadJobGeneratorConfig {
     deadline: Duration,
     /// Maximum number of tasks to spawn for building a payload.
     max_payload_tasks: usize,
+    /// Whether to pre-cache changed state from canonical state notifications.
+    pre_cache_state: bool,
 }
 
 // === impl BasicPayloadJobGeneratorConfig ===
@@ -287,6 +298,15 @@ impl BasicPayloadJobGeneratorConfig {
         self.max_payload_tasks = max_payload_tasks;
         self
     }
+
+    /// Sets whether to pre-cache changed state from canonical state notifications.
+    ///
+    /// This keeps the parent block's state changes in memory so payload jobs building on top of it
+    /// can reuse those reads.
+    pub const fn pre_cache_state(mut self, pre_cache_state: bool) -> Self {
+        self.pre_cache_state = pre_cache_state;
+        self
+    }
 }
 
 impl Default for BasicPayloadJobGeneratorConfig {
@@ -296,6 +316,7 @@ impl Default for BasicPayloadJobGeneratorConfig {
             // 12s slot time
             deadline: SLOT_DURATION,
             max_payload_tasks: 3,
+            pre_cache_state: true,
         }
     }
 }
