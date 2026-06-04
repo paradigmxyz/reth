@@ -8,19 +8,35 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+use alloy_consensus::{
+    proofs::{calculate_ommers_root, calculate_transaction_root, calculate_withdrawals_root},
+    Block, BlockBody, Header, TxReceipt,
+};
+use alloy_primitives::{Bloom, U256};
 use alloy_rpc_types_engine::PayloadAttributes as EthPayloadAttributes;
 use reth_basic_payload_builder::{
-    BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder, PayloadConfig,
+    is_better_payload, BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder,
+    PayloadConfig,
 };
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_ethereum_primitives::TransactionSigned;
-use reth_evm_ethereum::EthEvmConfig;
-use reth_payload_builder::EthBuiltPayload;
+use reth_evm_ethereum::{
+    evm2_block_env_with_blob_params, evm2_spec,
+    execute_evm2_block_with_borrowed_state_provider_context, EthEvmConfig,
+    Evm2BlockExecutionContext, Evm2BlockSystemCalls,
+};
+use reth_payload_builder::{BlobSidecars, EthBuiltPayload};
 use reth_payload_builder_primitives::PayloadBuilderError;
+use reth_payload_primitives::PayloadAttributes as _;
+use reth_primitives_traits::RecoveredBlock;
+use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
     BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
     ValidPoolTransaction,
 };
+use reth_trie_common::KeccakKeyHasher;
 use std::sync::Arc;
+use tracing::{debug, trace};
 
 mod config;
 pub use config::*;
@@ -61,7 +77,9 @@ impl<Pool, Client, EvmConfig> EthereumPayloadBuilder<Pool, Client, EvmConfig> {
 impl<Pool, Client, EvmConfig> PayloadBuilder for EthereumPayloadBuilder<Pool, Client, EvmConfig>
 where
     EvmConfig: Clone + Send + Sync,
-    Client: Clone + Send + Sync,
+    Client: StateProviderFactory
+        + ChainSpecProvider<ChainSpec: EthereumHardforks + EthChainSpec<Header = Header>>
+        + Clone,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
     type Attributes = EthPayloadAttributes;
@@ -127,20 +145,170 @@ where
 pub fn default_ethereum_payload<EvmConfig, Client, Pool, F>(
     evm_config: EvmConfig,
     client: Client,
-    pool: Pool,
+    _pool: Pool,
     builder_config: EthereumBuilderConfig,
     args: BuildArguments<EthPayloadAttributes, EthBuiltPayload>,
     best_txs: F,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
     EvmConfig: Clone + Send + Sync,
-    Client: Clone + Send + Sync,
+    Client: StateProviderFactory
+        + ChainSpecProvider<ChainSpec: EthereumHardforks + EthChainSpec<Header = Header>>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
-    let _ = (evm_config, client, pool, builder_config, args, best_txs);
-    Err(PayloadBuilderError::other(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "ethereum payload building is unsupported while the legacy builder path is parked",
-    )))
+    let BuildArguments { cached_reads, execution_cache, trie_handle, config, cancel, best_payload } =
+        args;
+    let PayloadConfig { parent_header, attributes, payload_id } = config;
+    let _ = (evm_config, execution_cache, trie_handle);
+
+    if client.chain_spec().is_amsterdam_active_at_timestamp(attributes.timestamp()) {
+        return Err(PayloadBuilderError::other(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "Amsterdam payload building is unsupported by the evm2 pre-Amsterdam path",
+        )))
+    }
+
+    let state_provider = client.state_by_block_hash(parent_header.hash())?;
+    let chain_spec = client.chain_spec();
+    let gas_limit = builder_config
+        .gas_limit_with_target(parent_header.gas_limit, attributes.target_gas_limit());
+    let base_fee = chain_spec
+        .next_block_base_fee(parent_header.as_ref(), attributes.timestamp())
+        .unwrap_or_default();
+    let blob_params = chain_spec.blob_params_at_timestamp(attributes.timestamp());
+    let excess_blob_gas = blob_params.map(|params| {
+        params.next_block_excess_blob_gas_osaka(
+            parent_header.excess_blob_gas.unwrap_or(0),
+            parent_header.blob_gas_used.unwrap_or(0),
+            parent_header.base_fee_per_gas.unwrap_or(0),
+        )
+    });
+    let block_env_header = Header {
+        parent_hash: parent_header.hash(),
+        beneficiary: attributes.suggested_fee_recipient,
+        timestamp: attributes.timestamp(),
+        number: parent_header.number + 1,
+        gas_limit,
+        base_fee_per_gas: Some(base_fee),
+        mix_hash: attributes.prev_randao,
+        parent_beacon_block_root: attributes.parent_beacon_block_root(),
+        excess_blob_gas,
+        withdrawals_root: attributes
+            .withdrawals
+            .as_ref()
+            .map(|withdrawals| calculate_withdrawals_root(withdrawals.as_slice())),
+        slot_number: attributes.slot_number(),
+        ..Default::default()
+    };
+
+    debug!(
+        target: "payload_builder",
+        id = %payload_id,
+        parent_header = ?parent_header.hash(),
+        parent_number = parent_header.number,
+        "building evm2 payload"
+    );
+
+    let mut best_txs = best_txs(BestTransactionsAttributes::new(
+        base_fee,
+        blob_params.and_then(|params| excess_blob_gas.map(|gas| params.calc_blob_fee(gas) as u64)),
+    ));
+    let mut transactions = Vec::new();
+    let mut senders = Vec::new();
+    let mut cumulative_gas_limit = 0u64;
+
+    while let Some(pool_tx) = best_txs.next() {
+        if cancel.is_cancelled() {
+            return Ok(BuildOutcome::Cancelled)
+        }
+
+        let tx_gas_limit = pool_tx.gas_limit();
+        if cumulative_gas_limit.saturating_add(tx_gas_limit) > gas_limit {
+            trace!(
+                target: "payload_builder",
+                ?payload_id,
+                tx_hash = ?pool_tx.hash(),
+                tx_gas_limit,
+                gas_limit,
+                cumulative_gas_limit,
+                "skipping transaction because it would exceed the block gas limit"
+            );
+            continue
+        }
+
+        let recovered = pool_tx.to_consensus();
+        let (tx, sender) = recovered.into_parts();
+        transactions.push(tx);
+        senders.push(sender);
+        cumulative_gas_limit += tx_gas_limit;
+    }
+
+    let body = BlockBody {
+        transactions,
+        ommers: Vec::new(),
+        withdrawals: attributes.withdrawals.clone().map(Into::into),
+    };
+    let execution_header = Header {
+        transactions_root: calculate_transaction_root(&body.transactions),
+        ommers_hash: calculate_ommers_root(&body.ommers),
+        withdrawals_root: body
+            .withdrawals
+            .as_ref()
+            .map(|withdrawals| calculate_withdrawals_root(withdrawals.as_slice())),
+        ..block_env_header.clone()
+    };
+    let execution_block = RecoveredBlock::new_unhashed(
+        Block { header: execution_header, body: body.clone() },
+        senders.clone(),
+    );
+    let output = execute_evm2_block_with_borrowed_state_provider_context(
+        evm2_spec(chain_spec.as_ref(), execution_block.header()),
+        evm2_block_env_with_blob_params(execution_block.header(), blob_params),
+        state_provider.as_ref(),
+        execution_block.number,
+        execution_block.senders_iter().zip(execution_block.body().transactions.iter()).map(
+            |(sender, tx)| {
+                alloy_consensus::transaction::Recovered::new_unchecked(tx.clone(), *sender)
+            },
+        ),
+        Evm2BlockExecutionContext {
+            system_calls: Some(Evm2BlockSystemCalls {
+                parent_hash: parent_header.hash(),
+                parent_beacon_block_root: attributes.parent_beacon_block_root(),
+            }),
+            ommers: Some(&body.ommers),
+            withdrawals: body.withdrawals.as_ref().map(|withdrawals| withdrawals.as_slice()),
+        },
+    )
+    .map_err(PayloadBuilderError::evm)?;
+
+    let total_fees = U256::ZERO;
+    if !is_better_payload(best_payload.as_ref(), total_fees) {
+        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
+    }
+
+    let state_root =
+        state_provider.state_root(output.state.hashed_post_state::<KeccakKeyHasher>())?;
+    let receipts_root =
+        reth_ethereum_primitives::calculate_receipt_root_no_memo(&output.result.receipts);
+    let logs_bloom =
+        output.result.receipts.iter().fold(Bloom::ZERO, |bloom, receipt| bloom | receipt.bloom());
+
+    let header = Header {
+        state_root,
+        receipts_root,
+        logs_bloom,
+        gas_used: output.result.gas_used,
+        blob_gas_used: blob_params.map(|_| output.result.blob_gas_used),
+        ..execution_block.header().clone()
+    };
+    let block = RecoveredBlock::new_unhashed(Block { header, body }, senders);
+    let requests = chain_spec
+        .is_prague_active_at_timestamp(attributes.timestamp())
+        .then_some(output.result.requests);
+    let payload = EthBuiltPayload::new(Arc::new(block), total_fees, requests, None)
+        .with_sidecars(BlobSidecars::Empty);
+
+    Ok(BuildOutcome::Better { payload, cached_reads })
 }

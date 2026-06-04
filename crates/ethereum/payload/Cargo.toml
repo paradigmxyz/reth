@@ -18,10 +18,13 @@ reth-primitives-traits.workspace = true
 reth-transaction-pool.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-builder-primitives.workspace = true
+reth-payload-primitives.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-evm-ethereum = { workspace = true, features = ["std"] }
 reth-chainspec.workspace = true
 reth-payload-validator.workspace = true
+reth-storage-api.workspace = true
+reth-trie-common.workspace = true
 
 # ethereum
 alloy-rpc-types-engine.workspace = true
@@ -30,3 +33,5 @@ alloy-rpc-types-engine.workspace = true
 alloy-eips.workspace = true
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
+
+tracing.workspace = true
