@@ -252,7 +252,7 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Evm2CachedPrecompiles")
-            .field("precompiles", &self.precompiles)
+            .field("precompile_count", &self.precompiles.as_map().len())
             .field("caches", &self.caches)
             .field("spec_id", &self.spec_id)
             .field("metrics", &self.metrics.as_ref().map(|_| "<metrics>"))
