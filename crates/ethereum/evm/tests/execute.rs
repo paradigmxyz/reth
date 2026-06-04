@@ -8,12 +8,11 @@ use alloy_eips::{
     eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     eip7685::EMPTY_REQUESTS_HASH,
 };
-use alloy_evm::block::BlockValidationError;
 use alloy_primitives::{b256, fixed_bytes, keccak256, Bytes, TxKind, B256, U256};
 use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, ForkCondition, MAINNET};
 use reth_ethereum_primitives::{Block, BlockBody, Transaction};
 use reth_evm::{
-    execute::{BasicBlockExecutor, Executor},
+    execute::{BasicBlockExecutor, BlockValidationError, Executor},
     ConfigureEvm,
 };
 use reth_evm_ethereum::EthEvmConfig;
