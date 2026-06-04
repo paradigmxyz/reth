@@ -648,7 +648,10 @@ where
             .get(&address)
             .and_then(|account| {
                 account.account.as_ref().map(|plain_account| {
-                    HashedStorage::from_plain_storage(account.status, plain_account.storage.iter())
+                    HashedStorage::from_plain_storage(
+                        account.status.was_destroyed(),
+                        plain_account.storage.iter(),
+                    )
                 })
             })
             .unwrap_or_default();

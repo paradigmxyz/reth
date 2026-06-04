@@ -42,9 +42,11 @@ use reth_stages::{
 };
 use reth_stages_api::{Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
-use reth_storage_api::{StorageChangeSetReader, StorageSettings, StorageSettingsCache};
+use reth_storage_api::{
+    StateWriteConfig, StorageChangeSetReader, StorageSettings, StorageSettingsCache,
+};
 use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
-use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
+use reth_trie::{KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 use tokio::sync::watch;
@@ -952,7 +954,7 @@ fn execute_and_commit_block(
     };
 
     let gas_used = output.gas_used;
-    let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
+    let hashed_state = output.state.hashed_post_state::<KeccakKeyHasher>();
     type TestStateRoot<'a, TX, A> = StateRoot<
         reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
         reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
@@ -989,8 +991,21 @@ fn execute_and_commit_block(
         BlockBody { transactions, ommers: Vec::new(), withdrawals: None },
     );
 
-    let plain_state = output.state.to_plain_state(OriginalValuesKnown::Yes);
-    provider.write_state_changes(plain_state)?;
+    let execution_outcome = reth_execution_types::ExecutionOutcome::new(
+        output.state.clone(),
+        vec![],
+        block_num,
+        vec![],
+    );
+    provider.write_state(
+        &execution_outcome,
+        OriginalValuesKnown::Yes,
+        StateWriteConfig {
+            write_receipts: false,
+            write_account_changesets: false,
+            write_storage_changesets: false,
+        },
+    )?;
     provider.write_hashed_state(&hashed_state.into_sorted())?;
     provider.commit()?;
 

@@ -36,10 +36,11 @@ use reth_stages::sets::DefaultStages;
 use reth_stages_api::{Pipeline, StageId};
 use reth_static_file::StaticFileProducer;
 use reth_storage_api::{
-    ChangeSetReader, StateProvider, StorageChangeSetReader, StorageSettings, StorageSettingsCache,
+    ChangeSetReader, StateProvider, StateWriteConfig, StorageChangeSetReader, StorageSettings,
+    StorageSettingsCache,
 };
 use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
-use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
+use reth_trie::{KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -346,8 +347,7 @@ async fn run_pipeline_forward_and_unwind(
         let gas_used = output.gas_used;
 
         // Convert bundle state to hashed post state and compute state root
-        let hashed_state =
-            HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
+        let hashed_state = output.state.hashed_post_state::<KeccakKeyHasher>();
         type TestStateRoot<'a, TX, A> = StateRoot<
             reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
             reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
@@ -382,8 +382,21 @@ async fn run_pipeline_forward_and_unwind(
         );
 
         // Write the plain state to database so subsequent blocks build on it
-        let plain_state = output.state.to_plain_state(OriginalValuesKnown::Yes);
-        provider.write_state_changes(plain_state)?;
+        let execution_outcome = reth_execution_types::ExecutionOutcome::new(
+            output.state.clone(),
+            vec![],
+            block_num,
+            vec![],
+        );
+        provider.write_state(
+            &execution_outcome,
+            OriginalValuesKnown::Yes,
+            StateWriteConfig {
+                write_receipts: false,
+                write_account_changesets: false,
+                write_storage_changesets: false,
+            },
+        )?;
         provider.write_hashed_state(&hashed_state.into_sorted())?;
         provider.commit()?;
 
