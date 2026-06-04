@@ -33,6 +33,10 @@ use reth_primitives_traits::{
 };
 use revm::{database::State, primitives::hardfork::SpecId};
 
+/// Cached database adapters for payload building.
+pub mod cached;
+/// Cancellation markers for EVM execution work.
+pub mod cancelled;
 /// Database adapters for EVM execution.
 pub mod database;
 pub mod either;
