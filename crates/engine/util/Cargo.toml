@@ -19,7 +19,6 @@ reth-fs-util.workspace = true
 reth-engine-primitives = { workspace = true, features = ["std"] }
 reth-engine-tree.workspace = true
 reth-evm.workspace = true
-reth-revm.workspace = true
 reth-storage-api.workspace = true
 reth-payload-primitives.workspace = true
 
