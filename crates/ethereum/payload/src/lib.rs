@@ -141,6 +141,6 @@ where
     let _ = (evm_config, client, pool, builder_config, args, best_txs);
     Err(PayloadBuilderError::other(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
-        "ethereum payload building is unsupported while the revm builder path is excised",
+        "ethereum payload building is unsupported while the legacy builder path is parked",
     )))
 }

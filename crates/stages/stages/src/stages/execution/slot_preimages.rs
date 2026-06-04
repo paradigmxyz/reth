@@ -135,7 +135,7 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     state: &mut ExecutionOutcome<R>,
 ) -> Result<(), StageError> {
     // Collect preimage entries from bundle state and reverts.
-    // StorageKey in revm is U256, representing a plain EVM slot index.
+    // Storage keys are represented as U256 plain EVM slot indices.
     let mut preimage_entries = Vec::new();
     let mut seen_hashes = HashSet::new();
     for storage in state.bundle.storage().values() {

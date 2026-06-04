@@ -39,7 +39,7 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                 "block access list construction is unsupported by the evm2 execution path",
             )))
 
-            // The previous revm-backed live construction path is intentionally kept out of the
+            // The previous live construction path is intentionally kept out of the
             // compiled evm2 path. Restore this block when BAL execution is wired through evm2:
             //
             // self.spawn_blocking_io(move |eth_api| {
@@ -108,7 +108,7 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                 "raw block access lists are unsupported by the evm2 execution path",
             )))
 
-            // The previous revm-backed cached/raw BAL path is intentionally kept out of the
+            // The previous cached/raw BAL path is intentionally kept out of the
             // compiled evm2 path. Restore this block when BAL execution is wired through evm2:
             //
             // Ok(self

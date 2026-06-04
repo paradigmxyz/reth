@@ -77,7 +77,7 @@ where
         Self { inner }
     }
 
-    // The previous revm-backed validation cache kept cached reads here.
+    // The previous validation cache kept cached reads here.
 }
 
 #[cfg(any())]
