@@ -71,7 +71,10 @@ mod build;
 pub use build::EthBlockAssembler;
 
 mod evm2_convert;
-pub use evm2_convert::{evm2_recovered_tx, evm2_recovered_tx_ref};
+pub use evm2_convert::{
+    evm2_block_env, evm2_recovered_tx, evm2_recovered_tx_ref, evm2_spec,
+    evm2_spec_by_timestamp_and_block_number,
+};
 
 mod receipt;
 pub use receipt::RethReceiptBuilder;
