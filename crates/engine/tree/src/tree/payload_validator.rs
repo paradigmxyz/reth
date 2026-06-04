@@ -698,7 +698,7 @@ where
 
         // Create ExecutionOutcome early so we can terminate caching before validation and state
         // root computation. Using Arc allows sharing with both the caching task and the deferred
-        // trie task without cloning the expensive BundleState.
+        // trie task without cloning the expensive bundle state.
         let output = Arc::new(output);
 
         // Terminate caching task early since execution is complete and caching is no longer
@@ -2037,7 +2037,7 @@ where
         let code_read = provider_stats.total_code_fetches();
         let code_bytes_read = provider_stats.total_code_fetched_bytes();
 
-        // Write stats from BundleState (final state changes)
+        // Write stats from the final state changes.
         let accounts_changed = output.state.accounts().len();
         let accounts_deleted = output
             .state
