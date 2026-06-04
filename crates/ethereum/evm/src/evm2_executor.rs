@@ -521,7 +521,12 @@ mod tests {
     use super::*;
     use alloc::collections::BTreeMap;
     use alloy_consensus::{SignableTransaction, TxLegacy};
-    use alloy_eips::{eip4895::Withdrawal, eip7002::WITHDRAWAL_REQUEST_PREDEPLOY_CODE};
+    use alloy_eips::{
+        eip2935::{HISTORY_SERVE_WINDOW, HISTORY_STORAGE_CODE},
+        eip4788::BEACON_ROOTS_CODE,
+        eip4895::Withdrawal,
+        eip7002::WITHDRAWAL_REQUEST_PREDEPLOY_CODE,
+    };
     use alloy_primitives::{address, Address, Bytes, Signature, TxKind, B256, U256};
     use core::convert::Infallible;
     use evm2::{
@@ -533,6 +538,7 @@ mod tests {
     #[derive(Default)]
     struct TestDatabase {
         accounts: BTreeMap<Address, AccountInfo>,
+        storage: BTreeMap<(Address, Word), Word>,
     }
 
     impl Database for TestDatabase {
@@ -546,8 +552,8 @@ mod tests {
             Ok(Bytecode::default())
         }
 
-        fn get_storage(&mut self, _address: &Address, _key: &Word) -> Result<Word, Self::Error> {
-            Ok(Word::ZERO)
+        fn get_storage(&mut self, address: &Address, key: &Word) -> Result<Word, Self::Error> {
+            Ok(self.storage.get(&(*address, *key)).copied().unwrap_or_default())
         }
 
         fn get_block_hash(&mut self, _number: &Word) -> Result<Option<B256>, Self::Error> {
@@ -705,6 +711,80 @@ mod tests {
             err,
             Evm2ExecutionError::CancunGenesisParentBeaconBlockRootNotZero(actual) if actual == root
         ));
+    }
+
+    #[test]
+    fn writes_beacon_root_contract_storage_with_evm2() {
+        let mut database = TestDatabase::default();
+        database.accounts.insert(
+            BEACON_ROOTS_ADDRESS,
+            AccountInfo::default()
+                .with_nonce(1)
+                .with_code(Bytecode::new_raw(BEACON_ROOTS_CODE.clone())),
+        );
+
+        let timestamp = U256::from(1);
+        let parent_beacon_block_root = B256::with_last_byte(0x69);
+        let output = execute_evm2_block_with_context(
+            SpecId::CANCUN,
+            BlockEnv { number: U256::from(1), timestamp, ..Default::default() },
+            database,
+            1,
+            core::iter::empty::<Recovered<TransactionSigned>>(),
+            Evm2BlockExecutionContext {
+                system_calls: Some(Evm2BlockSystemCalls {
+                    parent_hash: B256::ZERO,
+                    parent_beacon_block_root: Some(parent_beacon_block_root),
+                }),
+                ommers: None,
+                withdrawals: None,
+            },
+        )
+        .expect("beacon roots system call succeeds");
+
+        let storage = output.state.storage().get(&BEACON_ROOTS_ADDRESS).unwrap();
+        let timestamp_index = timestamp % U256::from(HISTORY_SERVE_WINDOW);
+        let root_index = timestamp_index + U256::from(HISTORY_SERVE_WINDOW);
+        assert_eq!(storage.slots.get(&timestamp_index).unwrap().current, timestamp);
+        assert_eq!(
+            storage.slots.get(&root_index).unwrap().current,
+            U256::from_be_bytes(parent_beacon_block_root.0)
+        );
+    }
+
+    #[test]
+    fn writes_parent_hash_history_storage_with_evm2() {
+        let mut database = TestDatabase::default();
+        database.accounts.insert(
+            HISTORY_STORAGE_ADDRESS,
+            AccountInfo::default()
+                .with_nonce(1)
+                .with_code(Bytecode::new_raw(HISTORY_STORAGE_CODE.clone())),
+        );
+
+        let parent_hash = B256::with_last_byte(0x42);
+        let output = execute_evm2_block_with_context(
+            SpecId::PRAGUE,
+            BlockEnv { number: U256::from(1), ..Default::default() },
+            database,
+            1,
+            core::iter::empty::<Recovered<TransactionSigned>>(),
+            Evm2BlockExecutionContext {
+                system_calls: Some(Evm2BlockSystemCalls {
+                    parent_hash,
+                    parent_beacon_block_root: Some(B256::ZERO),
+                }),
+                ommers: None,
+                withdrawals: None,
+            },
+        )
+        .expect("history storage system call succeeds");
+
+        let storage = output.state.storage().get(&HISTORY_STORAGE_ADDRESS).unwrap();
+        assert_eq!(
+            storage.slots.get(&U256::ZERO).unwrap().current,
+            U256::from_be_bytes(parent_hash.0)
+        );
     }
 
     #[test]
