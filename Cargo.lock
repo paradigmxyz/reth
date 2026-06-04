@@ -3334,7 +3334,6 @@ dependencies = [
  "reth-evm-ethereum",
  "reth-primitives-traits",
  "reth-provider",
- "reth-revm",
  "reth-tracing",
  "reth-trie",
  "reth-trie-db",
@@ -7788,7 +7787,6 @@ dependencies = [
  "reth-payload-primitives",
  "reth-primitives-traits",
  "reth-provider",
- "reth-revm",
  "reth-rpc-api",
  "reth-rpc-engine-api",
  "reth-storage-errors",
@@ -9838,23 +9836,6 @@ dependencies = [
  "thiserror 2.0.18",
  "toml",
  "tracing",
-]
-
-[[package]]
-name = "reth-revm"
-version = "2.3.0"
-dependencies = [
- "alloy-consensus",
- "alloy-primitives",
- "alloy-rlp",
- "alloy-rpc-types-debug",
- "reth-ethereum-forks",
- "reth-execution-types",
- "reth-primitives-traits",
- "reth-storage-api",
- "reth-storage-errors",
- "reth-trie",
- "revm",
 ]
 
 [[package]]

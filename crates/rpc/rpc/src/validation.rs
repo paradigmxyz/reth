@@ -77,7 +77,7 @@ where
         Self { inner }
     }
 
-    // The previous revm-backed validation cache used `reth_revm::cached::CachedReads` here.
+    // The previous revm-backed validation cache kept cached reads here.
 }
 
 #[cfg(any())]

@@ -11,9 +11,10 @@ use reth_errors::ProviderError;
 #[cfg(any())]
 use reth_evm::{ConfigureEvm, EvmErrorFor, HaltReasonFor};
 #[cfg(any())]
-use reth_revm::db::bal::EvmDatabaseError;
-#[cfg(any())]
-use revm::{context::result::ExecutionResult, context_interface::result::HaltReason};
+use revm::{
+    context::result::ExecutionResult, context_interface::result::HaltReason,
+    database::bal::EvmDatabaseError,
+};
 
 use super::RpcInvalidTransactionError;
 

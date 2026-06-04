@@ -32,7 +32,6 @@ reth-rpc-engine-api.workspace = true
 reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
 reth-ethereum-forks.workspace = true
-reth-revm.workspace = true
 reth-consensus.workspace = true
 reth-chain-state.workspace = true
 reth-errors.workspace = true
@@ -73,7 +72,8 @@ default = [
     "min-trace-logs",
     "otlp",
     "otlp-logs",
-    "reth-revm/portable",
+    "revm/optional_no_base_fee",
+    "revm/portable",
     "js-tracer",
 ]
 
