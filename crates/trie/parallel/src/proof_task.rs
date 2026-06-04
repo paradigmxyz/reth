@@ -431,6 +431,7 @@ where
         HC: HashedStorageCursor<Value = U256>,
     {
         let StorageProofInput { hashed_address, mut targets } = input;
+        let needs_root = targets.is_empty() || targets.iter().any(|target| target.min_len == 0);
 
         let span = debug_span!(
             target: "trie::proof_task",
@@ -449,7 +450,7 @@ where
             calculator.storage_proof(hashed_address, &mut targets)?
         };
 
-        let root = calculator.compute_root_hash(&proof)?;
+        let root = if needs_root { calculator.compute_root_hash(&proof)? } else { None };
 
         trace!(
             target: "trie::proof_task",
