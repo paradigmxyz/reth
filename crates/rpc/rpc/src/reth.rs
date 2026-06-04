@@ -147,38 +147,10 @@ where
         block_id: BlockId,
         block_count: u64,
     ) -> EthResult<Option<ExecutionOutcome<N::Receipt>>> {
-        let Some(start_block) = self.provider().block_number_for_id(block_id)? else {
-            return Ok(None)
-        };
-
-        if start_block == 0 {
-            return Ok(Some(ExecutionOutcome::default()))
-        }
-
-        let state_provider = self.provider().history_by_block_number(start_block - 1)?;
-        let db = reth_evm::database::StateProviderDatabase::new(&state_provider);
-
-        let mut blocks = Vec::with_capacity(block_count as usize);
-        for block_number in start_block..start_block + block_count {
-            let Some(block) = self
-                .provider()
-                .recovered_block(block_number.into(), TransactionVariant::WithHash)?
-            else {
-                if block_number == start_block {
-                    return Ok(None)
-                }
-                break;
-            };
-            blocks.push(block);
-        }
-
-        let outcome = self.evm_config().executor(db).execute_batch(&blocks).map_err(
-            |e: reth_evm::execute::BlockExecutionError| {
-                EthApiError::Internal(reth_errors::RethError::Other(e.into()))
-            },
-        )?;
-
-        Ok(Some(outcome))
+        let _ = (block_id, block_count);
+        Err(EthApiError::Unsupported(
+            "reth_getBlockExecutionOutcome is unsupported by the evm2 execution path",
+        ))
     }
 }
 

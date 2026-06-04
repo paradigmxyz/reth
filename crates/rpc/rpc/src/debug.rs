@@ -780,43 +780,10 @@ where
 
     /// Executes a block and returns the state root after each transaction.
     pub async fn intermediate_roots(&self, block_hash: B256) -> Result<Vec<B256>, Eth::Error> {
-        let block = self
-            .eth_api()
-            .recovered_block(block_hash.into())
-            .await?
-            .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
-        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
-
-        self.eth_api()
-            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
-                // Enable transition tracking so that merge_transitions works
-                db.transition_state = Some(Default::default());
-
-                eth_api.apply_pre_execution_changes(&block, &mut db)?;
-
-                let mut roots = Vec::with_capacity(block.body().transactions().len());
-                for tx in block.transactions_recovered() {
-                    let tx_env = eth_api.evm_config().tx_env(tx);
-                    {
-                        let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env.clone());
-                        evm.transact_commit(tx_env).map_err(Eth::Error::from_evm_err)?;
-                    }
-                    // Merge transitions into cumulative bundle_state
-                    db.merge_transitions(BundleRetention::PlainState);
-                    // Compute state root from the accumulated state changes
-                    let bundle_state = reth_evm::execute::revm_bundle_to_evm2(
-                        db.bundle_state.clone(),
-                        block.number(),
-                    );
-                    let hashed_state = db.database.hashed_post_state(&bundle_state);
-                    let root =
-                        db.database.state_root(hashed_state).map_err(Eth::Error::from_eth_err)?;
-                    roots.push(root);
-                }
-
-                Ok(roots)
-            })
-            .await
+        let _ = block_hash;
+        Err(Eth::Error::from_eth_err(EthApiError::Unsupported(
+            "debug intermediate roots are unsupported by the evm2 execution path",
+        )))
     }
 }
 
