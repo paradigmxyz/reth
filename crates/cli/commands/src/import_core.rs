@@ -10,7 +10,7 @@ use reth_downloaders::{
     file_client::{ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_evm::ConfigureEvm;
+use reth_evm::{ConfigureEvm, ConfigureEvm2BlockExecutor};
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
@@ -86,7 +86,7 @@ pub async fn import_blocks_from_file<N>(
     import_config: ImportConfig,
     provider_factory: ProviderFactory<N>,
     config: &Config,
-    executor: impl ConfigureEvm<Primitives = N::Primitives> + 'static,
+    executor: impl ConfigureEvm<Primitives = N::Primitives> + ConfigureEvm2BlockExecutor + 'static,
     consensus: Arc<impl FullConsensus<N::Primitives> + 'static>,
     runtime: reth_tasks::Runtime,
 ) -> eyre::Result<ImportResult>
@@ -293,7 +293,7 @@ pub fn build_import_pipeline_impl<N, C, E>(
 where
     N: ProviderNodeTypes,
     C: FullConsensus<N::Primitives> + 'static,
-    E: ConfigureEvm<Primitives = N::Primitives> + 'static,
+    E: ConfigureEvm<Primitives = N::Primitives> + ConfigureEvm2BlockExecutor + 'static,
 {
     if !file_client.has_canonical_blocks() {
         eyre::bail!("unable to import non canonical blocks");

@@ -12,7 +12,7 @@ use reth_db::{init_db, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis_with_settings;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_eth_wire::NetPrimitivesFor;
-use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
+use reth_evm::{noop::NoopEvmConfig, ConfigureEvm, ConfigureEvm2BlockExecutor};
 use reth_network::NetworkEventListenerProvider;
 use reth_node_api::FullNodeTypesAdapter;
 use reth_node_builder::{
@@ -306,7 +306,7 @@ type FullTypesAdapter<T> = FullNodeTypesAdapter<
 /// Helper trait with a common set of requirements for the
 /// [`NodeTypes`] in CLI.
 pub trait CliNodeTypes: Node<FullTypesAdapter<Self>> + NodeTypesForProvider {
-    type Evm: ConfigureEvm<Primitives = Self::Primitives>;
+    type Evm: ConfigureEvm<Primitives = Self::Primitives> + ConfigureEvm2BlockExecutor;
     type NetworkPrimitives: NetPrimitivesFor<Self::Primitives>;
 }
 

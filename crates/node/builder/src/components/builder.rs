@@ -9,6 +9,7 @@ use crate::{
 };
 use reth_chainspec::EthChainSpec;
 use reth_consensus::{noop::NoopConsensus, FullConsensus};
+use reth_evm::ConfigureEvm2BlockExecutor;
 use reth_network::{types::NetPrimitivesFor, EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::{noop::NoopNetwork, FullNetwork};
 use reth_node_api::{BlockTy, BodyTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy};
@@ -450,7 +451,8 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
-    EVM: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + 'static,
+    EVM:
+        ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + ConfigureEvm2BlockExecutor + 'static,
     Cons: FullConsensus<PrimitivesTy<Node::Types>> + Clone + Unpin + 'static,
 {
     type Components = Components<Node, Net, Pool, EVM, Cons>;
@@ -552,7 +554,7 @@ impl<N, Pool, EVM> PayloadServiceBuilder<N, Pool, EVM> for NoopPayloadBuilder
 where
     N: FullNodeTypes,
     Pool: TransactionPool,
-    EVM: ConfigureEvm<Primitives = PrimitivesTy<N::Types>> + 'static,
+    EVM: ConfigureEvm<Primitives = PrimitivesTy<N::Types>> + ConfigureEvm2BlockExecutor + 'static,
 {
     async fn spawn_payload_builder_service(
         self,
