@@ -12,6 +12,10 @@ use evm2::{
 };
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_execution_types::BlockExecutionOutput;
+#[cfg(feature = "std")]
+use reth_storage_api::{Evm2StateProviderDatabase, StateProvider};
+#[cfg(feature = "std")]
+use reth_storage_errors::provider::ProviderError;
 
 /// Error returned by evm2-backed Ethereum execution.
 #[derive(Debug)]
@@ -77,6 +81,28 @@ where
     }
 
     Ok(RethReceiptBuilder.build_evm2_block_output(block_number, results))
+}
+
+/// Executes a block worth of recovered Ethereum transactions with an evm2 database adapter backed
+/// by a Reth state provider.
+#[cfg(feature = "std")]
+pub fn execute_evm2_block_with_state_provider<DB>(
+    spec_id: SpecId,
+    block_env: BlockEnv,
+    state_provider: DB,
+    block_number: u64,
+    transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
+) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<ProviderError>>
+where
+    DB: StateProvider + Send + 'static,
+{
+    execute_evm2_block(
+        spec_id,
+        block_env,
+        Evm2StateProviderDatabase::new(state_provider),
+        block_number,
+        transactions,
+    )
 }
 
 fn map_handler_error<DB>(
