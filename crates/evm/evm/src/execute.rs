@@ -509,6 +509,7 @@ pub trait BlockExecutorFactory: 'static {
     /// The executor type this factory produces.
     type Executor<'a, DB: StateDB, I: Inspector<<Self::EvmFactory as EvmFactory>::Context<DB>>>: BlockExecutor<
         Evm = <Self::EvmFactory as EvmFactory>::Evm<DB, I>,
+        DB = DB,
         Transaction = Self::Transaction,
         Receipt = Self::Receipt,
         Result = Self::TxExecutionResult,
@@ -1136,6 +1137,7 @@ where
             Spec = <F::EvmFactory as EvmFactory>::Spec,
             HaltReason = <F::EvmFactory as EvmFactory>::HaltReason,
             BlockEnv = <F::EvmFactory as EvmFactory>::BlockEnv,
+            DB = &'a mut State<DB>,
         >,
         DB = &'a mut State<DB>,
         Transaction = N::SignedTx,
