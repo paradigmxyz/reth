@@ -614,7 +614,7 @@ where
         mut changeset: Vec<AccountBeforeTx>,
     ) -> ProviderResult<()> {
         // First sort the changesets
-        changeset.par_sort_by_key(|a| a.address);
+        changeset.par_sort_unstable_by_key(|a| a.address);
         match self {
             Self::Database(cursor) => {
                 for change in changeset {
@@ -643,7 +643,7 @@ where
         block_number: BlockNumber,
         mut changeset: Vec<StorageBeforeTx>,
     ) -> ProviderResult<()> {
-        changeset.par_sort_by_key(|change| (change.address, change.key));
+        changeset.par_sort_unstable_by_key(|change| (change.address, change.key));
 
         match self {
             Self::Database(cursor) => {
