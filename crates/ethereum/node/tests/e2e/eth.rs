@@ -19,6 +19,7 @@ use reth_node_core::{
     version::{version_metadata, CLIENT_CODE},
 };
 use reth_node_ethereum::{engine_ssz_proxy::EngineSszProxyLayer, EthereumAddOns, EthereumNode};
+use reth_payload_builder::PayloadStore;
 use reth_provider::BlockNumReader;
 use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_layer::secret_to_bearer_header;
@@ -323,7 +324,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
     let envelope = node
         .testing_build_block_v1(TestingBuildBlockRequestV1 {
             parent_block_hash: genesis_hash,
-            payload_attributes,
+            payload_attributes: payload_attributes.clone(),
             transactions: vec![raw_tx],
             extra_data: None,
         })
