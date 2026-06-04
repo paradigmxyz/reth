@@ -1,7 +1,9 @@
-use crate::{execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor, TxEnvFor};
+use crate::{
+    execute::{ExecutableTxFor, ExecutableTxParts, RecoveredTx},
+    ConfigureEvm, EvmEnvFor, ExecutionCtxFor, TxEnvFor,
+};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_consensus::transaction::{Either, Recovered};
-use alloy_evm::{block::ExecutableTxParts, RecoveredTx};
 use rayon::prelude::*;
 use reth_execution_types::BlockExecutionOutput;
 use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, RecoveredBlock, TxTy};
