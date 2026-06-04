@@ -31,13 +31,13 @@ use reth_evm::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
         ExecutableTx, GasOutput, InternalBlockExecutionError,
     },
-    context::{Block as _, TxEnv},
+    context::{Block as _, BlockEnv, EVMError, HaltReason, TxEnv},
     database::DatabaseCommit,
     eth::EthBlockExecutionCtx,
     evm2::{Evm2RethBlockExecutor, Evm2TxExecutionResult, RethEvm2ReceiptBuilder},
     hardfork::SpecId,
     precompiles::PrecompilesMap,
-    EthEvm, EthEvmFactory,
+    EthEvm, EthEvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
 use std::fmt::Display;
 
@@ -190,7 +190,15 @@ impl<DB, I> BlockExecutor for CustomBlockExecutor<'_, DB, I>
 where
     DB: StateDB,
     I: InspectorFor<CustomEvmConfig, DB>,
-    EthEvm<DB, I, PrecompilesMap>: Evm<DB = DB, Tx = TxEnv>,
+    EthEvm<DB, I, PrecompilesMap>: Evm<
+        DB = DB,
+        Tx = TxEnv,
+        HaltReason = HaltReason,
+        Error = EVMError<DB::Error>,
+        Spec = SpecId,
+        BlockEnv = BlockEnv,
+    >,
+    TxEnv: FromRecoveredTx<TransactionSigned> + FromTxWithEncoded<TransactionSigned>,
 {
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
