@@ -9017,6 +9017,7 @@ dependencies = [
  "alloy-primitives",
  "auto_impl",
  "derive_more",
+ "evm2",
  "futures-util",
  "metrics",
  "rayon",

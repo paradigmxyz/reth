@@ -10,12 +10,19 @@ use alloy_evm::{
     block::{CommitChanges, ExecutableTxParts},
     Evm, EvmEnv, EvmFactory, RecoveredTx, ToTxEnv,
 };
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{map::AddressMap, Address, B256};
+use evm2::{
+    bytecode::Bytecode,
+    evm::{AccountInfo, Tracked},
+};
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
-use reth_execution_types::BlockExecutionResult;
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
+use reth_execution_types::{
+    BlockExecutionResult, Evm2BlockReverts, Evm2BundleState, Evm2StorageChangeSet,
+    Evm2StorageReverts,
+};
 use reth_primitives_traits::{
     Block, HeaderTy, NodePrimitives, ReceiptTy, Recovered, RecoveredBlock, SealedHeader, TxTy,
 };
@@ -23,7 +30,10 @@ use reth_storage_api::StateProvider;
 pub use reth_storage_errors::provider::ProviderError;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::{
-    database::{states::bundle_state::BundleRetention, BundleState, State},
+    database::{
+        states::{bundle_state::BundleRetention, reverts::AccountInfoRevert, RevertToSlot},
+        BundleState, State,
+    },
     state::bal::Bal,
 };
 
@@ -65,7 +75,10 @@ pub trait Executor<DB: Database>: Sized {
     {
         let result = self.execute_one(block)?;
         let mut state = self.into_state();
-        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
+        Ok(BlockExecutionOutput {
+            state: revm_bundle_to_evm2(state.take_bundle(), block.header().number()),
+            result,
+        })
     }
 
     /// Executes multiple inputs in the batch, and returns an aggregated [`ExecutionOutcome`].
@@ -89,7 +102,7 @@ pub trait Executor<DB: Database>: Sized {
 
         Ok(ExecutionOutcome::from_blocks(
             first_block.unwrap_or_default(),
-            self.into_state().take_bundle(),
+            revm_bundle_to_evm2(self.into_state().take_bundle(), first_block.unwrap_or_default()),
             results,
         ))
     }
@@ -107,7 +120,10 @@ pub trait Executor<DB: Database>: Sized {
         let result = self.execute_one(block)?;
         let mut state = self.into_state();
         f(&state);
-        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
+        Ok(BlockExecutionOutput {
+            state: revm_bundle_to_evm2(state.take_bundle(), block.header().number()),
+            result,
+        })
     }
 
     /// Executes the EVM with the given input and accepts a state closure that is always invoked
@@ -124,7 +140,10 @@ pub trait Executor<DB: Database>: Sized {
         let mut state = self.into_state();
         f(&state);
 
-        Ok(BlockExecutionOutput { state: state.take_bundle(), result: result? })
+        Ok(BlockExecutionOutput {
+            state: revm_bundle_to_evm2(state.take_bundle(), block.header().number()),
+            result: result?,
+        })
     }
 
     /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
@@ -139,7 +158,10 @@ pub trait Executor<DB: Database>: Sized {
     {
         let result = self.execute_one_with_state_hook(block, state_hook)?;
         let mut state = self.into_state();
-        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
+        Ok(BlockExecutionOutput {
+            state: revm_bundle_to_evm2(state.take_bundle(), block.header().number()),
+            result,
+        })
     }
 
     /// Consumes the executor and returns the [`State`] containing all state changes.
@@ -207,8 +229,8 @@ pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
     pub transactions: Vec<F::Transaction>,
     /// Output of block execution.
     pub output: &'b BlockExecutionResult<F::Receipt>,
-    /// [`BundleState`] after the block execution.
-    pub bundle_state: &'a BundleState,
+    /// Bundle state after the block execution.
+    pub bundle_state: &'b Evm2BundleState,
     /// Provider with access to state.
     #[debug(skip)]
     pub state_provider: &'b dyn StateProvider,
@@ -230,7 +252,7 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
         parent: &'a SealedHeader<H>,
         transactions: Vec<F::Transaction>,
         output: &'b BlockExecutionResult<F::Receipt>,
-        bundle_state: &'a BundleState,
+        bundle_state: &'b Evm2BundleState,
         state_provider: &'b dyn StateProvider,
         state_root: B256,
         block_access_list_hash: Option<B256>,
@@ -476,7 +498,7 @@ where
     type Executor = Executor;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        self.executor.apply_pre_execution_changes()?;
+        self.executor.apply_pre_execution_changes().map_err(BlockExecutionError::other)?;
         self.executor.evm_mut().db_mut().bump_bal_index();
 
         Ok(())
@@ -488,8 +510,10 @@ where
         f: impl FnOnce(&<Self::Executor as BlockExecutor>::Result) -> CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let (tx_env, tx) = tx.into_parts();
-        if let Some(gas_used) =
-            self.executor.execute_transaction_with_commit_condition((tx_env, &tx), f)?
+        if let Some(gas_used) = self
+            .executor
+            .execute_transaction_with_commit_condition((tx_env, &tx), f)
+            .map_err(BlockExecutionError::other)?
         {
             self.transactions.push(tx);
             self.executor.evm_mut().db_mut().bump_bal_index();
@@ -504,17 +528,17 @@ where
         state: impl StateProvider,
         state_root_precomputed: Option<(B256, TrieUpdates)>,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
-        let (evm, result) = self.executor.finish()?;
+        let (evm, result) = self.executor.finish().map_err(BlockExecutionError::other)?;
         let (db, evm_env) = evm.finish();
 
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);
-
         let block_access_list = db.take_built_alloy_bal();
         let block_access_list_hash =
             block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal.as_slice()));
+        let bundle_state = revm_bundle_to_evm2(db.bundle_state.clone(), self.parent.number() + 1);
 
-        let hashed_state = state.hashed_post_state(&db.bundle_state);
+        let hashed_state = state.hashed_post_state(&bundle_state);
         let (state_root, trie_updates) = match state_root_precomputed {
             Some(precomputed) => precomputed,
             None => state
@@ -525,13 +549,14 @@ where
         let (transactions, senders) =
             self.transactions.into_iter().map(|tx| tx.into_parts()).unzip();
 
+        let result = alloy_block_execution_result_to_reth(result);
         let block = self.assembler.assemble_block(BlockAssemblerInput {
             evm_env,
             execution_ctx: self.ctx,
             parent: self.parent,
             transactions,
             output: &result,
-            bundle_state: &db.bundle_state,
+            bundle_state: &bundle_state,
             state_provider: &state,
             state_root,
             block_access_list_hash,
@@ -605,24 +630,24 @@ where
             executor.evm_mut().db_mut().bal_state.bal_builder = None;
         }
 
-        executor.apply_pre_execution_changes()?;
+        executor.apply_pre_execution_changes().map_err(BlockExecutionError::other)?;
 
         if has_bal {
             executor.evm_mut().db_mut().bump_bal_index();
         }
 
         for tx in block.transactions_recovered() {
-            executor.execute_transaction(tx)?;
+            executor.execute_transaction(tx).map_err(BlockExecutionError::other)?;
             if has_bal {
                 executor.evm_mut().db_mut().bump_bal_index();
             }
         }
 
-        let result = executor.apply_post_execution_changes()?;
+        let result = executor.apply_post_execution_changes().map_err(BlockExecutionError::other)?;
 
         self.db.merge_transitions(BundleRetention::Reverts);
 
-        Ok(result)
+        Ok(alloy_block_execution_result_to_reth(result))
     }
 
     fn execute_one_with_state_hook<H>(
@@ -645,7 +670,7 @@ where
         self.db.set_state_hook(None);
         self.db.merge_transitions(BundleRetention::Reverts);
 
-        result
+        result.map(alloy_block_execution_result_to_reth).map_err(BlockExecutionError::other)
     }
 
     fn into_state(self) -> State<DB> {
@@ -658,6 +683,106 @@ where
 
     fn take_bal(&mut self) -> Option<BlockAccessList> {
         self.db.take_built_alloy_bal()
+    }
+}
+
+fn alloy_block_execution_result_to_reth<T>(
+    result: alloy_evm::block::BlockExecutionResult<T>,
+) -> BlockExecutionResult<T> {
+    let alloy_evm::block::BlockExecutionResult { receipts, requests, gas_used, blob_gas_used } =
+        result;
+    BlockExecutionResult { receipts, requests, gas_used, blob_gas_used }
+}
+
+fn revm_bundle_to_evm2(bundle: BundleState, first_block: u64) -> Evm2BundleState {
+    let BundleState { state, contracts, reverts, .. } = bundle;
+
+    let accounts = state
+        .iter()
+        .map(|(address, account)| {
+            (
+                *address,
+                Tracked {
+                    original: account.original_info.as_ref().map(revm_account_info_to_evm2),
+                    current: account.info.as_ref().map(revm_account_info_to_evm2),
+                    _non_exhaustive: (),
+                },
+            )
+        })
+        .collect();
+
+    let storage = state
+        .iter()
+        .filter_map(|(address, account)| {
+            let slots = account
+                .storage
+                .iter()
+                .map(|(slot, value)| {
+                    (
+                        *slot,
+                        Tracked {
+                            original: value.original_value(),
+                            current: value.present_value(),
+                            _non_exhaustive: (),
+                        },
+                    )
+                })
+                .collect();
+            let storage = Evm2StorageChangeSet { wipe: account.was_destroyed(), slots };
+            (!storage.slots.is_empty() || storage.wipe).then_some((*address, storage))
+        })
+        .collect::<AddressMap<_>>();
+
+    let contracts = contracts
+        .into_iter()
+        .map(|(hash, bytecode)| (hash, Bytecode::new_raw(bytecode.original_bytes())))
+        .collect();
+    let block_reverts = reverts
+        .iter()
+        .map(|block_reverts| {
+            let mut reverts = Evm2BlockReverts::default();
+            for (address, revert) in block_reverts {
+                match &revert.account {
+                    AccountInfoRevert::DoNothing => {}
+                    AccountInfoRevert::DeleteIt => {
+                        reverts.accounts.insert(*address, None);
+                    }
+                    AccountInfoRevert::RevertTo(info) => {
+                        reverts.accounts.insert(*address, Some(revm_account_info_to_evm2(info)));
+                    }
+                }
+
+                let slots = revert
+                    .storage
+                    .iter()
+                    .map(|(slot, value)| {
+                        let value = match value {
+                            RevertToSlot::Some(value) => *value,
+                            RevertToSlot::Destroyed => Default::default(),
+                        };
+                        (*slot, value)
+                    })
+                    .collect();
+                let storage =
+                    Evm2StorageReverts { wiped: revert.wipe_storage, previous_wipe: false, slots };
+                if storage.wiped || !storage.slots.is_empty() {
+                    reverts.storage.insert(*address, storage);
+                }
+            }
+            reverts
+        })
+        .collect();
+
+    Evm2BundleState::from_parts(first_block, accounts, storage, contracts, block_reverts)
+}
+
+fn revm_account_info_to_evm2(info: &revm::state::AccountInfo) -> AccountInfo {
+    AccountInfo {
+        balance: info.balance,
+        nonce: info.nonce,
+        code_hash: info.code_hash,
+        code: info.code.as_ref().map(|code| Bytecode::new_raw(code.original_bytes())),
+        _non_exhaustive: (),
     }
 }
 
