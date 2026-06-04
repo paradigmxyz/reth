@@ -1,29 +1,21 @@
 //! `Eth` Sim bundle implementation and helpers.
 
-use alloy_consensus::{transaction::TxHashRef, BlockHeader};
-use alloy_eips::BlockNumberOrTag;
-use alloy_evm::{env::BlockEnvironment, overrides::apply_block_overrides};
-use alloy_primitives::U256;
-use alloy_rpc_types_eth::{BlockId, Log};
+use alloy_consensus::transaction::Recovered;
+#[cfg(test)]
+use alloy_rpc_types_eth::Log;
+#[cfg(test)]
+use alloy_rpc_types_mev::SimBundleLogs;
 use alloy_rpc_types_mev::{
-    BundleItem, Inclusion, MevSendBundle, Privacy, RefundConfig, SimBundleLogs, SimBundleOverrides,
+    BundleItem, Inclusion, MevSendBundle, Privacy, RefundConfig, SimBundleOverrides,
     SimBundleResponse, Validity,
 };
 use jsonrpsee::core::RpcResult;
-use reth_evm::{ConfigureEvm, Evm};
-use reth_primitives_traits::Recovered;
 use reth_rpc_api::MevSimApiServer;
-use reth_rpc_eth_api::{
-    helpers::{block::LoadBlock, Call, EthTransactions},
-    FromEthApiError, FromEvmError,
-};
+use reth_rpc_eth_api::helpers::{block::LoadBlock, Call, EthTransactions};
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_storage_api::ProviderTx;
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
-use revm::{
-    context::Block, context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef,
-};
 use std::{sync::Arc, time::Duration};
 use tracing::trace;
 
@@ -40,6 +32,7 @@ const DEFAULT_SIM_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_SIM_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Maximum payout cost
+#[expect(dead_code)]
 const SBUNDLE_PAYOUT_MAX_COST: u64 = 30_000;
 
 /// A flattened representation of a bundle item containing transaction and associated metadata.
@@ -79,6 +72,7 @@ impl<Eth> EthSimBundle<Eth> {
     }
 
     /// Builds a hierarchical `SimBundleLogs` structure from flattened transaction logs.
+    #[cfg(test)]
     fn build_bundle_logs(
         bundle: &MevSendBundle,
         flat_logs: &[Vec<Log>],
@@ -148,6 +142,7 @@ where
     /// `FlattenedBundleItem` with their associated metadata. This handles recursive bundle
     /// processing up to `MAX_NESTED_BUNDLE_DEPTH` and `MAX_BUNDLE_BODY_SIZE`, preserving
     /// inclusion, validity and privacy settings from parent bundles.
+    #[expect(dead_code)]
     fn parse_and_flatten_bundle(
         &self,
         request: &MevSendBundle,
@@ -283,189 +278,9 @@ where
         overrides: SimBundleOverrides,
         logs: bool,
     ) -> Result<SimBundleResponse, Eth::Error> {
-        let SimBundleOverrides { parent_block, block_overrides, .. } = overrides;
-
-        // Parse and validate bundle
-        // Also, flatten the bundle here so that its easier to process
-        let flattened_bundle = self.parse_and_flatten_bundle(&request)?;
-
-        let block_id = parent_block.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
-        let (current_block, mut evm_env, current_block_id) =
-            self.eth_api().evm_env_and_recovered_block_at(block_id).await?;
-
-        let eth_api = self.inner.eth_api.clone();
-
-        let sim_response = self
-            .inner
-            .eth_api
-            .spawn_with_state_at_block(current_block_id, move |_, mut db| {
-                // Setup environment
-                let current_block_number = current_block.number();
-                let coinbase = evm_env.block_env.beneficiary();
-                let basefee = evm_env.block_env.basefee();
-
-                // apply overrides
-                apply_block_overrides(block_overrides, &mut db, evm_env.block_env.inner_mut());
-
-                let initial_coinbase_balance = DatabaseRef::basic_ref(&db, coinbase)
-                    .map_err(EthApiError::from_eth_err)?
-                    .map(|acc| acc.balance)
-                    .unwrap_or_default();
-
-                let mut coinbase_balance_before_tx = initial_coinbase_balance;
-                let mut total_gas_used = 0;
-                let mut total_profit = U256::ZERO;
-                let mut refundable_value = U256::ZERO;
-                let mut flat_logs: Vec<Vec<Log>> = Vec::new();
-
-                let mut evm = eth_api.evm_config().evm_with_env(db, evm_env);
-                let mut log_index = 0;
-
-                for (tx_index, item) in flattened_bundle.iter().enumerate() {
-                    // Check inclusion constraints
-                    let block_number = item.inclusion.block_number();
-                    let max_block_number =
-                        item.inclusion.max_block_number().unwrap_or(block_number);
-
-                    if current_block_number < block_number ||
-                        current_block_number > max_block_number
-                    {
-                        return Err(EthApiError::InvalidParams(
-                            EthSimBundleError::InvalidInclusion.to_string(),
-                        )
-                        .into());
-                    }
-
-                    let ResultAndState { result, state } = evm
-                        .transact(eth_api.evm_config().tx_env(&item.tx))
-                        .map_err(Eth::Error::from_evm_err)?;
-
-                    if !result.is_success() && !item.can_revert {
-                        return Err(EthApiError::InvalidParams(
-                            EthSimBundleError::BundleTransactionFailed.to_string(),
-                        )
-                        .into());
-                    }
-
-                    let gas_used = result.tx_gas_used();
-                    total_gas_used += gas_used;
-
-                    // coinbase is always present in the result state
-                    let coinbase_balance_after_tx =
-                        state.get(&coinbase).map(|acc| acc.info.balance).unwrap_or_default();
-
-                    let coinbase_diff =
-                        coinbase_balance_after_tx.saturating_sub(coinbase_balance_before_tx);
-                    total_profit += coinbase_diff;
-
-                    // Add to refundable value if this tx does not have a refund percent
-                    if item.refund_percent.is_none() {
-                        refundable_value += coinbase_diff;
-                    }
-
-                    // Update coinbase balance before next tx
-                    coinbase_balance_before_tx = coinbase_balance_after_tx;
-
-                    // Keep one log entry per executed transaction so we can rebuild the bundle
-                    // tree in execution order after simulation.
-                    if logs {
-                        let tx_logs: Vec<Log> = result
-                            .into_logs()
-                            .into_iter()
-                            .map(|inner| {
-                                let full_log = Log {
-                                    inner,
-                                    block_hash: Some(current_block.hash()),
-                                    block_number: Some(current_block.number()),
-                                    block_timestamp: Some(current_block.timestamp()),
-                                    transaction_hash: Some(*item.tx.tx_hash()),
-                                    transaction_index: Some(tx_index as u64),
-                                    log_index: Some(log_index),
-                                    removed: false,
-                                };
-                                log_index += 1;
-                                full_log
-                            })
-                            .collect();
-                        flat_logs.push(tx_logs);
-                    }
-
-                    // Apply state changes
-                    evm.db_mut().commit(state);
-                }
-
-                let body_logs =
-                    if logs { Self::build_bundle_logs(&request, &flat_logs)? } else { vec![] };
-
-                // After processing all transactions, process refunds
-                // Store the original refundable value to calculate all payouts correctly
-                let original_refundable_value = refundable_value;
-                for item in &flattened_bundle {
-                    if let Some(refund_percent) = item.refund_percent {
-                        let refund_configs = item.refund_configs.clone().unwrap_or_else(|| {
-                            vec![RefundConfig { address: item.tx.signer(), percent: 100 }]
-                        });
-
-                        // Calculate payout transaction fee
-                        let payout_tx_fee = U256::from(basefee) *
-                            U256::from(SBUNDLE_PAYOUT_MAX_COST) *
-                            U256::from(refund_configs.len() as u64);
-
-                        // Add gas used for payout transactions
-                        total_gas_used += SBUNDLE_PAYOUT_MAX_COST * refund_configs.len() as u64;
-
-                        // Calculate allocated refundable value (payout value) based on ORIGINAL
-                        // refundable value. This ensures all refund_percent values are
-                        // calculated from the same base.
-                        let payout_value = original_refundable_value * U256::from(refund_percent) /
-                            U256::from(100);
-
-                        if payout_tx_fee > payout_value {
-                            return Err(EthApiError::InvalidParams(
-                                EthSimBundleError::NegativeProfit.to_string(),
-                            )
-                            .into());
-                        }
-
-                        // Subtract payout value from total profit
-                        total_profit = total_profit.checked_sub(payout_value).ok_or(
-                            EthApiError::InvalidParams(
-                                EthSimBundleError::NegativeProfit.to_string(),
-                            ),
-                        )?;
-
-                        // Adjust refundable value
-                        refundable_value = refundable_value.checked_sub(payout_value).ok_or(
-                            EthApiError::InvalidParams(
-                                EthSimBundleError::NegativeProfit.to_string(),
-                            ),
-                        )?;
-                    }
-                }
-
-                // Calculate mev gas price
-                let mev_gas_price = if total_gas_used != 0 {
-                    total_profit / U256::from(total_gas_used)
-                } else {
-                    U256::ZERO
-                };
-
-                Ok(SimBundleResponse {
-                    success: true,
-                    state_block: current_block_number,
-                    error: None,
-                    logs: Some(body_logs),
-                    gas_used: total_gas_used,
-                    mev_gas_price,
-                    profit: total_profit,
-                    refundable_value,
-                    exec_error: None,
-                    revert: None,
-                })
-            })
-            .await?;
-
-        Ok(sim_response)
+        let _ = (request, overrides, logs);
+        Err(EthApiError::Unsupported("mev_simBundle is unsupported by the evm2 execution path")
+            .into())
     }
 }
 
