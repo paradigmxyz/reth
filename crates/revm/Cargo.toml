@@ -44,6 +44,7 @@ std = [
     "reth-ethereum-forks/std",
     "reth-storage-api/std",
     "reth-storage-errors/std",
+    "reth-execution-types?/std",
 ]
 witness = ["dep:reth-trie", "dep:alloy-rlp", "dep:alloy-rpc-types-debug"]
 test-utils = [
@@ -60,6 +61,7 @@ serde = [
     "reth-ethereum-forks/serde",
     "reth-primitives-traits/serde",
     "reth-storage-api/serde",
+    "reth-execution-types?/serde",
 ]
 portable = ["revm/portable"]
 optional-balance-check = ["revm/optional_balance_check"]

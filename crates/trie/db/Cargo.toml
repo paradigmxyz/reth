@@ -69,6 +69,7 @@ serde = [
     "reth-trie/serde",
     "reth-trie-common/serde",
     "reth-primitives-traits/serde",
+    "reth-execution-types/serde",
 ]
 test-utils = [
     "reth-trie-common/test-utils",

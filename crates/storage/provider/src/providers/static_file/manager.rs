@@ -6,8 +6,9 @@ use crate::{
     changeset_walker::{StaticFileAccountChangesetWalker, StaticFileStorageChangesetWalker},
     providers::evm2_bundle_to_plain_state_and_reverts,
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, EitherWriter,
-    EitherWriterDestination, HeaderProvider, ReceiptProvider, StageCheckpointReader, StatsReader,
-    TransactionVariant, TransactionsProvider, TransactionsProviderExt,
+    EitherWriterDestination, HeaderProvider, OriginalValuesKnown, ReceiptProvider,
+    StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
+    TransactionsProviderExt,
 };
 use alloy_consensus::{
     transaction::{TransactionMeta, TxHashRef},
@@ -523,7 +524,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             let block_number = block.recovered_block().number();
             let (_, reverts) = evm2_bundle_to_plain_state_and_reverts(
                 &block.execution_outcome().state,
-                revm_database::OriginalValuesKnown::Yes,
+                OriginalValuesKnown::Yes,
             );
 
             let changeset: Vec<_> = reverts
@@ -547,7 +548,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             let block_number = block.recovered_block().number();
             let (_, reverts) = evm2_bundle_to_plain_state_and_reverts(
                 &block.execution_outcome().state,
-                revm_database::OriginalValuesKnown::Yes,
+                OriginalValuesKnown::Yes,
             );
 
             let changeset: Vec<_> = reverts

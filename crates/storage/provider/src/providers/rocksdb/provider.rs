@@ -1,7 +1,10 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation, ROCKSDB_TABLES};
-use crate::providers::{
-    compute_history_rank, evm2_bundle_to_plain_state_and_reverts, needs_prev_shard_check,
-    HistoryInfo,
+use crate::{
+    providers::{
+        compute_history_rank, evm2_bundle_to_plain_state_and_reverts, needs_prev_shard_check,
+        HistoryInfo,
+    },
+    OriginalValuesKnown,
 };
 use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::{
@@ -1409,7 +1412,7 @@ impl RocksDBProvider {
             let block_number = ctx.first_block_number + block_idx as u64;
             let (_, reverts) = evm2_bundle_to_plain_state_and_reverts(
                 &block.execution_outcome().state,
-                revm_database::OriginalValuesKnown::Yes,
+                OriginalValuesKnown::Yes,
             );
 
             // Iterate through account reverts - these are exactly the accounts that have
@@ -1444,7 +1447,7 @@ impl RocksDBProvider {
             let block_number = ctx.first_block_number + block_idx as u64;
             let (_, reverts) = evm2_bundle_to_plain_state_and_reverts(
                 &block.execution_outcome().state,
-                revm_database::OriginalValuesKnown::Yes,
+                OriginalValuesKnown::Yes,
             );
 
             // Iterate through storage reverts - these are exactly the slots that have

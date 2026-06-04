@@ -27,11 +27,11 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider, StateProvider,
-    StateProviderBox, StorageChangeSetReader, TryIntoHistoricalStateProvider,
+    BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider, OriginalValuesKnown,
+    PlainStorageRevert, StateProvider, StateProviderBox, StorageChangeSetReader,
+    TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
-use revm_database::states::PlainStorageRevert;
 use std::{
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
     sync::Arc,
@@ -1194,7 +1194,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
         {
             let (_, reverts) = evm2_bundle_to_plain_state_and_reverts(
                 &state.block().execution_output.state,
-                revm_database::OriginalValuesKnown::Yes,
+                OriginalValuesKnown::Yes,
             );
             let changesets = reverts
                 .storage
@@ -1246,7 +1246,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
         {
             let (_, reverts) = evm2_bundle_to_plain_state_and_reverts(
                 &state.block_ref().execution_output.state,
-                revm_database::OriginalValuesKnown::Yes,
+                OriginalValuesKnown::Yes,
             );
             let changeset =
                 reverts.storage.into_iter().flatten().find_map(|revert: PlainStorageRevert| {
@@ -1294,7 +1294,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
             for state in head_block.chain() {
                 let (_, reverts) = evm2_bundle_to_plain_state_and_reverts(
                     &state.block_ref().execution_output.state,
-                    revm_database::OriginalValuesKnown::Yes,
+                    OriginalValuesKnown::Yes,
                 );
                 let block_changesets =
                     reverts.storage.into_iter().flatten().flat_map(|revert: PlainStorageRevert| {
@@ -1346,7 +1346,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
         {
             let (_, reverts) = evm2_bundle_to_plain_state_and_reverts(
                 &state.block_ref().execution_output.state,
-                revm_database::OriginalValuesKnown::Yes,
+                OriginalValuesKnown::Yes,
             );
             let changesets = reverts
                 .accounts
@@ -1390,7 +1390,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
             // Search in-memory state for the account changeset
             let (_, reverts) = evm2_bundle_to_plain_state_and_reverts(
                 &state.block_ref().execution_output.state,
-                revm_database::OriginalValuesKnown::Yes,
+                OriginalValuesKnown::Yes,
             );
             let changeset = reverts
                 .accounts
@@ -1441,7 +1441,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                 // found block in memory, collect its changesets
                 let (_, reverts) = evm2_bundle_to_plain_state_and_reverts(
                     &state.block_ref().execution_output.state,
-                    revm_database::OriginalValuesKnown::Yes,
+                    OriginalValuesKnown::Yes,
                 );
                 let block_changesets = reverts
                     .accounts
