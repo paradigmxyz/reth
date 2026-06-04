@@ -8,7 +8,6 @@ use reth_primitives_traits::{transaction::signed::RecoveryError, GotExpected};
 use reth_prune_types::PruneSegmentError;
 use reth_static_file_types::StaticFileSegment;
 use revm_database_interface::{bal::EvmDatabaseError, DBErrorMarker};
-use revm_state::bal::BalError;
 
 /// Provider result type.
 pub type ProviderResult<Ok> = Result<Ok, ProviderError>;
@@ -19,9 +18,6 @@ pub enum ProviderError {
     /// Database error.
     #[error(transparent)]
     Database(#[from] DatabaseError),
-    /// BAL error.
-    #[error("BAL error:{_0}")]
-    Bal(BalError),
     /// Pruning error.
     #[error(transparent)]
     Pruning(#[from] PruneSegmentError),

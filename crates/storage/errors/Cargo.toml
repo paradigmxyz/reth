@@ -27,7 +27,6 @@ derive_more.workspace = true
 thiserror.workspace = true
 
 revm-database-interface.workspace = true
-revm-state.workspace = true
 
 [features]
 default = ["std"]
@@ -41,6 +40,5 @@ std = [
     "revm-database-interface/std",
     "reth-prune-types/std",
     "reth-static-file-types/std",
-    "revm-state/std",
     "reth-codecs/std",
 ]
