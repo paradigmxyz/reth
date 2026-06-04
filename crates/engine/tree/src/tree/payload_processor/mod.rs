@@ -17,8 +17,7 @@ use multiproof::*;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_evm::{
-    block::ExecutableTxParts,
-    execute::{ExecutableTxFor, WithTxEnv},
+    execute::{ExecutableTxFor, ExecutableTxParts, WithTxEnv},
     ConfigureEvm, ConvertTx, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, SpecFor, TxEnvFor,
 };
 use reth_execution_types::Evm2BundleState;

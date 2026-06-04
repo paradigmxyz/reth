@@ -6,8 +6,7 @@ use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory, GasOutput};
 use alloy_evm::{
-    block::{CommitChanges, ExecutableTxParts},
-    Evm, EvmEnv, EvmFactory, RecoveredTx, ToTxEnv,
+    block::CommitChanges, Evm, EvmEnv, EvmFactory, FromRecoveredTx, FromTxWithEncoded, ToTxEnv,
 };
 use alloy_primitives::{map::AddressMap, Address, Bytes, B256};
 use evm2::{
@@ -764,6 +763,169 @@ pub fn alloy_block_execution_result_to_reth<T>(
     let alloy_evm::block::BlockExecutionResult { receipts, requests, gas_used, blob_gas_used } =
         result;
     BlockExecutionResult { receipts, requests, gas_used, blob_gas_used }
+}
+
+/// Helper trait to abstract over recovered transaction wrappers.
+#[auto_impl::auto_impl(&)]
+pub trait RecoveredTx<T> {
+    /// Returns the transaction.
+    fn tx(&self) -> &T;
+
+    /// Returns the signer of the transaction.
+    fn signer(&self) -> &Address;
+}
+
+impl<T> RecoveredTx<T> for Recovered<&T> {
+    fn tx(&self) -> &T {
+        self.inner()
+    }
+
+    fn signer(&self) -> &Address {
+        self.signer_ref()
+    }
+}
+
+impl<T> RecoveredTx<T> for Recovered<Arc<T>> {
+    fn tx(&self) -> &T {
+        self.inner().as_ref()
+    }
+
+    fn signer(&self) -> &Address {
+        self.signer_ref()
+    }
+}
+
+impl<T> RecoveredTx<T> for Recovered<T> {
+    fn tx(&self) -> &T {
+        self.inner()
+    }
+
+    fn signer(&self) -> &Address {
+        self.signer_ref()
+    }
+}
+
+impl<Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for WithEncoded<T> {
+    fn tx(&self) -> &Tx {
+        self.1.tx()
+    }
+
+    fn signer(&self) -> &Address {
+        self.1.signer()
+    }
+}
+
+impl<L, R, Tx> RecoveredTx<Tx> for alloy_consensus::transaction::Either<L, R>
+where
+    L: RecoveredTx<Tx>,
+    R: RecoveredTx<Tx>,
+{
+    fn tx(&self) -> &Tx {
+        match self {
+            Self::Left(l) => l.tx(),
+            Self::Right(r) => r.tx(),
+        }
+    }
+
+    fn signer(&self) -> &Address {
+        match self {
+            Self::Left(l) => l.signer(),
+            Self::Right(r) => r.signer(),
+        }
+    }
+}
+
+impl<Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for Arc<T> {
+    fn tx(&self) -> &Tx {
+        (**self).tx()
+    }
+
+    fn signer(&self) -> &Address {
+        (**self).signer()
+    }
+}
+
+/// Helper trait to split an executable transaction into an EVM transaction environment and its
+/// recovered transaction accessor.
+pub trait ExecutableTxParts<TxEnv, T> {
+    /// The recovered transaction accessor type.
+    type Recovered: RecoveredTx<T>;
+
+    /// Converts the transaction into the executable transaction environment and recovered
+    /// transaction accessor.
+    fn into_parts(self) -> (TxEnv, Self::Recovered);
+}
+
+impl<'a, S, TxEnv, T> ExecutableTxParts<TxEnv, T> for &'a S
+where
+    S: ToTxEnv<TxEnv> + RecoveredTx<T>,
+{
+    type Recovered = &'a S;
+
+    fn into_parts(self) -> (TxEnv, &'a S) {
+        (self.to_tx_env(), self)
+    }
+}
+
+impl<TxEnv, T: RecoveredTx<Tx>, Tx> ExecutableTxParts<TxEnv, Tx> for (TxEnv, T) {
+    type Recovered = T;
+
+    fn into_parts(self) -> (TxEnv, T) {
+        (self.0, self.1)
+    }
+}
+
+impl<T, TxEnv: FromRecoveredTx<T>> ExecutableTxParts<TxEnv, T> for Recovered<T> {
+    type Recovered = Self;
+
+    fn into_parts(self) -> (TxEnv, Self) {
+        (self.to_tx_env(), self)
+    }
+}
+
+impl<T, TxEnv: FromRecoveredTx<T>> ExecutableTxParts<TxEnv, T> for Recovered<&T> {
+    type Recovered = Self;
+
+    fn into_parts(self) -> (TxEnv, Self) {
+        (self.to_tx_env(), self)
+    }
+}
+
+impl<T, TxEnv: FromTxWithEncoded<T>> ExecutableTxParts<TxEnv, T> for WithEncoded<Recovered<T>> {
+    type Recovered = Self;
+
+    fn into_parts(self) -> (TxEnv, Self) {
+        (self.to_tx_env(), self)
+    }
+}
+
+impl<T, TxEnv: FromTxWithEncoded<T>> ExecutableTxParts<TxEnv, T> for WithEncoded<&Recovered<T>> {
+    type Recovered = Self;
+
+    fn into_parts(self) -> (TxEnv, Self) {
+        (self.to_tx_env(), self)
+    }
+}
+
+impl<L, R, TxEnv, T> ExecutableTxParts<TxEnv, T> for alloy_consensus::transaction::Either<L, R>
+where
+    L: ExecutableTxParts<TxEnv, T>,
+    R: ExecutableTxParts<TxEnv, T>,
+{
+    type Recovered = alloy_consensus::transaction::Either<L::Recovered, R::Recovered>;
+
+    fn into_parts(self) -> (TxEnv, Self::Recovered) {
+        match self {
+            Self::Left(l) => {
+                let (tx_env, recovered) = l.into_parts();
+                (tx_env, alloy_consensus::transaction::Either::Left(recovered))
+            }
+            Self::Right(r) => {
+                let (tx_env, recovered) = r.into_parts();
+                (tx_env, alloy_consensus::transaction::Either::Right(recovered))
+            }
+        }
+    }
 }
 
 /// Converts a revm bundle into Reth's evm2-backed bundle state type.
