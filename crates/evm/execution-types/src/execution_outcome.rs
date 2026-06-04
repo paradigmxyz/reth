@@ -1,6 +1,6 @@
 use crate::{
     evm2_bundle::account_to_info, BlockExecutionOutput, BlockExecutionResult, Evm2BlockReverts,
-    Evm2BundleState,
+    Evm2BundleState, Evm2StorageReverts,
 };
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
@@ -122,11 +122,14 @@ impl<T> ExecutionOutcome<T> {
                 storage: reverts
                     .into_iter()
                     .filter_map(|(address, (_, storage))| {
-                        let storage = storage
+                        let slots = storage
                             .into_iter()
                             .map(|entry| (U256::from_be_bytes(entry.key.0), entry.value))
                             .collect::<BTreeMap<_, _>>();
-                        (!storage.is_empty()).then_some((address, storage))
+                        (!slots.is_empty()).then_some((
+                            address,
+                            Evm2StorageReverts { slots, ..Default::default() },
+                        ))
                     })
                     .collect(),
             }),

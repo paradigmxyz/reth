@@ -189,12 +189,21 @@ impl Evm2BundleState {
         }
 
         for (address, change_set) in storage {
-            let block_revert = block_reverts.storage.entry(address).or_default();
+            let block_revert =
+                block_reverts.storage.entry(address).or_insert_with(|| Evm2StorageReverts {
+                    previous_wipe: self
+                        .storage
+                        .get(&address)
+                        .map(|storage| storage.wipe)
+                        .unwrap_or_default(),
+                    ..Default::default()
+                });
             let bundle_storage = self.storage.entry(address).or_default();
+            block_revert.wiped |= change_set.wipe;
             bundle_storage.wipe |= change_set.wipe;
 
             for (key, change) in change_set.slots {
-                block_revert.entry(key).or_insert(change.original);
+                block_revert.slots.entry(key).or_insert(change.original);
                 bundle_storage
                     .slots
                     .entry(key)
@@ -225,7 +234,9 @@ impl Evm2BundleState {
 
         for (address, storage_reverts) in reverts.storage {
             if let Some(storage) = self.storage.get_mut(&address) {
-                for (key, original) in storage_reverts {
+                storage.wipe = storage_reverts.previous_wipe;
+
+                for (key, original) in storage_reverts.slots {
                     match storage.slots.get_mut(&key) {
                         Some(slot) => slot.current = original,
                         None => {
@@ -255,8 +266,19 @@ pub struct Evm2StorageChangeSet {
 pub struct Evm2BlockReverts {
     /// Original accounts before the block changed them.
     pub accounts: AddressMap<Option<AccountInfo>>,
+    /// Original storage before the block changed it.
+    pub storage: AddressMap<Evm2StorageReverts>,
+}
+
+/// Storage reverts for one account in one block.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Evm2StorageReverts {
+    /// Whether the block wiped the account storage.
+    pub wiped: bool,
+    /// Whether earlier bundle state had already marked this account storage as wiped.
+    pub previous_wipe: bool,
     /// Original storage slots before the block changed them.
-    pub storage: AddressMap<BTreeMap<U256, U256>>,
+    pub slots: BTreeMap<U256, U256>,
 }
 
 impl From<StorageChangeSet> for Evm2StorageChangeSet {
@@ -307,7 +329,14 @@ mod serde_impl {
     #[derive(Serialize, Deserialize)]
     struct BlockRevertsSerde {
         accounts: AddressMap<Option<AccountInfoSerde>>,
-        storage: AddressMap<BTreeMap<U256, U256>>,
+        storage: AddressMap<StorageRevertsSerde>,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct StorageRevertsSerde {
+        wiped: bool,
+        previous_wipe: bool,
+        slots: BTreeMap<U256, U256>,
     }
 
     #[derive(Serialize, Deserialize)]
@@ -458,7 +487,11 @@ mod serde_impl {
                         (*address, account.as_ref().map(AccountInfoSerde::from))
                     })
                     .collect(),
-                storage: value.storage.clone(),
+                storage: value
+                    .storage
+                    .iter()
+                    .map(|(address, storage)| (*address, StorageRevertsSerde::from(storage)))
+                    .collect(),
             }
         }
     }
@@ -471,8 +504,28 @@ mod serde_impl {
                     .into_iter()
                     .map(|(address, account)| (address, account.map(Into::into)))
                     .collect(),
-                storage: value.storage,
+                storage: value
+                    .storage
+                    .into_iter()
+                    .map(|(address, storage)| (address, storage.into()))
+                    .collect(),
             }
+        }
+    }
+
+    impl From<&Evm2StorageReverts> for StorageRevertsSerde {
+        fn from(value: &Evm2StorageReverts) -> Self {
+            Self {
+                wiped: value.wiped,
+                previous_wipe: value.previous_wipe,
+                slots: value.slots.clone(),
+            }
+        }
+    }
+
+    impl From<StorageRevertsSerde> for Evm2StorageReverts {
+        fn from(value: StorageRevertsSerde) -> Self {
+            Self { wiped: value.wiped, previous_wipe: value.previous_wipe, slots: value.slots }
         }
     }
 
@@ -610,9 +663,63 @@ mod tests {
         assert_eq!(storage.slots.get(&U256::from(1)).unwrap().original, U256::ZERO);
         assert_eq!(storage.slots.get(&U256::from(1)).unwrap().current, U256::from(3));
         assert_eq!(
-            bundle.block_reverts()[0].storage.get(&address).unwrap().get(&U256::from(1)),
+            bundle.block_reverts()[0].storage.get(&address).unwrap().slots.get(&U256::from(1)),
             Some(&U256::ZERO)
         );
+        assert!(bundle.block_reverts()[0].storage.get(&address).unwrap().wiped);
+    }
+
+    #[test]
+    fn block_reverts_preserve_previous_storage_wipe_state() {
+        let address = address!("0000000000000000000000000000000000000001");
+        let slot = U256::from(1);
+        let mut first_block = StateChanges::default();
+        first_block.storage.insert(
+            address,
+            StorageChangeSet {
+                wipe: true,
+                slots: BTreeMap::from([(
+                    slot,
+                    Tracked { original: U256::ZERO, current: U256::from(2), _non_exhaustive: () },
+                )]),
+                _non_exhaustive: (),
+            },
+        );
+
+        let mut second_block = StateChanges::default();
+        second_block.storage.insert(
+            address,
+            StorageChangeSet {
+                wipe: true,
+                slots: BTreeMap::from([(
+                    slot,
+                    Tracked {
+                        original: U256::from(2),
+                        current: U256::from(3),
+                        _non_exhaustive: (),
+                    },
+                )]),
+                _non_exhaustive: (),
+            },
+        );
+
+        let mut bundle = Evm2BundleState::new(1);
+        bundle.append_block([first_block]);
+        bundle.append_block([second_block]);
+
+        let second_block_reverts = bundle.block_reverts()[1].storage.get(&address).unwrap();
+        assert!(second_block_reverts.wiped);
+        assert!(second_block_reverts.previous_wipe);
+
+        bundle.revert_blocks(1);
+        let storage = bundle.storage().get(&address).unwrap();
+        assert!(storage.wipe);
+        assert_eq!(storage.slots.get(&slot).unwrap().current, U256::from(2));
+
+        bundle.revert_blocks(1);
+        let storage = bundle.storage().get(&address).unwrap();
+        assert!(!storage.wipe);
+        assert_eq!(storage.slots.get(&slot).unwrap().current, U256::ZERO);
     }
 
     #[test]
