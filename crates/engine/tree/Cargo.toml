@@ -45,14 +45,11 @@ alloy-rlp.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 evm2.workspace = true
-revm = { workspace = true, features = ["optional_balance_check"] }
-revm-state.workspace = true
 
 # common
 futures.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros"] }
-moka = { workspace = true, features = ["sync"] }
 
 # metrics
 metrics.workspace = true
