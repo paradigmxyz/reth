@@ -1,5 +1,5 @@
 use crate::utils::{eth_payload_attributes, eth_payload_attributes_amsterdam};
-use alloy_eips::{eip2718::Encodable2718, eip7910::EthConfig, eip7928::bal::DecodedBal};
+use alloy_eips::{eip2718::Encodable2718, eip7910::EthConfig};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_provider::{network::EthereumWallet, Provider, ProviderBuilder, SendableTx};
@@ -332,16 +332,7 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
     assert!(payload.block_access_list().is_some());
     assert!(payload.block().body().transactions().count() >= 3);
 
-    let mut envelope = payload.clone().try_into_v6()?;
-    let mut decoded_bal =
-        DecodedBal::from_rlp_bytes(envelope.execution_payload.block_access_list.clone())?
-            .as_bal()
-            .clone();
-    for account in &mut decoded_bal {
-        account.storage_root = None;
-    }
-    envelope.execution_payload.block_access_list = alloy_rlp::encode(&decoded_bal).into();
-
+    let envelope = payload.clone().try_into_v6()?;
     let mut request = BuilderBlockValidationRequestV6 {
         request: SignedBidSubmissionV6 {
             message: BidTrace {
