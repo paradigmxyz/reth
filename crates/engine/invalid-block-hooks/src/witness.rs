@@ -4,12 +4,8 @@ use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_execution_types::{
-    Evm2AccountInfo, Evm2BlockReverts, Evm2BundleState, Evm2StorageReverts,
-};
-use reth_primitives_traits::{
-    Account, Bytecode as RethBytecode, NodePrimitives, RecoveredBlock, SealedHeader,
-};
+use reth_execution_types::{Evm2AccountInfo, Evm2BundleState};
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderBox, StateProviderFactory};
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_api::DebugApiClient;
@@ -429,6 +425,8 @@ mod tests {
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_execution_types::{Evm2BlockReverts, Evm2StorageReverts};
+    use reth_primitives_traits::{Account, Bytecode as RethBytecode};
     use reth_provider::test_utils::MockEthProvider;
     use tempfile::TempDir;
 

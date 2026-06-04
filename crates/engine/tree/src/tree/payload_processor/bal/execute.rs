@@ -315,7 +315,6 @@ mod tests {
     use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Block as _, Recovered, SealedBlock};
-    use reth_revm::db::BundleState;
     use reth_tasks::Runtime;
     use revm::{
         database::{CacheDB, EmptyDB},
@@ -689,7 +688,7 @@ mod tests {
     /// the harness can compare field-by-field.
     #[derive(Debug)]
     struct ShadowOutput {
-        bundle_state: BundleState,
+        bundle_state: reth_execution_types::Evm2BundleState,
         receipts: Vec<reth_ethereum_primitives::Receipt>,
         gas_used: u64,
         requests: alloy_eips::eip7685::Requests,
@@ -729,7 +728,7 @@ mod tests {
 
         let bal = state.take_built_alloy_bal().expect("with_bal_builder was set");
         state.merge_transitions(BundleRetention::Reverts);
-        let bundle_state = state.take_bundle();
+        let bundle_state = revm_bundle_to_evm2(state.take_bundle(), block.number());
 
         (
             ShadowOutput {
