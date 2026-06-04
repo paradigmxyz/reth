@@ -19,6 +19,7 @@ use reth_trie_common::{
     prefix_set::PrefixSet, BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2,
     ProofV2Target, RlpNode, TrieNodeV2,
 };
+use smallvec::SmallVec;
 use std::cmp::Ordering;
 use tracing::{error, instrument, trace};
 
@@ -36,6 +37,8 @@ static TRACE_TARGET: &str = "trie::proof_v2";
 
 /// Number of bytes to pre-allocate for [`ProofCalculator`]'s `rlp_encode_buf` field.
 const RLP_ENCODE_BUF_SIZE: usize = 1024;
+
+type CachedBranchStack = SmallVec<[(Nibbles, BranchNodeCompact); 8]>;
 
 /// A proof calculator that generates merkle proofs using only leaf data.
 ///
@@ -75,7 +78,7 @@ pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
     /// Cached branch data pulled from the `trie_cursor`. The calculator will use the cached
     /// [`BranchNodeCompact::hashes`] to skip over the calculation of sub-tries in the overall
     /// trie. The cached hashes cannot be used for any paths which are prefixes of a proof target.
-    cached_branch_stack: Vec<(Nibbles, BranchNodeCompact)>,
+    cached_branch_stack: CachedBranchStack,
     /// The proofs which will be returned from the calculation. This gets taken at the end of every
     /// proof call.
     retained_proofs: Vec<ProofTrieNodeV2>,
@@ -100,7 +103,7 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
             branch_stack: Vec::<_>::with_capacity(64),
             branch_path: Nibbles::new(),
             child_stack: Vec::<_>::with_capacity(64),
-            cached_branch_stack: Vec::<_>::with_capacity(64),
+            cached_branch_stack: CachedBranchStack::new(),
             retained_proofs: Vec::<_>::with_capacity(32),
             rlp_nodes_bufs: Vec::<_>::with_capacity(8),
             rlp_encode_buf: Vec::<_>::with_capacity(RLP_ENCODE_BUF_SIZE),
