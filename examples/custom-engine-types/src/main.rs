@@ -101,6 +101,10 @@ impl PayloadAttributes for CustomPayloadAttributes {
     fn slot_number(&self) -> Option<u64> {
         self.inner.slot_number()
     }
+
+    fn target_gas_limit(&self) -> Option<u64> {
+        self.inner.target_gas_limit()
+    }
 }
 
 /// Custom engine types - uses a custom payload attributes RPC type, but uses the default
