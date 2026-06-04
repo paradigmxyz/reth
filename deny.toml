@@ -100,8 +100,6 @@ unused-allowed-source = "allow"
 allow-git = [
     "https://github.com/alloy-rs/alloy",
     "https://github.com/foundry-rs/block-explorers",
-    "https://github.com/bluealloy/revm",
-    "https://github.com/paradigmxyz/revm-inspectors",
     "https://github.com/alloy-rs/evm",
     "https://github.com/alloy-rs/hardforks",
     "https://github.com/paradigmxyz/jsonrpsee",
