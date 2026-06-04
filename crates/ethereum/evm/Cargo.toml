@@ -17,22 +17,19 @@ reth-chainspec.workspace = true
 reth-ethereum-forks.workspace = true
 reth-primitives-traits.workspace = true
 reth-ethereum-primitives.workspace = true
-revm.workspace = true
 reth-evm.workspace = true
-reth-storage-errors.workspace = true
+reth-storage-errors = { workspace = true, optional = true }
 reth-storage-api = { workspace = true, optional = true }
 evm2.workspace = true
 
 # Alloy
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
-alloy-evm.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 metrics = { workspace = true, optional = true }
 reth-metrics = { workspace = true, optional = true }
-revmc = { workspace = true, features = ["alloy-evm"], optional = true }
 
 [dev-dependencies]
 reth-testing-utils.workspace = true
@@ -51,22 +48,15 @@ std = [
     "reth-ethereum-forks/std",
     "reth-chainspec/std",
     "evm2/std",
-    "alloy-evm/std",
     "reth-execution-types/std",
     "reth-evm/std",
     "reth-primitives-traits/std",
-    "revm/std",
     "reth-ethereum-primitives/std",
     "alloy-rpc-types-engine/std",
+    "dep:reth-storage-errors",
     "reth-storage-errors/std",
     "dep:reth-storage-api",
     "reth-storage-api/std",
-]
-jit = [
-    "std",
-    "dep:revmc",
-    "dep:metrics",
-    "dep:reth-metrics",
 ]
 test-utils = [
     "std",
