@@ -18,7 +18,7 @@ use alloy_rpc_types_eth::{
     BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
 use futures::Future;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
     block::BlockExecutor, env::BlockEnvironment, execute::BlockBuilder, ConfigureEvm, Evm,
@@ -45,6 +45,7 @@ use revm::{
     Database, DatabaseCommit,
 };
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
+use std::collections::BTreeMap;
 use tracing::{trace, warn};
 
 /// Result type for `eth_simulateV1` RPC method.
@@ -148,6 +149,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     // matching spec behavior where MixDigest is zero-initialized.
                     // If user provides an override, it will be applied by apply_block_overrides.
                     evm_env.block_env.inner_mut().prevrandao = Some(B256::ZERO);
+                    if !this
+                        .provider()
+                        .chain_spec()
+                        .is_paris_active_at_block(evm_env.block_env.number().saturating_to())
+                    {
+                        evm_env.block_env.inner_mut().difficulty = parent.difficulty();
+                    }
 
                     if let Some(block_overrides) = block_overrides {
                         // ensure we don't allow uncapped gas limit per block
@@ -229,7 +237,12 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         .map_err(map_err)?
                     };
 
-                    parent = result.block.clone_sealed_header();
+                    let simulated_header = result.block.clone_sealed_header();
+                    db.override_block_hashes(BTreeMap::from([(
+                        simulated_header.number(),
+                        simulated_header.hash(),
+                    )]));
+                    parent = simulated_header;
 
                     let block = simulate::build_simulated_block::<Self::Error, _>(
                         result.block,
