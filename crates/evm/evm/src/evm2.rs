@@ -34,6 +34,7 @@ use alloy_evm::{
     RecoveredTx,
 };
 use alloy_primitives::{
+    keccak256,
     map::{AddressMap, B256Map, HashMap},
     Address, Bytes, B256, KECCAK256_EMPTY, U256,
 };
@@ -711,12 +712,15 @@ pub fn bytecode_from_evm2(bytecode: Evm2Bytecode) -> Bytecode {
 
 /// Converts an `evm2` account info value into the revm account info type used by reth.
 pub fn account_info_from_evm2(info: Evm2AccountInfo) -> AccountInfo {
+    let code = info.code.and_then(|code| {
+        evm2_bytecode_matches_hash(&code, info.code_hash).then(|| bytecode_from_evm2(code))
+    });
     AccountInfo {
         balance: info.balance,
         nonce: info.nonce,
         code_hash: info.code_hash,
         account_id: None,
-        code: info.code.map(bytecode_from_evm2),
+        code,
     }
 }
 
@@ -724,12 +728,16 @@ fn account_info_from_evm2_with_code(
     mut info: Evm2AccountInfo,
     code: &BTreeMap<B256, Evm2Bytecode>,
 ) -> AccountInfo {
-    if info.code.is_none() &&
+    if !info.code.as_ref().is_some_and(|code| evm2_bytecode_matches_hash(code, info.code_hash)) &&
         let Some(bytecode) = code.get(&info.code_hash)
     {
         info.code = Some(bytecode.clone());
     }
     account_info_from_evm2(info)
+}
+
+fn evm2_bytecode_matches_hash(bytecode: &Evm2Bytecode, hash: B256) -> bool {
+    keccak256(bytecode.original_bytes()) == hash
 }
 
 /// Converts a revm bytecode value into evm2 bytecode.
@@ -3253,7 +3261,7 @@ mod tests {
                         balance: U256::ZERO,
                         nonce: 1,
                         code_hash,
-                        code: None,
+                        code: Some(Evm2Bytecode::new()),
                         _non_exhaustive: (),
                     }),
                     _non_exhaustive: (),
