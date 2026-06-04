@@ -761,10 +761,11 @@ pub trait Call:
 
                 let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
                 let block_env = block_env_from_revm(executor.block_env().clone());
+                let spec = *executor.cfg_env().spec();
                 let tx_env = ethereum_tx_env_from_revm(&tx_env);
                 let res = execute_tx_env_for::<Self::Evm, _>(
                     executor.db_mut(),
-                    *executor.cfg_env().spec(),
+                    spec,
                     block_env,
                     &tx_env,
                 )
