@@ -789,8 +789,8 @@ mod tests {
 
     #[test]
     fn shadow_empty_block() {
-        // System calls only — no txs. Both paths should produce identical system-call
-        // side effects in their BundleState (beacon roots storage, history storage, etc.).
+        // System calls only — no txs. Both paths should produce identical system-call side
+        // effects in their bundle state (beacon roots storage, history storage, etc.).
         assert_shadow_equal(
             EthEvmConfig::mainnet(),
             system_contracts_db(),

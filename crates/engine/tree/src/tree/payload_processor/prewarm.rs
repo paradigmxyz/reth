@@ -292,8 +292,8 @@ where
                 let caches = saved_cache.cache().clone();
                 let new_cache = SavedCache::new(hash, caches);
 
-                // Insert state into cache while holding the lock
-                // Access the BundleState through the shared ExecutionOutcome
+                // Insert state into cache while holding the lock.
+                // Access the bundle state through the shared execution output.
                 if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
                     // Clear the cache on error to prevent having a polluted cache
                     *cached = None;
@@ -853,7 +853,7 @@ mod tests {
 /// The events the pre-warm task can handle.
 ///
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the main
-/// execution path without cloning the expensive `BundleState`.
+/// execution path without cloning the expensive bundle state.
 #[derive(Debug)]
 pub enum PrewarmTaskEvent<R> {
     /// Forcefully terminate all remaining transaction execution.
@@ -862,7 +862,7 @@ pub enum PrewarmTaskEvent<R> {
     /// before exiting.
     Terminate {
         /// The final execution outcome. Using `Arc` allows sharing with the main execution
-        /// path without cloning the expensive `BundleState`.
+        /// path without cloning the expensive bundle state.
         execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
         /// Receiver for the block validation result.
         ///
