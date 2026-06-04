@@ -112,7 +112,7 @@ use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
-use alloy_primitives::{map::B256Set, B256};
+use alloy_primitives::{map::B256Set, Address, B256, KECCAK256_EMPTY as KECCAK_EMPTY};
 use reth_tasks::LazyHandle;
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
@@ -153,7 +153,6 @@ use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPost
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm::context::Block as _;
-use revm_primitives::{Address, KECCAK_EMPTY};
 use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
