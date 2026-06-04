@@ -58,13 +58,10 @@ impl<'a, R> OrderedWorkerOutputs<'a, R> {
         result_rx: &'a Receiver<Result<BalWorkerOutput<R>, BalWorkerError>>,
         total: usize,
     ) -> Self {
-        Self {
-            result_rx,
-            pending: (0..total).map(|_| None).collect(),
-            next: 0,
-            total,
-            failed: false,
-        }
+        let mut pending = Vec::with_capacity(total);
+        pending.resize_with(total, || None);
+
+        Self { result_rx, pending, next: 0, total, failed: false }
     }
 }
 
