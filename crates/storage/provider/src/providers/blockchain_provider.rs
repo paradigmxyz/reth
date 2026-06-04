@@ -32,7 +32,6 @@ use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{BlockBodyIndicesProvider, NodePrimitivesProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{HashedPostState, KeccakKeyHasher};
-use revm_database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,

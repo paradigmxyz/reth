@@ -479,7 +479,13 @@ impl From<BlockExecutionError> for EthApiError {
         match error {
             BlockExecutionError::Validation(validation_error) => match validation_error {
                 BlockValidationError::InvalidTx { error, .. } => {
-                    if let Some(invalid_tx) = error.as_invalid_tx_err() {
+                    if let Some(invalid_tx) = error.as_any().downcast_ref::<InvalidTransaction>() {
+                        Self::InvalidTransaction(RpcInvalidTransactionError::from(
+                            invalid_tx.clone(),
+                        ))
+                    } else if let Some(invalid_tx) =
+                        error.as_any().downcast_ref::<InvalidTransactionError>()
+                    {
                         Self::InvalidTransaction(RpcInvalidTransactionError::from(
                             invalid_tx.clone(),
                         ))
@@ -538,7 +544,6 @@ where
     fn from(err: EVMError<T, TxError>) -> Self {
         match err {
             EVMError::Transaction(invalid_tx) => {
-                // Try to get the underlying InvalidTransaction if available
                 if let Some(eth_tx_err) = invalid_tx.as_invalid_tx_err() {
                     // Handle the special NonceTooLow case
                     match eth_tx_err {

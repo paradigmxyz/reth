@@ -7,7 +7,7 @@ use reth_errors::ProviderResult;
 use reth_revm::database::StateProviderDatabase;
 use reth_storage_api::{BytecodeReader, HashedPostStateProvider, StateProvider, StateProviderBox};
 use reth_trie::{HashedStorage, MultiProofTargets};
-use revm::database::{BundleState, State};
+use revm::database::State;
 
 /// Helper alias type for the state's [`State`]
 pub type StateCacheDb = State<StateProviderDatabase<StateProviderTraitObjWrapper>>;
