@@ -1,34 +1,43 @@
 //! Utilities for serving `eth_simulateV1`
 
-use crate::{
-    error::{api::FromEthApiError, FromEvmError, ToRpcError},
-    EthApiError,
-};
+use crate::{error::ToRpcError, EthApiError};
 use alloy_chains::Chain;
-use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
+use alloy_consensus::BlockHeader;
+#[cfg(any())]
+use alloy_consensus::{transaction::TxHashRef, Transaction as _};
+#[cfg(any())]
 use alloy_eips::eip2718::WithEncoded;
+#[cfg(any())]
 use alloy_evm::{block::TxResult, precompiles::PrecompilesMap};
+#[cfg(any())]
 use alloy_network::{NetworkTransactionBuilder, TransactionBuilder};
+use alloy_primitives::{Address, U256};
+use alloy_rpc_types_eth::{simulate::SimBlock, BlockId, BlockOverrides};
+#[cfg(any())]
 use alloy_rpc_types_eth::{
-    simulate::{SimBlock, SimCallResult, SimulateError, SimulatedBlock},
+    simulate::{SimCallResult, SimulateError, SimulatedBlock},
     state::StateOverride,
-    BlockId, BlockOverrides, BlockTransactionsKind,
+    BlockTransactionsKind,
 };
 use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
+#[cfg(any())]
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
     Evm, HaltReasonFor,
 };
-use reth_primitives_traits::{
-    BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock, SealedHeader,
-};
+use reth_primitives_traits::SealedHeader;
+#[cfg(any())]
+use reth_primitives_traits::{BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock};
+#[cfg(any())]
 use reth_rpc_convert::{RpcBlock, RpcConvert, RpcTxReq};
 use reth_rpc_server_types::result::{block_id_to_str, rpc_err};
+#[cfg(any())]
 use reth_storage_api::{noop::NoopProvider, StateProvider};
+#[cfg(any())]
 use revm::{
     context::Block,
     context_interface::result::ExecutionResult,
-    primitives::{Address, Bytes, TxKind, U256},
+    primitives::{Bytes, TxKind},
     Database,
 };
 
@@ -258,6 +267,7 @@ where
 /// This function processes `movePrecompileToAddress` entries from the state overrides and
 /// moves precompiles from their original addresses to new addresses. The original address
 /// is cleared (precompile removed) and the precompile is installed at the destination address.
+#[cfg(any())]
 pub fn apply_precompile_overrides(
     state_overrides: &StateOverride,
     precompiles: &mut PrecompilesMap,
@@ -299,6 +309,7 @@ pub fn apply_precompile_overrides(
 ///
 /// [`TransactionRequest`]: alloy_rpc_types_eth::TransactionRequest
 #[expect(clippy::type_complexity)]
+#[cfg(any())]
 pub fn execute_transactions<S, T>(
     mut builder: S,
     state_provider: impl StateProvider,
@@ -412,6 +423,7 @@ where
 /// This will set the defaults as defined in <https://github.com/ethereum/execution-apis/blob/e56d3208789259d0b09fa68e9d8594aa4d73c725/docs/ethsimulatev1-notes.md#default-values-for-transactions>
 ///
 /// [`TransactionRequest`]: alloy_rpc_types_eth::TransactionRequest
+#[cfg(any())]
 pub fn resolve_transaction<DB: Database, Tx, T>(
     mut tx: RpcTxReq<T::Network>,
     default_gas_limit: u64,
@@ -487,6 +499,7 @@ where
 }
 
 /// Handles outputs of the calls execution and builds a [`SimulatedBlock`].
+#[cfg(any())]
 pub fn build_simulated_block<Err, T>(
     block: RecoveredBlock<BlockTy<T::Primitives>>,
     results: Vec<ExecutionResult<HaltReasonFor<T::Evm>>>,
@@ -574,20 +587,22 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        apply_precompile_overrides, sanitize_chain, EthSimulateError, INTERNAL_ERROR_CODE,
-    };
+    #[cfg(any())]
+    use super::apply_precompile_overrides;
+    use super::{sanitize_chain, EthSimulateError, INTERNAL_ERROR_CODE};
     use crate::{error::ToRpcError, EthApiError};
     use alloy_chains::Chain;
     use alloy_consensus::Header;
+    #[cfg(any())]
     use alloy_evm::precompiles::PrecompilesMap;
-    use alloy_primitives::{address, U256};
-    use alloy_rpc_types_eth::{
-        simulate::SimBlock,
-        state::{AccountOverride, StateOverride},
-        BlockOverrides, TransactionRequest,
-    };
+    #[cfg(any())]
+    use alloy_primitives::address;
+    use alloy_primitives::U256;
+    #[cfg(any())]
+    use alloy_rpc_types_eth::state::{AccountOverride, StateOverride};
+    use alloy_rpc_types_eth::{simulate::SimBlock, BlockOverrides, TransactionRequest};
     use reth_primitives_traits::SealedHeader;
+    #[cfg(any())]
     use revm::precompile::Precompiles;
 
     #[test]
@@ -621,6 +636,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(any())]
     fn precompile_self_move_requires_existing_precompile() {
         let address = address!("c100000000000000000000000000000000000000");
         let mut state_overrides = StateOverride::default();
@@ -636,6 +652,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(any())]
     fn precompile_self_move_errors_for_existing_precompile() {
         let address = address!("0000000000000000000000000000000000000001");
         let mut state_overrides = StateOverride::default();
@@ -651,6 +668,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(any())]
     fn moved_precompile_is_callable() {
         let source = address!("0000000000000000000000000000000000000001");
         let dest = address!("0000000000000000000000000000000000123456");
