@@ -353,8 +353,8 @@ where
     /// Spawns BAL prewarming.
     ///
     /// BAL execution is Amsterdam-only and unsupported in the active evm2 pre-Amsterdam path, so
-    /// the compiled implementation is a no-op. The old revm-backed implementation is preserved
-    /// below for reference and future Amsterdam work.
+    /// the compiled implementation is a no-op. The future Amsterdam implementation should be
+    /// evm2-native.
     #[allow(dead_code)]
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn run_bal_prewarm(
@@ -372,8 +372,7 @@ where
         let _ = actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
     }
 
-    /// Previous revm-backed BAL prewarm implementation, parked until Amsterdam support is ported
-    /// to evm2.
+    /// Previous BAL prewarm implementation, parked until Amsterdam support is ported to evm2.
     #[cfg(any())]
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn run_bal_prewarm_revm(

@@ -64,8 +64,8 @@ use preserved_sparse_trie::{PreservedSparseTrie, SharedPreservedSparseTrie};
 /// prewarm workers exceeds the execution time saved.
 pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
 
-/// Transaction prewarming still depends on the old revm/alloy-evm execution path.
-const DISABLE_REVM_TRANSACTION_PREWARMING: bool = true;
+/// Transaction prewarming is parked until it has an evm2-native implementation.
+const DISABLE_LEGACY_TRANSACTION_PREWARMING: bool = true;
 
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorTx<Evm, I> = RecoveredTx<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
@@ -135,7 +135,7 @@ where
     sparse_trie_max_hot_accounts: usize,
     /// Whether sparse trie cache pruning is fully disabled.
     disable_sparse_trie_cache_pruning: bool,
-    /// Keeps the payload processor typed by its configured EVM while revm-backed prewarming is
+    /// Keeps the payload processor typed by its configured EVM while transaction prewarming is
     /// parked.
     _evm: PhantomData<Evm>,
     /// Whether to disable BAL-driven parallel state root computation.
@@ -585,9 +585,9 @@ where
                 );
                 PrewarmMode::Skipped
             }
-        } else if DISABLE_REVM_TRANSACTION_PREWARMING {
-            // Transaction prewarming still executes through the old revm/alloy-evm path. Keep it
-            // disabled while the active sync execution path is evm2-native.
+        } else if DISABLE_LEGACY_TRANSACTION_PREWARMING {
+            // Transaction prewarming needs an evm2-native implementation before it can run with
+            // the active sync execution path.
             PrewarmMode::Skipped
         } else if self.disable_transaction_prewarming ||
             env.transaction_count < SMALL_BLOCK_TX_THRESHOLD
