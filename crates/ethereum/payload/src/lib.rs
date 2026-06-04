@@ -24,7 +24,7 @@ use reth_evm::{
     context::{Block as _, Cfg as _, InvalidTransaction},
     database::{State, StateProviderDatabase},
     execute::{BlockBuilder, BlockBuilderOutcome, TxResult},
-    ConfigureEvm, Evm, NextBlockEnvAttributes, StateHookExt,
+    ConfigureEvm, NextBlockEnvAttributes, StateHookExt,
 };
 use reth_evm_ethereum::EthEvm2Config;
 use reth_execution_cache::{CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider};

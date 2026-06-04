@@ -15,7 +15,7 @@ use reth_evm::{
     context::{Block, Cfg as _, InvalidTransaction},
     database::{State, StateProviderDatabase},
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionOutput, TxResult},
-    ConfigureEvm, Evm, EvmEnvFor, NextBlockEnvAttributes,
+    ConfigureEvm, EvmEnvFor, NextBlockEnvAttributes,
 };
 use reth_primitives_traits::{transaction::error::InvalidTransactionError, HeaderTy, SealedHeader};
 use reth_rpc_convert::RpcConvert;
