@@ -174,7 +174,7 @@ pub(crate) fn evm2_bundle_to_plain_state_and_reverts(
                 .iter()
                 .map(|(address, storage)| PlainStorageRevert {
                     address: *address,
-                    wiped: storage.wiped,
+                    wiped: storage.wiped && !storage.previous_wipe,
                     storage_revert: storage
                         .slots
                         .iter()
@@ -4089,6 +4089,41 @@ mod tests {
             }],
             [],
         )
+    }
+
+    #[test]
+    fn evm2_plain_reverts_skip_secondary_storage_wipes() {
+        let address = Address::random();
+        let slot = U256::from(1);
+        let value = U256::from(2);
+        let bundle = Evm2BundleState::new_init(
+            1,
+            [],
+            [Evm2BlockReverts {
+                storage: AddressMap::from_iter([(
+                    address,
+                    Evm2StorageReverts {
+                        wiped: true,
+                        previous_wipe: true,
+                        slots: BTreeMap::from([(slot, value)]),
+                    },
+                )]),
+                ..Default::default()
+            }],
+            [],
+        );
+
+        let (_, reverts) =
+            evm2_bundle_to_plain_state_and_reverts(&bundle, OriginalValuesKnown::Yes);
+
+        assert_eq!(
+            reverts.storage,
+            [vec![PlainStorageRevert {
+                address,
+                wiped: false,
+                storage_revert: vec![(slot, RevertToSlot::Some(value))],
+            }]]
+        );
     }
 
     #[test]
