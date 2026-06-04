@@ -125,7 +125,15 @@ where
 {
     /// Creates a new state provider from this builder.
     pub fn build(&self) -> ProviderResult<StateProviderBox> {
-        let mut provider = self.provider_factory.state_by_block_hash(self.historical)?;
+        let mut provider = if let Some(latest_hash) =
+            self.provider_factory.block_hash(self.provider_factory.best_block_number()?)?
+            && latest_hash == self.historical
+        {
+            self.provider_factory.latest()?
+        } else {
+            self.provider_factory.state_by_block_hash(self.historical)?
+        };
+
         if let Some(overlay) = self.overlay.clone() {
             provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay))
         }
