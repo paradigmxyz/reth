@@ -21,12 +21,10 @@ reth-engine-primitives.workspace = true
 reth-errors.workspace = true
 reth-metrics.workspace = true
 reth-storage-api.workspace = true
-reth-execution-types = { workspace = true, features = ["serde"] }
 reth-chain-state.workspace = true
 reth-transaction-pool.workspace = true
 reth-network-api.workspace = true
 reth-rpc-engine-api.workspace = true
-reth-revm = { workspace = true, features = ["witness"] }
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-rpc-convert.workspace = true
 reth-network-peers = { workspace = true, features = ["secp256k1"] }
@@ -36,7 +34,6 @@ reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
 reth-network-types.workspace = true
 reth-consensus.workspace = true
-reth-consensus-common.workspace = true
 reth-node-api.workspace = true
 reth-payload-primitives.workspace = true
 reth-trie-common.workspace = true
