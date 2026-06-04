@@ -103,6 +103,11 @@ impl Evm2BundleState {
         &self.block_reverts
     }
 
+    /// Returns mutable per-block reverts captured by this bundle.
+    pub const fn block_reverts_mut(&mut self) -> &mut Vec<Evm2BlockReverts> {
+        &mut self.block_reverts
+    }
+
     /// Return bytecode if known.
     pub fn bytecode(&self, code_hash: &B256) -> Option<RethBytecode> {
         self.contracts
@@ -279,6 +284,14 @@ pub struct Evm2BlockReverts {
     pub accounts: AddressMap<Option<AccountInfo>>,
     /// Original storage before the block changed it.
     pub storage: AddressMap<Evm2StorageReverts>,
+}
+
+impl Evm2BlockReverts {
+    /// Clears account and storage revert entries.
+    pub fn clear(&mut self) {
+        self.accounts.clear();
+        self.storage.clear();
+    }
 }
 
 /// Storage reverts for one account in one block.

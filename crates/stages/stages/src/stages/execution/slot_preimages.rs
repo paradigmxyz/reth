@@ -6,11 +6,11 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     transaction::DbTx,
 };
+use reth_execution_types::Evm2StorageReverts;
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, SyncMode, WriteFlags, RO,
 };
 use reth_provider::{DBProvider, ExecutionOutcome};
-use reth_revm::revm::database::states::RevertToSlot;
 use reth_stages_api::StageError;
 use std::path::Path;
 use tracing::trace;
@@ -138,8 +138,8 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     // StorageKey in revm is U256, representing a plain EVM slot index.
     let mut preimage_entries = Vec::new();
     let mut seen_hashes = HashSet::new();
-    for account in state.bundle.state().values() {
-        for &slot_key in account.storage.keys() {
+    for storage in state.bundle.storage().values() {
+        for &slot_key in storage.slots.keys() {
             let plain = B256::from(slot_key.to_be_bytes());
             let hashed = keccak256(plain);
             if seen_hashes.insert(hashed) {
@@ -147,9 +147,9 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
             }
         }
     }
-    for block_reverts in state.bundle.reverts.iter() {
-        for (_, revert) in block_reverts {
-            for &slot_key in revert.storage.keys() {
+    for block_reverts in state.bundle.block_reverts() {
+        for revert in block_reverts.storage.values() {
+            for &slot_key in revert.slots.keys() {
                 let plain = B256::from(slot_key.to_be_bytes());
                 let hashed = keccak256(plain);
                 if seen_hashes.insert(hashed) {
@@ -174,9 +174,9 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     // Open a single RO transaction for all preimage lookups in this batch.
     let reader = preimages.reader().map_err(fatal)?;
 
-    for block_reverts in state.bundle.reverts.iter_mut() {
-        for (address, revert) in block_reverts.iter_mut() {
-            if !revert.wipe_storage {
+    for block_reverts in state.bundle.block_reverts_mut() {
+        for (address, revert) in block_reverts.storage.iter_mut() {
+            if !revert.wiped {
                 continue;
             }
 
@@ -202,7 +202,7 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
 /// into the account revert if not already present.
 fn inject_preimage_entry(
     reader: &SlotPreimagesReader,
-    revert: &mut reth_revm::revm::database::AccountRevert,
+    revert: &mut Evm2StorageReverts,
     address: alloy_primitives::Address,
     hashed_slot: B256,
     value: alloy_primitives::U256,
@@ -213,20 +213,7 @@ fn inject_preimage_entry(
 
     // Convert B256 plain slot to U256 StorageKey for the revert map.
     let plain_key = alloy_primitives::U256::from_be_bytes(plain_slot.0);
-    // When a contract is selfdestructed and then re-created at the same address via
-    // CREATE2 in the same block, revm treats the new contract as fresh and never reads
-    // the slot's original DB value. Slots touched by the new contract are marked as
-    // `Destroyed` instead of `Some(previous_value)`. We must overwrite these with the
-    // actual DB value here, otherwise `to_previous_value()` resolves them to zero.
-    revert
-        .storage
-        .entry(plain_key)
-        .and_modify(|slot| {
-            if matches!(slot, RevertToSlot::Destroyed) {
-                *slot = RevertToSlot::Some(value);
-            }
-        })
-        .or_insert(RevertToSlot::Some(value));
+    revert.slots.entry(plain_key).or_insert(value);
     Ok(())
 }
 

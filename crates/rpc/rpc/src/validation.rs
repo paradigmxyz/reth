@@ -312,18 +312,17 @@ where
         output: &BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
         message: &BidTrace,
     ) -> Result<(), ValidationApiError> {
-        let (mut balance_before, balance_after) = if let Some(acc) =
-            output.state.state.get(&message.proposer_fee_recipient)
-        {
-            let balance_before = acc.original_info.as_ref().map(|i| i.balance).unwrap_or_default();
-            let balance_after = acc.info.as_ref().map(|i| i.balance).unwrap_or_default();
+        let (mut balance_before, balance_after) =
+            if let Some(acc) = output.state.accounts().get(&message.proposer_fee_recipient) {
+                let balance_before = acc.original.as_ref().map(|i| i.balance).unwrap_or_default();
+                let balance_after = acc.current.as_ref().map(|i| i.balance).unwrap_or_default();
 
-            (balance_before, balance_after)
-        } else {
-            // account might have balance but considering it zero is fine as long as we know
-            // that balance have not changed
-            (U256::ZERO, U256::ZERO)
-        };
+                (balance_before, balance_after)
+            } else {
+                // account might have balance but considering it zero is fine as long as we know
+                // that balance have not changed
+                (U256::ZERO, U256::ZERO)
+            };
 
         if let Some(withdrawals) = block.body().withdrawals() {
             for withdrawal in withdrawals {

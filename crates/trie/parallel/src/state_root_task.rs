@@ -95,7 +95,7 @@ impl StateRootHandle {
     /// Returns a state hook that streams state updates to the background state root task.
     ///
     /// The hook must be dropped after execution completes to signal the end of state updates.
-    pub fn state_hook(&self) -> impl FnMut(&EvmState) {
+    pub fn state_hook(&self) -> impl FnMut(&EvmState) + use<> {
         let sender = StateHookSender::new(self.updates_tx.clone());
 
         move |state: EvmState| {
