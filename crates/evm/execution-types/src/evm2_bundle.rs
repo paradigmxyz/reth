@@ -183,8 +183,26 @@ impl Evm2BundleState {
 
     /// Extends this bundle with another bundle built on top of it.
     pub fn extend(&mut self, other: Self) {
-        self.accounts.extend(other.accounts);
-        self.storage.extend(other.storage);
+        for (address, account) in other.accounts {
+            self.accounts
+                .entry(address)
+                .and_modify(|existing| existing.current = account.current.clone())
+                .or_insert(account);
+        }
+
+        for (address, storage) in other.storage {
+            let bundle_storage = self.storage.entry(address).or_default();
+            bundle_storage.wipe |= storage.wipe;
+
+            for (slot, value) in storage.slots {
+                bundle_storage
+                    .slots
+                    .entry(slot)
+                    .and_modify(|existing| existing.current = value.current)
+                    .or_insert(value);
+            }
+        }
+
         self.contracts.extend(other.contracts);
         self.block_reverts.extend(other.block_reverts);
     }
@@ -198,6 +216,12 @@ impl Evm2BundleState {
         let StateChanges { accounts, storage, code, logs: _, _non_exhaustive: () } = changes;
 
         for (address, change) in accounts {
+            if let Some(account) = &change.current &&
+                let Some(bytecode) = &account.code
+            {
+                self.contracts.entry(account.code_hash).or_insert_with(|| bytecode.clone());
+            }
+
             block_reverts.accounts.entry(address).or_insert_with(|| change.original.clone());
             self.accounts
                 .entry(address)
@@ -746,6 +770,83 @@ mod tests {
     }
 
     #[test]
+    fn extend_preserves_original_account_values() {
+        let address = address!("0000000000000000000000000000000000000001");
+        let mut first = Evm2BundleState::new(1);
+        let mut second = Evm2BundleState::new(2);
+
+        let mut first_block = StateChanges::default();
+        first_block.accounts.insert(
+            address,
+            Tracked { original: Some(account(1)), current: Some(account(2)), _non_exhaustive: () },
+        );
+        first.append_block([first_block]);
+
+        let mut second_block = StateChanges::default();
+        second_block.accounts.insert(
+            address,
+            Tracked { original: Some(account(2)), current: Some(account(3)), _non_exhaustive: () },
+        );
+        second.append_block([second_block]);
+
+        first.extend(second);
+
+        let account_change = first.accounts().get(&address).unwrap();
+        assert_eq!(account_change.original, Some(account(1)));
+        assert_eq!(account_change.current, Some(account(3)));
+        assert_eq!(first.block_reverts().len(), 2);
+    }
+
+    #[test]
+    fn extend_preserves_original_storage_values() {
+        let address = address!("0000000000000000000000000000000000000001");
+        let slot = U256::from(1);
+        let mut first = Evm2BundleState::new(1);
+        let mut second = Evm2BundleState::new(2);
+
+        let mut first_block = StateChanges::default();
+        first_block.storage.insert(
+            address,
+            StorageChangeSet {
+                wipe: false,
+                slots: BTreeMap::from([(
+                    slot,
+                    Tracked { original: U256::ZERO, current: U256::from(2), _non_exhaustive: () },
+                )]),
+                _non_exhaustive: (),
+            },
+        );
+        first.append_block([first_block]);
+
+        let mut second_block = StateChanges::default();
+        second_block.storage.insert(
+            address,
+            StorageChangeSet {
+                wipe: true,
+                slots: BTreeMap::from([(
+                    slot,
+                    Tracked {
+                        original: U256::from(2),
+                        current: U256::from(3),
+                        _non_exhaustive: (),
+                    },
+                )]),
+                _non_exhaustive: (),
+            },
+        );
+        second.append_block([second_block]);
+
+        first.extend(second);
+
+        let storage = first.storage().get(&address).unwrap();
+        assert!(storage.wipe);
+        let slot = storage.slots.get(&slot).unwrap();
+        assert_eq!(slot.original, U256::ZERO);
+        assert_eq!(slot.current, U256::from(3));
+        assert_eq!(first.block_reverts().len(), 2);
+    }
+
+    #[test]
     fn hashed_post_state_hashes_accounts_and_storage() {
         let address = address!("0000000000000000000000000000000000000001");
         let slot = U256::from(1);
@@ -781,6 +882,27 @@ mod tests {
         let storage = hashed.storages.get(&hashed_address).unwrap();
         assert!(storage.wiped);
         assert_eq!(storage.storage.get(&hashed_slot), Some(&value));
+    }
+
+    #[test]
+    fn bundle_indexes_account_embedded_bytecode() {
+        let address = address!("0000000000000000000000000000000000000001");
+        let code_hash = b256!("0x1111111111111111111111111111111111111111111111111111111111111111");
+        let bytecode = Bytecode::new_raw([0x00].as_slice().into());
+        let mut bundle = Evm2BundleState::new(1);
+
+        let mut account = account(1);
+        account.code_hash = code_hash;
+        account.code = Some(bytecode.clone());
+
+        let mut tx = StateChanges::default();
+        tx.accounts.insert(
+            address,
+            Tracked { original: None, current: Some(account), _non_exhaustive: () },
+        );
+        bundle.append_block([tx]);
+
+        assert_eq!(bundle.contracts().get(&code_hash), Some(&bytecode));
     }
 
     fn account(nonce: u64) -> AccountInfo {
