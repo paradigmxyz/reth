@@ -646,7 +646,7 @@ impl TrieUpdatesSorted {
     /// For small batches, uses `extend_ref_and_sort` loop.
     /// For large batches, uses k-way merge for O(n log k) complexity.
     pub fn merge_slice<T: AsRef<Self>>(items: &[T]) -> Self {
-        const THRESHOLD: usize = 30;
+        const KWAY_MERGE_THRESHOLD: usize = 8;
 
         let k = items.len();
 
@@ -657,7 +657,7 @@ impl TrieUpdatesSorted {
             return items[0].as_ref().clone();
         }
 
-        if k < THRESHOLD {
+        if k < KWAY_MERGE_THRESHOLD {
             // Small k: extend loop, oldest-to-newest so newer overrides older.
             let mut iter = items.iter().rev();
             let mut acc = iter.next().expect("k > 0").as_ref().clone();
