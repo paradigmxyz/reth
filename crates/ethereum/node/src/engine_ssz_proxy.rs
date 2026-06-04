@@ -71,7 +71,7 @@ impl<C> std::fmt::Debug for EngineSszProxyHandle<C> {
     }
 }
 
-impl<C> Default for EngineSszProxyHandle<C> {
+impl<ChainSpec: Default> Default for EngineSszProxyHandle<ChainSpec> {
     fn default() -> Self {
         Self {
             engine: Default::default(),
@@ -97,7 +97,7 @@ impl<ChainSpec> EngineSszProxyHandle<ChainSpec> {
     }
 
     /// Sets the chain spec used for getBlobs fork validation.
-    pub async fn set_chain_spec(&mut self, chain_spec: Arc<ChainSpec>) {
+    pub fn set_chain_spec(&mut self, chain_spec: Arc<ChainSpec>) {
         self.chain_spec = chain_spec;
     }
 
@@ -105,7 +105,7 @@ impl<ChainSpec> EngineSszProxyHandle<ChainSpec> {
         self.blob_store.read().await.clone()
     }
 
-    async fn chain_spec(&self) -> Arc<ChainSpec> {
+    fn chain_spec(&self) -> Arc<ChainSpec> {
         self.chain_spec
     }
 }
