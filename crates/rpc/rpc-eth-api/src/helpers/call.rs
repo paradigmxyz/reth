@@ -186,10 +186,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         // prepare inspector to capture transfer inside the evm so they are recorded
                         // and included in logs
                         let inspector = TransferInspector::new(false).with_logs(true);
-                        let evm = this
-                            .evm_config()
-                            .evm_with_env_and_inspector(&mut db, evm_env, inspector);
-                        let mut builder = this.evm_config().create_block_builder(evm, &parent, ctx);
+                        let mut builder =
+                            this.evm_config().create_block_builder_with_state_env_and_inspector(
+                                &mut db, evm_env, &parent, ctx, inspector,
+                            );
 
                         if let Some(ref state_overrides) = state_overrides {
                             simulate::apply_precompile_overrides(

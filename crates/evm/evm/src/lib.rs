@@ -479,6 +479,22 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         self.block_executor_factory().create_executor_with_env(db, evm_env, ctx)
     }
 
+    /// Creates a strategy with a DB state borrow, EVM environment, and inspector.
+    fn create_executor_with_state_env_and_inspector<'a, 'db, DB, I>(
+        &'a self,
+        db: &'db mut State<DB>,
+        evm_env: EvmEnvFor<Self>,
+        ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
+        inspector: I,
+    ) -> BlockExecutorFor<'a, Self::BlockExecutorFactory, &'db mut State<DB>, I>
+    where
+        DB: Database,
+        I: InspectorFor<Self, &'db mut State<DB>>,
+    {
+        let evm = self.evm_factory().create_evm_with_inspector(db, evm_env, inspector);
+        self.block_executor_factory().create_executor(evm, ctx)
+    }
+
     /// Creates a strategy for execution of a given block.
     fn executor_for_block<'a, DB: Database>(
         &'a self,
@@ -537,6 +553,33 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     {
         BasicBlockBuilder {
             executor: self.create_executor_with_state_and_env(db, evm_env, ctx.clone()),
+            ctx,
+            assembler: self.block_assembler(),
+            parent,
+            transactions: Vec::new(),
+        }
+    }
+
+    /// Creates a [`BlockBuilder`] with a DB state borrow, EVM environment, and inspector.
+    fn create_block_builder_with_state_env_and_inspector<'a, DB, I>(
+        &'a self,
+        db: &'a mut State<DB>,
+        evm_env: EvmEnvFor<Self>,
+        parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
+        ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
+        inspector: I,
+    ) -> impl BlockBuilder<Primitives = Self::Primitives, Executor = BlockExecutorForEvm<'a, Self, DB, I>>
+    where
+        DB: Database,
+        I: InspectorFor<Self, &'a mut State<DB>> + 'a,
+    {
+        BasicBlockBuilder {
+            executor: self.create_executor_with_state_env_and_inspector(
+                db,
+                evm_env,
+                ctx.clone(),
+                inspector,
+            ),
             ctx,
             assembler: self.block_assembler(),
             parent,
