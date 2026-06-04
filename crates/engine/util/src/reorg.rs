@@ -281,7 +281,6 @@ where
     let mut state = State::builder()
         .with_database_ref(StateProviderDatabase::new(&state_provider))
         .with_bundle_update()
-        .with_bal_builder_if(false)
         // .with_bal_builder_if(has_bal)
         .build();
 
