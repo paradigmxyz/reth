@@ -306,9 +306,9 @@ where
     let mut cumulative_tx_gas_used: u64 = 0;
     let mut block_regular_gas_used: u64 = 0;
     let mut block_state_gas_used: u64 = 0;
-    let block_gas_limit = builder.evm().block().gas_limit();
-    let is_amsterdam = builder.evm().cfg_env().enable_amsterdam_eip8037;
-    let tx_gas_limit_cap = builder.evm().cfg_env().tx_gas_limit_cap.unwrap_or(u64::MAX);
+    let block_gas_limit = builder.block_env().gas_limit();
+    let is_amsterdam = builder.cfg_env().enable_amsterdam_eip8037;
+    let tx_gas_limit_cap = builder.cfg_env().tx_gas_limit_cap.unwrap_or(u64::MAX);
     for mut call in calls {
         let block_gas_remaining = if is_amsterdam {
             block_gas_limit
@@ -350,7 +350,7 @@ where
         let tx = resolve_transaction(
             call,
             default_gas_limit,
-            builder.evm().block().basefee(),
+            builder.block_env().basefee(),
             chain_id,
             builder.db_mut(),
             converter,

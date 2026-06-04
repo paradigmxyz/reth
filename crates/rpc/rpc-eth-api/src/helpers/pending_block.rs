@@ -262,13 +262,13 @@ pub trait LoadPendingBlock:
 
         builder.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
 
-        let block_gas_limit: u64 = builder.evm().block().gas_limit();
+        let block_gas_limit: u64 = builder.block_env().gas_limit();
         let is_amsterdam = self
             .provider()
             .chain_spec()
-            .is_amsterdam_active_at_timestamp(builder.evm().block().timestamp().saturating_to());
-        let basefee = builder.evm().block().basefee();
-        let blob_gasprice = builder.evm().block().blob_gasprice().map(|p| p as u64);
+            .is_amsterdam_active_at_timestamp(builder.block_env().timestamp().saturating_to());
+        let basefee = builder.block_env().basefee();
+        let blob_gasprice = builder.block_env().blob_gasprice().map(|p| p as u64);
 
         let blob_params = self
             .provider()
@@ -279,7 +279,7 @@ pub trait LoadPendingBlock:
         let mut block_regular_gas_used = 0;
         let mut block_state_gas_used = 0;
         let mut sum_blob_gas_used = 0;
-        let tx_gas_limit_cap = builder.evm().cfg_env().tx_gas_limit_cap();
+        let tx_gas_limit_cap = builder.cfg_env().tx_gas_limit_cap();
 
         // Only include transactions if not configured as Empty
         if !self.pending_block_kind().is_empty() {

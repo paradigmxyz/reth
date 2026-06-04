@@ -145,7 +145,7 @@ where
                 builder.apply_pre_execution_changes().map_err(Eth::Error::from_eth_err)?;
 
                 let mut total_fees = U256::ZERO;
-                let base_fee = builder.evm_mut().block().basefee();
+                let base_fee = builder.block_env().basefee();
 
                 let mut invalid_senders: HashSet<Address, DefaultHashBuilder> = HashSet::default();
                 let mut block_transactions_rlp_length = 0usize;

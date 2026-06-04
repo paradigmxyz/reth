@@ -33,7 +33,9 @@ use reth_storage_api::StateProvider;
 pub use reth_storage_errors::provider::ProviderError;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::{
-    context::result::ResultAndState, context_interface::either::Either, inspector::NoOpInspector,
+    context::{result::ResultAndState, CfgEnv},
+    context_interface::either::Either,
+    inspector::NoOpInspector,
     Inspector,
 };
 
@@ -347,6 +349,16 @@ pub trait BlockExecutor {
     /// Exposes immutable reference to the executor state database.
     fn db(&self) -> &<Self::Evm as Evm>::DB {
         self.evm().db()
+    }
+
+    /// Exposes the block environment used by this executor.
+    fn block_env(&self) -> &<Self::Evm as Evm>::BlockEnv {
+        self.evm().block()
+    }
+
+    /// Exposes the configuration environment used by this executor.
+    fn cfg_env(&self) -> &CfgEnv<<Self::Evm as Evm>::Spec> {
+        self.evm().cfg_env()
     }
 
     /// Returns recorded receipts.
@@ -1011,6 +1023,16 @@ pub trait BlockBuilder {
     /// Helper to access inner executor state.
     fn db(&self) -> &<<Self::Executor as BlockExecutor>::Evm as Evm>::DB {
         self.executor().db()
+    }
+
+    /// Helper to access the builder block environment.
+    fn block_env(&self) -> &<<Self::Executor as BlockExecutor>::Evm as Evm>::BlockEnv {
+        self.executor().block_env()
+    }
+
+    /// Helper to access the builder configuration environment.
+    fn cfg_env(&self) -> &CfgEnv<<<Self::Executor as BlockExecutor>::Evm as Evm>::Spec> {
+        self.executor().cfg_env()
     }
 
     /// Consumes the type and returns the underlying [`BlockExecutor`].

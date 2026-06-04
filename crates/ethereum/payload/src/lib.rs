@@ -207,13 +207,13 @@ where
     let mut cumulative_tx_gas_used = 0;
     let mut block_regular_gas_used = 0;
     let mut block_state_gas_used = 0;
-    let block_gas_limit: u64 = builder.evm_mut().block().gas_limit();
-    let tx_gas_limit_cap = builder.evm_mut().cfg_env().tx_gas_limit_cap();
-    let base_fee = builder.evm_mut().block().basefee();
+    let block_gas_limit: u64 = builder.block_env().gas_limit();
+    let tx_gas_limit_cap = builder.cfg_env().tx_gas_limit_cap();
+    let base_fee = builder.block_env().basefee();
 
     let mut best_txs = best_txs(BestTransactionsAttributes::new(
         base_fee,
-        builder.evm_mut().block().blob_gasprice().map(|gasprice| gasprice as u64),
+        builder.block_env().blob_gasprice().map(|gasprice| gasprice as u64),
     ));
     let mut total_fees = U256::ZERO;
 
