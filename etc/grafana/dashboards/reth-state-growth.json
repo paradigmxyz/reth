@@ -1,12 +1,11 @@
 {
   "__inputs": [
     {
-      "name": "DS_PROMETHEUS",
-      "label": "Prometheus",
-      "description": "",
-      "type": "datasource",
-      "pluginId": "prometheus",
-      "pluginName": "Prometheus"
+      "name": "VAR_INSTANCE_LABEL",
+      "type": "constant",
+      "label": "Instance Label",
+      "value": "job",
+      "description": ""
     }
   ],
   "__elements": {},
@@ -63,7 +62,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -114,11 +113,11 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "reth_info{instance=~\"$instance\"}",
+          "expr": "reth_info{$instance_label=\"$instance\"}",
           "instant": true,
           "legendFormat": "{{version}}",
           "range": false,
@@ -132,7 +131,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -183,11 +182,11 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "reth_info{instance=~\"$instance\"}",
+          "expr": "reth_info{$instance_label=\"$instance\"}",
           "instant": true,
           "legendFormat": "{{build_timestamp}}",
           "range": false,
@@ -201,7 +200,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -252,11 +251,11 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "reth_info{instance=~\"$instance\"}",
+          "expr": "reth_info{$instance_label=\"$instance\"}",
           "instant": true,
           "legendFormat": "{{git_sha}}",
           "range": false,
@@ -270,7 +269,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -321,11 +320,11 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "reth_info{instance=~\"$instance\"}",
+          "expr": "reth_info{$instance_label=\"$instance\"}",
           "instant": true,
           "legendFormat": "{{build_profile}}",
           "range": false,
@@ -339,7 +338,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -390,11 +389,11 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "reth_info{instance=~\"$instance\"}",
+          "expr": "reth_info{$instance_label=\"$instance\"}",
           "instant": true,
           "legendFormat": "{{target_triple}}",
           "range": false,
@@ -408,7 +407,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -459,11 +458,11 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "reth_info{instance=~\"$instance\"}",
+          "expr": "reth_info{$instance_label=\"$instance\"}",
           "instant": true,
           "legendFormat": "{{cargo_features}}",
           "range": false,
@@ -490,7 +489,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -571,10 +570,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"HashedAccounts\"}[$interval]))",
+          "expr": "avg(delta(reth_db_table_size{$instance_label=\"$instance\", table=\"HashedAccounts\"}[$interval]))",
           "instant": false,
           "legendFormat": "Flat accounts",
           "range": true,
@@ -584,10 +583,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"HashedStorages\"}[$interval]))",
+          "expr": "avg(delta(reth_db_table_size{$instance_label=\"$instance\", table=\"HashedStorages\"}[$interval]))",
           "instant": false,
           "legendFormat": "Flat storage",
           "range": true,
@@ -597,10 +596,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"Bytecodes\"}[$interval]))",
+          "expr": "avg(delta(reth_db_table_size{$instance_label=\"$instance\", table=\"Bytecodes\"}[$interval]))",
           "instant": false,
           "legendFormat": "Bytecodes",
           "range": true,
@@ -610,10 +609,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(delta(reth_db_table_size{instance=~\"$instance\", table=~\"AccountsTrie|StoragesTrie\"}[$interval]))",
+          "expr": "sum(delta(reth_db_table_size{$instance_label=\"$instance\", table=~\"AccountsTrie|StoragesTrie\"}[$interval]))",
           "instant": false,
           "legendFormat": "Trie",
           "range": true,
@@ -623,10 +622,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(delta(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"}[$interval]))",
+          "expr": "sum(delta(reth_db_table_size{$instance_label=\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"}[$interval]))",
           "instant": false,
           "legendFormat": "Total",
           "range": true,
@@ -640,7 +639,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -721,10 +720,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_db_table_size{instance=~\"$instance\", table=\"HashedAccounts\"})",
+          "expr": "sum(reth_db_table_size{$instance_label=\"$instance\", table=\"HashedAccounts\"})",
           "instant": false,
           "legendFormat": "Flat accounts",
           "range": true,
@@ -734,10 +733,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_db_table_size{instance=~\"$instance\", table=\"HashedStorages\"})",
+          "expr": "sum(reth_db_table_size{$instance_label=\"$instance\", table=\"HashedStorages\"})",
           "instant": false,
           "legendFormat": "Flat storage",
           "range": true,
@@ -747,10 +746,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_db_table_size{instance=~\"$instance\", table=\"Bytecodes\"})",
+          "expr": "sum(reth_db_table_size{$instance_label=\"$instance\", table=\"Bytecodes\"})",
           "instant": false,
           "legendFormat": "Bytecodes",
           "range": true,
@@ -760,10 +759,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_db_table_size{instance=~\"$instance\", table=~\"AccountsTrie|StoragesTrie\"})",
+          "expr": "sum(reth_db_table_size{$instance_label=\"$instance\", table=~\"AccountsTrie|StoragesTrie\"})",
           "instant": false,
           "legendFormat": "Trie",
           "range": true,
@@ -773,10 +772,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"})",
+          "expr": "sum(reth_db_table_size{$instance_label=\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"})",
           "instant": false,
           "legendFormat": "Total",
           "range": true,
@@ -790,7 +789,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -842,10 +841,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "predict_linear(sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"})[$__range:], 7 * 24 * 60 * 60)",
+          "expr": "predict_linear(sum(reth_db_table_size{$instance_label=\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"})[$__range:], 7 * 24 * 60 * 60)",
           "instant": true,
           "legendFormat": "Projected total state",
           "range": false,
@@ -859,7 +858,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -911,10 +910,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "predict_linear(sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"})[$__range:], 14 * 24 * 60 * 60)",
+          "expr": "predict_linear(sum(reth_db_table_size{$instance_label=\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"})[$__range:], 14 * 24 * 60 * 60)",
           "instant": true,
           "legendFormat": "Projected total state",
           "range": false,
@@ -928,7 +927,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -980,10 +979,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "predict_linear(sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"})[$__range:], 30 * 24 * 60 * 60)",
+          "expr": "predict_linear(sum(reth_db_table_size{$instance_label=\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"})[$__range:], 30 * 24 * 60 * 60)",
           "instant": true,
           "legendFormat": "Projected total state",
           "range": false,
@@ -997,7 +996,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -1076,10 +1075,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"HashedAccounts\"}[$interval]))",
+          "expr": "avg(delta(reth_db_table_size{$instance_label=\"$instance\", table=\"HashedAccounts\"}[$interval]))",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -1093,7 +1092,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -1172,10 +1171,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"HashedStorages\"}[$interval]))",
+          "expr": "avg(delta(reth_db_table_size{$instance_label=\"$instance\", table=\"HashedStorages\"}[$interval]))",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -1189,7 +1188,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -1268,10 +1267,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"Bytecodes\"}[$interval]))",
+          "expr": "avg(delta(reth_db_table_size{$instance_label=\"$instance\", table=\"Bytecodes\"}[$interval]))",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -1285,7 +1284,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -1364,10 +1363,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(delta(reth_db_table_size{instance=~\"$instance\", table=~\"AccountsTrie|StoragesTrie\"}[$interval]))",
+          "expr": "sum(delta(reth_db_table_size{$instance_label=\"$instance\", table=~\"AccountsTrie|StoragesTrie\"}[$interval]))",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -1394,7 +1393,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -1475,10 +1474,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"Headers\"}[$interval])) + avg(delta(reth_static_files_segment_size{instance=~\"$instance\", segment=\"headers\"}[$interval]))",
+          "expr": "avg(delta(reth_db_table_size{$instance_label=\"$instance\", table=\"Headers\"}[$interval])) + avg(delta(reth_static_files_segment_size{$instance_label=\"$instance\", segment=\"headers\"}[$interval]))",
           "instant": false,
           "interval": "$interval",
           "legendFormat": "Headers",
@@ -1488,10 +1487,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"Receipts\"}[$interval])) + avg(delta(reth_static_files_segment_size{instance=~\"$instance\", segment=\"receipts\"}[$interval]))",
+          "expr": "avg(delta(reth_db_table_size{$instance_label=\"$instance\", table=\"Receipts\"}[$interval])) + avg(delta(reth_static_files_segment_size{$instance_label=\"$instance\", segment=\"receipts\"}[$interval]))",
           "hide": false,
           "instant": false,
           "interval": "$interval",
@@ -1502,10 +1501,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"Transactions\"}[$interval])) + avg(delta(reth_static_files_segment_size{instance=~\"$instance\", segment=\"transactions\"}[$interval]))",
+          "expr": "avg(delta(reth_db_table_size{$instance_label=\"$instance\", table=\"Transactions\"}[$interval])) + avg(delta(reth_static_files_segment_size{$instance_label=\"$instance\", segment=\"transactions\"}[$interval]))",
           "hide": false,
           "instant": false,
           "interval": "$interval",
@@ -1541,7 +1540,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -1622,10 +1621,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_db_table_size{instance=~\"$instance\", table=\"Headers\"}) + sum(reth_static_files_segment_size{instance=~\"$instance\", segment=\"headers\"})",
+          "expr": "sum(reth_db_table_size{$instance_label=\"$instance\", table=\"Headers\"}) + sum(reth_static_files_segment_size{$instance_label=\"$instance\", segment=\"headers\"})",
           "instant": false,
           "interval": "$interval",
           "legendFormat": "Headers",
@@ -1635,10 +1634,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_db_table_size{instance=~\"$instance\", table=\"Receipts\"}) + sum(reth_static_files_segment_size{instance=~\"$instance\", segment=\"receipts\"})",
+          "expr": "sum(reth_db_table_size{$instance_label=\"$instance\", table=\"Receipts\"}) + sum(reth_static_files_segment_size{$instance_label=\"$instance\", segment=\"receipts\"})",
           "hide": false,
           "instant": false,
           "interval": "$interval",
@@ -1649,10 +1648,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_db_table_size{instance=~\"$instance\", table=\"Transactions\"}) + sum(reth_static_files_segment_size{instance=~\"$instance\", segment=\"transactions\"})",
+          "expr": "sum(reth_db_table_size{$instance_label=\"$instance\", table=\"Transactions\"}) + sum(reth_static_files_segment_size{$instance_label=\"$instance\", segment=\"transactions\"})",
           "hide": false,
           "instant": false,
           "interval": "$interval",
@@ -1683,7 +1682,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -1762,10 +1761,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"Headers\"}[$interval])) + avg(delta(reth_static_files_segment_size{instance=~\"$instance\", segment=\"headers\"}[$interval]))",
+          "expr": "avg(delta(reth_db_table_size{$instance_label=\"$instance\", table=\"Headers\"}[$interval])) + avg(delta(reth_static_files_segment_size{$instance_label=\"$instance\", segment=\"headers\"}[$interval]))",
           "instant": false,
           "interval": "$interval",
           "legendFormat": "__auto",
@@ -1779,7 +1778,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -1858,10 +1857,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"Receipts\"}[$interval])) + avg(delta(reth_static_files_segment_size{instance=~\"$instance\", segment=\"receipts\"}[$interval]))",
+          "expr": "avg(delta(reth_db_table_size{$instance_label=\"$instance\", table=\"Receipts\"}[$interval])) + avg(delta(reth_static_files_segment_size{$instance_label=\"$instance\", segment=\"receipts\"}[$interval]))",
           "instant": false,
           "interval": "$interval",
           "legendFormat": "__auto",
@@ -1875,7 +1874,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -1954,10 +1953,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "avg(delta(reth_db_table_size{instance=~\"$instance\", table=\"Transactions\"}[$interval])) + avg(delta(reth_static_files_segment_size{instance=~\"$instance\", segment=\"transactions\"}[$interval]))",
+          "expr": "avg(delta(reth_db_table_size{$instance_label=\"$instance\", table=\"Transactions\"}[$interval])) + avg(delta(reth_static_files_segment_size{$instance_label=\"$instance\", segment=\"transactions\"}[$interval]))",
           "instant": false,
           "interval": "$interval",
           "legendFormat": "__auto",
@@ -1981,23 +1980,59 @@
         "current": {},
         "datasource": {
           "type": "prometheus",
-          "uid": "${DS_PROMETHEUS}"
+          "uid": "${datasource}"
         },
-        "definition": "query_result(reth_info)",
+        "definition": "label_values(reth_info,$instance_label)",
         "hide": 0,
         "includeAll": false,
+        "label": "Instance",
         "multi": false,
         "name": "instance",
         "options": [],
         "query": {
-          "query": "query_result(reth_info)",
+          "qryType": 1,
+          "query": "label_values(reth_info,$instance_label)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 1,
-        "regex": "/.*instance=\\\"([^\\\"]*).*/",
+        "regex": "",
         "skipUrlSync": false,
-        "sort": 0,
+        "sort": 1,
         "type": "query"
+      },
+      {
+        "current": {},
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "${VAR_INSTANCE_LABEL}",
+          "value": "${VAR_INSTANCE_LABEL}"
+        },
+        "hide": 2,
+        "label": "Instance Label",
+        "name": "instance_label",
+        "options": [
+          {
+            "selected": false,
+            "text": "${VAR_INSTANCE_LABEL}",
+            "value": "${VAR_INSTANCE_LABEL}"
+          }
+        ],
+        "query": "${VAR_INSTANCE_LABEL}",
+        "skipUrlSync": true,
+        "type": "constant"
       },
       {
         "current": {
