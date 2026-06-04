@@ -126,12 +126,11 @@ const DEFAULT_MAX_OPEN_FILES: i32 = 512;
 /// Default bytes per sync for `RocksDB` WAL writes (1 MB).
 const DEFAULT_BYTES_PER_SYNC: u64 = 1_048_576;
 
-/// Default write buffer size for `RocksDB` memtables (128 MB).
+/// Default write buffer size for `RocksDB` memtables (256 MB).
 ///
-/// Larger memtables reduce flush frequency during burst writes, providing more consistent
-/// tail latency. Benchmarks showed 128 MB reduces p99 latency variance by ~80% compared
-/// to 64 MB default, with negligible impact on mean throughput.
-const DEFAULT_WRITE_BUFFER_SIZE: usize = 128 << 20;
+/// Larger memtables reduce flush frequency during burst writes, providing more consistent tail
+/// latency for large history batches.
+const DEFAULT_WRITE_BUFFER_SIZE: usize = 256 << 20;
 
 /// Default total `RocksDB` memtable memory budget across column families (4 GiB).
 ///
