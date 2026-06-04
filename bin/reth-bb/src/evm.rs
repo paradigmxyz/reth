@@ -435,16 +435,16 @@ where
         // the receipt root task (which reads receipts incrementally) sees
         // globally-correct values across all segments.
         let offset = self.gas_used_offset;
-        if offset > 0 &&
-            let Some(receipt) = self.inner_mut().receipts_mut().last_mut()
+        if offset > 0
+            && let Some(receipt) = self.inner_mut().receipts_mut().last_mut()
         {
             receipt.cumulative_gas_used += offset;
         }
 
         self.plan.tx_counter += 1;
 
-        while self.plan.next_segment < self.plan.segments.len() &&
-            self.plan.tx_counter == self.plan.segments[self.plan.next_segment].start_tx
+        while self.plan.next_segment < self.plan.segments.len()
+            && self.plan.tx_counter == self.plan.segments[self.plan.next_segment].start_tx
         {
             self.apply_segment_boundary().expect("must succeed");
         }
@@ -605,8 +605,7 @@ where
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
     type TxExecutionResult = Evm2TxExecutionResult;
-    type Executor<'a, DB: StateDB, I: Inspector<EthEvmContext<DB>>> =
-        BbBlockExecutor<'a, DB, I>;
+    type Executor<'a, DB: StateDB, I: Inspector<EthEvmContext<DB>>> = BbBlockExecutor<'a, DB, I>;
 
     fn evm_factory(&self) -> &Self::EvmFactory {
         &self.evm_factory

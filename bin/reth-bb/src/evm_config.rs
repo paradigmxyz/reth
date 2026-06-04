@@ -18,17 +18,16 @@ use core::convert::Infallible;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthExecutorSpec as RethEthExecutorSpec};
 use reth_ethereum_forks::{EthereumHardfork, Hardforks};
 use reth_ethereum_primitives::{Block, EthPrimitives};
+use reth_evm::evm2::RethEvm2ReceiptBuilder;
 use reth_evm::{
     block::BlockExecutorFor,
     database::{Database, State},
     eth::EthBlockExecutionCtx,
     execute::BlockAssembler,
     hardfork::SpecId,
-    ConfigureEngineEvm, ConfigureEvm, EvmEnv, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor,
-    NextBlockEnvAttributes,
-    EthEvmFactory,
+    ConfigureEngineEvm, ConfigureEvm, EthEvmFactory, EvmEnv, EvmEnvFor, ExecutableTxIterator,
+    ExecutionCtxFor, NextBlockEnvAttributes,
 };
-use reth_evm::evm2::RethEvm2ReceiptBuilder;
 use reth_evm_ethereum::EthEvm2Config;
 use reth_execution_types::BlockAccessIndex;
 use reth_primitives_traits::{SealedBlock, SealedHeader, SignedTransaction, TxTy};
@@ -314,7 +313,8 @@ where
 #[derive(Debug, Default, Clone)]
 pub struct BbBlockAssembler;
 
-impl<Spec: Send + Sync + 'static> BlockAssembler<BbBlockExecutorFactory<Spec>> for BbBlockAssembler
+impl<Spec: Send + Sync + 'static> BlockAssembler<BbBlockExecutorFactory<Spec>>
+    for BbBlockAssembler
 {
     type Block = Block;
 
