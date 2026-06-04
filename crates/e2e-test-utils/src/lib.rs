@@ -4,6 +4,7 @@ use alloy_rpc_types_engine::PayloadAttributes;
 use node::NodeTestContext;
 use reth_chainspec::ChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
+use reth_evm::ConfigureEvm;
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_builder::{
     components::NodeComponentsBuilder,
@@ -153,6 +154,7 @@ where
                 TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
                 Components: NodeComponents<
                     TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+                    Evm: ConfigureEvm<Primitives = <Self as NodeTypes>::Primitives>,
                     Network: PeersHandleProvider,
                 >,
             >,
@@ -175,6 +177,7 @@ impl<T> NodeBuilderHelper for T where
                 TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
                 Components: NodeComponents<
                     TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+                    Evm: ConfigureEvm<Primitives = <Self as NodeTypes>::Primitives>,
                     Network: PeersHandleProvider,
                 >,
             >,

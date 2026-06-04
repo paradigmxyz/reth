@@ -3,7 +3,8 @@ use alloy_eips::eip7594::BlobTransactionSidecarVariant;
 use alloy_network::eip2718::Decodable2718;
 use alloy_primitives::{Bytes, B256};
 use reth_chainspec::EthereumHardforks;
-use reth_node_api::{BlockTy, FullNodeComponents};
+use reth_evm::ConfigureEvm;
+use reth_node_api::{BlockTy, FullNodeComponents, PrimitivesTy};
 use reth_node_builder::{rpc::RpcRegistry, NodeTypes};
 use reth_provider::BlockReader;
 use reth_rpc_api::DebugApiServer;
@@ -29,7 +30,16 @@ where
         let eth_api = self.inner.eth_api();
         eth_api.send_raw_transaction(raw_tx).await
     }
+}
 
+impl<Node, EthApi> RpcTestContext<Node, EthApi>
+where
+    Node: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
+    Node::Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
+    EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
+        + EthTransactions
+        + TraceExt,
+{
     /// Retrieves a transaction envelope by its hash
     pub async fn envelope_by_hash(
         &self,
