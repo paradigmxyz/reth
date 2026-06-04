@@ -845,7 +845,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"}) + (sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"}) - sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"} offset 7d)) / 7 * 7",
+          "expr": "predict_linear(sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"})[$__range:], 7 * 24 * 60 * 60)",
           "instant": true,
           "legendFormat": "Projected total state",
           "range": false,
@@ -914,7 +914,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"}) + (sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"}) - sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"} offset 7d)) / 7 * 14",
+          "expr": "predict_linear(sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"})[$__range:], 14 * 24 * 60 * 60)",
           "instant": true,
           "legendFormat": "Projected total state",
           "range": false,
@@ -983,7 +983,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"}) + (sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"}) - sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"} offset 7d)) / 7 * 30",
+          "expr": "predict_linear(sum(reth_db_table_size{instance=~\"$instance\", table=~\"HashedAccounts|HashedStorages|Bytecodes|AccountsTrie|StoragesTrie\"})[$__range:], 30 * 24 * 60 * 60)",
           "instant": true,
           "legendFormat": "Projected total state",
           "range": false,
