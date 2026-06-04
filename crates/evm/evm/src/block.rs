@@ -8,5 +8,5 @@ pub use crate::execute::{
 pub use alloy_evm::block::{
     state_changes, system_calls, BalIndexedDatabase, StateDB, SystemCaller,
 };
-pub use alloy_evm::DatabaseCommit;
+pub use alloy_evm::revm::DatabaseCommit;
 pub use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
