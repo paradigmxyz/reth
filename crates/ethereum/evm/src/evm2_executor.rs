@@ -592,6 +592,40 @@ mod tests {
     }
 
     #[test]
+    fn rejects_transaction_gas_limit_above_block_gas_limit() {
+        let caller = address!("0000000000000000000000000000000000000001");
+        let mut database = TestDatabase::default();
+        database
+            .accounts
+            .insert(caller, AccountInfo::default().with_balance(U256::from(ETH_TO_WEI)));
+        let transaction = Recovered::new_unchecked(
+            TransactionSigned::Legacy(
+                TxLegacy {
+                    gas_price: 1,
+                    gas_limit: 2_500_000,
+                    to: TxKind::Call(Address::ZERO),
+                    ..Default::default()
+                }
+                .into_signed(Signature::test_signature()),
+            ),
+            caller,
+        );
+
+        let block_env = BlockEnv { gas_limit: U256::from(1_500_000), ..Default::default() };
+        let err = execute_evm2_block(SpecId::FRONTIER, block_env, database, 1, [transaction])
+            .expect_err("transaction gas limit above block gas limit should fail");
+
+        assert!(matches!(
+            err,
+            Evm2ExecutionError::Handler(HandlerError::GasLimitMoreThanBlock {
+                gas_limit,
+                block_gas_limit,
+            }) if gas_limit == 2_500_000 &&
+                block_gas_limit == U256::from(1_500_000)
+        ));
+    }
+
+    #[test]
     fn applies_withdrawals_to_evm2_block_output() {
         let existing = address!("0000000000000000000000000000000000000001");
         let new = address!("0000000000000000000000000000000000000002");
