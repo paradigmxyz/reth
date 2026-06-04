@@ -32,7 +32,6 @@ use reth_evm::{
         ExecutableTx, GasOutput, InternalBlockExecutionError,
     },
     context::{Block as _, BlockEnv, EVMError, HaltReason, TxEnv},
-    database::DatabaseCommit,
     eth::EthBlockExecutionCtx,
     evm2::{Evm2RethBlockExecutor, Evm2TxExecutionResult, RethEvm2ReceiptBuilder},
     hardfork::SpecId,
@@ -268,7 +267,7 @@ sol!(
 /// [`ChainSpec`], EVM.
 pub fn apply_withdrawals_contract_call(
     withdrawals: &[Withdrawal],
-    evm: &mut impl Evm<Error: Display, DB: DatabaseCommit>,
+    evm: &mut impl Evm<Error: Display, DB: StateDB>,
 ) -> Result<(), BlockExecutionError> {
     let mut state = match evm.transact_system_call(
         SYSTEM_ADDRESS,
