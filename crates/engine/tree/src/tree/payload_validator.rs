@@ -49,7 +49,6 @@ use crate::tree::{
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{map::B256Set, Address, B256, KECCAK256_EMPTY as KECCAK_EMPTY};
@@ -474,13 +473,7 @@ where
             .in_scope(|| self.evm_env_for(&input))
             .map_err(NewPayloadError::other)?;
 
-        // Extract the decoded BAL, if valid and available.
-        let decoded_bal = ensure_ok!(input
-            .try_decoded_access_list()
-            .map_err(|err| ConsensusError::BlockAccessListInvalid(err.to_string())))
-        .map(Arc::new);
-
-        if decoded_bal.is_some() {
+        if input.has_block_access_list() {
             return Err(InsertBlockError::new(
                 validated_block.try_into_inner().expect("sole handle")?,
                 ConsensusError::BlockAccessListInvalid(
@@ -2226,14 +2219,11 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         matches!(self, Self::Block(_))
     }
 
-    /// Returns the decoded block access list, if present and successfully decoded.
-    pub fn try_decoded_access_list(&self) -> Result<Option<DecodedBal>, alloy_rlp::Error> {
+    /// Returns true if the payload contains a block access list.
+    pub fn has_block_access_list(&self) -> bool {
         match self {
-            Self::Payload(payload) => payload
-                .block_access_list()
-                .map(|block_access_list| DecodedBal::from_rlp_bytes(block_access_list.clone()))
-                .transpose(),
-            Self::Block(_) => Ok(None),
+            Self::Payload(payload) => payload.block_access_list().is_some(),
+            Self::Block(_) => false,
         }
     }
 
