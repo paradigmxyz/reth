@@ -10299,7 +10299,6 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "reth-trie-common",
- "revm",
  "serde_json",
  "tokio",
  "tracing",
