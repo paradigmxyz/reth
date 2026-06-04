@@ -356,6 +356,8 @@ where
                     error: BlockErrorKind::Execution(error),
                 })
             })?;
+            let bal = executor.take_bal();
+            tracing::info!("BAL after executing block {}: {:?}", block_number, bal);
 
             if let Err(err) =
                 self.consensus.validate_block_post_execution(&block, &result, None, None)
