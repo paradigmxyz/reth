@@ -50,17 +50,35 @@ impl RethReceiptBuilder {
         txs: impl IntoIterator<Item = (TxType, TxResult)>,
         extra_state_changes: impl IntoIterator<Item = StateChanges>,
     ) -> BlockExecutionOutput<Receipt> {
+        self.build_evm2_block_output_with_surrounding_state_changes(
+            block_number,
+            core::iter::empty::<StateChanges>(),
+            txs,
+            extra_state_changes,
+        )
+    }
+
+    /// Builds a block execution output from evm2 pre-block state changes, transaction results, and
+    /// post-block state changes.
+    pub fn build_evm2_block_output_with_surrounding_state_changes(
+        &self,
+        block_number: u64,
+        pre_state_changes: impl IntoIterator<Item = StateChanges>,
+        txs: impl IntoIterator<Item = (TxType, TxResult)>,
+        post_state_changes: impl IntoIterator<Item = StateChanges>,
+    ) -> BlockExecutionOutput<Receipt> {
         let mut receipts = Vec::new();
         let mut state_changes = Vec::new();
         let mut cumulative_gas_used = 0;
 
+        state_changes.extend(pre_state_changes);
         for (tx_type, mut result) in txs {
             cumulative_gas_used += result.gas_used;
             let logs = mem::take(&mut result.state_changes.logs);
             receipts.push(Receipt { tx_type, success: result.status, cumulative_gas_used, logs });
             state_changes.push(result.state_changes);
         }
-        state_changes.extend(extra_state_changes);
+        state_changes.extend(post_state_changes);
 
         let mut state = Evm2BundleState::new(block_number);
         state.append_block(state_changes);
@@ -184,5 +202,83 @@ mod tests {
             U256::from(5)
         );
         assert_eq!(output.state.block_reverts().len(), 1);
+    }
+
+    #[test]
+    fn builds_block_output_with_surrounding_state_changes_in_order() {
+        let pre_address = address!("0000000000000000000000000000000000000001");
+        let tx_address = address!("0000000000000000000000000000000000000002");
+        let post_address = address!("0000000000000000000000000000000000000003");
+
+        let mut pre = StateChanges::default();
+        pre.accounts.insert(
+            pre_address,
+            Tracked {
+                original: None,
+                current: Some(AccountInfo {
+                    balance: U256::from(1),
+                    nonce: 0,
+                    code_hash: B256::ZERO,
+                    code: None,
+                    _non_exhaustive: (),
+                }),
+                _non_exhaustive: (),
+            },
+        );
+
+        let mut tx = TxResult::default();
+        tx.status = true;
+        tx.state_changes.accounts.insert(
+            tx_address,
+            Tracked {
+                original: None,
+                current: Some(AccountInfo {
+                    balance: U256::from(2),
+                    nonce: 0,
+                    code_hash: B256::ZERO,
+                    code: None,
+                    _non_exhaustive: (),
+                }),
+                _non_exhaustive: (),
+            },
+        );
+
+        let mut post = StateChanges::default();
+        post.accounts.insert(
+            post_address,
+            Tracked {
+                original: None,
+                current: Some(AccountInfo {
+                    balance: U256::from(3),
+                    nonce: 0,
+                    code_hash: B256::ZERO,
+                    code: None,
+                    _non_exhaustive: (),
+                }),
+                _non_exhaustive: (),
+            },
+        );
+
+        let output = RethReceiptBuilder.build_evm2_block_output_with_surrounding_state_changes(
+            7,
+            [pre],
+            [(TxType::Legacy, tx)],
+            [post],
+        );
+
+        assert_eq!(output.state.block_reverts().len(), 1);
+        assert_eq!(output.state.accounts().len(), 3);
+        assert_eq!(
+            output.state.accounts().get(&pre_address).unwrap().current.as_ref().unwrap().balance,
+            U256::from(1)
+        );
+        assert_eq!(
+            output.state.accounts().get(&tx_address).unwrap().current.as_ref().unwrap().balance,
+            U256::from(2)
+        );
+        assert_eq!(
+            output.state.accounts().get(&post_address).unwrap().current.as_ref().unwrap().balance,
+            U256::from(3)
+        );
     }
 }
