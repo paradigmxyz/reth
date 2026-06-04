@@ -90,6 +90,7 @@ pub use evm2_executor::{
 };
 #[cfg(feature = "std")]
 pub use evm2_executor::{
+    execute_evm2_block_with_borrowed_state_provider_context,
     execute_evm2_block_with_state_provider, execute_evm2_block_with_state_provider_and_withdrawals,
     execute_evm2_block_with_state_provider_context,
 };
@@ -567,10 +568,48 @@ where
                 parent_hash: header.parent_hash,
                 parent_beacon_block_root: header.parent_beacon_block_root,
             }),
+            ommers: Some(&block.body().ommers),
             withdrawals: block.body().withdrawals().map(|withdrawals| withdrawals.as_slice()),
         };
 
         execute_evm2_block_with_state_provider_context(
+            evm2_spec(self.chain_spec(), header),
+            evm2_block_env_with_blob_params(
+                header,
+                self.chain_spec().blob_params_at_timestamp(header.timestamp),
+            ),
+            state_provider,
+            header.number,
+            transactions,
+            context,
+        )
+        .map_err(|err| Box::new(err) as Box<dyn core::error::Error + Send + Sync>)
+    }
+
+    fn execute_evm2_block_with_state_provider_ref(
+        &self,
+        state_provider: &dyn reth_storage_api::StateProvider,
+        block: &RecoveredBlock<Block>,
+    ) -> Result<
+        reth_execution_types::BlockExecutionOutput<reth_ethereum_primitives::Receipt>,
+        Box<dyn core::error::Error + Send + Sync>,
+    > {
+        let header = block.header();
+        let transactions = block
+            .senders_iter()
+            .zip(block.body().transactions())
+            .map(|(signer, tx)| Recovered::new_unchecked(tx.clone(), *signer))
+            .collect::<Vec<_>>();
+        let context = Evm2BlockExecutionContext {
+            system_calls: Some(Evm2BlockSystemCalls {
+                parent_hash: header.parent_hash,
+                parent_beacon_block_root: header.parent_beacon_block_root,
+            }),
+            ommers: Some(&block.body().ommers),
+            withdrawals: block.body().withdrawals().map(|withdrawals| withdrawals.as_slice()),
+        };
+
+        execute_evm2_block_with_borrowed_state_provider_context(
             evm2_spec(self.chain_spec(), header),
             evm2_block_env_with_blob_params(
                 header,

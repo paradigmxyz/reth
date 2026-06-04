@@ -118,7 +118,8 @@ pub(crate) fn evm2_bundle_to_plain_state_and_reverts(
                 account.current.as_ref().map(|info| Account {
                     balance: info.balance,
                     nonce: info.nonce,
-                    bytecode_hash: (!info.code_hash.is_zero()).then_some(info.code_hash),
+                    bytecode_hash: (!info.code_hash.is_zero() && info.code_hash != KECCAK_EMPTY)
+                        .then_some(info.code_hash),
                 }),
             ));
         }
@@ -162,7 +163,9 @@ pub(crate) fn evm2_bundle_to_plain_state_and_reverts(
                         account.as_ref().map(|info| Account {
                             balance: info.balance,
                             nonce: info.nonce,
-                            bytecode_hash: (!info.code_hash.is_zero()).then_some(info.code_hash),
+                            bytecode_hash: (!info.code_hash.is_zero() &&
+                                info.code_hash != KECCAK_EMPTY)
+                                .then_some(info.code_hash),
                         }),
                     )
                 })
@@ -178,6 +181,7 @@ pub(crate) fn evm2_bundle_to_plain_state_and_reverts(
                     storage_revert: storage
                         .slots
                         .iter()
+                        .filter(|(_, value)| !storage.wiped || !value.is_zero())
                         .map(|(key, value)| (*key, RevertToSlot::Some(*value)))
                         .collect(),
                 })

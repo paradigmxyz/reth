@@ -2,12 +2,12 @@
 
 use crate::{evm2_recovered_tx, RethReceiptBuilder};
 use alloc::{format, string::String, vec::Vec};
-use alloy_consensus::transaction::Recovered;
+use alloy_consensus::{constants::ETH_TO_WEI, transaction::Recovered, BlockHeader, Header};
 use alloy_eips::{
     eip4895::Withdrawal, eip7002::WITHDRAWAL_REQUEST_TYPE, eip7251::CONSOLIDATION_REQUEST_TYPE,
     eip7685::Requests,
 };
-use alloy_primitives::{Address, Bytes, B256, KECCAK256_EMPTY, U256};
+use alloy_primitives::{map::AddressMap, Address, Bytes, B256, KECCAK256_EMPTY, U256};
 use evm2::{
     env::BlockEnv,
     ethereum::ethereum_tx_registry,
@@ -21,7 +21,9 @@ use evm2::{
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_execution_types::{BlockExecutionOutput, Evm2BundleState};
 #[cfg(feature = "std")]
-use reth_storage_api::{Evm2StateProviderDatabase, StateProvider};
+use reth_storage_api::{
+    BorrowedEvm2StateProviderDatabase, Evm2StateProviderDatabase, StateProvider,
+};
 #[cfg(feature = "std")]
 use reth_storage_errors::provider::ProviderError;
 
@@ -78,6 +80,8 @@ impl<E> core::error::Error for Evm2ExecutionError<E> where E: core::error::Error
 pub struct Evm2BlockExecutionContext<'a> {
     /// Pre-block system calls to run before transaction execution.
     pub system_calls: Option<Evm2BlockSystemCalls>,
+    /// Pre-merge ommer headers included in the block.
+    pub ommers: Option<&'a [Header]>,
     /// Post-block withdrawals to apply after transaction execution.
     pub withdrawals: Option<&'a [Withdrawal]>,
 }
@@ -130,7 +134,7 @@ where
         database,
         block_number,
         transactions,
-        Evm2BlockExecutionContext { system_calls: None, withdrawals },
+        Evm2BlockExecutionContext { system_calls: None, ommers: None, withdrawals },
     )
 }
 
@@ -146,6 +150,7 @@ pub fn execute_evm2_block_with_context<DB>(
 where
     DB: Database + 'static,
 {
+    let block_beneficiary = block_env.beneficiary;
     let mut evm = Evm::<BaseEvmTypes>::new(
         spec_id,
         block_env,
@@ -172,8 +177,15 @@ where
         results.push((tx_type, result));
     }
 
-    let withdrawal_changes =
-        withdrawal_state_changes::<DB>(&mut evm, block_number, &results, context.withdrawals)?;
+    let post_block_balance_changes = post_block_balance_state_changes::<DB>(
+        &mut evm,
+        spec_id,
+        block_number,
+        block_beneficiary,
+        &results,
+        context.ommers,
+        context.withdrawals,
+    )?;
     let (post_system_changes, requests) =
         post_execution_system_call_state_changes::<DB>(&mut evm, spec_id, context)?;
 
@@ -181,7 +193,7 @@ where
         block_number,
         pre_system_changes,
         results,
-        post_system_changes.into_iter().chain(withdrawal_changes),
+        post_system_changes.into_iter().chain(post_block_balance_changes),
     );
     output.result.requests = requests;
 
@@ -256,6 +268,23 @@ where
         transactions,
         context,
     )
+}
+
+/// Executes a block worth of recovered Ethereum transactions with additional block-level context
+/// and an evm2 database adapter backed by a borrowed Reth state provider.
+#[cfg(feature = "std")]
+pub fn execute_evm2_block_with_borrowed_state_provider_context(
+    spec_id: SpecId,
+    block_env: BlockEnv,
+    state_provider: &dyn StateProvider,
+    block_number: u64,
+    transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
+    context: Evm2BlockExecutionContext<'_>,
+) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<ProviderError>> {
+    // SAFETY: The borrowed database is constructed and consumed by this synchronous execution call.
+    // It is not stored beyond `execute_evm2_block_with_context`.
+    let db = unsafe { BorrowedEvm2StateProviderDatabase::new(state_provider) };
+    execute_evm2_block_with_context(spec_id, block_env, db, block_number, transactions, context)
 }
 
 fn map_handler_error<DB>(
@@ -390,18 +419,37 @@ where
     Ok(result)
 }
 
-fn withdrawal_state_changes<DB>(
+fn post_block_balance_state_changes<DB>(
     evm: &mut Evm<BaseEvmTypes>,
+    spec_id: SpecId,
     block_number: u64,
+    block_beneficiary: Address,
     txs: &[(alloy_consensus::TxType, evm2::TxResult)],
+    ommers: Option<&[Header]>,
     withdrawals: Option<&[Withdrawal]>,
 ) -> Result<Option<StateChanges>, Evm2ExecutionError<DB::Error>>
 where
     DB: Database + 'static,
 {
-    let Some(withdrawals) = withdrawals.filter(|withdrawals| !withdrawals.is_empty()) else {
+    let mut balance_increments = AddressMap::<U256>::default();
+
+    if let Some(base_block_reward) = base_block_reward(spec_id) {
+        let ommers = ommers.unwrap_or_default();
+        for ommer in ommers {
+            *balance_increments.entry(ommer.beneficiary()).or_default() +=
+                U256::from(ommer_reward(base_block_reward, block_number, ommer.number()));
+        }
+        *balance_increments.entry(block_beneficiary).or_default() +=
+            U256::from(block_reward(base_block_reward, ommers.len()));
+    }
+
+    for withdrawal in withdrawals.into_iter().flatten() {
+        *balance_increments.entry(withdrawal.address).or_default() += withdrawal.amount_wei();
+    }
+
+    if balance_increments.is_empty() {
         return Ok(None);
-    };
+    }
 
     let mut bundle = Evm2BundleState::new(block_number);
     bundle.append_block(txs.iter().map(|(_, result)| result.state_changes.clone()));
@@ -410,17 +458,17 @@ where
         evm.database_as_mut::<Db<DB>>().expect("evm database should use the typed evm2 Db adapter");
     let mut changes = StateChanges::default();
 
-    for withdrawal in withdrawals {
-        let (original, mut current) = match changes.accounts.get(&withdrawal.address) {
+    for (address, increment) in balance_increments {
+        let (original, mut current) = match changes.accounts.get(&address) {
             Some(account) => {
                 (account.original.clone(), account.current.clone().unwrap_or_else(empty_account))
             }
             None => {
-                let original = match bundle.accounts().get(&withdrawal.address) {
+                let original = match bundle.accounts().get(&address) {
                     Some(account) => account.current.clone(),
                     None => db
                         .inner_mut()
-                        .get_account(&withdrawal.address)
+                        .get_account(&address)
                         .map_err(Evm2ExecutionError::Database)?,
                 };
                 let current = original.clone().unwrap_or_else(empty_account);
@@ -428,14 +476,34 @@ where
             }
         };
 
-        current.balance = current.balance.saturating_add(withdrawal.amount_wei());
-        changes.accounts.insert(
-            withdrawal.address,
-            Tracked { original, current: Some(current), _non_exhaustive: () },
-        );
+        current.balance = current.balance.saturating_add(increment);
+        changes
+            .accounts
+            .insert(address, Tracked { original, current: Some(current), _non_exhaustive: () });
     }
 
     Ok(Some(changes))
+}
+
+fn base_block_reward(spec_id: SpecId) -> Option<u128> {
+    if spec_id.enables(SpecId::MERGE) {
+        None
+    } else if spec_id.enables(SpecId::PETERSBURG) {
+        Some(ETH_TO_WEI * 2)
+    } else if spec_id.enables(SpecId::BYZANTIUM) {
+        Some(ETH_TO_WEI * 3)
+    } else {
+        Some(ETH_TO_WEI * 5)
+    }
+}
+
+const fn block_reward(base_block_reward: u128, ommers: usize) -> u128 {
+    base_block_reward + (base_block_reward >> 5) * ommers as u128
+}
+
+fn ommer_reward(base_block_reward: u128, block_number: u64, ommer_block_number: u64) -> u128 {
+    let distance = 8u64.saturating_add(ommer_block_number).saturating_sub(block_number);
+    (u128::from(distance) * base_block_reward) >> 3
 }
 
 fn empty_account() -> AccountInfo {
@@ -570,6 +638,7 @@ mod tests {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: None,
                 }),
+                ommers: None,
                 withdrawals: None,
             },
         )
@@ -592,6 +661,7 @@ mod tests {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: Some(root),
                 }),
+                ommers: None,
                 withdrawals: None,
             },
         )
@@ -616,6 +686,7 @@ mod tests {
                     parent_hash: B256::from([2u8; 32]),
                     parent_beacon_block_root: Some(B256::ZERO),
                 }),
+                ommers: None,
                 withdrawals: None,
             },
         )
@@ -649,6 +720,7 @@ mod tests {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: Some(B256::ZERO),
                 }),
+                ommers: None,
                 withdrawals: None,
             },
         )

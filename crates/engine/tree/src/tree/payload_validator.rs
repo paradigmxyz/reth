@@ -1164,6 +1164,7 @@ where
                 parent_hash: input.parent_hash(),
                 parent_beacon_block_root: input.parent_beacon_block_root(),
             }),
+            ommers: None,
             withdrawals: env.withdrawals.as_deref(),
         };
 

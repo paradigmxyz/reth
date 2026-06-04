@@ -1,6 +1,7 @@
 //! Evm2 state aggregation types.
 
 use alloc::{collections::BTreeMap, vec::Vec};
+use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
     map::{AddressMap, B256Map},
     Address, BlockNumber, B256, U256,
@@ -312,11 +313,9 @@ impl From<StorageChangeSet> for Evm2StorageChangeSet {
 }
 
 fn account_info_to_reth(info: &AccountInfo) -> Account {
-    Account {
-        nonce: info.nonce,
-        balance: info.balance,
-        bytecode_hash: (!info.code_hash.is_zero()).then_some(info.code_hash),
-    }
+    let bytecode_hash =
+        (!info.code_hash.is_zero() && info.code_hash != KECCAK_EMPTY).then_some(info.code_hash);
+    Account { nonce: info.nonce, balance: info.balance, bytecode_hash }
 }
 
 pub(crate) fn account_to_info(account: Account) -> AccountInfo {
