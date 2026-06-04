@@ -135,7 +135,7 @@ mod tests {
     use alloy_consensus::{
         BlobTransactionSidecar, Block, Header, SidecarBuilder, SimpleCoder, Transaction,
     };
-    use alloy_primitives::{map::AddressMap, Address, U256};
+    use alloy_primitives::{map::AddressMap, Address, Bytes, U256};
     use alloy_rpc_types_eth::request::TransactionRequest;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_evm_ethereum::EthEvmConfig;
@@ -149,7 +149,6 @@ mod tests {
         test_utils::{testing_pool, TestPool},
         TransactionOrigin, TransactionPool,
     };
-    use revm_primitives::Bytes;
 
     fn mock_eth_api(
         accounts: AddressMap<ExtendedAccount>,
