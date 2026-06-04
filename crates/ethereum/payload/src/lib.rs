@@ -9,6 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 use alloy_consensus::Transaction;
+use alloy_eips::eip7825::MAX_TX_GAS_LIMIT_OSAKA;
 use alloy_primitives::U256;
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::PayloadAttributes as EthPayloadAttributes;
@@ -38,7 +39,6 @@ use reth_transaction_pool::{
     BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
     ValidPoolTransaction,
 };
-use revm::context_interface::{Block as _, Cfg as _};
 use std::sync::Arc;
 use tracing::{debug, trace, warn};
 
@@ -210,16 +210,21 @@ where
         .map_err(PayloadBuilderError::other)?;
 
     debug!(target: "payload_builder", id=%payload_id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
+    let is_osaka = chain_spec.is_osaka_active_at_timestamp(attributes.timestamp);
     let mut cumulative_tx_gas_used = 0;
     let mut block_regular_gas_used = 0;
     let mut block_state_gas_used = 0;
-    let block_gas_limit: u64 = builder.evm_mut().block().gas_limit();
-    let tx_gas_limit_cap = builder.evm_mut().cfg_env().tx_gas_limit_cap();
-    let base_fee = builder.evm_mut().block().basefee();
+    let block_gas_limit = builder.block_gas_limit();
+    let tx_gas_limit_cap = builder.tx_gas_limit_cap().unwrap_or(if is_osaka {
+        MAX_TX_GAS_LIMIT_OSAKA
+    } else {
+        u64::MAX
+    });
+    let base_fee = builder.block_base_fee();
 
     let mut best_txs = best_txs(BestTransactionsAttributes::new(
         base_fee,
-        builder.evm_mut().block().blob_gasprice().map(|gasprice| gasprice as u64),
+        builder.block_blob_gasprice().map(|gasprice| gasprice as u64),
     ));
     let mut total_fees = U256::ZERO;
 
@@ -251,8 +256,6 @@ where
         .max_blobs_per_block
         .map(|user_limit| std::cmp::min(user_limit, protocol_max_blob_count).max(1))
         .unwrap_or(protocol_max_blob_count);
-
-    let is_osaka = chain_spec.is_osaka_active_at_timestamp(attributes.timestamp);
 
     let withdrawals_rlp_length =
         attributes.withdrawals.as_ref().map(|withdrawals| withdrawals.length()).unwrap_or(0);

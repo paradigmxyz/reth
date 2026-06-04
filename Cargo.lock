@@ -8807,7 +8807,6 @@ dependencies = [
  "reth-primitives-traits",
  "reth-storage-api",
  "reth-transaction-pool",
- "revm",
  "tracing",
 ]
 
