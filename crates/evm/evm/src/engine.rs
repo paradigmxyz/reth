@@ -2,7 +2,7 @@ use crate::{execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor, 
 use alloy_consensus::transaction::Either;
 use alloy_evm::{block::ExecutableTxParts, RecoveredTx};
 use rayon::prelude::*;
-use reth_primitives_traits::TxTy;
+use reth_primitives_traits::{HeaderTy, TxTy};
 
 /// [`ConfigureEvm`] extension providing methods for executing payloads.
 pub trait ConfigureEngineEvm<ExecutionData>: ConfigureEvm {
@@ -20,6 +20,30 @@ pub trait ConfigureEngineEvm<ExecutionData>: ConfigureEvm {
         &self,
         payload: &ExecutionData,
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error>;
+}
+
+/// [`ConfigureEvm`] extension exposing evm2-native environments for engine execution.
+pub trait ConfigureEvm2Engine<ExecutionData>: ConfigureEngineEvm<ExecutionData> {
+    /// Returns the evm2 spec id for the given block header.
+    fn evm2_spec_for_header(
+        &self,
+        header: &HeaderTy<Self::Primitives>,
+    ) -> Result<evm2::SpecId, Self::Error>;
+
+    /// Returns the evm2 block environment for the given block header.
+    fn evm2_block_env_for_header(
+        &self,
+        header: &HeaderTy<Self::Primitives>,
+    ) -> Result<evm2::env::BlockEnv, Self::Error>;
+
+    /// Returns the evm2 spec id for the given engine payload.
+    fn evm2_spec_for_payload(&self, payload: &ExecutionData) -> Result<evm2::SpecId, Self::Error>;
+
+    /// Returns the evm2 block environment for the given engine payload.
+    fn evm2_block_env_for_payload(
+        &self,
+        payload: &ExecutionData,
+    ) -> Result<evm2::env::BlockEnv, Self::Error>;
 }
 
 /// Converts a raw transaction into an executable transaction.

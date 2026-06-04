@@ -36,7 +36,7 @@ use reth_primitives_traits::{SealedBlock, SealedHeader};
 use revm::{context::BlockEnv, primitives::hardfork::SpecId};
 
 #[cfg(feature = "std")]
-use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
+use reth_evm::{ConfigureEngineEvm, ConfigureEvm2Engine, ExecutableTxIterator};
 #[allow(unused_imports)]
 use {
     alloy_eips::Decodable2718,
@@ -440,6 +440,58 @@ where
         };
 
         Ok((txs, convert))
+    }
+}
+
+#[cfg(feature = "std")]
+impl<ChainSpec, EvmF> ConfigureEvm2Engine<ExecutionData> for EthEvmConfig<ChainSpec, EvmF>
+where
+    ChainSpec:
+        EthExecutorSpec + EthChainSpec<Header = Header> + EthereumHardforks + Hardforks + 'static,
+    EvmF: EvmFactory<
+            Tx: TransactionEnvMut
+                    + FromRecoveredTx<TransactionSigned>
+                    + FromTxWithEncoded<TransactionSigned>,
+            Spec = SpecId,
+            BlockEnv = BlockEnv,
+            Precompiles = PrecompilesMap,
+        > + Clone
+        + Debug
+        + Send
+        + Sync
+        + Unpin
+        + 'static,
+{
+    fn evm2_spec_for_header(&self, header: &Header) -> Result<evm2::SpecId, Self::Error> {
+        Ok(evm2_spec(self.chain_spec(), header))
+    }
+
+    fn evm2_block_env_for_header(
+        &self,
+        header: &Header,
+    ) -> Result<evm2::env::BlockEnv, Self::Error> {
+        Ok(evm2_block_env_with_blob_params(
+            header,
+            self.chain_spec().blob_params_at_timestamp(header.timestamp),
+        ))
+    }
+
+    fn evm2_spec_for_payload(&self, payload: &ExecutionData) -> Result<evm2::SpecId, Self::Error> {
+        Ok(evm2_spec_by_timestamp_and_block_number(
+            self.chain_spec(),
+            payload.payload.timestamp(),
+            payload.payload.block_number(),
+        ))
+    }
+
+    fn evm2_block_env_for_payload(
+        &self,
+        payload: &ExecutionData,
+    ) -> Result<evm2::env::BlockEnv, Self::Error> {
+        Ok(evm2_payload_block_env(
+            payload,
+            self.chain_spec().blob_params_at_timestamp(payload.payload.timestamp()),
+        ))
     }
 }
 

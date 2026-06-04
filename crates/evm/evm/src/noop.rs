@@ -94,3 +94,31 @@ where
         self.inner().tx_iterator_for_payload(payload)
     }
 }
+
+#[cfg(feature = "std")]
+impl<Inner, T> crate::ConfigureEvm2Engine<T> for NoopEvmConfig<Inner>
+where
+    Inner: crate::ConfigureEvm2Engine<T>,
+{
+    fn evm2_spec_for_header(
+        &self,
+        header: &HeaderTy<Self::Primitives>,
+    ) -> Result<evm2::SpecId, Self::Error> {
+        self.inner().evm2_spec_for_header(header)
+    }
+
+    fn evm2_block_env_for_header(
+        &self,
+        header: &HeaderTy<Self::Primitives>,
+    ) -> Result<evm2::env::BlockEnv, Self::Error> {
+        self.inner().evm2_block_env_for_header(header)
+    }
+
+    fn evm2_spec_for_payload(&self, payload: &T) -> Result<evm2::SpecId, Self::Error> {
+        self.inner().evm2_spec_for_payload(payload)
+    }
+
+    fn evm2_block_env_for_payload(&self, payload: &T) -> Result<evm2::env::BlockEnv, Self::Error> {
+        self.inner().evm2_block_env_for_payload(payload)
+    }
+}
