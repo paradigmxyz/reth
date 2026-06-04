@@ -50,12 +50,18 @@ enum DeferredTrieDataInner {
     /// Data is not yet available; raw inputs stored for fallback computation.
     ///
     /// Wrapped in `Option` to allow taking ownership during computation.
+    // jnt-v2 fix: PATCH 2 makes `pending` store Ready, so this variant is no longer
+    // constructed (still matched by wait_cloned/Debug). Kept intentionally.
+    #[allow(dead_code)]
     Pending(Option<PendingInputs>),
     /// Data has been computed and is ready.
     Ready(ComputedTrieData),
 }
 
 /// Inputs kept while a deferred trie computation is pending.
+// jnt-v2 fix: PATCH 2 makes `pending` store Ready, so these fields are no longer
+// constructed/read on any live path. Kept intentionally (matched by wait_cloned).
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 struct PendingInputs {
     /// Unsorted hashed post-state from execution.
@@ -81,12 +87,11 @@ impl fmt::Debug for DeferredTrieData {
 impl DeferredTrieData {
     /// Create a new pending handle with fallback inputs for synchronous computation.
     pub fn pending(hashed_state: Arc<HashedPostState>, trie_updates: Arc<TrieUpdates>) -> Self {
-        Self {
-            state: Arc::new(Mutex::new(DeferredTrieDataInner::Pending(Some(PendingInputs {
-                hashed_state,
-                trie_updates,
-            })))),
-        }
+        // FIX (jnt-v2 engine wedge): compute eagerly and store Ready. The lazy variant computed
+        // inside wait_cloned WHILE HOLDING the Mutex (Self::sort runs a rayon::join), which
+        // deadlocked the overlay/engine machinery. Computing up-front means wait_cloned always
+        // finds Ready and never holds the lock across a compute (no deadlock, no busy-wait).
+        Self::ready(Self::sort(hashed_state, trie_updates))
     }
 
     /// Create a handle that is already populated with the given [`ComputedTrieData`].
