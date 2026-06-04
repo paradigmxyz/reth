@@ -93,9 +93,10 @@ where
     ) -> (Self, Sender<PrewarmTaskEvent<N::Receipt>>) {
         let (actions_tx, actions_rx) = channel();
 
-        trace!(
+        debug!(
             target: "engine::tree::payload_processor::prewarm",
             prewarming_threads = executor.prewarming_pool().current_num_threads(),
+            bal_streaming_threads = executor.bal_streaming_pool().current_num_threads(),
             transaction_count = ctx.env.transaction_count,
             "Initialized prewarm task"
         );
@@ -337,9 +338,17 @@ where
             return;
         }
 
-        trace!(
+        let prewarming_threads = self.executor.prewarming_pool().current_num_threads();
+        let bal_streaming_threads = self.executor.bal_streaming_pool().current_num_threads();
+        let stream_hashed_state = self.to_sparse_trie_task.is_some();
+        let prefetch_storage = self.ctx.saved_cache.is_some() && !self.ctx.disable_bal_batch_io;
+        debug!(
             target: "engine::tree::payload_processor::prewarm",
             accounts = bal.len(),
+            prewarming_threads,
+            bal_streaming_threads,
+            stream_hashed_state,
+            prefetch_storage,
             "Starting BAL prewarm"
         );
 

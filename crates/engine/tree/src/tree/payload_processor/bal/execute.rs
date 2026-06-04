@@ -36,6 +36,7 @@ use revm::{
 };
 use revm_state::bal::Bal as RevmBal;
 use std::sync::Arc;
+use tracing::debug;
 
 use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
 
@@ -64,7 +65,15 @@ where
     ReceiptTy<Evm::Primitives>: Clone,
 {
     let worker_pool = runtime.bal_streaming_pool();
-    let worker_count = worker_pool.current_num_threads().max(1).min(transaction_count);
+    let bal_streaming_threads = worker_pool.current_num_threads();
+    let worker_count = bal_streaming_threads.max(1).min(transaction_count);
+    debug!(
+        target: "engine::tree::payload_processor::bal",
+        transaction_count,
+        bal_streaming_threads,
+        worker_count,
+        "starting parallel BAL block execution"
+    );
 
     worker_pool.in_place_scope(|scope| {
         execute_block_inner(
