@@ -75,6 +75,9 @@ pub use evm2_convert::{
     evm2_recovered_tx_ref, evm2_spec, evm2_spec_by_timestamp_and_block_number,
 };
 
+mod evm2_executor;
+pub use evm2_executor::{execute_evm2_block, Evm2ExecutionError};
+
 mod receipt;
 pub use receipt::RethReceiptBuilder;
 
