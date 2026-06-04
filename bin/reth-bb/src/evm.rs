@@ -17,8 +17,6 @@ use reth_evm::{
     evm2::{Evm2RethBlockExecutor, Evm2TxExecutionResult, RethEvm2ReceiptBuilder},
     hardfork::SpecId,
     inspector::Inspector,
-    interpreter::InterpreterResult,
-    precompile::PrecompileProvider,
     precompiles::PrecompilesMap,
     EthEvm, EthEvmFactory, Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
@@ -128,12 +126,12 @@ pub(crate) type BalIndexSetter<DB> = fn(&mut DB, u64);
 /// is used (preserving correct GASLIMIT opcode behavior). Accumulated offsets
 /// are applied to receipts and totals in `finish()`.
 #[expect(missing_debug_implementations)]
-pub struct BbBlockExecutor<'a, DB, I, P>
+pub struct BbBlockExecutor<'a, DB, I>
 where
     DB: StateDB,
 {
     /// The inner executor. `None` transiently during `apply_segment_boundary`.
-    inner: Option<Evm2RethBlockExecutor<'a, EthEvm<DB, I, P>, RethEvm2ReceiptBuilder>>,
+    inner: Option<Evm2RethBlockExecutor<'a, EthEvm<DB, I, PrecompilesMap>, RethEvm2ReceiptBuilder>>,
     plan: BbEvmPlan<'a>,
     receipt_builder: RethEvm2ReceiptBuilder,
     dao_fork_block: Option<u64>,
@@ -163,12 +161,11 @@ where
     initialized: bool,
 }
 
-impl<'a, DB, I, P> BbBlockExecutor<'a, DB, I, P>
+impl<'a, DB, I> BbBlockExecutor<'a, DB, I>
 where
     DB: StateDB,
     I: Inspector<<EthEvmFactory as EvmFactory>::Context<DB>>,
-    P: PrecompileProvider<<EthEvmFactory as EvmFactory>::Context<DB>, Output = InterpreterResult>,
-    EthEvm<DB, I, P>: Evm<
+    EthEvm<DB, I, PrecompilesMap>: Evm<
         DB = DB,
         Tx = TxEnv,
         HaltReason = HaltReason,
@@ -180,7 +177,7 @@ where
 {
     #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
-        evm: EthEvm<DB, I, P>,
+        evm: EthEvm<DB, I, PrecompilesMap>,
         plan: BbEvmPlan<'a>,
         receipt_builder: RethEvm2ReceiptBuilder,
         dao_fork_block: Option<u64>,
@@ -270,13 +267,15 @@ where
         Ok(())
     }
 
-    fn inner(&self) -> &Evm2RethBlockExecutor<'a, EthEvm<DB, I, P>, RethEvm2ReceiptBuilder> {
+    fn inner(
+        &self,
+    ) -> &Evm2RethBlockExecutor<'a, EthEvm<DB, I, PrecompilesMap>, RethEvm2ReceiptBuilder> {
         self.inner.as_ref().expect("inner executor must exist")
     }
 
     fn inner_mut(
         &mut self,
-    ) -> &mut Evm2RethBlockExecutor<'a, EthEvm<DB, I, P>, RethEvm2ReceiptBuilder> {
+    ) -> &mut Evm2RethBlockExecutor<'a, EthEvm<DB, I, PrecompilesMap>, RethEvm2ReceiptBuilder> {
         self.inner.as_mut().expect("inner executor must exist")
     }
 
@@ -389,12 +388,11 @@ where
     }
 }
 
-impl<'a, DB, I, P> BlockExecutor for BbBlockExecutor<'a, DB, I, P>
+impl<'a, DB, I> BlockExecutor for BbBlockExecutor<'a, DB, I>
 where
     DB: StateDB,
     I: Inspector<<EthEvmFactory as EvmFactory>::Context<DB>>,
-    P: PrecompileProvider<<EthEvmFactory as EvmFactory>::Context<DB>, Output = InterpreterResult>,
-    EthEvm<DB, I, P>: Evm<
+    EthEvm<DB, I, PrecompilesMap>: Evm<
         DB = DB,
         Tx = TxEnv,
         HaltReason = HaltReason,
@@ -406,7 +404,7 @@ where
 {
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
-    type Evm = EthEvm<DB, I, P>;
+    type Evm = EthEvm<DB, I, PrecompilesMap>;
     type DB = DB;
     type Result = Evm2TxExecutionResult;
 
@@ -577,7 +575,7 @@ impl<Spec> BbBlockExecutorFactory<Spec> {
         bal_index_reader: Option<BalIndexReader<DB>>,
         bal_index_bumper: Option<BalIndexBumper<DB>>,
         bal_index_setter: Option<BalIndexSetter<DB>>,
-    ) -> BbBlockExecutor<'a, DB, I, PrecompilesMap>
+    ) -> BbBlockExecutor<'a, DB, I>
     where
         DB: StateDB,
         I: Inspector<<EthEvmFactory as EvmFactory>::Context<DB>>,
@@ -606,7 +604,7 @@ where
     type Receipt = Receipt;
     type TxExecutionResult = Evm2TxExecutionResult;
     type Executor<'a, DB: StateDB, I: Inspector<<EthEvmFactory as EvmFactory>::Context<DB>>> =
-        BbBlockExecutor<'a, DB, I, PrecompilesMap>;
+        BbBlockExecutor<'a, DB, I>;
 
     fn evm_factory(&self) -> &Self::EvmFactory {
         &self.evm_factory
