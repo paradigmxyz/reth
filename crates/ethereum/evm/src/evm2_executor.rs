@@ -3,14 +3,17 @@
 use crate::{evm2_recovered_tx, RethReceiptBuilder};
 use alloc::{format, string::String, vec::Vec};
 use alloy_consensus::transaction::Recovered;
-use alloy_eips::eip4895::Withdrawal;
+use alloy_eips::{
+    eip4895::Withdrawal, eip7002::WITHDRAWAL_REQUEST_TYPE, eip7251::CONSOLIDATION_REQUEST_TYPE,
+    eip7685::Requests,
+};
 use alloy_primitives::{Address, Bytes, B256, KECCAK256_EMPTY, U256};
 use evm2::{
     env::BlockEnv,
     ethereum::ethereum_tx_registry,
     evm::{
         AccountInfo, Database, Db, DbErrorCode, StateChanges, Tracked, BEACON_ROOTS_ADDRESS,
-        HISTORY_STORAGE_ADDRESS,
+        CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
     },
     registry::HandlerError,
     BaseEvmTypes, Evm, Precompiles, SpecId,
@@ -171,13 +174,18 @@ where
 
     let withdrawal_changes =
         withdrawal_state_changes::<DB>(&mut evm, block_number, &results, context.withdrawals)?;
+    let (post_system_changes, requests) =
+        post_execution_system_call_state_changes::<DB>(&mut evm, spec_id, context)?;
 
-    Ok(RethReceiptBuilder.build_evm2_block_output_with_surrounding_state_changes(
+    let mut output = RethReceiptBuilder.build_evm2_block_output_with_surrounding_state_changes(
         block_number,
         pre_system_changes,
         results,
-        withdrawal_changes,
-    ))
+        post_system_changes.into_iter().chain(withdrawal_changes),
+    );
+    output.result.requests = requests;
+
+    Ok(output)
 }
 
 /// Executes a block worth of recovered Ethereum transactions with an evm2 database adapter backed
@@ -287,11 +295,14 @@ where
     };
 
     if spec_id.enables(SpecId::PRAGUE) && block_number != 0 {
-        state_changes.push(execute_system_call::<DB>(
-            evm,
-            HISTORY_STORAGE_ADDRESS,
-            system_calls.parent_hash.0.into(),
-        )?);
+        state_changes.push(
+            execute_system_call::<DB>(
+                evm,
+                HISTORY_STORAGE_ADDRESS,
+                system_calls.parent_hash.0.into(),
+            )?
+            .state_changes,
+        );
     }
 
     if spec_id.enables(SpecId::CANCUN) {
@@ -306,22 +317,58 @@ where
                 ));
             }
         } else {
-            state_changes.push(execute_system_call::<DB>(
-                evm,
-                BEACON_ROOTS_ADDRESS,
-                parent_beacon_block_root.0.into(),
-            )?);
+            state_changes.push(
+                execute_system_call::<DB>(
+                    evm,
+                    BEACON_ROOTS_ADDRESS,
+                    parent_beacon_block_root.0.into(),
+                )?
+                .state_changes,
+            );
         }
     }
 
     Ok(state_changes)
 }
 
+fn post_execution_system_call_state_changes<DB>(
+    evm: &mut Evm<BaseEvmTypes>,
+    spec_id: SpecId,
+    context: Evm2BlockExecutionContext<'_>,
+) -> Result<(Vec<StateChanges>, Requests), Evm2ExecutionError<DB::Error>>
+where
+    DB: Database + 'static,
+{
+    let mut state_changes = Vec::new();
+    let mut requests = Requests::default();
+    if context.system_calls.is_none() || !spec_id.enables(SpecId::PRAGUE) {
+        return Ok((state_changes, requests));
+    }
+
+    let withdrawal_requests =
+        execute_system_call::<DB>(evm, WITHDRAWAL_REQUEST_ADDRESS, Bytes::new())?;
+    requests.push_request_with_type(
+        WITHDRAWAL_REQUEST_TYPE,
+        withdrawal_requests.output.iter().copied(),
+    );
+    state_changes.push(withdrawal_requests.state_changes);
+
+    let consolidation_requests =
+        execute_system_call::<DB>(evm, CONSOLIDATION_REQUEST_ADDRESS, Bytes::new())?;
+    requests.push_request_with_type(
+        CONSOLIDATION_REQUEST_TYPE,
+        consolidation_requests.output.iter().copied(),
+    );
+    state_changes.push(consolidation_requests.state_changes);
+
+    Ok((state_changes, requests))
+}
+
 fn execute_system_call<DB>(
     evm: &mut Evm<BaseEvmTypes>,
     address: Address,
     data: Bytes,
-) -> Result<StateChanges, Evm2ExecutionError<DB::Error>>
+) -> Result<evm2::TxResult, Evm2ExecutionError<DB::Error>>
 where
     DB: Database + 'static,
 {
@@ -340,7 +387,7 @@ where
         });
     }
 
-    Ok(result.state_changes)
+    Ok(result)
 }
 
 fn withdrawal_state_changes<DB>(
@@ -409,7 +456,11 @@ mod tests {
     use alloy_eips::eip4895::Withdrawal;
     use alloy_primitives::{address, Address, Bytes, Signature, TxKind, B256, U256};
     use core::convert::Infallible;
-    use evm2::{bytecode::Bytecode, evm::AccountInfo, interpreter::Word};
+    use evm2::{
+        bytecode::Bytecode,
+        evm::AccountInfo,
+        interpreter::{opcode::op, Word},
+    };
 
     #[derive(Default)]
     struct TestDatabase {
@@ -573,5 +624,58 @@ mod tests {
         assert!(output.result.receipts.is_empty());
         assert!(output.state.accounts().is_empty());
         assert_eq!(output.state.block_reverts().len(), 1);
+    }
+
+    #[test]
+    fn collects_post_execution_system_call_requests() {
+        let mut database = TestDatabase::default();
+        database.accounts.insert(
+            WITHDRAWAL_REQUEST_ADDRESS,
+            AccountInfo::default().with_code(return_byte_code(0xaa)),
+        );
+        database.accounts.insert(
+            CONSOLIDATION_REQUEST_ADDRESS,
+            AccountInfo::default().with_code(return_byte_code(0xbb)),
+        );
+
+        let output = execute_evm2_block_with_context(
+            SpecId::PRAGUE,
+            BlockEnv::default(),
+            database,
+            1,
+            core::iter::empty::<Recovered<TransactionSigned>>(),
+            Evm2BlockExecutionContext {
+                system_calls: Some(Evm2BlockSystemCalls {
+                    parent_hash: B256::ZERO,
+                    parent_beacon_block_root: Some(B256::ZERO),
+                }),
+                withdrawals: None,
+            },
+        )
+        .expect("system calls succeed");
+
+        assert_eq!(
+            output.result.requests.iter().cloned().collect::<Vec<_>>(),
+            vec![
+                Bytes::from_static(&[WITHDRAWAL_REQUEST_TYPE, 0xaa]),
+                Bytes::from_static(&[CONSOLIDATION_REQUEST_TYPE, 0xbb]),
+            ]
+        );
+        assert!(output.result.receipts.is_empty());
+    }
+
+    fn return_byte_code(value: u8) -> Bytecode {
+        Bytecode::new_legacy(Bytes::from(vec![
+            op::PUSH1,
+            value,
+            op::PUSH1,
+            0,
+            op::MSTORE8,
+            op::PUSH1,
+            1,
+            op::PUSH1,
+            0,
+            op::RETURN,
+        ]))
     }
 }
