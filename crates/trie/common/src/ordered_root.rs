@@ -40,8 +40,8 @@
 //! ```
 
 use crate::{HashBuilder, Nibbles, EMPTY_ROOT_HASH};
-use alloc::vec::Vec;
 use alloy_primitives::B256;
+use smallvec::SmallVec;
 
 /// First index whose RLP-encoded key sorts after index 0.
 ///
@@ -49,6 +49,7 @@ use alloy_primitives::B256;
 /// index 0 (`0x80`). Index `0x80` and larger use long-form RLP integer encoding and sort after
 /// index 0, so index 0 must be flushed before inserting this index.
 const ZERO_KEY_FLUSH_INDEX: usize = 0x80;
+const ZERO_LEAF_INLINE_CAPACITY: usize = 512;
 
 /// A builder for computing ordered trie roots from an append-only stream of pre-encoded items.
 ///
@@ -64,7 +65,7 @@ pub struct OrderedTrieRootEncodedBuilder {
     len: usize,
     /// Index 0 is the only item whose final insertion position depends on whether more items
     /// arrive.
-    zero: Option<Vec<u8>>,
+    zero: Option<SmallVec<[u8; ZERO_LEAF_INLINE_CAPACITY]>>,
     /// The underlying hash builder.
     hb: HashBuilder,
 }
@@ -85,7 +86,7 @@ impl OrderedTrieRootEncodedBuilder {
 
         match index {
             0 => {
-                self.zero = Some(bytes.to_vec());
+                self.zero = Some(SmallVec::from_slice(bytes));
             }
             1..=0x7f => {
                 self.add_leaf(index, bytes);
