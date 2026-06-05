@@ -13,10 +13,11 @@
     "inject-cargo-docs": "bun scripts/inject-cargo-docs.ts"
   },
   "dependencies": {
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5",
-    "vocs": "^2.0.10",
-    "waku": "^1.0.0-beta.0"
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "react-server-dom-webpack": "19.2.4",
+    "vocs": "^2.0.11",
+    "waku": "1.0.0-beta.0"
   },
   "devDependencies": {
     "@types/node": "^24.12.2",

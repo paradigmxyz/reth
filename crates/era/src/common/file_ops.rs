@@ -114,6 +114,8 @@ pub trait FileReader: StreamReader<File> {
     }
 }
 
+impl<T: StreamReader<File>> FileReader for T {}
+
 /// [`StreamWriter`] for writing era-format files
 pub trait StreamWriter<W: Write>: Sized {
     /// The file type this writer handles
