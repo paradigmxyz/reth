@@ -7,7 +7,6 @@
 use alloy_consensus::{Transaction, TxEnvelope};
 use alloy_eips::{
     eip2718::Decodable2718,
-    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7685::{Requests, RequestsOrHash},
 };
 use alloy_primitives::{Bytes, B128, B256};
@@ -22,7 +21,6 @@ use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_payload_primitives::EngineObjectValidationError;
-use reth_rpc_engine_api::{EngineApiError, EngineApiResult};
 use reth_transaction_pool::BlobStore;
 use ssz::Decode;
 use std::{
@@ -43,6 +41,7 @@ const STATUS_OK: u16 = 200;
 const STATUS_BAD_REQUEST: u16 = 400;
 const STATUS_NOT_FOUND: u16 = 404;
 const STATUS_METHOD_NOT_ALLOWED: u16 = 405;
+const STATUS_PAYLOAD_TOO_LARGE: u16 = 413;
 const STATUS_INTERNAL_SERVER_ERROR: u16 = 500;
 const STATUS_SERVICE_UNAVAILABLE: u16 = 503;
 
@@ -71,17 +70,11 @@ impl<C> std::fmt::Debug for EngineSszProxyHandle<C> {
     }
 }
 
-impl<ChainSpec: Default> Default for EngineSszProxyHandle<ChainSpec> {
-    fn default() -> Self {
-        Self {
-            engine: Default::default(),
-            blob_store: Default::default(),
-            chain_spec: Default::default(),
-        }
-    }
-}
-
 impl<ChainSpec> EngineSszProxyHandle<ChainSpec> {
+    fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        Self { engine: Default::default(), blob_store: Default::default(), chain_spec }
+    }
+
     /// Sets the consensus engine handle used by the proxy.
     pub async fn set_engine(&self, engine: ConsensusEngineHandle<EthEngineTypes>) {
         *self.engine.write().await = Some(engine);
@@ -96,30 +89,25 @@ impl<ChainSpec> EngineSszProxyHandle<ChainSpec> {
         *self.blob_store.write().await = Some(Arc::new(blob_store));
     }
 
-    /// Sets the chain spec used for getBlobs fork validation.
-    pub fn set_chain_spec(&mut self, chain_spec: Arc<ChainSpec>) {
-        self.chain_spec = chain_spec;
-    }
-
     async fn blob_store(&self) -> Option<Arc<dyn BlobStore>> {
         self.blob_store.read().await.clone()
     }
 
     fn chain_spec(&self) -> Arc<ChainSpec> {
-        self.chain_spec
+        self.chain_spec.clone()
     }
 }
 
 /// A tower layer that intercepts SSZ Engine API routes under `/engine/v2`.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct EngineSszProxyLayer<ChainSpec> {
     handle: EngineSszProxyHandle<ChainSpec>,
 }
 
 impl<ChainSpec> EngineSszProxyLayer<ChainSpec> {
     /// Creates a new proxy layer and a handle for setting the engine after node launch.
-    pub fn new() -> (Self, EngineSszProxyHandle<ChainSpec>) {
-        let handle = EngineSszProxyHandle::default();
+    pub fn new(chain_spec: Arc<ChainSpec>) -> (Self, EngineSszProxyHandle<ChainSpec>) {
+        let handle = EngineSszProxyHandle::new(chain_spec);
         (Self { handle: handle.clone() }, handle)
     }
 }
@@ -164,10 +152,13 @@ where
     }
 }
 
-async fn handle_engine_ssz_request(
-    handle: EngineSszProxyHandle<impl EthereumHardforks + Send + Sync + 'static>,
+async fn handle_engine_ssz_request<ChainSpec>(
+    handle: EngineSszProxyHandle<ChainSpec>,
     request: HttpRequest,
-) -> HttpResponse {
+) -> HttpResponse
+where
+    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+{
     if request.method().as_str() != "POST" {
         return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
     }
@@ -316,119 +307,44 @@ async fn handle_forkchoice_updated(
     }
 }
 
-impl<C> EngineSszProxyHandle<C>
-where
-    C: EthereumHardforks,
-{
-    async fn get_blobs_v1(
-        &self,
-        versioned_hashes: Vec<B256>,
-    ) -> EngineApiResult<Vec<Option<BlobAndProofV1>>> {
-        let current_timestamp = current_timestamp();
-        if self.chain_spec().is_osaka_active_at_timestamp(current_timestamp) {
-            return Err(unsupported_fork())
-        }
-
-        if versioned_hashes.len() > MAX_BLOB_LIMIT {
-            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
-        }
-
-        self.blob_store()
-            .await
-            .ok_or_else(engine_unavailable)?
-            .get_by_versioned_hashes_v1(&versioned_hashes)
-            .map_err(|err| EngineApiError::Internal(Box::new(err)))
-    }
-
-    async fn get_blobs_v2(
-        &self,
-        versioned_hashes: Vec<B256>,
-    ) -> EngineApiResult<Option<Vec<BlobAndProofV2>>> {
-        let current_timestamp = current_timestamp();
-        if !self.chain_spec.is_osaka_active_at_timestamp(current_timestamp) {
-            return Err(unsupported_fork())
-        }
-
-        if versioned_hashes.len() > MAX_BLOB_LIMIT {
-            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
-        }
-
-        self.blob_store()
-            .await
-            .ok_or_else(engine_unavailable)?
-            .get_by_versioned_hashes_v2(&versioned_hashes)
-            .map_err(|err| EngineApiError::Internal(Box::new(err)))
-    }
-
-    async fn get_blobs_v3(
-        &self,
-        versioned_hashes: Vec<B256>,
-    ) -> EngineApiResult<Option<Vec<Option<BlobAndProofV2>>>> {
-        let current_timestamp = current_timestamp();
-        if !self.chain_spec.is_osaka_active_at_timestamp(current_timestamp) {
-            return Err(unsupported_fork())
-        }
-
-        if versioned_hashes.len() > MAX_BLOB_LIMIT {
-            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
-        }
-
-        // // Spec requires returning `null` if syncing.
-        // if self.is_syncing().await {
-        //     return Ok(None)
-        // }
-
-        self.blob_store()
-            .await
-            .ok_or_else(engine_unavailable)?
-            .get_by_versioned_hashes_v3(&versioned_hashes)
-            .map(Some)
-            .map_err(|err| EngineApiError::Internal(Box::new(err)))
-    }
-
-    async fn get_blobs_v4(
-        &self,
-        versioned_hashes: Vec<B256>,
-        indices_bitarray: B128,
-    ) -> EngineApiResult<Option<Vec<Option<BlobCellsAndProofsV1>>>> {
-        let current_timestamp = current_timestamp();
-        if !self.chain_spec.is_amsterdam_active_at_timestamp(current_timestamp) {
-            return Err(unsupported_fork())
-        }
-
-        if versioned_hashes.len() > MAX_BLOB_LIMIT {
-            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
-        }
-
-        // // Spec requires returning `null` if syncing.
-        // if self.is_syncing().await {
-        //     return Ok(None)
-        // }
-
-        self.blob_store()
-            .await
-            .ok_or_else(engine_unavailable)?
-            .get_by_versioned_hashes_v4(&versioned_hashes, indices_bitarray)
-            .map(Some)
-            .map_err(|err| EngineApiError::Internal(Box::new(err)))
-    }
-}
-
-/// Handles SSZ `engine_getBlobsV*` requests with the native Engine API blob provider.
-async fn handle_get_blobs(
-    handler: EngineSszProxyHandle<impl EthereumHardforks + Send + Sync + 'static>,
+/// Handles SSZ `engine_getBlobsV*` requests with the node's blob store.
+async fn handle_get_blobs<ChainSpec>(
+    handler: EngineSszProxyHandle<ChainSpec>,
     version: u8,
     body: &[u8],
-) -> HttpResponse {
+) -> HttpResponse
+where
+    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+{
+    let Some(blob_store) = handler.blob_store().await else {
+        return text_response(STATUS_SERVICE_UNAVAILABLE, "blob store unavailable")
+    };
+
+    let chain_spec = handler.chain_spec();
+    let current_timestamp =
+        SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs();
+    let unsupported_fork = || {
+        text_response(STATUS_BAD_REQUEST, EngineObjectValidationError::UnsupportedFork.to_string())
+    };
+
     match version {
         1 => {
             let hashes = match decode_blob_hashes_request(body) {
                 Ok(hashes) => hashes,
                 Err(err) => return text_response(STATUS_BAD_REQUEST, err),
             };
-            match handler.get_blobs_v1(hashes).await {
+            if chain_spec.is_osaka_active_at_timestamp(current_timestamp) {
+                return unsupported_fork()
+            }
+            if hashes.len() > MAX_BLOB_LIMIT {
+                return text_response(
+                    STATUS_PAYLOAD_TOO_LARGE,
+                    format!("blob request too large: {}", hashes.len()),
+                )
+            }
+            match blob_store.get_by_versioned_hashes_v1(&hashes) {
                 Ok(response) => ssz_response(response),
-                Err(err) => engine_error_response(err),
+                Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
             }
         }
         2 => {
@@ -436,10 +352,19 @@ async fn handle_get_blobs(
                 Ok(hashes) => hashes,
                 Err(err) => return text_response(STATUS_BAD_REQUEST, err),
             };
-            match handler.get_blobs_v2(hashes).await {
+            if !chain_spec.is_osaka_active_at_timestamp(current_timestamp) {
+                return unsupported_fork()
+            }
+            if hashes.len() > MAX_BLOB_LIMIT {
+                return text_response(
+                    STATUS_PAYLOAD_TOO_LARGE,
+                    format!("blob request too large: {}", hashes.len()),
+                )
+            }
+            match blob_store.get_by_versioned_hashes_v2(&hashes) {
                 Ok(Some(response)) => ssz_response(response),
                 Ok(None) => no_content_response(),
-                Err(err) => engine_error_response(err),
+                Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
             }
         }
         3 => {
@@ -447,10 +372,18 @@ async fn handle_get_blobs(
                 Ok(hashes) => hashes,
                 Err(err) => return text_response(STATUS_BAD_REQUEST, err),
             };
-            match handler.get_blobs_v3(hashes).await {
-                Ok(Some(response)) => ssz_response(response),
-                Ok(None) => no_content_response(),
-                Err(err) => engine_error_response(err),
+            if !chain_spec.is_osaka_active_at_timestamp(current_timestamp) {
+                return unsupported_fork()
+            }
+            if hashes.len() > MAX_BLOB_LIMIT {
+                return text_response(
+                    STATUS_PAYLOAD_TOO_LARGE,
+                    format!("blob request too large: {}", hashes.len()),
+                )
+            }
+            match blob_store.get_by_versioned_hashes_v3(&hashes) {
+                Ok(response) => ssz_response(response),
+                Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
             }
         }
         4 => {
@@ -458,10 +391,18 @@ async fn handle_get_blobs(
                 Ok(request) => request,
                 Err(err) => return text_response(STATUS_BAD_REQUEST, err),
             };
-            match handler.get_blobs_v4(hashes, indices_bitarray).await {
-                Ok(Some(response)) => ssz_response(response),
-                Ok(None) => no_content_response(),
-                Err(err) => engine_error_response(err),
+            if !chain_spec.is_amsterdam_active_at_timestamp(current_timestamp) {
+                return unsupported_fork()
+            }
+            if hashes.len() > MAX_BLOB_LIMIT {
+                return text_response(
+                    STATUS_PAYLOAD_TOO_LARGE,
+                    format!("blob request too large: {}", hashes.len()),
+                )
+            }
+            match blob_store.get_by_versioned_hashes_v4(&hashes, indices_bitarray) {
+                Ok(response) => ssz_response(response),
+                Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
             }
         }
         _ => text_response(STATUS_NOT_FOUND, "unsupported blobs endpoint version"),
@@ -476,29 +417,6 @@ fn decode_blob_hashes_request(body: &[u8]) -> Result<Vec<B256>, &'static str> {
 /// Decodes the Amsterdam getBlobs request container with hashes and a cell index mask.
 fn decode_blob_cells_request(body: &[u8]) -> Result<(Vec<B256>, B128), &'static str> {
     <(Vec<B256>, B128) as ssz::Decode>::from_ssz_bytes(body).map_err(|_| "invalid ssz")
-}
-
-fn engine_error_response(error: EngineApiError) -> HttpResponse {
-    let status = match error {
-        EngineApiError::BlobRequestTooLarge { .. } => 413,
-        EngineApiError::EngineObjectValidationError(
-            EngineObjectValidationError::UnsupportedFork,
-        ) => STATUS_BAD_REQUEST,
-        _ => STATUS_INTERNAL_SERVER_ERROR,
-    };
-    text_response(status, error.to_string())
-}
-
-fn current_timestamp() -> u64 {
-    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs()
-}
-
-fn unsupported_fork() -> EngineApiError {
-    EngineApiError::EngineObjectValidationError(EngineObjectValidationError::UnsupportedFork)
-}
-
-fn engine_unavailable() -> EngineApiError {
-    EngineApiError::Internal(Box::new(std::io::Error::other("engine ssz blob context unavailable")))
 }
 
 fn decode_new_payload_request(version: u8, body: &[u8]) -> Result<ExecutionData, &'static str> {
