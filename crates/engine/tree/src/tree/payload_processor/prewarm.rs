@@ -406,7 +406,9 @@ where
                 let _span = branch_span.entered();
 
                 prefetch_bal.as_bal().par_iter().for_each(|account| {
-                    if ctx.should_stop() {
+                    if ctx.should_stop()
+                        || (account.storage_changes.is_empty() && account.storage_reads.is_empty())
+                    {
                         return;
                     }
                     WorkerPool::with_worker_mut(|worker| {
