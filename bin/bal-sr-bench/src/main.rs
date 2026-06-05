@@ -221,10 +221,20 @@ fn main() -> eyre::Result<()> {
     // (GUI on :8086 or headless tracy-capture) connects to record. Equivalent to reth's --log.tracy.
     if std::env::var_os("RETH_LOG_TRACY").is_some() {
         let directives = std::env::var("RETH_TRACY_FILTER").unwrap_or_else(|_| {
-            "info,engine::tree::payload_processor=trace,reth_trie_parallel=trace".to_string()
+            "info,engine::tree::payload_processor=trace,reth_trie_parallel=trace,reth_trie_sparse=trace".to_string()
         });
         layers.push(
             tracing_tracy::TracyLayer::default().with_filter(EnvFilter::new(directives)).boxed(),
+        );
+    }
+    // Console logs driven by RUST_LOG (e.g. RUST_LOG=trie::arena=debug). Writes to stderr so it
+    // doesn't clash with the per-block result lines on stdout.
+    if std::env::var_os("RUST_LOG").is_some() {
+        layers.push(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_filter(EnvFilter::from_default_env())
+                .boxed(),
         );
     }
     if !layers.is_empty() {
