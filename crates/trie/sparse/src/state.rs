@@ -334,8 +334,14 @@ where
             .into_iter()
             .map(|(target, mut nodes)| {
                 let result = match target {
-                    Either::Left(trie) => trie.reveal_v2_proof_nodes(&mut nodes, retain_updates),
-                    Either::Right(trie) => trie.reveal_v2_proof_nodes(&mut nodes, retain_updates),
+                    Either::Left(trie) => {
+                        let _span = tracing::trace_span!("reveal_account_proof_nodes", nodes = nodes.len()).entered();
+                        trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
+                    }
+                    Either::Right(trie) => {
+                        let _span = tracing::trace_span!("reveal_storage_proof_nodes", nodes = nodes.len()).entered();
+                        trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
+                    }
                 };
                 (result, nodes)
             })
@@ -352,9 +358,11 @@ where
                 .map(|(target, mut nodes)| {
                     let result = match target {
                         Either::Left(trie) => {
+                            let _span = tracing::trace_span!("reveal_account_proof_nodes", nodes = nodes.len()).entered();
                             trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
                         }
                         Either::Right(trie) => {
+                            let _span = tracing::trace_span!("reveal_storage_proof_nodes", nodes = nodes.len()).entered();
                             trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
                         }
                     };
