@@ -1575,6 +1575,7 @@ dependencies = [
  "alloy-eip7928 0.4.1",
  "alloy-primitives",
  "eyre",
+ "rayon",
  "reth-chain-state",
  "reth-chainspec",
  "reth-cli-util",
@@ -1594,6 +1595,8 @@ dependencies = [
  "tracing-chrome",
  "tracing-samply",
  "tracing-subscriber 0.3.23",
+ "tracing-tracy",
+ "tracy-client",
 ]
 
 [[package]]

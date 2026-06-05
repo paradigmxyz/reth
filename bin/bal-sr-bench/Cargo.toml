@@ -20,6 +20,7 @@ reth-chain-state.workspace = true
 reth-execution-types.workspace = true
 revm.workspace = true
 alloy-consensus.workspace = true
+rayon.workspace = true
 
 # Node primitives / chain / evm
 reth-chainspec.workspace = true
@@ -42,4 +43,6 @@ alloy-primitives.workspace = true
 eyre.workspace = true
 tracing-chrome = "0.7"
 tracing-samply.workspace = true
+tracing-tracy.workspace = true
+tracy-client.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter", "registry", "std"] }

@@ -1,6 +1,14 @@
 [alias]
 docs = "doc --workspace --all-features --no-deps"
 
+# Force frame pointers for the whole workspace so profilers (Tracy/perf/samply) can walk the full
+# user-space call stack. The kernel's x86-64 perf callchain unwinder follows the RBP chain; without
+# this, optimized (release-derived) builds omit frame pointers and sampled stacks truncate at the
+# first FP-less frame. Runtime cost is negligible. This is a profiling/benchmark repo, so it is
+# applied globally.
+[build]
+rustflags = ["-C", "force-frame-pointers=yes"]
+
 [target.x86_64-pc-windows-msvc]
 rustflags = [
     # Increases the stack size to 10MB, which is

@@ -35,7 +35,7 @@ use revm_primitives::{hash_map::Entry, B256Map};
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
 /// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
-const MAX_PENDING_UPDATES: usize = 100;
+const MAX_PENDING_UPDATES: usize = 10;
 
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = ConfigurableSparseTrie> {
@@ -279,6 +279,23 @@ where
         let mut total_idle_time = std::time::Duration::ZERO;
         let mut idle_start = Instant::now();
 
+        // The heavy "storage update avalanche" is the persistent re-application
+        // (`process_leaf_updates(false)`), which is unblocked by proof reveals — not by the
+        // incoming update stream pausing. Originally it only ran inside
+        // `promote_pending_account_updates` in the fully-quiescent branch, so it was deferred
+        // until the input stream stopped and then ran all at once, starving proof reveal and
+        // dispatch. Instead we drain it each time the proof wave drains (throttled by this
+        // interval), overlapping it with proof generation. Account promotion stays in the
+        // quiescent branch (it computes final storage roots and is only correct once an
+        // account's storage updates are complete). Set the interval very large to recover the
+        // original behavior.
+        let promote_interval = std::env::var("RETH_SR_PROMOTE_INTERVAL_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(std::time::Duration::from_millis)
+            .unwrap_or(std::time::Duration::from_millis(2));
+        let mut last_promote = Instant::now();
+
         loop {
             let mut t = Instant::now();
             crossbeam_channel::select_biased! {
@@ -333,14 +350,18 @@ where
                 },
             }
 
-            if self.updates.is_empty() && self.proof_result_rx.is_empty() {
-                // If we don't have any pending messages, we can spend some time on computing
-                // storage roots and promoting account updates.
+            let proofs_empty = self.proof_result_rx.is_empty();
+            let updates_empty = self.updates.is_empty();
+
+            if proofs_empty && updates_empty {
+                // Fully quiescent: no pending messages or proofs. Safe to apply everything,
+                // promote account updates (storage is complete), and terminate.
                 self.dispatch_pending_targets();
                 t = Instant::now();
                 self.process_new_updates()?;
                 self.promote_pending_account_updates()?;
                 self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
+                last_promote = Instant::now();
 
                 if self.finished_state_updates &&
                     self.account_updates.is_empty() &&
@@ -356,7 +377,20 @@ where
                 if self.proof_result_rx.is_empty() {
                     self.trie.calculate_subtries();
                 }
-            } else if self.updates.is_empty() || self.pending_updates > MAX_PENDING_UPDATES {
+            } else if proofs_empty && last_promote.elapsed() >= promote_interval {
+                // The current proof wave is fully revealed but updates are still streaming in.
+                // Drain the persistent storage updates that the reveals just unblocked and
+                // dispatch the next wave of targets — overlapping this heavy work with proof
+                // generation instead of dumping it once the stream pauses. We do NOT promote
+                // accounts here: more storage updates for an account may still arrive, so
+                // computing its final storage root now could be premature.
+                t = Instant::now();
+                self.process_new_updates()?;
+                self.process_leaf_updates(false)?;
+                self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
+                last_promote = Instant::now();
+                self.dispatch_pending_targets();
+            } else if updates_empty || self.pending_updates > MAX_PENDING_UPDATES {
                 // If we don't have any pending updates OR we've accumulated a lot already, apply
                 // them to the trie,
                 t = Instant::now();

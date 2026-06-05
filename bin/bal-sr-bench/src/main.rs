@@ -168,7 +168,23 @@ impl UnhashedState {
     }
 }
 
+// Register the default (rustc/cpp) symbol demangler with the embedded Tracy client, so sampled
+// stack frames show readable names instead of mangled `_ZN...` symbols. Expands to the
+// `___tracy_demangle` hook that tracy-client-sys calls; must live at crate root.
+tracy_client::register_demangler!();
+
 fn main() -> eyre::Result<()> {
+    // Configure the implicit global rayon pool up front, exactly as the node does in its launch
+    // context. The sparse-trie reveal uses the global pool via par_iter/rayon::join; without this
+    // the pool is built lazily on first use from inside the `sparse-trie` coordinator thread, and
+    // rayon's unnamed default workers inherit that parent's `comm` — so every worker shows up as
+    // `sparse-trie` in profilers. Naming them `rayon-NN` matches the node and keeps the one
+    // coordinator distinct from the pool workers in Tracy/samply.
+    let _ = rayon::ThreadPoolBuilder::new()
+        .num_threads(std::thread::available_parallelism().map_or(1, |n| n.get()))
+        .thread_name(|i| format!("rayon-{i:02}"))
+        .build_global();
+
     let datadir = std::env::var("RETH_DATADIR").unwrap_or_else(|_| "/schelk/reth".to_string());
     let datadir = Path::new(&datadir);
     let capture = std::env::var("RETH_BAL_DUMP_DIR").unwrap_or_else(|_| "/tmp/bal_capture".to_string());
@@ -200,6 +216,16 @@ fn main() -> eyre::Result<()> {
         let layer = tracing_samply::SamplyLayer::new()
             .map_err(|e| eyre::eyre!("failed to create samply layer: {e}"))?;
         layers.push(layer.with_filter(EnvFilter::new(directives)).boxed());
+    }
+    // Tracy: RETH_LOG_TRACY=1 (+ RETH_TRACY_FILTER) — embeds the Tracy client; a Tracy profiler
+    // (GUI on :8086 or headless tracy-capture) connects to record. Equivalent to reth's --log.tracy.
+    if std::env::var_os("RETH_LOG_TRACY").is_some() {
+        let directives = std::env::var("RETH_TRACY_FILTER").unwrap_or_else(|_| {
+            "info,engine::tree::payload_processor=trace,reth_trie_parallel=trace".to_string()
+        });
+        layers.push(
+            tracing_tracy::TracyLayer::default().with_filter(EnvFilter::new(directives)).boxed(),
+        );
     }
     if !layers.is_empty() {
         Registry::default().with(layers).init();

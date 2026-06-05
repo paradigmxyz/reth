@@ -77,6 +77,25 @@ where
     parent_span: Span,
 }
 
+/// A fixed, lazily-created set of worker-thread names for the BAL account-load lane.
+///
+/// `Runtime::spawn_blocking_named` maps each name to a single OS thread that is reused across all
+/// tasks submitted under that name (see `WorkerMap`). Reusing this fixed name set therefore keeps
+/// the process thread count stable — the threads are created once on first use and reused every
+/// block — instead of spawning threads ad-hoc per block. The count comes from
+/// `BAL_ACCT_LOAD_THREADS` (default 64) and is read once.
+fn bal_load_worker_names() -> &'static [&'static str] {
+    static NAMES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+    NAMES.get_or_init(|| {
+        let n = std::env::var("BAL_ACCT_LOAD_THREADS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|&n| n > 0)
+            .unwrap_or(64);
+        (0..n).map(|i| &*Box::leak(format!("bal-acct-load-{i}").into_boxed_str())).collect()
+    })
+}
+
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
 where
     N: NodePrimitives,
@@ -361,30 +380,77 @@ where
         let (stream_tx, stream_rx) = oneshot::channel();
 
         if let Some(to_sparse_trie_task) = to_sparse_trie_task {
+            // Split the hashed-state streaming into two lanes that never share a thread:
+            //   Lane A (storage): pure keccak/CPU, on the rayon streaming pool — no DB I/O.
+            //   Lane B+C (account): basic_account load + leaf hash, on dedicated blocking OS
+            //                       threads, so the read never parks a rayon worker.
+            // A coordinator (one blocking thread) fans both out, joins them, then signals end.
             let ctx = ctx.clone();
-            executor.bal_streaming_pool().spawn(move || {
-                let branch_span = debug_span!(
-                    target: "engine::tree::payload_processor::prewarm",
-                    parent: &stream_parent_span,
-                    "bal_hashed_state_stream",
-                    bal_accounts = stream_bal.as_bal().len(),
-                );
-                let parent_span = branch_span.clone();
-                let _span = branch_span.entered();
-
-                stream_bal.as_bal().par_iter().for_each(|account_changes| {
-                    WorkerPool::with_worker_mut(|worker| {
-                        let provider =
-                            worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
-                        ctx.send_bal_hashed_state(
-                            &parent_span,
-                            provider,
-                            account_changes,
-                            &to_sparse_trie_task,
-                        );
+            let coord_executor = executor.clone();
+            executor.spawn_blocking_named("bal-stream-coord", move || {
+                // Lane A: storage hashing on the rayon streaming pool (CPU only).
+                let (a_done_tx, a_done_rx) = std::sync::mpsc::channel();
+                {
+                    let ctx = ctx.clone();
+                    let bal = stream_bal.clone();
+                    let tx = to_sparse_trie_task.clone();
+                    let span = stream_parent_span.clone();
+                    coord_executor.bal_streaming_pool().spawn(move || {
+                        let _e = debug_span!(
+                            target: "engine::tree::payload_processor::prewarm",
+                            parent: &span,
+                            "bal_storage_hash",
+                            bal_accounts = bal.as_bal().len(),
+                        )
+                        .entered();
+                        bal.as_bal().par_iter().for_each(|ac| {
+                            ctx.send_bal_storage_hashed(ac, &tx);
+                        });
+                        let _ = a_done_tx.send(());
                     });
-                });
+                }
 
+                // Lane B+C: account load (I/O) + leaf hash on a STABLE set of persistent worker
+                // threads. `spawn_blocking_named` maps each name to one reused OS thread (WorkerMap),
+                // so the fixed name set is created once and reused every block — no ad-hoc per-block
+                // thread spawning, and distinct from the bal-prewarm pool.
+                let names = bal_load_worker_names();
+                let bal_len = stream_bal.as_bal().len();
+                let chunk = bal_len.div_ceil(names.len()).max(1);
+                let (load_done_tx, load_done_rx) = std::sync::mpsc::channel();
+                let mut spawned = 0usize;
+                for (chunk_idx, start) in (0..bal_len).step_by(chunk).enumerate() {
+                    let end = (start + chunk).min(bal_len);
+                    let ctx = ctx.clone();
+                    let bal = stream_bal.clone();
+                    let tx = to_sparse_trie_task.clone();
+                    let span = stream_parent_span.clone();
+                    let load_done_tx = load_done_tx.clone();
+                    // chunk_idx < names.len() since the number of chunks is ceil(len/chunk) <= names.
+                    let _ = coord_executor.spawn_blocking_named(names[chunk_idx], move || {
+                        let _e = debug_span!(
+                            target: "engine::tree::payload_processor::prewarm",
+                            parent: &span,
+                            "bal_account_load",
+                            accounts = end - start,
+                        )
+                        .entered();
+                        if let Some(reader) = ctx.build_bal_account_reader(&span) {
+                            for ac in &bal.as_bal()[start..end] {
+                                ctx.send_bal_account_hashed(reader.as_ref(), ac, &tx);
+                            }
+                        }
+                        let _ = load_done_tx.send(());
+                    });
+                    spawned += 1;
+                }
+                drop(load_done_tx);
+                for _ in 0..spawned {
+                    let _ = load_done_rx.recv();
+                }
+
+                // Both lanes complete -> signal end of state updates.
+                let _ = a_done_rx.recv();
                 let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
                 let _ = stream_tx.send(());
             });
@@ -636,10 +702,71 @@ where
     ///
     /// The `provider` is lazily initialized on first call and reused across accounts on the same
     /// thread.
-    fn send_bal_hashed_state(
+    /// Lane A: hash an account's storage changes and stream them to the sparse trie.
+    ///
+    /// This is pure keccak/CPU work with **no database I/O**, so it runs on the rayon streaming
+    /// pool without ever parking a worker on a read. Storage slots are the bulk of the keccak work
+    /// and have no dependency on account loading.
+    fn send_bal_storage_hashed(
         &self,
-        parent_span: &Span,
-        provider: &mut Option<Box<dyn AccountReader>>,
+        account_changes: &alloy_eip7928::AccountChanges,
+        to_sparse_trie_task: &CrossbeamSender<StateRootMessage>,
+    ) {
+        if self.disable_bal_parallel_state_root || account_changes.storage_changes.is_empty() {
+            return;
+        }
+        let hashed_address = keccak256(account_changes.address);
+        let mut storage_map = reth_trie::HashedStorage::new(false);
+        for slot_changes in &account_changes.storage_changes {
+            let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
+            if let Some(last_change) = slot_changes.changes.last() {
+                storage_map.storage.insert(hashed_slot, last_change.new_value);
+            }
+        }
+        let mut hashed_state = reth_trie::HashedPostState::default();
+        hashed_state.storages.insert(hashed_address, storage_map);
+        let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
+    }
+
+    /// Builds the (optionally cache-wrapped) account reader for the account-load lane.
+    ///
+    /// Called once per load thread, off the rayon pool, since opening a read txn touches the DB.
+    fn build_bal_account_reader(&self, parent_span: &Span) -> Option<Box<dyn AccountReader>> {
+        let _span = debug_span!(
+            target: "engine::tree::payload_processor::prewarm",
+            parent: parent_span,
+            "bal_hashed_state_provider_init",
+            has_saved_cache = !self.disable_bal_batch_io && self.saved_cache.is_some(),
+        )
+        .entered();
+        let inner = match self.provider.build() {
+            Ok(p) => p,
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    ?err,
+                    "Failed to build provider for BAL account reads"
+                );
+                return None;
+            }
+        };
+        let boxed: Box<dyn AccountReader> = match (self.disable_bal_batch_io, &self.saved_cache) {
+            (false, Some(saved)) => {
+                let caches = saved.cache().clone();
+                Box::new(CachedStateProvider::new_prewarm(inner, caches))
+            }
+            _ => Box::new(inner),
+        };
+        Some(boxed)
+    }
+
+    /// Lane B+C: load an account's pre-state (the only DB I/O here) and hash its leaf.
+    ///
+    /// Runs on a dedicated blocking pool — **not** rayon — so the `basic_account` read never parks
+    /// a CPU worker. The base account is only read when a field is missing from the BAL.
+    fn send_bal_account_hashed(
+        &self,
+        account_reader: &dyn AccountReader,
         account_changes: &alloy_eip7928::AccountChanges,
         to_sparse_trie_task: &CrossbeamSender<StateRootMessage>,
     ) {
@@ -647,57 +774,6 @@ where
             return;
         }
         let address = account_changes.address;
-        let mut hashed_address = None;
-
-        if !account_changes.storage_changes.is_empty() {
-            let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
-            let mut storage_map = reth_trie::HashedStorage::new(false);
-
-            for slot_changes in &account_changes.storage_changes {
-                let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
-                if let Some(last_change) = slot_changes.changes.last() {
-                    storage_map.storage.insert(hashed_slot, last_change.new_value);
-                }
-            }
-
-            let mut hashed_state = reth_trie::HashedPostState::default();
-            hashed_state.storages.insert(hashed_address, storage_map);
-            let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
-        }
-
-        if provider.is_none() {
-            let _span = debug_span!(
-                target: "engine::tree::payload_processor::prewarm",
-                parent: parent_span,
-                "bal_hashed_state_provider_init",
-                has_saved_cache = !self.disable_bal_batch_io && self.saved_cache.is_some(),
-            )
-            .entered();
-
-            let inner = match self.provider.build() {
-                Ok(p) => p,
-                Err(err) => {
-                    warn!(
-                        target: "engine::tree::payload_processor::prewarm",
-                        ?err,
-                        "Failed to build provider for BAL account reads"
-                    );
-                    return;
-                }
-            };
-            let boxed: Box<dyn AccountReader> = match (self.disable_bal_batch_io, &self.saved_cache)
-            {
-                (false, Some(saved)) => {
-                    let caches = saved.cache().clone();
-                    Box::new(CachedStateProvider::new_prewarm(inner, caches))
-                }
-                _ => Box::new(inner),
-            };
-            *provider = Some(boxed);
-        }
-        let account_reader = provider.as_ref().expect("provider just initialized");
-
-        let existing_account = account_reader.basic_account(&address).ok().flatten();
 
         let balance = account_changes.balance_changes.last().map(|change| change.post_balance);
         let nonce = account_changes.nonce_changes.last().map(|change| change.new_nonce);
@@ -717,28 +793,29 @@ where
             return;
         }
 
+        // Only read the base account when the BAL doesn't carry every field (the fallback path).
+        let existing_account = if balance.is_none() || nonce.is_none() || code_hash.is_none() {
+            account_reader.basic_account(&address).ok().flatten()
+        } else {
+            None
+        };
+
         let account = reth_primitives_traits::Account {
             balance: balance.unwrap_or_else(|| {
-                existing_account
-                    .as_ref()
-                    .map(|account| account.balance)
-                    .unwrap_or(alloy_primitives::U256::ZERO)
+                existing_account.as_ref().map(|a| a.balance).unwrap_or(alloy_primitives::U256::ZERO)
             }),
-            nonce: nonce.unwrap_or_else(|| {
-                existing_account.as_ref().map(|account| account.nonce).unwrap_or(0)
-            }),
+            nonce: nonce.unwrap_or_else(|| existing_account.as_ref().map(|a| a.nonce).unwrap_or(0)),
             bytecode_hash: code_hash.or_else(|| {
                 existing_account
                     .as_ref()
-                    .and_then(|account| account.bytecode_hash)
+                    .and_then(|a| a.bytecode_hash)
                     .or(Some(alloy_consensus::constants::KECCAK_EMPTY))
             }),
         };
 
-        let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
+        let hashed_address = keccak256(address);
         let mut hashed_state = reth_trie::HashedPostState::default();
         hashed_state.accounts.insert(hashed_address, Some(account));
-
         let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
     }
 
