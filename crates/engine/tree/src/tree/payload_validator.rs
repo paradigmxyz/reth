@@ -469,6 +469,30 @@ where
             decoded_bal,
         };
 
+        // [BAL-DUMP] Capture per-block state-root inputs for the isolated SR bench.
+        // Gated by RETH_BAL_DUMP_DIR. Dumps the raw BAL RLP + scalars; the bench reconstructs
+        // DecodedBal::from_rlp_bytes. Block N's expected post-root == block N+1's parent_state_root,
+        // so replaying N+1 blocks yields the expected roots for the first N.
+        if let Ok(dump_dir) = std::env::var("RETH_BAL_DUMP_DIR") {
+            let raw_bal = match &input {
+                BlockOrPayload::Payload(p) => p.block_access_list().cloned(),
+                BlockOrPayload::Block(_) => None,
+            };
+            if let Some(raw_bal) = raw_bal {
+                let number = input.num_hash().number;
+                let _ = std::fs::create_dir_all(&dump_dir);
+                let _ = std::fs::write(format!("{dump_dir}/{number:08}.bal"), &raw_bal);
+                let meta = format!(
+                    "number\t{number}\nparent_hash\t{:?}\nparent_state_root\t{:?}\ngas_used\t{}\ntx_count\t{}\n",
+                    input.parent_hash(),
+                    env.parent_state_root,
+                    env.gas_used,
+                    env.transaction_count,
+                );
+                let _ = std::fs::write(format!("{dump_dir}/{number:08}.meta"), meta);
+            }
+        }
+
         // Plan the strategy used for state root computation.
         let strategy = self.plan_state_root_computation();
 

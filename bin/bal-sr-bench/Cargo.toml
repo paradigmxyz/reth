@@ -1,0 +1,45 @@
+[package]
+name = "bal-sr-bench"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "bal-sr-bench"
+path = "src/main.rs"
+
+[dependencies]
+# State-root machinery + its inputs
+reth-engine-tree.workspace = true
+reth-provider.workspace = true
+reth-trie-db.workspace = true
+reth-trie.workspace = true
+reth-tasks.workspace = true
+reth-chain-state.workspace = true
+reth-execution-types.workspace = true
+revm.workspace = true
+alloy-consensus.workspace = true
+
+# Node primitives / chain / evm
+reth-chainspec.workspace = true
+reth-node-ethereum.workspace = true
+reth-node-types.workspace = true
+reth-ethereum-primitives.workspace = true
+reth-evm-ethereum.workspace = true
+reth-primitives-traits.workspace = true
+
+# DB open
+reth-db.workspace = true
+
+# Global allocator (jemalloc) to match the node
+reth-cli-util = { workspace = true, features = ["jemalloc"] }
+
+# BAL decode
+alloy-eip7928.workspace = true
+alloy-primitives.workspace = true
+
+eyre.workspace = true
+tracing-chrome = "0.7"
+tracing-samply.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter", "registry", "std"] }

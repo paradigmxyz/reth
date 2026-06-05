@@ -171,6 +171,20 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self
     }
 
+    /// Sets an immediate overlay carrying both trie updates and hashed state.
+    ///
+    /// Intended for standalone/benchmark drivers that reconstruct the cross-block overlay (the diff
+    /// from the persisted base to an in-memory tip) without running the in-memory tree, so proof
+    /// workers see prior blocks' trie nodes and leaves.
+    pub fn with_immediate_overlay(
+        mut self,
+        trie: Arc<TrieUpdatesSorted>,
+        state: Arc<HashedPostStateSorted>,
+    ) -> Self {
+        self.overlay_source = Some(OverlaySource::Immediate { trie, state });
+        self
+    }
+
     /// Resolves the effective overlay (trie updates, hashed state).
     fn resolve_overlays(
         &self,

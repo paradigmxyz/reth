@@ -1568,6 +1568,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "bal-sr-bench"
+version = "0.0.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eip7928 0.4.1",
+ "alloy-primitives",
+ "eyre",
+ "reth-chain-state",
+ "reth-chainspec",
+ "reth-cli-util",
+ "reth-db",
+ "reth-engine-tree",
+ "reth-ethereum-primitives",
+ "reth-evm-ethereum",
+ "reth-execution-types",
+ "reth-node-ethereum",
+ "reth-node-types",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-tasks",
+ "reth-trie",
+ "reth-trie-db",
+ "revm",
+ "tracing-chrome",
+ "tracing-samply",
+ "tracing-subscriber 0.3.23",
+]
+
+[[package]]
 name = "base-x"
 version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12500,6 +12529,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "tracing-chrome"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf0a738ed5d6450a9fb96e86a23ad808de2b727fd1394585da5cdd6788ffe724"
+dependencies = [
+ "serde_json",
+ "tracing-core",
+ "tracing-subscriber 0.3.23",
 ]
 
 [[package]]
