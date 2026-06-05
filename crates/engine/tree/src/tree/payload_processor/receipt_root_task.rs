@@ -68,6 +68,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
     /// * `receipts_len` - The total number of receipts expected. This is needed to correctly order
     ///   the trie keys according to RLP encoding rules.
     pub fn run(self, receipts_len: impl Into<Option<usize>>) {
+        let Self { receipt_rx, result_tx } = self;
         let receipts_len = receipts_len.into();
 
         let _span = debug_span!(
@@ -93,17 +94,26 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
             builder.push_next(&encode_buf);
         };
 
-        for indexed_receipt in self.receipt_rx {
-            if indexed_receipt.index == next {
-                push(indexed_receipt.receipt);
-                next += 1;
-
-                while let Some(receipt) = pending.remove(&next) {
-                    push(receipt);
+        {
+            let mut process_receipt = |indexed_receipt: IndexedReceipt<R>| {
+                if indexed_receipt.index == next {
+                    push(indexed_receipt.receipt);
                     next += 1;
+
+                    while let Some(receipt) = pending.remove(&next) {
+                        push(receipt);
+                        next += 1;
+                    }
+                } else {
+                    pending.insert(indexed_receipt.index, indexed_receipt.receipt);
                 }
-            } else {
-                pending.insert(indexed_receipt.index, indexed_receipt.receipt);
+            };
+
+            while let Ok(indexed_receipt) = receipt_rx.recv() {
+                process_receipt(indexed_receipt);
+                while let Ok(indexed_receipt) = receipt_rx.try_recv() {
+                    process_receipt(indexed_receipt);
+                }
             }
         }
 
@@ -127,7 +137,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
             return;
         }
 
-        let _ = self.result_tx.send((builder.finalize(), aggregated_bloom));
+        let _ = result_tx.send((builder.finalize(), aggregated_bloom));
     }
 }
 
