@@ -305,6 +305,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
 
     ssz_handle.set_engine(node.add_ons_handle.beacon_engine_handle.clone()).await;
     ssz_handle.set_blob_store(node.pool.blob_store().clone()).await;
+    ssz_handle.set_provider(node.provider.clone()).await;
     let node = NodeTestContext::new(node, eth_payload_attributes).await?;
 
     let wallets = Wallet::new(2).wallet_gen();
@@ -362,7 +363,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
             },
             "unscoped_endpoints": ["capabilities", "identity"],
             "limits": {
-                "bodies.max_count": 128,
+                "bodies.max_count": 32,
                 "blobs.max_versioned_hashes": 128,
                 "payload.max_bytes": 67108864,
             },
