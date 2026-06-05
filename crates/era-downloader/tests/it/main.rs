@@ -13,20 +13,20 @@ use futures::Stream;
 use reqwest::IntoUrl;
 use reth_era_downloader::HttpClient;
 
-pub(crate) const ERA1_NIMBUS: &[u8] = include_bytes!("../res/era1-nimbus.html");
-pub(crate) const ERA1_ETH_PORTAL: &[u8] = include_bytes!("../res/ethportal.html");
-pub(crate) const ERA1_ITHACA: &[u8] = include_bytes!("../res/era1-ithaca.html");
-pub(crate) const ERA1_CHECKSUMS: &[u8] = include_bytes!("../res/checksums.txt");
+pub(crate) const ERA1_NIMBUS: &[u8] = include_bytes!("../res/era1/nimbus.html");
+pub(crate) const ERA1_ETH_PORTAL: &[u8] = include_bytes!("../res/era1/ethportal.html");
+pub(crate) const ERA1_ITHACA: &[u8] = include_bytes!("../res/era1/ithaca.html");
+pub(crate) const ERA1_CHECKSUMS: &[u8] = include_bytes!("../res/era1/checksums.txt");
 pub(crate) const ERA1_MAINNET_0: &[u8] =
-    include_bytes!("../res/era1-files/mainnet-00000-5ec1ffb8.era1");
+    include_bytes!("../res/era1/files/mainnet-00000-5ec1ffb8.era1");
 pub(crate) const ERA1_MAINNET_1: &[u8] =
-    include_bytes!("../res/era1-files/mainnet-00001-a5364e9a.era1");
+    include_bytes!("../res/era1/files/mainnet-00001-a5364e9a.era1");
 
-pub(crate) const ERA_NIMBUS: &[u8] = include_bytes!("../res/era-nimbus.html");
+pub(crate) const ERA_NIMBUS: &[u8] = include_bytes!("../res/era/nimbus.html");
 pub(crate) const ERA_MAINNET_0: &[u8] =
-    include_bytes!("../res/era-files/mainnet-00000-4b363db9.era");
+    include_bytes!("../res/era/files/mainnet-00000-4b363db9.era");
 pub(crate) const ERA_MAINNET_1: &[u8] =
-    include_bytes!("../res/era-files/mainnet-00001-40cf2f3c.era");
+    include_bytes!("../res/era/files/mainnet-00001-40cf2f3c.era");
 
 pub(crate) const ERE_ETHPANDAOPS: &[u8] = include_bytes!("../res/ere-ethpandaops.html");
 pub(crate) const ERE_CHECKSUMS: &[u8] = include_bytes!("../res/ere-checksums.txt");
