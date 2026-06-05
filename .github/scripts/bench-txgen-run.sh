@@ -294,13 +294,13 @@ if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
 fi
 
 if [ "${BENCH_TRACING_CHROME:-false}" = "true" ]; then
-  if "$BINARY" node --help 2>/dev/null | grep -qF -- '--log.tracing-chrome'; then
+  if "$BINARY" node --log.tracing-chrome --log.tracing-chrome.file "$OUTPUT_DIR/tracing-chrome-profile.json" --help >/dev/null 2>&1; then
     RETH_ARGS+=(
       --log.tracing-chrome
       --log.tracing-chrome.file "$OUTPUT_DIR/tracing-chrome-profile.json"
     )
   else
-    echo "Chrome trace recording requested, but ${LABEL} binary does not support --log.tracing-chrome; skipping"
+    echo "Chrome trace recording requested, but ${LABEL} binary rejected --log.tracing-chrome; skipping"
   fi
 fi
 
