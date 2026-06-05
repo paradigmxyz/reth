@@ -411,7 +411,7 @@ where
 
 /// Decodes the common getBlobs request container with only versioned hashes.
 fn decode_blob_hashes_request(body: &[u8]) -> Result<Vec<B256>, &'static str> {
-    decode_one::<Vec<B256>>(body).map_err(|_| "invalid ssz")
+    Vec::<B256>::from_ssz_bytes(body).map_err(|_| "invalid ssz")
 }
 
 /// Decodes the Amsterdam getBlobs request container with hashes and a cell index mask.
@@ -581,6 +581,7 @@ fn text_response(status: u16, body: impl Into<String>) -> HttpResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ssz::Encode;
 
     #[test]
     fn parses_fork_scoped_payload_endpoint() {
@@ -606,5 +607,12 @@ mod tests {
     #[test]
     fn rejects_legacy_version_scoped_endpoint() {
         assert!(parse_engine_path("/engine/v4/payloads").is_none());
+    }
+
+    #[test]
+    fn decodes_top_level_blob_hashes_request() {
+        let hashes = vec![B256::ZERO, B256::with_last_byte(1)];
+        let decoded = decode_blob_hashes_request(&hashes.as_ssz_bytes()).unwrap();
+        assert_eq!(decoded, hashes);
     }
 }
