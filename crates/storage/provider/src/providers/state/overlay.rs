@@ -29,7 +29,7 @@ use reth_trie_db::{
 };
 use std::{
     ops::RangeInclusive,
-    sync::Arc,
+    sync::{Arc, LazyLock},
     time::{Duration, Instant},
 };
 use tracing::{debug, debug_span, instrument};
@@ -52,6 +52,19 @@ pub(crate) struct OverlayStateProviderMetrics {
     database_provider_ro_duration: Histogram,
     /// Number of cache misses when fetching [`Overlay`]s from the overlay cache.
     overlay_cache_misses: Counter,
+}
+
+static EMPTY_TRIE_UPDATES_SORTED: LazyLock<Arc<TrieUpdatesSorted>> =
+    LazyLock::new(|| Arc::new(TrieUpdatesSorted::default()));
+static EMPTY_HASHED_POST_STATE_SORTED: LazyLock<Arc<HashedPostStateSorted>> =
+    LazyLock::new(|| Arc::new(HashedPostStateSorted::default()));
+
+fn empty_trie_updates_sorted() -> Arc<TrieUpdatesSorted> {
+    Arc::clone(&EMPTY_TRIE_UPDATES_SORTED)
+}
+
+fn empty_hashed_post_state_sorted() -> Arc<HashedPostStateSorted> {
+    Arc::clone(&EMPTY_HASHED_POST_STATE_SORTED)
 }
 
 /// Contains all fields required to initialize an [`OverlayStateProvider`].
@@ -127,7 +140,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     ) -> Self {
         self.overlay_source = Some(OverlaySource::Managed {
             manager: state_trie_overlay_manager,
-            state: Arc::new(HashedPostStateSorted::default()),
+            state: empty_hashed_post_state_sorted(),
         });
         self
     }
@@ -143,10 +156,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     *managed_state = state;
                 }
                 _ => {
-                    self.overlay_source = Some(OverlaySource::Immediate {
-                        trie: Arc::new(TrieUpdatesSorted::default()),
-                        state,
-                    });
+                    self.overlay_source =
+                        Some(OverlaySource::Immediate { trie: empty_trie_updates_sorted(), state });
                 }
             }
         }
@@ -163,7 +174,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             }
             None => {
                 self.overlay_source = Some(OverlaySource::Immediate {
-                    trie: Arc::new(TrieUpdatesSorted::default()),
+                    trie: empty_trie_updates_sorted(),
                     state: Arc::new(other),
                 });
             }
@@ -179,10 +190,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         match &self.overlay_source {
             Some(OverlaySource::Managed { manager, state }) => {
                 let (trie, mut overlay_state) = if anchor_hash == self.parent_hash {
-                    (
-                        Arc::new(TrieUpdatesSorted::default()),
-                        Arc::new(HashedPostStateSorted::default()),
-                    )
+                    (empty_trie_updates_sorted(), empty_hashed_post_state_sorted())
                 } else {
                     manager
                         .overlay_for_parent(self.parent_hash, anchor_hash)
@@ -206,10 +214,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 }
                 Ok((Arc::clone(trie), Arc::clone(state)))
             }
-            None => Ok((
-                Arc::new(TrieUpdatesSorted::default()),
-                Arc::new(HashedPostStateSorted::default()),
-            )),
+            None => Ok((empty_trie_updates_sorted(), empty_hashed_post_state_sorted())),
         }
     }
 
