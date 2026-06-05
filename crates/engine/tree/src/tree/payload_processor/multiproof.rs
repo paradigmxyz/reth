@@ -61,17 +61,15 @@ pub(crate) fn dispatch_with_chunking<T, I>(
     chunking_len: usize,
     chunk_size: usize,
     max_targets_for_chunking: usize,
-    has_multiple_idle_account_workers: bool,
-    has_multiple_idle_storage_workers: bool,
+    has_multiple_idle_workers: bool,
     chunker: impl FnOnce(T, usize) -> I,
     mut dispatch: impl FnMut(T),
 ) where
     I: IntoIterator<Item = T>,
 {
     let has_full_chunks = chunking_len >= chunk_size.saturating_mul(2);
-    let should_chunk = chunking_len > max_targets_for_chunking ||
-        (has_full_chunks &&
-            (has_multiple_idle_account_workers || has_multiple_idle_storage_workers));
+    let should_chunk =
+        chunking_len > max_targets_for_chunking || (has_full_chunks && has_multiple_idle_workers);
 
     if should_chunk && chunking_len > chunk_size {
         for chunk in chunker(items, chunk_size) {
@@ -81,4 +79,39 @@ pub(crate) fn dispatch_with_chunking<T, I>(
     }
 
     dispatch(items);
+}
+
+/// Returns true when worker availability can affect a chunking decision.
+pub(crate) const fn chunking_can_use_idle_workers(
+    chunking_len: usize,
+    chunk_size: usize,
+    max_targets_for_chunking: usize,
+) -> bool {
+    chunking_len <= max_targets_for_chunking && chunking_len >= chunk_size.saturating_mul(2)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn chunk_vec(items: Vec<u8>, size: usize) -> Vec<Vec<u8>> {
+        items.chunks(size).map(<[u8]>::to_vec).collect()
+    }
+
+    #[test]
+    fn forced_chunking_does_not_need_idle_workers() {
+        let mut dispatched = Vec::new();
+        dispatch_with_chunking(vec![1, 2, 3, 4], 4, 2, 3, false, chunk_vec, |chunk| {
+            dispatched.push(chunk);
+        });
+
+        assert_eq!(dispatched, vec![vec![1, 2], vec![3, 4]]);
+    }
+
+    #[test]
+    fn idle_workers_only_matter_for_full_non_forced_chunks() {
+        assert!(!chunking_can_use_idle_workers(4, 2, 3));
+        assert!(!chunking_can_use_idle_workers(3, 2, 8));
+        assert!(chunking_can_use_idle_workers(4, 2, 8));
+    }
 }

@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use crate::tree::{
     multiproof::{
-        dispatch_with_chunking, evm_state_to_hashed_post_state, StateRootComputeOutcome,
-        StateRootMessage, DEFAULT_MAX_TARGETS_FOR_CHUNKING,
+        chunking_can_use_idle_workers, dispatch_with_chunking, evm_state_to_hashed_post_state,
+        StateRootComputeOutcome, StateRootMessage, DEFAULT_MAX_TARGETS_FOR_CHUNKING,
     },
     payload_processor::multiproof::MultiProofTaskMetrics,
 };
@@ -817,13 +817,18 @@ where
 
         let _span = trace_span!("dispatch_pending_targets").entered();
         let (targets, chunking_length) = self.pending_targets.take();
+        let has_multiple_idle_workers = chunking_can_use_idle_workers(
+            chunking_length,
+            self.chunk_size,
+            self.max_targets_for_chunking,
+        ) && (self.proof_worker_handle.has_multiple_idle_account_workers() ||
+            self.proof_worker_handle.has_multiple_idle_storage_workers());
         dispatch_with_chunking(
             targets,
             chunking_length,
             self.chunk_size,
             self.max_targets_for_chunking,
-            self.proof_worker_handle.has_multiple_idle_account_workers(),
-            self.proof_worker_handle.has_multiple_idle_storage_workers(),
+            has_multiple_idle_workers,
             MultiProofTargetsV2::chunks,
             |proof_targets| {
                 if let Err(e) =
