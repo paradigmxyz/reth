@@ -10,16 +10,17 @@ use alloy_eips::{
 use alloy_primitives::{map::AddressMap, Address, Bytes, B256, KECCAK256_EMPTY, U256};
 use evm2::{
     env::BlockEnv,
-    ethereum::ethereum_tx_registry,
+    ethereum::{ethereum_tx_registry, RecoveredTxEnvelope},
     evm::{
-        AccountInfo, Database, Db, DbErrorCode, StateChanges, Tracked, BEACON_ROOTS_ADDRESS,
-        CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
+        AccountInfo, BlockStateAccumulator, Database, Db, DbErrorCode, StateChangeSource,
+        StateChanges, Tracked, BEACON_ROOTS_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS,
+        HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
     },
     registry::HandlerError,
-    BaseEvmTypes, Evm, ExecutionConfig, Precompiles, SpecId, Version,
+    BaseEvmTypes, Evm, ExecutionConfig, Precompiles, SpecId, TxOutcome, Version,
 };
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
-use reth_execution_types::{BlockExecutionOutput, Evm2BundleState};
+use reth_execution_types::BlockExecutionOutput;
 #[cfg(feature = "std")]
 use reth_storage_api::{
     BorrowedEvm2StateProviderDatabase, Evm2StateProviderDatabase, StateProvider,
@@ -169,42 +170,45 @@ where
         Db::new(database),
         Precompiles::base(spec_id),
     );
-    let pre_system_changes =
-        pre_execution_system_call_state_changes::<DB>(&mut evm, spec_id, block_number, context)?;
+    let mut block_state = BlockStateAccumulator::new();
+    pre_execution_system_call_state_changes::<DB>(
+        &mut evm,
+        &mut block_state,
+        spec_id,
+        block_number,
+        context,
+    )?;
     let mut results = Vec::new();
 
     for transaction in transactions {
         let tx_type = transaction.inner().tx_type();
         let transaction = evm2_recovered_tx(transaction);
-        let result =
-            evm.transact(&transaction).map_err(|err| map_handler_error::<DB>(&mut evm, err))?;
-
-        if let Some(code) = result.db_error_code {
-            return Err(take_database_error::<DB>(&mut evm)
-                .map(Evm2ExecutionError::Database)
-                .unwrap_or(Evm2ExecutionError::MissingDatabaseError(code)))
-        }
-
-        results.push((tx_type, result));
+        let outcome = execute_transaction::<DB>(&mut evm, &mut block_state, &transaction)?;
+        results.push((tx_type, outcome));
     }
 
-    let post_block_balance_changes = post_block_balance_state_changes::<DB>(
+    let requests = post_execution_system_call_state_changes::<DB>(
         &mut evm,
+        &mut block_state,
+        spec_id,
+        context,
+    )?;
+
+    post_block_balance_state_changes::<DB>(
+        &mut evm,
+        &mut block_state,
         spec_id,
         block_number,
         block_beneficiary,
-        &results,
         context.ommers,
         context.withdrawals,
     )?;
-    let (post_system_changes, requests) =
-        post_execution_system_call_state_changes::<DB>(&mut evm, spec_id, context)?;
 
-    let mut output = RethReceiptBuilder.build_evm2_block_output_with_surrounding_state_changes(
+    let frozen_state = block_state.freeze();
+    let mut output = RethReceiptBuilder.build_evm2_block_output_from_state_source(
         block_number,
-        pre_system_changes,
         results,
-        post_system_changes.into_iter().chain(post_block_balance_changes),
+        &frozen_state,
     );
     output.result.requests = requests;
 
@@ -320,29 +324,72 @@ where
     evm.database_as_mut::<Db<DB>>().and_then(Db::take_result)
 }
 
-fn pre_execution_system_call_state_changes<DB>(
+fn execute_transaction<DB>(
     evm: &mut Evm<BaseEvmTypes>,
-    spec_id: SpecId,
-    block_number: u64,
-    context: Evm2BlockExecutionContext<'_>,
-) -> Result<Vec<StateChanges>, Evm2ExecutionError<DB::Error>>
+    block_state: &mut BlockStateAccumulator,
+    transaction: &RecoveredTxEnvelope,
+) -> Result<TxOutcome, Evm2ExecutionError<DB::Error>>
 where
     DB: Database + 'static,
 {
-    let mut state_changes = Vec::new();
+    enum TransactionResolution {
+        Outcome(TxOutcome),
+        DatabaseError(DbErrorCode),
+        HandlerError(HandlerError),
+    }
+
+    let resolution = match evm.transact(transaction) {
+        Ok(executed) => {
+            if let Some(code) = executed.outcome().db_error_code {
+                executed.discard();
+                TransactionResolution::DatabaseError(code)
+            } else {
+                TransactionResolution::Outcome(executed.commit_to(block_state))
+            }
+        }
+        Err(err) => TransactionResolution::HandlerError(err),
+    };
+
+    match resolution {
+        TransactionResolution::Outcome(outcome) => Ok(outcome),
+        TransactionResolution::DatabaseError(code) => Err(map_db_error_code::<DB>(evm, code)),
+        TransactionResolution::HandlerError(err) => Err(map_handler_error::<DB>(evm, err)),
+    }
+}
+
+fn map_db_error_code<DB>(
+    evm: &mut Evm<BaseEvmTypes>,
+    code: DbErrorCode,
+) -> Evm2ExecutionError<DB::Error>
+where
+    DB: Database + 'static,
+{
+    take_database_error::<DB>(evm)
+        .map(Evm2ExecutionError::Database)
+        .unwrap_or(Evm2ExecutionError::MissingDatabaseError(code))
+}
+
+fn pre_execution_system_call_state_changes<DB>(
+    evm: &mut Evm<BaseEvmTypes>,
+    block_state: &mut BlockStateAccumulator,
+    spec_id: SpecId,
+    block_number: u64,
+    context: Evm2BlockExecutionContext<'_>,
+) -> Result<(), Evm2ExecutionError<DB::Error>>
+where
+    DB: Database + 'static,
+{
     let Some(system_calls) = context.system_calls else {
-        return Ok(state_changes);
+        return Ok(());
     };
 
     if spec_id.enables(SpecId::PRAGUE) && block_number != 0 {
-        state_changes.push(
-            execute_system_call::<DB>(
-                evm,
-                HISTORY_STORAGE_ADDRESS,
-                system_calls.parent_hash.0.into(),
-            )?
-            .state_changes,
-        );
+        execute_system_call::<DB>(
+            evm,
+            block_state,
+            HISTORY_STORAGE_ADDRESS,
+            system_calls.parent_hash.0.into(),
+        )?;
     }
 
     if spec_id.enables(SpecId::CANCUN) {
@@ -357,88 +404,95 @@ where
                 ));
             }
         } else {
-            state_changes.push(
-                execute_system_call::<DB>(
-                    evm,
-                    BEACON_ROOTS_ADDRESS,
-                    parent_beacon_block_root.0.into(),
-                )?
-                .state_changes,
-            );
+            execute_system_call::<DB>(
+                evm,
+                block_state,
+                BEACON_ROOTS_ADDRESS,
+                parent_beacon_block_root.0.into(),
+            )?;
         }
     }
 
-    Ok(state_changes)
+    Ok(())
 }
 
 fn post_execution_system_call_state_changes<DB>(
     evm: &mut Evm<BaseEvmTypes>,
+    block_state: &mut BlockStateAccumulator,
     spec_id: SpecId,
     context: Evm2BlockExecutionContext<'_>,
-) -> Result<(Vec<StateChanges>, Requests), Evm2ExecutionError<DB::Error>>
+) -> Result<Requests, Evm2ExecutionError<DB::Error>>
 where
     DB: Database + 'static,
 {
-    let mut state_changes = Vec::new();
     let mut requests = Requests::default();
     if context.system_calls.is_none() || !spec_id.enables(SpecId::PRAGUE) {
-        return Ok((state_changes, requests));
+        return Ok(requests);
     }
 
     let withdrawal_requests =
-        execute_system_call::<DB>(evm, WITHDRAWAL_REQUEST_ADDRESS, Bytes::new())?;
+        execute_system_call::<DB>(evm, block_state, WITHDRAWAL_REQUEST_ADDRESS, Bytes::new())?;
     requests.push_request_with_type(
         WITHDRAWAL_REQUEST_TYPE,
         withdrawal_requests.output.iter().copied(),
     );
-    state_changes.push(withdrawal_requests.state_changes);
 
     let consolidation_requests =
-        execute_system_call::<DB>(evm, CONSOLIDATION_REQUEST_ADDRESS, Bytes::new())?;
+        execute_system_call::<DB>(evm, block_state, CONSOLIDATION_REQUEST_ADDRESS, Bytes::new())?;
     requests.push_request_with_type(
         CONSOLIDATION_REQUEST_TYPE,
         consolidation_requests.output.iter().copied(),
     );
-    state_changes.push(consolidation_requests.state_changes);
 
-    Ok((state_changes, requests))
+    Ok(requests)
 }
 
 fn execute_system_call<DB>(
     evm: &mut Evm<BaseEvmTypes>,
+    block_state: &mut BlockStateAccumulator,
     address: Address,
     data: Bytes,
-) -> Result<evm2::TxResult, Evm2ExecutionError<DB::Error>>
+) -> Result<TxOutcome, Evm2ExecutionError<DB::Error>>
 where
     DB: Database + 'static,
 {
-    let result = evm.system_call(address, data);
+    let executed = evm.system_call(address, data);
 
-    if let Some(code) = result.db_error_code {
-        return Err(take_database_error::<DB>(evm)
-            .map(Evm2ExecutionError::Database)
-            .unwrap_or(Evm2ExecutionError::MissingDatabaseError(code)))
+    if let Some(code) = executed.outcome().db_error_code {
+        executed.discard();
+        return Err(map_db_error_code::<DB>(evm, code))
     }
 
-    if !result.status {
-        return Err(Evm2ExecutionError::SystemCallFailed {
-            address,
-            reason: format!("{:?}", result.stop),
-        });
+    if !executed.outcome().status {
+        let reason = format!("{:?}", executed.outcome().stop);
+        executed.discard();
+        return Err(Evm2ExecutionError::SystemCallFailed { address, reason });
     }
 
-    Ok(result)
+    Ok(executed.commit_to(block_state))
+}
+
+fn commit_state_changes<S: StateChangeSource>(
+    evm: &mut Evm<BaseEvmTypes>,
+    block_state: &mut BlockStateAccumulator,
+    changes: &S,
+) {
+    evm.commit_source(changes);
+    match changes.visit(block_state) {
+        Ok(()) => {}
+        Err(err) => match err {},
+    }
 }
 
 fn post_block_balance_state_changes<DB>(
     evm: &mut Evm<BaseEvmTypes>,
+    block_state: &mut BlockStateAccumulator,
     spec_id: SpecId,
     block_number: u64,
     block_beneficiary: Address,
-    txs: &[(alloy_consensus::TxType, evm2::TxResult)],
     ommers: Option<&[Header]>,
     withdrawals: Option<&[Withdrawal]>,
-) -> Result<Option<StateChanges>, Evm2ExecutionError<DB::Error>>
+) -> Result<(), Evm2ExecutionError<DB::Error>>
 where
     DB: Database + 'static,
 {
@@ -459,33 +513,15 @@ where
     }
 
     if balance_increments.is_empty() {
-        return Ok(None);
+        return Ok(());
     }
 
-    let mut bundle = Evm2BundleState::new(block_number);
-    bundle.append_block(txs.iter().map(|(_, result)| result.state_changes.clone()));
-
-    let db =
-        evm.database_as_mut::<Db<DB>>().expect("evm database should use the typed evm2 Db adapter");
     let mut changes = StateChanges::default();
 
     for (address, increment) in balance_increments {
-        let (original, mut current) = match changes.accounts.get(&address) {
-            Some(account) => {
-                (account.original.clone(), account.current.clone().unwrap_or_else(empty_account))
-            }
-            None => {
-                let original = match bundle.accounts().get(&address) {
-                    Some(account) => account.current.clone(),
-                    None => db
-                        .inner_mut()
-                        .get_account(&address)
-                        .map_err(Evm2ExecutionError::Database)?,
-                };
-                let current = original.clone().unwrap_or_else(empty_account);
-                (original, current)
-            }
-        };
+        let original =
+            evm.account_info(&address).map_err(|code| map_db_error_code::<DB>(evm, code))?;
+        let mut current = original.clone().unwrap_or_else(empty_account);
 
         current.balance = current.balance.saturating_add(increment);
         changes
@@ -493,7 +529,9 @@ where
             .insert(address, Tracked { original, current: Some(current), _non_exhaustive: () });
     }
 
-    Ok(Some(changes))
+    commit_state_changes(evm, block_state, &changes);
+
+    Ok(())
 }
 
 fn base_block_reward(spec_id: SpecId) -> Option<u128> {

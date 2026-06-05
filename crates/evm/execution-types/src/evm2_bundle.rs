@@ -6,9 +6,13 @@ use alloy_primitives::{
     map::{AddressMap, B256Map},
     Address, BlockNumber, B256, U256,
 };
+use core::convert::Infallible;
 use evm2::{
     bytecode::Bytecode,
-    evm::{AccountInfo, StateChanges, StorageChangeSet, Tracked},
+    evm::{
+        AccountChangeRef, AccountInfo, StateChangeSink, StateChangeSource, StateChanges,
+        StorageChangeRef, StorageChangeSet, Tracked,
+    },
 };
 use reth_primitives_traits::{Account, Bytecode as RethBytecode};
 use reth_trie_common::{HashedPostState, HashedStorage, KeyHasher};
@@ -38,6 +42,16 @@ impl Evm2BundleState {
         block_reverts: Vec<Evm2BlockReverts>,
     ) -> Self {
         Self { accounts, storage, contracts, block_reverts, first_block }
+    }
+
+    /// Creates a bundle from an evm2 state-change source.
+    pub fn from_state_source<S>(first_block: BlockNumber, source: &S) -> Self
+    where
+        S: StateChangeSource,
+    {
+        let mut bundle = Self::new(first_block);
+        bundle.append_state_source(source);
+        bundle
     }
 
     /// Creates a bundle from Reth account, storage, revert, and bytecode initialization data.
@@ -170,6 +184,19 @@ impl Evm2BundleState {
         self.block_reverts.push(block_reverts);
     }
 
+    /// Appends one block worth of changes from an evm2 state-change source.
+    pub fn append_state_source<S>(&mut self, source: &S)
+    where
+        S: StateChangeSource,
+    {
+        let mut materializer = StateChangesMaterializer::default();
+        match source.visit(&mut materializer) {
+            Ok(()) => {}
+            Err(err) => match err {},
+        }
+        self.append_block([materializer.into_state_changes()]);
+    }
+
     /// Removes state and revert data for the last `n` blocks.
     ///
     /// This only rewinds changes recorded in this bundle. Callers remain responsible for
@@ -239,7 +266,7 @@ impl Evm2BundleState {
     }
 
     fn append_transaction(&mut self, changes: StateChanges, block_reverts: &mut Evm2BlockReverts) {
-        let StateChanges { accounts, storage, code, logs: _, _non_exhaustive: () } = changes;
+        let StateChanges { accounts, storage, code, _non_exhaustive: () } = changes;
 
         for (address, change) in accounts {
             if let Some(account) = &change.current &&
@@ -362,6 +389,51 @@ impl Evm2BundleState {
                 }
             }
         }
+    }
+}
+
+#[derive(Default)]
+struct StateChangesMaterializer {
+    changes: StateChanges,
+}
+
+impl StateChangesMaterializer {
+    fn into_state_changes(self) -> StateChanges {
+        self.changes
+    }
+}
+
+impl StateChangeSink for StateChangesMaterializer {
+    type Error = Infallible;
+
+    fn bytecode(&mut self, code_hash: B256, code: &Bytecode) -> Result<(), Self::Error> {
+        self.changes.code.entry(code_hash).or_insert_with(|| code.clone());
+        Ok(())
+    }
+
+    fn account(&mut self, change: AccountChangeRef<'_>) -> Result<(), Self::Error> {
+        self.changes.accounts.insert(
+            change.address,
+            Tracked {
+                original: change.original.map(|account| account.to_account_info()),
+                current: change.current.map(|account| account.to_account_info()),
+                _non_exhaustive: (),
+            },
+        );
+        Ok(())
+    }
+
+    fn storage_wipe(&mut self, address: Address) -> Result<(), Self::Error> {
+        self.changes.storage.entry(address).or_default().wipe = true;
+        Ok(())
+    }
+
+    fn storage(&mut self, change: StorageChangeRef) -> Result<(), Self::Error> {
+        self.changes.storage.entry(change.address).or_default().slots.insert(
+            change.key,
+            Tracked { original: change.original, current: change.current, _non_exhaustive: () },
+        );
+        Ok(())
     }
 }
 
