@@ -34,15 +34,22 @@ use std::{
     collections::BTreeMap,
     fmt,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, LazyLock},
 };
 use tracing::instrument;
 
 /// Returns [`WriteOptions`] with WAL sync enabled for crash durability.
-fn synced_write_options() -> WriteOptions {
+fn make_synced_write_options() -> WriteOptions {
     let mut opts = WriteOptions::default();
     opts.set_sync(true);
     opts
+}
+
+static SYNCED_WRITE_OPTIONS: LazyLock<WriteOptions> = LazyLock::new(make_synced_write_options);
+
+/// Returns shared [`WriteOptions`] with WAL sync enabled for crash durability.
+fn synced_write_options() -> &'static WriteOptions {
+    &SYNCED_WRITE_OPTIONS
 }
 
 /// Pending `RocksDB` batches type alias.
@@ -1285,7 +1292,7 @@ impl RocksDBProvider {
     /// Panics if the provider is in read-only mode.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = batch.len(), batch_size = batch.size_in_bytes()))]
     pub fn commit_batch(&self, batch: WriteBatchWithTransaction<true>) -> ProviderResult<()> {
-        self.0.db_rw().write_opt(batch, &synced_write_options()).map_err(|e| {
+        self.0.db_rw().write_opt(batch, synced_write_options()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,
@@ -1768,7 +1775,7 @@ impl<'a> RocksDBBatch<'a> {
                 "Auto-committing RocksDB batch"
             );
             let old_batch = std::mem::take(&mut self.inner);
-            self.provider.0.db_rw().write_opt(old_batch, &synced_write_options()).map_err(|e| {
+            self.provider.0.db_rw().write_opt(old_batch, synced_write_options()).map_err(|e| {
                 ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                     message: e.to_string().into(),
                     code: -1,
@@ -1786,7 +1793,7 @@ impl<'a> RocksDBBatch<'a> {
     /// Panics if the provider is in read-only mode.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = self.inner.len(), batch_size = self.inner.size_in_bytes()))]
     pub fn commit(self) -> ProviderResult<()> {
-        self.provider.0.db_rw().write_opt(self.inner, &synced_write_options()).map_err(|e| {
+        self.provider.0.db_rw().write_opt(self.inner, synced_write_options()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,
