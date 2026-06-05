@@ -1,6 +1,7 @@
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockHash, BlockNumber, B256};
 use metrics::{Counter, Histogram};
+use parking_lot::{Condvar, Mutex};
 use reth_chain_state::{EthPrimitives, StateTrieOverlayManager};
 use reth_db_api::{tables, transaction::DbTx, DatabaseError};
 use reth_errors::{ProviderError, ProviderResult};
@@ -59,6 +60,68 @@ pub(crate) struct OverlayStateProviderMetrics {
 pub(super) struct Overlay {
     pub(super) trie_updates: Arc<TrieUpdatesSorted>,
     pub(super) hashed_post_state: Arc<HashedPostStateSorted>,
+}
+
+#[derive(Debug)]
+enum OverlayCacheState {
+    Empty,
+    Computing,
+    Ready(Overlay),
+}
+
+struct OverlayCacheEntry {
+    state: Mutex<OverlayCacheState>,
+    ready: Condvar,
+}
+
+impl core::fmt::Debug for OverlayCacheEntry {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("OverlayCacheEntry").finish_non_exhaustive()
+    }
+}
+
+impl Default for OverlayCacheEntry {
+    fn default() -> Self {
+        Self { state: Mutex::new(OverlayCacheState::Empty), ready: Condvar::new() }
+    }
+}
+
+impl OverlayCacheEntry {
+    fn get_or_compute(
+        &self,
+        compute: impl FnOnce() -> ProviderResult<Overlay>,
+    ) -> ProviderResult<Overlay> {
+        let mut compute = Some(compute);
+
+        loop {
+            let mut state = self.state.lock();
+            match &*state {
+                OverlayCacheState::Ready(overlay) => return Ok(overlay.clone()),
+                OverlayCacheState::Computing => {
+                    self.ready.wait(&mut state);
+                }
+                OverlayCacheState::Empty => {
+                    *state = OverlayCacheState::Computing;
+                    drop(state);
+
+                    let result = compute.take().expect("overlay computation used once")();
+                    let mut state = self.state.lock();
+                    match result {
+                        Ok(overlay) => {
+                            *state = OverlayCacheState::Ready(overlay.clone());
+                            self.ready.notify_all();
+                            return Ok(overlay)
+                        }
+                        Err(err) => {
+                            *state = OverlayCacheState::Empty;
+                            self.ready.notify_all();
+                            return Err(err)
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Source of overlay data for [`OverlayStateProviderFactory`].
@@ -446,7 +509,7 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     overlay_builder: OverlayBuilder<N>,
     /// A cache which maps `db_tip -> Overlay`. If the db tip changes during usage of the factory
     /// then a new entry will get added to this, but in most cases only one entry is present.
-    overlay_cache: Arc<DashMap<BlockHash, Overlay>>,
+    overlay_cache: Arc<DashMap<BlockHash, Arc<OverlayCacheEntry>>>,
 }
 
 impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
@@ -487,17 +550,17 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     {
         let db_tip_block = self.overlay_builder.get_db_tip_block(provider)?;
 
-        let overlay = match self.overlay_cache.entry(db_tip_block.hash) {
-            dashmap::Entry::Occupied(entry) => entry.get().clone(),
+        let entry = match self.overlay_cache.entry(db_tip_block.hash) {
+            dashmap::Entry::Occupied(entry) => Arc::clone(entry.get()),
             dashmap::Entry::Vacant(entry) => {
                 self.overlay_builder.metrics.overlay_cache_misses.increment(1);
-                let overlay = self.overlay_builder.build_overlay(provider)?;
-                entry.insert(overlay.clone());
-                overlay
+                let cache_entry = Arc::new(OverlayCacheEntry::default());
+                entry.insert(Arc::clone(&cache_entry));
+                cache_entry
             }
         };
 
-        Ok(overlay)
+        entry.get_or_compute(|| self.overlay_builder.build_overlay(provider))
     }
 }
 
