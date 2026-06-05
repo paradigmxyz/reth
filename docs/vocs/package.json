@@ -13,6 +13,7 @@
     "inject-cargo-docs": "bun scripts/inject-cargo-docs.ts"
   },
   "dependencies": {
+    "mermaid": "^11",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-server-dom-webpack": "19.2.4",
