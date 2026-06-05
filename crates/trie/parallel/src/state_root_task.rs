@@ -3,12 +3,11 @@
 use crate::root::ParallelStateRootError;
 use alloy_eip7928::BlockAccessList;
 use alloy_primitives::{keccak256, B256};
-use derive_more::derive::Deref;
 use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2};
 use revm_state::EvmState;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Condvar, Mutex,
 };
 use tracing::trace;
 
@@ -21,6 +20,8 @@ pub enum StateRootMessage {
     StateUpdate(EvmState),
     /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
     HashedStateUpdate(HashedPostState),
+    /// Error produced before updates could be fully streamed.
+    Error(ParallelStateRootError),
     /// Block Access List (EIP-7928; BAL) containing complete state changes for the block.
     ///
     /// When received, the task generates a single state update from the BAL and processes it.
@@ -67,6 +68,8 @@ pub struct StateRootHandle {
     hashed_state_rx: Option<std::sync::mpsc::Receiver<HashedPostState>>,
     /// Set when the payload-builder side drops this handle before consuming sparse-trie outputs.
     consumer_cancelled: Arc<AtomicBool>,
+    /// Optional gate that delays execution state updates until prerequisite updates are streamed.
+    update_gate: Option<StateRootUpdateGate>,
 }
 
 impl StateRootHandle {
@@ -85,6 +88,7 @@ impl StateRootHandle {
             state_root_rx: Some(state_root_rx),
             hashed_state_rx: Some(hashed_state_rx),
             consumer_cancelled: Arc::new(AtomicBool::new(false)),
+            update_gate: None,
         }
     }
 
@@ -113,11 +117,17 @@ impl StateRootHandle {
         &self.updates_tx
     }
 
+    /// Attaches a gate that must open before state-hook updates are sent.
+    pub fn with_update_gate(mut self, update_gate: StateRootUpdateGate) -> Self {
+        self.update_gate = Some(update_gate);
+        self
+    }
+
     /// Returns a state hook that streams state updates to the background state root task.
     ///
     /// The hook must be dropped after execution completes to signal the end of state updates.
     pub fn state_hook(&self) -> impl alloy_evm::block::OnStateHook {
-        let sender = StateHookSender::new(self.updates_tx.clone());
+        let sender = StateHookSender::new(self.updates_tx.clone(), self.update_gate.clone());
 
         move |state: &EvmState| {
             let _ = sender.send(StateRootMessage::StateUpdate(state.clone()));
@@ -164,25 +174,91 @@ impl Drop for StateRootHandle {
     }
 }
 
+/// Gate used to preserve update ordering when prerequisite state is streamed asynchronously.
+#[derive(Clone, Debug, Default)]
+pub struct StateRootUpdateGate {
+    inner: Arc<StateRootUpdateGateInner>,
+}
+
+#[derive(Debug, Default)]
+struct StateRootUpdateGateInner {
+    open: AtomicBool,
+    lock: Mutex<()>,
+    cvar: Condvar,
+}
+
+impl StateRootUpdateGate {
+    /// Creates a closed update gate.
+    pub fn closed() -> Self {
+        Self::default()
+    }
+
+    /// Opens the gate and wakes any state-hook senders waiting on prerequisite updates.
+    pub fn open(&self) {
+        if self.inner.open.load(Ordering::Acquire) {
+            return;
+        }
+
+        let _guard = self.inner.lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if self.inner.open.swap(true, Ordering::AcqRel) {
+            return;
+        }
+
+        self.inner.cvar.notify_all();
+    }
+
+    /// Blocks until the gate opens.
+    fn wait(&self) {
+        if self.inner.open.load(Ordering::Acquire) {
+            return;
+        }
+
+        let mut guard = self.inner.lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        while !self.inner.open.load(Ordering::Acquire) {
+            guard = self.inner.cvar.wait(guard).unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+    }
+}
+
 /// A wrapper for the sender that signals completion when dropped.
 ///
 /// This type is intended to be used in combination with the evm executor statehook.
 /// This should trigger once the block has been executed (after) the last state update has been
 /// sent. This triggers the exit condition of the multi proof task.
-#[derive(Deref, Debug)]
-pub struct StateHookSender(crossbeam_channel::Sender<StateRootMessage>);
+#[derive(Debug)]
+pub struct StateHookSender {
+    sender: crossbeam_channel::Sender<StateRootMessage>,
+    update_gate: Option<StateRootUpdateGate>,
+}
 
 impl StateHookSender {
     /// Creates a new [`StateHookSender`] wrapping the given channel sender.
-    pub const fn new(inner: crossbeam_channel::Sender<StateRootMessage>) -> Self {
-        Self(inner)
+    pub const fn new(
+        sender: crossbeam_channel::Sender<StateRootMessage>,
+        update_gate: Option<StateRootUpdateGate>,
+    ) -> Self {
+        Self { sender, update_gate }
+    }
+
+    /// Sends a message after any configured prerequisite update gate has opened.
+    pub fn send(
+        &self,
+        message: StateRootMessage,
+    ) -> Result<(), crossbeam_channel::SendError<StateRootMessage>> {
+        if let Some(gate) = &self.update_gate {
+            gate.wait();
+        }
+        self.sender.send(message)
     }
 }
 
 impl Drop for StateHookSender {
     fn drop(&mut self) {
+        if let Some(gate) = &self.update_gate {
+            gate.wait();
+        }
         // Send completion signal when the sender is dropped
-        let _ = self.0.send(StateRootMessage::FinishedStateUpdates);
+        let _ = self.sender.send(StateRootMessage::FinishedStateUpdates);
     }
 }
 
@@ -266,5 +342,31 @@ mod tests {
 
         drop(hook);
         assert!(matches!(updates_rx.recv().unwrap(), StateRootMessage::FinishedStateUpdates));
+    }
+
+    #[test]
+    fn state_hook_waits_for_update_gate() {
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (_state_root_tx, state_root_rx) = std::sync::mpsc::channel();
+        let (_hashed_state_tx, hashed_state_rx) = std::sync::mpsc::channel();
+        let gate = StateRootUpdateGate::closed();
+        let handle = StateRootHandle::new(B256::ZERO, updates_tx, state_root_rx, hashed_state_rx)
+            .with_update_gate(gate.clone());
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+
+        let worker = std::thread::spawn(move || {
+            let mut hook = handle.state_hook();
+            started_tx.send(()).unwrap();
+            hook.on_state(&EvmState::default());
+            drop(hook);
+        });
+
+        started_rx.recv().unwrap();
+        assert!(updates_rx.recv_timeout(std::time::Duration::from_millis(20)).is_err());
+
+        gate.open();
+        assert!(matches!(updates_rx.recv().unwrap(), StateRootMessage::StateUpdate(_)));
+        assert!(matches!(updates_rx.recv().unwrap(), StateRootMessage::FinishedStateUpdates));
+        worker.join().unwrap();
     }
 }

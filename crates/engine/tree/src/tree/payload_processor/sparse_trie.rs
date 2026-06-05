@@ -208,6 +208,7 @@ where
                 StateRootMessage::HashedStateUpdate(state) => {
                     SparseTrieTaskMessage::HashedState(state)
                 }
+                StateRootMessage::Error(error) => SparseTrieTaskMessage::Error(error),
             };
             if hashed_state_tx.send(msg).is_err() {
                 break;
@@ -299,7 +300,7 @@ where
                         .sparse_trie_channel_wait_duration_histogram
                         .record(wake.duration_since(t));
 
-                    self.on_message(update);
+                    self.on_message(update)?;
                     self.pending_updates += 1;
                 }
                 recv(self.proof_result_rx) -> message => {
@@ -421,7 +422,7 @@ where
     }
 
     /// Processes a [`SparseTrieTaskMessage`] from the hashing task.
-    fn on_message(&mut self, message: SparseTrieTaskMessage) {
+    fn on_message(&mut self, message: SparseTrieTaskMessage) -> Result<(), ParallelStateRootError> {
         match message {
             SparseTrieTaskMessage::PrefetchProofs(targets) => self.on_prewarm_targets(targets),
             SparseTrieTaskMessage::HashedState(hashed_state) => {
@@ -435,7 +436,10 @@ where
                     .send(core::mem::take(&mut self.final_hashed_state));
                 self.finished_state_updates = true
             }
+            SparseTrieTaskMessage::Error(error) => return Err(error),
         }
+
+        Ok(())
     }
 
     #[instrument(
@@ -908,6 +912,8 @@ enum SparseTrieTaskMessage {
     PrefetchProofs(MultiProofTargetsV2),
     /// Signals that all state updates have been received.
     FinishedStateUpdates,
+    /// Propagates an upstream error from an update producer.
+    Error(ParallelStateRootError),
 }
 
 #[cfg(test)]
