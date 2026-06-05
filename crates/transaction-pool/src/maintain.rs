@@ -242,7 +242,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
             // and also do periodic cleanup
             let pool = pool.clone();
             task_spawner.spawn_blocking_task(async move {
-                debug!(target: "txpool", finalized_block = %finalized, "cleaning up blob store");
+                trace!(target: "txpool", finalized_block = %finalized, "cleaning up blob store");
                 pool.cleanup_blobs();
             });
         }
