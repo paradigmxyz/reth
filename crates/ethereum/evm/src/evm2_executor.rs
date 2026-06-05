@@ -609,6 +609,58 @@ mod tests {
     }
 
     #[test]
+    fn charges_london_sstore_set_gas_with_evm2() {
+        let caller = address!("0000000000000000000000000000000000000001");
+        let contract = address!("0000000000000000000000000000000000001000");
+        let mut database = TestDatabase::default();
+        database
+            .accounts
+            .insert(caller, AccountInfo::default().with_balance(U256::from(ETH_TO_WEI)));
+        database.accounts.insert(
+            contract,
+            AccountInfo::default().with_nonce(1).with_code(Bytecode::new_raw(Bytes::from(vec![
+                op::PUSH1,
+                10,
+                op::PUSH1,
+                0,
+                op::SSTORE,
+                op::STOP,
+            ]))),
+        );
+        let transaction = Recovered::new_unchecked(
+            TransactionSigned::Legacy(
+                TxLegacy {
+                    gas_price: 1_000_000_000,
+                    gas_limit: 100_000,
+                    to: TxKind::Call(contract),
+                    ..Default::default()
+                }
+                .into_signed(Signature::test_signature()),
+            ),
+            caller,
+        );
+
+        let output = execute_evm2_block(
+            SpecId::LONDON,
+            BlockEnv {
+                gas_limit: U256::from(1_500_000),
+                basefee: U256::from(1),
+                ..Default::default()
+            },
+            database,
+            1,
+            [transaction],
+        )
+        .expect("evm2 execution succeeds");
+
+        assert_eq!(output.result.receipts[0].cumulative_gas_used, 43_106);
+        assert_eq!(
+            output.state.storage().get(&contract).unwrap().slots[&U256::ZERO].current,
+            U256::from(10)
+        );
+    }
+
+    #[test]
     fn rejects_transaction_gas_limit_above_block_gas_limit() {
         let caller = address!("0000000000000000000000000000000000000001");
         let mut database = TestDatabase::default();
