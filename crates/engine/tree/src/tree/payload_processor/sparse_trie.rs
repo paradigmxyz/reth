@@ -63,6 +63,8 @@ pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = Configurab
     account_updates: B256Map<LeafUpdate>,
     /// Storage trie updates. hashed address -> slot -> update.
     storage_updates: B256Map<B256Map<LeafUpdate>>,
+    /// Number of `storage_updates` buckets that still contain pending leaves.
+    storage_updates_non_empty: usize,
 
     /// Account updates that are buffered but were not yet applied to the trie.
     new_account_updates: B256Map<LeafUpdate>,
@@ -155,6 +157,7 @@ where
             max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
             account_updates: Default::default(),
             storage_updates: Default::default(),
+            storage_updates_non_empty: 0,
             new_account_updates: Default::default(),
             new_storage_updates: Default::default(),
             pending_account_updates: Default::default(),
@@ -341,7 +344,7 @@ where
 
                 if self.finished_state_updates &&
                     self.account_updates.is_empty() &&
-                    self.storage_updates.iter().all(|(_, updates)| updates.is_empty())
+                    self.storage_updates_non_empty == 0
                 {
                     break;
                 }
@@ -473,6 +476,7 @@ where
                 // Look up outer maps once per address instead of once per slot.
                 let new_updates = self.new_storage_updates.entry(address).or_default();
                 let mut existing_updates = self.storage_updates.get_mut(&address);
+                let mut cleared_existing_updates = false;
 
                 for (&slot, &value) in &storage.storage {
                     self.trie.record_slot_touch(address, slot);
@@ -485,9 +489,17 @@ where
                     new_updates.insert(slot, LeafUpdate::Changed(encoded));
 
                     // Remove an existing storage update if it exists.
-                    if let Some(ref mut existing) = existing_updates {
-                        existing.remove(&slot);
+                    if let Some(existing) = existing_updates.as_mut() &&
+                        existing.remove(&slot).is_some() &&
+                        existing.is_empty()
+                    {
+                        cleared_existing_updates = true;
                     }
+                }
+
+                if cleared_existing_updates {
+                    debug_assert!(self.storage_updates_non_empty > 0);
+                    self.storage_updates_non_empty -= 1;
                 }
             }
 
@@ -540,10 +552,14 @@ where
         for (address, mut new) in self.new_storage_updates.drain() {
             match self.storage_updates.entry(address) {
                 Entry::Vacant(entry) => {
+                    if !new.is_empty() {
+                        self.storage_updates_non_empty += 1;
+                    }
                     entry.insert(new); // insert the whole map at once, no per-slot loop
                 }
                 Entry::Occupied(mut entry) => {
                     let updates = entry.get_mut();
+                    let was_empty = updates.is_empty();
                     for (slot, new) in new.drain() {
                         match updates.entry(slot) {
                             Entry::Occupied(mut slot_entry) => {
@@ -555,6 +571,9 @@ where
                                 slot_entry.insert(new);
                             }
                         }
+                    }
+                    if was_empty && !updates.is_empty() {
+                        self.storage_updates_non_empty += 1;
                     }
                 }
             }
@@ -615,6 +634,10 @@ where
             let updates_len_after = updates.len();
             self.storage_cache_hits += (updates_len_before - updates_len_after) as u64;
             self.storage_cache_misses += updates_len_after as u64;
+            if !new && updates.is_empty() {
+                debug_assert!(self.storage_updates_non_empty > 0);
+                self.storage_updates_non_empty -= 1;
+            }
 
             if !targets.is_empty() {
                 self.pending_targets.extend_storage_targets(address, targets);
