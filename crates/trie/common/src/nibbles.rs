@@ -183,7 +183,9 @@ impl PackedStoredNibbles {
     pub fn to_compact_array(&self) -> [u8; 33] {
         assert!(self.0.len() <= 64);
         let mut buf = [0u8; 33];
-        self.0.pack_to(&mut buf[..32]);
+        // SAFETY: the assertion above guarantees the fixed 32-byte payload can hold the packed
+        // representation of at most 64 nibbles.
+        unsafe { self.0.pack_to_unchecked(buf.as_mut_ptr()) };
         buf[32] = self.0.len() as u8;
         buf
     }
@@ -198,7 +200,9 @@ impl reth_codecs::Compact for PackedStoredNibbles {
         assert!(self.0.len() <= 64);
 
         let mut packed = [0u8; 32];
-        self.0.pack_to(&mut packed);
+        // SAFETY: the assertion above guarantees the fixed 32-byte payload can hold the packed
+        // representation of at most 64 nibbles.
+        unsafe { self.0.pack_to_unchecked(packed.as_mut_ptr()) };
         buf.put_slice(&packed);
         buf.put_u8(self.0.len() as u8);
         33
@@ -267,7 +271,9 @@ impl PackedStoredNibblesSubKey {
     pub fn to_compact_array(&self) -> [u8; 33] {
         assert!(self.0.len() <= 64);
         let mut buf = [0u8; 33];
-        self.0.pack_to(&mut buf[..32]);
+        // SAFETY: the assertion above guarantees the fixed 32-byte payload can hold the packed
+        // representation of at most 64 nibbles.
+        unsafe { self.0.pack_to_unchecked(buf.as_mut_ptr()) };
         buf[32] = self.0.len() as u8;
         buf
     }
@@ -282,7 +288,9 @@ impl reth_codecs::Compact for PackedStoredNibblesSubKey {
         assert!(self.0.len() <= 64);
 
         let mut packed = [0u8; 32];
-        self.0.pack_to(&mut packed);
+        // SAFETY: the assertion above guarantees the fixed 32-byte payload can hold the packed
+        // representation of at most 64 nibbles.
+        unsafe { self.0.pack_to_unchecked(packed.as_mut_ptr()) };
         buf.put_slice(&packed);
         buf.put_u8(self.0.len() as u8);
         33
