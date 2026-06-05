@@ -4,7 +4,7 @@
 //! parent has not been persisted yet. [`StateTrieOverlayManager`] tracks those in-memory blocks and
 //! builds reusable flattened state trie overlays on demand.
 
-use crate::{EthPrimitives, ExecutedBlock};
+use crate::{DeferredTrieData, EthPrimitives, ExecutedBlock};
 use alloy_primitives::B256;
 use reth_metrics::{
     metrics::{Counter, Histogram},
@@ -263,7 +263,11 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
             let block =
                 self.blocks.get(&hash).ok_or(StateTrieOverlayError { tip_hash, anchor_hash })?;
             let parent_hash = block.recovered_block().parent_hash();
-            blocks.push(block.clone());
+            blocks.push(OverlayBlockData {
+                hash,
+                parent_hash,
+                trie_data: block.trie_data_handle(),
+            });
 
             if parent_hash == anchor_hash {
                 break
@@ -272,11 +276,10 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         }
         span.record("block_count", blocks.len());
         let parent_input = blocks.first().and_then(|block| {
-            let parent_hash = block.recovered_block().parent_hash();
-            (parent_hash != anchor_hash)
+            (block.parent_hash != anchor_hash)
                 .then(|| {
                     self.overlays
-                        .get(&OverlayCacheKey { anchor_hash, tip_hash: parent_hash })
+                        .get(&OverlayCacheKey { anchor_hash, tip_hash: block.parent_hash })
                         .map(|entry| Arc::clone(entry.value()))
                 })
                 .flatten()
@@ -284,7 +287,12 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         span.record("parent_overlay_reused", parent_input.is_some());
         let compute_input = match parent_input {
             Some(parent_input) => {
-                ComputeOverlayInput::ExtendCached { block: blocks.swap_remove(0), parent_input }
+                let block = blocks.swap_remove(0);
+                ComputeOverlayInput::ExtendCached {
+                    head_hash: block.hash,
+                    trie_data: block.trie_data,
+                    parent_input,
+                }
             }
             None => ComputeOverlayInput::MergeBlocks(blocks),
         };
@@ -386,9 +394,19 @@ struct OverlayCacheKey {
     tip_hash: B256,
 }
 
-enum ComputeOverlayInput<N: NodePrimitives> {
-    ExtendCached { block: ExecutedBlock<N>, parent_input: Arc<TrieInputSorted> },
-    MergeBlocks(Vec<ExecutedBlock<N>>),
+struct OverlayBlockData {
+    hash: B256,
+    parent_hash: B256,
+    trie_data: DeferredTrieData,
+}
+
+enum ComputeOverlayInput {
+    ExtendCached {
+        head_hash: B256,
+        trie_data: DeferredTrieData,
+        parent_input: Arc<TrieInputSorted>,
+    },
+    MergeBlocks(Vec<OverlayBlockData>),
 }
 
 #[tracing::instrument(
@@ -402,8 +420,8 @@ enum ComputeOverlayInput<N: NodePrimitives> {
         elapsed_us = tracing::field::Empty,
     )
 )]
-fn compute_overlay<N: NodePrimitives>(
-    input: ComputeOverlayInput<N>,
+fn compute_overlay(
+    input: ComputeOverlayInput,
     anchor_hash: B256,
     metrics: &StateTrieOverlayMetrics,
 ) -> TrieInputSorted {
@@ -417,16 +435,15 @@ fn compute_overlay<N: NodePrimitives>(
     tracing::Span::current().record("parent_overlay", parent_overlay);
 
     let overlay = match input {
-        ComputeOverlayInput::ExtendCached { block, parent_input } => {
-            let trie_data = block.trie_data();
-
+        ComputeOverlayInput::ExtendCached { head_hash, trie_data, parent_input } => {
             trace!(
                 target: "chain_state::state_trie_overlay",
                 %anchor_hash,
-                head = %block.recovered_block().hash(),
+                head = %head_hash,
                 "extending cached parent state trie overlay"
             );
 
+            let trie_data = trie_data.wait_cloned();
             let mut overlay = parent_input.as_ref().clone();
             extend_overlay(&mut overlay, &trie_data.hashed_state, &trie_data.trie_updates);
             overlay
@@ -449,8 +466,9 @@ fn compute_overlay<N: NodePrimitives>(
     overlay
 }
 
-fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSorted {
-    let trie_data = blocks.iter().map(ExecutedBlock::trie_data).collect::<Vec<_>>();
+fn merge_blocks(blocks: Vec<OverlayBlockData>) -> TrieInputSorted {
+    let trie_data =
+        blocks.into_iter().map(|block| block.trie_data.wait_cloned()).collect::<Vec<_>>();
 
     #[cfg(feature = "rayon")]
     let (nodes, state) = rayon::join(
