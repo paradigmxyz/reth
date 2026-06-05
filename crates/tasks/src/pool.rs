@@ -253,7 +253,11 @@ impl WorkerPool {
 
     /// Clears the state on every thread in the pool.
     pub fn clear(&self) {
-        self.pool().broadcast(|_| {
+        let Some(pool) = self.pool.get() else {
+            return;
+        };
+
+        pool.broadcast(|_| {
             WORKER.with_borrow_mut(Worker::clear);
         });
     }
@@ -453,6 +457,15 @@ mod tests {
         assert_eq!(len, 4);
 
         pool.clear();
+    }
+
+    #[test]
+    fn worker_pool_clear_does_not_initialize() {
+        let pool = WorkerPool::new(2, "test-no-init");
+
+        assert!(!pool.is_initialized());
+        pool.clear();
+        assert!(!pool.is_initialized());
     }
 
     #[test]
