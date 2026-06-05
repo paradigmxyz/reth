@@ -113,9 +113,18 @@ pub struct RayonConfig {
     /// Number of threads for the proof account worker pool (trie account proof workers).
     /// If `None`, derived from available parallelism.
     pub proof_account_worker_threads: Option<usize>,
+    /// Number of threads for the payload builder proof storage worker pool.
+    /// If `None`, matches [`Self::proof_storage_worker_threads`].
+    pub payload_builder_proof_storage_worker_threads: Option<usize>,
+    /// Number of threads for the payload builder proof account worker pool.
+    /// If `None`, matches [`Self::proof_account_worker_threads`].
+    pub payload_builder_proof_account_worker_threads: Option<usize>,
     /// Number of threads for the prewarming pool (execution prewarming workers).
     /// If `None`, derived from available parallelism.
     pub prewarming_threads: Option<usize>,
+    /// Number of threads for the payload builder prewarming pool.
+    /// If `None`, matches [`Self::prewarming_threads`].
+    pub payload_builder_prewarming_threads: Option<usize>,
     /// Number of threads for the BAL streaming pool (BAL hashed state streaming).
     /// If `None`, derived from available parallelism.
     pub bal_streaming_threads: Option<usize>,
@@ -135,7 +144,10 @@ impl Default for RayonConfig {
             max_blocking_tasks: DEFAULT_MAX_BLOCKING_TASKS,
             proof_storage_worker_threads: None,
             proof_account_worker_threads: None,
+            payload_builder_proof_storage_worker_threads: None,
+            payload_builder_proof_account_worker_threads: None,
             prewarming_threads: None,
+            payload_builder_prewarming_threads: None,
             bal_streaming_threads: None,
             state_trie_overlay_worker_threads: None,
         }
@@ -186,9 +198,38 @@ impl RayonConfig {
         self
     }
 
+    /// Set the number of threads for the payload builder proof storage worker pool.
+    pub const fn with_payload_builder_proof_storage_worker_threads(
+        mut self,
+        payload_builder_proof_storage_worker_threads: usize,
+    ) -> Self {
+        self.payload_builder_proof_storage_worker_threads =
+            Some(payload_builder_proof_storage_worker_threads);
+        self
+    }
+
+    /// Set the number of threads for the payload builder proof account worker pool.
+    pub const fn with_payload_builder_proof_account_worker_threads(
+        mut self,
+        payload_builder_proof_account_worker_threads: usize,
+    ) -> Self {
+        self.payload_builder_proof_account_worker_threads =
+            Some(payload_builder_proof_account_worker_threads);
+        self
+    }
+
     /// Set the number of threads for the prewarming pool.
     pub const fn with_prewarming_threads(mut self, prewarming_threads: usize) -> Self {
         self.prewarming_threads = Some(prewarming_threads);
+        self
+    }
+
+    /// Set the number of threads for the payload builder prewarming pool.
+    pub const fn with_payload_builder_prewarming_threads(
+        mut self,
+        payload_builder_prewarming_threads: usize,
+    ) -> Self {
+        self.payload_builder_prewarming_threads = Some(payload_builder_prewarming_threads);
         self
     }
 
@@ -286,9 +327,18 @@ struct RuntimeInner {
     /// Proof account worker pool (trie account proof computation).
     #[cfg(feature = "rayon")]
     proof_account_worker_pool: WorkerPool,
+    /// Payload builder proof storage worker pool.
+    #[cfg(feature = "rayon")]
+    payload_builder_proof_storage_worker_pool: WorkerPool,
+    /// Payload builder proof account worker pool.
+    #[cfg(feature = "rayon")]
+    payload_builder_proof_account_worker_pool: WorkerPool,
     /// Prewarming pool (execution prewarming workers).
     #[cfg(feature = "rayon")]
     prewarming_pool: WorkerPool,
+    /// Payload builder prewarming pool.
+    #[cfg(feature = "rayon")]
+    payload_builder_prewarming_pool: WorkerPool,
     /// BAL streaming pool (BAL hashed state streaming).
     #[cfg(feature = "rayon")]
     bal_streaming_pool: WorkerPool,
@@ -374,10 +424,28 @@ impl Runtime {
         &self.0.proof_account_worker_pool
     }
 
+    /// Get the payload builder proof storage worker pool.
+    #[cfg(feature = "rayon")]
+    pub fn payload_builder_proof_storage_worker_pool(&self) -> &WorkerPool {
+        &self.0.payload_builder_proof_storage_worker_pool
+    }
+
+    /// Get the payload builder proof account worker pool.
+    #[cfg(feature = "rayon")]
+    pub fn payload_builder_proof_account_worker_pool(&self) -> &WorkerPool {
+        &self.0.payload_builder_proof_account_worker_pool
+    }
+
     /// Get the prewarming pool.
     #[cfg(feature = "rayon")]
     pub fn prewarming_pool(&self) -> &WorkerPool {
         &self.0.prewarming_pool
+    }
+
+    /// Get the payload builder prewarming pool.
+    #[cfg(feature = "rayon")]
+    pub fn payload_builder_prewarming_pool(&self) -> &WorkerPool {
+        &self.0.payload_builder_prewarming_pool
     }
 
     /// Get the BAL streaming pool.
@@ -424,7 +492,10 @@ impl Runtime {
                 max_blocking_tasks: 16,
                 proof_storage_worker_threads: Some(2),
                 proof_account_worker_threads: Some(2),
+                payload_builder_proof_storage_worker_threads: Some(2),
+                payload_builder_proof_account_worker_threads: Some(2),
                 prewarming_threads: Some(2),
+                payload_builder_prewarming_threads: Some(2),
                 bal_streaming_threads: Some(2),
                 state_trie_overlay_worker_threads: Some(2),
             },
@@ -892,7 +963,10 @@ impl RuntimeBuilder {
             blocking_guard,
             proof_storage_worker_pool,
             proof_account_worker_pool,
+            payload_builder_proof_storage_worker_pool,
+            payload_builder_proof_account_worker_pool,
             prewarming_pool,
+            payload_builder_prewarming_pool,
             bal_streaming_pool,
             state_trie_overlay_worker_pool,
         ) = {
@@ -932,8 +1006,27 @@ impl RuntimeBuilder {
             let proof_account_worker_pool =
                 WorkerPool::new(proof_account_worker_threads, "proof-acct");
 
+            let payload_builder_proof_storage_worker_threads = config
+                .rayon
+                .payload_builder_proof_storage_worker_threads
+                .unwrap_or(proof_storage_worker_threads);
+            let payload_builder_proof_storage_worker_pool =
+                WorkerPool::new(payload_builder_proof_storage_worker_threads, "pb-proof-strg");
+
+            let payload_builder_proof_account_worker_threads = config
+                .rayon
+                .payload_builder_proof_account_worker_threads
+                .unwrap_or(proof_account_worker_threads);
+            let payload_builder_proof_account_worker_pool =
+                WorkerPool::new(payload_builder_proof_account_worker_threads, "pb-proof-acct");
+
             let prewarming_threads = config.rayon.prewarming_threads.unwrap_or(default_threads);
             let prewarming_pool = WorkerPool::new(prewarming_threads, "prewarm");
+
+            let payload_builder_prewarming_threads =
+                config.rayon.payload_builder_prewarming_threads.unwrap_or(prewarming_threads);
+            let payload_builder_prewarming_pool =
+                WorkerPool::new(payload_builder_prewarming_threads, "pb-prewarm");
 
             let bal_streaming_threads =
                 config.rayon.bal_streaming_threads.unwrap_or(default_threads);
@@ -952,7 +1045,10 @@ impl RuntimeBuilder {
                 storage_threads,
                 proof_storage_worker_threads,
                 proof_account_worker_threads,
+                payload_builder_proof_storage_worker_threads,
+                payload_builder_proof_account_worker_threads,
                 prewarming_threads,
+                payload_builder_prewarming_threads,
                 bal_streaming_threads,
                 state_trie_overlay_worker_threads,
                 max_blocking_tasks = config.rayon.max_blocking_tasks,
@@ -966,7 +1062,10 @@ impl RuntimeBuilder {
                 blocking_guard,
                 proof_storage_worker_pool,
                 proof_account_worker_pool,
+                payload_builder_proof_storage_worker_pool,
+                payload_builder_proof_account_worker_pool,
                 prewarming_pool,
+                payload_builder_prewarming_pool,
                 bal_streaming_pool,
                 state_trie_overlay_worker_pool,
             )
@@ -1000,7 +1099,13 @@ impl RuntimeBuilder {
             #[cfg(feature = "rayon")]
             proof_account_worker_pool,
             #[cfg(feature = "rayon")]
+            payload_builder_proof_storage_worker_pool,
+            #[cfg(feature = "rayon")]
+            payload_builder_proof_account_worker_pool,
+            #[cfg(feature = "rayon")]
             prewarming_pool,
+            #[cfg(feature = "rayon")]
+            payload_builder_prewarming_pool,
             #[cfg(feature = "rayon")]
             bal_streaming_pool,
             #[cfg(feature = "rayon")]
@@ -1101,7 +1206,10 @@ mod tests {
 
         assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), 2);
         assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), 2);
+        assert_eq!(runtime.payload_builder_proof_storage_worker_pool().current_num_threads(), 2);
+        assert_eq!(runtime.payload_builder_proof_account_worker_pool().current_num_threads(), 2);
         assert_eq!(runtime.prewarming_pool().current_num_threads(), 2);
+        assert_eq!(runtime.payload_builder_prewarming_pool().current_num_threads(), 2);
         assert_eq!(runtime.state_trie_overlay_worker_pool().current_num_threads(), 2);
     }
 }

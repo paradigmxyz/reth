@@ -42,7 +42,7 @@ use reth_execution_errors::StateProofError;
 use reth_primitives_traits::{dashmap::DashMap, FastInstant as Instant};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
 use reth_storage_errors::db::DatabaseError;
-use reth_tasks::Runtime;
+use reth_tasks::{Runtime, WorkerPool};
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor, InstrumentedHashedCursor},
     proof_v2,
@@ -150,6 +150,31 @@ pub struct ProofWorkerHandle {
     account_worker_count: usize,
 }
 
+/// Runtime proof worker pool set used by a [`ProofWorkerHandle`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProofWorkerPoolKind {
+    /// Validation and other consensus-critical state-root work.
+    Validation,
+    /// Speculative payload-builder state-root work.
+    PayloadBuilder,
+}
+
+impl ProofWorkerPoolKind {
+    fn storage_pool(self, runtime: &Runtime) -> &WorkerPool {
+        match self {
+            Self::Validation => runtime.proof_storage_worker_pool(),
+            Self::PayloadBuilder => runtime.payload_builder_proof_storage_worker_pool(),
+        }
+    }
+
+    fn account_pool(self, runtime: &Runtime) -> &WorkerPool {
+        match self {
+            Self::Validation => runtime.proof_account_worker_pool(),
+            Self::PayloadBuilder => runtime.payload_builder_proof_account_worker_pool(),
+        }
+    }
+}
+
 impl ProofWorkerHandle {
     /// Spawns storage and account worker pools with dedicated database transactions.
     ///
@@ -178,16 +203,57 @@ impl ProofWorkerHandle {
             + Sync
             + 'static,
     {
+        Self::new_with_pool_kind(runtime, task_ctx, halve_workers, ProofWorkerPoolKind::Validation)
+    }
+
+    /// Spawns storage and account proof workers on the payload-builder proof pools.
+    #[instrument(
+        name = "ProofWorkerHandle::new_for_payload_builder",
+        level = "debug",
+        target = "trie::proof_task",
+        skip_all
+    )]
+    pub fn new_for_payload_builder<Factory>(
+        runtime: &Runtime,
+        task_ctx: ProofTaskCtx<Factory>,
+        halve_workers: bool,
+    ) -> Self
+    where
+        Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
+        Self::new_with_pool_kind(
+            runtime,
+            task_ctx,
+            halve_workers,
+            ProofWorkerPoolKind::PayloadBuilder,
+        )
+    }
+
+    fn new_with_pool_kind<Factory>(
+        runtime: &Runtime,
+        task_ctx: ProofTaskCtx<Factory>,
+        halve_workers: bool,
+        pool_kind: ProofWorkerPoolKind,
+    ) -> Self
+    where
+        Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
 
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
 
         let divisor = if halve_workers { 2 } else { 1 };
-        let storage_worker_count =
-            runtime.proof_storage_worker_pool().current_num_threads() / divisor;
-        let account_worker_count =
-            runtime.proof_account_worker_pool().current_num_threads() / divisor;
+        let storage_worker_count = pool_kind.storage_pool(runtime).current_num_threads() / divisor;
+        let account_worker_count = pool_kind.account_pool(runtime).current_num_threads() / divisor;
 
         let storage_availability = Arc::new(AvailabilitySheet::new(storage_worker_count));
         let account_availability = Arc::new(AvailabilitySheet::new(account_worker_count));
@@ -197,6 +263,7 @@ impl ProofWorkerHandle {
             storage_worker_count,
             account_worker_count,
             halve_workers,
+            ?pool_kind,
             "Spawning proof worker pools"
         );
 
@@ -211,7 +278,7 @@ impl ProofWorkerHandle {
         let storage_parent_span = tracing::Span::current();
         let _storage_workers = runtime.spawn_blocking(move || {
             let worker_id = AtomicUsize::new(0);
-            storage_rt.proof_storage_worker_pool().broadcast(storage_worker_count, |_| {
+            pool_kind.storage_pool(&storage_rt).broadcast(storage_worker_count, |_| {
                 let worker_id = worker_id.fetch_add(1, Ordering::Relaxed);
                 let span = debug_span!(target: "trie::proof_task", parent: storage_parent_span.clone(), "storage_worker", ?worker_id);
                 let _guard = span.enter();
@@ -249,7 +316,7 @@ impl ProofWorkerHandle {
         let account_parent_span = tracing::Span::current();
         let _account_workers = runtime.spawn_blocking(move || {
             let worker_id = AtomicUsize::new(0);
-            account_rt.proof_account_worker_pool().broadcast(account_worker_count, |_| {
+            pool_kind.account_pool(&account_rt).broadcast(account_worker_count, |_| {
                 let worker_id = worker_id.fetch_add(1, Ordering::Relaxed);
                 let span = debug_span!(target: "trie::proof_task", parent: account_parent_span.clone(), "account_worker", ?worker_id);
                 let _guard = span.enter();

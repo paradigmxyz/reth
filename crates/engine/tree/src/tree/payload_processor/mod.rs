@@ -32,7 +32,7 @@ use reth_trie::{
     HashedPostState,
 };
 use reth_trie_parallel::{
-    proof_task::{ProofTaskCtx, ProofWorkerHandle},
+    proof_task::{ProofTaskCtx, ProofWorkerHandle, ProofWorkerPoolKind},
     root::ParallelStateRootError,
 };
 use reth_trie_sparse::{
@@ -427,6 +427,30 @@ where
         )
     }
 
+    /// Spawns a payload-builder state-root computation pipeline backed by builder worker pools.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
+    pub fn spawn_payload_builder_state_root<F>(
+        &self,
+        multiproof_provider_factory: F,
+        parent_state_root: B256,
+        halve_workers: bool,
+        config: &TreeConfig,
+    ) -> StateRootHandle
+    where
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.state_root_spawner().spawn_payload_builder_state_root(
+            multiproof_provider_factory,
+            parent_state_root,
+            halve_workers,
+            config,
+        )
+    }
+
     /// Spawns a state-root computation pipeline backed by a private sparse-trie copy.
     ///
     /// The shared preserved trie is cloned synchronously when it can already represent
@@ -768,6 +792,33 @@ impl StateRootSpawner {
             VALIDATION_SPARSE_TRIE_WORKER_NAME,
             self.sparse_state_trie.clone(),
             None,
+            ProofWorkerPoolKind::Validation,
+        )
+    }
+
+    pub(crate) fn spawn_payload_builder_state_root<F>(
+        &self,
+        multiproof_provider_factory: F,
+        parent_state_root: B256,
+        halve_workers: bool,
+        config: &TreeConfig,
+    ) -> StateRootHandle
+    where
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.spawn_state_root_with_preserved_sparse_trie(
+            multiproof_provider_factory,
+            parent_state_root,
+            halve_workers,
+            config,
+            PAYLOAD_BUILDER_SPARSE_TRIE_WORKER_NAME,
+            SharedPreservedSparseTrie::default(),
+            Some(self.payload_builder_sparse_tries.clone()),
+            ProofWorkerPoolKind::PayloadBuilder,
         )
     }
 
@@ -812,6 +863,7 @@ impl StateRootSpawner {
             PAYLOAD_BUILDER_SPARSE_TRIE_WORKER_NAME,
             SharedPreservedSparseTrie::new(preserved),
             Some(self.payload_builder_sparse_tries.clone()),
+            ProofWorkerPoolKind::PayloadBuilder,
         )
     }
 
@@ -824,6 +876,7 @@ impl StateRootSpawner {
         sparse_trie_worker_name: &'static str,
         sparse_state_trie: SharedPreservedSparseTrie,
         publish_payload_builder_sparse_tries: Option<PublishedPayloadBuilderSparseTries>,
+        proof_worker_pool_kind: ProofWorkerPoolKind,
     ) -> StateRootHandle
     where
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -837,7 +890,14 @@ impl StateRootSpawner {
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         #[cfg(feature = "trie-debug")]
         let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
-        let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers);
+        let proof_handle = match proof_worker_pool_kind {
+            ProofWorkerPoolKind::Validation => {
+                ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers)
+            }
+            ProofWorkerPoolKind::PayloadBuilder => {
+                ProofWorkerHandle::new_for_payload_builder(&self.executor, task_ctx, halve_workers)
+            }
+        };
 
         let (state_root_tx, state_root_rx) = channel();
         let (hashed_state_tx, hashed_state_rx) = channel();

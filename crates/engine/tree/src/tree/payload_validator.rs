@@ -2123,7 +2123,7 @@ where
                 self.provider.clone(),
                 Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone()),
             );
-            let handle = self.payload_processor.spawn_state_root(
+            let handle = self.payload_processor.spawn_payload_builder_state_root(
                 overlay_factory,
                 parent_state_root,
                 false,
@@ -2808,7 +2808,7 @@ where
             Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone()),
         );
 
-        Some(self.payload_processor.spawn_state_root(
+        Some(self.payload_processor.spawn_payload_builder_state_root(
             overlay_factory,
             parent_state_root,
             false,
