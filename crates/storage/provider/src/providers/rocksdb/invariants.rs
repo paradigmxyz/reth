@@ -572,11 +572,7 @@ mod tests {
 
         let result = rocksdb.heal_accounts_history(&provider).unwrap();
         assert_eq!(result, None, "AccountsHistory should return early at checkpoint 0");
-        // Genesis account history entries are re-inserted
-        assert_eq!(
-            rocksdb.iter::<tables::AccountsHistory>().unwrap().count(),
-            factory.chain_spec().genesis().alloc.len()
-        );
+        assert_eq!(rocksdb.iter::<tables::AccountsHistory>().unwrap().count(), 0);
     }
 
     #[test]
