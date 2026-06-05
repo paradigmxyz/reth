@@ -198,7 +198,7 @@ fn parse_engine_path(path: &str) -> Option<EngineSszEndpoint> {
         (Some("engine"), Some("v2"), Some(fork), Some("forkchoice"), None) => {
             Some(EngineSszEndpoint::Forkchoice(fork.parse().ok()?))
         }
-        (Some("engine"), Some("v2"),Some("blobs"), version, None) => {
+        (Some("engine"), Some("v2"), Some("blobs"), version, None) => {
             Some(EngineSszEndpoint::Blobs(parse_method_version(version?)?))
         }
         _ => None,
@@ -241,7 +241,6 @@ impl EngineSszFork {
             Self::Amsterdam => 4,
         }
     }
-
 }
 
 impl std::str::FromStr for EngineSszFork {
