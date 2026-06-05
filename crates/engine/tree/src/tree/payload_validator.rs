@@ -49,7 +49,10 @@ use crate::tree::{
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
+use alloy_eip7928::{
+    bal::DecodedBal, compute_block_access_list_hash, constants::EMPTY_BLOCK_ACCESS_LIST_HASH,
+    BlockAccessList,
+};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{map::B256Set, B256};
@@ -115,6 +118,14 @@ const MAX_EXPECTED_GAS_USAGE_MULTIPLIER: u64 = 2;
 
 /// Worker name for deferred trie data and changeset provider preparation.
 const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
+
+fn block_access_list_hash_for_validation(bal: &BlockAccessList) -> B256 {
+    if bal.is_empty() {
+        return EMPTY_BLOCK_ACCESS_LIST_HASH
+    }
+
+    compute_block_access_list_hash(bal)
+}
 
 type ReceiptRootSender<N> =
     crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
@@ -1617,8 +1628,7 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
-        let block_access_list_hash =
-            built_bal.as_ref().map(|bal| compute_block_access_list_hash(bal));
+        let block_access_list_hash = built_bal.as_ref().map(block_access_list_hash_for_validation);
 
         if let Err(err) = self.consensus.validate_block_post_execution(
             block,
@@ -2377,3 +2387,15 @@ pub type CustomStateRoot<N> = Arc<
         + Sync
         + 'static,
 >;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_block_access_list_hash_uses_protocol_constant() {
+        let bal = BlockAccessList::default();
+
+        assert_eq!(block_access_list_hash_for_validation(&bal), EMPTY_BLOCK_ACCESS_LIST_HASH);
+    }
+}
