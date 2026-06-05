@@ -173,7 +173,7 @@ where
         }
 
         let handle = self.handle.clone();
-        Box::pin(async move { Ok(handle.handle_request(request).await) })
+        Box::pin(async move { Ok(handle_engine_ssz_request(handle, request).await) })
     }
 }
 
@@ -768,10 +768,7 @@ mod tests {
     #[test]
     fn parses_fork_scoped_get_payload_endpoint() {
         let SszEngineApiRoute::GetPayload(fork, payload_id) =
-            EngineSszProxyHandle::parse_engine_path(
-                "/engine/v2/prague/payloads/0x1234567890abcdef",
-            )
-            .unwrap()
+            parse_engine_path("/engine/v2/prague/payloads/0x1234567890abcdef").unwrap()
         else {
             panic!("expected get payload route")
         };
@@ -788,7 +785,7 @@ mod tests {
 
     #[test]
     fn rejects_legacy_version_scoped_endpoint() {
-        assert!(EngineSszProxyHandle::parse_engine_path("/engine/v4/payloads").is_none());
+        assert!(parse_engine_path("/engine/v4/payloads").is_none());
     }
 
     #[test]
