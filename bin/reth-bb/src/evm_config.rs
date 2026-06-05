@@ -150,6 +150,10 @@ where
         + ConfigureEngineEvm<ExecutionData>
         + ConfigureEvm<Primitives = EthPrimitives, Error = Infallible>,
 {
+    fn evm2_chain_id(&self) -> u64 {
+        self.inner.evm2_chain_id()
+    }
+
     fn evm2_spec_for_header(
         &self,
         header: &HeaderTy<Self::Primitives>,
