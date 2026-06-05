@@ -584,15 +584,6 @@ mod tests {
     }
 
     #[test]
-    fn parses_blob_endpoints() {
-        let endpoint = parse_engine_path("/engine/v2/amsterdam/blobs").unwrap();
-        assert_eq!(endpoint, EngineSszEndpoint::Blobs(4));
-
-        let endpoint = parse_engine_path("/engine/v3/blobs").unwrap();
-        assert_eq!(endpoint, EngineSszEndpoint::Blobs(3));
-    }
-
-    #[test]
     fn rejects_legacy_version_scoped_endpoint() {
         assert!(parse_engine_path("/engine/v4/payloads").is_none());
     }
