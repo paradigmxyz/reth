@@ -6,7 +6,7 @@ use alloy_evm::{
     Evm,
 };
 use alloy_primitives::Address;
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
 use revm::database::State;
 use revm_state::bal::Bal as RevmBal;
@@ -48,6 +48,9 @@ type WorkerExecutorResult<Cfg> =
 type WorkerResultSender<Cfg> =
     Sender<Result<BalWorkerOutput<WorkerExecutorResult<Cfg>>, BalWorkerError>>;
 
+/// Poll abort every 16 ready transactions on the hot path.
+const ABORT_POLL_MASK: usize = 0x0f;
+
 #[expect(clippy::too_many_arguments)]
 pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
     scope: &rayon::Scope<'scope>,
@@ -78,14 +81,29 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
                 .build();
             let evm = evm_config.evm_with_env(&mut worker_state, evm_env);
             let mut executor = evm_config.create_executor_with_state(evm, ctx.clone());
+            let mut abort_poll_counter = 0usize;
 
             loop {
-                let (index, tx) = crossbeam_channel::select_biased! {
-                    recv(abort_rx) -> _ => break,
-                    recv(tx_rx) -> msg => match msg {
-                        Ok(ix_tx) => ix_tx,
-                        Err(_) => break,
-                    },
+                if abort_poll_counter == 0 {
+                    match abort_rx.try_recv() {
+                        Ok(()) | Err(TryRecvError::Disconnected) => break,
+                        Err(TryRecvError::Empty) => {}
+                    }
+                }
+                abort_poll_counter = abort_poll_counter.wrapping_add(1) & ABORT_POLL_MASK;
+
+                let (index, tx) = match tx_rx.try_recv() {
+                    Ok(ix_tx) => ix_tx,
+                    Err(TryRecvError::Empty) => {
+                        crossbeam_channel::select_biased! {
+                            recv(abort_rx) -> _ => break,
+                            recv(tx_rx) -> msg => match msg {
+                                Ok(ix_tx) => ix_tx,
+                                Err(_) => break,
+                            },
+                        }
+                    }
+                    Err(TryRecvError::Disconnected) => break,
                 };
                 let tx = tx.map_err(|e| BalWorkerError::Transaction(Box::new(e)))?;
                 let signer = *tx.signer();
