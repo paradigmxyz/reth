@@ -483,10 +483,17 @@ fn decode_forkchoice_request(
     body: &[u8],
 ) -> Result<(ForkchoiceState, Option<PayloadAttributes>), &'static str> {
     match version {
-        1..=4 => {
+        1..=3 => {
             let (forkchoice_state, payload_attributes) =
                 <(ForkchoiceState, Vec<PayloadAttributes>)>::from_ssz_bytes(body)
                     .map_err(|_| "invalid ssz")?;
+            Ok((forkchoice_state, payload_attrs(version, payload_attributes)?))
+        }
+        4 => {
+            let (forkchoice_state, payload_attributes, custody_columns) =
+                <(ForkchoiceState, Vec<PayloadAttributes>, Vec<B128>)>::from_ssz_bytes(body)
+                    .map_err(|_| "invalid ssz")?;
+            custody_columns_opt(custody_columns)?;
             Ok((forkchoice_state, payload_attrs(version, payload_attributes)?))
         }
         _ => Err("unsupported forkchoice endpoint version"),
@@ -509,6 +516,14 @@ fn payload_attrs(
     }
 
     attrs.into_iter().next().map(|attrs| validate_payload_attrs_version(version, attrs)).transpose()
+}
+
+fn custody_columns_opt(custody_columns: Vec<B128>) -> Result<Option<B128>, &'static str> {
+    if custody_columns.len() > 1 {
+        return Err("invalid params")
+    }
+
+    Ok(custody_columns.into_iter().next())
 }
 
 fn validate_payload_attrs_version(
@@ -593,5 +608,39 @@ mod tests {
         let hashes = vec![B256::ZERO, B256::with_last_byte(1)];
         let decoded = decode_blob_hashes_request(&hashes.as_ssz_bytes()).unwrap();
         assert_eq!(decoded, hashes);
+    }
+
+    #[test]
+    fn decodes_forkchoice_v4_with_custody_columns() {
+        let forkchoice_state = ForkchoiceState {
+            head_block_hash: B256::ZERO,
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+        let encoded =
+            (forkchoice_state, Vec::<PayloadAttributes>::new(), vec![B128::with_last_byte(1)])
+                .as_ssz_bytes();
+
+        let (decoded_state, decoded_attrs) = decode_forkchoice_request(4, &encoded).unwrap();
+        assert_eq!(decoded_state, forkchoice_state);
+        assert!(decoded_attrs.is_none());
+    }
+
+    #[test]
+    fn rejects_forkchoice_v4_with_multiple_custody_columns() {
+        let forkchoice_state = ForkchoiceState {
+            head_block_hash: B256::ZERO,
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+        let encoded = (
+            forkchoice_state,
+            Vec::<PayloadAttributes>::new(),
+            vec![B128::ZERO, B128::with_last_byte(1)],
+        )
+            .as_ssz_bytes();
+
+        let err = decode_forkchoice_request(4, &encoded).unwrap_err();
+        assert_eq!(err, "invalid params");
     }
 }
