@@ -1453,7 +1453,8 @@ jobs:
           CHARTS_REPO="https://x-access-token:${DEREK_TOKEN}@github.com/decofe/reth-bench-charts.git"
 
           TMP_DIR=$(mktemp -d)
-          if git clone --depth 1 "${CHARTS_REPO}" "${TMP_DIR}" 2>/dev/null; then
+          if git clone --depth 1 --filter=blob:none --sparse "${CHARTS_REPO}" "${TMP_DIR}" 2>/dev/null; then
+            git -C "${TMP_DIR}" sparse-checkout set --no-cone "${CHART_DIR}"
             true
           else
             git init "${TMP_DIR}"
