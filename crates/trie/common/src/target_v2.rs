@@ -118,7 +118,9 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
             let slots: Vec<_> = storage_iter.by_ref().take(remaining_capacity).collect();
 
             count += slots.len();
-            chunk.storage_targets.insert(account_addr, slots);
+            if !slots.is_empty() {
+                chunk.storage_targets.insert(account_addr, slots);
+            }
 
             // If iterator is exhausted, clear current_account_storage
             if storage_iter.len() == 0 {
@@ -139,7 +141,15 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
             // Check if this account has storage targets
             let account_addr = account_target.key();
             if let Some(storage_slots) = self.storage_targets.remove(&account_addr) {
+                if storage_slots.is_empty() {
+                    continue;
+                }
+
                 let remaining_capacity = self.size - count;
+                if remaining_capacity == 0 {
+                    self.current_account_storage = Some((account_addr, storage_slots.into_iter()));
+                    break;
+                }
 
                 if storage_slots.len() <= remaining_capacity {
                     // Optimization: We can take all slots, just move the vec
@@ -172,6 +182,9 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
             // Always remove from the map - if there are remaining slots they go to
             // current_account_storage
             self.storage_targets.remove(&account_addr);
+            if storage_slots.is_empty() {
+                continue;
+            }
 
             if storage_slots.len() <= remaining_capacity {
                 // Optimization: We can take all slots, just move the vec
@@ -198,5 +211,52 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
         } else {
             Some(chunk)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn target(byte: u8) -> ProofV2Target {
+        ProofV2Target::new(B256::with_last_byte(byte))
+    }
+
+    #[test]
+    fn chunking_does_not_emit_empty_storage_targets_when_account_fills_chunk() {
+        let account = B256::with_last_byte(1);
+        let storage = target(2);
+        let mut targets = MultiProofTargetsV2 {
+            account_targets: vec![ProofV2Target::new(account)],
+            storage_targets: B256Map::default(),
+        };
+        targets.storage_targets.insert(account, vec![storage]);
+
+        let chunks: Vec<_> = targets.chunks(1).collect();
+
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].account_targets.len(), 1);
+        assert!(chunks[0].storage_targets.is_empty());
+        assert!(chunks[1].account_targets.is_empty());
+        let storage_targets = chunks[1].storage_targets.get(&account).unwrap();
+        assert_eq!(storage_targets.len(), 1);
+        assert_eq!(storage_targets[0].key(), storage.key());
+        assert_eq!(storage_targets[0].min_len, storage.min_len);
+    }
+
+    #[test]
+    fn chunking_skips_empty_storage_target_entries() {
+        let account = B256::with_last_byte(1);
+        let mut targets = MultiProofTargetsV2 {
+            account_targets: vec![ProofV2Target::new(account)],
+            storage_targets: B256Map::default(),
+        };
+        targets.storage_targets.insert(account, Vec::new());
+
+        let chunks: Vec<_> = targets.chunks(1).collect();
+
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].account_targets.len(), 1);
+        assert!(chunks[0].storage_targets.is_empty());
     }
 }
