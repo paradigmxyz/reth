@@ -206,6 +206,10 @@ impl WorkerPool {
 
     /// Returns the total number of threads in the underlying rayon pool.
     pub fn current_num_threads(&self) -> usize {
+        if self.num_threads != 0 {
+            return self.num_threads
+        }
+
         self.pool().current_num_threads()
     }
 
