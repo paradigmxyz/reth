@@ -42,6 +42,14 @@ function isWin(changes) {
 }
 
 function loadSamplyUrls(workDir) {
+  return loadProfileUrls(workDir, 'samply-profile-url.txt');
+}
+
+function loadTracingChromeUrls(workDir) {
+  return loadProfileUrls(workDir, 'tracing-chrome-profile-url.txt');
+}
+
+function loadProfileUrls(workDir, fileName) {
   const urls = {};
   let runs = [];
   try {
@@ -53,7 +61,7 @@ function loadSamplyUrls(workDir) {
   }
   for (const run of runs) {
     try {
-      const url = fs.readFileSync(path.join(workDir, run, 'samply-profile-url.txt'), 'utf8').trim();
+      const url = fs.readFileSync(path.join(workDir, run, fileName), 'utf8').trim();
       if (url) urls[run] = url;
     } catch {}
   }
@@ -132,6 +140,7 @@ module.exports = {
   verdict,
   isWin,
   loadSamplyUrls,
+  loadTracingChromeUrls,
   blocksLabel,
   metricRows,
   waitTimeRows,

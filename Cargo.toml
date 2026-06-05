@@ -688,6 +688,7 @@ sysinfo = { version = "0.38", default-features = false }
 tracing-journald = "0.3"
 tracing-logfmt = "0.3.7"
 tracing-samply = "0.1"
+tracing-chrome = "0.7.2"
 tracing-subscriber = { version = "0.3", default-features = false }
 tracing-tracy = "0.11"
 triehash = "0.8"

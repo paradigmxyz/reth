@@ -11,7 +11,8 @@
 #               BENCH_WORK_DIR, BENCH_WAIT_TIME, BENCH_BASELINE_ARGS,
 #               BENCH_FEATURE_ARGS, BENCH_OTLP_TRACES_ENDPOINT,
 #               BENCH_OTLP_LOGS_ENDPOINT, BENCH_OTLP_DISABLED,
-#               BENCH_TRACY, BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ,
+#               BENCH_TRACING_CHROME, BENCH_TRACY,
+#               BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ,
 #               TXGEN_PAYLOADS_DIR (pre-extracted payloads; skips extraction),
 #               BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS (optional txgen override)
 set -euxo pipefail
@@ -290,6 +291,20 @@ echo "Memory limit: $(( MEM_LIMIT / 1024 / 1024 ))MB (95% of $(( TOTAL_MEM_KB / 
 
 if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
   RETH_ARGS+=(--log.samply)
+fi
+
+if [ "${BENCH_TRACING_CHROME:-false}" = "true" ]; then
+  if "$BINARY" node --log.tracing-chrome --log.tracing-chrome.file "$OUTPUT_DIR/tracing-chrome-profile.json" --help >/dev/null 2>&1; then
+    RETH_ARGS+=(
+      --log.tracing-chrome
+      --log.tracing-chrome.file "$OUTPUT_DIR/tracing-chrome-profile.json"
+    )
+  else
+    echo "Chrome trace recording requested, but ${LABEL} binary rejected --log.tracing-chrome; skipping"
+  fi
+fi
+
+if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
   SAMPLY="$(which samply)"
   # shellcheck disable=SC2024
   sudo systemd-run --quiet --scope --collect --unit="$RETH_SCOPE" \
