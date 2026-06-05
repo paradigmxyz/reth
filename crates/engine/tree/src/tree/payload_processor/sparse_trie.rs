@@ -33,6 +33,7 @@ use reth_trie_sparse::{
     SparseTrie,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
+use tokio::sync::mpsc as tokio_mpsc;
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
@@ -40,7 +41,7 @@ pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = Configurab
     /// Receiver for proof results directly from workers.
     proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
     /// Sender for proof requests to the proof orchestrator.
-    proof_request_tx: CrossbeamSender<ProofRequest>,
+    proof_request_tx: tokio_mpsc::UnboundedSender<ProofRequest>,
     /// Receives updates from execution and prewarming.
     updates: CrossbeamReceiver<SparseTrieTaskMessage>,
     /// Sender half for the channel to send final hashed state to.
@@ -132,8 +133,8 @@ where
         chunk_size: usize,
     ) -> Self {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
-        let (worker_result_tx, worker_result_rx) = crossbeam_channel::unbounded();
-        let (proof_request_tx, proof_request_rx) = crossbeam_channel::unbounded();
+        let (worker_result_tx, worker_result_rx) = tokio_mpsc::unbounded_channel();
+        let (proof_request_tx, proof_request_rx) = tokio_mpsc::unbounded_channel();
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
 
         let parent_span = tracing::Span::current();
@@ -348,9 +349,9 @@ where
                 self.promote_pending_account_updates()?;
                 self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
 
-                if self.finished_state_updates &&
-                    self.account_updates.is_empty() &&
-                    self.storage_updates.iter().all(|(_, updates)| updates.is_empty())
+                if self.finished_state_updates
+                    && self.account_updates.is_empty()
+                    && self.storage_updates.iter().all(|(_, updates)| updates.is_empty())
                 {
                     break;
                 }
@@ -699,8 +700,8 @@ where
         let mut tries_to_compute_roots: Vec<(B256, SendStorageTriePtr<S>)> =
             Vec::with_capacity(addresses_to_compute_roots.len());
         for address in addresses_to_compute_roots {
-            if let Some(trie) = self.trie.storage_tries_mut().get_mut(&address) &&
-                !trie.is_root_cached()
+            if let Some(trie) = self.trie.storage_tries_mut().get_mut(&address)
+                && !trie.is_root_cached()
             {
                 tries_to_compute_roots.push((address, SendStorageTriePtr(trie)));
             }
@@ -812,7 +813,7 @@ where
             // We need to keep iterating if any updates are being drained because that might
             // indicate that more pending account updates can be promoted.
             if num_promoted == 0 || !self.process_account_leaf_updates(false)? {
-                break
+                break;
             }
         }
 
@@ -864,11 +865,11 @@ struct ProofOrchestrator {
     /// Handle to the database-backed proof worker pools.
     proof_worker_handle: ProofWorkerHandle,
     /// Proof requests from the sparse trie task.
-    proof_request_rx: CrossbeamReceiver<ProofRequest>,
+    proof_request_rx: tokio_mpsc::UnboundedReceiver<ProofRequest>,
     /// Sender handed to proof workers.
-    worker_result_tx: CrossbeamSender<ProofWorkerResultMessage>,
+    worker_result_tx: tokio_mpsc::UnboundedSender<ProofWorkerResultMessage>,
     /// Receiver for completed proof worker responses.
-    worker_result_rx: CrossbeamReceiver<ProofWorkerResultMessage>,
+    worker_result_rx: tokio_mpsc::UnboundedReceiver<ProofWorkerResultMessage>,
     /// Sender used to return proof results to the sparse trie task.
     sparse_trie_result_tx: CrossbeamSender<ProofResultMessage>,
 }
@@ -876,18 +877,18 @@ struct ProofOrchestrator {
 impl ProofOrchestrator {
     /// Spawns the orchestrator as a background task.
     fn spawn(self, executor: &Runtime) {
-        executor.spawn_blocking_named("proof-orchestrator", move || self.run());
+        executor.spawn_with_signal(|_| self.run());
     }
 
     /// Runs the orchestrator until sparse trie proof requests are closed and all in-flight worker
     /// responses have been relayed.
-    fn run(self) {
+    async fn run(self) {
         let Self {
             executor,
             proof_worker_handle,
-            proof_request_rx,
+            mut proof_request_rx,
             worker_result_tx,
-            worker_result_rx,
+            mut worker_result_rx,
             sparse_trie_result_tx,
         } = self;
 
@@ -895,30 +896,26 @@ impl ProofOrchestrator {
         let mut in_flight = 0usize;
 
         loop {
-            crossbeam_channel::select! {
-                recv(proof_request_rx) -> message => {
-                    match message {
-                        Ok(request) => {
-                            Self::dispatch_request(
-                                &proof_worker_handle,
-                                &worker_result_tx,
-                                request,
-                                &mut in_flight,
-                            );
-                        }
-                        Err(_) => {
-                            proof_requests_closed = true;
-                            if in_flight == 0 {
-                                break;
-                            }
+            tokio::select! {
+                biased;
+
+                message = proof_request_rx.recv(), if !proof_requests_closed => {
+                    if let Some(request) = message {
+                        Self::dispatch_request(
+                            &proof_worker_handle,
+                            &worker_result_tx,
+                            request,
+                            &mut in_flight,
+                        );
+                    } else {
+                        proof_requests_closed = true;
+                        if in_flight == 0 {
+                            break;
                         }
                     }
                 }
-                recv(worker_result_rx) -> message => {
-                    let Ok(result) = message else {
-                        break;
-                    };
-
+                message = worker_result_rx.recv() => {
+                    let Some(result) = message else { break };
                     in_flight = in_flight.saturating_sub(1);
                     Self::spawn_join_task(&executor, sparse_trie_result_tx.clone(), result);
 
@@ -932,7 +929,7 @@ impl ProofOrchestrator {
 
     fn dispatch_request(
         proof_worker_handle: &ProofWorkerHandle,
-        worker_result_tx: &CrossbeamSender<ProofWorkerResultMessage>,
+        worker_result_tx: &tokio_mpsc::UnboundedSender<ProofWorkerResultMessage>,
         request: ProofRequest,
         in_flight: &mut usize,
     ) {
@@ -967,8 +964,8 @@ impl ProofOrchestrator {
         sparse_trie_result_tx: CrossbeamSender<ProofResultMessage>,
         result: ProofWorkerResultMessage,
     ) {
-        executor.spawn_blocking(move || {
-            let _ = sparse_trie_result_tx.send(result.finalize());
+        executor.spawn_with_signal(|_| async move {
+            let _ = sparse_trie_result_tx.send(result.finalize().await);
         });
     }
 }

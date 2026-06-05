@@ -58,6 +58,7 @@ use std::{
     },
     time::Duration,
 };
+use tokio::sync::{mpsc as tokio_mpsc, oneshot};
 use tracing::{debug, debug_span, error, instrument, trace};
 
 #[cfg(feature = "metrics")]
@@ -326,7 +327,7 @@ impl ProofWorkerHandle {
     pub fn dispatch_storage_proof(
         &self,
         input: StorageProofInput,
-        proof_result_sender: CrossbeamSender<StorageProofResultMessage>,
+        proof_result_sender: oneshot::Sender<StorageProofResultMessage>,
     ) -> Result<(), ProviderError> {
         let hashed_address = input.hashed_address;
         self.storage_work_tx
@@ -467,7 +468,7 @@ where
 /// Channel used by account worker threads to deliver proof work back to the orchestrator.
 ///
 /// The account worker does not wait for storage worker receivers before sending on this channel.
-pub type ProofWorkerResultSender = CrossbeamSender<ProofWorkerResultMessage>;
+pub type ProofWorkerResultSender = tokio_mpsc::UnboundedSender<ProofWorkerResultMessage>;
 
 /// Message containing a completed proof result with metadata for direct delivery to
 /// `SparseTrieCacheTask`.
@@ -500,9 +501,12 @@ pub struct ProofWorkerResultMessage {
 impl ProofWorkerResultMessage {
     /// Waits for any outstanding storage proof responses and converts this into the regular proof
     /// result message expected by the sparse trie task.
-    pub fn finalize(self) -> ProofResultMessage {
+    pub async fn finalize(self) -> ProofResultMessage {
         let Self { result, elapsed, state } = self;
-        let result = result.and_then(PartialDecodedMultiProofV2::finalize);
+        let result = match result {
+            Ok(proof) => proof.finalize().await,
+            Err(error) => Err(error),
+        };
         ProofResultMessage { result, elapsed, state }
     }
 }
@@ -515,15 +519,15 @@ pub struct PartialDecodedMultiProofV2 {
     /// Storage proof nodes already collected while encoding account values.
     storage_proofs: B256Map<Vec<ProofTrieNodeV2>>,
     /// Storage proof receivers that should be awaited outside the account worker.
-    pending_storage_proofs: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
+    pending_storage_proofs: B256Map<oneshot::Receiver<StorageProofResultMessage>>,
 }
 
 impl PartialDecodedMultiProofV2 {
     /// Collects pending storage proofs and returns a complete decoded multiproof.
-    fn finalize(mut self) -> Result<DecodedMultiProofV2, ParallelStateRootError> {
+    async fn finalize(mut self) -> Result<DecodedMultiProofV2, ParallelStateRootError> {
         for (hashed_address, rx) in self.pending_storage_proofs {
             let result = rx
-                .recv()
+                .await
                 .map_err(|_| {
                     ParallelStateRootError::Other(format!(
                         "Storage proof channel closed for {hashed_address:?}",
@@ -600,7 +604,7 @@ pub(crate) enum StorageWorkerJob {
         /// Storage proof input parameters
         input: StorageProofInput,
         /// Context for sending the proof result.
-        proof_result_sender: CrossbeamSender<StorageProofResultMessage>,
+        proof_result_sender: oneshot::Sender<StorageProofResultMessage>,
     },
 }
 
@@ -766,7 +770,7 @@ where
         proof_tx: &ProofTaskTx<Provider>,
         v2_calculator: &mut proof_v2::StorageProofCalculator<TC, HC>,
         input: StorageProofInput,
-        proof_result_sender: CrossbeamSender<StorageProofResultMessage>,
+        proof_result_sender: oneshot::Sender<StorageProofResultMessage>,
         storage_proofs_processed: &mut u64,
     ) where
         Provider: TrieCursorFactory + HashedCursorFactory,
@@ -1089,7 +1093,10 @@ where
         *account_proofs_processed += 1;
 
         // Send result to SparseTrieCacheTask
-        if result_tx.send(ProofWorkerResultMessage { result, elapsed: total_elapsed, state }).is_err() {
+        if result_tx
+            .send(ProofWorkerResultMessage { result, elapsed: total_elapsed, state })
+            .is_err()
+        {
             trace!(
                 target: "trie::proof_task",
                 worker_id=self.worker_id,
@@ -1121,9 +1128,9 @@ fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
     account_targets: &[ProofV2Target],
     mut storage_targets: B256Map<Vec<ProofV2Target>>,
-) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
+) -> Result<B256Map<oneshot::Receiver<StorageProofResultMessage>>, ParallelStateRootError> {
     if storage_targets.is_empty() {
-        return Ok(B256Map::default())
+        return Ok(B256Map::default());
     }
 
     let mut storage_proof_receivers =
@@ -1135,8 +1142,8 @@ fn dispatch_v2_storage_proofs(
     // For storage targets with associated account proofs, ensure the first target has
     // min_len(0) so the root node is returned for storage root computation
     for (hashed_address, targets) in &mut storage_targets {
-        if account_target_addresses.contains(hashed_address) &&
-            let Some(first) = targets.first_mut()
+        if account_target_addresses.contains(hashed_address)
+            && let Some(first) = targets.first_mut()
         {
             *first = first.with_min_len(0);
         }
@@ -1151,7 +1158,7 @@ fn dispatch_v2_storage_proofs(
     // Dispatch all proofs for targeted storage slots
     for (hashed_address, targets) in sorted_storage_targets {
         // Create channel for receiving StorageProofResultMessage
-        let (result_tx, result_rx) = crossbeam_channel::unbounded();
+        let (result_tx, result_rx) = oneshot::channel();
         let input = StorageProofInput::new(hashed_address, targets);
 
         storage_work_tx

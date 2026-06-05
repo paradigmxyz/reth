@@ -39,6 +39,7 @@ rayon.workspace = true
 itertools.workspace = true
 crossbeam-channel.workspace = true
 crossbeam-utils.workspace = true
+tokio = { workspace = true, features = ["sync"] }
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }
@@ -61,7 +62,6 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 rand.workspace = true
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
 
 [features]
 default = ["metrics"]
