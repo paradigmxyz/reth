@@ -656,21 +656,16 @@ where
                             }
                         }
                         CacheAction::CacheNewCanonicalChain { chain_change } => {
-                            for block in chain_change.blocks {
+                            for ChainBlockChange { block, receipts } in chain_change.blocks {
+                                let block_hash = block.hash();
                                 // Index transactions before caching the block
                                 this.index_block_transactions(&block);
-                                this.on_new_block(block.hash(), Ok(Some(Arc::new(block))));
-                            }
-
-                            for block_receipts in chain_change.receipts {
-                                this.on_new_receipts(
-                                    block_receipts.block_hash,
-                                    Ok(Some(Arc::new(block_receipts.receipts))),
-                                );
+                                this.on_new_block(block_hash, Ok(Some(Arc::new(block))));
+                                this.on_new_receipts(block_hash, Ok(Some(Arc::new(receipts))));
                             }
                         }
                         CacheAction::RemoveReorgedChain { chain_change } => {
-                            for block in chain_change.blocks {
+                            for ChainBlockChange { block, receipts } in chain_change.blocks {
                                 let block_hash = block.hash();
                                 let header = block.clone_header();
                                 // Remove transaction index entries for reorged blocks
@@ -678,13 +673,7 @@ where
                                 this.on_reorg_block(block_hash, Ok(Some(block)));
                                 this.on_reorg_header(block_hash, Ok(header));
                                 this.on_reorg_bal(block_hash, Ok(None));
-                            }
-
-                            for block_receipts in chain_change.receipts {
-                                this.on_reorg_receipts(
-                                    block_receipts.block_hash,
-                                    Ok(Some(Arc::new(block_receipts.receipts))),
-                                );
+                                this.on_reorg_receipts(block_hash, Ok(Some(Arc::new(receipts))));
                             }
                         }
                         CacheAction::GetCachedParentBlocks {
@@ -788,15 +777,14 @@ enum CacheAction<B: Block, R> {
     },
 }
 
-struct BlockReceipts<R> {
-    block_hash: B256,
+struct ChainBlockChange<B: Block, R> {
+    block: RecoveredBlock<B>,
     receipts: Vec<R>,
 }
 
 /// A change of the canonical chain
 struct ChainChange<B: Block, R> {
-    blocks: Vec<RecoveredBlock<B>>,
-    receipts: Vec<BlockReceipts<R>>,
+    blocks: Vec<ChainBlockChange<B, R>>,
 }
 
 impl<B: Block, R: Clone> ChainChange<B, R> {
@@ -804,15 +792,14 @@ impl<B: Block, R: Clone> ChainChange<B, R> {
     where
         N: NodePrimitives<Block = B, Receipt = R>,
     {
-        let (blocks, receipts): (Vec<_>, Vec<_>) = chain
+        let blocks = chain
             .blocks_and_receipts()
-            .map(|(block, receipts)| {
-                let block_receipts =
-                    BlockReceipts { block_hash: block.hash(), receipts: receipts.clone() };
-                (block.clone(), block_receipts)
+            .map(|(block, receipts)| ChainBlockChange {
+                block: block.clone(),
+                receipts: receipts.clone(),
             })
-            .unzip();
-        Self { blocks, receipts }
+            .collect();
+        Self { blocks }
     }
 }
 
