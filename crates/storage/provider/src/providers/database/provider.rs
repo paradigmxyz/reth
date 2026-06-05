@@ -719,19 +719,23 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Write all hashed state and trie updates in single batches.
             // This reduces cursor open/close overhead from N calls to 1.
             if save_mode.with_state() {
+                let trie_data: SmallVec<[ComputedTrieData; 4]> =
+                    blocks.iter().rev().map(|block| block.trie_data()).collect();
+
                 // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
                 let start = Instant::now();
-                let merged_hashed_state = HashedPostStateSorted::merge_batch(
-                    blocks.iter().rev().map(|b| b.trie_data().hashed_state),
-                );
+                let hashed_states: SmallVec<[&HashedPostStateSorted; 4]> =
+                    trie_data.iter().map(|data| data.hashed_state.as_ref()).collect();
+                let merged_hashed_state = HashedPostStateSorted::merge_slice(&hashed_states);
                 if !merged_hashed_state.is_empty() {
                     self.write_hashed_state(&merged_hashed_state)?;
                 }
                 timings.write_hashed_state += start.elapsed();
 
                 let start = Instant::now();
-                let merged_trie =
-                    TrieUpdatesSorted::merge_batch(blocks.iter().rev().map(|b| b.trie_updates()));
+                let trie_updates: SmallVec<[&TrieUpdatesSorted; 4]> =
+                    trie_data.iter().map(|data| data.trie_updates.as_ref()).collect();
+                let merged_trie = TrieUpdatesSorted::merge_slice(&trie_updates);
                 if !merged_trie.is_empty() {
                     self.write_trie_updates_sorted(&merged_trie)?;
                 }
