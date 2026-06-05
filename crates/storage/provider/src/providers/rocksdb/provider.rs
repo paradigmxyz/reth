@@ -140,9 +140,9 @@ const DEFAULT_WRITE_BUFFER_SIZE: usize = 128 << 20;
 const DEFAULT_WRITE_BUFFER_MANAGER_SIZE: usize = 4 * 1024 * 1024 * 1024;
 
 /// Default buffer capacity for compression in batches.
-/// 4 KiB matches common block/page sizes and comfortably holds typical history values,
-/// reducing the first few reallocations without over-allocating.
-const DEFAULT_COMPRESS_BUF_CAPACITY: usize = 4096;
+/// History shards can serialize above a page-sized value during persistence bursts, so start
+/// with enough space to avoid repeated growth in the reused batch scratch buffer.
+const DEFAULT_COMPRESS_BUF_CAPACITY: usize = 16 * 1024;
 
 /// Default auto-commit threshold for batch writes (512 MiB).
 ///
