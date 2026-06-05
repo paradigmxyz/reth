@@ -1,5 +1,5 @@
 //! Tests fetching a list of files
-use crate::StubClient;
+use crate::{StubClient, ERE_ETHPANDAOPS_URL};
 use reqwest::Url;
 use reth_era_downloader::EraClient;
 use std::str::FromStr;
@@ -24,9 +24,10 @@ async fn test_getting_era1_file_name_after_fetching_file_list(url: &str) {
     assert_eq!(actual, expected);
 }
 
+#[test_case(ERE_ETHPANDAOPS_URL; "ethpandaops")]
 #[tokio::test]
-async fn test_getting_ere_file_name_after_fetching_file_list() {
-    let url = Url::from_str("https://data.ethpandaops.io/erae/mainnet/").unwrap();
+async fn test_getting_ere_file_name_after_fetching_file_list(url: &str) {
+    let url = Url::from_str(url).unwrap();
     let folder = tempdir().unwrap();
     let folder = folder.path();
     let client = EraClient::new(StubClient, url, folder);

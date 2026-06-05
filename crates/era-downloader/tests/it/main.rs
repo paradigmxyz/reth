@@ -28,6 +28,9 @@ pub(crate) const ERA_MAINNET_0: &[u8] =
 pub(crate) const ERA_MAINNET_1: &[u8] =
     include_bytes!("../res/era/files/mainnet-00001-40cf2f3c.era");
 
+/// Base URL of the ethPandaOps `erae` directory the ere test fixtures are served from.
+pub(crate) const ERE_ETHPANDAOPS_URL: &str = "https://data.ethpandaops.io/erae/mainnet/";
+
 pub(crate) const ERE_ETHPANDAOPS: &[u8] = include_bytes!("../res/ere/ethpandaops.html");
 pub(crate) const ERE_CHECKSUMS: &[u8] = include_bytes!("../res/ere/checksums.txt");
 pub(crate) const ERE_MAINNET_0: &[u8] =

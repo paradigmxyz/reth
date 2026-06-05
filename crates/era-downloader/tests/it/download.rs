@@ -1,5 +1,5 @@
 //! Tests fetching a file
-use crate::StubClient;
+use crate::{StubClient, ERE_ETHPANDAOPS_URL};
 use reqwest::Url;
 use reth_era_downloader::EraClient;
 use std::str::FromStr;
@@ -49,9 +49,10 @@ async fn test_getting_file_after_fetching_file_list(url: &str) {
     assert_eq!(actual_count, expected_count);
 }
 
+#[test_case(ERE_ETHPANDAOPS_URL; "ethpandaops")]
 #[tokio::test]
-async fn test_getting_ere_file_url_after_fetching_file_list() {
-    let base_url = Url::from_str("https://data.ethpandaops.io/erae/mainnet/").unwrap();
+async fn test_getting_ere_file_url_after_fetching_file_list(url: &str) {
+    let base_url = Url::from_str(url).unwrap();
     let folder = tempdir().unwrap();
     let folder = folder.path();
     let client = EraClient::new(StubClient, base_url.clone(), folder);
@@ -64,9 +65,10 @@ async fn test_getting_ere_file_url_after_fetching_file_list() {
     assert_eq!(actual_url, expected_url);
 }
 
+#[test_case(ERE_ETHPANDAOPS_URL; "ethpandaops")]
 #[tokio::test]
-async fn test_getting_ere_file_after_fetching_file_list() {
-    let base_url = Url::from_str("https://data.ethpandaops.io/erae/mainnet/").unwrap();
+async fn test_getting_ere_file_after_fetching_file_list(url: &str) {
+    let base_url = Url::from_str(url).unwrap();
     let folder = tempdir().unwrap();
     let folder = folder.path();
     let mut client = EraClient::new(StubClient, base_url, folder);
@@ -75,11 +77,15 @@ async fn test_getting_ere_file_after_fetching_file_list() {
 
     let url = client.url(0).await.unwrap().unwrap();
 
-    assert_eq!(client.files_count().await, 0);
+    let expected_count = 0;
+    let actual_count = client.files_count().await;
+    assert_eq!(actual_count, expected_count);
 
     client.download_to_file(url).await.unwrap();
 
-    assert_eq!(client.files_count().await, 1);
+    let expected_count = 1;
+    let actual_count = client.files_count().await;
+    assert_eq!(actual_count, expected_count);
 }
 
 #[test_case("https://mainnet.era.nimbus.team/"; "nimbus")]

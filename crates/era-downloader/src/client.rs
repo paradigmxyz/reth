@@ -215,16 +215,9 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         let mut writer = io::BufWriter::new(file);
 
         while let Some(line) = lines.next_line().await? {
-            // Try each known extension longest-first so `.ere` never matches inside `.erae`.
-            for ext in self.era_type.extensions() {
-                if let Some(j) = line.find(ext) &&
-                    let Some(i) = line[..j].rfind(|c: char| !c.is_alphanumeric() && c != '-')
-                {
-                    let era = &line[i + 1..j + ext.len()];
-                    writer.write_all(era.as_bytes()).await?;
-                    writer.write_all(b"\n").await?;
-                    break;
-                }
+            if let Some(era) = extract_era_filename(&line, self.era_type.extensions()) {
+                writer.write_all(era.as_bytes()).await?;
+                writer.write_all(b"\n").await?;
             }
         }
 
@@ -334,6 +327,20 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
     }
 }
 
+/// Extracts an era filename ending in one of `extensions` from a single index line.
+///
+/// `extensions` are tried in order; pass them longest-first so `.ere` never matches inside `.erae`.
+fn extract_era_filename<'a>(line: &'a str, extensions: &[&str]) -> Option<&'a str> {
+    for ext in extensions {
+        if let Some(j) = line.find(ext) &&
+            let Some(i) = line[..j].rfind(|c: char| !c.is_alphanumeric() && c != '-')
+        {
+            return Some(&line[i + 1..j + ext.len()]);
+        }
+    }
+    None
+}
+
 async fn checksum(mut reader: impl AsyncRead + Unpin) -> eyre::Result<Vec<u8>> {
     let mut hasher = Sha256::new();
 
@@ -379,6 +386,24 @@ mod tests {
         let actual_number = client.file_name_to_number(file_name);
 
         assert_eq!(actual_number, expected_number);
+    }
+
+    // `.erae` lines must yield the full `.erae` name, never the `.ere` prefix inside it.
+    #[test_case(
+        "<a href=\"mainnet-00000-a6860fef.erae\">", &[".erae", ".ere"],
+        Some("mainnet-00000-a6860fef.erae"); "erae anchor not clipped to ere"
+    )]
+    #[test_case(
+        "    \"name\": \"mainnet-00001-05c64fc4.erae\",", &[".erae", ".ere"],
+        Some("mainnet-00001-05c64fc4.erae"); "erae json entry"
+    )]
+    #[test_case(
+        "<a href=\"mainnet-00600-a81ae85f.era1\">", &[".era1"],
+        Some("mainnet-00600-a81ae85f.era1"); "era1 anchor"
+    )]
+    #[test_case("<a href=\"checksums.txt\">", &[".erae", ".ere"], None; "no era file on line")]
+    fn test_extract_era_filename(line: &str, exts: &[&str], expected: Option<&str>) {
+        assert_eq!(extract_era_filename(line, exts), expected);
     }
 
     #[test]

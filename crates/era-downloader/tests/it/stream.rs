@@ -1,5 +1,5 @@
 //! Tests downloading files and streaming their filenames
-use crate::StubClient;
+use crate::{StubClient, ERE_ETHPANDAOPS_URL};
 use futures_util::StreamExt;
 use reqwest::Url;
 use reth_era_downloader::{EraClient, EraStream, EraStreamConfig};
@@ -33,9 +33,10 @@ async fn test_streaming_files_after_fetching_file_list(url: &str) {
     assert_eq!(actual_file.as_ref(), expected_file.as_ref());
 }
 
+#[test_case(ERE_ETHPANDAOPS_URL; "ethpandaops")]
 #[tokio::test]
-async fn test_streaming_ere_files_after_fetching_file_list() {
-    let base_url = Url::from_str("https://data.ethpandaops.io/erae/mainnet/").unwrap();
+async fn test_streaming_ere_files_after_fetching_file_list(url: &str) {
+    let base_url = Url::from_str(url).unwrap();
     let folder = tempdir().unwrap();
     let folder = folder.path();
     let client = EraClient::new(StubClient, base_url, folder);
