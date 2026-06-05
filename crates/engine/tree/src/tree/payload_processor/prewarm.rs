@@ -24,9 +24,10 @@ use alloy_primitives::{keccak256, StorageKey, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
+use reth_errors::ProviderResult;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
 use reth_metrics::Metrics;
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockReader, StateProvider, StateProviderBox,
     StateProviderFactory, StateReader,
@@ -625,9 +626,6 @@ where
 
     /// Hashes and streams a single BAL account's state to the sparse trie task.
     ///
-    /// For each account, storage slots are hashed and sent immediately, then the account is read
-    /// from the database and sent as a separate update.
-    ///
     /// The `provider` is lazily initialized on first call and reused across accounts on the same
     /// thread.
     fn send_bal_hashed_state(
@@ -640,25 +638,6 @@ where
         if self.disable_bal_parallel_state_root {
             return;
         }
-        let address = account_changes.address;
-        let mut hashed_address = None;
-
-        if !account_changes.storage_changes.is_empty() {
-            let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
-            let mut storage_map = reth_trie::HashedStorage::new(false);
-
-            for slot_changes in &account_changes.storage_changes {
-                let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
-                if let Some(last_change) = slot_changes.changes.last() {
-                    storage_map.storage.insert(hashed_slot, last_change.new_value);
-                }
-            }
-
-            let mut hashed_state = reth_trie::HashedPostState::default();
-            hashed_state.storages.insert(hashed_address, storage_map);
-            let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
-        }
-
         if provider.is_none() {
             let _span = debug_span!(
                 target: "engine::tree::payload_processor::prewarm",
@@ -691,49 +670,20 @@ where
         }
         let account_reader = provider.as_ref().expect("provider just initialized");
 
-        let existing_account = account_reader.basic_account(&address).ok().flatten();
-
-        let balance = account_changes.balance_changes.last().map(|change| change.post_balance);
-        let nonce = account_changes.nonce_changes.last().map(|change| change.new_nonce);
-        let code_hash = account_changes.code_changes.last().map(|code_change| {
-            if code_change.new_code.is_empty() {
-                alloy_consensus::constants::KECCAK_EMPTY
-            } else {
-                keccak256(&code_change.new_code)
+        match bal_account_hashed_post_state(account_reader.as_ref(), account_changes) {
+            Ok(Some(hashed_state)) => {
+                let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
             }
-        });
-
-        if balance.is_none() &&
-            nonce.is_none() &&
-            code_hash.is_none() &&
-            account_changes.storage_changes.is_empty()
-        {
-            return;
+            Ok(None) => {}
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    address = %account_changes.address,
+                    ?err,
+                    "Failed to build BAL hashed state"
+                );
+            }
         }
-
-        let account = reth_primitives_traits::Account {
-            balance: balance.unwrap_or_else(|| {
-                existing_account
-                    .as_ref()
-                    .map(|account| account.balance)
-                    .unwrap_or(alloy_primitives::U256::ZERO)
-            }),
-            nonce: nonce.unwrap_or_else(|| {
-                existing_account.as_ref().map(|account| account.nonce).unwrap_or(0)
-            }),
-            bytecode_hash: code_hash.or_else(|| {
-                existing_account
-                    .as_ref()
-                    .and_then(|account| account.bytecode_hash)
-                    .or(Some(alloy_consensus::constants::KECCAK_EMPTY))
-            }),
-        };
-
-        let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
-        let mut hashed_state = reth_trie::HashedPostState::default();
-        hashed_state.accounts.insert(hashed_address, Some(account));
-
-        let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
     }
 
     /// Prefetches storage slots for a single BAL account into the cache.
@@ -795,6 +745,70 @@ where
 
         self.metrics.bal_slot_iteration_duration.record(start.elapsed().as_secs_f64());
     }
+}
+
+/// Builds the hashed post-state update represented by one BAL account entry.
+///
+/// BAL account entries may only include a subset of account fields, but trie leaf updates require a
+/// complete account. The base-state provider supplies unchanged fields before the update is streamed
+/// to the sparse trie task.
+pub(crate) fn bal_account_hashed_post_state(
+    account_reader: &dyn AccountReader,
+    account_changes: &alloy_eip7928::AccountChanges,
+) -> ProviderResult<Option<reth_trie::HashedPostState>> {
+    let address = account_changes.address;
+    let balance = account_changes.balance_changes.last().map(|change| change.post_balance);
+    let nonce = account_changes.nonce_changes.last().map(|change| change.new_nonce);
+    let code_hash = account_changes.code_changes.last().map(|code_change| {
+        if code_change.new_code.is_empty() {
+            alloy_consensus::constants::KECCAK_EMPTY
+        } else {
+            keccak256(&code_change.new_code)
+        }
+    });
+
+    if balance.is_none() &&
+        nonce.is_none() &&
+        code_hash.is_none() &&
+        account_changes.storage_changes.is_empty()
+    {
+        return Ok(None)
+    }
+
+    let existing_account = account_reader.basic_account(&address)?;
+    let account = Account {
+        balance: balance.unwrap_or_else(|| {
+            existing_account
+                .as_ref()
+                .map(|account| account.balance)
+                .unwrap_or(alloy_primitives::U256::ZERO)
+        }),
+        nonce: nonce.unwrap_or_else(|| existing_account.as_ref().map(|account| account.nonce).unwrap_or(0)),
+        bytecode_hash: code_hash.or_else(|| {
+            existing_account
+                .as_ref()
+                .and_then(|account| account.bytecode_hash)
+                .or(Some(alloy_consensus::constants::KECCAK_EMPTY))
+        }),
+    };
+
+    let hashed_address = keccak256(address);
+    let mut hashed_state = reth_trie::HashedPostState::default();
+
+    if !account_changes.storage_changes.is_empty() {
+        let mut storage_map = reth_trie::HashedStorage::new(false);
+        for slot_changes in &account_changes.storage_changes {
+            let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
+            if let Some(last_change) = slot_changes.changes.last() {
+                storage_map.storage.insert(hashed_slot, last_change.new_value);
+            }
+        }
+        hashed_state.storages.insert(hashed_address, storage_map);
+    }
+
+    hashed_state.accounts.insert(hashed_address, Some(account));
+
+    Ok(Some(hashed_state))
 }
 
 /// Returns a set of [`MultiProofTargetsV2`] and the total amount of storage targets, based on the

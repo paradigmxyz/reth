@@ -58,8 +58,6 @@ pub struct StateRootComputeOutcome {
 pub struct StateRootHandle {
     /// The state root that the cached sparse trie is anchored at (parent block's state root).
     cached_trie_state_root: B256,
-    /// Shared flag set while this handle is waiting for its parent sparse trie to become available.
-    deferred_parent_pending: Option<Arc<AtomicBool>>,
     /// Channel for streaming state updates and proof targets into the sparse trie pipeline.
     updates_tx: crossbeam_channel::Sender<StateRootMessage>,
     /// Receiver for the final state root result.
@@ -83,30 +81,6 @@ impl StateRootHandle {
     ) -> Self {
         Self {
             cached_trie_state_root,
-            deferred_parent_pending: None,
-            updates_tx,
-            state_root_rx: Some(state_root_rx),
-            hashed_state_rx: Some(hashed_state_rx),
-            consumer_cancelled: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
-    /// Creates a new deferred [`StateRootHandle`].
-    ///
-    /// A deferred handle queues payload-builder updates until an active sparse-trie task can be
-    /// rooted at the parent's post-state.
-    pub fn new_deferred(
-        cached_trie_state_root: B256,
-        updates_tx: crossbeam_channel::Sender<StateRootMessage>,
-        state_root_rx: std::sync::mpsc::Receiver<
-            Result<StateRootComputeOutcome, ParallelStateRootError>,
-        >,
-        hashed_state_rx: std::sync::mpsc::Receiver<HashedPostState>,
-        deferred_parent_pending: Arc<AtomicBool>,
-    ) -> Self {
-        Self {
-            cached_trie_state_root,
-            deferred_parent_pending: Some(deferred_parent_pending),
             updates_tx,
             state_root_rx: Some(state_root_rx),
             hashed_state_rx: Some(hashed_state_rx),
@@ -119,16 +93,14 @@ impl StateRootHandle {
         self.cached_trie_state_root
     }
 
-    /// Returns true if this handle is waiting for parent validation before sparse-trie work can run.
-    pub fn is_deferred(&self) -> bool {
-        self.deferred_parent_pending.is_some()
+    /// Returns whether this handle is waiting before sparse-trie work can run.
+    pub const fn is_deferred(&self) -> bool {
+        false
     }
 
-    /// Returns true if this handle is still waiting for parent validation.
-    pub fn is_deferred_parent_pending(&self) -> bool {
-        self.deferred_parent_pending
-            .as_ref()
-            .is_some_and(|pending| pending.load(Ordering::Acquire))
+    /// Returns whether this handle is still waiting for parent validation.
+    pub const fn is_deferred_parent_pending(&self) -> bool {
+        false
     }
 
     /// Returns a flag that is set once this handle is dropped by its consumer.
@@ -255,7 +227,7 @@ mod tests {
     use alloy_evm::block::OnStateHook;
 
     #[test]
-    fn state_root_handle_tracks_deferred_parent() {
+    fn state_root_handle_is_active_when_created() {
         let (updates_tx, _updates_rx) = crossbeam_channel::unbounded();
         let (_state_root_tx, state_root_rx) = std::sync::mpsc::channel();
         let (_hashed_state_tx, hashed_state_rx) = std::sync::mpsc::channel();
@@ -263,21 +235,7 @@ mod tests {
         let handle =
             StateRootHandle::new(B256::ZERO, updates_tx, state_root_rx, hashed_state_rx);
         assert!(!handle.is_deferred());
-
-        let (updates_tx, _updates_rx) = crossbeam_channel::unbounded();
-        let (_state_root_tx, state_root_rx) = std::sync::mpsc::channel();
-        let (_hashed_state_tx, hashed_state_rx) = std::sync::mpsc::channel();
-
-        let pending = Arc::new(AtomicBool::new(true));
-        let handle = StateRootHandle::new_deferred(
-            B256::ZERO,
-            updates_tx,
-            state_root_rx,
-            hashed_state_rx,
-            pending,
-        );
-        assert!(handle.is_deferred());
-        assert!(handle.is_deferred_parent_pending());
+        assert!(!handle.is_deferred_parent_pending());
     }
 
     #[test]
