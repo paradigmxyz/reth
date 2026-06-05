@@ -365,16 +365,17 @@ where
         if let Some(to_sparse_trie_task) = to_sparse_trie_task {
             let ctx = ctx.clone();
             executor.bal_streaming_pool().spawn(move || {
+                let bal = stream_bal.as_bal();
                 let branch_span = debug_span!(
                     target: "engine::tree::payload_processor::prewarm",
                     parent: &stream_parent_span,
                     "bal_hashed_state_stream",
-                    bal_accounts = stream_bal.as_bal().len(),
+                    bal_accounts = bal.len(),
                 );
                 let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
 
-                stream_bal.as_bal().par_iter().for_each(|account_changes| {
+                bal.par_iter().for_each(|account_changes| {
                     WorkerPool::with_worker_mut(|worker| {
                         let provider =
                             worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
@@ -396,16 +397,17 @@ where
 
         if ctx.saved_cache.is_some() && !ctx.disable_bal_batch_io {
             executor.prewarming_pool().spawn(move || {
+                let bal = prefetch_bal.as_bal();
                 let branch_span = debug_span!(
                     target: "engine::tree::payload_processor::prewarm",
                     parent: &prefetch_parent_span,
                     "bal_prefetch_storage",
-                    bal_accounts = prefetch_bal.as_bal().len(),
+                    bal_accounts = bal.len(),
                 );
                 let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
 
-                prefetch_bal.as_bal().par_iter().for_each(|account| {
+                bal.par_iter().for_each(|account| {
                     if ctx.should_stop() {
                         return;
                     }
