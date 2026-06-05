@@ -263,11 +263,7 @@ impl ArenaCursor {
             let child_depth = self.stack.len();
 
             let mut descended = false;
-            for (branch_child_idx, nibble) in BranchChildIter::new(state_mask) {
-                if branch_child_idx.get() < start {
-                    continue;
-                }
-
+            for (branch_child_idx, nibble) in BranchChildIter::from_dense(state_mask, start) {
                 let child_idx = match &arena[head_idx].branch_ref().children[branch_child_idx] {
                     ArenaSparseNodeBranchChild::Revealed(child_idx) => *child_idx,
                     ArenaSparseNodeBranchChild::Blinded(_) => continue,

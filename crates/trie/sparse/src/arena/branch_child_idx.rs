@@ -1,8 +1,5 @@
-use alloy_trie::{TrieMask, TrieMaskIter};
-use core::{
-    iter::Enumerate,
-    ops::{Index, IndexMut},
-};
+use alloy_trie::TrieMask;
+use core::ops::{Index, IndexMut};
 use smallvec::SmallVec;
 
 /// A dense index into a branch node's children array.
@@ -65,16 +62,29 @@ impl<T> IndexMut<BranchChildIdx> for SmallVec<[T; 4]> {
 
 /// An iterator over a branch's children that yields `(BranchChildIdx, nibble)` pairs.
 ///
-/// Wraps `TrieMask::iter().enumerate()` to produce [`BranchChildIdx`] values instead of raw
-/// `usize` indices.
+/// Iterates occupied children in a branch mask and returns dense [`BranchChildIdx`] values.
 pub(super) struct BranchChildIter {
-    inner: Enumerate<TrieMaskIter>,
+    mask: u16,
+    dense: u8,
 }
 
 impl BranchChildIter {
     /// Creates a new iterator over the occupied children of the given `state_mask`.
     pub(super) fn new(state_mask: TrieMask) -> Self {
-        Self { inner: state_mask.iter().enumerate() }
+        Self { mask: state_mask.get(), dense: 0 }
+    }
+
+    /// Creates a new iterator starting at the given dense child index.
+    pub(super) fn from_dense(state_mask: TrieMask, dense: usize) -> Self {
+        let mut mask = state_mask.get();
+        for _ in 0..dense {
+            if mask == 0 {
+                break;
+            }
+            mask &= mask - 1;
+        }
+
+        Self { mask, dense: dense as u8 }
     }
 }
 
@@ -82,10 +92,20 @@ impl Iterator for BranchChildIter {
     type Item = (BranchChildIdx, u8);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next().map(|(dense, nibble)| (BranchChildIdx(dense as u8), nibble))
+        if self.mask == 0 {
+            return None;
+        }
+
+        let nibble = self.mask.trailing_zeros() as u8;
+        self.mask &= self.mask - 1;
+
+        let dense = self.dense;
+        self.dense += 1;
+        Some((BranchChildIdx(dense), nibble))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
+        let remaining = self.mask.count_ones() as usize;
+        (remaining, Some(remaining))
     }
 }
