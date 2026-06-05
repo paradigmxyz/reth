@@ -49,6 +49,39 @@ async fn test_getting_file_after_fetching_file_list(url: &str) {
     assert_eq!(actual_count, expected_count);
 }
 
+#[tokio::test]
+async fn test_getting_ere_file_url_after_fetching_file_list() {
+    let base_url = Url::from_str("https://data.ethpandaops.io/erae/mainnet/").unwrap();
+    let folder = tempdir().unwrap();
+    let folder = folder.path();
+    let client = EraClient::new(StubClient, base_url.clone(), folder);
+
+    client.fetch_file_list().await.unwrap();
+
+    let expected_url = Some(base_url.join("mainnet-00000-a6860fef.erae").unwrap());
+    let actual_url = client.url(0).await.unwrap();
+
+    assert_eq!(actual_url, expected_url);
+}
+
+#[tokio::test]
+async fn test_getting_ere_file_after_fetching_file_list() {
+    let base_url = Url::from_str("https://data.ethpandaops.io/erae/mainnet/").unwrap();
+    let folder = tempdir().unwrap();
+    let folder = folder.path();
+    let mut client = EraClient::new(StubClient, base_url, folder);
+
+    client.fetch_file_list().await.unwrap();
+
+    let url = client.url(0).await.unwrap().unwrap();
+
+    assert_eq!(client.files_count().await, 0);
+
+    client.download_to_file(url).await.unwrap();
+
+    assert_eq!(client.files_count().await, 1);
+}
+
 #[test_case("https://mainnet.era.nimbus.team/"; "nimbus")]
 #[tokio::test]
 async fn test_getting_era_file_url_after_fetching_file_list(url: &str) {

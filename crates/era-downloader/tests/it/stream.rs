@@ -34,6 +34,27 @@ async fn test_streaming_files_after_fetching_file_list(url: &str) {
 }
 
 #[tokio::test]
+async fn test_streaming_ere_files_after_fetching_file_list() {
+    let base_url = Url::from_str("https://data.ethpandaops.io/erae/mainnet/").unwrap();
+    let folder = tempdir().unwrap();
+    let folder = folder.path();
+    let client = EraClient::new(StubClient, base_url, folder);
+
+    let mut stream = EraStream::new(
+        client,
+        EraStreamConfig::default().with_max_files(2).with_max_concurrent_downloads(1),
+    );
+
+    let expected_file = folder.join("mainnet-00000-a6860fef.erae").into_boxed_path();
+    let actual_file = stream.next().await.unwrap().unwrap();
+    assert_eq!(actual_file.as_ref(), expected_file.as_ref());
+
+    let expected_file = folder.join("mainnet-00001-05c64fc4.erae").into_boxed_path();
+    let actual_file = stream.next().await.unwrap().unwrap();
+    assert_eq!(actual_file.as_ref(), expected_file.as_ref());
+}
+
+#[tokio::test]
 async fn test_streaming_era1_files_after_fetching_file_list_into_missing_folder_fails() {
     let base_url = Url::from_str("https://era.ithaca.xyz/era1/index.html").unwrap();
     let folder = tempdir().unwrap().path().to_owned();

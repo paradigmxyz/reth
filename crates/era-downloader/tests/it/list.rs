@@ -24,6 +24,21 @@ async fn test_getting_era1_file_name_after_fetching_file_list(url: &str) {
     assert_eq!(actual, expected);
 }
 
+#[tokio::test]
+async fn test_getting_ere_file_name_after_fetching_file_list() {
+    let url = Url::from_str("https://data.ethpandaops.io/erae/mainnet/").unwrap();
+    let folder = tempdir().unwrap();
+    let folder = folder.path();
+    let client = EraClient::new(StubClient, url, folder);
+
+    client.fetch_file_list().await.unwrap();
+
+    let actual = client.number_to_file_name(1).await.unwrap();
+    let expected = Some("mainnet-00001-05c64fc4.erae".to_owned());
+
+    assert_eq!(actual, expected);
+}
+
 #[test_case("https://mainnet.era.nimbus.team/"; "nimbus")]
 #[tokio::test]
 async fn test_getting_era_file_name_after_fetching_file_list(url: &str) {
