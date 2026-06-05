@@ -28,12 +28,12 @@ pub(crate) const ERA_MAINNET_0: &[u8] =
 pub(crate) const ERA_MAINNET_1: &[u8] =
     include_bytes!("../res/era/files/mainnet-00001-40cf2f3c.era");
 
-pub(crate) const ERE_ETHPANDAOPS: &[u8] = include_bytes!("../res/ere-ethpandaops.html");
-pub(crate) const ERE_CHECKSUMS: &[u8] = include_bytes!("../res/ere-checksums.txt");
+pub(crate) const ERE_ETHPANDAOPS: &[u8] = include_bytes!("../res/ere/ethpandaops.html");
+pub(crate) const ERE_CHECKSUMS: &[u8] = include_bytes!("../res/ere/checksums.txt");
 pub(crate) const ERE_MAINNET_0: &[u8] =
-    include_bytes!("../res/ere-files/mainnet-00000-a6860fef.erae");
+    include_bytes!("../res/ere/files/mainnet-00000-a6860fef.erae");
 pub(crate) const ERE_MAINNET_1: &[u8] =
-    include_bytes!("../res/ere-files/mainnet-00001-05c64fc4.erae");
+    include_bytes!("../res/ere/files/mainnet-00001-05c64fc4.erae");
 
 /// An HTTP client pre-programmed with canned answers to received calls.
 /// Panics if it receives an unknown call.
