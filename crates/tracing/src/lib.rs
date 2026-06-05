@@ -57,7 +57,7 @@ tracy_client::register_demangler!();
 #[cfg(feature = "std")]
 pub use formatter::LogFormat;
 #[cfg(feature = "std")]
-pub use layers::{FileInfo, FileWorkerGuard, Layers};
+pub use layers::{FileInfo, FileWorkerGuard, Layers, TracingGuards};
 #[cfg(feature = "std")]
 pub use log_handle::{
     install_log_handle, log_handle_available, set_log_verbosity, set_log_vmodule,
@@ -86,8 +86,6 @@ mod throttle;
 #[cfg(feature = "std")]
 use tracing::level_filters::LevelFilter;
 #[cfg(feature = "std")]
-use tracing_appender::non_blocking::WorkerGuard;
-#[cfg(feature = "std")]
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 ///  Tracer for application logging.
@@ -101,6 +99,7 @@ pub struct RethTracer {
     journald: Option<String>,
     file: Option<(LayerInfo, FileInfo)>,
     samply: Option<LayerInfo>,
+    chrome: Option<(LayerInfo, std::path::PathBuf)>,
     #[cfg(feature = "tracy")]
     tracy: Option<LayerInfo>,
     /// When true, the stdout filter is wrapped in a reload layer so log levels
@@ -120,6 +119,7 @@ impl RethTracer {
             journald: None,
             file: None,
             samply: None,
+            chrome: None,
             #[cfg(feature = "tracy")]
             tracy: None,
             enable_reload: false,
@@ -157,6 +157,12 @@ impl RethTracer {
     /// Sets the samply layer configuration.
     pub fn with_samply(mut self, config: LayerInfo) -> Self {
         self.samply = Some(config);
+        self
+    }
+
+    /// Sets the Chrome trace layer configuration.
+    pub fn with_chrome(mut self, config: LayerInfo, file: std::path::PathBuf) -> Self {
+        self.chrome = Some((config, file));
         self
     }
 
@@ -245,9 +251,9 @@ pub trait Tracer: Sized {
     /// By default, this method creates a new `Layers` instance and delegates to `init_with_layers`.
     ///
     /// # Returns
-    /// An `eyre::Result` which is `Ok` with an optional `WorkerGuard` if a file layer is used,
-    /// or an `Err` in case of an error during initialization.
-    fn init(self) -> eyre::Result<Option<WorkerGuard>> {
+    /// An `eyre::Result` with guards for layers that need to stay alive, or an `Err` in case of an
+    /// error during initialization.
+    fn init(self) -> eyre::Result<TracingGuards> {
         self.init_with_layers(Layers::new())
     }
 
@@ -259,14 +265,14 @@ pub trait Tracer: Sized {
     /// * `layers` - Pre-configured `Layers` instance to use for initialization
     ///
     /// # Returns
-    /// An `eyre::Result` which is `Ok` with an optional `WorkerGuard` if a file layer is used,
-    /// or an `Err` in case of an error during initialization.
-    fn init_with_layers(self, layers: Layers) -> eyre::Result<Option<WorkerGuard>>;
+    /// An `eyre::Result` with guards for layers that need to stay alive, or an `Err` in case of an
+    /// error during initialization.
+    fn init_with_layers(self, layers: Layers) -> eyre::Result<TracingGuards>;
 }
 
 #[cfg(feature = "std")]
 impl Tracer for RethTracer {
-    fn init_with_layers(self, mut layers: Layers) -> eyre::Result<Option<WorkerGuard>> {
+    fn init_with_layers(self, mut layers: Layers) -> eyre::Result<TracingGuards> {
         // Configure stdout layer - reloadable if requested for runtime log level changes
         if let Some(handle) = layers.stdout(
             self.stdout.format,
@@ -297,6 +303,12 @@ impl Tracer for RethTracer {
             layers.samply(config)?;
         }
 
+        let chrome_guard = if let Some((config, file)) = self.chrome {
+            Some(layers.chrome(config, &file)?)
+        } else {
+            None
+        };
+
         #[cfg(feature = "tracy")]
         if let Some(config) = self.tracy {
             layers.tracy(config)?;
@@ -306,7 +318,7 @@ impl Tracer for RethTracer {
         // so it's safe to ignore it
         let _ = tracing_subscriber::registry().with(layers.into_inner()).try_init();
 
-        Ok(file_guard)
+        Ok(TracingGuards::new(file_guard, chrome_guard))
     }
 }
 
