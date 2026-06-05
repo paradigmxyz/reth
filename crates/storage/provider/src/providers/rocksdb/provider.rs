@@ -1858,10 +1858,13 @@ impl<'a> RocksDBBatch<'a> {
         );
 
         let last_key = ShardedKey::new(address, u64::MAX);
-        let last_shard_opt = self.provider.get::<tables::AccountsHistory>(last_key.clone())?;
-        let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
-
-        last_shard.append(indices).map_err(ProviderError::other)?;
+        let last_shard = match self.provider.get::<tables::AccountsHistory>(last_key.clone())? {
+            Some(mut last_shard) => {
+                last_shard.append(indices).map_err(ProviderError::other)?;
+                last_shard
+            }
+            None => BlockNumberList::new(indices).map_err(ProviderError::other)?,
+        };
 
         // Fast path: all indices fit in one shard
         if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
@@ -1920,10 +1923,13 @@ impl<'a> RocksDBBatch<'a> {
         );
 
         let last_key = StorageShardedKey::last(address, storage_key);
-        let last_shard_opt = self.provider.get::<tables::StoragesHistory>(last_key.clone())?;
-        let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
-
-        last_shard.append(indices).map_err(ProviderError::other)?;
+        let last_shard = match self.provider.get::<tables::StoragesHistory>(last_key.clone())? {
+            Some(mut last_shard) => {
+                last_shard.append(indices).map_err(ProviderError::other)?;
+                last_shard
+            }
+            None => BlockNumberList::new(indices).map_err(ProviderError::other)?,
+        };
 
         // Fast path: all indices fit in one shard
         if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
