@@ -139,8 +139,12 @@ impl Evm2BundleState {
         for (address, storage) in &self.storage {
             let hashed_storage = HashedStorage::from_iter(
                 storage.wipe,
-                storage.slots.iter().map(|(slot, value)| {
-                    (KH::hash_key(B256::new(slot.to_be_bytes())), value.current)
+                storage.slots.iter().filter_map(|(slot, value)| {
+                    if storage.wipe && value.current.is_zero() {
+                        return None
+                    }
+
+                    Some((KH::hash_key(B256::new(slot.to_be_bytes())), value.current))
                 }),
             );
 
@@ -183,28 +187,50 @@ impl Evm2BundleState {
 
     /// Extends this bundle with another bundle built on top of it.
     pub fn extend(&mut self, other: Self) {
-        for (address, account) in other.accounts {
+        let Self { accounts, storage, contracts, mut block_reverts, first_block: _ } = other;
+
+        for (address, account) in accounts {
             self.accounts
                 .entry(address)
                 .and_modify(|existing| existing.current = account.current.clone())
                 .or_insert(account);
         }
 
-        for (address, storage) in other.storage {
+        for (address, storage) in storage {
             let bundle_storage = self.storage.entry(address).or_default();
-            bundle_storage.wipe |= storage.wipe;
+            let previous_slots = if storage.wipe {
+                let previous_wipe = bundle_storage.wipe;
+                let mut wipe_revert = Self::first_wipe_revert(&mut block_reverts, &address);
+                if let Some(revert) = wipe_revert.as_deref_mut() {
+                    revert.previous_wipe = previous_wipe;
+                }
+                Self::wipe_storage(bundle_storage, wipe_revert)
+            } else {
+                BTreeMap::default()
+            };
 
             for (slot, value) in storage.slots {
-                bundle_storage
-                    .slots
-                    .entry(slot)
-                    .and_modify(|existing| existing.current = value.current)
-                    .or_insert(value);
+                if storage.wipe {
+                    let original = previous_slots
+                        .get(&slot)
+                        .map(|slot| slot.original)
+                        .unwrap_or(value.original);
+                    bundle_storage.slots.insert(
+                        slot,
+                        Tracked { original, current: value.current, _non_exhaustive: () },
+                    );
+                } else {
+                    bundle_storage
+                        .slots
+                        .entry(slot)
+                        .and_modify(|existing| existing.current = value.current)
+                        .or_insert(value);
+                }
             }
         }
 
-        self.contracts.extend(other.contracts);
-        self.block_reverts.extend(other.block_reverts);
+        self.contracts.extend(contracts);
+        self.block_reverts.extend(block_reverts);
     }
 
     /// Drops the first `n` block revert entries.
@@ -244,19 +270,62 @@ impl Evm2BundleState {
                 });
             let bundle_storage = self.storage.entry(address).or_default();
             block_revert.wiped |= change_set.wipe;
-            bundle_storage.wipe |= change_set.wipe;
+            let previous_slots = if change_set.wipe {
+                Self::wipe_storage(bundle_storage, Some(&mut *block_revert))
+            } else {
+                BTreeMap::default()
+            };
 
             for (key, change) in change_set.slots {
                 block_revert.slots.entry(key).or_insert(change.original);
-                bundle_storage
-                    .slots
-                    .entry(key)
-                    .and_modify(|existing| existing.current = change.current)
-                    .or_insert(change);
+                if change_set.wipe {
+                    let original = previous_slots
+                        .get(&key)
+                        .map(|slot| slot.original)
+                        .unwrap_or(change.original);
+                    bundle_storage.slots.insert(
+                        key,
+                        Tracked { original, current: change.current, _non_exhaustive: () },
+                    );
+                } else {
+                    bundle_storage
+                        .slots
+                        .entry(key)
+                        .and_modify(|existing| existing.current = change.current)
+                        .or_insert(change);
+                }
             }
         }
 
         self.contracts.extend(code);
+    }
+
+    fn first_wipe_revert<'a>(
+        block_reverts: &'a mut [Evm2BlockReverts],
+        address: &Address,
+    ) -> Option<&'a mut Evm2StorageReverts> {
+        for reverts in block_reverts {
+            if let Some(storage_reverts) = reverts.storage.get_mut(address) &&
+                storage_reverts.wiped
+            {
+                return Some(storage_reverts)
+            }
+        }
+        None
+    }
+
+    fn wipe_storage(
+        storage: &mut Evm2StorageChangeSet,
+        block_revert: Option<&mut Evm2StorageReverts>,
+    ) -> BTreeMap<U256, Tracked<U256>> {
+        let previous_slots = core::mem::take(&mut storage.slots);
+        if let Some(block_revert) = block_revert {
+            for (key, slot) in &previous_slots {
+                block_revert.slots.entry(*key).or_insert(slot.current);
+            }
+        }
+        storage.wipe = true;
+        previous_slots
     }
 
     fn apply_reverts(&mut self, reverts: Evm2BlockReverts) {
@@ -720,6 +789,53 @@ mod tests {
     }
 
     #[test]
+    fn storage_wipe_drops_slots_not_rewritten() {
+        let address = address!("0000000000000000000000000000000000000001");
+        let stale_slot = U256::from(1);
+        let post_wipe_slot = U256::from(2);
+        let mut first_tx = StateChanges::default();
+        first_tx.storage.insert(
+            address,
+            StorageChangeSet {
+                wipe: false,
+                slots: BTreeMap::from([(
+                    stale_slot,
+                    Tracked { original: U256::ZERO, current: U256::from(1), _non_exhaustive: () },
+                )]),
+                _non_exhaustive: (),
+            },
+        );
+
+        let mut second_tx = StateChanges::default();
+        second_tx.storage.insert(
+            address,
+            StorageChangeSet {
+                wipe: true,
+                slots: BTreeMap::from([(
+                    post_wipe_slot,
+                    Tracked { original: U256::ZERO, current: U256::from(2), _non_exhaustive: () },
+                )]),
+                _non_exhaustive: (),
+            },
+        );
+
+        let mut bundle = Evm2BundleState::new(1);
+        bundle.append_block([first_tx, second_tx]);
+
+        let storage = bundle.storage().get(&address).unwrap();
+        assert!(storage.wipe);
+        assert!(!storage.slots.contains_key(&stale_slot));
+        assert_eq!(bundle.storage_slot(&address, stale_slot), None);
+        assert_eq!(storage.slots.get(&post_wipe_slot).unwrap().current, U256::from(2));
+
+        bundle.revert_blocks(1);
+        let storage = bundle.storage().get(&address).unwrap();
+        assert!(!storage.wipe);
+        assert_eq!(storage.slots.get(&stale_slot).unwrap().current, U256::ZERO);
+        assert_eq!(storage.slots.get(&post_wipe_slot).unwrap().current, U256::ZERO);
+    }
+
+    #[test]
     fn block_reverts_preserve_previous_storage_wipe_state() {
         let address = address!("0000000000000000000000000000000000000001");
         let slot = U256::from(1);
@@ -850,6 +966,56 @@ mod tests {
     }
 
     #[test]
+    fn extend_wipe_drops_stale_storage_slots_and_reverts() {
+        let address = address!("0000000000000000000000000000000000000001");
+        let stale_slot = U256::from(1);
+        let post_wipe_slot = U256::from(2);
+        let mut first = Evm2BundleState::new(1);
+        let mut second = Evm2BundleState::new(2);
+
+        let mut first_block = StateChanges::default();
+        first_block.storage.insert(
+            address,
+            StorageChangeSet {
+                wipe: false,
+                slots: BTreeMap::from([(
+                    stale_slot,
+                    Tracked { original: U256::ZERO, current: U256::from(1), _non_exhaustive: () },
+                )]),
+                _non_exhaustive: (),
+            },
+        );
+        first.append_block([first_block]);
+
+        let mut second_block = StateChanges::default();
+        second_block.storage.insert(
+            address,
+            StorageChangeSet {
+                wipe: true,
+                slots: BTreeMap::from([(
+                    post_wipe_slot,
+                    Tracked { original: U256::ZERO, current: U256::from(2), _non_exhaustive: () },
+                )]),
+                _non_exhaustive: (),
+            },
+        );
+        second.append_block([second_block]);
+
+        first.extend(second);
+
+        let storage = first.storage().get(&address).unwrap();
+        assert!(storage.wipe);
+        assert!(!storage.slots.contains_key(&stale_slot));
+        assert_eq!(storage.slots.get(&post_wipe_slot).unwrap().current, U256::from(2));
+
+        first.revert_blocks(1);
+        let storage = first.storage().get(&address).unwrap();
+        assert!(!storage.wipe);
+        assert_eq!(storage.slots.get(&stale_slot).unwrap().current, U256::from(1));
+        assert_eq!(storage.slots.get(&post_wipe_slot).unwrap().current, U256::ZERO);
+    }
+
+    #[test]
     fn hashed_post_state_hashes_accounts_and_storage() {
         let address = address!("0000000000000000000000000000000000000001");
         let slot = U256::from(1);
@@ -885,6 +1051,45 @@ mod tests {
         let storage = hashed.storages.get(&hashed_address).unwrap();
         assert!(storage.wiped);
         assert_eq!(storage.storage.get(&hashed_slot), Some(&value));
+    }
+
+    #[test]
+    fn hashed_post_state_omits_zero_slots_after_storage_wipe() {
+        let address = address!("0000000000000000000000000000000000000001");
+        let zero_slot = U256::from(1);
+        let value_slot = U256::from(2);
+        let value = U256::from(3);
+        let mut bundle = Evm2BundleState::new(1);
+
+        let mut tx = StateChanges::default();
+        tx.storage.insert(
+            address,
+            StorageChangeSet {
+                wipe: true,
+                slots: BTreeMap::from([
+                    (
+                        zero_slot,
+                        Tracked { original: U256::ZERO, current: U256::ZERO, _non_exhaustive: () },
+                    ),
+                    (
+                        value_slot,
+                        Tracked { original: U256::ZERO, current: value, _non_exhaustive: () },
+                    ),
+                ]),
+                _non_exhaustive: (),
+            },
+        );
+        bundle.append_block([tx]);
+
+        let hashed = bundle.hashed_post_state::<KeccakKeyHasher>();
+        let hashed_address = KeccakKeyHasher::hash_key(address);
+        let hashed_zero_slot = KeccakKeyHasher::hash_key(B256::new(zero_slot.to_be_bytes()));
+        let hashed_value_slot = KeccakKeyHasher::hash_key(B256::new(value_slot.to_be_bytes()));
+        let storage = hashed.storages.get(&hashed_address).unwrap();
+
+        assert!(storage.wiped);
+        assert!(!storage.storage.contains_key(&hashed_zero_slot));
+        assert_eq!(storage.storage.get(&hashed_value_slot), Some(&value));
     }
 
     #[test]
