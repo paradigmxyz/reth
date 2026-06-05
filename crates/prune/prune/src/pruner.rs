@@ -16,7 +16,7 @@ use reth_stages_types::StageId;
 use reth_tokio_util::{EventSender, EventStream};
 use std::time::Duration;
 use tokio::sync::watch;
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, trace};
 
 /// Result of [`Pruner::run`] execution.
 pub type PrunerResult = Result<PrunerOutput, PrunerError>;
@@ -308,7 +308,7 @@ where
         if tip_block_number.saturating_sub(self.previous_tip_block_number.unwrap_or_default()) >=
             self.min_block_interval as u64
         {
-            debug!(
+            trace!(
                 target: "pruner",
                 previous_tip_block_number = ?self.previous_tip_block_number,
                 %tip_block_number,

@@ -12,7 +12,7 @@ use reth_prune_types::{
     PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
 use reth_static_file_types::StaticFileSegment;
-use tracing::{debug, instrument, trace};
+use tracing::{instrument, trace};
 
 #[derive(Debug)]
 pub struct SenderRecovery {
@@ -53,10 +53,10 @@ where
     )]
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
         if EitherWriterDestination::senders(provider).is_static_file() {
-            debug!(target: "pruner", "Pruning transaction senders from static files.");
+            trace!(target: "pruner", "Pruning transaction senders from static files.");
 
             if self.mode.is_full() {
-                debug!(target: "pruner", "PruneMode::Full: deleting all transaction senders static files.");
+                trace!(target: "pruner", "PruneMode::Full: deleting all transaction senders static files.");
                 return segments::delete_static_files_segment(
                     provider,
                     input,
@@ -70,7 +70,7 @@ where
                 StaticFileSegment::TransactionSenders,
             )
         }
-        debug!(target: "pruner", "Pruning transaction senders from database.");
+        trace!(target: "pruner", "Pruning transaction senders from database.");
 
         let tx_range = match input.get_next_tx_num_range(provider)? {
             Some(range) => range,

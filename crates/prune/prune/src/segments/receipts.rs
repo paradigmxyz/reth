@@ -17,7 +17,7 @@ use reth_provider::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment, SegmentOutput, SegmentOutputCheckpoint};
 use reth_static_file_types::StaticFileSegment;
-use tracing::{debug, trace};
+use tracing::trace;
 
 pub(crate) fn prune<Provider>(
     provider: &Provider,
@@ -32,10 +32,10 @@ where
         + NodePrimitivesProvider<Primitives: NodePrimitives<Receipt: Value>>,
 {
     if EitherWriter::receipts_destination(provider).is_static_file() {
-        debug!(target: "pruner", "Pruning receipts from static files.");
+        trace!(target: "pruner", "Pruning receipts from static files.");
         return segments::prune_static_files(provider, input, StaticFileSegment::Receipts)
     }
-    debug!(target: "pruner", "Pruning receipts from database.");
+    trace!(target: "pruner", "Pruning receipts from database.");
 
     // Original database implementation for when receipts are not on static files (old nodes)
     let tx_range = match input.get_next_tx_num_range(provider)? {
