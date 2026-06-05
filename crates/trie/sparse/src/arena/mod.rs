@@ -24,7 +24,7 @@ use reth_trie_common::{
 };
 use slotmap::{DefaultKey, SlotMap};
 use smallvec::SmallVec;
-use tracing::{instrument, trace};
+use tracing::{debug, instrument, trace};
 
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::{LeafUpdateRecord, ProofTrieNodeRecord, RecordedOp, TrieDebugRecorder};
@@ -2283,7 +2283,15 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn reserve_nodes(&mut self, additional: usize) {
-        self.upper_arena.reserve(additional);
+        // The caller passes the *total* proof-node estimate, but almost all of those nodes land
+        // in the lower subtries (reserved separately). The upper trie is bounded by
+        // `UPPER_TRIE_MAX_DEPTH`: 16 depth-1 nodes + 16^2 depth-2 subtrie
+        // wrappers. `reserve` adds capacity *beyond the current len*, so clamp to the headroom
+        // remaining to that ceiling — otherwise an account reveal (tens of thousands of nodes)
+        // balloons this small arena's allocation.
+        const MAX_UPPER_NODES: usize = 16 + 16 * 16;
+        let headroom = MAX_UPPER_NODES.saturating_sub(self.upper_arena.len());
+        self.upper_arena.reserve(additional.min(headroom));
     }
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all, fields(num_nodes = nodes.len()))]
