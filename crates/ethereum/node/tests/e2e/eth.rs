@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 const ENGINE_PRAGUE_PAYLOADS_ROUTE: &str = "/engine/v2/prague/payloads";
 const ENGINE_PRAGUE_FORKCHOICE_ROUTE: &str = "/engine/v2/prague/forkchoice";
-const ENGINE_PRAGUE_BLOBS_ROUTE: &str = "/engine/v2/prague/blobs";
+const ENGINE_V1_BLOBS_ROUTE: &str = "/engine/v2/blobs/v1";
 
 #[tokio::test]
 async fn can_run_eth_node() -> eyre::Result<()> {
@@ -366,7 +366,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
     let versioned_hashes = TransactionTestContext::validate_sidecar(envelope);
 
     let blobs_response = client
-        .post(format!("{auth_url}{ENGINE_PRAGUE_BLOBS_ROUTE}"))
+        .post(format!("{auth_url}{ENGINE_V1_BLOBS_ROUTE}"))
         .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
         .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
         .header(reqwest::header::ACCEPT, "application/octet-stream")

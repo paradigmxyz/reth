@@ -198,10 +198,7 @@ fn parse_engine_path(path: &str) -> Option<EngineSszEndpoint> {
         (Some("engine"), Some("v2"), Some(fork), Some("forkchoice"), None) => {
             Some(EngineSszEndpoint::Forkchoice(fork.parse().ok()?))
         }
-        (Some("engine"), Some("v2"), Some(fork), Some("blobs"), None) => {
-            Some(EngineSszEndpoint::Blobs(fork.parse::<EngineSszFork>().ok()?.blobs_version()?))
-        }
-        (Some("engine"), version, Some("blobs"), None, None) => {
+        (Some("engine"), Some("v2"),Some("blobs"), version, None) => {
             Some(EngineSszEndpoint::Blobs(parse_method_version(version?)?))
         }
         _ => None,
@@ -245,14 +242,6 @@ impl EngineSszFork {
         }
     }
 
-    const fn blobs_version(self) -> Option<u8> {
-        match self {
-            Self::Paris | Self::Shanghai => None,
-            Self::Cancun | Self::Prague => Some(1),
-            Self::Osaka => Some(3),
-            Self::Amsterdam => Some(4),
-        }
-    }
 }
 
 impl std::str::FromStr for EngineSszFork {
