@@ -121,11 +121,14 @@ type ReceiptRootSender<N> =
     crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
 type ReceiptRootReceiver = tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>;
 
-struct OpenStateRootUpdateGateOnDrop(StateRootUpdateGate);
+struct OpenStateRootUpdateGateOnDrop {
+    gate: StateRootUpdateGate,
+    updates_tx: crossbeam_channel::Sender<StateRootMessage>,
+}
 
 impl Drop for OpenStateRootUpdateGateOnDrop {
     fn drop(&mut self) {
-        self.0.open();
+        self.gate.open(&self.updates_tx);
     }
 }
 
@@ -2044,7 +2047,8 @@ where
         let executor = self.payload_processor.executor().clone();
 
         let _ = executor.spawn_blocking(move || {
-            let _open_gate = OpenStateRootUpdateGateOnDrop(update_gate);
+            let _open_gate =
+                OpenStateRootUpdateGateOnDrop { gate: update_gate, updates_tx: updates_tx.clone() };
             let stream_start = Instant::now();
             let mut parent_bal_updates = 0usize;
 

@@ -7,9 +7,9 @@ use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage, MultiProof
 use revm_state::EvmState;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc, Condvar, Mutex,
+    Arc, Mutex,
 };
-use tracing::trace;
+use tracing::{debug, trace};
 
 /// Messages used internally by the multi proof task.
 #[derive(Debug)]
@@ -175,6 +175,10 @@ impl Drop for StateRootHandle {
 }
 
 /// Gate used to preserve update ordering when prerequisite state is streamed asynchronously.
+///
+/// While closed, state-hook updates are buffered in memory instead of blocking the caller. This is
+/// important for speculative payload builders: execution must be able to finish and drop its state
+/// provider even if parent BAL streaming is still waiting for validation resources.
 #[derive(Clone, Debug, Default)]
 pub struct StateRootUpdateGate {
     inner: Arc<StateRootUpdateGateInner>,
@@ -183,8 +187,7 @@ pub struct StateRootUpdateGate {
 #[derive(Debug, Default)]
 struct StateRootUpdateGateInner {
     open: AtomicBool,
-    lock: Mutex<()>,
-    cvar: Condvar,
+    pending: Mutex<Vec<StateRootMessage>>,
 }
 
 impl StateRootUpdateGate {
@@ -193,30 +196,51 @@ impl StateRootUpdateGate {
         Self::default()
     }
 
-    /// Opens the gate and wakes any state-hook senders waiting on prerequisite updates.
-    pub fn open(&self) {
+    /// Opens the gate and flushes any buffered state-hook updates after prerequisite updates.
+    pub fn open(&self, sender: &crossbeam_channel::Sender<StateRootMessage>) {
         if self.inner.open.load(Ordering::Acquire) {
             return;
         }
 
-        let _guard = self.inner.lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut pending =
+            self.inner.pending.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if self.inner.open.swap(true, Ordering::AcqRel) {
             return;
         }
 
-        self.inner.cvar.notify_all();
+        let pending_count = pending.len();
+        debug!(
+            target: "trie::parallel::sparse",
+            pending_count,
+            "flushing buffered sparse-trie state updates"
+        );
+
+        for message in pending.drain(..) {
+            if sender.send(message).is_err() {
+                break;
+            }
+        }
     }
 
-    /// Blocks until the gate opens.
-    fn wait(&self) {
+    /// Sends immediately when open, otherwise buffers without blocking.
+    fn send(
+        &self,
+        sender: &crossbeam_channel::Sender<StateRootMessage>,
+        message: StateRootMessage,
+    ) -> Result<(), crossbeam_channel::SendError<StateRootMessage>> {
         if self.inner.open.load(Ordering::Acquire) {
-            return;
+            return sender.send(message);
         }
 
-        let mut guard = self.inner.lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        while !self.inner.open.load(Ordering::Acquire) {
-            guard = self.inner.cvar.wait(guard).unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut pending =
+            self.inner.pending.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if self.inner.open.load(Ordering::Acquire) {
+            drop(pending);
+            return sender.send(message);
         }
+
+        pending.push(message);
+        Ok(())
     }
 }
 
@@ -246,7 +270,7 @@ impl StateHookSender {
         message: StateRootMessage,
     ) -> Result<(), crossbeam_channel::SendError<StateRootMessage>> {
         if let Some(gate) = &self.update_gate {
-            gate.wait();
+            return gate.send(&self.sender, message);
         }
         self.sender.send(message)
     }
@@ -255,7 +279,8 @@ impl StateHookSender {
 impl Drop for StateHookSender {
     fn drop(&mut self) {
         if let Some(gate) = &self.update_gate {
-            gate.wait();
+            let _ = gate.send(&self.sender, StateRootMessage::FinishedStateUpdates);
+            return;
         }
         // Send completion signal when the sender is dropped
         let _ = self.sender.send(StateRootMessage::FinishedStateUpdates);
@@ -345,12 +370,13 @@ mod tests {
     }
 
     #[test]
-    fn state_hook_waits_for_update_gate() {
+    fn state_hook_buffers_updates_until_update_gate_opens() {
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
         let (_state_root_tx, state_root_rx) = std::sync::mpsc::channel();
         let (_hashed_state_tx, hashed_state_rx) = std::sync::mpsc::channel();
         let gate = StateRootUpdateGate::closed();
-        let handle = StateRootHandle::new(B256::ZERO, updates_tx, state_root_rx, hashed_state_rx)
+        let handle =
+            StateRootHandle::new(B256::ZERO, updates_tx.clone(), state_root_rx, hashed_state_rx)
             .with_update_gate(gate.clone());
         let (started_tx, started_rx) = std::sync::mpsc::channel();
 
@@ -362,11 +388,11 @@ mod tests {
         });
 
         started_rx.recv().unwrap();
+        worker.join().unwrap();
         assert!(updates_rx.recv_timeout(std::time::Duration::from_millis(20)).is_err());
 
-        gate.open();
+        gate.open(&updates_tx);
         assert!(matches!(updates_rx.recv().unwrap(), StateRootMessage::StateUpdate(_)));
         assert!(matches!(updates_rx.recv().unwrap(), StateRootMessage::FinishedStateUpdates));
-        worker.join().unwrap();
     }
 }
