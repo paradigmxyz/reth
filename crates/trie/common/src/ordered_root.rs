@@ -136,9 +136,32 @@ impl OrderedTrieRootEncodedBuilder {
     }
 
     fn add_leaf(&mut self, index: usize, bytes: &[u8]) {
-        let index_buffer = alloy_rlp::encode_fixed_size(&index);
-        self.hb.add_leaf(Nibbles::unpack(&index_buffer), bytes);
+        let (index_buffer, len) = encode_index_key(index);
+        self.hb.add_leaf(Nibbles::unpack(&index_buffer[..len]), bytes);
     }
+}
+
+fn encode_index_key(index: usize) -> ([u8; core::mem::size_of::<usize>() + 1], usize) {
+    if index == 0 {
+        let mut buffer = [0; core::mem::size_of::<usize>() + 1];
+        buffer[0] = 0x80;
+        return (buffer, 1);
+    }
+
+    if index <= 0x7f {
+        let mut buffer = [0; core::mem::size_of::<usize>() + 1];
+        buffer[0] = index as u8;
+        return (buffer, 1);
+    }
+
+    let bytes = index.to_be_bytes();
+    let leading_zeros = bytes.iter().take_while(|&&byte| byte == 0).count();
+    let payload = &bytes[leading_zeros..];
+
+    let mut buffer = [0; core::mem::size_of::<usize>() + 1];
+    buffer[0] = 0x80 + payload.len() as u8;
+    buffer[1..][..payload.len()].copy_from_slice(payload);
+    (buffer, payload.len() + 1)
 }
 
 #[cfg(test)]
@@ -244,6 +267,15 @@ mod tests {
 
         assert_eq!(builder.pushed_count(), 129);
         assert_eq!(builder.finalize(), expected);
+    }
+
+    #[test]
+    fn stack_index_key_matches_rlp_encoding() {
+        for index in [0, 1, 2, 0x7f, 0x80, 0xff, 0x100, 0xffff, 0x10000, usize::MAX] {
+            let (buffer, len) = encode_index_key(index);
+            let expected = alloy_rlp::encode_fixed_size(&index);
+            assert_eq!(&buffer[..len], expected.as_slice(), "index {index}");
+        }
     }
 
     proptest! {
