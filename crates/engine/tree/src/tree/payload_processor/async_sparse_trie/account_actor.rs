@@ -3,7 +3,10 @@ use super::{
     proof_service::ProofServiceCommand, to_parallel_sparse_error, ActorTrie, CoordinatorEvent,
     PendingAccountUpdate, MAX_ACCOUNT_UPDATES_PER_DRIVE,
 };
-use alloy_primitives::{map::B256Map, B256};
+use alloy_primitives::{
+    map::{B256Map, HashMap},
+    B256,
+};
 use alloy_rlp::Decodable;
 use reth_trie::{
     Nibbles, ProofTrieNodeV2, ProofV2Target, TrieAccount, EMPTY_ROOT_HASH,
@@ -15,11 +18,14 @@ use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
     oneshot,
 };
-use tracing::{debug_span, instrument};
+use tracing::{debug, debug_span, instrument};
 
 pub(super) enum AccountTrieCommand {
     Touch(B256),
-    Reveal(Vec<ProofTrieNodeV2>),
+    Reveal {
+        nodes: Vec<ProofTrieNodeV2>,
+        targets: Vec<ProofV2Target>,
+    },
     Drive,
     FinalizeAccounts {
         pending_accounts: B256Map<PendingAccountUpdate>,
@@ -33,6 +39,8 @@ pub(super) enum AccountTrieCommand {
 pub(super) struct AccountTrieActor {
     trie: ActorTrie,
     updates: B256Map<LeafUpdate>,
+    blocked_updates: HashMap<BlockedAccountTarget, B256Map<LeafUpdate>>,
+    blocked_update_targets: B256Map<BlockedAccountTarget>,
     finalize: Option<AccountFinalize>,
     final_updates_built: bool,
     finalized: bool,
@@ -53,6 +61,8 @@ impl AccountTrieActor {
         Self {
             trie,
             updates: B256Map::default(),
+            blocked_updates: HashMap::default(),
+            blocked_update_targets: B256Map::default(),
             finalize: None,
             final_updates_built: false,
             finalized: false,
@@ -89,14 +99,15 @@ impl AccountTrieActor {
     ) -> Result<(), ParallelStateRootError> {
         let should_drive = match command {
             AccountTrieCommand::Touch(address) => {
-                insert_leaf_update(&mut self.updates, address, LeafUpdate::Touched);
+                self.insert_account_update(address, LeafUpdate::Touched);
                 false
             }
-            AccountTrieCommand::Reveal(mut nodes) => {
+            AccountTrieCommand::Reveal { mut nodes, targets } => {
                 self.trie
                     .reveal_v2_proof_nodes(&mut nodes, true)
                     .map_err(to_parallel_sparse_error)?;
                 self.deferred.proof_nodes_bufs.push(nodes);
+                self.promote_blocked_account_targets(targets);
                 true
             }
             AccountTrieCommand::Drive => true,
@@ -121,35 +132,92 @@ impl AccountTrieActor {
         skip_all,
         fields(
             updates = self.updates.len(),
+            blocked_updates = self.blocked_update_count(),
+            blocked_targets = self.blocked_updates.len(),
             finalize = self.finalize.is_some(),
             final_updates_built = self.final_updates_built,
             finalized = self.finalized,
+            chunks = tracing::field::Empty,
+            applied = tracing::field::Empty,
+            blocked = tracing::field::Empty,
+            targets = tracing::field::Empty,
+            return_reason = tracing::field::Empty,
         )
     )]
     async fn drive(&mut self) -> Result<(), ParallelStateRootError> {
+        let span = tracing::Span::current();
         self.try_build_final_updates()?;
+
+        let mut chunks = 0usize;
+        let mut applied = 0usize;
+        let mut blocked = 0usize;
+        let mut targets_total = 0usize;
 
         loop {
             if self.updates.is_empty() {
                 self.try_build_final_updates()?;
+                if self.has_blocked_updates() {
+                    self.record_drive_summary(
+                        &span,
+                        chunks,
+                        applied,
+                        blocked,
+                        targets_total,
+                        "waiting_for_reveal",
+                    );
+                    return Ok(())
+                }
                 if self.updates.is_empty() && self.final_updates_built && !self.finalized {
                     self.finalized = true;
                     let _ = self.event_tx.send(CoordinatorEvent::AccountFinalized);
+                    self.record_drive_summary(
+                        &span,
+                        chunks,
+                        applied,
+                        blocked,
+                        targets_total,
+                        "finalized",
+                    );
+                } else {
+                    self.record_drive_summary(
+                        &span,
+                        chunks,
+                        applied,
+                        blocked,
+                        targets_total,
+                        "empty",
+                    );
                 }
                 return Ok(())
             }
 
             let updates_len_before = self.updates.len();
             let mut chunk = drain_update_chunk(&mut self.updates, MAX_ACCOUNT_UPDATES_PER_DRIVE);
+            let chunk_len_before = chunk.len();
+            let mut blocked_targets = B256Map::default();
             let mut targets = Vec::new();
             self.trie
-                .update_leaves(&mut chunk, |path, min_len| {
-                    targets.push(ProofV2Target::new(path).with_min_len(min_len));
+                .update_leaves_2(&mut chunk, |update_key, target_key, min_len| {
+                    let target = BlockedAccountTarget { key: target_key, min_len };
+                    blocked_targets.insert(update_key, target);
+                    targets.push(ProofV2Target::new(target_key).with_min_len(min_len));
                 })
                 .map_err(to_parallel_sparse_error)?;
-            merge_leaf_updates(&mut self.updates, chunk);
+            chunks += 1;
+            applied += chunk_len_before.saturating_sub(chunk.len());
+            blocked += chunk.len();
+            targets_total += targets.len();
 
             if !targets.is_empty() {
+                self.block_account_updates(chunk, blocked_targets)?;
+                self.record_drive_summary(
+                    &span,
+                    chunks,
+                    applied,
+                    blocked,
+                    targets_total,
+                    "proof_targets",
+                );
                 self.proof_tx.send(ProofServiceCommand::AccountTargets(targets)).map_err(|_| {
                     ParallelStateRootError::Other(
                         "async sparse trie proof service dropped".to_string(),
@@ -158,7 +226,30 @@ impl AccountTrieActor {
                 return Ok(())
             }
 
+            if !chunk.is_empty() {
+                self.record_drive_summary(
+                    &span,
+                    chunks,
+                    applied,
+                    blocked,
+                    targets_total,
+                    "blocked_without_targets",
+                );
+                return Err(ParallelStateRootError::Other(
+                    "account sparse trie actor retained blocked updates without proof targets"
+                        .to_string(),
+                ));
+            }
+
             if self.updates.len() == updates_len_before {
+                self.record_drive_summary(
+                    &span,
+                    chunks,
+                    applied,
+                    blocked,
+                    targets_total,
+                    "no_progress",
+                );
                 return Err(ParallelStateRootError::Other(
                     "account sparse trie actor made no progress without proof targets".to_string(),
                 ));
@@ -166,8 +257,105 @@ impl AccountTrieActor {
         }
     }
 
+    fn record_drive_summary(
+        &self,
+        span: &tracing::Span,
+        chunks: usize,
+        applied: usize,
+        blocked: usize,
+        targets: usize,
+        return_reason: &'static str,
+    ) {
+        span.record("chunks", chunks);
+        span.record("applied", applied);
+        span.record("blocked", blocked);
+        span.record("targets", targets);
+        span.record("return_reason", return_reason);
+        debug!(
+            target: "engine::tree::payload_processor::async_sparse_trie",
+            chunks,
+            applied,
+            blocked,
+            targets,
+            return_reason,
+            updates_remaining = self.updates.len(),
+            blocked_updates = self.blocked_update_count(),
+            blocked_targets = self.blocked_updates.len(),
+            finalize = self.finalize.is_some(),
+            final_updates_built = self.final_updates_built,
+            finalized = self.finalized,
+            "async sparse trie account drive summary"
+        );
+    }
+
+    fn insert_account_update(&mut self, key: B256, update: LeafUpdate) {
+        if let Some(target) = self.blocked_update_targets.get(&key).copied() {
+            insert_leaf_update(self.blocked_updates.entry(target).or_default(), key, update);
+        } else {
+            insert_leaf_update(&mut self.updates, key, update);
+        }
+    }
+
+    fn block_account_updates(
+        &mut self,
+        chunk: B256Map<LeafUpdate>,
+        mut blocked_targets: B256Map<BlockedAccountTarget>,
+    ) -> Result<(), ParallelStateRootError> {
+        for (key, update) in chunk {
+            let Some(target) = blocked_targets.remove(&key) else {
+                return Err(ParallelStateRootError::Other(
+                    "account sparse trie actor retained blocked update without target metadata"
+                        .to_string(),
+                ))
+            };
+            self.blocked_update_targets.insert(key, target);
+            insert_leaf_update(self.blocked_updates.entry(target).or_default(), key, update);
+        }
+
+        Ok(())
+    }
+
+    fn promote_blocked_account_targets(&mut self, targets: Vec<ProofV2Target>) {
+        if targets.is_empty() {
+            let buckets = std::mem::take(&mut self.blocked_updates);
+            for bucket in buckets.into_values() {
+                for key in bucket.keys() {
+                    self.blocked_update_targets.remove(key);
+                }
+                merge_leaf_updates(&mut self.updates, bucket);
+            }
+            return
+        }
+
+        for target in targets {
+            let target_key = target.key();
+            let matching: Vec<_> = self
+                .blocked_updates
+                .keys()
+                .filter(|blocked| blocked.key == target_key && target.min_len <= blocked.min_len)
+                .copied()
+                .collect();
+
+            for blocked_target in matching {
+                let Some(bucket) = self.blocked_updates.remove(&blocked_target) else { continue };
+                for key in bucket.keys() {
+                    self.blocked_update_targets.remove(key);
+                }
+                merge_leaf_updates(&mut self.updates, bucket);
+            }
+        }
+    }
+
+    fn has_blocked_updates(&self) -> bool {
+        !self.blocked_update_targets.is_empty()
+    }
+
+    fn blocked_update_count(&self) -> usize {
+        self.blocked_update_targets.len()
+    }
+
     fn try_build_final_updates(&mut self) -> Result<(), ParallelStateRootError> {
-        if self.final_updates_built || !self.updates.is_empty() {
+        if self.final_updates_built || !self.updates.is_empty() || self.has_blocked_updates() {
             return Ok(())
         }
 
@@ -203,7 +391,7 @@ impl AccountTrieActor {
 
             let encoded =
                 encode_account_leaf_value(account, storage_root, &mut self.account_rlp_buf);
-            self.updates.insert(address, LeafUpdate::Changed(encoded));
+            self.insert_account_update(address, LeafUpdate::Changed(encoded));
         }
 
         self.final_updates_built = true;
@@ -212,7 +400,112 @@ impl AccountTrieActor {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct BlockedAccountTarget {
+    key: B256,
+    min_len: u8,
+}
+
+impl From<ProofV2Target> for BlockedAccountTarget {
+    fn from(target: ProofV2Target) -> Self {
+        Self { key: target.key(), min_len: target.min_len }
+    }
+}
+
 struct AccountFinalize {
     pending_accounts: B256Map<PendingAccountUpdate>,
     storage_roots: B256Map<B256>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tree::payload_processor::async_sparse_trie::proof_service::ProofServiceCommand;
+    use reth_trie_sparse::{ArenaParallelSparseTrie, ConfigurableSparseTrie, RevealableSparseTrie};
+    use tokio::sync::mpsc::{error::TryRecvError, unbounded_channel, UnboundedReceiver};
+
+    fn blind_actor() -> (
+        AccountTrieActor,
+        UnboundedReceiver<ProofServiceCommand>,
+        UnboundedReceiver<CoordinatorEvent>,
+    ) {
+        let trie = RevealableSparseTrie::blind_from(ConfigurableSparseTrie::Arena(
+            ArenaParallelSparseTrie::default(),
+        ));
+        let (_command_tx, command_rx) = unbounded_channel();
+        let (event_tx, event_rx) = unbounded_channel();
+        let (proof_tx, proof_rx) = unbounded_channel();
+
+        (AccountTrieActor::new(trie, command_rx, event_tx, proof_tx), proof_rx, event_rx)
+    }
+
+    #[tokio::test]
+    async fn drive_does_not_retry_blocked_account_update_without_reveal() {
+        let (mut actor, mut proof_rx, _event_rx) = blind_actor();
+        let address = B256::with_last_byte(1);
+
+        actor.on_command(AccountTrieCommand::Touch(address)).await.unwrap();
+        actor.on_command(AccountTrieCommand::Drive).await.unwrap();
+        let first_targets = match proof_rx.recv().await.unwrap() {
+            ProofServiceCommand::AccountTargets(targets) => targets,
+            _ => panic!("expected account proof targets"),
+        };
+        assert!(!first_targets.is_empty());
+        assert!(actor.updates.is_empty());
+        assert_eq!(actor.blocked_updates.len(), 1);
+
+        actor.on_command(AccountTrieCommand::Drive).await.unwrap();
+        assert!(matches!(proof_rx.try_recv(), Err(TryRecvError::Empty)));
+        assert!(actor.updates.is_empty());
+        assert_eq!(actor.blocked_updates.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn drive_processes_ready_account_updates_while_other_updates_are_blocked() {
+        let (mut actor, mut proof_rx, _event_rx) = blind_actor();
+        let blocked_address = B256::with_last_byte(1);
+        let ready_address = B256::with_last_byte(2);
+
+        actor.on_command(AccountTrieCommand::Touch(blocked_address)).await.unwrap();
+        actor.on_command(AccountTrieCommand::Drive).await.unwrap();
+        assert!(matches!(proof_rx.recv().await.unwrap(), ProofServiceCommand::AccountTargets(_)));
+        assert!(actor.updates.is_empty());
+        assert_eq!(actor.blocked_updates.len(), 1);
+
+        actor.on_command(AccountTrieCommand::Touch(ready_address)).await.unwrap();
+        assert_eq!(actor.updates.len(), 1);
+        assert_eq!(actor.blocked_updates.len(), 1);
+
+        actor.on_command(AccountTrieCommand::Drive).await.unwrap();
+        assert!(matches!(proof_rx.recv().await.unwrap(), ProofServiceCommand::AccountTargets(_)));
+        assert!(actor.updates.is_empty());
+        assert_eq!(actor.blocked_updates.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn returned_account_target_promotes_only_matching_blocked_bucket() {
+        let (mut actor, mut proof_rx, _event_rx) = blind_actor();
+        let first_address = B256::with_last_byte(1);
+        let second_address = B256::with_last_byte(2);
+
+        actor.on_command(AccountTrieCommand::Touch(first_address)).await.unwrap();
+        actor.on_command(AccountTrieCommand::Touch(second_address)).await.unwrap();
+        actor.on_command(AccountTrieCommand::Drive).await.unwrap();
+
+        let targets = match proof_rx.recv().await.unwrap() {
+            ProofServiceCommand::AccountTargets(targets) => targets,
+            _ => panic!("expected account proof targets"),
+        };
+        assert_eq!(targets.len(), 2);
+        assert!(actor.updates.is_empty());
+        assert_eq!(actor.blocked_update_count(), 2);
+        assert_eq!(actor.blocked_updates.len(), 2);
+
+        actor.promote_blocked_account_targets(vec![ProofV2Target::new(first_address)]);
+
+        assert!(actor.updates.contains_key(&first_address));
+        assert!(!actor.updates.contains_key(&second_address));
+        assert_eq!(actor.blocked_update_count(), 1);
+        assert_eq!(actor.blocked_updates.len(), 1);
+    }
 }
