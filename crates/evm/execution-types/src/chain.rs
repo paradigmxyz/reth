@@ -459,7 +459,11 @@ impl<B: Block<Body: BlockBody<Transaction: SignedTransaction>>> ChainBlocks<'_, 
         let capacity = self.blocks.values().map(|block| block.body().transactions().len()).sum();
 
         let mut hashes = Vec::with_capacity(capacity);
-        hashes.extend(self.transaction_hashes());
+        for block in self.blocks.values() {
+            for tx in block.body().transactions_iter() {
+                hashes.push(*tx.tx_hash());
+            }
+        }
         hashes
     }
 
