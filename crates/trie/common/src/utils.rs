@@ -13,17 +13,22 @@ where
     K: Ord + Clone + 'a,
     V: Clone + 'a,
 {
-    slices
-        .into_iter()
-        .filter(|s| !s.is_empty())
-        .enumerate()
-        // Merge by reference: (priority, &K, &V) - avoids cloning all elements upfront
-        .map(|(i, s)| s.iter().map(move |(k, v)| (i, k, v)))
-        .kmerge_by(|(i1, k1, _), (i2, k2, _)| (k1, i1) < (k2, i2))
-        .dedup_by(|(_, k1, _), (_, k2, _)| *k1 == *k2)
-        // Clone only surviving elements after dedup
-        .map(|(_, k, v)| (k.clone(), v.clone()))
-        .collect()
+    let slices: Vec<_> = slices.into_iter().filter(|s| !s.is_empty()).collect();
+    let mut out = Vec::with_capacity(slices.iter().map(|s| s.len()).sum());
+
+    out.extend(
+        slices
+            .into_iter()
+            .enumerate()
+            // Merge by reference: (priority, &K, &V) - avoids cloning all elements upfront
+            .map(|(i, s)| s.iter().map(move |(k, v)| (i, k, v)))
+            .kmerge_by(|(i1, k1, _), (i2, k2, _)| (k1, i1) < (k2, i2))
+            .dedup_by(|(_, k1, _), (_, k2, _)| *k1 == *k2)
+            // Clone only surviving elements after dedup
+            .map(|(_, k, v)| (k.clone(), v.clone())),
+    );
+
+    out
 }
 
 /// Extend a sorted vector with another sorted vector using 2 pointer merge.
