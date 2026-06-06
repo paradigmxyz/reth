@@ -232,6 +232,21 @@ impl AsyncSparseTrieCoordinator {
             .values()
             .map(|storage| storage.storage.len())
             .sum::<usize>();
+        let account_address = (accounts_len == 1)
+            .then(|| hashed_state_update.accounts.keys().next().copied())
+            .flatten();
+        let storage_address = (storages_len == 1)
+            .then(|| hashed_state_update.storages.keys().next().copied())
+            .flatten();
+        debug!(
+            target: "engine::tree::payload_processor::async_sparse_trie",
+            accounts = accounts_len,
+            storages = storages_len,
+            storage_slots,
+            ?account_address,
+            ?storage_address,
+            "async sparse trie hashed state update"
+        );
         let _span = trace_span!(
             target: "engine::tree::payload_processor::async_sparse_trie",
             "async_sr_hashed_state_update",
