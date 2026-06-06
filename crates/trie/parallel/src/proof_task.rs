@@ -734,6 +734,9 @@ where
         *storage_proofs_processed += 1;
 
         let root = result.as_ref().ok().and_then(|result| result.root());
+        if let Some(root) = root {
+            self.cached_storage_roots.insert(hashed_address, root);
+        }
 
         if proof_result_sender.send(StorageProofResultMessage { hashed_address, result }).is_err() {
             trace!(
@@ -743,10 +746,6 @@ where
                 storage_proofs_processed,
                 "Proof result receiver dropped, discarding result"
             );
-        }
-
-        if let Some(root) = root {
-            self.cached_storage_roots.insert(hashed_address, root);
         }
 
         trace!(
