@@ -37,7 +37,7 @@ use reth_trie_sparse::{
 use std::{
     future::Future,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc, Arc,
     },
     thread::{self, JoinHandle as StdJoinHandle},
@@ -46,35 +46,96 @@ use std::{
 use tokio::{
     runtime::{Builder, Runtime as TokioRuntime},
     sync::{
-        mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+        mpsc::{error::TryRecvError, unbounded_channel, UnboundedReceiver, UnboundedSender},
         oneshot,
     },
 };
-use tracing::{debug, debug_span, error, instrument, trace_span};
+use tracing::{debug, debug_span, error, instrument, trace_span, Instrument};
 
-/// Environment variable that enables the async BAL sparse trie prototype.
+/// Environment variable that disables the async BAL sparse trie prototype when set to a falsy
+/// value.
 const ASYNC_BAL_SPARSE_TRIE_ENV: &str = "RETH_ASYNC_BAL_SPARSE_TRIE";
-/// Name of the persistent worker thread that drives the async BAL sparse trie runtime.
-pub(super) const ASYNC_SPARSE_TRIE_THREAD_NAME: &str = "reth-async-sparse-trie";
-/// Maximum updates an actor applies in one `update_leaves` call.
-const MAX_ACTOR_UPDATES_PER_DRIVE: usize = 1024;
-/// Number of update chunks an actor drains before yielding back to Tokio.
-const ACTOR_YIELD_EVERY_CHUNKS: usize = 8;
+/// Environment variable that controls async sparse trie runtime worker count.
+const ASYNC_SPARSE_TRIE_THREADS_ENV: &str = "RETH_ASYNC_SPARSE_TRIE_THREADS";
+/// Default worker count for the persistent async sparse trie runtime.
+const DEFAULT_ASYNC_SPARSE_TRIE_THREADS: usize = 32;
+/// Prefix for persistent async sparse trie runtime worker thread names.
+const ASYNC_SPARSE_TRIE_THREAD_PREFIX: &str = "async-sr";
+/// Maximum account updates an actor applies in one `update_leaves` call.
+const MAX_ACCOUNT_UPDATES_PER_DRIVE: usize = 1024;
+/// Maximum storage updates an actor applies in one `update_leaves` call.
+const MAX_STORAGE_UPDATES_PER_DRIVE: usize = 1024;
 /// Poll interval used by bridge threads so they can be stopped without waiting on channel close.
 const BRIDGE_RECV_TIMEOUT: Duration = Duration::from_millis(10);
 
 type StateTrie = SparseStateTrie<ConfigurableSparseTrie, ConfigurableSparseTrie>;
 type ActorTrie = RevealableSparseTrie<ConfigurableSparseTrie>;
 
+/// Persistent Tokio runtime for the async BAL sparse trie prototype.
+pub(super) struct AsyncSparseTrieRuntime {
+    runtime: TokioRuntime,
+}
+
+impl std::fmt::Debug for AsyncSparseTrieRuntime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AsyncSparseTrieRuntime").finish_non_exhaustive()
+    }
+}
+
+impl AsyncSparseTrieRuntime {
+    /// Builds a new persistent async sparse trie runtime.
+    pub(super) fn new() -> Result<Arc<Self>, String> {
+        let threads = async_sparse_trie_threads();
+        let next_thread_id = Arc::new(AtomicUsize::new(0));
+        let thread_id = next_thread_id.clone();
+
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(threads)
+            .thread_name_fn(move || {
+                let id = thread_id.fetch_add(1, Ordering::Relaxed);
+                format!("{ASYNC_SPARSE_TRIE_THREAD_PREFIX}-{id}")
+            })
+            .on_thread_start(reth_tasks::utils::increase_thread_priority)
+            .enable_all()
+            .build()
+            .map_err(|error| format!("failed to build async sparse trie runtime: {error}"))?;
+
+        Ok(Arc::new(Self { runtime }))
+    }
+
+    /// Spawns a future on the persistent async sparse trie runtime.
+    pub(super) fn spawn<F>(&self, future: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        self.runtime.spawn(future);
+    }
+}
+
+fn async_sparse_trie_threads() -> usize {
+    std::env::var(ASYNC_SPARSE_TRIE_THREADS_ENV)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|threads| *threads > 0)
+        .unwrap_or(DEFAULT_ASYNC_SPARSE_TRIE_THREADS)
+}
+
 /// Returns whether the experimental async BAL sparse trie path should be selected.
 pub(super) fn async_bal_sparse_trie_enabled() -> bool {
-    std::env::var(ASYNC_BAL_SPARSE_TRIE_ENV)
-        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+    std::env::var(ASYNC_BAL_SPARSE_TRIE_ENV).map_or(true, |value| {
+        !matches!(value.as_str(), "0" | "false" | "FALSE" | "no" | "NO" | "off" | "OFF")
+    })
 }
 
 /// Runs the experimental async BAL sparse trie task.
+#[instrument(
+    name = "async_sr_task",
+    level = "debug",
+    target = "engine::tree::payload_processor::async_sparse_trie",
+    skip_all
+)]
 #[expect(clippy::too_many_arguments)]
-pub(super) fn run_async_bal_sparse_trie_task(
+pub(super) async fn run_async_bal_sparse_trie_task(
     preserved_sparse_trie: SharedPreservedSparseTrie,
     executor: Runtime,
     proof_worker_handle: ProofWorkerHandle,
@@ -114,24 +175,16 @@ pub(super) fn run_async_bal_sparse_trie_task(
     sparse_state_trie.set_hot_cache_capacities(max_hot_slots, max_hot_accounts);
 
     let coordinator_metrics = trie_metrics.clone();
-    let output = match block_on_async_sparse_trie_runtime(async move {
-        AsyncSparseTrieCoordinator::new(
-            sparse_state_trie,
-            from_multi_proof,
-            proof_worker_handle,
-            coordinator_metrics,
-            parent_state_root,
-            chunk_size,
-        )
-        .run()
-        .await
-    }) {
-        Ok(output) => output,
-        Err(error) => {
-            let _ = state_root_tx.send(Err(error));
-            return;
-        }
-    };
+    let output = AsyncSparseTrieCoordinator::new(
+        sparse_state_trie,
+        from_multi_proof,
+        proof_worker_handle,
+        coordinator_metrics,
+        parent_state_root,
+        chunk_size,
+    )
+    .run()
+    .await;
 
     preserve_async_sparse_trie(
         preserved_sparse_trie,
@@ -145,25 +198,6 @@ pub(super) fn run_async_bal_sparse_trie_task(
     );
 }
 
-thread_local! {
-    /// Current-thread Tokio runtime reused by the persistent async sparse trie worker thread.
-    static ASYNC_SPARSE_TRIE_RUNTIME: Result<TokioRuntime, String> =
-        Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|error| format!("failed to build async sparse trie runtime: {error}"));
-}
-
-fn block_on_async_sparse_trie_runtime<F>(future: F) -> Result<F::Output, ParallelStateRootError>
-where
-    F: Future,
-{
-    ASYNC_SPARSE_TRIE_RUNTIME.with(|runtime| match runtime {
-        Ok(runtime) => Ok(runtime.block_on(future)),
-        Err(error) => Err(ParallelStateRootError::Other(error.clone())),
-    })
-}
-
 #[expect(clippy::too_many_arguments)]
 fn preserve_async_sparse_trie(
     preserved_sparse_trie: SharedPreservedSparseTrie,
@@ -175,6 +209,12 @@ fn preserve_async_sparse_trie(
     max_hot_accounts: usize,
     disable_cache_pruning: bool,
 ) {
+    let _span = debug_span!(
+        target: "engine::tree::payload_processor::async_sparse_trie",
+        "async_sr_preserve_trie"
+    )
+    .entered();
+
     let mut guard = preserved_sparse_trie.lock();
     let task_result = output.result.as_ref().ok().cloned();
 
@@ -279,7 +319,10 @@ impl AsyncSparseTrieCoordinator {
         let account_trie = trie.take_accounts_trie();
         let account_actor =
             AccountTrieActor::new(account_trie, account_rx, event_tx.clone(), proof_tx.clone());
-        tokio::spawn(account_actor.run());
+        tokio::spawn(account_actor.run().instrument(debug_span!(
+            target: "engine::tree::payload_processor::async_sparse_trie",
+            "async_sr_account_actor"
+        )));
 
         let proof_service = ProofService::new(
             proof_worker_handle,
@@ -290,7 +333,10 @@ impl AsyncSparseTrieCoordinator {
             event_tx.clone(),
             chunk_size,
         );
-        tokio::spawn(proof_service.run());
+        tokio::spawn(proof_service.run().instrument(debug_span!(
+            target: "engine::tree::payload_processor::async_sparse_trie",
+            "async_sr_proof_service"
+        )));
 
         Self {
             trie,
@@ -313,7 +359,15 @@ impl AsyncSparseTrieCoordinator {
         }
     }
 
+    #[instrument(
+        name = "async_sr_coordinator",
+        level = "debug",
+        target = "engine::tree::payload_processor::async_sparse_trie",
+        skip_all
+    )]
     async fn run(mut self) -> CoordinatorOutput {
+        let mut progress_interval = tokio::time::interval(Duration::from_secs(1));
+
         loop {
             tokio::select! {
                 maybe_message = self.state_rx.recv(), if !self.finished_state_updates => {
@@ -349,8 +403,29 @@ impl AsyncSparseTrieCoordinator {
                         }
                     }
                 }
+                _ = progress_interval.tick(), if self.finished_state_updates => {
+                    self.log_progress();
+                }
             }
         }
+    }
+
+    fn log_progress(&self) {
+        let missing_storage_roots = self
+            .pending_storage_roots
+            .iter()
+            .filter(|address| !self.storage_roots.contains_key(*address))
+            .count();
+        debug!(
+            target: "engine::tree::payload_processor::async_sparse_trie",
+            storage_actors = self.storage_actors.len(),
+            pending_storage_roots = self.pending_storage_roots.len(),
+            ready_storage_roots = self.storage_roots.len(),
+            missing_storage_roots,
+            pending_accounts = self.pending_accounts.len(),
+            finalize_sent = self.finalize_sent,
+            "async sparse trie coordinator progress"
+        );
     }
 
     async fn on_state_root_message(
@@ -365,8 +440,16 @@ impl AsyncSparseTrieCoordinator {
                 self.on_prewarm_targets(targets).await?;
             }
             StateRootMessage::FinishedStateUpdates => {
+                let _span = debug_span!(
+                    target: "engine::tree::payload_processor::async_sparse_trie",
+                    "async_sr_finished_state_updates",
+                    storage_actors = self.storage_actors.len(),
+                    pending_storage_roots = self.pending_storage_roots.len(),
+                    pending_accounts = self.pending_accounts.len(),
+                )
+                .entered();
                 self.finished_state_updates = true;
-                self.send_proof_command(ProofServiceCommand::Flush)?;
+                self.drive_all_actors()?;
                 self.maybe_finalize_accounts()?;
             }
             StateRootMessage::StateUpdate(_, _) | StateRootMessage::BlockAccessList(_) => {
@@ -380,17 +463,25 @@ impl AsyncSparseTrieCoordinator {
         Ok(())
     }
 
-    #[instrument(
-        level = "trace",
-        target = "engine::tree::payload_processor::async_sparse_trie",
-        skip_all
-    )]
     async fn on_hashed_state_update(
         &mut self,
         hashed_state_update: HashedPostState,
     ) -> Result<(), ParallelStateRootError> {
         let accounts_len = hashed_state_update.accounts.len();
         let storages_len = hashed_state_update.storages.len();
+        let storage_slots = hashed_state_update
+            .storages
+            .values()
+            .map(|storage| storage.storage.len())
+            .sum::<usize>();
+        let _span = trace_span!(
+            target: "engine::tree::payload_processor::async_sparse_trie",
+            "async_sr_hashed_state_update",
+            accounts = accounts_len,
+            storages = storages_len,
+            storage_slots,
+        )
+        .entered();
 
         match (accounts_len, storages_len) {
             (0, 0) => Ok(()),
@@ -442,6 +533,19 @@ impl AsyncSparseTrieCoordinator {
         &mut self,
         targets: MultiProofTargetsV2,
     ) -> Result<(), ParallelStateRootError> {
+        let account_targets = targets.account_targets.len();
+        let storage_tries = targets.storage_targets.len();
+        let storage_targets =
+            targets.storage_targets.values().map(|targets| targets.len()).sum::<usize>();
+        let _span = debug_span!(
+            target: "engine::tree::payload_processor::async_sparse_trie",
+            "async_sr_prewarm_targets",
+            account_targets,
+            storage_tries,
+            storage_targets,
+        )
+        .entered();
+
         for target in targets.account_targets {
             self.send_account_command(AccountTrieCommand::Touch(target.key()))?;
         }
@@ -451,9 +555,11 @@ impl AsyncSparseTrieCoordinator {
                 let storage_tx = self.ensure_storage_actor(address)?;
                 let slots = slots.into_iter().map(|target| target.key()).collect();
                 send_storage_command(&storage_tx, StorageTrieCommand::TouchSlots(slots))?;
+                send_storage_command(&storage_tx, StorageTrieCommand::Drive)?;
             }
             self.send_account_command(AccountTrieCommand::Touch(address))?;
         }
+        self.send_account_command(AccountTrieCommand::Drive)?;
 
         Ok(())
     }
@@ -470,7 +576,11 @@ impl AsyncSparseTrieCoordinator {
         let (tx, rx) = unbounded_channel();
         let actor =
             StorageTrieActor::new(address, trie, rx, self.event_tx.clone(), self.proof_tx()?);
-        tokio::spawn(actor.run());
+        tokio::spawn(actor.run().instrument(debug_span!(
+            target: "engine::tree::payload_processor::async_sparse_trie",
+            "async_sr_storage_actor",
+            ?address,
+        )));
 
         self.send_proof_command(ProofServiceCommand::RegisterStorageActor {
             address,
@@ -479,6 +589,23 @@ impl AsyncSparseTrieCoordinator {
         self.storage_actors.insert(address, StorageActorHandle { tx: tx.clone() });
 
         Ok(tx)
+    }
+
+    fn drive_all_actors(&self) -> Result<(), ParallelStateRootError> {
+        let _span = debug_span!(
+            target: "engine::tree::payload_processor::async_sparse_trie",
+            "async_sr_drive_all_actors",
+            storage_actors = self.storage_actors.len(),
+            pending_storage_roots = self.pending_storage_roots.len(),
+            pending_accounts = self.pending_accounts.len(),
+        )
+        .entered();
+
+        self.send_account_command(AccountTrieCommand::Drive)?;
+        for actor in self.storage_actors.values() {
+            send_storage_command(&actor.tx, StorageTrieCommand::Drive)?;
+        }
+        Ok(())
     }
 
     fn maybe_finalize_accounts(&mut self) -> Result<(), ParallelStateRootError> {
@@ -495,18 +622,32 @@ impl AsyncSparseTrieCoordinator {
         }
 
         let pending_accounts = std::mem::take(&mut self.pending_accounts);
+        let _span = debug_span!(
+            target: "engine::tree::payload_processor::async_sparse_trie",
+            "async_sr_send_account_finalize",
+            pending_accounts = pending_accounts.len(),
+            storage_roots = self.storage_roots.len(),
+        )
+        .entered();
         self.send_account_command(AccountTrieCommand::FinalizeAccounts {
             pending_accounts,
             storage_roots: self.storage_roots.clone(),
         })?;
-        self.send_proof_command(ProofServiceCommand::Flush)?;
         self.finalize_sent = true;
 
         Ok(())
     }
 
     async fn finish_success(mut self) -> CoordinatorOutput {
-        let actor_result = self.return_actor_tries().await;
+        let storage_actors = self.storage_actors.len();
+        let actor_result = self
+            .return_actor_tries()
+            .instrument(debug_span!(
+                target: "engine::tree::payload_processor::async_sparse_trie",
+                "async_sr_return_actor_tries",
+                storage_actors,
+            ))
+            .await;
         self.shutdown_bridges();
 
         let result = actor_result.and_then(|_| self.compute_outcome());
@@ -516,7 +657,15 @@ impl AsyncSparseTrieCoordinator {
     }
 
     async fn finish_with_error(mut self, error: ParallelStateRootError) -> CoordinatorOutput {
-        let actor_result = self.return_actor_tries().await;
+        let storage_actors = self.storage_actors.len();
+        let actor_result = self
+            .return_actor_tries()
+            .instrument(debug_span!(
+                target: "engine::tree::payload_processor::async_sparse_trie",
+                "async_sr_return_actor_tries",
+                storage_actors,
+            ))
+            .await;
         self.shutdown_bridges();
 
         let result = actor_result.and(Err(error));
@@ -554,6 +703,11 @@ impl AsyncSparseTrieCoordinator {
     }
 
     fn compute_outcome(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+        let _span = debug_span!(
+            target: "engine::tree::payload_processor::async_sparse_trie",
+            "async_sr_compute_outcome"
+        )
+        .entered();
         let start = Instant::now();
         let (state_root, trie_updates) = match self.trie.root_with_updates() {
             Ok(result) => result,
@@ -643,6 +797,7 @@ enum CoordinatorEvent {
 enum AccountTrieCommand {
     Touch(B256),
     Reveal(Vec<ProofTrieNodeV2>),
+    Drive,
     FinalizeAccounts {
         pending_accounts: B256Map<PendingAccountUpdate>,
         storage_roots: B256Map<B256>,
@@ -686,6 +841,12 @@ impl AccountTrieActor {
         }
     }
 
+    #[instrument(
+        name = "async_sr_account_actor_run",
+        level = "debug",
+        target = "engine::tree::payload_processor::async_sparse_trie",
+        skip_all
+    )]
     async fn run(mut self) {
         while let Some(command) = self.rx.recv().await {
             if let AccountTrieCommand::ReturnTrie { tx } = command {
@@ -703,29 +864,48 @@ impl AccountTrieActor {
         &mut self,
         command: AccountTrieCommand,
     ) -> Result<(), ParallelStateRootError> {
-        match command {
+        let should_drive = match command {
             AccountTrieCommand::Touch(address) => {
                 insert_leaf_update(&mut self.updates, address, LeafUpdate::Touched);
+                false
             }
             AccountTrieCommand::Reveal(mut nodes) => {
                 self.trie
                     .reveal_v2_proof_nodes(&mut nodes, true)
                     .map_err(to_parallel_sparse_error)?;
                 self.deferred.proof_nodes_bufs.push(nodes);
+                true
             }
+            AccountTrieCommand::Drive => true,
             AccountTrieCommand::FinalizeAccounts { pending_accounts, storage_roots } => {
                 self.finalize = Some(AccountFinalize { pending_accounts, storage_roots });
+                true
             }
             AccountTrieCommand::ReturnTrie { .. } => unreachable!("handled by run"),
-        }
+        };
 
-        self.drive().await
+        if should_drive {
+            self.drive().await
+        } else {
+            Ok(())
+        }
     }
 
+    #[instrument(
+        name = "async_sr_account_drive",
+        level = "debug",
+        target = "engine::tree::payload_processor::async_sparse_trie",
+        skip_all,
+        fields(
+            updates = self.updates.len(),
+            finalize = self.finalize.is_some(),
+            final_updates_built = self.final_updates_built,
+            finalized = self.finalized,
+        )
+    )]
     async fn drive(&mut self) -> Result<(), ParallelStateRootError> {
         self.try_build_final_updates()?;
 
-        let mut chunks = 0usize;
         loop {
             if self.updates.is_empty() {
                 self.try_build_final_updates()?;
@@ -737,7 +917,7 @@ impl AccountTrieActor {
             }
 
             let updates_len_before = self.updates.len();
-            let mut chunk = drain_update_chunk(&mut self.updates, MAX_ACTOR_UPDATES_PER_DRIVE);
+            let mut chunk = drain_update_chunk(&mut self.updates, MAX_ACCOUNT_UPDATES_PER_DRIVE);
             let mut targets = Vec::new();
             self.trie
                 .update_leaves(&mut chunk, |path, min_len| {
@@ -752,11 +932,6 @@ impl AccountTrieActor {
                         "async sparse trie proof service dropped".to_string(),
                     )
                 })?;
-                self.proof_tx.send(ProofServiceCommand::Flush).map_err(|_| {
-                    ParallelStateRootError::Other(
-                        "async sparse trie proof service dropped".to_string(),
-                    )
-                })?;
                 return Ok(())
             }
 
@@ -764,11 +939,6 @@ impl AccountTrieActor {
                 return Err(ParallelStateRootError::Other(
                     "account sparse trie actor made no progress without proof targets".to_string(),
                 ));
-            }
-
-            chunks += 1;
-            if chunks % ACTOR_YIELD_EVERY_CHUNKS == 0 {
-                tokio::task::yield_now().await;
             }
         }
     }
@@ -781,6 +951,13 @@ impl AccountTrieActor {
         let Some(AccountFinalize { pending_accounts, storage_roots }) = self.finalize.take() else {
             return Ok(())
         };
+        let _span = debug_span!(
+            target: "engine::tree::payload_processor::async_sparse_trie",
+            "async_sr_build_account_final_updates",
+            pending_accounts = pending_accounts.len(),
+            storage_roots = storage_roots.len(),
+        )
+        .entered();
 
         for (address, pending) in pending_accounts {
             let trie_account = self
@@ -821,6 +998,7 @@ enum StorageTrieCommand {
     TouchSlots(Vec<B256>),
     ApplyHashedStorage(HashedStorage),
     Reveal(Vec<ProofTrieNodeV2>),
+    Drive,
     ReturnTrie { tx: oneshot::Sender<(ActorTrie, DeferredDrops)> },
 }
 
@@ -857,6 +1035,13 @@ impl StorageTrieActor {
         }
     }
 
+    #[instrument(
+        name = "async_sr_storage_actor_run",
+        level = "debug",
+        target = "engine::tree::payload_processor::async_sparse_trie",
+        skip_all,
+        fields(address = ?self.address)
+    )]
     async fn run(mut self) {
         while let Some(command) = self.rx.recv().await {
             if let StorageTrieCommand::ReturnTrie { tx } = command {
@@ -874,11 +1059,12 @@ impl StorageTrieActor {
         &mut self,
         command: StorageTrieCommand,
     ) -> Result<(), ParallelStateRootError> {
-        match command {
+        let should_drive = match command {
             StorageTrieCommand::TouchSlots(slots) => {
                 for slot in slots {
                     insert_leaf_update(&mut self.updates, slot, LeafUpdate::Touched);
                 }
+                false
             }
             StorageTrieCommand::ApplyHashedStorage(storage) => {
                 if storage.wiped {
@@ -898,24 +1084,48 @@ impl StorageTrieActor {
                 }
                 self.needs_root = true;
                 self.root = None;
+                false
             }
             StorageTrieCommand::Reveal(mut nodes) => {
                 self.trie
                     .reveal_v2_proof_nodes(&mut nodes, true)
                     .map_err(to_parallel_sparse_error)?;
                 self.deferred.proof_nodes_bufs.push(nodes);
+                true
             }
+            StorageTrieCommand::Drive => true,
             StorageTrieCommand::ReturnTrie { .. } => unreachable!("handled by run"),
-        }
+        };
 
-        self.drive().await
+        if should_drive {
+            self.drive().await
+        } else {
+            Ok(())
+        }
     }
 
+    #[instrument(
+        name = "async_sr_storage_drive",
+        level = "debug",
+        target = "engine::tree::payload_processor::async_sparse_trie",
+        skip_all,
+        fields(
+            address = ?self.address,
+            updates = self.updates.len(),
+            needs_root = self.needs_root,
+            root_cached = self.root.is_some(),
+        )
+    )]
     async fn drive(&mut self) -> Result<(), ParallelStateRootError> {
-        let mut chunks = 0usize;
         loop {
             if self.updates.is_empty() {
                 if self.needs_root && self.root.is_none() {
+                    let _span = debug_span!(
+                        target: "engine::tree::payload_processor::async_sparse_trie",
+                        "async_sr_storage_root",
+                        address = ?self.address,
+                    )
+                    .entered();
                     let root = self.trie.root().ok_or_else(|| {
                         ParallelStateRootError::Other(format!(
                             "storage trie for {:?} remained blind after updates drained",
@@ -931,7 +1141,7 @@ impl StorageTrieActor {
             }
 
             let updates_len_before = self.updates.len();
-            let mut chunk = drain_update_chunk(&mut self.updates, MAX_ACTOR_UPDATES_PER_DRIVE);
+            let mut chunk = drain_update_chunk(&mut self.updates, MAX_STORAGE_UPDATES_PER_DRIVE);
             let mut targets = Vec::new();
             self.trie
                 .update_leaves(&mut chunk, |path, min_len| {
@@ -948,11 +1158,6 @@ impl StorageTrieActor {
                             "async sparse trie proof service dropped".to_string(),
                         )
                     })?;
-                self.proof_tx.send(ProofServiceCommand::Flush).map_err(|_| {
-                    ParallelStateRootError::Other(
-                        "async sparse trie proof service dropped".to_string(),
-                    )
-                })?;
                 return Ok(())
             }
 
@@ -962,11 +1167,6 @@ impl StorageTrieActor {
                     self.address
                 )));
             }
-
-            chunks += 1;
-            if chunks % ACTOR_YIELD_EVERY_CHUNKS == 0 {
-                tokio::task::yield_now().await;
-            }
         }
     }
 }
@@ -975,7 +1175,6 @@ enum ProofServiceCommand {
     AccountTargets(Vec<ProofV2Target>),
     StorageTargets { address: B256, targets: Vec<ProofV2Target> },
     RegisterStorageActor { address: B256, tx: UnboundedSender<StorageTrieCommand> },
-    Flush,
 }
 
 struct ProofService {
@@ -1024,6 +1223,12 @@ impl ProofService {
         }
     }
 
+    #[instrument(
+        name = "async_sr_proof_service_run",
+        level = "debug",
+        target = "engine::tree::payload_processor::async_sparse_trie",
+        skip_all
+    )]
     async fn run(mut self) {
         loop {
             if self.commands_closed && !self.pending_targets.is_empty() {
@@ -1038,7 +1243,15 @@ impl ProofService {
             tokio::select! {
                 maybe_command = self.command_rx.recv(), if !self.commands_closed => {
                     match maybe_command {
-                        Some(command) => self.on_command(command),
+                        Some(command) => {
+                            self.on_command(command);
+                            self.drain_ready_commands();
+                            if !self.pending_targets.is_empty() {
+                                tokio::task::yield_now().await;
+                                self.drain_ready_commands();
+                                self.dispatch_pending_targets();
+                            }
+                        }
                         None => self.commands_closed = true,
                     }
                 }
@@ -1059,6 +1272,19 @@ impl ProofService {
         }
     }
 
+    fn drain_ready_commands(&mut self) {
+        loop {
+            match self.command_rx.try_recv() {
+                Ok(command) => self.on_command(command),
+                Err(TryRecvError::Empty) => return,
+                Err(TryRecvError::Disconnected) => {
+                    self.commands_closed = true;
+                    return
+                }
+            }
+        }
+    }
+
     fn on_command(&mut self, command: ProofServiceCommand) {
         match command {
             ProofServiceCommand::AccountTargets(targets) => {
@@ -1070,25 +1296,36 @@ impl ProofService {
             ProofServiceCommand::RegisterStorageActor { address, tx } => {
                 self.storage_txs.insert(address, tx);
             }
-            ProofServiceCommand::Flush => {
-                self.dispatch_pending_targets();
-            }
         }
     }
 
     fn queue_account_targets(&mut self, targets: Vec<ProofV2Target>) {
+        let mut queued = 0usize;
+        let mut retry_if_idle = Vec::new();
+
         for target in targets {
             match self.fetched_account_targets.entry(target.key()) {
                 Entry::Occupied(mut entry) => {
                     if target.min_len < *entry.get() {
                         entry.insert(target.min_len);
                         self.pending_targets.push_account_target(target);
+                        queued += 1;
+                    } else {
+                        retry_if_idle.push(target);
                     }
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(target.min_len);
                     self.pending_targets.push_account_target(target);
+                    queued += 1;
                 }
+            }
+        }
+
+        if queued == 0 && self.inflight == 0 && self.pending_targets.is_empty() {
+            for target in retry_if_idle {
+                self.fetched_account_targets.insert(target.key(), target.min_len);
+                self.pending_targets.push_account_target(target);
             }
         }
     }
@@ -1096,12 +1333,15 @@ impl ProofService {
     fn queue_storage_targets(&mut self, address: B256, targets: Vec<ProofV2Target>) {
         let fetched = self.fetched_storage_targets.entry(address).or_default();
         let mut queued = Vec::new();
+        let mut retry_if_idle = Vec::new();
         for target in targets {
             match fetched.entry(target.key()) {
                 Entry::Occupied(mut entry) => {
                     if target.min_len < *entry.get() {
                         entry.insert(target.min_len);
                         queued.push(target);
+                    } else {
+                        retry_if_idle.push(target);
                     }
                 }
                 Entry::Vacant(entry) => {
@@ -1113,6 +1353,13 @@ impl ProofService {
 
         if !queued.is_empty() {
             self.pending_targets.extend_storage_targets(&address, queued);
+        } else if self.inflight == 0 && self.pending_targets.is_empty() && !retry_if_idle.is_empty()
+        {
+            let fetched = self.fetched_storage_targets.entry(address).or_default();
+            for target in &retry_if_idle {
+                fetched.insert(target.key(), target.min_len);
+            }
+            self.pending_targets.extend_storage_targets(&address, retry_if_idle);
         }
     }
 
@@ -1128,6 +1375,18 @@ impl ProofService {
         };
 
         let DecodedMultiProofV2 { account_proofs, storage_proofs } = decoded;
+        let storage_tries = storage_proofs.len();
+        let storage_proof_nodes = storage_proofs.values().map(|nodes| nodes.len()).sum::<usize>();
+        let _span = debug_span!(
+            target: "engine::tree::payload_processor::async_sparse_trie",
+            "async_sr_proof_result",
+            account_proof_nodes = account_proofs.len(),
+            storage_tries,
+            storage_proof_nodes,
+            inflight = self.inflight,
+        )
+        .entered();
+
         if !account_proofs.is_empty() &&
             self.account_tx.send(AccountTrieCommand::Reveal(account_proofs)).is_err()
         {
@@ -1159,8 +1418,21 @@ impl ProofService {
             return;
         }
 
-        let _span = trace_span!("async_dispatch_pending_targets").entered();
         let (targets, chunking_length) = self.pending_targets.take();
+        let account_targets = targets.account_targets.len();
+        let storage_tries = targets.storage_targets.len();
+        let storage_targets =
+            targets.storage_targets.values().map(|targets| targets.len()).sum::<usize>();
+        let _span = debug_span!(
+            target: "engine::tree::payload_processor::async_sparse_trie",
+            "async_sr_dispatch_pending_targets",
+            chunking_length,
+            account_targets,
+            storage_tries,
+            storage_targets,
+            inflight = self.inflight,
+        )
+        .entered();
         let proof_worker_handle = self.proof_worker_handle.clone();
         let proof_result_tx = self.proof_result_tx.clone();
         let event_tx = self.event_tx.clone();
@@ -1247,7 +1519,7 @@ fn spawn_state_message_bridge(
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = stop.clone();
     let handle = thread::Builder::new()
-        .name("async-sparse-trie-state-bridge".to_string())
+        .name("async-sr-state-bridge".to_string())
         .spawn(move || {
             while !thread_stop.load(Ordering::Relaxed) {
                 match rx.recv_timeout(BRIDGE_RECV_TIMEOUT) {
@@ -1274,7 +1546,7 @@ fn spawn_proof_result_bridge(
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = stop.clone();
     let handle = thread::Builder::new()
-        .name("async-sparse-trie-proof-bridge".to_string())
+        .name("async-sr-proof-bridge".to_string())
         .spawn(move || {
             while !thread_stop.load(Ordering::Relaxed) {
                 match rx.recv_timeout(BRIDGE_RECV_TIMEOUT) {

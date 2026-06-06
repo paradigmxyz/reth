@@ -45,7 +45,7 @@ use std::{
         Arc, OnceLock,
     },
 };
-use tracing::{debug, debug_span, instrument, trace, warn, Span};
+use tracing::{debug, debug_span, instrument, trace, warn, Instrument, Span};
 
 mod async_sparse_trie;
 pub mod bal;
@@ -158,6 +158,10 @@ where
     /// Dedicated blocking pool for warming the BAL read-set, created lazily on the first BAL block
     /// (see [`Self::bal_prewarm_pool`]). Its threads exit when the processor is dropped.
     bal_prewarm_pool: OnceLock<Arc<bal_prewarm_pool::BalPrewarmPool>>,
+    /// Dedicated async sparse trie runtime, created lazily on the first async BAL sparse trie
+    /// block. Its worker threads exit when the processor is dropped.
+    async_sparse_trie_runtime:
+        OnceLock<Result<Arc<async_sparse_trie::AsyncSparseTrieRuntime>, String>>,
 }
 
 impl<N, Evm> PayloadProcessor<Evm>
@@ -198,6 +202,7 @@ where
             disable_bal_parallel_state_root: config.disable_bal_parallel_state_root(),
             disable_bal_batch_io: config.disable_bal_batch_io(),
             bal_prewarm_pool: OnceLock::new(),
+            async_sparse_trie_runtime: OnceLock::new(),
         }
     }
 
@@ -208,6 +213,15 @@ where
             .get_or_init(|| {
                 bal_prewarm_pool::BalPrewarmPool::new(bal_prewarm_pool::DEFAULT_BAL_PREWARM_THREADS)
             })
+            .clone()
+    }
+
+    /// Returns the dedicated async sparse trie runtime, spawning its worker threads on first use.
+    fn async_sparse_trie_runtime(
+        &self,
+    ) -> Result<Arc<async_sparse_trie::AsyncSparseTrieRuntime>, String> {
+        self.async_sparse_trie_runtime
+            .get_or_init(async_sparse_trie::AsyncSparseTrieRuntime::new)
             .clone()
     }
 }
@@ -627,14 +641,17 @@ where
         let parent_span = Span::current();
 
         if use_async_bal_sparse_trie {
-            self.executor.spawn_blocking_named(
-                async_sparse_trie::ASYNC_SPARSE_TRIE_THREAD_NAME,
-                move || {
-                    reth_tasks::once!(increase_thread_priority);
+            let async_sparse_trie_runtime = match self.async_sparse_trie_runtime() {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    let _ = state_root_tx.send(Err(ParallelStateRootError::Other(error)));
+                    return;
+                }
+            };
 
-                    let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "async_sparse_trie_task")
-                        .entered();
-
+            let span = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "async_sparse_trie_task");
+            async_sparse_trie_runtime.spawn(
+                async move {
                     async_sparse_trie::run_async_bal_sparse_trie_task(
                         preserved_sparse_trie,
                         executor,
@@ -648,8 +665,10 @@ where
                         max_hot_slots,
                         max_hot_accounts,
                         disable_cache_pruning,
-                    );
-                },
+                    )
+                    .await;
+                }
+                .instrument(span),
             );
             return;
         }
