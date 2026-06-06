@@ -28,6 +28,7 @@ impl ValueWithSubKey for AccountBeforeTx {
 // over whole value (Even SubKey) that would mess up fetching of values with seek_by_key_subkey
 #[cfg(any(test, feature = "reth-codec"))]
 impl reth_codecs::Compact for AccountBeforeTx {
+    #[inline]
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
@@ -39,18 +40,20 @@ impl reth_codecs::Compact for AccountBeforeTx {
         acc_len + 20
     }
 
-    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
-        use bytes::Buf;
-        let address = Address::from_slice(&buf[..20]);
-        buf.advance(20);
+    #[inline]
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let mut address = [0u8; 20];
+        address.copy_from_slice(&buf[..20]);
+        let address = Address::new(address);
+        let mut rest = &buf[20..];
 
-        let info = (len - 20 > 0).then(|| {
-            let (acc, advanced_buf) = Account::from_compact(buf, len - 20);
-            buf = advanced_buf;
+        let info = (len > 20).then(|| {
+            let (acc, advanced_buf) = Account::from_compact(rest, len - 20);
+            rest = advanced_buf;
             acc
         });
 
-        (Self { address, info }, buf)
+        (Self { address, info }, rest)
     }
 }
 
