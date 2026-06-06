@@ -57,13 +57,18 @@ where
     // Compute account trie changesets
     let account_nodes = compute_account_changesets(factory, trie_updates)?;
 
-    // Compute storage trie changesets
-    let mut storage_tries = B256Map::default();
+    // Compute storage trie changesets.
+    let storage_updates = trie_updates.storage_tries_ref();
+    let mut storage_tries =
+        B256Map::with_capacity_and_hasher(storage_updates.len(), Default::default());
+    if storage_updates.is_empty() {
+        return Ok(TrieUpdatesSorted::new(account_nodes, storage_tries));
+    }
 
-    // Create storage cursor once and reuse it for all addresses
+    // Create storage cursor once and reuse it for all addresses.
     let mut storage_cursor = factory.storage_trie_cursor(B256::default())?;
 
-    for (hashed_address, storage_updates) in trie_updates.storage_tries_ref() {
+    for (hashed_address, storage_updates) in storage_updates {
         storage_cursor.set_hashed_address(*hashed_address);
 
         let storage_changesets = if storage_updates.is_deleted() {
@@ -101,12 +106,17 @@ fn compute_account_changesets<Factory>(
 where
     Factory: TrieCursorFactory,
 {
+    let account_nodes = trie_updates.account_nodes_ref();
+    if account_nodes.is_empty() {
+        return Ok(Vec::new());
+    }
+
     let mut cursor = factory.account_trie_cursor()?;
-    let mut account_changesets = Vec::with_capacity(trie_updates.account_nodes_ref().len());
+    let mut account_changesets = Vec::with_capacity(account_nodes.len());
 
     // For each changed account node, look up its current value
     // The input is already sorted, so the output will be sorted
-    for (path, _new_node) in trie_updates.account_nodes_ref() {
+    for (path, _new_node) in account_nodes {
         let old_node = cursor.seek_exact(*path)?.map(|(_path, node)| node);
         account_changesets.push((*path, old_node));
     }
@@ -244,12 +254,8 @@ mod tests {
 
     #[test]
     fn test_empty_updates() {
-        // Create an empty mock factory
-        // Note: We need to include B256::default() in storage_tries because
-        // compute_trie_changesets creates cursors for it upfront
-        let mut storage_tries = B256Map::default();
-        storage_tries.insert(B256::default(), BTreeMap::new());
-        let factory = MockTrieCursorFactory::new(BTreeMap::new(), storage_tries);
+        // Create an empty mock factory. Empty updates should not open account or storage cursors.
+        let factory = MockTrieCursorFactory::new(BTreeMap::new(), B256Map::default());
 
         // Create empty updates
         let updates = TrieUpdatesSorted::new(vec![], B256Map::default());
@@ -275,10 +281,8 @@ mod tests {
         account_nodes.insert(path1, node1.clone());
         account_nodes.insert(path2, node2);
 
-        // Need to include B256::default() for cursor creation
-        let mut storage_tries = B256Map::default();
-        storage_tries.insert(B256::default(), BTreeMap::new());
-        let factory = MockTrieCursorFactory::new(account_nodes, storage_tries);
+        // Account-only updates should not open a storage cursor.
+        let factory = MockTrieCursorFactory::new(account_nodes, B256Map::default());
 
         // Create updates that modify path1 and add a new path3
         let path3 = Nibbles::from_nibbles([0x7, 0x8, 0x9]);
