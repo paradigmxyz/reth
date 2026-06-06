@@ -1,4 +1,4 @@
-use parking_lot::Mutex;
+use parking_lot::{Condvar, Mutex};
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_trie::{
     updates::{TrieUpdates, TrieUpdatesSorted},
@@ -6,6 +6,7 @@ use reth_trie::{
 };
 use std::{
     fmt,
+    mem,
     sync::{Arc, LazyLock},
 };
 use tracing::{debug_span, instrument};
@@ -17,7 +18,7 @@ use tracing::{debug_span, instrument};
 #[derive(Clone)]
 pub struct DeferredTrieData {
     /// Shared deferred state holding either raw inputs (pending) or computed result (ready).
-    state: Arc<Mutex<DeferredTrieDataInner>>,
+    state: Arc<DeferredTrieDataState>,
 }
 
 /// Sorted trie data computed for one executed block.
@@ -45,12 +46,27 @@ struct DeferredTrieMetrics {
 static DEFERRED_TRIE_METRICS: LazyLock<DeferredTrieMetrics> =
     LazyLock::new(DeferredTrieMetrics::default);
 
+/// Shared state for deferred trie data.
+struct DeferredTrieDataState {
+    /// Deferred trie state.
+    inner: Mutex<DeferredTrieDataInner>,
+    /// Notifies waiters once the pending inputs have been computed.
+    ready: Condvar,
+}
+
+impl DeferredTrieDataState {
+    /// Creates a new shared deferred trie state.
+    fn new(inner: DeferredTrieDataInner) -> Self {
+        Self { inner: Mutex::new(inner), ready: Condvar::new() }
+    }
+}
+
 /// Internal state for deferred trie data.
 enum DeferredTrieDataInner {
     /// Data is not yet available; raw inputs stored for fallback computation.
-    ///
-    /// Wrapped in `Option` to allow taking ownership during computation.
-    Pending(Option<PendingInputs>),
+    Pending(PendingInputs),
+    /// One caller is currently sorting the pending inputs.
+    Computing,
     /// Data has been computed and is ready.
     Ready(ComputedTrieData),
 }
@@ -66,9 +82,9 @@ struct PendingInputs {
 
 impl fmt::Debug for DeferredTrieData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let state = self.state.lock();
+        let state = self.state.inner.lock();
         match &*state {
-            DeferredTrieDataInner::Pending(_) => {
+            DeferredTrieDataInner::Pending(_) | DeferredTrieDataInner::Computing => {
                 f.debug_struct("DeferredTrieData").field("state", &"pending").finish()
             }
             DeferredTrieDataInner::Ready(_) => {
@@ -82,16 +98,20 @@ impl DeferredTrieData {
     /// Create a new pending handle with fallback inputs for synchronous computation.
     pub fn pending(hashed_state: Arc<HashedPostState>, trie_updates: Arc<TrieUpdates>) -> Self {
         Self {
-            state: Arc::new(Mutex::new(DeferredTrieDataInner::Pending(Some(PendingInputs {
-                hashed_state,
-                trie_updates,
-            })))),
+            state: Arc::new(DeferredTrieDataState::new(DeferredTrieDataInner::Pending(
+                PendingInputs {
+                    hashed_state,
+                    trie_updates,
+                },
+            ))),
         }
     }
 
     /// Create a handle that is already populated with the given [`ComputedTrieData`].
     pub fn ready(bundle: ComputedTrieData) -> Self {
-        Self { state: Arc::new(Mutex::new(DeferredTrieDataInner::Ready(bundle))) }
+        Self {
+            state: Arc::new(DeferredTrieDataState::new(DeferredTrieDataInner::Ready(bundle))),
+        }
     }
 
     /// Sorts block execution outputs.
@@ -131,22 +151,36 @@ impl DeferredTrieData {
     /// Returns trie data, computing synchronously if the async task hasn't completed.
     #[instrument(level = "debug", target = "engine::tree::deferred_trie", skip_all)]
     pub fn wait_cloned(&self) -> ComputedTrieData {
-        let mut state = self.state.lock();
-        match &mut *state {
-            DeferredTrieDataInner::Ready(bundle) => {
-                DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
-                bundle.clone()
-            }
-            DeferredTrieDataInner::Pending(maybe_inputs) => {
-                DEFERRED_TRIE_METRICS.deferred_trie_sync_fallback.increment(1);
+        let inputs = {
+            let mut state = self.state.inner.lock();
 
-                let inputs = maybe_inputs.take().expect("inputs must be present in Pending state");
-                let computed = Self::sort(inputs.hashed_state, inputs.trie_updates);
-                *state = DeferredTrieDataInner::Ready(computed.clone());
-
-                computed
+            loop {
+                match &*state {
+                    DeferredTrieDataInner::Ready(bundle) => {
+                        DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
+                        return bundle.clone()
+                    }
+                    DeferredTrieDataInner::Computing => {
+                        self.state.ready.wait(&mut state);
+                    }
+                    DeferredTrieDataInner::Pending(_) => {
+                        DEFERRED_TRIE_METRICS.deferred_trie_sync_fallback.increment(1);
+                        match mem::replace(&mut *state, DeferredTrieDataInner::Computing) {
+                            DeferredTrieDataInner::Pending(inputs) => break inputs,
+                            _ => unreachable!("pending state checked before replacement"),
+                        }
+                    }
+                }
             }
-        }
+        };
+
+        let computed = Self::sort(inputs.hashed_state, inputs.trie_updates);
+
+        let mut state = self.state.inner.lock();
+        *state = DeferredTrieDataInner::Ready(computed.clone());
+        self.state.ready.notify_all();
+
+        computed
     }
 }
 
