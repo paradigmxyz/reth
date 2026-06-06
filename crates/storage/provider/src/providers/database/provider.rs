@@ -67,7 +67,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-    HashedPostStateSorted,
+    HashedPostStateSorted, HashedStorageSorted,
 };
 use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm_database::states::{
@@ -2696,11 +2696,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         }
 
         // Write hashed storage changes.
-        let sorted_storages = hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
         let mut hashed_storage_cursor =
             self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
-        for (hashed_address, storage) in sorted_storages {
-            if storage.is_wiped() && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
+        let mut write_storage = |hashed_address, storage: &HashedStorageSorted| {
+            if storage.is_wiped() && hashed_storage_cursor.seek_exact(hashed_address)?.is_some() {
                 hashed_storage_cursor.delete_current_duplicates()?;
             }
 
@@ -2708,14 +2707,34 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 let entry = StorageEntry { key: *hashed_slot, value: *value };
 
                 if let Some(db_entry) =
-                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
+                    hashed_storage_cursor.seek_by_key_subkey(hashed_address, entry.key)? &&
                     db_entry.key == entry.key
                 {
                     hashed_storage_cursor.delete_current()?;
                 }
 
                 if !entry.value.is_zero() {
-                    hashed_storage_cursor.upsert(*hashed_address, &entry)?;
+                    hashed_storage_cursor.upsert(hashed_address, &entry)?;
+                }
+            }
+
+            Ok::<_, ProviderError>(())
+        };
+
+        match hashed_state.account_storages().len() {
+            0 => {}
+            1 => {
+                if let Some((hashed_address, storage)) =
+                    hashed_state.account_storages().iter().next()
+                {
+                    write_storage(*hashed_address, storage)?;
+                }
+            }
+            _ => {
+                for (hashed_address, storage) in
+                    hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key)
+                {
+                    write_storage(*hashed_address, storage)?;
                 }
             }
         }
