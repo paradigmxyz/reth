@@ -225,6 +225,7 @@ impl ProofService {
             }
         }
 
+        let mut storage_targets = proof.storage_targets.unwrap_or_default();
         for (address, proof_nodes) in storage_proofs {
             let Some(tx) = self.storage_txs.get(&address) else {
                 let _ = self.event_tx.send(CoordinatorEvent::Error(ParallelStateRootError::Other(
@@ -233,7 +234,8 @@ impl ProofService {
                 continue;
             };
 
-            if tx.send(StorageTrieCommand::Reveal(proof_nodes)).is_err() {
+            let targets = storage_targets.remove(&address).unwrap_or_default();
+            if tx.send(StorageTrieCommand::Reveal { nodes: proof_nodes, targets }).is_err() {
                 let _ = self.event_tx.send(CoordinatorEvent::Error(ParallelStateRootError::Other(
                     format!(
                     "async storage sparse trie actor for {address:?} dropped before proof reveal"
@@ -283,6 +285,7 @@ impl ProofService {
             |proof_targets| {
                 dispatched += 1;
                 let account_targets = proof_targets.account_targets.clone();
+                let storage_targets = proof_targets.storage_targets.clone();
                 if let Err(error) =
                     proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput {
                         targets: proof_targets,
@@ -291,7 +294,8 @@ impl ProofService {
                             HashedPostState::default(),
                             Instant::now(),
                         )
-                        .with_account_targets(account_targets),
+                        .with_account_targets(account_targets)
+                        .with_storage_targets(storage_targets),
                     })
                 {
                     error!("failed to dispatch async sparse trie account multiproof: {error:?}");

@@ -363,6 +363,7 @@ impl ProofWorkerHandle {
                     state,
                     start_time: start,
                     account_targets,
+                    storage_targets,
                 } = input.into_proof_result_sender();
 
                 let _ = result_tx.send(ProofResultMessage {
@@ -370,6 +371,7 @@ impl ProofWorkerHandle {
                     elapsed: start.elapsed(),
                     state,
                     account_targets,
+                    storage_targets,
                 });
 
                 error
@@ -490,6 +492,8 @@ pub struct ProofResultMessage {
     pub state: HashedPostState,
     /// Account targets that were used for this proof, if the caller requested them back.
     pub account_targets: Option<Vec<ProofV2Target>>,
+    /// Storage targets that were used for this proof, if the caller requested them back.
+    pub storage_targets: Option<B256Map<Vec<ProofV2Target>>>,
 }
 
 /// Context for sending proof calculation results back to `SparseTrieCacheTask`.
@@ -506,6 +510,8 @@ pub struct ProofResultContext {
     pub start_time: Instant,
     /// Account targets that should be returned with the proof result.
     pub account_targets: Option<Vec<ProofV2Target>>,
+    /// Storage targets that should be returned with the proof result.
+    pub storage_targets: Option<B256Map<Vec<ProofV2Target>>>,
 }
 
 impl ProofResultContext {
@@ -515,12 +521,18 @@ impl ProofResultContext {
         state: HashedPostState,
         start_time: Instant,
     ) -> Self {
-        Self { sender, state, start_time, account_targets: None }
+        Self { sender, state, start_time, account_targets: None, storage_targets: None }
     }
 
     /// Returns this context with account targets attached to the result message.
     pub fn with_account_targets(mut self, account_targets: Vec<ProofV2Target>) -> Self {
         self.account_targets = Some(account_targets);
+        self
+    }
+
+    /// Returns this context with storage targets attached to the result message.
+    pub fn with_storage_targets(mut self, storage_targets: B256Map<Vec<ProofV2Target>>) -> Self {
+        self.storage_targets = Some(storage_targets);
         self
     }
 }
@@ -1038,8 +1050,13 @@ where
             Err(e) => (Err(e), ValueEncoderStats::default()),
         };
 
-        let ProofResultContext { sender: result_tx, state, start_time: start, account_targets } =
-            proof_result_sender;
+        let ProofResultContext {
+            sender: result_tx,
+            state,
+            start_time: start,
+            account_targets,
+            storage_targets,
+        } = proof_result_sender;
 
         let proof_elapsed = proof_start.elapsed();
         let total_elapsed = start.elapsed();
@@ -1047,7 +1064,13 @@ where
 
         // Send result to SparseTrieCacheTask
         if result_tx
-            .send(ProofResultMessage { result, elapsed: total_elapsed, state, account_targets })
+            .send(ProofResultMessage {
+                result,
+                elapsed: total_elapsed,
+                state,
+                account_targets,
+                storage_targets,
+            })
             .is_err()
         {
             trace!(

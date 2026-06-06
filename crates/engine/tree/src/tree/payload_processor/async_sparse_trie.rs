@@ -297,12 +297,6 @@ fn insert_leaf_update(updates: &mut B256Map<LeafUpdate>, key: B256, update: Leaf
     }
 }
 
-fn merge_leaf_updates(updates: &mut B256Map<LeafUpdate>, chunk: B256Map<LeafUpdate>) {
-    for (key, update) in chunk {
-        insert_leaf_update(updates, key, update);
-    }
-}
-
 fn drain_update_chunk(updates: &mut B256Map<LeafUpdate>, limit: usize) -> B256Map<LeafUpdate> {
     let len = updates.len().min(limit);
     let keys: Vec<_> = updates.keys().take(len).copied().collect();
