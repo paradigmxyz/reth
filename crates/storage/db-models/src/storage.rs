@@ -30,6 +30,7 @@ impl ValueWithSubKey for StorageBeforeTx {
 // over whole value (Even SubKey) that would mess up fetching of values with seek_by_key_subkey
 #[cfg(any(test, feature = "reth-codec"))]
 impl reth_codecs::Compact for StorageBeforeTx {
+    #[inline]
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
@@ -39,11 +40,14 @@ impl reth_codecs::Compact for StorageBeforeTx {
         self.value.to_compact(buf) + 52
     }
 
+    #[inline]
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let address = Address::from_slice(&buf[..20]);
-        let key = B256::from_slice(&buf[20..52]);
+        let mut address = [0u8; 20];
+        address.copy_from_slice(&buf[..20]);
+        let mut key = [0u8; 32];
+        key.copy_from_slice(&buf[20..52]);
         let (value, out) = U256::from_compact(&buf[52..], len - 52);
-        (Self { address, key, value }, out)
+        (Self { address: Address::new(address), key: B256::new(key), value }, out)
     }
 }
 
