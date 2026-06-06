@@ -469,7 +469,11 @@ impl<B: Block<Body: BlockBody<Transaction: SignedTransaction>>> ChainBlocks<'_, 
         let capacity = self.blocks.values().map(|block| block.body().transactions().len()).sum();
 
         let mut hashes = HashSet::with_capacity_and_hasher(capacity, Default::default());
-        hashes.extend(self.transaction_hashes());
+        for block in self.blocks.values() {
+            for tx in block.body().transactions_iter() {
+                hashes.insert(*tx.tx_hash());
+            }
+        }
         hashes
     }
 }
