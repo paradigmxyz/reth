@@ -81,6 +81,11 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
         let mut aggregated_bloom = Bloom::ZERO;
         let mut encode_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
         let mut next = 0usize;
+        let mut pending_by_index = receipts_len.map(|len| {
+            let mut pending = Vec::with_capacity(len);
+            pending.resize_with(len, || None);
+            pending
+        });
         let mut pending = HashMap::new();
 
         let mut push = |receipt: R| {
@@ -98,9 +103,28 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
                 push(indexed_receipt.receipt);
                 next += 1;
 
-                while let Some(receipt) = pending.remove(&next) {
+                loop {
+                    let receipt = if let Some(pending_by_index) = pending_by_index.as_mut() {
+                        pending_by_index.get_mut(next).and_then(Option::take)
+                    } else {
+                        pending.remove(&next)
+                    };
+
+                    let Some(receipt) = receipt else { break };
                     push(receipt);
                     next += 1;
+                }
+            } else if let Some(pending_by_index) = pending_by_index.as_mut() {
+                if let Some(slot) = pending_by_index.get_mut(indexed_receipt.index) {
+                    *slot = Some(indexed_receipt.receipt);
+                } else {
+                    tracing::error!(
+                        target: "engine::tree::payload_processor",
+                        expected = receipts_len,
+                        received = indexed_receipt.index,
+                        "Receipt root task received receipt index beyond expected length"
+                    );
+                    return;
                 }
             } else {
                 pending.insert(indexed_receipt.index, indexed_receipt.receipt);
@@ -117,11 +141,16 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
             return;
         }
 
-        if !pending.is_empty() {
+        let pending_len = pending_by_index
+            .as_ref()
+            .map(|pending| pending.iter().filter(|receipt| receipt.is_some()).count())
+            .unwrap_or_else(|| pending.len());
+
+        if pending_len != 0 {
             tracing::error!(
                 target: "engine::tree::payload_processor",
                 received = next,
-                pending = pending.len(),
+                pending = pending_len,
                 "Receipt root task received gapped receipts"
             );
             return;
