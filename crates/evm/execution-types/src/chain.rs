@@ -305,13 +305,10 @@ impl<N: NodePrimitives> Chain<N> {
         self.blocks_and_receipts().for_each(|(block, receipts)| {
             let block_num_hash = BlockNumHash::new(block.number(), block.hash());
 
-            let tx_receipts = block
-                .body()
-                .transactions()
-                .iter()
-                .zip(receipts)
-                .map(|(tx, receipt)| (*tx.tx_hash(), receipt.clone()))
-                .collect();
+            let mut tx_receipts = Vec::with_capacity(receipts.len());
+            for (tx, receipt) in block.body().transactions_iter().zip(receipts) {
+                tx_receipts.push((*tx.tx_hash(), receipt.clone()));
+            }
 
             receipt_attach.push(BlockReceipts {
                 block: block_num_hash,
