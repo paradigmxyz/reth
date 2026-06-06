@@ -2479,7 +2479,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let mut receipts_writer = EitherWriter::new_receipts(self, first_block)?;
 
         let has_contract_log_filter = !self.prune_modes.receipts_log_filter.is_empty();
-        let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
 
         // All receipts from the last 128 blocks are required for blockchain tree, even with
         // [`PruneSegment::ContractLogs`].
@@ -2494,11 +2493,22 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 .is_none()) &&
             PruneMode::Distance(self.minimum_pruning_distance).should_prune(first_block, tip);
 
-        // Prepare set of addresses which logs should not be pruned.
-        let mut allowed_addresses: AddressSet = AddressSet::default();
-        for (_, addresses) in contract_log_pruner.range(..first_block) {
-            allowed_addresses.extend(addresses.iter().copied());
-        }
+        let contract_log_pruner = if has_contract_log_filter {
+            Some(self.prune_modes.receipts_log_filter.group_by_block(tip, None)?)
+        } else {
+            None
+        };
+        let mut allowed_addresses = if prunable_receipts {
+            contract_log_pruner.as_ref().map(|contract_log_pruner| {
+                let mut allowed_addresses = AddressSet::default();
+                for (_, addresses) in contract_log_pruner.range(..first_block) {
+                    allowed_addresses.extend(addresses.iter().copied());
+                }
+                allowed_addresses
+            })
+        } else {
+            None
+        };
 
         for (idx, (receipts, first_tx_index)) in
             execution_outcome.receipts().zip(block_indices).enumerate()
@@ -2518,7 +2528,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             }
 
             // If there are new addresses to retain after this block number, track them
-            if let Some(new_addresses) = contract_log_pruner.get(&block_number) {
+            if let (Some(contract_log_pruner), Some(allowed_addresses)) =
+                (&contract_log_pruner, &mut allowed_addresses) &&
+                let Some(new_addresses) = contract_log_pruner.get(&block_number)
+            {
                 allowed_addresses.extend(new_addresses.iter().copied());
             }
 
@@ -2526,8 +2539,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 let receipt_idx = first_tx_index + idx as u64;
                 // Skip writing receipt if log filter is active and it does not have any logs to
                 // retain
-                if prunable_receipts &&
-                    has_contract_log_filter &&
+                if let Some(allowed_addresses) = &allowed_addresses &&
                     !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
                 {
                     continue
