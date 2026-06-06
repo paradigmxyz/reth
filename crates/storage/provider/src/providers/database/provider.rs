@@ -84,6 +84,8 @@ use std::{
 };
 use tracing::{debug, instrument, trace};
 
+const LOCAL_STATE_REVERT_SORT_THRESHOLD: usize = 512;
+
 /// Determines the commit order for database operations.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum CommitOrder {
@@ -2556,7 +2558,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
                 tracing::trace!(block_number, "Writing block change");
                 // sort changes by address.
-                storage_changes.par_sort_unstable_by_key(|a| a.address);
+                if storage_changes.len() >= LOCAL_STATE_REVERT_SORT_THRESHOLD {
+                    storage_changes.par_sort_unstable_by_key(|a| a.address);
+                } else {
+                    storage_changes.sort_unstable_by_key(|a| a.address);
+                }
                 let total_changes =
                     storage_changes.iter().map(|change| change.storage_revert.len()).sum();
                 let mut changeset = Vec::with_capacity(total_changes);
@@ -2566,7 +2572,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                         .map(|(k, v)| (B256::from(k.to_be_bytes()), v))
                         .collect::<Vec<_>>();
                     // sort storage slots by key.
-                    storage.par_sort_unstable_by_key(|a| a.0);
+                    if storage.len() >= LOCAL_STATE_REVERT_SORT_THRESHOLD {
+                        storage.par_sort_unstable_by_key(|a| a.0);
+                    } else {
+                        storage.sort_unstable_by_key(|a| a.0);
+                    }
 
                     // If we are writing the primary storage wipe transition, the pre-existing
                     // storage state has to be taken from the database and written to storage
