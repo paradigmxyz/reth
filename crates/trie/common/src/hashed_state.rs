@@ -440,7 +440,11 @@ impl HashedStorage {
 
     /// Create new hashed storage from iterator.
     pub fn from_iter(wiped: bool, iter: impl IntoIterator<Item = (B256, U256)>) -> Self {
-        Self { wiped, storage: HashMap::from_iter(iter) }
+        let iter = iter.into_iter();
+        let (lower, _) = iter.size_hint();
+        let mut storage = HashMap::with_capacity_and_hasher(lower, Default::default());
+        storage.extend(iter);
+        Self { wiped, storage }
     }
 
     /// Create new hashed storage from account status and plain storage.
@@ -770,7 +774,8 @@ impl HashedStorageSorted {
 
 impl From<HashedStorageSorted> for HashedStorage {
     fn from(sorted: HashedStorageSorted) -> Self {
-        let mut storage = B256Map::default();
+        let mut storage =
+            B256Map::with_capacity_and_hasher(sorted.storage_slots.len(), Default::default());
 
         // Add all storage slots (including zero-valued ones which indicate deletion)
         for (slot, value) in sorted.storage_slots {
