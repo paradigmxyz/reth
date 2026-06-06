@@ -17,7 +17,7 @@ pub(super) enum StorageTrieCommand {
     ApplyHashedStorage(HashedStorage),
     Reveal(Vec<ProofTrieNodeV2>),
     Drive,
-    ReturnTrie { tx: oneshot::Sender<(ActorTrie, DeferredDrops)> },
+    ReturnTrie { tx: oneshot::Sender<(ActorTrie, DeferredDrops, Vec<B256>, HashedStorage)> },
 }
 
 pub(super) struct StorageTrieActor {
@@ -27,6 +27,8 @@ pub(super) struct StorageTrieActor {
     needs_root: bool,
     root: Option<B256>,
     deferred: DeferredDrops,
+    touched_slots: Vec<B256>,
+    final_hashed_storage: HashedStorage,
     rx: UnboundedReceiver<StorageTrieCommand>,
     event_tx: UnboundedSender<CoordinatorEvent>,
     proof_tx: UnboundedSender<ProofServiceCommand>,
@@ -47,6 +49,8 @@ impl StorageTrieActor {
             needs_root: false,
             root: None,
             deferred: DeferredDrops::default(),
+            touched_slots: Vec::new(),
+            final_hashed_storage: HashedStorage::default(),
             rx,
             event_tx,
             proof_tx,
@@ -63,7 +67,12 @@ impl StorageTrieActor {
     pub(super) async fn run(mut self) {
         while let Some(command) = self.rx.recv().await {
             if let StorageTrieCommand::ReturnTrie { tx } = command {
-                let _ = tx.send((self.trie, self.deferred));
+                let _ = tx.send((
+                    self.trie,
+                    self.deferred,
+                    self.touched_slots,
+                    self.final_hashed_storage,
+                ));
                 return;
             }
 
@@ -92,7 +101,10 @@ impl StorageTrieActor {
                     ));
                 }
 
+                self.final_hashed_storage.extend(&storage);
+
                 for (slot, value) in storage.storage {
+                    self.touched_slots.push(slot);
                     let encoded = if value.is_zero() {
                         Vec::new()
                     } else {

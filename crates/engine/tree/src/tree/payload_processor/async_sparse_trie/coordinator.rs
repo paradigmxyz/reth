@@ -273,16 +273,11 @@ impl AsyncSparseTrieCoordinator {
             (0, 1) => {
                 let (address, storage) =
                     hashed_state_update.storages.into_iter().next().expect("checked len");
-                self.final_hashed_state.storages.entry(address).or_default().extend(&storage);
                 if storage.wiped {
                     return Err(ParallelStateRootError::Other(
                         "async BAL sparse trie prototype does not support storage wipes yet"
                             .to_string(),
                     ));
-                }
-
-                for &slot in storage.storage.keys() {
-                    self.trie.record_slot_touch(address, slot);
                 }
 
                 if !storage.storage.is_empty() {
@@ -476,11 +471,22 @@ impl AsyncSparseTrieCoordinator {
         for (address, actor) in std::mem::take(&mut self.storage_actors) {
             let (return_tx, return_rx) = oneshot::channel();
             send_storage_command(&actor.tx, StorageTrieCommand::ReturnTrie { tx: return_tx })?;
-            let (storage_trie, storage_deferred) = return_rx.await.map_err(|_| {
-                ParallelStateRootError::Other(format!(
-                    "async storage sparse trie actor for {address:?} dropped before returning trie"
-                ))
-            })?;
+            let (storage_trie, storage_deferred, touched_slots, final_hashed_storage) =
+                return_rx.await.map_err(|_| {
+                    ParallelStateRootError::Other(format!(
+                        "async storage sparse trie actor for {address:?} dropped before returning trie"
+                    ))
+                })?;
+            for slot in touched_slots {
+                self.trie.record_slot_touch(address, slot);
+            }
+            if !final_hashed_storage.is_empty() {
+                self.final_hashed_state
+                    .storages
+                    .entry(address)
+                    .or_default()
+                    .extend(&final_hashed_storage);
+            }
             self.trie.insert_storage_trie(address, storage_trie);
             self.trie.extend_deferred_drops(storage_deferred);
         }
