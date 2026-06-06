@@ -149,32 +149,18 @@ impl ProofService {
     }
 
     fn queue_account_targets(&mut self, targets: Vec<ProofV2Target>) {
-        let mut queued = 0usize;
-        let mut retry_if_idle = Vec::new();
-
         for target in targets {
             match self.fetched_account_targets.entry(target.key()) {
                 Entry::Occupied(mut entry) => {
                     if target.min_len < *entry.get() {
                         entry.insert(target.min_len);
                         self.pending_targets.push_account_target(target);
-                        queued += 1;
-                    } else {
-                        retry_if_idle.push(target);
                     }
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(target.min_len);
                     self.pending_targets.push_account_target(target);
-                    queued += 1;
                 }
-            }
-        }
-
-        if queued == 0 && self.inflight == 0 && self.pending_targets.is_empty() {
-            for target in retry_if_idle {
-                self.fetched_account_targets.insert(target.key(), target.min_len);
-                self.pending_targets.push_account_target(target);
             }
         }
     }
@@ -182,15 +168,12 @@ impl ProofService {
     fn queue_storage_targets(&mut self, address: B256, targets: Vec<ProofV2Target>) {
         let fetched = self.fetched_storage_targets.entry(address).or_default();
         let mut queued = Vec::new();
-        let mut retry_if_idle = Vec::new();
         for target in targets {
             match fetched.entry(target.key()) {
                 Entry::Occupied(mut entry) => {
                     if target.min_len < *entry.get() {
                         entry.insert(target.min_len);
                         queued.push(target);
-                    } else {
-                        retry_if_idle.push(target);
                     }
                 }
                 Entry::Vacant(entry) => {
@@ -202,13 +185,6 @@ impl ProofService {
 
         if !queued.is_empty() {
             self.pending_targets.extend_storage_targets(&address, queued);
-        } else if self.inflight == 0 && self.pending_targets.is_empty() && !retry_if_idle.is_empty()
-        {
-            let fetched = self.fetched_storage_targets.entry(address).or_default();
-            for target in &retry_if_idle {
-                fetched.insert(target.key(), target.min_len);
-            }
-            self.pending_targets.extend_storage_targets(&address, retry_if_idle);
         }
     }
 
