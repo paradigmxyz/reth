@@ -4,7 +4,7 @@ use super::{
     PendingAccountUpdate, MAX_ACCOUNT_UPDATES_PER_DRIVE,
 };
 use alloy_primitives::{
-    map::{B256Map, B256Set, HashMap},
+    map::{B256Map, B256Set, Entry, HashMap},
     B256,
 };
 use alloy_rlp::Decodable;
@@ -41,6 +41,7 @@ pub(super) struct AccountTrieActor {
     updates: B256Map<LeafUpdate>,
     blocked_updates: HashMap<BlockedAccountTarget, B256Map<LeafUpdate>>,
     blocked_update_targets: B256Map<Vec<BlockedAccountTarget>>,
+    fetched_targets: B256Map<u8>,
     finalize: Option<AccountFinalize>,
     final_updates_built: bool,
     finalized: bool,
@@ -63,6 +64,7 @@ impl AccountTrieActor {
             updates: B256Map::default(),
             blocked_updates: HashMap::default(),
             blocked_update_targets: B256Map::default(),
+            fetched_targets: B256Map::default(),
             finalize: None,
             final_updates_built: false,
             finalized: false,
@@ -200,7 +202,18 @@ impl AccountTrieActor {
                 .update_leaves_2(&mut chunk, |update_key, target_key, min_len| {
                     let target = BlockedAccountTarget { key: target_key, min_len };
                     blocked_targets.entry(update_key).or_default().push(target);
-                    targets.push(ProofV2Target::new(target_key).with_min_len(min_len));
+                    match self.fetched_targets.entry(target_key) {
+                        Entry::Occupied(mut entry) => {
+                            if min_len < *entry.get() {
+                                entry.insert(min_len);
+                                targets.push(ProofV2Target::new(target_key).with_min_len(min_len));
+                            }
+                        }
+                        Entry::Vacant(entry) => {
+                            entry.insert(min_len);
+                            targets.push(ProofV2Target::new(target_key).with_min_len(min_len));
+                        }
+                    }
                 })
                 .map_err(to_parallel_sparse_error)?;
             chunks += 1;
@@ -208,8 +221,12 @@ impl AccountTrieActor {
             blocked += chunk.len();
             targets_total += targets.len();
 
-            if !targets.is_empty() {
+            let chunk_blocked = !chunk.is_empty();
+            if chunk_blocked {
                 self.block_account_updates(chunk, blocked_targets)?;
+            }
+
+            if !targets.is_empty() {
                 self.record_drive_summary(
                     &span,
                     chunks,
@@ -226,19 +243,16 @@ impl AccountTrieActor {
                 return Ok(())
             }
 
-            if !chunk.is_empty() {
+            if chunk_blocked {
                 self.record_drive_summary(
                     &span,
                     chunks,
                     applied,
                     blocked,
                     targets_total,
-                    "blocked_without_targets",
+                    "waiting_for_reveal",
                 );
-                return Err(ParallelStateRootError::Other(
-                    "account sparse trie actor retained blocked updates without proof targets"
-                        .to_string(),
-                ));
+                return Ok(())
             }
 
             if self.updates.len() == updates_len_before {
@@ -485,6 +499,21 @@ mod tests {
         actor.on_command(AccountTrieCommand::Drive).await.unwrap();
         assert!(matches!(proof_rx.try_recv(), Err(TryRecvError::Empty)));
         assert!(actor.updates.is_empty());
+        assert_eq!(actor.blocked_updates.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn drive_filters_account_target_already_requested_by_actor() {
+        let (mut actor, mut proof_rx, _event_rx) = blind_actor();
+        let address = B256::with_last_byte(1);
+
+        actor.fetched_targets.insert(address, 0);
+        actor.on_command(AccountTrieCommand::Touch(address)).await.unwrap();
+        actor.on_command(AccountTrieCommand::Drive).await.unwrap();
+
+        assert!(matches!(proof_rx.try_recv(), Err(TryRecvError::Empty)));
+        assert!(actor.updates.is_empty());
+        assert_eq!(actor.blocked_update_count(), 1);
         assert_eq!(actor.blocked_updates.len(), 1);
     }
 
