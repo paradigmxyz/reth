@@ -15,6 +15,7 @@ use tokio::sync::oneshot;
 use tracing::debug_span;
 
 const RECEIPT_ENCODE_BUF_INITIAL_CAPACITY: usize = 512;
+const RECEIPT_PENDING_PREALLOC_THRESHOLD: usize = 4096;
 
 /// Receipt with index, ready to be sent to the background task for encoding and trie building.
 #[derive(Debug, Clone)]
@@ -81,7 +82,12 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
         let mut aggregated_bloom = Bloom::ZERO;
         let mut encode_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
         let mut next = 0usize;
-        let mut pending = HashMap::new();
+        let mut pending = match receipts_len {
+            Some(len) if len >= RECEIPT_PENDING_PREALLOC_THRESHOLD => {
+                HashMap::with_capacity_and_hasher(len, Default::default())
+            }
+            _ => HashMap::new(),
+        };
 
         let mut push = |receipt: R| {
             let receipt_with_bloom = receipt.with_bloom_ref();
