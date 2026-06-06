@@ -239,12 +239,16 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
             metrics.inc_deleted_tracked_blobs(blobs.len());
             // remove all finalized blobs from the blob store
             pool.delete_blobs(blobs);
-            // and also do periodic cleanup
-            let pool = pool.clone();
-            task_spawner.spawn_blocking_task(async move {
-                debug!(target: "txpool", finalized_block = %finalized, "cleaning up blob store");
-                pool.cleanup_blobs();
-            });
+
+            // Only blob-aware chains need blob store cleanup. On chains without blob support,
+            // this avoids invoking blob store maintenance after every finalized block.
+            if pool_info.pending_blob_fee.unwrap_or_default() > 0 {
+                let pool = pool.clone();
+                task_spawner.spawn_blocking_task(async move {
+                    debug!(target: "txpool", finalized_block = %finalized, "cleaning up blob store");
+                    pool.cleanup_blobs();
+                });
+            }
         }
 
         // outcomes of the futures we are waiting on
