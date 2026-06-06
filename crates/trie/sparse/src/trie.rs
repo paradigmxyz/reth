@@ -316,6 +316,24 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
             Self::Revealed(trie) => trie.update_leaves(updates, proof_required_fn),
         }
     }
+
+    /// Applies batch leaf updates to the sparse trie and reports which update key was blocked by
+    /// which proof target.
+    pub fn update_leaves_2(
+        &mut self,
+        updates: &mut B256Map<LeafUpdate>,
+        mut proof_required_fn: impl FnMut(B256, B256, u8),
+    ) -> SparseTrieResult<()> {
+        match self {
+            Self::Blind(_) => {
+                for key in updates.keys() {
+                    proof_required_fn(*key, *key, 0);
+                }
+                Ok(())
+            }
+            Self::Revealed(trie) => trie.update_leaves_2(updates, proof_required_fn),
+        }
+    }
 }
 
 /// Enum representing sparse trie node type.

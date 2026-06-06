@@ -24,7 +24,7 @@ use reth_trie_common::{
 };
 use slotmap::{DefaultKey, SlotMap};
 use smallvec::SmallVec;
-use tracing::{debug, instrument, trace};
+use tracing::{instrument, trace};
 
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::{LeafUpdateRecord, ProofTrieNodeRecord, RecordedOp, TrieDebugRecorder};
@@ -2800,6 +2800,20 @@ impl SparseTrie for ArenaParallelSparseTrie {
         updates: &mut B256Map<LeafUpdate>,
         mut proof_required_fn: impl FnMut(B256, u8),
     ) -> SparseTrieResult<()> {
+        self.update_leaves_2(updates, |_, target, min_len| proof_required_fn(target, min_len))
+    }
+
+    #[instrument(
+        level = "trace",
+        target = TRACE_TARGET,
+        skip_all,
+        fields(num_updates = updates.len()),
+    )]
+    fn update_leaves_2(
+        &mut self,
+        updates: &mut B256Map<LeafUpdate>,
+        mut proof_required_fn: impl FnMut(B256, B256, u8),
+    ) -> SparseTrieResult<()> {
         if updates.is_empty() {
             return Ok(());
         }
@@ -2835,7 +2849,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     let logical_len = cursor.head_logical_branch_path_len(&self.upper_arena);
                     let min_len = (logical_len as u8 + 1).min(64);
                     trace!(target: TRACE_TARGET, ?key, min_len, "Update hit blinded node, requesting proof");
-                    proof_required_fn(key, min_len);
+                    proof_required_fn(key, key, min_len);
                     #[cfg(feature = "trie-debug")]
                     recorded_proof_targets.push((key, min_len));
                     updates.insert(key, update.clone());
@@ -2864,10 +2878,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         subtrie_updates,
                     ) {
                         trace!(target: TRACE_TARGET, proof_key = ?proof.key, proof_min_len = proof.min_len, "Subtrie collapse would need blinded sibling, requesting proof");
-                        proof_required_fn(proof.key, proof.min_len);
-                        #[cfg(feature = "trie-debug")]
-                        recorded_proof_targets.push((proof.key, proof.min_len));
                         for &(key, _, ref update) in subtrie_updates {
+                            proof_required_fn(key, proof.key, proof.min_len);
+                            #[cfg(feature = "trie-debug")]
+                            recorded_proof_targets.push((proof.key, proof.min_len));
                             updates.insert(key, update.clone());
                         }
                         // Pop the subtrie entry before continuing.
@@ -2914,10 +2928,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         subtrie.update_leaves(subtrie_updates);
 
                         for (target_idx, proof) in subtrie.required_proofs.drain(..) {
-                            proof_required_fn(proof.key, proof.min_len);
+                            let (key, _, ref update) = subtrie_updates[target_idx];
+                            proof_required_fn(key, proof.key, proof.min_len);
                             #[cfg(feature = "trie-debug")]
                             recorded_proof_targets.push((proof.key, proof.min_len));
-                            let (key, _, ref update) = subtrie_updates[target_idx];
                             updates.insert(key, update.clone());
                         }
 
@@ -2976,7 +2990,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         );
                         match result {
                             RemoveLeafResult::NeedsProof { key, proof_key, min_len } => {
-                                proof_required_fn(proof_key, min_len);
+                                proof_required_fn(key, proof_key, min_len);
                                 #[cfg(feature = "trie-debug")]
                                 recorded_proof_targets.push((proof_key, min_len));
                                 let update =
@@ -3042,10 +3056,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
         for (child_idx, mut subtrie, range) in taken {
             let subtrie_updates = &sorted[range];
             for (target_idx, proof) in subtrie.required_proofs.drain(..) {
-                proof_required_fn(proof.key, proof.min_len);
+                let (key, _, ref update) = subtrie_updates[target_idx];
+                proof_required_fn(key, proof.key, proof.min_len);
                 #[cfg(feature = "trie-debug")]
                 recorded_proof_targets.push((proof.key, proof.min_len));
-                let (key, _, ref update) = subtrie_updates[target_idx];
                 updates.insert(key, update.clone());
             }
 

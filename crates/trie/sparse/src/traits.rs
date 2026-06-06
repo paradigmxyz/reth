@@ -301,6 +301,20 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
         proof_required_fn: impl FnMut(B256, u8),
     ) -> SparseTrieResult<()>;
 
+    /// Applies leaf updates to the sparse trie, reporting which update was blocked by which proof
+    /// target.
+    ///
+    /// This has the same mutation semantics as [`Self::update_leaves`]. The callback receives
+    /// `(update_key, target_key, min_len)`, where `update_key` is the key retained in `updates` and
+    /// `target_key` is the proof target needed before that update should be retried.
+    fn update_leaves_2(
+        &mut self,
+        updates: &mut B256Map<LeafUpdate>,
+        mut proof_required_fn: impl FnMut(B256, B256, u8),
+    ) -> SparseTrieResult<()> {
+        self.update_leaves(updates, |target, min_len| proof_required_fn(target, target, min_len))
+    }
+
     /// Commits the updated nodes to internal trie state.
     fn commit_updates(
         &mut self,
@@ -489,6 +503,14 @@ mod configurable_sparse_trie {
             proof_required_fn: impl FnMut(B256, u8),
         ) -> SparseTrieResult<()> {
             delegate!(self, update_leaves, updates, proof_required_fn)
+        }
+
+        fn update_leaves_2(
+            &mut self,
+            updates: &mut B256Map<LeafUpdate>,
+            proof_required_fn: impl FnMut(B256, B256, u8),
+        ) -> SparseTrieResult<()> {
+            delegate!(self, update_leaves_2, updates, proof_required_fn)
         }
 
         fn commit_updates(
