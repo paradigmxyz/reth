@@ -69,6 +69,7 @@ impl ValueWithSubKey for PackedStorageTrieEntry {
 
 #[cfg(any(test, feature = "reth-codec"))]
 impl reth_codecs::Compact for PackedStorageTrieEntry {
+    #[inline]
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
@@ -78,6 +79,7 @@ impl reth_codecs::Compact for PackedStorageTrieEntry {
         nibbles_len + node_len
     }
 
+    #[inline]
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         let (nibbles, buf) = PackedStoredNibblesSubKey::from_compact(buf, 33);
         let (node, buf) = BranchNodeCompact::from_compact(buf, len - 33);
