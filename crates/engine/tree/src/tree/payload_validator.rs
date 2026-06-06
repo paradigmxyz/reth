@@ -49,10 +49,16 @@ use crate::tree::{
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
+use alloy_eip7928::{
+    bal::DecodedBal, compute_block_access_list_hash, AccountChanges, BlockAccessList,
+    BlockAccessListGasError, ITEM_COST,
+};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
-use alloy_primitives::{map::B256Set, B256};
+use alloy_primitives::{
+    map::{B256Set, HashSet},
+    B256,
+};
 use reth_tasks::LazyHandle;
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
@@ -119,6 +125,43 @@ const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
 type ReceiptRootSender<N> =
     crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
 type ReceiptRootReceiver = tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>;
+
+fn validate_bal_gas(
+    block_access_list: &[AccountChanges],
+    gas_limit: u64,
+) -> Result<(), BlockAccessListGasError> {
+    let items = count_bal_items(block_access_list);
+    if items > gas_limit / ITEM_COST as u64 {
+        return Err(BlockAccessListGasError::new(items, gas_limit));
+    }
+
+    Ok(())
+}
+
+fn count_bal_items(block_access_list: &[AccountChanges]) -> u64 {
+    let mut bal_items = 0;
+
+    for account in block_access_list {
+        bal_items += 1;
+
+        let slot_count = account.storage_changes().len() + account.storage_reads().len();
+        if slot_count == 0 {
+            continue;
+        }
+
+        let mut unique_slots = HashSet::with_capacity(slot_count);
+        for change in account.storage_changes() {
+            unique_slots.insert(change.slot);
+        }
+        for slot in account.storage_reads() {
+            unique_slots.insert(*slot);
+        }
+
+        bal_items += unique_slots.len() as u64;
+    }
+
+    bal_items
+}
 
 /// Context providing access to tree state during validation.
 ///
@@ -997,7 +1040,7 @@ where
         decoded_bal: &DecodedBal,
         gas_limit: u64,
     ) -> Result<(), ConsensusError> {
-        decoded_bal.as_bal().validate_gas_limit(gas_limit).map_err(ConsensusError::from)
+        validate_bal_gas(decoded_bal.as_bal().as_slice(), gas_limit).map_err(ConsensusError::from)
     }
 
     /// Executes a block with the given state provider.
@@ -2354,6 +2397,46 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
             Self::Payload(payload) => payload.gas_limit(),
             Self::Block(block) => block.gas_limit(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_eip7928::{BlockAccessIndex, SlotChanges, StorageChange};
+    use alloy_primitives::U256;
+
+    fn slot_change(slot: u64) -> SlotChanges {
+        SlotChanges::new(
+            U256::from(slot),
+            vec![StorageChange::new(BlockAccessIndex::new(1), U256::from(slot))],
+        )
+    }
+
+    #[test]
+    fn count_bal_items_deduplicates_storage_reads_and_writes() {
+        let account = AccountChanges {
+            address: Address::ZERO,
+            storage_changes: vec![slot_change(1), slot_change(2), slot_change(2)],
+            storage_reads: vec![U256::from(2), U256::from(3), U256::from(3)],
+            ..Default::default()
+        };
+
+        assert_eq!(count_bal_items(&[account]), 4);
+    }
+
+    #[test]
+    fn validate_bal_gas_uses_unique_item_count() {
+        let account = AccountChanges {
+            address: Address::ZERO,
+            storage_changes: vec![slot_change(1)],
+            storage_reads: vec![U256::from(2)],
+            ..Default::default()
+        };
+        let block_access_list = [account];
+
+        assert!(validate_bal_gas(&block_access_list, 3 * ITEM_COST as u64).is_ok());
+        assert!(validate_bal_gas(&block_access_list, 3 * ITEM_COST as u64 - 1).is_err());
     }
 }
 
