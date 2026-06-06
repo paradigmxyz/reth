@@ -118,6 +118,16 @@ impl<A, S> SparseStateTrie<A, S> {
         self.state = trie;
     }
 
+    /// Takes the accounts trie, replacing it with a blind trie.
+    pub fn take_accounts_trie(&mut self) -> RevealableSparseTrie<A> {
+        core::mem::replace(&mut self.state, RevealableSparseTrie::Blind(None))
+    }
+
+    /// Inserts the accounts trie.
+    pub fn insert_accounts_trie(&mut self, trie: RevealableSparseTrie<A>) {
+        self.state = trie;
+    }
+
     /// Set the accounts trie to the given `RevealableSparseTrie`.
     pub fn with_accounts_trie(mut self, trie: RevealableSparseTrie<A>) -> Self {
         self.set_accounts_trie(trie);
@@ -143,6 +153,18 @@ impl<A, S> SparseStateTrie<A, S> {
     /// calculating the state root.
     pub fn take_deferred_drops(&mut self) -> DeferredDrops {
         core::mem::take(&mut self.deferred_drops)
+    }
+
+    /// Extends the deferred drops with additional drops.
+    pub fn extend_deferred_drops(&mut self, deferred: DeferredDrops) {
+        self.deferred_drops.extend(deferred);
+    }
+}
+
+impl DeferredDrops {
+    /// Extends this collection with another collection of deferred drops.
+    pub fn extend(&mut self, other: Self) {
+        self.proof_nodes_bufs.extend(other.proof_nodes_bufs);
     }
 }
 
@@ -335,11 +357,15 @@ where
             .map(|(target, mut nodes)| {
                 let result = match target {
                     Either::Left(trie) => {
-                        let _span = tracing::trace_span!("reveal_account_proof_nodes", nodes = nodes.len()).entered();
+                        let _span =
+                            tracing::trace_span!("reveal_account_proof_nodes", nodes = nodes.len())
+                                .entered();
                         trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
                     }
                     Either::Right(trie) => {
-                        let _span = tracing::trace_span!("reveal_storage_proof_nodes", nodes = nodes.len()).entered();
+                        let _span =
+                            tracing::trace_span!("reveal_storage_proof_nodes", nodes = nodes.len())
+                                .entered();
                         trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
                     }
                 };
@@ -358,11 +384,19 @@ where
                 .map(|(target, mut nodes)| {
                     let result = match target {
                         Either::Left(trie) => {
-                            let _span = tracing::trace_span!("reveal_account_proof_nodes", nodes = nodes.len()).entered();
+                            let _span = tracing::trace_span!(
+                                "reveal_account_proof_nodes",
+                                nodes = nodes.len()
+                            )
+                            .entered();
                             trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
                         }
                         Either::Right(trie) => {
-                            let _span = tracing::trace_span!("reveal_storage_proof_nodes", nodes = nodes.len()).entered();
+                            let _span = tracing::trace_span!(
+                                "reveal_storage_proof_nodes",
+                                nodes = nodes.len()
+                            )
+                            .entered();
                             trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
                         }
                     };

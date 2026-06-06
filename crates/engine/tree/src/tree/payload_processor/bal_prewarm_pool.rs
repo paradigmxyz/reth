@@ -6,13 +6,13 @@
 //! CPU that contends with the block executor's threads and slows execution.
 //!
 //! This pool instead uses dedicated OS threads that **block** on a per-worker queue when idle, so
-//! they cost nothing when there's no work and leave the cores for execution. The per-block lifecycle
-//! is explicit: [`begin_block`](BalPrewarmPool::begin_block) hands every worker the provider builder
-//! so each opens its own MDBX read txn over the parent state; warm requests are distributed
-//! round-robin across the workers; [`end_block`](BalPrewarmPool::end_block) tells every worker to
-//! drop its provider once it has drained the warm requests ahead of it. A worker therefore holds a
-//! read txn only while it is warming the current block, never pinning MDBX's freelist across the
-//! inter-block gap.
+//! they cost nothing when there's no work and leave the cores for execution. The per-block
+//! lifecycle is explicit: [`begin_block`](BalPrewarmPool::begin_block) hands every worker the
+//! provider builder so each opens its own MDBX read txn over the parent state; warm requests are
+//! distributed round-robin across the workers; [`end_block`](BalPrewarmPool::end_block) tells every
+//! worker to drop its provider once it has drained the warm requests ahead of it. A worker
+//! therefore holds a read txn only while it is warming the current block, never pinning MDBX's
+//! freelist across the inter-block gap.
 
 use alloy_primitives::{Address, StorageKey};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache};

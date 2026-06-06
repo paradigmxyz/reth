@@ -47,6 +47,7 @@ use std::{
 };
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
+mod async_sparse_trie;
 pub mod bal;
 pub(crate) mod bal_prewarm_pool;
 pub mod multiproof;
@@ -205,9 +206,7 @@ where
     fn bal_prewarm_pool(&self) -> Arc<bal_prewarm_pool::BalPrewarmPool> {
         self.bal_prewarm_pool
             .get_or_init(|| {
-                bal_prewarm_pool::BalPrewarmPool::new(
-                    bal_prewarm_pool::DEFAULT_BAL_PREWARM_THREADS,
-                )
+                bal_prewarm_pool::BalPrewarmPool::new(bal_prewarm_pool::DEFAULT_BAL_PREWARM_THREADS)
             })
             .clone()
     }
@@ -315,6 +314,7 @@ where
             env.parent_state_root,
             halve_workers,
             config,
+            parallel_bal_execution,
         );
         // BAL blocks bypass the normal execution state hook only when the parallel BAL executor
         // consumes the BAL (`parallel_bal_execution`); otherwise the block follows the sequential
@@ -354,8 +354,13 @@ where
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count);
-        let prewarm_handle =
-            self.spawn_caching_with(env, prewarm_rx, provider_builder, None, parallel_bal_execution);
+        let prewarm_handle = self.spawn_caching_with(
+            env,
+            prewarm_rx,
+            provider_builder,
+            None,
+            parallel_bal_execution,
+        );
         PayloadHandle {
             state_root_handle: None,
             install_state_hook: false,
@@ -384,6 +389,7 @@ where
         parent_state_root: B256,
         halve_workers: bool,
         config: &TreeConfig,
+        parallel_bal_execution: bool,
     ) -> StateRootHandle
     where
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -409,6 +415,7 @@ where
             from_multi_proof,
             parent_state_root,
             config.multiproof_chunk_size(),
+            parallel_bal_execution,
         );
 
         StateRootHandle::new(parent_state_root, updates_tx, state_root_rx, hashed_state_rx)
@@ -606,6 +613,7 @@ where
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
         parent_state_root: B256,
         chunk_size: usize,
+        parallel_bal_execution: bool,
     ) {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
@@ -613,8 +621,39 @@ where
         let max_hot_accounts = self.sparse_trie_max_hot_accounts;
         let disable_cache_pruning = self.disable_sparse_trie_cache_pruning;
         let executor = self.executor.clone();
+        let use_async_bal_sparse_trie =
+            parallel_bal_execution && async_sparse_trie::async_bal_sparse_trie_enabled();
 
         let parent_span = Span::current();
+
+        if use_async_bal_sparse_trie {
+            self.executor.spawn_blocking_named(
+                async_sparse_trie::ASYNC_SPARSE_TRIE_THREAD_NAME,
+                move || {
+                    reth_tasks::once!(increase_thread_priority);
+
+                    let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "async_sparse_trie_task")
+                        .entered();
+
+                    async_sparse_trie::run_async_bal_sparse_trie_task(
+                        preserved_sparse_trie,
+                        executor,
+                        proof_worker_handle,
+                        trie_metrics,
+                        state_root_tx,
+                        hashed_state_tx,
+                        from_multi_proof,
+                        parent_state_root,
+                        chunk_size,
+                        max_hot_slots,
+                        max_hot_accounts,
+                        disable_cache_pruning,
+                    );
+                },
+            );
+            return;
+        }
+
         self.executor.spawn_blocking_named("sparse-trie", move || {
             reth_tasks::once!(increase_thread_priority);
 

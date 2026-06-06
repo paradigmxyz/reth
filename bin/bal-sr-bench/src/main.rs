@@ -1,8 +1,8 @@
 //! Standalone benchmark for the BAL (EIP-7928) parallel state-root machinery.
 //!
 //! Runs ONLY the state-root path (prewarm BAL load -> proof workers -> sparse-trie reveal -> root),
-//! stripped of execution, networking, engine API, and persistence, replaying captured blocks against
-//! a read-only MDBX database. See project memory `sr-isolation-bench`.
+//! stripped of execution, networking, engine API, and persistence, replaying captured blocks
+//! against a read-only MDBX database. See project memory `sr-isolation-bench`.
 //!
 //! Reconstruct approach: feed the production `PayloadProcessor::spawn` the captured BAL + parent
 //! state root with an empty tx iterator and `parallel_bal_execution = true`; the BAL prewarm path
@@ -12,11 +12,11 @@
 //! Cross-block: a single long-lived `PayloadProcessor` replays N consecutive blocks. Each block's
 //! `parent_state_root` chains to the previous computed root (preserved sparse trie reuse). Prior
 //! blocks' writes are made visible two ways:
-//!  - proof workers: an Immediate overlay (accumulated hashed leaves + trie nodes) on the multiproof
-//!    factory;
-//!  - prewarm `basic_account` reads: an unhashed `BundleState` overlay (accumulated account/storage,
-//!    derived from the BALs exactly as `send_bal_hashed_state` does) passed as an `ExecutedBlock` to
-//!    the `StateProviderBuilder`.
+//!  - proof workers: an Immediate overlay (accumulated hashed leaves + trie nodes) on the
+//!    multiproof factory;
+//!  - prewarm `basic_account` reads: an unhashed `BundleState` overlay (accumulated
+//!    account/storage, derived from the BALs exactly as `send_bal_hashed_state` does) passed as an
+//!    `ExecutedBlock` to the `StateProviderBuilder`.
 
 // Match the node's global allocator (jemalloc) so allocation behavior is representative.
 #[global_allocator]
@@ -42,7 +42,10 @@ use reth_node_ethereum::EthereumNode;
 use reth_node_types::NodeTypesWithDBAdapter;
 use reth_primitives_traits::{Account, Recovered};
 use reth_provider::{
-    providers::{BlockchainProvider, OverlayBuilder, OverlayStateProviderFactory, RocksDBProvider, StaticFileProvider},
+    providers::{
+        BlockchainProvider, OverlayBuilder, OverlayStateProviderFactory, RocksDBProvider,
+        StaticFileProvider,
+    },
     AccountReader, ProviderFactory, StateProviderFactory,
 };
 use reth_trie::{updates::TrieUpdates, HashedPostState};
@@ -118,7 +121,11 @@ impl UnhashedState {
                     keccak256(&c.new_code)
                 }
             });
-            if balance.is_none() && nonce.is_none() && code_hash.is_none() && ac.storage_changes.is_empty() {
+            if balance.is_none() &&
+                nonce.is_none() &&
+                code_hash.is_none() &&
+                ac.storage_changes.is_empty()
+            {
                 continue;
             }
             let existing = self
@@ -127,7 +134,8 @@ impl UnhashedState {
                 .copied()
                 .or_else(|| db.basic_account(&addr).ok().flatten());
             let account = Account {
-                balance: balance.unwrap_or_else(|| existing.map(|a| a.balance).unwrap_or(U256::ZERO)),
+                balance: balance
+                    .unwrap_or_else(|| existing.map(|a| a.balance).unwrap_or(U256::ZERO)),
                 nonce: nonce.unwrap_or_else(|| existing.map(|a| a.nonce).unwrap_or(0)),
                 bytecode_hash: code_hash
                     .or_else(|| existing.and_then(|a| a.bytecode_hash).or(Some(KECCAK_EMPTY))),
@@ -187,16 +195,19 @@ fn main() -> eyre::Result<()> {
 
     let datadir = std::env::var("RETH_DATADIR").unwrap_or_else(|_| "/schelk/reth".to_string());
     let datadir = Path::new(&datadir);
-    let capture = std::env::var("RETH_BAL_DUMP_DIR").unwrap_or_else(|_| "/tmp/bal_capture".to_string());
+    let capture =
+        std::env::var("RETH_BAL_DUMP_DIR").unwrap_or_else(|_| "/tmp/bal_capture".to_string());
     let capture = Path::new(&capture);
-    let first: u64 = std::env::var("BENCH_FIRST_BLOCK").ok().and_then(|v| v.parse().ok()).unwrap_or(25115966);
+    let first: u64 =
+        std::env::var("BENCH_FIRST_BLOCK").ok().and_then(|v| v.parse().ok()).unwrap_or(25115966);
     let count: u64 = std::env::var("BENCH_BLOCKS").ok().and_then(|v| v.parse().ok()).unwrap_or(5);
 
     // Optional tracing layers (one or both):
-    //  - Chrome/Perfetto: RETH_CHROME_TRACE=/path/trace.json (+ RETH_CHROME_FILTER). The flush guard
-    //    is held to end of main so it flushes on clean exit.
-    //  - samply markers: RETH_LOG_SAMPLY=1 (+ RETH_SAMPLY_FILTER) — equivalent to reth's `--log.samply`;
-    //    spans show as markers in the Firefox Profiler alongside the sampled stacks (run under samply).
+    //  - Chrome/Perfetto: RETH_CHROME_TRACE=/path/trace.json (+ RETH_CHROME_FILTER). The flush
+    //    guard is held to end of main so it flushes on clean exit.
+    //  - samply markers: RETH_LOG_SAMPLY=1 (+ RETH_SAMPLY_FILTER) — equivalent to reth's
+    //    `--log.samply`; spans show as markers in the Firefox Profiler alongside the sampled stacks
+    //    (run under samply).
     use tracing_subscriber::{prelude::*, EnvFilter, Layer, Registry};
     let mut layers: Vec<Box<dyn Layer<Registry> + Send + Sync>> = Vec::new();
     let chrome_guard = match std::env::var("RETH_CHROME_TRACE") {
@@ -212,13 +223,15 @@ fn main() -> eyre::Result<()> {
         Err(_) => None,
     };
     if std::env::var_os("RETH_LOG_SAMPLY").is_some() {
-        let directives = std::env::var("RETH_SAMPLY_FILTER").unwrap_or_else(|_| "debug".to_string());
+        let directives =
+            std::env::var("RETH_SAMPLY_FILTER").unwrap_or_else(|_| "debug".to_string());
         let layer = tracing_samply::SamplyLayer::new()
             .map_err(|e| eyre::eyre!("failed to create samply layer: {e}"))?;
         layers.push(layer.with_filter(EnvFilter::new(directives)).boxed());
     }
     // Tracy: RETH_LOG_TRACY=1 (+ RETH_TRACY_FILTER) — embeds the Tracy client; a Tracy profiler
-    // (GUI on :8086 or headless tracy-capture) connects to record. Equivalent to reth's --log.tracy.
+    // (GUI on :8086 or headless tracy-capture) connects to record. Equivalent to reth's
+    // --log.tracy.
     if std::env::var_os("RETH_LOG_TRACY").is_some() {
         let directives = std::env::var("RETH_TRACY_FILTER").unwrap_or_else(|_| {
             "info,engine::tree::payload_processor=trace,reth_trie_parallel=trace,reth_trie_sparse=trace".to_string()
@@ -245,12 +258,21 @@ fn main() -> eyre::Result<()> {
     let runtime = reth_tasks::RuntimeBuilder::new(reth_tasks::RuntimeConfig::default()).build()?;
     let chain_spec = Arc::new(ChainSpecBuilder::mainnet().build());
 
-    let db = open_db_read_only(&datadir.join("db"), DatabaseArguments::new(ClientVersion::default()))?;
+    let db =
+        open_db_read_only(&datadir.join("db"), DatabaseArguments::new(ClientVersion::default()))?;
+    let rocksdb_path = datadir.join("rocksdb");
+    let rocksdb_read_only = rocksdb_path.join("CURRENT").exists();
+    if !rocksdb_read_only {
+        eprintln!("creating missing RocksDB sidecar at {}", rocksdb_path.display());
+    }
     let factory = ProviderFactory::<NodeTypes>::new(
         db,
         chain_spec.clone(),
         StaticFileProvider::read_only(datadir.join("static_files"))?,
-        RocksDBProvider::builder(datadir.join("rocksdb")).with_default_tables().with_read_only(true).build()?,
+        RocksDBProvider::builder(&rocksdb_path)
+            .with_default_tables()
+            .with_read_only(rocksdb_read_only)
+            .build()?,
         runtime.clone(),
     )?;
     let provider: Provider = BlockchainProvider::new(factory)?;
@@ -292,16 +314,18 @@ fn main() -> eyre::Result<()> {
         };
 
         // prewarm reads see prior blocks via an unhashed BundleState overlay
-        let overlay_blocks = (!unhashed.accounts.is_empty())
-            .then(|| vec![unhashed.to_executed_block(number)]);
-        let provider_builder = StateProviderBuilder::new(provider.clone(), base_hash, overlay_blocks);
+        let overlay_blocks =
+            (!unhashed.accounts.is_empty()).then(|| vec![unhashed.to_executed_block(number)]);
+        let provider_builder =
+            StateProviderBuilder::new(provider.clone(), base_hash, overlay_blocks);
 
         // proof workers see prior blocks via an Immediate trie+hashed overlay
-        let overlay_builder = OverlayBuilder::<EthPrimitives>::new(base_hash, ChangesetCache::new())
-            .with_immediate_overlay(
-                Arc::new(acc_trie.clone().into_sorted()),
-                Arc::new(acc_hashed.clone().into_sorted()),
-            );
+        let overlay_builder =
+            OverlayBuilder::<EthPrimitives>::new(base_hash, ChangesetCache::new())
+                .with_immediate_overlay(
+                    Arc::new(acc_trie.clone().into_sorted()),
+                    Arc::new(acc_hashed.clone().into_sorted()),
+                );
         // This base has no pin_snapshot; OverlayStateProviderFactory implements
         // DatabaseProviderROFactory directly.
         let overlay_factory = OverlayStateProviderFactory::new(provider.clone(), overlay_builder);

@@ -411,9 +411,10 @@ where
                 }
 
                 // Lane B+C: account load (I/O) + leaf hash on a STABLE set of persistent worker
-                // threads. `spawn_blocking_named` maps each name to one reused OS thread (WorkerMap),
-                // so the fixed name set is created once and reused every block — no ad-hoc per-block
-                // thread spawning, and distinct from the bal-prewarm pool.
+                // threads. `spawn_blocking_named` maps each name to one reused OS thread
+                // (WorkerMap), so the fixed name set is created once and reused
+                // every block — no ad-hoc per-block thread spawning, and distinct
+                // from the bal-prewarm pool.
                 let names = bal_load_worker_names();
                 let bal_len = stream_bal.as_bal().len();
                 let chunk = bal_len.div_ceil(names.len()).max(1);
@@ -426,7 +427,8 @@ where
                     let tx = to_sparse_trie_task.clone();
                     let span = stream_parent_span.clone();
                     let load_done_tx = load_done_tx.clone();
-                    // chunk_idx < names.len() since the number of chunks is ceil(len/chunk) <= names.
+                    // chunk_idx < names.len() since the number of chunks is ceil(len/chunk) <=
+                    // names.
                     let _ = coord_executor.spawn_blocking_named(names[chunk_idx], move || {
                         let _e = debug_span!(
                             target: "engine::tree::payload_processor::prewarm",
@@ -818,9 +820,7 @@ where
         hashed_state.accounts.insert(hashed_address, Some(account));
         let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
     }
-
 }
-
 
 /// Returns a set of [`MultiProofTargetsV2`] and the total amount of storage targets, based on the
 /// given state.
