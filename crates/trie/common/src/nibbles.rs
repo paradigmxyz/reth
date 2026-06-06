@@ -9,14 +9,17 @@ pub use nybbles::Nibbles;
 /// - Descendants come before their ancestors (children before parents)
 /// - Siblings are ordered lexicographically
 pub fn depth_first_cmp(a: &Nibbles, b: &Nibbles) -> Ordering {
-    if a.len() == b.len() {
+    let a_len = a.len();
+    let b_len = b.len();
+
+    if a_len == b_len {
         return a.cmp(b)
     }
 
     let common_prefix_len = a.common_prefix_length(b);
-    if a.len() == common_prefix_len {
+    if a_len == common_prefix_len {
         return Ordering::Greater
-    } else if b.len() == common_prefix_len {
+    } else if b_len == common_prefix_len {
         return Ordering::Less
     }
 
