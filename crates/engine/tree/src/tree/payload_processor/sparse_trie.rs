@@ -597,7 +597,7 @@ where
 
             let trie = self.trie.get_or_create_storage_trie_mut(*address);
             let fetched = self.fetched_storage_targets.entry(*address).or_default();
-            let mut targets = Vec::new();
+            let mut targets = Vec::with_capacity(updates.len());
 
             let updates_len_before = updates.len();
             trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
@@ -892,7 +892,14 @@ impl PendingTargets {
     /// Extends storage targets for the given address.
     fn extend_storage_targets(&mut self, address: &B256, targets: Vec<ProofV2Target>) {
         self.len += targets.len();
-        self.targets.storage_targets.entry(*address).or_default().extend(targets);
+        match self.targets.storage_targets.entry(*address) {
+            Entry::Vacant(entry) => {
+                entry.insert(targets);
+            }
+            Entry::Occupied(mut entry) => {
+                entry.get_mut().extend(targets);
+            }
+        }
     }
 }
 
