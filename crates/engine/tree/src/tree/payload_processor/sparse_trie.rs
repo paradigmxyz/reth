@@ -9,7 +9,7 @@ use crate::tree::{
     },
     payload_processor::multiproof::MultiProofTaskMetrics,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{B256, U256};
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -477,12 +477,7 @@ where
                 for (&slot, &value) in &storage.storage {
                     self.trie.record_slot_touch(address, slot);
 
-                    let encoded = if value.is_zero() {
-                        Vec::new()
-                    } else {
-                        alloy_rlp::encode_fixed_size(&value).to_vec()
-                    };
-                    new_updates.insert(slot, LeafUpdate::Changed(encoded));
+                    new_updates.insert(slot, LeafUpdate::Changed(encode_storage_leaf_value(value)));
 
                     // Remove an existing storage update if it exists.
                     if let Some(ref mut existing) = existing_updates {
@@ -858,6 +853,17 @@ fn encode_account_leaf_value(
     account_rlp_buf.clone()
 }
 
+/// RLP-encodes a storage value as a sparse trie leaf value, or returns empty for zero/deletions.
+fn encode_storage_leaf_value(value: U256) -> Vec<u8> {
+    if value.is_zero() {
+        return Vec::new();
+    }
+
+    let mut encoded = Vec::with_capacity(value.length());
+    value.encode(&mut encoded);
+    encoded
+}
+
 /// Pending proof targets queued for dispatch to proof workers, along with their count.
 #[derive(Default)]
 struct PendingTargets {
@@ -996,6 +1002,13 @@ mod tests {
         assert_eq!(decoded.balance, U256::from(42));
         assert_eq!(decoded.storage_root, storage_root);
         assert_eq!(account_rlp_buf, encoded);
+    }
+
+    #[test]
+    fn test_encode_storage_leaf_value_matches_fixed_size_encoding() {
+        let value = U256::from(42);
+        assert_eq!(encode_storage_leaf_value(value), alloy_rlp::encode_fixed_size(&value).to_vec());
+        assert!(encode_storage_leaf_value(U256::ZERO).is_empty());
     }
 
     #[test]
