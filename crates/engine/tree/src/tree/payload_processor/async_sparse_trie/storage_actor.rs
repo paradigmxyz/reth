@@ -2,7 +2,10 @@ use super::{
     drain_update_chunk, insert_leaf_update, merge_leaf_updates, proof_service::ProofServiceCommand,
     to_parallel_sparse_error, ActorTrie, CoordinatorEvent, MAX_STORAGE_UPDATES_PER_DRIVE,
 };
-use alloy_primitives::{map::B256Map, B256};
+use alloy_primitives::{
+    map::{B256Map, Entry},
+    B256,
+};
 use reth_trie::{HashedStorage, ProofTrieNodeV2, ProofV2Target};
 use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{DeferredDrops, LeafUpdate};
@@ -26,6 +29,7 @@ pub(super) struct StorageTrieActor {
     updates: B256Map<LeafUpdate>,
     needs_root: bool,
     root: Option<B256>,
+    fetched_targets: B256Map<u8>,
     deferred: DeferredDrops,
     touched_slots: Vec<B256>,
     final_hashed_storage: HashedStorage,
@@ -48,6 +52,7 @@ impl StorageTrieActor {
             updates: B256Map::default(),
             needs_root: false,
             root: None,
+            fetched_targets: B256Map::default(),
             deferred: DeferredDrops::default(),
             touched_slots: Vec::new(),
             final_hashed_storage: HashedStorage::default(),
@@ -173,9 +178,22 @@ impl StorageTrieActor {
             let updates_len_before = self.updates.len();
             let mut chunk = drain_update_chunk(&mut self.updates, MAX_STORAGE_UPDATES_PER_DRIVE);
             let mut targets = Vec::new();
+            let mut emitted_targets = 0usize;
             self.trie
                 .update_leaves(&mut chunk, |path, min_len| {
-                    targets.push(ProofV2Target::new(path).with_min_len(min_len));
+                    emitted_targets += 1;
+                    match self.fetched_targets.entry(path) {
+                        Entry::Occupied(mut entry) => {
+                            if min_len < *entry.get() {
+                                entry.insert(min_len);
+                                targets.push(ProofV2Target::new(path).with_min_len(min_len));
+                            }
+                        }
+                        Entry::Vacant(entry) => {
+                            entry.insert(min_len);
+                            targets.push(ProofV2Target::new(path).with_min_len(min_len));
+                        }
+                    }
                 })
                 .map_err(to_parallel_sparse_error)?;
             merge_leaf_updates(&mut self.updates, chunk);
@@ -188,6 +206,10 @@ impl StorageTrieActor {
                             "async sparse trie proof service dropped".to_string(),
                         )
                     })?;
+                return Ok(())
+            }
+
+            if emitted_targets > 0 {
                 return Ok(())
             }
 
