@@ -1486,6 +1486,29 @@ where
         let mut trie_cursor_state = TrieCursorState::unseeked();
         let mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)> = None;
 
+        if targets.len() == 1 {
+            let prefix = sub_trie_prefix(&targets[0]);
+            let sub_trie_targets =
+                SubTrieTargets { prefix, targets, retain_root: targets[0].min_len == 0 };
+
+            if let Err(err) = self.proof_subtrie(
+                value_encoder,
+                &mut trie_cursor_state,
+                &mut hashed_cursor_current,
+                sub_trie_targets,
+            ) {
+                self.clear_computation_state();
+                return Err(err);
+            }
+
+            trace!(
+                target: TRACE_TARGET,
+                retained_proofs_len = ?self.retained_proofs.len(),
+                "proof_inner: returning",
+            );
+            return Ok(core::mem::take(&mut self.retained_proofs))
+        }
+
         // Divide targets into chunks, each chunk corresponding to a different sub-trie within the
         // overall trie, and handle all proofs within that sub-trie.
         for sub_trie_targets in iter_sub_trie_targets(targets) {
