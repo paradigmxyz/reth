@@ -1,10 +1,10 @@
 use super::{
-    drain_update_chunk, encode_account_leaf_value, insert_leaf_update, merge_leaf_updates,
+    drain_update_chunk, encode_account_leaf_value, insert_leaf_update,
     proof_service::ProofServiceCommand, to_parallel_sparse_error, ActorTrie, CoordinatorEvent,
     PendingAccountUpdate, MAX_ACCOUNT_UPDATES_PER_DRIVE,
 };
 use alloy_primitives::{
-    map::{B256Map, HashMap},
+    map::{B256Map, B256Set, HashMap},
     B256,
 };
 use alloy_rlp::Decodable;
@@ -40,7 +40,7 @@ pub(super) struct AccountTrieActor {
     trie: ActorTrie,
     updates: B256Map<LeafUpdate>,
     blocked_updates: HashMap<BlockedAccountTarget, B256Map<LeafUpdate>>,
-    blocked_update_targets: B256Map<BlockedAccountTarget>,
+    blocked_update_targets: B256Map<Vec<BlockedAccountTarget>>,
     finalize: Option<AccountFinalize>,
     final_updates_built: bool,
     finalized: bool,
@@ -194,12 +194,12 @@ impl AccountTrieActor {
             let updates_len_before = self.updates.len();
             let mut chunk = drain_update_chunk(&mut self.updates, MAX_ACCOUNT_UPDATES_PER_DRIVE);
             let chunk_len_before = chunk.len();
-            let mut blocked_targets = B256Map::default();
+            let mut blocked_targets = B256Map::<Vec<BlockedAccountTarget>>::default();
             let mut targets = Vec::new();
             self.trie
                 .update_leaves_2(&mut chunk, |update_key, target_key, min_len| {
                     let target = BlockedAccountTarget { key: target_key, min_len };
-                    blocked_targets.insert(update_key, target);
+                    blocked_targets.entry(update_key).or_default().push(target);
                     targets.push(ProofV2Target::new(target_key).with_min_len(min_len));
                 })
                 .map_err(to_parallel_sparse_error)?;
@@ -289,8 +289,14 @@ impl AccountTrieActor {
     }
 
     fn insert_account_update(&mut self, key: B256, update: LeafUpdate) {
-        if let Some(target) = self.blocked_update_targets.get(&key).copied() {
-            insert_leaf_update(self.blocked_updates.entry(target).or_default(), key, update);
+        if let Some(targets) = self.blocked_update_targets.get(&key).cloned() {
+            for target in targets {
+                insert_leaf_update(
+                    self.blocked_updates.entry(target).or_default(),
+                    key,
+                    update.clone(),
+                );
+            }
         } else {
             insert_leaf_update(&mut self.updates, key, update);
         }
@@ -299,17 +305,23 @@ impl AccountTrieActor {
     fn block_account_updates(
         &mut self,
         chunk: B256Map<LeafUpdate>,
-        mut blocked_targets: B256Map<BlockedAccountTarget>,
+        mut blocked_targets: B256Map<Vec<BlockedAccountTarget>>,
     ) -> Result<(), ParallelStateRootError> {
         for (key, update) in chunk {
-            let Some(target) = blocked_targets.remove(&key) else {
+            let Some(targets) = blocked_targets.remove(&key) else {
                 return Err(ParallelStateRootError::Other(
                     "account sparse trie actor retained blocked update without target metadata"
                         .to_string(),
                 ))
             };
-            self.blocked_update_targets.insert(key, target);
-            insert_leaf_update(self.blocked_updates.entry(target).or_default(), key, update);
+            self.blocked_update_targets.insert(key, targets.clone());
+            for target in targets {
+                insert_leaf_update(
+                    self.blocked_updates.entry(target).or_default(),
+                    key,
+                    update.clone(),
+                );
+            }
         }
 
         Ok(())
@@ -317,16 +329,10 @@ impl AccountTrieActor {
 
     fn promote_blocked_account_targets(&mut self, targets: Vec<ProofV2Target>) {
         if targets.is_empty() {
-            let buckets = std::mem::take(&mut self.blocked_updates);
-            for bucket in buckets.into_values() {
-                for key in bucket.keys() {
-                    self.blocked_update_targets.remove(key);
-                }
-                merge_leaf_updates(&mut self.updates, bucket);
-            }
             return
         }
 
+        let mut promoted = B256Set::default();
         for target in targets {
             let target_key = target.key();
             let matching: Vec<_> = self
@@ -338,10 +344,32 @@ impl AccountTrieActor {
 
             for blocked_target in matching {
                 let Some(bucket) = self.blocked_updates.remove(&blocked_target) else { continue };
-                for key in bucket.keys() {
-                    self.blocked_update_targets.remove(key);
+                for (key, update) in bucket {
+                    if !promoted.insert(key) {
+                        continue
+                    }
+
+                    if let Some(targets) = self.blocked_update_targets.remove(&key) {
+                        for other_target in targets {
+                            if other_target == blocked_target {
+                                continue
+                            }
+
+                            let remove_bucket = if let Some(other_bucket) =
+                                self.blocked_updates.get_mut(&other_target)
+                            {
+                                other_bucket.remove(&key);
+                                other_bucket.is_empty()
+                            } else {
+                                false
+                            };
+                            if remove_bucket {
+                                self.blocked_updates.remove(&other_target);
+                            }
+                        }
+                    }
+                    insert_leaf_update(&mut self.updates, key, update);
                 }
-                merge_leaf_updates(&mut self.updates, bucket);
             }
         }
     }
@@ -507,5 +535,30 @@ mod tests {
         assert!(!actor.updates.contains_key(&second_address));
         assert_eq!(actor.blocked_update_count(), 1);
         assert_eq!(actor.blocked_updates.len(), 1);
+    }
+
+    #[test]
+    fn returned_account_target_promotes_update_blocked_by_multiple_targets() {
+        let (mut actor, _proof_rx, _event_rx) = blind_actor();
+        let address = B256::with_last_byte(1);
+        let first_target = BlockedAccountTarget { key: B256::with_last_byte(2), min_len: 3 };
+        let second_target = BlockedAccountTarget { key: B256::with_last_byte(3), min_len: 4 };
+
+        actor
+            .block_account_updates(
+                B256Map::from_iter([(address, LeafUpdate::Touched)]),
+                B256Map::from_iter([(address, vec![first_target, second_target])]),
+            )
+            .unwrap();
+        assert_eq!(actor.blocked_update_count(), 1);
+        assert_eq!(actor.blocked_updates.len(), 2);
+
+        actor.promote_blocked_account_targets(vec![
+            ProofV2Target::new(first_target.key).with_min_len(first_target.min_len)
+        ]);
+
+        assert!(actor.updates.contains_key(&address));
+        assert_eq!(actor.blocked_update_count(), 0);
+        assert!(actor.blocked_updates.is_empty());
     }
 }
