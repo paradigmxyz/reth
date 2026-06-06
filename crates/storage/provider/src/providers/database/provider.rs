@@ -3108,7 +3108,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
     fn write_storage_tries<A: TrieTableAdapter>(
         tx: &TX,
-        storage_tries: Vec<(&B256, &StorageTrieUpdatesSorted)>,
+        storage_tries: SmallVec<[(&B256, &StorageTrieUpdatesSorted); 8]>,
         num_entries: &mut usize,
     ) -> ProviderResult<()>
     where
@@ -3161,8 +3161,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdatesSorted)>,
     ) -> ProviderResult<usize> {
         let mut num_entries = 0;
-        let mut storage_tries = storage_tries.collect::<Vec<_>>();
-        storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        let mut storage_tries = storage_tries.collect::<SmallVec<[_; 8]>>();
+        if storage_tries.len() > 1 {
+            storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        }
         reth_trie_db::with_adapter!(self, |A| {
             Self::write_storage_tries::<A>(self.tx_ref(), storage_tries, &mut num_entries)?;
         });
