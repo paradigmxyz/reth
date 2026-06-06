@@ -87,7 +87,9 @@ use reth_provider::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
+use reth_trie::{
+    trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState, HashedPostStateSorted,
+};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::{Address, KECCAK_EMPTY};
@@ -107,6 +109,12 @@ pub use crate::tree::types::ValidationOutcome;
 
 /// Handle to a [`HashedPostState`] computed on a background thread.
 type LazyHashedPostState = reth_tasks::LazyHandle<Arc<HashedPostState>>;
+
+struct ParallelStateRootOutput {
+    state_root: B256,
+    trie_updates: TrieUpdates,
+    sorted_hashed_state: Arc<HashedPostStateSorted>,
+}
 
 /// Multiplier over the parent's gas limit beyond which a block's claimed gas usage cannot be
 /// legitimate. Gas limit can change by at most 1/1024 per block, so anything over this is rejected
@@ -670,6 +678,7 @@ where
 
         let root_time = Instant::now();
         let mut maybe_state_root = None;
+        let mut maybe_sorted_hashed_state = None;
         let mut state_root_task_failed = false;
         #[cfg(feature = "trie-debug")]
         let mut trie_debug_recorders = Vec::new();
@@ -775,11 +784,13 @@ where
                         let elapsed = root_time.elapsed();
                         info!(
                             target: "engine::tree::payload_validator",
-                            regular_state_root = ?result.0,
+                            regular_state_root = ?result.state_root,
                             ?elapsed,
                             "Regular root task finished"
                         );
-                        maybe_state_root = Some((result.0, Arc::new(result.1), elapsed));
+                        maybe_sorted_hashed_state = Some(result.sorted_hashed_state);
+                        maybe_state_root =
+                            Some((result.state_root, Arc::new(result.trie_updates), elapsed));
                     }
                     Err(error) => {
                         debug!(target: "engine::tree::payload_validator", %error, "Parallel state root computation failed");
@@ -893,6 +904,7 @@ where
             Arc::new(block),
             output,
             hashed_state,
+            maybe_sorted_hashed_state,
             trie_output,
             changeset_provider,
         );
@@ -1336,17 +1348,21 @@ where
         provider_factory: P,
         overlay_builder: OverlayBuilder<N>,
         hashed_state: &LazyHashedPostState,
-    ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
+    ) -> Result<ParallelStateRootOutput, ParallelStateRootError> {
         let hashed_state = hashed_state.get();
         // The `hashed_state` argument will be taken into account as part of the overlay, but we
         // need to use the prefix sets which were generated from it to indicate to the
         // ParallelStateRoot which parts of the trie need to be recomputed.
         let prefix_sets = hashed_state.construct_prefix_sets().freeze();
+        let sorted_hashed_state = Arc::new(hashed_state.clone_into_sorted());
         let overlay_builder =
-            overlay_builder.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted());
+            overlay_builder.with_hashed_state_overlay(Some(Arc::clone(&sorted_hashed_state)));
         let overlay_factory = OverlayStateProviderFactory::new(provider_factory, overlay_builder);
-        ParallelStateRoot::new(overlay_factory, prefix_sets, self.runtime.clone())
-            .incremental_root_with_updates()
+        let (state_root, trie_updates) =
+            ParallelStateRoot::new(overlay_factory, prefix_sets, self.runtime.clone())
+                .incremental_root_with_updates()?;
+
+        Ok(ParallelStateRootOutput { state_root, trie_updates, sorted_hashed_state })
     }
 
     /// Compute state root for the given hashed post state in serial.
@@ -1809,6 +1825,7 @@ where
         block: Arc<RecoveredBlock<N::Block>>,
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         hashed_state: LazyHashedPostState,
+        sorted_hashed_state: Option<Arc<HashedPostStateSorted>>,
         trie_output: Arc<TrieUpdates>,
         changeset_provider: impl TrieCursorFactory + Send + 'static,
     ) -> ExecutedBlock<N> {
@@ -1819,7 +1836,15 @@ where
             Ok(state) => state,
             Err(handle) => handle.get().clone(),
         };
-        let deferred_trie_data = DeferredTrieData::pending(hashed_state, trie_output);
+        let deferred_trie_data = if let Some(sorted_hashed_state) = sorted_hashed_state {
+            DeferredTrieData::pending_with_sorted_hashed_state(
+                hashed_state,
+                trie_output,
+                sorted_hashed_state,
+            )
+        } else {
+            DeferredTrieData::pending(hashed_state, trie_output)
+        };
         let deferred_handle_task = deferred_trie_data.clone();
         let block_validation_metrics = self.metrics.block_validation.clone();
 
@@ -2202,6 +2227,7 @@ where
             block.recovered_block,
             block.execution_output,
             LazyHashedPostState::ready(block.hashed_state),
+            None,
             block.trie_updates,
             changeset_provider,
         ))

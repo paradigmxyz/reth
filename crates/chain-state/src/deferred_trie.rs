@@ -62,6 +62,8 @@ struct PendingInputs {
     hashed_state: Arc<HashedPostState>,
     /// Unsorted trie updates from state root computation.
     trie_updates: Arc<TrieUpdates>,
+    /// Hashed post-state that was already sorted for state root computation.
+    sorted_hashed_state: Option<Arc<HashedPostStateSorted>>,
 }
 
 impl fmt::Debug for DeferredTrieData {
@@ -81,10 +83,28 @@ impl fmt::Debug for DeferredTrieData {
 impl DeferredTrieData {
     /// Create a new pending handle with fallback inputs for synchronous computation.
     pub fn pending(hashed_state: Arc<HashedPostState>, trie_updates: Arc<TrieUpdates>) -> Self {
+        Self::pending_inner(hashed_state, trie_updates, None)
+    }
+
+    /// Create a new pending handle with already sorted hashed state.
+    pub fn pending_with_sorted_hashed_state(
+        hashed_state: Arc<HashedPostState>,
+        trie_updates: Arc<TrieUpdates>,
+        sorted_hashed_state: Arc<HashedPostStateSorted>,
+    ) -> Self {
+        Self::pending_inner(hashed_state, trie_updates, Some(sorted_hashed_state))
+    }
+
+    fn pending_inner(
+        hashed_state: Arc<HashedPostState>,
+        trie_updates: Arc<TrieUpdates>,
+        sorted_hashed_state: Option<Arc<HashedPostStateSorted>>,
+    ) -> Self {
         Self {
             state: Arc::new(Mutex::new(DeferredTrieDataInner::Pending(Some(PendingInputs {
                 hashed_state,
                 trie_updates,
+                sorted_hashed_state,
             })))),
         }
     }
@@ -128,6 +148,22 @@ impl DeferredTrieData {
         ComputedTrieData::new(Arc::new(sorted_hashed_state), Arc::new(sorted_trie_updates))
     }
 
+    /// Sorts trie updates while reusing hashed state that was already sorted by state root
+    /// computation.
+    pub fn sort_with_hashed_state(
+        sorted_hashed_state: Arc<HashedPostStateSorted>,
+        trie_updates: Arc<TrieUpdates>,
+    ) -> ComputedTrieData {
+        let _span = debug_span!(target: "engine::tree::deferred_trie", "sort_inputs").entered();
+
+        let sorted_trie_updates = match Arc::try_unwrap(trie_updates) {
+            Ok(updates) => updates.into_sorted(),
+            Err(arc) => arc.clone_into_sorted(),
+        };
+
+        ComputedTrieData::new(sorted_hashed_state, Arc::new(sorted_trie_updates))
+    }
+
     /// Returns trie data, computing synchronously if the async task hasn't completed.
     #[instrument(level = "debug", target = "engine::tree::deferred_trie", skip_all)]
     pub fn wait_cloned(&self) -> ComputedTrieData {
@@ -141,7 +177,12 @@ impl DeferredTrieData {
                 DEFERRED_TRIE_METRICS.deferred_trie_sync_fallback.increment(1);
 
                 let inputs = maybe_inputs.take().expect("inputs must be present in Pending state");
-                let computed = Self::sort(inputs.hashed_state, inputs.trie_updates);
+                let computed = match inputs.sorted_hashed_state {
+                    Some(sorted_hashed_state) => {
+                        Self::sort_with_hashed_state(sorted_hashed_state, inputs.trie_updates)
+                    }
+                    None => Self::sort(inputs.hashed_state, inputs.trie_updates),
+                };
                 *state = DeferredTrieDataInner::Ready(computed.clone());
 
                 computed
@@ -229,6 +270,26 @@ mod tests {
         let result = deferred.wait_cloned();
 
         assert_eq!(result.hashed_state.total_len(), 2);
+        assert_eq!(result.trie_updates.total_len(), 0);
+    }
+
+    #[test]
+    fn pending_reuses_sorted_hashed_state() {
+        let hashed_address = B256::with_last_byte(1);
+        let sorted_hashed_state = Arc::new(HashedPostStateSorted::new(
+            vec![(hashed_address, Some(Account::default()))],
+            Default::default(),
+        ));
+
+        let deferred = DeferredTrieData::pending_with_sorted_hashed_state(
+            Arc::new(HashedPostState::default()),
+            Arc::new(TrieUpdates::default()),
+            Arc::clone(&sorted_hashed_state),
+        );
+
+        let result = deferred.wait_cloned();
+
+        assert!(Arc::ptr_eq(&result.hashed_state, &sorted_hashed_state));
         assert_eq!(result.trie_updates.total_len(), 0);
     }
 
