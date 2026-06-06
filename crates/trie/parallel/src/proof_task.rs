@@ -104,6 +104,10 @@ impl AvailabilitySheet {
     /// Note, that this is somewhat racy since a flag that was just saying `idle` and we counted it
     /// as such might turn into `busy` right away.
     fn has_multiple_idle(&self) -> bool {
+        if self.flags.len() < 2 {
+            return false;
+        }
+
         let mut idle = 0u32;
         for flag in &self.flags {
             if flag.load(Ordering::Relaxed) {
