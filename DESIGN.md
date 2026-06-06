@@ -448,7 +448,7 @@ account/storage paths after prune.
 
 ### Phase 7: Integration Switch
 
-Add a config or env-gated path in `spawn_sparse_trie_task`:
+Add an integration branch in `spawn_sparse_trie_task`:
 
 ```text
 if async_bal_sparse_trie_enabled && BAL mode:
@@ -457,7 +457,9 @@ else:
     current SparseTrieCacheTask
 ```
 
-Do not replace the current path yet.
+The prototype is enabled by default for BAL mode. `RETH_ASYNC_BAL_SPARSE_TRIE=0` disables it for
+rollback, and `RETH_ASYNC_SPARSE_TRIE_THREADS` controls the persistent runtime worker count
+(default 32).
 
 ### Phase 8: End-To-End Tests
 
