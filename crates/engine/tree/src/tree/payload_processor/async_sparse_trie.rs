@@ -139,10 +139,6 @@ pub(super) async fn run_async_bal_sparse_trie_task(
     max_hot_accounts: usize,
     disable_cache_pruning: bool,
 ) {
-    // TODO: accumulate and forward final hashed state from the async BAL coordinator. Until then,
-    // dropping the sender makes validators fall back to their existing recomputation path.
-    drop(final_hashed_state_tx);
-
     let start = Instant::now();
     let preserved = preserved_sparse_trie.take();
     trie_metrics.sparse_trie_cache_wait_duration_histogram.record(start.elapsed().as_secs_f64());
@@ -181,6 +177,7 @@ pub(super) async fn run_async_bal_sparse_trie_task(
         executor,
         trie_metrics,
         state_root_tx,
+        final_hashed_state_tx,
         output,
         max_hot_slots,
         max_hot_accounts,
@@ -194,6 +191,7 @@ fn preserve_async_sparse_trie(
     executor: Runtime,
     trie_metrics: MultiProofTaskMetrics,
     state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
+    final_hashed_state_tx: mpsc::Sender<HashedPostState>,
     mut output: CoordinatorOutput,
     max_hot_slots: usize,
     max_hot_accounts: usize,
@@ -207,6 +205,11 @@ fn preserve_async_sparse_trie(
 
     let mut guard = preserved_sparse_trie.lock();
     let task_result = output.result.as_ref().ok().cloned();
+
+    if task_result.is_some() {
+        let final_hashed_state = std::mem::take(&mut output.final_hashed_state);
+        let _ = final_hashed_state_tx.send(final_hashed_state);
+    }
 
     if state_root_tx.send(output.result).is_err() {
         debug!(

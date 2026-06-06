@@ -32,6 +32,7 @@ pub(super) struct CoordinatorOutput {
     pub(super) result: Result<StateRootComputeOutcome, ParallelStateRootError>,
     pub(super) trie: StateTrie,
     pub(super) deferred: DeferredDrops,
+    pub(super) final_hashed_state: HashedPostState,
 }
 
 pub(super) struct AsyncSparseTrieCoordinator {
@@ -48,6 +49,7 @@ pub(super) struct AsyncSparseTrieCoordinator {
     pending_storage_roots: B256Set,
     storage_roots: B256Map<B256>,
     pending_accounts: B256Map<PendingAccountUpdate>,
+    final_hashed_state: HashedPostState,
     finished_state_updates: bool,
     finalize_sent: bool,
     metrics: MultiProofTaskMetrics,
@@ -110,6 +112,7 @@ impl AsyncSparseTrieCoordinator {
             pending_storage_roots: B256Set::default(),
             storage_roots: B256Map::default(),
             pending_accounts: B256Map::default(),
+            final_hashed_state: HashedPostState::default(),
             finished_state_updates: false,
             finalize_sent: false,
             metrics,
@@ -261,6 +264,7 @@ impl AsyncSparseTrieCoordinator {
             (1, 0) => {
                 let (address, account) =
                     hashed_state_update.accounts.into_iter().next().expect("checked len");
+                self.final_hashed_state.accounts.insert(address, account);
                 self.trie.record_account_touch(address);
                 self.pending_accounts.insert(address, PendingAccountUpdate::AccountChanged(account));
                 self.send_account_command(AccountTrieCommand::Touch(address))?;
@@ -269,6 +273,7 @@ impl AsyncSparseTrieCoordinator {
             (0, 1) => {
                 let (address, storage) =
                     hashed_state_update.storages.into_iter().next().expect("checked len");
+                self.final_hashed_state.storages.entry(address).or_default().extend(&storage);
                 if storage.wiped {
                     return Err(ParallelStateRootError::Other(
                         "async BAL sparse trie prototype does not support storage wipes yet"
@@ -426,7 +431,12 @@ impl AsyncSparseTrieCoordinator {
         let result = actor_result.and_then(|_| self.compute_outcome());
         let deferred = self.trie.take_deferred_drops();
 
-        CoordinatorOutput { result, trie: self.trie, deferred }
+        CoordinatorOutput {
+            result,
+            trie: self.trie,
+            deferred,
+            final_hashed_state: self.final_hashed_state,
+        }
     }
 
     async fn finish_with_error(mut self, error: ParallelStateRootError) -> CoordinatorOutput {
@@ -444,7 +454,12 @@ impl AsyncSparseTrieCoordinator {
         let result = actor_result.and(Err(error));
         let deferred = self.trie.take_deferred_drops();
 
-        CoordinatorOutput { result, trie: self.trie, deferred }
+        CoordinatorOutput {
+            result,
+            trie: self.trie,
+            deferred,
+            final_hashed_state: self.final_hashed_state,
+        }
     }
 
     async fn return_actor_tries(&mut self) -> Result<(), ParallelStateRootError> {
