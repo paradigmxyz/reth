@@ -113,6 +113,19 @@ where
     Ok(())
 }
 
+#[inline]
+fn collect_account_indices(
+    collector: &mut Collector<ShardedKey<Address>, BlockNumberList>,
+    cache: impl Iterator<Item = (Address, Vec<u64>)>,
+) -> Result<(), StageError> {
+    for (address, indices) in cache {
+        let last = indices.last().expect("indices is non-empty");
+        collector
+            .insert(ShardedKey::new(address, *last), BlockNumberList::new_pre_sorted(indices))?;
+    }
+    Ok(())
+}
+
 /// Collects account history indices using a provider that implements `ChangeSetReader`.
 pub(crate) fn collect_account_history_indices<Provider>(
     provider: &Provider,
@@ -124,13 +137,6 @@ where
 {
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
     let mut cache: AddressMap<Vec<u64>> = AddressMap::default();
-
-    let mut insert_fn = |address: Address, indices: Vec<u64>| {
-        let last = indices.last().expect("indices is non-empty");
-        collector
-            .insert(ShardedKey::new(address, *last), BlockNumberList::new_pre_sorted(indices))?;
-        Ok(())
-    };
 
     // Convert range bounds to concrete range
     let range = to_range(range);
@@ -160,11 +166,11 @@ where
                 current_block = current_block_number,
                 "Collecting indices"
             );
-            collect_indices(cache.drain(), &mut insert_fn)?;
+            collect_account_indices(&mut collector, cache.drain())?;
             flush_counter = 0;
         }
     }
-    collect_indices(cache.into_iter(), insert_fn)?;
+    collect_account_indices(&mut collector, cache.into_iter())?;
 
     Ok(collector)
 }
