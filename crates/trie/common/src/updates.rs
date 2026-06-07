@@ -10,6 +10,11 @@ use alloy_primitives::{
     map::{B256Map, B256Set, HashMap, HashSet},
     FixedBytes, B256,
 };
+#[cfg(feature = "rayon")]
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+
+#[cfg(feature = "rayon")]
+const SORT_STORAGE_TRIES_PARALLEL_THRESHOLD: usize = 64;
 
 /// The aggregation of trie updates.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
@@ -171,6 +176,25 @@ impl TrieUpdates {
         account_nodes.extend(self.removed_nodes.drain().map(|path| (path, None)));
         account_nodes.sort_unstable_by_key(|a| a.0);
 
+        #[cfg(feature = "rayon")]
+        let storage_tries: B256Map<StorageTrieUpdatesSorted> =
+            if self.storage_tries.len() >= SORT_STORAGE_TRIES_PARALLEL_THRESHOLD {
+                self.storage_tries
+                    .drain()
+                    .collect::<Vec<_>>()
+                    .into_par_iter()
+                    .map(|(hashed_address, updates)| (hashed_address, updates.into_sorted()))
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .collect()
+            } else {
+                self.storage_tries
+                    .drain()
+                    .map(|(hashed_address, updates)| (hashed_address, updates.into_sorted()))
+                    .collect()
+            };
+
+        #[cfg(not(feature = "rayon"))]
         let storage_tries = self
             .storage_tries
             .drain()
@@ -197,6 +221,29 @@ impl TrieUpdates {
         );
         account_nodes.sort_unstable_by_key(|a| a.0);
 
+        #[cfg(feature = "rayon")]
+        let storage_tries: B256Map<StorageTrieUpdatesSorted> =
+            if self.storage_tries.len() >= SORT_STORAGE_TRIES_PARALLEL_THRESHOLD {
+                self.storage_tries
+                    .iter()
+                    .collect::<Vec<_>>()
+                    .into_par_iter()
+                    .map(|(&hashed_address, updates)| {
+                        (hashed_address, updates.clone_into_sorted())
+                    })
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .collect()
+            } else {
+                self.storage_tries
+                    .iter()
+                    .map(|(&hashed_address, updates)| {
+                        (hashed_address, updates.clone_into_sorted())
+                    })
+                    .collect()
+            };
+
+        #[cfg(not(feature = "rayon"))]
         let storage_tries = self
             .storage_tries
             .iter()

@@ -22,6 +22,9 @@ use rayon::prelude::{FromParallelIterator, IntoParallelIterator, ParallelIterato
 
 use revm_database::{AccountStatus, BundleAccount};
 
+#[cfg(feature = "rayon")]
+const SORT_STORAGES_PARALLEL_THRESHOLD: usize = 64;
+
 /// In-memory hashed state that stores account and storage changes with keccak256-hashed keys in
 /// hash maps.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
@@ -330,6 +333,25 @@ impl HashedPostState {
         let mut accounts: Vec<_> = self.accounts.into_iter().collect();
         accounts.sort_unstable_by_key(|(address, _)| *address);
 
+        #[cfg(feature = "rayon")]
+        let storages: B256Map<HashedStorageSorted> =
+            if self.storages.len() >= SORT_STORAGES_PARALLEL_THRESHOLD {
+                self.storages
+                    .into_iter()
+                    .collect::<Vec<_>>()
+                    .into_par_iter()
+                    .map(|(hashed_address, storage)| (hashed_address, storage.into_sorted()))
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .collect()
+            } else {
+                self.storages
+                    .into_iter()
+                    .map(|(hashed_address, storage)| (hashed_address, storage.into_sorted()))
+                    .collect()
+            };
+
+        #[cfg(not(feature = "rayon"))]
         let storages = self
             .storages
             .into_iter()
@@ -345,6 +367,27 @@ impl HashedPostState {
         let mut accounts: Vec<_> = self.accounts.iter().map(|(&k, &v)| (k, v)).collect();
         accounts.sort_unstable_by_key(|(address, _)| *address);
 
+        #[cfg(feature = "rayon")]
+        let storages: B256Map<HashedStorageSorted> =
+            if self.storages.len() >= SORT_STORAGES_PARALLEL_THRESHOLD {
+                self.storages
+                    .iter()
+                    .collect::<Vec<_>>()
+                    .into_par_iter()
+                    .map(|(&hashed_address, storage)| {
+                        (hashed_address, storage.clone_into_sorted())
+                    })
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .collect()
+            } else {
+                self.storages
+                    .iter()
+                    .map(|(&hashed_address, storage)| (hashed_address, storage.clone_into_sorted()))
+                    .collect()
+            };
+
+        #[cfg(not(feature = "rayon"))]
         let storages = self
             .storages
             .iter()
