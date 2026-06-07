@@ -20,7 +20,7 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, StorageKey, B256};
+use alloy_primitives::{keccak256, keccak256_uncached, StorageKey, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
@@ -643,11 +643,11 @@ where
         let mut hashed_address = None;
 
         if !account_changes.storage_changes.is_empty() {
-            let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
+            let hashed_address = *hashed_address.get_or_insert_with(|| keccak256_uncached(address));
             let mut storage_map = reth_trie::HashedStorage::new(false);
 
             for slot_changes in &account_changes.storage_changes {
-                let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
+                let hashed_slot = keccak256_uncached(slot_changes.slot.to_be_bytes::<32>());
                 if let Some(last_change) = slot_changes.changes.last() {
                     storage_map.storage.insert(hashed_slot, last_change.new_value);
                 }
@@ -728,7 +728,7 @@ where
             }),
         };
 
-        let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
+        let hashed_address = hashed_address.unwrap_or_else(|| keccak256_uncached(address));
         let mut hashed_state = reth_trie::HashedPostState::default();
         hashed_state.accounts.insert(hashed_address, Some(account));
 
@@ -815,7 +815,7 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize
             continue
         }
 
-        let hashed_address = keccak256(addr);
+        let hashed_address = keccak256_uncached(addr);
 
         if account.info != account.original_info() {
             targets.account_targets.push(hashed_address.into());
@@ -828,7 +828,7 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize
                 continue
             }
 
-            let hashed_slot = keccak256(B256::new(key.to_be_bytes()));
+            let hashed_slot = keccak256_uncached(B256::new(key.to_be_bytes()));
             storage_slots.push(ProofV2Target::from(hashed_slot));
         }
 
@@ -847,7 +847,7 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize
 /// only account-level entries with empty storage sets.
 fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProofTargetsV2 {
     MultiProofTargetsV2 {
-        account_targets: withdrawals.iter().map(|w| keccak256(w.address).into()).collect(),
+        account_targets: withdrawals.iter().map(|w| keccak256_uncached(w.address).into()).collect(),
         ..Default::default()
     }
 }
