@@ -81,7 +81,7 @@ where
         }
 
         // Load next block with changesets
-        while self.end_block.is_none_or(|end| self.current_block < end) {
+        while is_before_end(self.current_block, self.end_block) {
             match self.provider.account_block_changeset(self.current_block) {
                 Ok(changesets) if !changesets.is_empty() => {
                     self.current_changesets = changesets;
@@ -156,7 +156,7 @@ where
             self.current_block += 1;
         }
 
-        while self.end_block.is_none_or(|end| self.current_block < end) {
+        while is_before_end(self.current_block, self.end_block) {
             match self.provider.storage_changeset(self.current_block) {
                 Ok(changesets) if !changesets.is_empty() => {
                     self.current_changesets = changesets;
@@ -172,5 +172,13 @@ where
         }
 
         None
+    }
+}
+
+#[inline]
+const fn is_before_end(current_block: BlockNumber, end_block: Option<BlockNumber>) -> bool {
+    match end_block {
+        Some(end) => current_block < end,
+        None => true,
     }
 }
