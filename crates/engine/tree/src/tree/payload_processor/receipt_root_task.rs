@@ -82,6 +82,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
         let mut encode_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
         let mut next = 0usize;
         let mut pending = HashMap::new();
+        let expected_receipts = receipts_len;
 
         let mut push = |receipt: R| {
             let receipt_with_bloom = receipt.with_bloom_ref();
@@ -102,15 +103,19 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
                     push(receipt);
                     next += 1;
                 }
+
+                if expected_receipts.is_some_and(|len| next == len) && pending.is_empty() {
+                    break;
+                }
             } else {
                 pending.insert(indexed_receipt.index, indexed_receipt.receipt);
             }
         }
 
-        if receipts_len.is_some_and(|len| len != next) {
+        if expected_receipts.is_some_and(|len| len != next) {
             tracing::error!(
                 target: "engine::tree::payload_processor",
-                expected = receipts_len,
+                expected = expected_receipts,
                 received = next,
                 "Receipt root task received incomplete receipts, execution likely aborted"
             );
@@ -209,6 +214,44 @@ mod tests {
             bloom,
             Bloom::from(hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"))
         );
+    }
+
+    #[test]
+    fn test_receipt_root_task_finishes_after_expected_receipts() {
+        let receipts: Vec<Receipt> = vec![Receipt::default(); 2];
+
+        let receipts_with_bloom: Vec<_> = receipts.iter().map(|r| r.with_bloom_ref()).collect();
+        let expected_root = calculate_receipt_root(&receipts_with_bloom);
+
+        let (tx, rx) = bounded(2);
+        let (result_tx, result_rx) = oneshot::channel();
+        let receipts_len = receipts.len();
+
+        let handle = ReceiptRootTaskHandle::new(rx, result_tx);
+        let join_handle = std::thread::spawn(move || handle.run(receipts_len));
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = done_tx.send(result_rx.blocking_recv());
+        });
+
+        for (i, receipt) in receipts.into_iter().enumerate() {
+            tx.send(IndexedReceipt::new(i, receipt)).unwrap();
+        }
+
+        let (root, _bloom) =
+            match done_rx.recv_timeout(std::time::Duration::from_secs(1)) {
+                Ok(result) => result.expect("receipt root task should send result"),
+                Err(err) => {
+                    drop(tx);
+                    join_handle.join().unwrap();
+                    panic!("receipt root should not wait for channel close: {err}");
+                }
+            };
+
+        drop(tx);
+        join_handle.join().unwrap();
+
+        assert_eq!(root, expected_root);
     }
 
     #[tokio::test]
