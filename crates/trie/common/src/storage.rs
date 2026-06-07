@@ -16,6 +16,7 @@ pub struct StorageTrieEntry {
 impl ValueWithSubKey for StorageTrieEntry {
     type SubKey = StoredNibblesSubKey;
 
+    #[inline]
     fn get_subkey(&self) -> Self::SubKey {
         self.nibbles.clone()
     }
@@ -62,6 +63,7 @@ pub struct PackedStorageTrieEntry {
 impl ValueWithSubKey for PackedStorageTrieEntry {
     type SubKey = PackedStoredNibblesSubKey;
 
+    #[inline]
     fn get_subkey(&self) -> Self::SubKey {
         self.nibbles.clone()
     }

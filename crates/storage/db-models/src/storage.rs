@@ -20,6 +20,7 @@ pub struct StorageBeforeTx {
 impl ValueWithSubKey for StorageBeforeTx {
     type SubKey = B256;
 
+    #[inline]
     fn get_subkey(&self) -> Self::SubKey {
         self.key
     }

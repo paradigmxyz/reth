@@ -18,6 +18,7 @@ pub struct AccountBeforeTx {
 impl ValueWithSubKey for AccountBeforeTx {
     type SubKey = Address;
 
+    #[inline]
     fn get_subkey(&self) -> Self::SubKey {
         self.address
     }
