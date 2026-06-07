@@ -302,7 +302,7 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         })
     }
 
-    #[instrument(name = "Tx::commit", level = "debug", target = "providers::db", skip_all)]
+    #[instrument(name = "Tx::commit", level = "trace", target = "providers::db", skip_all)]
     fn commit(self) -> Result<(), DatabaseError> {
         self.execute_with_close_transaction_metric(TransactionOutcome::Commit, |this| {
             match this.inner.commit().map_err(|e| DatabaseError::Commit(e.into())) {
