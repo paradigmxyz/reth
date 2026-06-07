@@ -141,10 +141,14 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
 {
     let metrics = MaintainPoolMetrics::default();
     let MaintainPoolConfig { max_update_depth, max_reload_accounts, .. } = config;
+    let mut blob_fee_active = false;
     // ensure the pool points to latest state
     if let Ok(Some(latest)) = client.header_by_number_or_tag(BlockNumberOrTag::Latest) {
         let latest = SealedHeader::seal_slow(latest);
         let chain_spec = client.chain_spec();
+        let pending_blob_fee = latest
+            .maybe_next_block_blob_fee(chain_spec.blob_params_at_timestamp(latest.timestamp()));
+        blob_fee_active = pending_blob_fee.is_some();
         let info = BlockInfo {
             block_gas_limit: latest.gas_limit(),
             last_seen_block_hash: latest.hash(),
@@ -152,8 +156,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
             pending_basefee: chain_spec
                 .next_block_base_fee(latest.header(), latest.timestamp())
                 .unwrap_or_default(),
-            pending_blob_fee: latest
-                .maybe_next_block_blob_fee(chain_spec.blob_params_at_timestamp(latest.timestamp())),
+            pending_blob_fee,
         };
         pool.set_block_info(info);
     }
@@ -240,9 +243,9 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
             // remove all finalized blobs from the blob store
             pool.delete_blobs(blobs);
 
-            // Only blob-aware chains need blob store cleanup. On chains without blob support,
-            // this avoids invoking blob store maintenance after every finalized block.
-            if pool_info.pending_blob_fee.unwrap_or_default() > 0 {
+            // `excess_blob_gas` can be zero on blob-aware chains, so gate cleanup on whether
+            // the tracked tip has an active blob fee instead of checking fee or excess magnitude.
+            if blob_fee_active {
                 let pool = pool.clone();
                 task_spawner.spawn_blocking_task(async move {
                     debug!(target: "txpool", finalized_block = %finalized, "cleaning up blob store");
@@ -346,6 +349,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                 let pending_block_blob_fee = new_tip.header().maybe_next_block_blob_fee(
                     chain_spec.blob_params_at_timestamp(new_tip.timestamp()),
                 );
+                blob_fee_active = pending_block_blob_fee.is_some();
 
                 // we know all changed account in the new chain
                 let new_changed_accounts: HashSet<_> =
@@ -449,6 +453,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                 let pending_block_blob_fee = tip.header().maybe_next_block_blob_fee(
                     chain_spec.blob_params_at_timestamp(tip.timestamp()),
                 );
+                blob_fee_active = pending_block_blob_fee.is_some();
 
                 let first_block = blocks.first();
                 trace!(
