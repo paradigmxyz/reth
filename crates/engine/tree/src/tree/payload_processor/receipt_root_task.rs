@@ -81,7 +81,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
         let mut aggregated_bloom = Bloom::ZERO;
         let mut encode_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
         let mut next = 0usize;
-        let mut pending = HashMap::new();
+        let mut pending = None::<HashMap<usize, R>>;
 
         let mut push = |receipt: R| {
             let receipt_with_bloom = receipt.with_bloom_ref();
@@ -98,12 +98,16 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
                 push(indexed_receipt.receipt);
                 next += 1;
 
-                while let Some(receipt) = pending.remove(&next) {
+                while let Some(receipt) =
+                    pending.as_mut().and_then(|pending| pending.remove(&next))
+                {
                     push(receipt);
                     next += 1;
                 }
             } else {
-                pending.insert(indexed_receipt.index, indexed_receipt.receipt);
+                pending
+                    .get_or_insert_with(HashMap::default)
+                    .insert(indexed_receipt.index, indexed_receipt.receipt);
             }
         }
 
@@ -117,11 +121,11 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
             return;
         }
 
-        if !pending.is_empty() {
+        if pending.as_ref().is_some_and(|pending| !pending.is_empty()) {
             tracing::error!(
                 target: "engine::tree::payload_processor",
                 received = next,
-                pending = pending.len(),
+                pending = pending.as_ref().map_or(0, HashMap::len),
                 "Receipt root task received gapped receipts"
             );
             return;
