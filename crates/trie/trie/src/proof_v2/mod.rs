@@ -35,7 +35,7 @@ pub(crate) use target::*;
 static TRACE_TARGET: &str = "trie::proof_v2";
 
 /// Number of bytes to pre-allocate for [`ProofCalculator`]'s `rlp_encode_buf` field.
-const RLP_ENCODE_BUF_SIZE: usize = 1024;
+const RLP_ENCODE_BUF_SIZE: usize = 2048;
 
 /// A proof calculator that generates merkle proofs using only leaf data.
 ///
