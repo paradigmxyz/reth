@@ -720,22 +720,41 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // This reduces cursor open/close overhead from N calls to 1.
             if save_mode.with_state() {
                 // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
-                let start = Instant::now();
-                let merged_hashed_state = HashedPostStateSorted::merge_batch(
-                    blocks.iter().rev().map(|b| b.trie_data().hashed_state),
+                let (
+                    (merged_hashed_state, hashed_merge_elapsed),
+                    (merged_trie, trie_merge_elapsed),
+                ) = rayon::join(
+                    || {
+                        let start = Instant::now();
+                        (
+                            HashedPostStateSorted::merge_batch(
+                                blocks.iter().rev().map(|b| b.trie_data().hashed_state),
+                            ),
+                            start.elapsed(),
+                        )
+                    },
+                    || {
+                        let start = Instant::now();
+                        (
+                            TrieUpdatesSorted::merge_batch(
+                                blocks.iter().rev().map(|b| b.trie_updates()),
+                            ),
+                            start.elapsed(),
+                        )
+                    },
                 );
+
+                let start = Instant::now();
                 if !merged_hashed_state.is_empty() {
                     self.write_hashed_state(&merged_hashed_state)?;
                 }
-                timings.write_hashed_state += start.elapsed();
+                timings.write_hashed_state += hashed_merge_elapsed + start.elapsed();
 
                 let start = Instant::now();
-                let merged_trie =
-                    TrieUpdatesSorted::merge_batch(blocks.iter().rev().map(|b| b.trie_updates()));
                 if !merged_trie.is_empty() {
                     self.write_trie_updates_sorted(&merged_trie)?;
                 }
-                timings.write_trie_updates += start.elapsed();
+                timings.write_trie_updates += trie_merge_elapsed + start.elapsed();
             }
 
             // Full mode: update history indices
