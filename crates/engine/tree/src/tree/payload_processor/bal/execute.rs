@@ -267,6 +267,7 @@ impl BlockGasTracker {
         }
     }
 
+    #[inline]
     fn validate_tx_limit(&self, tx_gas_limit: u64) -> Result<(), BlockExecutionError> {
         let block_gas_used = if self.enable_amsterdam_eip8037 {
             self.block_regular_gas_used
@@ -288,6 +289,7 @@ impl BlockGasTracker {
         Ok(())
     }
 
+    #[inline]
     const fn record_result<H>(&mut self, result: &ResultAndState<H>) {
         let gas = result.result.gas();
         self.cumulative_tx_gas_used = self.cumulative_tx_gas_used.saturating_add(gas.tx_gas_used());
