@@ -884,8 +884,6 @@ impl ExecutionCache {
             target: "engine::tree",
             "accounts",
             accounts = state_updates.state.len(),
-            storages =
-                state_updates.state.values().map(|account| account.storage.len()).sum::<usize>()
         )
         .entered();
         for (addr, account) in &state_updates.state {
