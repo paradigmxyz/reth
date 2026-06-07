@@ -284,7 +284,7 @@ where
         }
 
         // Append new block numbers to the accumulator.
-        current_list.extend(new_list.iter());
+        append_history_list(&mut current_list, new_list);
 
         // Flush complete shards, keeping the last (partial) shard buffered.
         flush_account_history_shards_partial(address, &mut current_list, append_only, writer)?;
@@ -499,7 +499,7 @@ where
         }
 
         // Append new block numbers to the accumulator.
-        current_list.extend(new_list.iter());
+        append_history_list(&mut current_list, new_list);
 
         // Flush complete shards, keeping the last (partial) shard buffered.
         flush_storage_history_shards_partial(
@@ -619,4 +619,8 @@ where
 
     list.clear();
     Ok(())
+}
+
+fn append_history_list(current_list: &mut Vec<u64>, new_list: BlockNumberList) {
+    current_list.extend(new_list.0);
 }
