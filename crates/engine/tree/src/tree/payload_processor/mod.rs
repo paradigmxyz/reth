@@ -410,7 +410,7 @@ where
     /// (work-stealing setup, channel-based reorder) exceeds the cost of sequential conversion.
     /// Inspired by Nethermind's `RecoverSignature` which uses sequential `foreach` for small
     /// blocks.
-    const SMALL_BLOCK_TX_THRESHOLD: usize = 30;
+    const SMALL_BLOCK_TX_THRESHOLD: usize = 64;
 
     /// Number of leading transactions to convert sequentially before entering the rayon
     /// parallel path.
