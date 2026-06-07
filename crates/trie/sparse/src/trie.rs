@@ -92,9 +92,10 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
         nodes: &mut [ProofTrieNodeV2],
         retain_updates: bool,
     ) -> SparseTrieResult<()> {
-        let capacity = estimate_v2_proof_capacity(nodes);
+        let (capacity, root_idx) = estimate_v2_proof_capacity_and_root(nodes);
 
-        let trie = if let Some(root_node) = nodes.iter().find(|n| n.path.is_empty()) {
+        let trie = if let Some(root_idx) = root_idx {
+            let root_node = &nodes[root_idx];
             self.reveal_root(root_node.node.clone(), root_node.masks, retain_updates)?
         } else {
             self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
@@ -106,20 +107,24 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
     }
 }
 
-/// Calculates capacity estimation for V2 proof nodes.
+/// Calculates capacity estimation for V2 proof nodes and returns the root node index, if present.
 ///
 /// This counts nodes and their children (for branch nodes) to provide proper capacity hints for
 /// `reserve_nodes`.
-fn estimate_v2_proof_capacity(nodes: &[ProofTrieNodeV2]) -> usize {
+fn estimate_v2_proof_capacity_and_root(nodes: &[ProofTrieNodeV2]) -> (usize, Option<usize>) {
     let mut capacity = nodes.len();
+    let mut root_idx = None;
 
-    for node in nodes {
+    for (idx, node) in nodes.iter().enumerate() {
+        if root_idx.is_none() && node.path.is_empty() {
+            root_idx = Some(idx);
+        }
         if let TrieNodeV2::Branch(branch) = &node.node {
             capacity += branch.state_mask.count_ones() as usize;
         }
     }
 
-    capacity
+    (capacity, root_idx)
 }
 
 impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
