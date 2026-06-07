@@ -103,7 +103,7 @@ pub(crate) fn iter_sub_trie_targets(
     target_chunks.map(move |targets| {
         let prefix = sub_trie_prefix(&targets[0]);
         let retain_root = targets[0].min_len == 0;
-        targets.sort_unstable_by_key(|target| target.key_nibbles);
+        targets.sort_unstable_by(|a, b| a.key_nibbles.cmp(&b.key_nibbles));
         SubTrieTargets { prefix, targets, retain_root }
     })
 }
