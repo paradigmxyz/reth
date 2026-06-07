@@ -164,6 +164,7 @@ where
                 }
             }
         }
+        drop(receipt_tx);
         drop(abort_guard);
 
         canonical_executor.evm_mut().db_mut().bump_bal_index();
