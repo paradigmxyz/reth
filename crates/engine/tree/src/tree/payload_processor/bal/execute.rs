@@ -140,7 +140,7 @@ where
         let mut gas_tracker =
             BlockGasTracker::new(block_gas_limit, enable_amsterdam_eip8037, tx_gas_limit_cap);
         let evm = evm_config.evm_with_env(&mut canonical_state, evm_env);
-        let mut canonical_executor = evm_config.create_executor_with_state(evm, ctx.clone());
+        let mut canonical_executor = evm_config.create_executor_with_state(evm, ctx);
 
         canonical_executor.apply_pre_execution_changes()?;
         let mut senders = Vec::with_capacity(transaction_count);
