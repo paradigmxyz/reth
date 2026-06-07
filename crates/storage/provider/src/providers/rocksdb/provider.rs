@@ -1845,23 +1845,19 @@ impl<'a> RocksDBBatch<'a> {
         address: Address,
         indices: impl IntoIterator<Item = u64>,
     ) -> ProviderResult<()> {
-        let indices: Vec<u64> = indices.into_iter().collect();
-
-        if indices.is_empty() {
+        let mut indices = indices.into_iter().peekable();
+        let Some(first_index) = indices.next() else {
             return Ok(());
-        }
-
-        debug_assert!(
-            indices.windows(2).all(|w| w[0] < w[1]),
-            "indices must be strictly increasing: {:?}",
-            indices
-        );
+        };
 
         let last_key = ShardedKey::new(address, u64::MAX);
         let last_shard_opt = self.provider.get::<tables::AccountsHistory>(last_key.clone())?;
         let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
 
-        last_shard.append(indices).map_err(ProviderError::other)?;
+        last_shard.push(first_index).map_err(ProviderError::other)?;
+        if indices.peek().is_some() {
+            last_shard.append(indices).map_err(ProviderError::other)?;
+        }
 
         // Fast path: all indices fit in one shard
         if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
@@ -1907,23 +1903,19 @@ impl<'a> RocksDBBatch<'a> {
         storage_key: B256,
         indices: impl IntoIterator<Item = u64>,
     ) -> ProviderResult<()> {
-        let indices: Vec<u64> = indices.into_iter().collect();
-
-        if indices.is_empty() {
+        let mut indices = indices.into_iter().peekable();
+        let Some(first_index) = indices.next() else {
             return Ok(());
-        }
-
-        debug_assert!(
-            indices.windows(2).all(|w| w[0] < w[1]),
-            "indices must be strictly increasing: {:?}",
-            indices
-        );
+        };
 
         let last_key = StorageShardedKey::last(address, storage_key);
         let last_shard_opt = self.provider.get::<tables::StoragesHistory>(last_key.clone())?;
         let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
 
-        last_shard.append(indices).map_err(ProviderError::other)?;
+        last_shard.push(first_index).map_err(ProviderError::other)?;
+        if indices.peek().is_some() {
+            last_shard.append(indices).map_err(ProviderError::other)?;
+        }
 
         // Fast path: all indices fit in one shard
         if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
