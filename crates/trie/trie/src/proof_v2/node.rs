@@ -1,5 +1,5 @@
 use crate::proof_v2::DeferredValueEncoder;
-use alloy_rlp::Encodable;
+use alloy_rlp::{length_of_length, Encodable};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
     BranchNodeMasks, BranchNodeV2, LeafNode, LeafNodeRef, Nibbles, ProofTrieNodeV2, RlpNode,
@@ -43,7 +43,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
                 let value_enc_len = buf.len();
 
                 // Determine the required buffer size for the encoded leaf
-                let leaf_enc_len = LeafNodeRef::new(&short_key, buf).length();
+                let leaf_enc_len = leaf_node_rlp_len(&short_key, buf);
 
                 // We want to re-use buf for the encoding of the leaf node as well. To do this we
                 // will keep appending to it, leaving the already encoded value in-place. First we
@@ -136,6 +136,17 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
             }
         }
     }
+}
+
+#[inline]
+fn leaf_node_rlp_len(key: &Nibbles, value: &[u8]) -> usize {
+    let mut encoded_key_len = key.len() / 2 + 1;
+    if encoded_key_len != 1 {
+        encoded_key_len += length_of_length(encoded_key_len);
+    }
+
+    let payload_length = encoded_key_len + Encodable::length(&value);
+    payload_length + length_of_length(payload_length)
 }
 
 /// A single branch in the trie which is under construction. The actual child nodes of the branch
