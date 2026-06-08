@@ -7,7 +7,10 @@ use reth_config::config::ExecutionConfig;
 use reth_consensus::FullConsensus;
 use reth_db::{static_file::HeaderMask, tables};
 use reth_evm::{metrics::ExecutorMetrics, ConfigureEvm2BlockExecutor};
-use reth_execution_types::{evm2_block_state_from_state_source, Chain, Evm2BundleState};
+use reth_execution_types::{
+    evm2_block_state_accumulator_extend, evm2_block_state_hashed_post_state_sorted,
+    evm2_state_source_size_hint, Chain, Evm2BlockStateAccumulator, Evm2BundleState,
+};
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
@@ -335,6 +338,7 @@ where
             start_block,
             Vec::new(),
         );
+        let mut evm2_state = Evm2BlockStateAccumulator::new();
         for block_number in start_block..=max_block {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -356,7 +360,7 @@ where
 
             let output = self.metrics.metered_one(&block, |input| {
                 let state_provider = LatestStateProviderRef::new(provider);
-                let overlay_state = evm2_block_state_from_state_source(state.state());
+                let overlay_state = evm2_state.clone().freeze();
                 let state_provider = Evm2OverlayStateProvider::new(&state_provider, &overlay_state);
                 self.evm_config
                     .execute_evm2_block_with_state_provider_ref(&state_provider, input)
@@ -377,6 +381,7 @@ where
                     error: BlockErrorKind::Validation(err),
                 })
             }
+            evm2_block_state_accumulator_extend(&mut evm2_state, &output.state);
             state.extend(ExecutionOutcome::single(block_number, output));
 
             execution_duration += execute_start.elapsed();
@@ -408,7 +413,7 @@ where
             // Check if we should commit now
             if self.thresholds.is_end_of_batch(
                 block_number - start_block,
-                evm2_state_size_hint(state.state()) as u64,
+                evm2_state_source_size_hint(&evm2_state) as u64,
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
@@ -502,8 +507,10 @@ where
         provider.write_state(&state, OriginalValuesKnown::Yes, StateWriteConfig::default())?;
 
         if provider.cached_storage_settings().use_hashed_state() {
-            let hashed_state = state.hash_state_slow::<KeccakKeyHasher>();
-            provider.write_hashed_state(&hashed_state.into_sorted())?;
+            let evm2_state = evm2_state.freeze();
+            let hashed_state =
+                evm2_block_state_hashed_post_state_sorted::<KeccakKeyHasher>(&evm2_state);
+            provider.write_hashed_state(&hashed_state)?;
         }
 
         let db_write_duration = time.elapsed();
@@ -748,12 +755,6 @@ where
     debug!(target: "sync::stages::execution", ?range, ?duration, "Finished calculating gas used from headers");
 
     Ok(gas_total)
-}
-
-fn evm2_state_size_hint(state: &Evm2BundleState) -> usize {
-    state.accounts().len() +
-        state.contracts().len() +
-        state.storage().values().map(|storage| storage.slots.len()).sum::<usize>()
 }
 
 #[cfg(test)]

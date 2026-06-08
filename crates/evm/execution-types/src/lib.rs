@@ -11,7 +11,10 @@
 
 extern crate alloc;
 
-pub use evm2::evm::{AccountInfo as Evm2AccountInfo, FrozenBlockState as Evm2BlockState};
+pub use evm2::evm::{
+    AccountInfo as Evm2AccountInfo, BlockStateAccumulator as Evm2BlockStateAccumulator,
+    FrozenBlockState as Evm2BlockState,
+};
 
 mod chain;
 pub use chain::*;
