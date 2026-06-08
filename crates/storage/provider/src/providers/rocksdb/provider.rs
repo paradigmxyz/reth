@@ -1725,6 +1725,7 @@ impl<'a> RocksDBBatch<'a> {
     /// Puts a value into the batch.
     ///
     /// If auto-commit is enabled and the batch exceeds the threshold, commits and resets.
+    #[inline]
     pub fn put<T: Table>(&mut self, key: T::Key, value: &T::Value) -> ProviderResult<()> {
         let encoded_key = key.encode();
         self.put_encoded::<T>(&encoded_key, value)
@@ -1733,6 +1734,7 @@ impl<'a> RocksDBBatch<'a> {
     /// Puts a value into the batch using pre-encoded key.
     ///
     /// If auto-commit is enabled and the batch exceeds the threshold, commits and resets.
+    #[inline]
     pub fn put_encoded<T: Table>(
         &mut self,
         key: &<T::Key as Encode>::Encoded,
@@ -1747,6 +1749,7 @@ impl<'a> RocksDBBatch<'a> {
     /// Deletes a value from the batch.
     ///
     /// If auto-commit is enabled and the batch exceeds the threshold, commits and resets.
+    #[inline]
     pub fn delete<T: Table>(&mut self, key: T::Key) -> ProviderResult<()> {
         self.inner.delete_cf(self.provider.get_cf_handle::<T>()?, key.encode().as_ref());
         self.maybe_auto_commit()?;
@@ -1757,10 +1760,18 @@ impl<'a> RocksDBBatch<'a> {
     ///
     /// This is called after each `put` or `delete` operation to prevent unbounded memory growth.
     /// Returns immediately if auto-commit is disabled or threshold not reached.
+    #[inline]
     fn maybe_auto_commit(&mut self) -> ProviderResult<()> {
-        if let Some(threshold) = self.auto_commit_threshold &&
-            self.inner.size_in_bytes() >= threshold
-        {
+        let Some(threshold) = self.auto_commit_threshold else {
+            return Ok(());
+        };
+        self.maybe_auto_commit_slow(threshold)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn maybe_auto_commit_slow(&mut self, threshold: usize) -> ProviderResult<()> {
+        if self.inner.size_in_bytes() >= threshold {
             tracing::debug!(
                 target: "providers::rocksdb",
                 batch_size = self.inner.size_in_bytes(),
