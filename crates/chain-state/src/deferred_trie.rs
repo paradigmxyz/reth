@@ -21,6 +21,7 @@ pub struct DeferredTrieData {
 }
 
 /// Owned task that computes and publishes sorted trie data for a [`DeferredTrieData`] handle.
+#[must_use = "DeferredTrieTask must be consumed with compute_and_publish to wake trie data waiters"]
 pub struct DeferredTrieTask {
     /// Shared result initialized exactly once by this task.
     value: Arc<OnceLock<ComputedTrieData>>,
