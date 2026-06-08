@@ -201,7 +201,11 @@ impl reth_codecs::Compact for Bytecode {
                     original_len
                 };
                 buf.advance(jump_table_len.div_ceil(8));
-                Self::new_raw(bytes)
+                assert!(
+                    original_len <= bytes.len(),
+                    "analyzed bytecode original length exceeds bytecode length"
+                );
+                Self::new_raw(bytes.slice(..original_len))
             }
             EIP7702_BYTECODE_ID => {
                 // EIP-7702 bytecode objects will be decoded from the raw bytecode
@@ -288,6 +292,26 @@ mod tests {
 
         let (decoded, remainder) = Bytecode::from_compact(&buf, len);
         assert_eq!(decoded, bytecode);
+        assert!(remainder.is_empty());
+    }
+
+    #[test]
+    fn test_analyzed_bytecode_decodes_original_bytes() {
+        use compact_ids::LEGACY_ANALYZED_BYTECODE_ID;
+
+        let original = Bytes::from_static(&[0x60, 0x00, 0x5b]);
+        let analyzed = Bytes::from_static(&[0x60, 0x00, 0x5b, 0x00]);
+
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&(analyzed.len() as u32).to_be_bytes());
+        buf.extend_from_slice(&analyzed);
+        buf.push(LEGACY_ANALYZED_BYTECODE_ID);
+        buf.extend_from_slice(&(original.len() as u64).to_be_bytes());
+        buf.push(0);
+
+        let (decoded, remainder) = Bytecode::from_compact(&buf, buf.len());
+        assert_eq!(decoded.original_bytes(), original);
+        assert_eq!(decoded.hash_slow(), keccak256(&original));
         assert!(remainder.is_empty());
     }
 
