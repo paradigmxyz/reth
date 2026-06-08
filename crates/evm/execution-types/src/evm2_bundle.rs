@@ -1,5 +1,6 @@
 //! Evm2 state aggregation types.
 
+use crate::{Evm2BlockReverts, Evm2StorageReverts};
 use alloc::{collections::BTreeMap, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
@@ -392,14 +393,6 @@ impl Evm2BundleState {
     }
 }
 
-/// Returns the per-block reverts represented by an evm2 state-change source.
-pub fn evm2_block_reverts_from_state_source<S>(source: &S) -> Evm2BlockReverts
-where
-    S: StateChangeSource,
-{
-    Evm2BundleState::from_state_source(0, source).block_reverts.pop().unwrap_or_default()
-}
-
 impl StateChangeSource for Evm2BundleState {
     fn visit<S: StateChangeSink>(&self, sink: &mut S) -> Result<(), S::Error> {
         let mut code_entries = self.contracts.iter().collect::<Vec<_>>();
@@ -502,34 +495,6 @@ pub struct Evm2StorageChangeSet {
     pub slots: BTreeMap<U256, Tracked<U256>>,
 }
 
-/// Reverts for one block of evm2 state changes.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Evm2BlockReverts {
-    /// Original accounts before the block changed them.
-    pub accounts: AddressMap<Option<AccountInfo>>,
-    /// Original storage before the block changed it.
-    pub storage: AddressMap<Evm2StorageReverts>,
-}
-
-impl Evm2BlockReverts {
-    /// Clears account and storage revert entries.
-    pub fn clear(&mut self) {
-        self.accounts.clear();
-        self.storage.clear();
-    }
-}
-
-/// Storage reverts for one account in one block.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Evm2StorageReverts {
-    /// Whether the block wiped the account storage.
-    pub wiped: bool,
-    /// Whether earlier bundle state had already marked this account storage as wiped.
-    pub previous_wipe: bool,
-    /// Original storage slots before the block changed them.
-    pub slots: BTreeMap<U256, U256>,
-}
-
 impl From<StorageChangeSet> for Evm2StorageChangeSet {
     fn from(value: StorageChangeSet) -> Self {
         Self { wipe: value.wipe, slots: value.slots }
@@ -563,7 +528,7 @@ mod serde_impl {
         accounts: AddressMap<TrackedSerde<Option<AccountInfoSerde>>>,
         storage: AddressMap<StorageChangeSetSerde>,
         contracts: B256Map<Bytes>,
-        block_reverts: Vec<BlockRevertsSerde>,
+        block_reverts: Vec<Evm2BlockReverts>,
         first_block: BlockNumber,
     }
 
@@ -571,19 +536,6 @@ mod serde_impl {
     struct StorageChangeSetSerde {
         wipe: bool,
         slots: BTreeMap<U256, TrackedSerde<U256>>,
-    }
-
-    #[derive(Serialize, Deserialize)]
-    struct BlockRevertsSerde {
-        accounts: AddressMap<Option<AccountInfoSerde>>,
-        storage: AddressMap<StorageRevertsSerde>,
-    }
-
-    #[derive(Serialize, Deserialize)]
-    struct StorageRevertsSerde {
-        wiped: bool,
-        previous_wipe: bool,
-        slots: BTreeMap<U256, U256>,
     }
 
     #[derive(Serialize, Deserialize)]
@@ -636,24 +588,6 @@ mod serde_impl {
         }
     }
 
-    impl Serialize for Evm2BlockReverts {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
-        {
-            BlockRevertsSerde::from(self).serialize(serializer)
-        }
-    }
-
-    impl<'de> Deserialize<'de> for Evm2BlockReverts {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            BlockRevertsSerde::deserialize(deserializer).map(Into::into)
-        }
-    }
-
     impl From<&Evm2BundleState> for BundleStateSerde {
         fn from(value: &Evm2BundleState) -> Self {
             Self {
@@ -672,7 +606,7 @@ mod serde_impl {
                     .iter()
                     .map(|(hash, bytecode)| (*hash, bytecode.original_bytes()))
                     .collect(),
-                block_reverts: value.block_reverts.iter().map(BlockRevertsSerde::from).collect(),
+                block_reverts: value.block_reverts.clone(),
                 first_block: value.first_block,
             }
         }
@@ -696,7 +630,7 @@ mod serde_impl {
                     .into_iter()
                     .map(|(hash, bytecode)| (hash, Bytecode::new_raw(bytecode)))
                     .collect(),
-                block_reverts: value.block_reverts.into_iter().map(Into::into).collect(),
+                block_reverts: value.block_reverts,
                 first_block: value.first_block,
             }
         }
@@ -721,58 +655,6 @@ mod serde_impl {
                 wipe: value.wipe,
                 slots: value.slots.into_iter().map(|(key, slot)| (key, slot.into())).collect(),
             }
-        }
-    }
-
-    impl From<&Evm2BlockReverts> for BlockRevertsSerde {
-        fn from(value: &Evm2BlockReverts) -> Self {
-            Self {
-                accounts: value
-                    .accounts
-                    .iter()
-                    .map(|(address, account)| {
-                        (*address, account.as_ref().map(AccountInfoSerde::from))
-                    })
-                    .collect(),
-                storage: value
-                    .storage
-                    .iter()
-                    .map(|(address, storage)| (*address, StorageRevertsSerde::from(storage)))
-                    .collect(),
-            }
-        }
-    }
-
-    impl From<BlockRevertsSerde> for Evm2BlockReverts {
-        fn from(value: BlockRevertsSerde) -> Self {
-            Self {
-                accounts: value
-                    .accounts
-                    .into_iter()
-                    .map(|(address, account)| (address, account.map(Into::into)))
-                    .collect(),
-                storage: value
-                    .storage
-                    .into_iter()
-                    .map(|(address, storage)| (address, storage.into()))
-                    .collect(),
-            }
-        }
-    }
-
-    impl From<&Evm2StorageReverts> for StorageRevertsSerde {
-        fn from(value: &Evm2StorageReverts) -> Self {
-            Self {
-                wiped: value.wiped,
-                previous_wipe: value.previous_wipe,
-                slots: value.slots.clone(),
-            }
-        }
-    }
-
-    impl From<StorageRevertsSerde> for Evm2StorageReverts {
-        fn from(value: StorageRevertsSerde) -> Self {
-            Self { wiped: value.wiped, previous_wipe: value.previous_wipe, slots: value.slots }
         }
     }
 
