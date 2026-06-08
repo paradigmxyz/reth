@@ -392,6 +392,14 @@ impl Evm2BundleState {
     }
 }
 
+/// Returns the per-block reverts represented by an evm2 state-change source.
+pub fn evm2_block_reverts_from_state_source<S>(source: &S) -> Evm2BlockReverts
+where
+    S: StateChangeSource,
+{
+    Evm2BundleState::from_state_source(0, source).block_reverts.pop().unwrap_or_default()
+}
+
 impl StateChangeSource for Evm2BundleState {
     fn visit<S: StateChangeSink>(&self, sink: &mut S) -> Result<(), S::Error> {
         let mut code_entries = self.contracts.iter().collect::<Vec<_>>();
