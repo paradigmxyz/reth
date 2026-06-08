@@ -344,7 +344,7 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Returns [`HashedPostState`] for this execution outcome.
-    /// See [`HashedPostState::from_bundle_state`] for more info.
+    /// Returns the hashed post-state represented by the aggregate evm2 state.
     pub fn hash_state_slow<KH: reth_trie_common::KeyHasher>(
         &self,
     ) -> reth_trie_common::HashedPostState {

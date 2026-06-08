@@ -22,9 +22,6 @@ pub use chain::*;
 mod execute;
 pub use execute::*;
 
-mod evm2_bundle;
-pub use evm2_bundle::*;
-
 mod evm2_state;
 pub use evm2_state::*;
 
