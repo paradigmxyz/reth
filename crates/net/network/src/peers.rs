@@ -704,9 +704,6 @@ impl PeersManager {
         err: impl SessionError,
         reputation_change: ReputationChangeKind,
     ) {
-        if let Some(peer) = self.peers.get_mut(peer_id) {
-            peer.mark_disconnected();
-        }
         trace!(target: "net::peers", ?remote_addr, ?peer_id, %err, "handling failed connection");
 
         if err.is_fatal_protocol_error() {
@@ -717,7 +714,9 @@ impl PeersManager {
                 self.connection_info.decr_state(entry.get().state);
                 // only remove if the peer is not trusted
                 if entry.get().is_trusted() {
-                    entry.get_mut().state = PeerConnectionState::Idle;
+                    let peer = entry.get_mut();
+                    peer.state = PeerConnectionState::Idle;
+                    peer.mark_disconnected();
                 } else {
                     entry.remove();
                     self.queued_actions.push_back(PeerAction::PeerRemoved(*peer_id));
@@ -772,6 +771,7 @@ impl PeersManager {
 
                 self.connection_info.decr_state(peer.state);
                 peer.state = PeerConnectionState::Idle;
+                peer.mark_disconnected();
 
                 if peer.severe_backoff_counter > self.max_backoff_count &&
                     !peer.is_trusted() &&
