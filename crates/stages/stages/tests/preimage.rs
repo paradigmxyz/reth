@@ -20,6 +20,7 @@ use reth_downloaders::{
 use reth_ethereum_primitives::{Block, BlockBody, Transaction, TransactionSigned};
 use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::EthEvmConfig;
+use reth_execution_types::evm2_block_state_hashed_post_state_sorted;
 use reth_libmdbx::{Environment, EnvironmentFlags, Mode};
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
@@ -953,16 +954,13 @@ fn execute_and_commit_block(
     };
 
     let gas_used = output.gas_used;
-    let hashed_state = output.state.hashed_post_state::<KeccakKeyHasher>();
+    let hashed_state = evm2_block_state_hashed_post_state_sorted::<KeccakKeyHasher>(&output.state);
     type TestStateRoot<'a, TX, A> = StateRoot<
         reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
         reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
     >;
     let (state_root, _trie_updates) = reth_trie_db::with_adapter!(provider, |A| {
-        TestStateRoot::<_, A>::overlay_root_with_updates(
-            provider.tx_ref(),
-            &hashed_state.clone().into_sorted(),
-        )
+        TestStateRoot::<_, A>::overlay_root_with_updates(provider.tx_ref(), &hashed_state)
     })?;
 
     let receipts: Vec<_> = output.receipts.iter().map(|r| r.with_bloom_ref()).collect();

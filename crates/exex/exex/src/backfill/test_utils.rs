@@ -7,6 +7,7 @@ use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN
 use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction};
 use reth_evm::{execute::BlockExecutionOutput, ConfigureEvm2BlockExecutor};
 use reth_evm_ethereum::EthEvmConfig;
+use reth_execution_types::{evm2_block_state_hashed_post_state_sorted, Evm2BundleState};
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
@@ -22,7 +23,7 @@ pub(crate) fn to_execution_outcome(
     block_execution_output: &BlockExecutionOutput<Receipt>,
 ) -> ExecutionOutcome {
     ExecutionOutcome {
-        bundle: block_execution_output.state.clone(),
+        bundle: Evm2BundleState::from_state_source(block_number, &block_execution_output.state),
         receipts: vec![block_execution_output.receipts.clone()],
         first_block: block_number,
         requests: vec![block_execution_output.requests.clone()],
@@ -73,7 +74,8 @@ where
     let execution_outcome = to_execution_outcome(block.number(), &block_execution_output);
 
     // Commit the block's execution outcome to the database
-    let hashed_state = execution_outcome.hash_state_slow::<KeccakKeyHasher>().into_sorted();
+    let hashed_state =
+        evm2_block_state_hashed_post_state_sorted::<KeccakKeyHasher>(&block_execution_output.state);
     let provider_rw = provider_factory.provider_rw()?;
     provider_rw.append_blocks_with_state(vec![block.clone()], &execution_outcome, hashed_state)?;
     provider_rw.commit()?;

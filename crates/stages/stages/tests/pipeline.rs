@@ -16,6 +16,7 @@ use reth_downloaders::{
 use reth_ethereum_primitives::{Block, BlockBody, Transaction};
 use reth_evm::ConfigureEvm2BlockExecutor;
 use reth_evm_ethereum::EthEvmConfig;
+use reth_execution_types::evm2_block_state_hashed_post_state_sorted;
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
@@ -345,17 +346,15 @@ async fn run_pipeline_forward_and_unwind(
 
         let gas_used = output.gas_used;
 
-        // Convert bundle state to hashed post state and compute state root
-        let hashed_state = output.state.hashed_post_state::<KeccakKeyHasher>();
+        // Convert block state to sorted hashed post state and compute state root.
+        let hashed_state =
+            evm2_block_state_hashed_post_state_sorted::<KeccakKeyHasher>(&output.state);
         type TestStateRoot<'a, TX, A> = StateRoot<
             reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
             reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
         >;
         let (state_root, _trie_updates) = reth_trie_db::with_adapter!(provider, |A| {
-            TestStateRoot::<_, A>::overlay_root_with_updates(
-                provider.tx_ref(),
-                &hashed_state.clone().into_sorted(),
-            )
+            TestStateRoot::<_, A>::overlay_root_with_updates(provider.tx_ref(), &hashed_state)
         })?;
 
         // Create receipts for receipt root calculation (one per transaction)

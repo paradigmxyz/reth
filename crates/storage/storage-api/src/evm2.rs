@@ -5,6 +5,7 @@ use crate::{
     StateProvider, StateRootProvider, StorageRootProvider,
 };
 use alloc::vec::Vec;
+use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{Address, BlockNumber, Bytes, B256, U256};
 use core::{
     mem,
@@ -16,7 +17,7 @@ use evm2::{
     evm::{AccountInfo, Database},
     interpreter::Word,
 };
-use reth_execution_types::Evm2BundleState;
+use reth_execution_types::{Evm2AccountInfo, Evm2BlockState};
 use reth_primitives_traits::{Account, Bytecode as RethBytecode};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::{
@@ -167,7 +168,7 @@ impl Database for BorrowedEvm2StateProviderDatabase {
 /// A borrowed [`StateProvider`] that overlays uncommitted evm2 state on top of a base provider.
 pub struct Evm2OverlayStateProvider<'a> {
     base: &'a dyn StateProvider,
-    overlay: &'a Evm2BundleState,
+    overlay: &'a Evm2BlockState,
 }
 
 impl core::fmt::Debug for Evm2OverlayStateProvider<'_> {
@@ -178,15 +179,15 @@ impl core::fmt::Debug for Evm2OverlayStateProvider<'_> {
 
 impl<'a> Evm2OverlayStateProvider<'a> {
     /// Creates a new overlay provider.
-    pub const fn new(base: &'a dyn StateProvider, overlay: &'a Evm2BundleState) -> Self {
+    pub const fn new(base: &'a dyn StateProvider, overlay: &'a Evm2BlockState) -> Self {
         Self { base, overlay }
     }
 }
 
 impl AccountReader for Evm2OverlayStateProvider<'_> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        if let Some(account) = self.overlay.account(address) {
-            return Ok(account)
+        if let Some((_, account)) = self.overlay.accounts().find(|(addr, _)| addr == address) {
+            return Ok(account.current.as_ref().map(account_info_to_reth))
         }
 
         self.base.basic_account(address)
@@ -195,8 +196,8 @@ impl AccountReader for Evm2OverlayStateProvider<'_> {
 
 impl BytecodeReader for Evm2OverlayStateProvider<'_> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<RethBytecode>> {
-        if let Some(bytecode) = self.overlay.bytecode(code_hash) {
-            return Ok(Some(bytecode))
+        if let Some((_, bytecode)) = self.overlay.code().find(|(hash, _)| *hash == code_hash) {
+            return Ok(Some(RethBytecode::new_raw(bytecode.original_bytes())))
         }
 
         self.base.bytecode_by_hash(code_hash)
@@ -313,16 +314,24 @@ impl HashedPostStateProvider for Evm2OverlayStateProvider<'_> {}
 impl StateProvider for Evm2OverlayStateProvider<'_> {
     fn storage(&self, account: Address, storage_key: B256) -> ProviderResult<Option<U256>> {
         let slot = U256::from_be_bytes(storage_key.0);
-        if let Some(value) = self.overlay.storage_slot(&account, slot) {
-            return Ok(Some(value))
+        if let Some((_, storage)) =
+            self.overlay.storage().find(|(key, _)| key.address() == account && key.key() == slot)
+        {
+            return Ok(Some(storage.current))
         }
 
-        if self.overlay.storage().get(&account).map(|storage| storage.wipe).unwrap_or_default() {
+        if self.overlay.storage_wipes().any(|address| address == account) {
             return Ok(Some(U256::ZERO))
         }
 
         self.base.storage(account, storage_key)
     }
+}
+
+fn account_info_to_reth(info: &Evm2AccountInfo) -> Account {
+    let bytecode_hash =
+        (!info.code_hash.is_zero() && info.code_hash != KECCAK_EMPTY).then_some(info.code_hash);
+    Account { nonce: info.nonce, balance: info.balance, bytecode_hash }
 }
 
 fn account_to_evm2(account: Account) -> AccountInfo {

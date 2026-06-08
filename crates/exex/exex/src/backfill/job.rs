@@ -121,9 +121,10 @@ where
                 .map_err(evm2_execution_error)?;
             execution_duration += execute_start.elapsed();
 
+            let block_state = Evm2BundleState::from_state_source(block_number, &output.state);
             match &mut bundle {
-                Some(bundle) => bundle.extend(output.state),
-                None => bundle = Some(output.state),
+                Some(bundle) => bundle.extend(block_state),
+                None => bundle = Some(block_state),
             }
             results.push(output.result);
 
