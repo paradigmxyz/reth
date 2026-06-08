@@ -34,11 +34,32 @@ where
     S: StateChangeSource,
 {
     let mut state = BlockStateAccumulator::new();
-    match source.visit(&mut state) {
+    evm2_block_state_accumulator_extend(&mut state, source);
+    state.freeze()
+}
+
+/// Extends an evm2 block-state accumulator with any evm2 state-change source.
+pub fn evm2_block_state_accumulator_extend<S>(accumulator: &mut BlockStateAccumulator, source: &S)
+where
+    S: StateChangeSource,
+{
+    match source.visit(accumulator) {
         Ok(()) => {}
         Err(err) => match err {},
     }
-    state.freeze()
+}
+
+/// Returns an approximate state-change size for thresholding and metrics.
+pub fn evm2_state_source_size_hint<S>(source: &S) -> usize
+where
+    S: StateChangeSource,
+{
+    let mut sink = StateSizeHintSink::default();
+    match source.visit(&mut sink) {
+        Ok(()) => {}
+        Err(err) => match err {},
+    }
+    sink.size
 }
 
 /// Returns trie-ready sorted hashed post-state for an evm2 block state.
@@ -89,9 +110,38 @@ struct HashedPostStateSink<KH> {
     _key_hasher: PhantomData<KH>,
 }
 
+#[derive(Default)]
+struct StateSizeHintSink {
+    size: usize,
+}
+
 impl<KH> Default for HashedPostStateSink<KH> {
     fn default() -> Self {
         Self { state: HashedPostState::default(), _key_hasher: PhantomData }
+    }
+}
+
+impl StateChangeSink for StateSizeHintSink {
+    type Error = Infallible;
+
+    fn bytecode(&mut self, _code_hash: B256, _code: &Bytecode) -> Result<(), Self::Error> {
+        self.size += 1;
+        Ok(())
+    }
+
+    fn account(&mut self, _change: AccountChangeRef<'_>) -> Result<(), Self::Error> {
+        self.size += 1;
+        Ok(())
+    }
+
+    fn storage_wipe(&mut self, _address: alloy_primitives::Address) -> Result<(), Self::Error> {
+        self.size += 1;
+        Ok(())
+    }
+
+    fn storage(&mut self, _change: StorageChangeRef) -> Result<(), Self::Error> {
+        self.size += 1;
+        Ok(())
     }
 }
 
