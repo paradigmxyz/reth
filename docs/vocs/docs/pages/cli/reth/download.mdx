@@ -206,7 +206,7 @@ Storage:
           Skip interactive component selection. Downloads the minimal set (state + headers + transactions + changesets) unless explicit --with-* flags narrow it
 
       --force
-          Overwrite existing snapshot data while preserving discovery-secret and known-peers.json
+          Overwrite existing snapshot data by removing db, rocksdb, static_files, and reth.toml
 
       --resumable [<RESUMABLE>]
           Enable resumable two-phase downloads (download to disk first, then extract).
