@@ -1,6 +1,7 @@
 use crate::{
-    evm2_bundle::account_to_info, BlockExecutionOutput, BlockExecutionResult, Evm2BlockReverts,
-    Evm2BlockState, Evm2BundleState, Evm2StorageReverts,
+    evm2_block_state_from_state_source, evm2_bundle::account_to_info, BlockExecutionOutput,
+    BlockExecutionResult, Evm2BlockReverts, Evm2BlockState, Evm2BundleState, Evm2StorageChangeSet,
+    Evm2StorageReverts,
 };
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
@@ -204,6 +205,21 @@ impl<T> ExecutionOutcome<T> {
     /// Returns mutable per-block reverts.
     pub const fn block_reverts_mut(&mut self) -> &mut Vec<Evm2BlockReverts> {
         self.bundle.block_reverts_mut()
+    }
+
+    /// Returns per-block reverts.
+    pub const fn block_reverts(&self) -> &Vec<Evm2BlockReverts> {
+        self.bundle.block_reverts()
+    }
+
+    /// Returns aggregated storage changes.
+    pub const fn storage_changes(&self) -> &AddressMap<Evm2StorageChangeSet> {
+        self.bundle.storage()
+    }
+
+    /// Returns the current state changes as an evm2 frozen block state.
+    pub fn evm2_block_state(&self) -> Evm2BlockState {
+        evm2_block_state_from_state_source(&self.bundle)
     }
 
     /// Set first block.

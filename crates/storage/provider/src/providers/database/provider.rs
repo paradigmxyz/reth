@@ -3916,9 +3916,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         let (account_transitions, storage_transitions) = {
             let mut account_transitions: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
             let mut storage_transitions: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
-            for (block_idx, block_reverts) in
-                execution_outcome.bundle.block_reverts().iter().enumerate()
-            {
+            for (block_idx, block_reverts) in execution_outcome.block_reverts().iter().enumerate() {
                 let block_number = first_number + block_idx as u64;
                 for address in block_reverts.accounts.keys() {
                     account_transitions.entry(*address).or_default().push(block_number);

@@ -138,7 +138,7 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     // Storage keys are represented as U256 plain EVM slot indices.
     let mut preimage_entries = Vec::new();
     let mut seen_hashes = HashSet::new();
-    for storage in state.bundle.storage().values() {
+    for storage in state.storage_changes().values() {
         for &slot_key in storage.slots.keys() {
             let plain = B256::from(slot_key.to_be_bytes());
             let hashed = keccak256(plain);
@@ -147,7 +147,7 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
             }
         }
     }
-    for block_reverts in state.bundle.block_reverts() {
+    for block_reverts in state.block_reverts() {
         for revert in block_reverts.storage.values() {
             for &slot_key in revert.slots.keys() {
                 let plain = B256::from(slot_key.to_be_bytes());
@@ -174,7 +174,7 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     // Open a single RO transaction for all preimage lookups in this batch.
     let reader = preimages.reader().map_err(fatal)?;
 
-    for block_reverts in state.bundle.block_reverts_mut() {
+    for block_reverts in state.block_reverts_mut() {
         for (address, revert) in block_reverts.storage.iter_mut() {
             if !revert.wiped {
                 continue;
