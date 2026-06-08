@@ -367,6 +367,8 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
                 waiter.finish(Arc::clone(&input));
 
                 if let Entry::Occupied(mut entry) = self.overlays.entry(key) {
+                    // The entry may have been pruned while the overlay was computing. Only cache
+                    // the result if the map still points at the waiter installed by this task.
                     let should_publish = match entry.get() {
                         OverlayCacheEntry::Computing(existing) => Arc::ptr_eq(existing, &waiter),
                         OverlayCacheEntry::Ready(_) => false,
