@@ -38,6 +38,10 @@ alloy-rlp.workspace = true
 
 [features]
 default = ["std"]
+asm-keccak = [
+    "evm2/asm-keccak",
+    "alloy-primitives/asm-keccak",
+]
 serde = [
     "dep:serde",
     "rand/serde",

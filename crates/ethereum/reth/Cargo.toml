@@ -78,6 +78,14 @@ arbitrary = [
     "alloy-rpc-types-engine?/arbitrary",
     "reth-codecs?/arbitrary",
 ]
+asm-keccak = [
+    "reth-ethereum-cli?/asm-keccak",
+    "reth-node-ethereum?/asm-keccak",
+    "reth-node-core?/asm-keccak",
+    "reth-evm?/asm-keccak",
+    "reth-evm-ethereum?/asm-keccak",
+    "reth-storage-api?/asm-keccak",
+]
 keccak-cache-global = [
     "reth-node-ethereum?/keccak-cache-global",
     "reth-node-core?/keccak-cache-global",

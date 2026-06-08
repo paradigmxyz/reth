@@ -43,6 +43,11 @@ tokio-stream.workspace = true
 
 [features]
 default = ["std"]
+asm-keccak = [
+    "evm2?/asm-keccak",
+    "reth-execution-types/asm-keccak",
+    "alloy-primitives/asm-keccak",
+]
 std = [
     "reth-chainspec/std",
     "alloy-consensus/std",

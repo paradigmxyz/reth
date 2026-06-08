@@ -92,6 +92,8 @@ jit = ["reth-evm-ethereum/jit"]
 asm-keccak = [
     "alloy-primitives/asm-keccak",
     "reth-node-core/asm-keccak",
+    "reth-evm/asm-keccak",
+    "reth-evm-ethereum/asm-keccak",
 ]
 keccak-cache-global = [
     "alloy-primitives/keccak-cache-global",

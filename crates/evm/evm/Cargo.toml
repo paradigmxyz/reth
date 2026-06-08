@@ -36,6 +36,12 @@ reth-ethereum-primitives.workspace = true
 
 [features]
 default = ["std"]
+asm-keccak = [
+    "evm2/asm-keccak",
+    "reth-execution-types/asm-keccak",
+    "reth-storage-api/asm-keccak",
+    "alloy-primitives/asm-keccak",
+]
 std = [
     "dep:rayon",
     "reth-primitives-traits/std",

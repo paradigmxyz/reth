@@ -99,6 +99,14 @@ rand.workspace = true
 rand_08.workspace = true
 
 [features]
+asm-keccak = [
+    "evm2/asm-keccak",
+    "reth-evm/asm-keccak",
+    "reth-evm-ethereum/asm-keccak",
+    "reth-execution-types/asm-keccak",
+    "alloy-primitives/asm-keccak",
+    "reth-node-ethereum/asm-keccak",
+]
 test-utils = [
     "reth-chain-state/test-utils",
     "reth-chainspec/test-utils",
