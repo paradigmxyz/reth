@@ -96,6 +96,11 @@ on:
         required: false
         default: "true"
         type: boolean
+      metrics:
+        description: "Upload txgen metrics to VictoriaMetrics"
+        required: false
+        default: "false"
+        type: boolean
 
 env:
   CARGO_TERM_COLOR: always
@@ -128,6 +133,7 @@ jobs:
       samply: ${{ steps.args.outputs.samply }}
       tracing-chrome: ${{ steps.args.outputs.tracing-chrome }}
       slack: ${{ steps.args.outputs.slack }}
+      metrics: ${{ steps.args.outputs.metrics }}
       cores: ${{ steps.args.outputs.cores }}
       big-blocks: ${{ steps.args.outputs.big-blocks }}
       big-blocks-target-gas: ${{ steps.args.outputs.big-blocks-target-gas }}
@@ -186,7 +192,7 @@ jobs:
           script: |
             const validBalModes = new Set(['false', 'true', 'feature', 'baseline']);
             const validSlackModes = new Set(['always', 'on-win', 'on-error', 'never']);
-            const usage = '`@decofe bench [blocks=N] [big-blocks[=true|false|100M|2G]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [tracing-chrome] [slack=always|on-win|on-error|never] [cores=N] [run-pairs=N] [otlp=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]`';
+            const usage = '`@decofe bench [blocks=N] [big-blocks[=true|false|100M|2G]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [tracing-chrome] [slack=always|on-win|on-error|never] [cores=N] [run-pairs=N] [otlp=true|false] [metrics[=true|false]] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]`';
             let pr, actor, blocks, warmup, baseline, feature, samply, tracingChrome, cores, bigBlocks, bal;
             let bigBlocksTargetGas = '';
             let explicitBlocks = false;
@@ -234,6 +240,7 @@ jobs:
               var runPairs = '${{ github.event.inputs.run_pairs }}' || '';
               explicitRunPairs = runPairs !== '';
               var otlp = '${{ github.event.inputs.otlp }}' === 'false' ? 'false' : 'true';
+              var metrics = '${{ github.event.inputs.metrics }}' === 'true' ? 'true' : 'false';
               var waitTime = '${{ github.event.inputs.wait_time }}' || '';
               var baselineNodeArgs = '${{ github.event.inputs.baseline_args }}' || '';
               var featureNodeArgs = '${{ github.event.inputs.feature_args }}' || '';
@@ -258,11 +265,11 @@ jobs:
               const body = context.payload.comment.body.trim();
               const intArgs = new Set(['warmup', 'cores', 'blocks', 'run-pairs']);
               const refArgs = new Set(['baseline', 'feature']);
-              const boolArgs = new Set(['samply', 'tracing-chrome', 'otlp']);
+              const boolArgs = new Set(['samply', 'tracing-chrome', 'otlp', 'metrics']);
               const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes]]);
               const durationArgs = new Set(['wait-time']);
               const stringArgs = new Set(['baseline-args', 'feature-args']);
-              const defaults = { blocks: '', warmup: '', baseline: '', feature: '', samply: 'false', 'tracing-chrome': 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', 'run-pairs': '', otlp: 'true', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
+              const defaults = { blocks: '', warmup: '', baseline: '', feature: '', samply: 'false', 'tracing-chrome': 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', 'run-pairs': '', otlp: 'true', metrics: 'false', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -363,6 +370,7 @@ jobs:
               bal = defaults.bal;
               var runPairs = defaults['run-pairs'];
               var otlp = defaults.otlp;
+              var metrics = defaults.metrics;
               var waitTime = defaults['wait-time'];
               var baselineNodeArgs = defaults['baseline-args'];
               var featureNodeArgs = defaults['feature-args'];
@@ -442,6 +450,7 @@ jobs:
             core.setOutput('run-pairs', runPairs);
             core.setOutput('run-order', runOrder);
             core.setOutput('otlp', otlp);
+            core.setOutput('metrics', metrics);
             core.setOutput('node-bin', nodeBin);
 
       - name: Acknowledge request
@@ -650,6 +659,7 @@ jobs:
       BENCH_RUN_PAIRS: ${{ needs.bench-ack.outputs.run-pairs }}
       BENCH_RUN_ORDER: ${{ needs.bench-ack.outputs.run-order }}
       BENCH_OTLP: ${{ needs.bench-ack.outputs.otlp }}
+      BENCH_METRICS: ${{ needs.bench-ack.outputs.metrics }}
       BENCH_COMMENT_ID: ${{ needs.bench-ack.outputs.comment-id }}
       BENCH_SLACK: ${{ needs.bench-ack.outputs.slack }}
       BENCH_NODE_BIN: ${{ needs.bench-ack.outputs.node-bin }}
@@ -659,7 +669,7 @@ jobs:
       BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS: "200"
       BENCH_OTLP_TRACES_ENDPOINT: ${{ needs.bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_TRACES_ENDPOINT || '' }}
       BENCH_OTLP_LOGS_ENDPOINT: ${{ needs.bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_LOGS_ENDPOINT || '' }}
-      BENCH_VICTORIAMETRICS_URL: ${{ secrets.BENCH_VICTORIAMETRICS_URL }}
+      BENCH_VICTORIAMETRICS_URL: ${{ needs.bench-ack.outputs.metrics == 'true' && secrets.BENCH_VICTORIAMETRICS_URL || '' }}
     steps:
       - name: Clean up previous bench-work
         run: sudo rm -rf "$BENCH_WORK_DIR" 2>/dev/null || true
@@ -1058,6 +1068,7 @@ jobs:
             cores="$BENCH_CORES"
             run-pairs="$BENCH_RUN_PAIRS"
             otlp="$BENCH_OTLP"
+            metrics="$BENCH_METRICS"
             slack="$BENCH_SLACK"
           )
           [ "$BENCH_SAMPLY" = "true" ] && derek_cmd+=(samply)
@@ -1391,7 +1402,7 @@ jobs:
             SUMMARY_ARGS="$SUMMARY_ARGS --benchmark-id $BENCH_ID"
           fi
           GRAFANA_URL='${{ steps.metrics.outputs.grafana-url }}'
-          if [ -n "$GRAFANA_URL" ]; then
+          if [ "${BENCH_METRICS:-false}" = "true" ] && [ -n "$GRAFANA_URL" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --grafana-url $GRAFANA_URL"
           fi
           LOGS_URL='${{ steps.metrics.outputs.logs-url }}'
