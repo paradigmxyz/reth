@@ -75,11 +75,7 @@ impl<T> Default for ExecutionOutcome<T> {
 }
 
 impl<T> ExecutionOutcome<T> {
-    /// Creates a new `ExecutionOutcome`.
-    ///
-    /// This constructor initializes a new `ExecutionOutcome` instance with the provided
-    /// bundle state, receipts, first block number, and EIP-7685 requests.
-    pub const fn new(
+    const fn from_bundle(
         bundle: Evm2BundleState,
         receipts: Vec<Vec<T>>,
         first_block: BlockNumber,
@@ -103,7 +99,7 @@ impl<T> ExecutionOutcome<T> {
 
     /// Creates an empty execution outcome beginning at `first_block`.
     pub fn new_empty(first_block: BlockNumber) -> Self {
-        Self::new(Evm2BundleState::new(first_block), Vec::new(), first_block, Vec::new())
+        Self::from_bundle(Evm2BundleState::new(first_block), Vec::new(), first_block, Vec::new())
     }
 
     /// Creates a new `ExecutionOutcome` from initialization parameters.
@@ -684,7 +680,7 @@ mod tests {
 
         // Assert that creating a new ExecutionOutcome using the constructor matches exec_res
         assert_eq!(
-            ExecutionOutcome::new(bundle, receipts.clone(), first_block, requests.clone()),
+            ExecutionOutcome::from_bundle(bundle, receipts.clone(), first_block, requests.clone()),
             exec_res
         );
 
