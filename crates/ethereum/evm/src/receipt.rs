@@ -79,15 +79,15 @@ impl RethReceiptBuilder {
             append_to_block_state(&mut state, &changes);
         }
 
-        BlockExecutionOutput {
-            result: BlockExecutionResult {
+        BlockExecutionOutput::new(
+            BlockExecutionResult {
                 receipts,
                 requests: Default::default(),
                 gas_used: cumulative_gas_used,
                 blob_gas_used: 0,
             },
-            state: state.freeze(),
-        }
+            state.freeze(),
+        )
     }
 
     /// Builds a block execution output from result-only evm2 transaction outcomes and an
@@ -114,15 +114,15 @@ impl RethReceiptBuilder {
             });
         }
 
-        BlockExecutionOutput {
-            result: BlockExecutionResult {
+        BlockExecutionOutput::new(
+            BlockExecutionResult {
                 receipts,
                 requests: Default::default(),
                 gas_used: cumulative_gas_used,
                 blob_gas_used: 0,
             },
-            state: block_state_from_source(state_source),
-        }
+            block_state_from_source(state_source),
+        )
     }
 
     /// Builds a block execution output from result-only evm2 transaction outcomes and an owned
@@ -145,15 +145,15 @@ impl RethReceiptBuilder {
             });
         }
 
-        BlockExecutionOutput {
-            result: BlockExecutionResult {
+        BlockExecutionOutput::new(
+            BlockExecutionResult {
                 receipts,
                 requests: Default::default(),
                 gas_used: cumulative_gas_used,
                 blob_gas_used: 0,
             },
             state,
-        }
+        )
     }
 }
 

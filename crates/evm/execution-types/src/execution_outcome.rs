@@ -209,7 +209,7 @@ impl<T> ExecutionOutcome<T> {
     /// Creates a new `ExecutionOutcome` from a single block execution result.
     pub fn single(block_number: u64, output: BlockExecutionOutput<T>) -> Self {
         let block_reverts = evm2_block_reverts_from_state_source(&output.state);
-        let state = output.state;
+        let state = output.state.into_inner();
         Self {
             state: state.clone(),
             block_states: vec![state],

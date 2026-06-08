@@ -5319,7 +5319,7 @@ mod tests {
                         gas_used: 0,
                         blob_gas_used: 0,
                     },
-                    state,
+                    state: state.into(),
                 }),
                 ComputedTrieData { hashed_state: Arc::new(hashed_state), ..Default::default() },
             );

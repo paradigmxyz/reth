@@ -184,7 +184,8 @@ where
             .evm_config
             .execute_evm2_block_with_state_provider_ref(&*state_provider, block)
             .map_err(|err| eyre::eyre!(err.to_string()))?;
-        let (codes, preimages, hashed_state, block_state) = collect_execution_data(output.state)?;
+        let (codes, preimages, hashed_state, block_state) =
+            collect_execution_data(output.state.into_inner())?;
         let witness = generate(codes, preimages, hashed_state, state_provider)?;
 
         Ok((witness, block_state))
@@ -732,7 +733,7 @@ mod tests {
 
         // Create mock BlockExecutionOutput
         let output = BlockExecutionOutput {
-            state: block_state,
+            state: block_state.into(),
             result: reth_provider::BlockExecutionResult {
                 receipts: vec![],
                 requests: Requests::default(),

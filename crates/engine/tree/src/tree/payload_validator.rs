@@ -143,7 +143,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{
     AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives,
-    RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
+    RecoveredBlock, SealedBlock, SealedHeader, SignedTransaction, SignerRecoverable,
 };
 use reth_provider::{
     providers::{OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory},
@@ -407,7 +407,7 @@ where
             }
             BlockOrPayload::Block(block) => {
                 let txs = block.body().clone_transactions();
-                let convert = |tx: N::SignedTx| tx.try_into_recovered();
+                let convert = |tx: N::SignedTx| SignerRecoverable::try_into_recovered(tx);
                 Either::Right((txs, convert))
             }
         })
@@ -1130,18 +1130,13 @@ where
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
         let execution_start = Instant::now();
 
-        let transactions = match input {
-            BlockOrPayload::Payload(payload) => self
-                .evm_config
-                .evm2_recovered_txs_for_payload(payload)
-                .map_err(InsertBlockErrorKind::Other)?,
-            BlockOrPayload::Block(block) => block
-                .body()
-                .clone_transactions()
-                .into_iter()
-                .map(|tx| tx.try_into_recovered().map_err(BlockExecutionError::other))
-                .collect::<Result<Vec<_>, _>>()?,
-        };
+        let transactions = handle
+            .iter_transactions()
+            .map(|tx| {
+                let tx = tx.map_err(BlockExecutionError::other)?;
+                Ok(tx.tx().clone().with_signer(*tx.signer()))
+            })
+            .collect::<Result<Vec<_>, BlockExecutionError>>()?;
         let senders = transactions.iter().map(|tx| tx.signer()).collect();
         executed_tx_index.store(transactions.len(), Ordering::Relaxed);
 
@@ -1879,14 +1874,8 @@ where
             })
             .filter_map(|(_, acc)| acc.current.as_ref().map(|info| info.code_hash))
             .collect();
-        let code_bytes_written: usize = unique_new_code_hashes
-            .iter()
-            .filter_map(|hash| {
-                output.state.code().find_map(|(code_hash, bytecode)| {
-                    (code_hash == hash).then(|| bytecode.original_bytes().len())
-                })
-            })
-            .sum();
+        let code_bytes_written: usize =
+            unique_new_code_hashes.iter().filter_map(|hash| output.bytecode_len(hash)).sum();
 
         // Total time spent fetching state during execution
         let state_read_duration = provider_stats.total_account_fetch_latency() +

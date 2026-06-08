@@ -125,7 +125,7 @@ where
             execution_duration += execute_start.elapsed();
 
             evm2_block_state_accumulator_extend(&mut state, &output.state);
-            block_states.push(output.state);
+            block_states.push(output.state.into_inner());
             results.push(output.result);
 
             // Seal the block back and save it
