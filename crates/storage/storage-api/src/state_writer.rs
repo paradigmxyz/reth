@@ -1,7 +1,7 @@
-use alloc::{borrow::Cow, vec::Vec};
+use alloc::vec::Vec;
 use alloy_consensus::transaction::Either;
 use alloy_primitives::{Address, BlockNumber, B256, U256};
-use reth_execution_types::{BlockExecutionOutput, Evm2BundleState, ExecutionOutcome};
+use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::HashedPostStateSorted;
@@ -51,16 +51,6 @@ impl<'a, R> WriteStateInput<'a, R> {
         match self {
             Self::Single { block, .. } => *block,
             Self::Multiple(outcome) => outcome.last_block(),
-        }
-    }
-
-    /// Returns a reference to the execution bundle state.
-    pub fn state(&self) -> Cow<'_, Evm2BundleState> {
-        match self {
-            Self::Single { outcome, block } => {
-                Cow::Owned(Evm2BundleState::from_state_source(*block, &outcome.state))
-            }
-            Self::Multiple(outcome) => Cow::Borrowed(&outcome.bundle),
         }
     }
 

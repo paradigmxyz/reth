@@ -2651,8 +2651,14 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         }
 
         let first_block = execution_outcome.first_block();
-        let state = execution_outcome.state();
-        let (plain_state, reverts) = evm2_bundle_to_plain_state_and_reverts(&state, is_value_known);
+        let (plain_state, reverts) = match &execution_outcome {
+            WriteStateInput::Single { outcome, .. } => {
+                evm2_block_state_to_plain_state_and_reverts(&outcome.state, is_value_known)
+            }
+            WriteStateInput::Multiple(outcome) => {
+                evm2_bundle_to_plain_state_and_reverts(outcome.state(), is_value_known)
+            }
+        };
 
         self.write_state_reverts(reverts, first_block, config)?;
         self.write_state_changes(plain_state)?;
