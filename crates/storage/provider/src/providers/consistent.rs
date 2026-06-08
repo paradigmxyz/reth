@@ -2039,7 +2039,7 @@ mod tests {
 
         let outcome = consistent_provider.get_state(1)?.expect("should return execution outcome");
 
-        let storage = outcome.bundle.storage().get(&address).expect("should have account storage");
+        let storage = outcome.storage_changes().get(&address).expect("should have account storage");
 
         let storage_slot = storage.slots.get(&slot).expect("should have the slot in storage");
 
