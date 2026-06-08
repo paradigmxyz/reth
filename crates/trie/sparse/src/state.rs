@@ -373,8 +373,14 @@ where
 
     /// Wipe the storage trie at the provided address.
     pub fn wipe_storage(&mut self, address: B256) -> SparseStateTrieResult<()> {
-        if let Some(trie) = self.storage.tries.get_mut(&address) {
+        if let Some(trie) = self.storage.tries.get_mut(&address) &&
+            trie.is_revealed()
+        {
             trie.wipe()?;
+        } else {
+            let mut trie = S::default().with_updates(self.retain_updates);
+            trie.wipe();
+            self.storage.tries.insert(address, RevealableSparseTrie::Revealed(Box::new(trie)));
         }
         Ok(())
     }
