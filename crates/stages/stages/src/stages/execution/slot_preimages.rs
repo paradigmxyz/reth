@@ -132,13 +132,11 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     // Storage keys are represented as U256 plain EVM slot indices.
     let mut preimage_entries = Vec::new();
     let mut seen_hashes = HashSet::new();
-    for storage in state.storage_changes().values() {
-        for &slot_key in storage.slots.keys() {
-            let plain = B256::from(slot_key.to_be_bytes());
-            let hashed = keccak256(plain);
-            if seen_hashes.insert(hashed) {
-                preimage_entries.push((hashed, plain));
-            }
+    for (_, slot_key) in state.storage_change_keys() {
+        let plain = B256::from(slot_key.to_be_bytes());
+        let hashed = keccak256(plain);
+        if seen_hashes.insert(hashed) {
+            preimage_entries.push((hashed, plain));
         }
     }
     for block_reverts in state.block_reverts() {

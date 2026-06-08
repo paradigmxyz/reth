@@ -50,8 +50,8 @@ use reth_db_api::{
     BlockNumberList,
 };
 use reth_execution_types::{
-    BlockExecutionOutput, BlockExecutionResult, Chain, Evm2AccountInfo, Evm2BlockState,
-    Evm2BundleState, ExecutionOutcome,
+    BlockExecutionOutput, BlockExecutionResult, Chain, Evm2AccountInfo, Evm2BlockReverts,
+    Evm2BlockState, ExecutionOutcome,
 };
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
@@ -105,70 +105,21 @@ impl CommitOrder {
     }
 }
 
-pub(crate) fn evm2_bundle_to_plain_state_and_reverts(
-    bundle: &Evm2BundleState,
+pub(crate) fn evm2_block_state_and_reverts_to_plain_state_and_reverts(
+    state: &Evm2BlockState,
+    block_reverts: &[Evm2BlockReverts],
     is_value_known: OriginalValuesKnown,
 ) -> (StateChangeset, PlainStateReverts) {
-    let mut accounts = Vec::with_capacity(bundle.accounts().len());
-    let mut storage = Vec::with_capacity(bundle.storage().len());
+    let (plain_state, _) = evm2_block_state_to_plain_state_and_reverts(state, is_value_known);
 
-    for (address, account) in bundle.accounts() {
-        if is_value_known.is_not_known() || account.original != account.current {
-            accounts.push((
-                *address,
-                account.current.as_ref().map(|info| Account {
-                    balance: info.balance,
-                    nonce: info.nonce,
-                    bytecode_hash: (!info.code_hash.is_zero() && info.code_hash != KECCAK_EMPTY)
-                        .then_some(info.code_hash),
-                }),
-            ));
-        }
-    }
-
-    for (address, account_storage) in bundle.storage() {
-        let mut changed_storage = Vec::with_capacity(account_storage.slots.len());
-        for (key, slot) in &account_storage.slots {
-            let wipe_and_not_zero = account_storage.wipe && !slot.current.is_zero();
-            let not_wiped_and_changed = !account_storage.wipe && slot.original != slot.current;
-            if is_value_known.is_not_known() || wipe_and_not_zero || not_wiped_and_changed {
-                changed_storage.push((*key, slot.current));
-            }
-        }
-
-        if !changed_storage.is_empty() || account_storage.wipe {
-            storage.push(PlainStorageChangeset {
-                address: *address,
-                wipe_storage: account_storage.wipe,
-                storage: changed_storage,
-            });
-        }
-    }
-
-    let contracts = bundle
-        .contracts()
-        .iter()
-        .filter(|(hash, _)| **hash != KECCAK_EMPTY)
-        .map(|(hash, bytecode)| (*hash, Bytecode::new_raw(bytecode.original_bytes())))
-        .collect();
-
-    let mut reverts = PlainStateReverts::with_capacity(bundle.block_reverts().len());
-    for block_reverts in bundle.block_reverts() {
+    let mut reverts = PlainStateReverts::with_capacity(block_reverts.len());
+    for block_reverts in block_reverts {
         reverts.accounts.push(
             block_reverts
                 .accounts
                 .iter()
                 .map(|(address, account)| {
-                    (
-                        *address,
-                        account.as_ref().map(|info| Account {
-                            balance: info.balance,
-                            nonce: info.nonce,
-                            bytecode_hash: (!info.code_hash.is_zero() &&
-                                info.code_hash != KECCAK_EMPTY)
-                                .then_some(info.code_hash),
-                        }),
-                    )
+                    (*address, account.as_ref().map(evm2_account_info_to_reth))
                 })
                 .collect(),
         );
@@ -190,7 +141,7 @@ pub(crate) fn evm2_bundle_to_plain_state_and_reverts(
         );
     }
 
-    (StateChangeset { accounts, storage, contracts }, reverts)
+    (plain_state, reverts)
 }
 
 pub(crate) fn evm2_block_state_to_plain_state_and_reverts(
@@ -2632,13 +2583,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     )?;
                 }
                 WriteStateInput::Multiple(outcome) => {
-                    self.write_bytecodes(
-                        outcome
-                            .state()
-                            .contracts()
-                            .iter()
-                            .map(|(h, b)| (*h, Bytecode::new_raw(b.original_bytes()))),
-                    )?;
+                    self.write_bytecodes(outcome.bytecodes())?;
                 }
             }
             return Ok(());
@@ -2650,7 +2595,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 evm2_block_state_to_plain_state_and_reverts(&outcome.state, is_value_known)
             }
             WriteStateInput::Multiple(outcome) => {
-                evm2_bundle_to_plain_state_and_reverts(outcome.state(), is_value_known)
+                evm2_block_state_and_reverts_to_plain_state_and_reverts(
+                    &outcome.evm2_block_state(),
+                    outcome.block_reverts(),
+                    is_value_known,
+                )
             }
         };
 
@@ -4159,7 +4108,7 @@ mod tests {
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{
         AccountRevertInit, BlockExecutionOutput, BlockExecutionResult, Evm2BlockReverts,
-        Evm2StorageReverts,
+        Evm2BundleState, Evm2StorageReverts,
     };
     use reth_primitives_traits::SealedBlock;
     use reth_storage_api::MetadataWriter;
@@ -4215,8 +4164,12 @@ mod tests {
             [],
         );
 
-        let (_, reverts) =
-            evm2_bundle_to_plain_state_and_reverts(&bundle, OriginalValuesKnown::Yes);
+        let state = evm2_block_state_from_state_source(&bundle);
+        let (_, reverts) = evm2_block_state_and_reverts_to_plain_state_and_reverts(
+            &state,
+            bundle.block_reverts(),
+            OriginalValuesKnown::Yes,
+        );
 
         assert_eq!(
             reverts.storage,

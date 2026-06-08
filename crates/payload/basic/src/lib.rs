@@ -228,13 +228,7 @@ where
             if let Some(info) = acc.cloned() {
                 // we want pre cache existing accounts and their storage
                 // this only includes changed accounts and storage but is better than nothing
-                let storage = new_execution_outcome
-                    .storage_changes()
-                    .get(&addr)
-                    .map(|storage| {
-                        storage.slots.iter().map(|(key, slot)| (*key, slot.current)).collect()
-                    })
-                    .unwrap_or_default();
+                let storage = new_execution_outcome.storage_changes_for(addr).collect();
                 cached.insert_account(
                     addr,
                     AccountInfo {
