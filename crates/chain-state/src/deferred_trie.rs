@@ -151,24 +151,24 @@ impl DeferredTrieData {
     /// Returns trie data, waiting for the async publishing task if it has not completed.
     #[instrument(level = "debug", target = "engine::tree::deferred_trie", skip_all)]
     pub fn wait_cloned(&self) -> ComputedTrieData {
-        if let Some(bundle) = self.inner.value.get() {
+        let mut initialized_from_task = false;
+        let bundle = self.inner.value.get_or_init(|| {
+            initialized_from_task = true;
+            DEFERRED_TRIE_METRICS.deferred_trie_task_wait.increment(1);
+            let rx = self
+                .inner
+                .rx
+                .lock()
+                .take()
+                .expect("deferred trie receiver already taken before data was published");
+            rx.blocking_recv().expect("deferred trie task dropped before publishing trie data")
+        });
+
+        if !initialized_from_task {
             DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
-            return bundle.clone()
         }
 
-        self.inner
-            .value
-            .get_or_init(|| {
-                DEFERRED_TRIE_METRICS.deferred_trie_task_wait.increment(1);
-                let rx = self
-                    .inner
-                    .rx
-                    .lock()
-                    .take()
-                    .expect("deferred trie receiver already taken before data was published");
-                rx.blocking_recv().expect("deferred trie task dropped before publishing trie data")
-            })
-            .clone()
+        bundle.clone()
     }
 }
 
