@@ -1379,12 +1379,22 @@ impl RocksDBProvider {
         ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
         let mut batch = self.batch();
+        let total_tx_count: usize =
+            blocks.iter().map(|block| block.recovered_block().body().transaction_count()).sum();
+        let mut tx_hash_numbers = Vec::with_capacity(total_tx_count);
+
         for (block, &first_tx_num) in blocks.iter().zip(tx_nums) {
             let body = block.recovered_block().body();
             for (tx_num, transaction) in (first_tx_num..).zip(body.transactions_iter()) {
-                batch.put::<tables::TransactionHashNumbers>(*transaction.tx_hash(), &tx_num)?;
+                tx_hash_numbers.push((*transaction.tx_hash(), tx_num));
             }
         }
+
+        tx_hash_numbers.sort_unstable_by_key(|(hash, _)| *hash);
+        for (tx_hash, tx_num) in tx_hash_numbers {
+            batch.put::<tables::TransactionHashNumbers>(tx_hash, &tx_num)?;
+        }
+
         ctx.pending_batches.lock().push(batch.into_inner());
         Ok(())
     }
