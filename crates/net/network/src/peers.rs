@@ -1451,8 +1451,8 @@ impl BackoffReason {
 
 /// Returns a random duration uniformly distributed in `[mean * 3/5, mean * 7/5]`.
 ///
-/// With the default 5-minute mean this gives `[3 min, 7 min]`, matching geth's peer dropper
-/// interval range.
+/// With the default 5-minute mean this gives `[3 min, 7 min]`, matching Geth's peer dropper:
+/// <https://github.com/ethereum/go-ethereum/blob/c5c75977ab55e4d7ea6147cc0e221b588e5e3754/eth/dropper.go#L32-L36>
 fn jitter_rotation_interval(mean: Duration) -> Duration {
     let min_nanos = (mean * 3 / 5).as_nanos() as u64;
     let max_nanos = (mean * 7 / 5).as_nanos() as u64;
