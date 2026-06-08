@@ -72,6 +72,7 @@ default = [
     "otlp",
     "otlp-logs",
     "js-tracer",
+    "portable",
 ]
 
 otlp = [
@@ -104,6 +105,13 @@ asm-keccak = [
     "reth-storage-api/asm-keccak",
     "alloy-primitives/asm-keccak",
     "evm2/asm-keccak",
+]
+portable = [
+    "reth-node-ethereum/portable",
+    "reth-engine-tree/portable",
+    "reth-evm/portable",
+    "reth-evm-ethereum/portable",
+    "evm2/portable",
 ]
 
 keccak-cache-global = [

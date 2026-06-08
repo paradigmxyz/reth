@@ -42,6 +42,10 @@ asm-keccak = [
     "evm2/asm-keccak",
     "alloy-primitives/asm-keccak",
 ]
+c-kzg = ["evm2/c-kzg"]
+blst = ["evm2/blst"]
+portable = ["evm2/portable"]
+p256-aws-lc-rs = ["evm2/p256-aws-lc-rs"]
 serde = [
     "dep:serde",
     "rand/serde",
