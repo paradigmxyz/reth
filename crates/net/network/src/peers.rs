@@ -1233,11 +1233,16 @@ impl PeersManager {
                 self.fill_outbound_slots();
             }
 
-            if self
+            if let Poll::Ready((peer_id, new_record)) = self.trusted_peers_resolver.poll(cx) {
+                self.on_resolved_peer(peer_id, new_record);
+            }
+
+            // Poll the jittered rotation timer and rotate one eligible peer when ready.
+            let rotation_ready = self
                 .peer_rotation_sleep
                 .as_mut()
-                .is_some_and(|sleep| sleep.as_mut().poll(cx).is_ready())
-            {
+                .is_some_and(|sleep| sleep.as_mut().poll(cx).is_ready());
+            if rotation_ready {
                 self.try_rotate_peer();
                 if let Some((mean, sleep)) =
                     self.peer_rotation_mean.zip(self.peer_rotation_sleep.as_mut())
@@ -1246,10 +1251,6 @@ impl PeersManager {
                         .as_mut()
                         .reset(tokio::time::Instant::now() + jitter_rotation_interval(mean));
                 }
-            }
-
-            if let Poll::Ready((peer_id, new_record)) = self.trusted_peers_resolver.poll(cx) {
-                self.on_resolved_peer(peer_id, new_record);
             }
 
             if self.queued_actions.is_empty() {
