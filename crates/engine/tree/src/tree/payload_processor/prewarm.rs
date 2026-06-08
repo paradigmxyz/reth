@@ -149,6 +149,7 @@ where
                     pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
                 });
 
+                let parent_span = Span::current();
                 while let Ok((index, tx)) = pending.recv() {
                     if ctx.should_stop() {
                         trace!(
@@ -164,7 +165,7 @@ where
                     }
 
                     tx_count += 1;
-                    let parent_span = Span::current();
+                    let parent_span = parent_span.clone();
                     s.spawn(move |_| {
                         let _enter = trace_span!(
                             target: "engine::tree::payload_processor::prewarm",
