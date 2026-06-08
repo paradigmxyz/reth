@@ -4,7 +4,9 @@ use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::ConfigureEvm2BlockExecutor;
-use reth_execution_types::{Evm2AccountInfo, Evm2BundleState};
+#[cfg(test)]
+use reth_execution_types::Evm2BundleState;
+use reth_execution_types::{evm2_state_source_hashed_post_state, Evm2AccountInfo, Evm2BlockState};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
 use reth_rpc_api::DebugApiClient;
@@ -14,9 +16,24 @@ use serde::Serialize;
 use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
 type CollectionResult =
-    (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, reth_trie::HashedPostState, Evm2BundleState);
+    (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, reth_trie::HashedPostState, Evm2BlockState);
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+struct BlockStateSorted {
+    pub state: BTreeMap<Address, BundleAccountSorted>,
+    pub contracts: BTreeMap<B256, Bytes>,
+    pub storage_wipes: Vec<Address>,
+    pub storage: BTreeMap<Address, BTreeMap<U256, StorageDeltaSorted>>,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+struct StorageDeltaSorted {
+    pub original: U256,
+    pub current: U256,
+}
 
 /// Serializable version of [`Evm2BundleState`] for deterministic comparison.
+#[cfg(test)]
 #[derive(Debug, PartialEq, Eq, Serialize)]
 struct BundleStateSorted {
     /// Account state
@@ -44,6 +61,7 @@ struct AccountInfoSorted {
 }
 
 /// Serializable version of one block of evm2 reverts.
+#[cfg(test)]
 #[derive(Debug, PartialEq, Eq, Serialize)]
 struct BlockRevertsSorted {
     pub accounts: BTreeMap<Address, Option<AccountInfoSorted>>,
@@ -51,6 +69,7 @@ struct BlockRevertsSorted {
 }
 
 /// Serializable version of an evm2 storage revert.
+#[cfg(test)]
 #[derive(Debug, PartialEq, Eq, Serialize)]
 struct StorageRevertSorted {
     pub wiped: bool,
@@ -59,6 +78,7 @@ struct StorageRevertSorted {
 }
 
 /// Converts bundle state to sorted format for deterministic comparison
+#[cfg(test)]
 fn sort_bundle_state_for_comparison(bundle_state: &Evm2BundleState) -> BundleStateSorted {
     BundleStateSorted {
         state: bundle_state
@@ -103,6 +123,36 @@ fn sort_bundle_state_for_comparison(bundle_state: &Evm2BundleState) -> BundleSta
     }
 }
 
+/// Converts block state to sorted format for deterministic comparison.
+fn sort_block_state_for_comparison(block_state: &Evm2BlockState) -> BlockStateSorted {
+    let mut storage = BTreeMap::<_, BTreeMap<_, _>>::new();
+    for (key, delta) in block_state.storage_sorted() {
+        storage.entry(key.address()).or_default().insert(
+            key.key(),
+            StorageDeltaSorted { original: delta.original, current: delta.current },
+        );
+    }
+
+    BlockStateSorted {
+        state: block_state
+            .accounts_sorted()
+            .into_iter()
+            .map(|(addr, acc)| {
+                (
+                    addr,
+                    BundleAccountSorted {
+                        current: acc.current.as_ref().map(account_info_sorted),
+                        original: acc.original.as_ref().map(account_info_sorted),
+                    },
+                )
+            })
+            .collect(),
+        contracts: block_state.code().map(|(k, v)| (*k, v.original_bytes())).collect(),
+        storage_wipes: block_state.storage_wipes_sorted(),
+        storage,
+    }
+}
+
 fn account_info_sorted(info: &Evm2AccountInfo) -> AccountInfoSorted {
     AccountInfoSorted {
         balance: info.balance,
@@ -113,42 +163,36 @@ fn account_info_sorted(info: &Evm2AccountInfo) -> AccountInfoSorted {
 }
 
 /// Extracts execution data including codes, preimages, and hashed state from evm2 state changes.
-fn collect_execution_data(
-    state_provider: &dyn StateProvider,
-    bundle_state: Evm2BundleState,
-) -> eyre::Result<CollectionResult> {
+fn collect_execution_data(block_state: Evm2BlockState) -> eyre::Result<CollectionResult> {
     let mut codes = BTreeMap::new();
     let mut preimages = BTreeMap::new();
-    let hashed_state = state_provider.hashed_post_state(&bundle_state);
+    let hashed_state =
+        evm2_state_source_hashed_post_state::<reth_trie::KeccakKeyHasher, _>(&block_state);
 
     // Collect codes
-    bundle_state.contracts().values().for_each(|code| {
+    block_state.code().for_each(|(_, code)| {
         let code_bytes = code.original_bytes();
         codes.insert(keccak256(&code_bytes), code_bytes);
     });
 
-    for (_, account) in bundle_state.accounts() {
-        if let Some(code) = account.current.as_ref().and_then(|account| account.code.as_ref()) {
-            let code_bytes = code.original_bytes();
-            codes.insert(keccak256(&code_bytes), code_bytes);
-        }
-    }
-
     // Collect preimages for changed accounts and storage slots.
-    for address in bundle_state.accounts().keys().chain(bundle_state.storage().keys()) {
+    for (address, _) in block_state.accounts() {
         let hashed_address = keccak256(address);
         preimages.insert(hashed_address, alloy_rlp::encode(address).into());
     }
-
-    for storage in bundle_state.storage().values() {
-        for slot in storage.slots.keys() {
-            let slot_bytes = B256::new(slot.to_be_bytes());
-            let hashed_slot = keccak256(slot_bytes);
-            preimages.insert(hashed_slot, alloy_rlp::encode(slot_bytes).into());
-        }
+    for address in block_state.storage_wipes() {
+        let hashed_address = keccak256(address);
+        preimages.insert(hashed_address, alloy_rlp::encode(address).into());
+    }
+    for (key, _) in block_state.storage() {
+        let hashed_address = keccak256(key.address());
+        preimages.insert(hashed_address, alloy_rlp::encode(key.address()).into());
+        let slot_bytes = B256::new(key.key().to_be_bytes());
+        let hashed_slot = keccak256(slot_bytes);
+        preimages.insert(hashed_slot, alloy_rlp::encode(slot_bytes).into());
     }
 
-    Ok((codes, preimages, hashed_state, bundle_state))
+    Ok((codes, preimages, hashed_state, block_state))
 }
 
 /// Generates execution witness from collected codes, preimages, and hashed state
@@ -211,14 +255,13 @@ where
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
         block: &RecoveredBlock<N::Block>,
-    ) -> eyre::Result<(ExecutionWitness, Evm2BundleState)> {
+    ) -> eyre::Result<(ExecutionWitness, Evm2BlockState)> {
         let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
         let output = self
             .evm_config
             .execute_evm2_block_with_state_provider_ref(&*state_provider, block)
             .map_err(|err| eyre::eyre!(err.to_string()))?;
-        let (codes, preimages, hashed_state, bundle_state) =
-            collect_execution_data(&*state_provider, output.state)?;
+        let (codes, preimages, hashed_state, bundle_state) = collect_execution_data(output.state)?;
         let witness = generate(codes, preimages, hashed_state, state_provider)?;
 
         Ok((witness, bundle_state))
@@ -262,23 +305,22 @@ where
         Ok(())
     }
 
-    /// Validates that the bundle state after re-execution matches the original
-    fn validate_bundle_state(
+    /// Validates that the block state after re-execution matches the original.
+    fn validate_block_state(
         &self,
-        re_executed_state: &Evm2BundleState,
-        original_state: &Evm2BundleState,
+        re_executed_state: &Evm2BlockState,
+        original_state: &Evm2BlockState,
         block_prefix: &str,
     ) -> eyre::Result<()> {
         if re_executed_state != original_state {
-            let original_filename = format!("{}.bundle_state.original.json", block_prefix);
-            let output_state_sorted = sort_bundle_state_for_comparison(original_state);
+            let original_filename = format!("{}.block_state.original.json", block_prefix);
+            let output_state_sorted = sort_block_state_for_comparison(original_state);
             let original_path = self.save_file(original_filename, &output_state_sorted)?;
-            let re_executed_filename = format!("{}.bundle_state.re_executed.json", block_prefix);
-            let bundle_state_sorted = sort_bundle_state_for_comparison(re_executed_state);
+            let re_executed_filename = format!("{}.block_state.re_executed.json", block_prefix);
+            let bundle_state_sorted = sort_block_state_for_comparison(re_executed_state);
             let re_executed_path = self.save_file(re_executed_filename, &bundle_state_sorted)?;
 
-            // Convert bundle state to sorted format for deterministic comparison
-            let filename = format!("{}.bundle_state.diff", block_prefix);
+            let filename = format!("{}.block_state.diff", block_prefix);
             let diff_path = self.save_diff(filename, &output_state_sorted, &bundle_state_sorted)?;
 
             warn!(
@@ -286,7 +328,7 @@ where
                 diff_path = %diff_path.display(),
                 original_path = %original_path.display(),
                 re_executed_path = %re_executed_path.display(),
-                "Bundle state mismatch after re-execution"
+                "Block state mismatch after re-execution"
             );
         }
         Ok(())
@@ -297,12 +339,13 @@ where
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
         block: &RecoveredBlock<N::Block>,
-        bundle_state: &Evm2BundleState,
+        block_state: &Evm2BlockState,
         trie_updates: Option<(&TrieUpdates, B256)>,
         block_prefix: &str,
     ) -> eyre::Result<()> {
         let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
-        let hashed_state = state_provider.hashed_post_state(bundle_state);
+        let hashed_state =
+            evm2_state_source_hashed_post_state::<reth_trie::KeccakKeyHasher, _>(block_state);
         let (re_executed_root, trie_output) =
             state_provider.state_root_with_updates(hashed_state)?;
 
@@ -347,17 +390,17 @@ where
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) -> eyre::Result<()> {
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
-        let (witness, bundle_state) = self.re_execute_block(parent_header, block)?;
+        let (witness, block_state) = self.re_execute_block(parent_header, block)?;
 
         let block_prefix = format!("{}_{}", block.number(), block.hash());
         self.handle_witness_operations(&witness, &block_prefix, block.number())?;
 
-        self.validate_bundle_state(&bundle_state, &output.state, &block_prefix)?;
+        self.validate_block_state(&block_state, &output.state, &block_prefix)?;
 
         self.validate_state_root_and_trie(
             parent_header,
             block,
-            &bundle_state,
+            &block_state,
             trie_updates,
             &block_prefix,
         )?;
@@ -414,7 +457,9 @@ mod tests {
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_execution_types::{Evm2BlockReverts, Evm2StorageReverts};
+    use reth_execution_types::{
+        evm2_block_state_from_state_source, Evm2BlockReverts, Evm2StorageReverts,
+    };
     use reth_primitives_traits::{Account, Bytecode as RethBytecode};
     use reth_provider::test_utils::MockEthProvider;
     use tempfile::TempDir;
@@ -466,6 +511,10 @@ mod tests {
 
         Evm2BundleState::new_init(0, bundle_accounts, reverts, contracts)
     }
+
+    fn create_block_state() -> Evm2BlockState {
+        evm2_block_state_from_state_source(&create_bundle_state())
+    }
     #[test]
     fn test_sort_bundle_state_for_comparison() {
         // Use the fixture function to create test data
@@ -496,22 +545,19 @@ mod tests {
     #[test]
     fn test_data_collector_collect() {
         // Create test data using the fixture function
-        let bundle_state = create_bundle_state();
-
-        // Create an empty provider for hashing the post-state.
-        let state_provider = MockEthProvider::default();
+        let block_state = create_block_state();
 
         // Call the collect function
-        let result = collect_execution_data(&state_provider, bundle_state);
+        let result = collect_execution_data(block_state);
         // Verify the function returns successfully
         assert!(result.is_ok());
 
-        let (codes, _preimages, _hashed_state, returned_bundle_state) = result.unwrap();
+        let (codes, _preimages, _hashed_state, returned_block_state) = result.unwrap();
 
         // Verify that the returned data contains expected values
         // Since we used the fixture data, we should have some codes and state
         assert!(!codes.is_empty(), "Expected some bytecode entries");
-        assert!(!returned_bundle_state.accounts().is_empty(), "Expected state entries");
+        assert!(returned_block_state.accounts().next().is_some(), "Expected state entries");
     }
 
     #[test]
@@ -666,36 +712,36 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_bundle_state_matching() {
+    fn test_validate_block_state_matching() {
         let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let bundle_state = create_bundle_state();
+        let block_state = create_block_state();
         let block_prefix = "test_block_123";
 
         // Test with identical states - should not produce any warnings or files
-        let result = hook.validate_bundle_state(&bundle_state, &bundle_state, block_prefix);
+        let result = hook.validate_block_state(&block_state, &block_state, block_prefix);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_validate_bundle_state_mismatch() {
+    fn test_validate_block_state_mismatch() {
         let (hook, output_dir, _temp_dir) = create_test_hook();
-        let original_state = create_bundle_state();
-        let modified_state = Evm2BundleState::default();
+        let original_state = create_block_state();
+        let modified_state = Evm2BlockState::default();
 
         let block_prefix = "test_block_mismatch";
 
         // Test with different states - should save files and log warning
-        let result = hook.validate_bundle_state(&modified_state, &original_state, block_prefix);
+        let result = hook.validate_block_state(&modified_state, &original_state, block_prefix);
         assert!(result.is_ok());
 
         // Verify that files were created
-        let original_file = output_dir.join(format!("{}.bundle_state.original.json", block_prefix));
+        let original_file = output_dir.join(format!("{}.block_state.original.json", block_prefix));
         let re_executed_file =
-            output_dir.join(format!("{}.bundle_state.re_executed.json", block_prefix));
-        let diff_file = output_dir.join(format!("{}.bundle_state.diff", block_prefix));
+            output_dir.join(format!("{}.block_state.re_executed.json", block_prefix));
+        let diff_file = output_dir.join(format!("{}.block_state.diff", block_prefix));
 
-        assert!(original_file.exists(), "Original bundle state file should be created");
-        assert!(re_executed_file.exists(), "Re-executed bundle state file should be created");
+        assert!(original_file.exists(), "Original block state file should be created");
+        assert!(re_executed_file.exists(), "Re-executed block state file should be created");
         assert!(diff_file.exists(), "Diff file should be created");
     }
 
@@ -725,7 +771,7 @@ mod tests {
     #[test]
     fn test_validate_state_root_and_trie_with_trie_updates() {
         let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let bundle_state = create_bundle_state();
+        let block_state = create_block_state();
 
         // Generate test data
         let mut rng = generators::rng();
@@ -750,7 +796,7 @@ mod tests {
         let result = hook.validate_state_root_and_trie(
             &parent_header,
             &recovered_block,
-            &bundle_state,
+            &block_state,
             Some((&trie_updates, original_root)),
             block_prefix,
         );
@@ -760,7 +806,7 @@ mod tests {
     #[test]
     fn test_on_invalid_block_calls_all_validation_methods() {
         let (hook, output_dir, _temp_dir) = create_test_hook();
-        let bundle_state = create_bundle_state();
+        let block_state = create_block_state();
 
         // Generate test data
         let mut rng = generators::rng();
@@ -779,7 +825,7 @@ mod tests {
 
         // Create mock BlockExecutionOutput
         let output = BlockExecutionOutput {
-            state: bundle_state,
+            state: block_state,
             result: reth_provider::BlockExecutionResult {
                 receipts: vec![],
                 requests: Requests::default(),
@@ -859,23 +905,23 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_bundle_state_with_empty_states() {
+    fn test_validate_block_state_with_empty_states() {
         let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let empty_state = Evm2BundleState::default();
+        let empty_state = Evm2BlockState::default();
         let block_prefix = "empty_states_test";
 
-        let result = hook.validate_bundle_state(&empty_state, &empty_state, block_prefix);
+        let result = hook.validate_block_state(&empty_state, &empty_state, block_prefix);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_validate_bundle_state_with_different_contract_counts() {
+    fn test_validate_block_state_with_different_contract_counts() {
         let (hook, output_dir, _temp_dir) = create_test_hook();
-        let state1 = create_bundle_state();
+        let state1 = create_block_state();
 
         // Add extra contract to state2
         let extra_contract_hash = B256::random();
-        let state2 = Evm2BundleState::new_init(
+        let state2 = evm2_block_state_from_state_source(&Evm2BundleState::new_init(
             0,
             [],
             [],
@@ -883,14 +929,14 @@ mod tests {
                 extra_contract_hash,
                 RethBytecode::new_raw(Bytes::from(vec![0x60, 0x00, 0x60, 0x00, 0xfd])),
             )],
-        );
+        ));
 
         let block_prefix = "different_contracts_test";
-        let result = hook.validate_bundle_state(&state1, &state2, block_prefix);
+        let result = hook.validate_block_state(&state1, &state2, block_prefix);
         assert!(result.is_ok());
 
         // Verify diff files were created
-        let diff_file = output_dir.join(format!("{}.bundle_state.diff", block_prefix));
+        let diff_file = output_dir.join(format!("{}.block_state.diff", block_prefix));
         assert!(diff_file.exists());
     }
 
@@ -911,7 +957,7 @@ mod tests {
     #[test]
     fn test_validate_state_root_and_trie_without_trie_updates() {
         let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let bundle_state = create_bundle_state();
+        let block_state = create_block_state();
 
         let mut rng = generators::rng();
         let parent_header = generators::random_header(&mut rng, 1, None);
@@ -933,7 +979,7 @@ mod tests {
         let result = hook.validate_state_root_and_trie(
             &parent_header,
             &recovered_block,
-            &bundle_state,
+            &block_state,
             None,
             block_prefix,
         );
@@ -959,18 +1005,18 @@ mod tests {
         .try_recover()
         .unwrap();
 
-        let bundle_state = create_bundle_state();
+        let block_state = create_block_state();
         let trie_updates = create_test_trie_updates();
 
         // Test validation methods
         let validation_result =
-            hook.validate_bundle_state(&bundle_state, &bundle_state, "integration_test");
-        assert!(validation_result.is_ok(), "Bundle state validation should succeed");
+            hook.validate_block_state(&block_state, &block_state, "integration_test");
+        assert!(validation_result.is_ok(), "Block state validation should succeed");
 
         let state_root_result = hook.validate_state_root_and_trie(
             &parent_header,
             &invalid_block,
-            &bundle_state,
+            &block_state,
             Some((&trie_updates, B256::random())),
             "integration_test",
         );
@@ -996,12 +1042,12 @@ mod tests {
         .try_recover()
         .unwrap();
 
-        let bundle_state = create_bundle_state();
+        let block_state = create_block_state();
         let _trie_updates = create_test_trie_updates();
 
         // Test individual components that would be part of the complete flow
         let validation_result =
-            hook.validate_bundle_state(&bundle_state, &bundle_state, "integration_component_test");
+            hook.validate_block_state(&block_state, &block_state, "integration_component_test");
         assert!(validation_result.is_ok(), "Component validation should succeed");
     }
 }

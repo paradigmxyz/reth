@@ -307,14 +307,7 @@ impl<S: BlockHashReader> BlockHashReader for InstrumentedStateProvider<S> {
     }
 }
 
-impl<S: HashedPostStateProvider> HashedPostStateProvider for InstrumentedStateProvider<S> {
-    fn hashed_post_state(
-        &self,
-        bundle_state: &reth_execution_types::Evm2BundleState,
-    ) -> HashedPostState {
-        self.state_provider.hashed_post_state(bundle_state)
-    }
-}
+impl<S: HashedPostStateProvider> HashedPostStateProvider for InstrumentedStateProvider<S> {}
 
 /// Accumulated fetch statistics from an [`InstrumentedStateProvider`].
 ///

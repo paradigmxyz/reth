@@ -21,8 +21,8 @@ use reth_primitives_traits::{Account, Bytecode as RethBytecode};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::{
     updates::TrieUpdates, AccountProof, ExecutionWitnessMode, HashedPostState,
-    HashedPostStateSorted, HashedStorage, KeccakKeyHasher, MultiProof, MultiProofTargets,
-    StorageMultiProof, StorageProof, TrieInput,
+    HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
+    StorageProof, TrieInput,
 };
 
 /// An evm2 [`Database`] implementation backed by a Reth [`StateProvider`].
@@ -308,11 +308,7 @@ impl StateProofProvider for Evm2OverlayStateProvider<'_> {
     }
 }
 
-impl HashedPostStateProvider for Evm2OverlayStateProvider<'_> {
-    fn hashed_post_state(&self, bundle_state: &Evm2BundleState) -> HashedPostState {
-        bundle_state.hashed_post_state::<KeccakKeyHasher>()
-    }
-}
+impl HashedPostStateProvider for Evm2OverlayStateProvider<'_> {}
 
 impl StateProvider for Evm2OverlayStateProvider<'_> {
     fn storage(&self, account: Address, storage_key: B256) -> ProviderResult<Option<U256>> {

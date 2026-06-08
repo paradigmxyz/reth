@@ -31,7 +31,6 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{BlockBodyIndicesProvider, NodePrimitivesProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{HashedPostState, KeccakKeyHasher};
 use std::{
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
@@ -625,14 +624,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     }
 }
 
-impl<N: NodeTypesWithDB> HashedPostStateProvider for BlockchainProvider<N> {
-    fn hashed_post_state(
-        &self,
-        bundle_state: &reth_execution_types::Evm2BundleState,
-    ) -> HashedPostState {
-        bundle_state.hashed_post_state::<KeccakKeyHasher>()
-    }
-}
+impl<N: NodeTypesWithDB> HashedPostStateProvider for BlockchainProvider<N> {}
 
 impl<N: ProviderNodeTypes> CanonChainTracker for BlockchainProvider<N> {
     type Header = HeaderTy<N>;

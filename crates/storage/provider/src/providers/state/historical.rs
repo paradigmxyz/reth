@@ -26,8 +26,8 @@ use reth_trie::{
     updates::TrieUpdates,
     witness::TrieWitness,
     AccountProof, ExecutionWitnessMode, HashedPostState, HashedPostStateSorted, HashedStorage,
-    KeccakKeyHasher, MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot,
-    TrieInput, TrieInputSorted,
+    MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot, TrieInput,
+    TrieInputSorted,
 };
 use reth_trie_db::{
     ChangesetCache, DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
@@ -660,12 +660,6 @@ where
     Provider: NodePrimitivesProvider<Primitives = N>,
     N: NodePrimitives,
 {
-    fn hashed_post_state(
-        &self,
-        bundle_state: &reth_execution_types::Evm2BundleState,
-    ) -> HashedPostState {
-        bundle_state.hashed_post_state::<KeccakKeyHasher>()
-    }
 }
 
 impl<Provider, N> StateProvider for HistoricalStateProviderRef<'_, Provider, N>

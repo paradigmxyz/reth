@@ -17,8 +17,8 @@ use reth_ethereum_primitives::{
     Block, BlockBody, EthPrimitives, Receipt, Transaction, TransactionSigned,
 };
 use reth_execution_types::{
-    BlockExecutionOutput, BlockExecutionResult, BundleStateInit, Chain, ExecutionOutcome,
-    RevertsInit,
+    evm2_block_state_from_state_source, BlockExecutionOutput, BlockExecutionResult,
+    BundleStateInit, Chain, ExecutionOutcome, RevertsInit,
 };
 use reth_primitives_traits::{
     proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
@@ -341,7 +341,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                     gas_used: num_txs * MIN_TRANSACTION_GAS,
                     blob_gas_used: 0,
                 },
-                state: bundle,
+                state: evm2_block_state_from_state_source(&bundle),
             }),
             trie_data,
         );

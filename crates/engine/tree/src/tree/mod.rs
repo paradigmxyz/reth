@@ -2187,7 +2187,7 @@ where
             .provider
             .get_state(block.header().number())?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.header().number()))?;
-        let hashed_state = self.provider.hashed_post_state(execution_output.state());
+        let hashed_state = execution_output.hash_state_slow::<reth_trie::KeccakKeyHasher>();
 
         debug!(
             target: "engine::tree",

@@ -881,9 +881,6 @@ where
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HashedPostStateProvider
     for MockEthProvider<T, ChainSpec>
 {
-    fn hashed_post_state(&self, _state: &reth_execution_types::Evm2BundleState) -> HashedPostState {
-        HashedPostState::default()
-    }
 }
 
 impl<T, ChainSpec> StateProvider for MockEthProvider<T, ChainSpec>
