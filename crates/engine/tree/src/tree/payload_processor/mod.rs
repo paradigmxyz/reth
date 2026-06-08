@@ -1120,7 +1120,7 @@ mod tests {
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_cache::CachedStatus;
-    use reth_execution_types::Evm2BundleState;
+    use reth_execution_types::{evm2_block_state_from_init, Evm2BlockState};
     use reth_primitives_traits::Account;
     #[cfg(any())]
     use reth_primitives_traits::{Recovered, StorageEntry};
@@ -1234,13 +1234,13 @@ mod tests {
             block: BlockNumHash { hash: block_hash, number: 1 },
             parent: parent_hash,
         };
-        let bundle_state = Evm2BundleState::default();
+        let block_state = Evm2BlockState::default();
 
         // Cache should be empty initially
         assert!(payload_processor.execution_cache.get_cache_for(block_hash).is_none());
 
         // Update cache with inserted block
-        payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
+        payload_processor.on_inserted_executed_block(block_with_parent, &block_state);
 
         // Cache should now exist for the block hash
         let cached = payload_processor.execution_cache.get_cache_for(block_hash);
@@ -1270,9 +1270,9 @@ mod tests {
             block: BlockNumHash { hash: block3_hash, number: 3 },
             parent: wrong_parent,
         };
-        let bundle_state = Evm2BundleState::default();
+        let block_state = Evm2BlockState::default();
 
-        payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
+        payload_processor.on_inserted_executed_block(block_with_parent, &block_state);
 
         // Cache should still be for block 1 (unchanged)
         let cached = payload_processor.execution_cache.get_cache_for(block1_hash);
@@ -1306,8 +1306,7 @@ mod tests {
             .expect("expected parent cache checkout to succeed");
 
         let polluted_address = Address::random();
-        let bundle_state = Evm2BundleState::new_init(
-            2,
+        let block_state = evm2_block_state_from_init(
             [(
                 polluted_address,
                 (
@@ -1321,7 +1320,6 @@ mod tests {
                 ),
             )],
             [],
-            [],
         );
 
         // Make parent match the cached slot so we bypass the parent-mismatch guard and exercise
@@ -1331,7 +1329,7 @@ mod tests {
             parent: parent_hash,
         };
 
-        payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
+        payload_processor.on_inserted_executed_block(block_with_parent, &block_state);
 
         // The closure runs only on a cache miss, so NotCached(None) means polluted_address was
         // absent and Cached(Some(_)) means it was written by on_inserted_executed_block.

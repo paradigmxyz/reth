@@ -811,8 +811,8 @@ mod tests {
     use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Block, Receipt};
     use reth_execution_types::{
-        evm2_block_state_from_state_source, BlockExecutionOutput, BlockExecutionResult, Chain,
-        Evm2AccountInfo, Evm2BlockReverts, Evm2BundleState, ExecutionOutcome,
+        evm2_block_state_from_init, BlockExecutionOutput, BlockExecutionResult, Chain,
+        Evm2AccountInfo, Evm2BlockReverts, ExecutionOutcome,
     };
     use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock, SignerRecoverable};
     use reth_storage_api::{
@@ -1701,23 +1701,25 @@ mod tests {
                 .map(|b| b.try_recover().expect("failed to seal block with senders"))
                 .collect(),
             &{
-                let bundle = Evm2BundleState::new_init(
-                    first_database_block,
+                let state = evm2_block_state_from_init(
                     database_state.into_iter().map(|(address, (account, _))| {
                         (address, (None, Some(account), BTreeMap::default()))
                     }),
-                    database_changesets.iter().map(|block_changesets| {
+                    [],
+                );
+                let block_reverts = database_changesets
+                    .iter()
+                    .map(|block_changesets| {
                         let mut accounts = AddressMap::default();
                         for (address, account, _) in block_changesets {
                             accounts.insert(*address, Some(account_to_evm2(*account)));
                         }
                         Evm2BlockReverts { accounts, storage: AddressMap::default() }
-                    }),
-                    [],
-                );
+                    })
+                    .collect();
                 ExecutionOutcome::from_state_and_reverts(
-                    evm2_block_state_from_state_source(&bundle),
-                    bundle.block_reverts().clone(),
+                    state,
+                    block_reverts,
                     Vec::new(),
                     first_database_block,
                     Vec::new(),
@@ -1735,20 +1737,10 @@ mod tests {
                 .first()
                 .map(|block| {
                     let senders = block.senders().expect("failed to recover senders");
-                    let bundle = Evm2BundleState::new_init(
-                        first_in_memory_block,
+                    let state = evm2_block_state_from_init(
                         in_memory_state.into_iter().map(|(address, (account, _))| {
                             (address, (None, Some(account), BTreeMap::default()))
                         }),
-                        [Evm2BlockReverts {
-                            accounts: in_memory_changesets
-                                .iter()
-                                .map(|(address, account, _)| {
-                                    (*address, Some(account_to_evm2(*account)))
-                                })
-                                .collect(),
-                            storage: AddressMap::default(),
-                        }],
                         [],
                     );
                     ExecutedBlock {
@@ -1757,7 +1749,7 @@ mod tests {
                             senders,
                         )),
                         execution_output: Arc::new(BlockExecutionOutput {
-                            state: evm2_block_state_from_state_source(&bundle),
+                            state,
                             result: BlockExecutionResult {
                                 receipts: Default::default(),
                                 requests: Default::default(),
