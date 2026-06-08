@@ -166,7 +166,7 @@ where
 }
 
 /// Reads `meta` with the [`EraBlockReader`] `S`, appends its blocks within `block_numbers`, and
-/// marks `meta` processed. Returns last block height.
+/// marks `meta` processed if the file was fully consumed. Returns last block height.
 pub fn process<S, P, B, BB, BH>(
     meta: &(impl EraMeta + ?Sized),
     writer: &mut StaticFileProviderRWRefMut<'_, <P as NodePrimitivesProvider>::Primitives>,
@@ -185,10 +185,15 @@ where
     P: DBProvider<Tx: DbTxMut> + NodePrimitivesProvider + BlockWriter<Block = B>,
     <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
 {
-    let iter = S::blocks(meta)?;
-    let height = process_iter(iter, writer, provider, hash_collector, block_numbers)?;
-    meta.mark_as_processed()?;
-    Ok(height)
+    let iter = S::blocks(meta)?
+        .map(Some)
+        .chain(std::iter::once_with(|| match meta.mark_as_processed() {
+            Ok(()) => None,
+            Err(error) => Some(Err(error)),
+        }))
+        .flatten();
+
+    process_iter(iter, writer, provider, hash_collector, block_numbers)
 }
 
 /// Extracts a pair of [`FullBlockHeader`] and [`FullBlockBody`] from [`BlockTuple`].
@@ -345,4 +350,71 @@ where
     }
 
     Ok(total_difficulty)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::Header;
+    use reth_db_common::init::init_genesis;
+    use reth_ethereum_primitives::{Block, BlockBody};
+    use reth_provider::{
+        test_utils::create_test_provider_factory, DatabaseProviderFactory,
+        StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+    };
+    use std::{cell::Cell, path::Path};
+    use tempfile::tempdir;
+
+    struct TestEra;
+
+    impl EraBlockReader<Header, BlockBody> for TestEra {
+        fn blocks<M: EraMeta + ?Sized>(
+            _meta: &M,
+        ) -> eyre::Result<impl Iterator<Item = eyre::Result<(Header, BlockBody)>>> {
+            Ok([1, 2]
+                .into_iter()
+                .map(|number| Ok((Header { number, ..Default::default() }, BlockBody::default()))))
+        }
+    }
+
+    #[derive(Debug)]
+    struct TestMeta {
+        marked: Cell<bool>,
+    }
+
+    impl EraMeta for TestMeta {
+        fn mark_as_processed(&self) -> eyre::Result<()> {
+            self.marked.set(true);
+            Ok(())
+        }
+
+        fn path(&self) -> &Path {
+            Path::new("test.era1")
+        }
+    }
+
+    #[test]
+    fn process_does_not_mark_partially_consumed_file_processed() {
+        let pf = create_test_provider_factory();
+        init_genesis(&pf).unwrap();
+
+        let static_file_provider = pf.static_file_provider();
+        let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+        let provider = pf.database_provider_rw().unwrap();
+        let folder = tempdir().unwrap();
+        let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+        let meta = TestMeta { marked: Cell::new(false) };
+
+        let height = process::<TestEra, _, Block, _, _>(
+            &meta,
+            &mut writer,
+            &provider,
+            &mut hash_collector,
+            0..=1,
+        )
+        .unwrap();
+
+        assert_eq!(height, 1);
+        assert!(!meta.marked.get());
+    }
 }
