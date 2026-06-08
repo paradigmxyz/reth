@@ -849,7 +849,7 @@ fn encode_account_leaf_value(
     storage_root: B256,
     account_rlp_buf: &mut Vec<u8>,
 ) -> Vec<u8> {
-    if account.is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH {
+    if storage_root == EMPTY_ROOT_HASH && account.is_none_or(|account| account.is_empty()) {
         return Vec::new();
     }
 
