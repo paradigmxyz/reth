@@ -52,11 +52,13 @@ fn prefix_range(
 ) -> core::ops::Range<usize> {
     // Advance past entries before `prefix`.
     let begin = start + sorted_keys[start..].partition_point(|p| p < prefix);
-    // Find the end of entries that start with `prefix`.
-    let mut end = begin;
-    while end < sorted_keys.len() && sorted_keys[end].starts_with(prefix) {
-        end += 1;
-    }
+    // Find the first key outside the prefix interval. `Nibbles::increment` returns the
+    // lexicographic successor of the prefix when one exists.
+    let end = if let Some(after_prefix) = prefix.increment() {
+        begin + sorted_keys[begin..].partition_point(|p| p < &after_prefix)
+    } else {
+        sorted_keys.len()
+    };
     begin..end
 }
 
@@ -3123,6 +3125,32 @@ mod tests {
     use reth_trie_common::{Nibbles, ProofV2Target};
     use std::collections::BTreeMap;
     use tracing::{info, trace};
+
+    #[test]
+    fn prefix_range_uses_lexicographic_prefix_bounds() {
+        let sorted = [
+            Nibbles::from_nibbles([0x0]),
+            Nibbles::from_nibbles([0x1, 0x1]),
+            Nibbles::from_nibbles([0x1, 0x2]),
+            Nibbles::from_nibbles([0x1, 0x2, 0x0]),
+            Nibbles::from_nibbles([0x1, 0x2, 0xf]),
+            Nibbles::from_nibbles([0x1, 0x3]),
+            Nibbles::from_nibbles([0xf, 0xf]),
+        ];
+
+        assert_eq!(
+            super::prefix_range(&sorted, 0, &Nibbles::from_nibbles([0x1, 0x2])),
+            2..5
+        );
+        assert_eq!(
+            super::prefix_range(&sorted, 2, &Nibbles::from_nibbles([0x1, 0x3])),
+            5..6
+        );
+        assert_eq!(
+            super::prefix_range(&sorted, 0, &Nibbles::from_nibbles([0xf, 0xf])),
+            6..7
+        );
+    }
 
     /// Test harness for proptest-based arena sparse trie testing.
     ///
