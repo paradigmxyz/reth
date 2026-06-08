@@ -232,13 +232,6 @@ impl<T> ExecutionOutcome<T> {
         self.bundle.accounts_iter()
     }
 
-    /// Return iterator over all account changes in the bundle.
-    pub fn bundle_accounts_iter(
-        &self,
-    ) -> impl Iterator<Item = (Address, &Tracked<Option<AccountInfo>>)> {
-        self.bundle.accounts().iter().map(|(a, acc)| (*a, acc))
-    }
-
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
         self.bundle.account(address)

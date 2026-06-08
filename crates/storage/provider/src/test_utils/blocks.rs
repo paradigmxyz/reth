@@ -168,25 +168,22 @@ pub fn genesis() -> SealedBlock<reth_ethereum_primitives::Block> {
 }
 
 fn bundle_state_root(execution_outcome: &ExecutionOutcome) -> B256 {
-    state_root_unhashed(execution_outcome.bundle_accounts_iter().filter_map(
-        |(address, account)| {
-            account.current.as_ref().map(|info| {
-                (
-                    address,
-                    account_info_to_reth(info).into_trie_account(storage_root_unhashed(
-                        execution_outcome
-                            .state()
-                            .storage()
-                            .get(&address)
-                            .into_iter()
-                            .flat_map(|storage| storage.slots.iter())
-                            .filter(|(_, value)| !value.current.is_zero())
-                            .map(|(slot, value)| ((*slot).into(), value.current)),
-                    )),
-                )
-            })
-        },
-    ))
+    state_root_unhashed(execution_outcome.accounts_iter().filter_map(|(address, account)| {
+        account.map(|info| {
+            (
+                address,
+                account_info_to_reth(info).into_trie_account(storage_root_unhashed(
+                    execution_outcome
+                        .storage_changes()
+                        .get(&address)
+                        .into_iter()
+                        .flat_map(|storage| storage.slots.iter())
+                        .filter(|(_, value)| !value.current.is_zero())
+                        .map(|(slot, value)| ((*slot).into(), value.current)),
+                )),
+            )
+        })
+    }))
 }
 
 fn test_account(nonce: u64, balance: U256) -> Account {
