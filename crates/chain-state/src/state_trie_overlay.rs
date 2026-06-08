@@ -470,7 +470,7 @@ enum OverlayCacheEntry {
 }
 
 impl OverlayCacheEntry {
-    fn is_ready(&self) -> bool {
+    const fn is_ready(&self) -> bool {
         matches!(self, Self::Ready(_))
     }
 
@@ -493,7 +493,7 @@ struct OverlayWaiter {
 }
 
 impl OverlayWaiter {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self { input: OnceLock::new() }
     }
 
@@ -756,11 +756,10 @@ mod tests {
         let waiter = Arc::new(OverlayWaiter::new());
         manager.overlays.insert(key, OverlayCacheEntry::Computing(Arc::clone(&waiter)));
 
-        let cloned = manager.clone();
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
             let res =
-                cloned.overlay_for_parent(key.tip_hash, key.anchor_hash).map(|(_, state)| state);
+                manager.overlay_for_parent(key.tip_hash, key.anchor_hash).map(|(_, state)| state);
             tx.send(res).unwrap();
         });
 
@@ -788,10 +787,9 @@ mod tests {
         };
         manager.overlays.insert(key, OverlayCacheEntry::Computing(Arc::new(OverlayWaiter::new())));
 
-        let cloned = manager.clone();
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
-            tx.send(cloned.precompute_overlay(key.tip_hash, key.anchor_hash)).unwrap();
+            tx.send(manager.precompute_overlay(key.tip_hash, key.anchor_hash)).unwrap();
         });
 
         rx.recv_timeout(Duration::from_secs(1)).unwrap().unwrap();
