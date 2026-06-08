@@ -67,9 +67,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
     ///
     /// * `receipts_len` - The total number of receipts expected. This is needed to correctly order
     ///   the trie keys according to RLP encoding rules.
-    pub fn run(self, receipts_len: impl Into<Option<usize>>) {
-        let receipts_len = receipts_len.into();
-
+    pub fn run(self, receipts_len: usize) {
         let _span = debug_span!(
             target: "engine::tree::payload_processor",
             "receipt_root",
@@ -107,7 +105,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
             }
         }
 
-        if receipts_len.is_some_and(|len| len != next) {
+        if receipts_len != next {
             tracing::error!(
                 target: "engine::tree::payload_processor",
                 expected = receipts_len,
