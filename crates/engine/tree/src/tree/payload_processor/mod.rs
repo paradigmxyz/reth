@@ -79,6 +79,11 @@ pub const SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY: usize = 1_000_000;
 /// 144MB.
 pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 
+/// Sparse-trie update batches at or above this size are large enough that pruning the retained
+/// trie costs foreground payload time. Preserve the full trie for these batches and let smaller
+/// blocks keep the existing bounded-cache behavior.
+pub const LARGE_SPARSE_TRIE_PRUNE_UPDATE_LIMIT: usize = 32_768;
+
 /// Blocks with fewer transactions than this skip prewarming, since the fixed overhead of spawning
 /// prewarm workers exceeds the execution time saved.
 pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
@@ -678,6 +683,11 @@ where
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
             let deferred = if let Some(result) = task_result {
                 let start = Instant::now();
+                let large_trie_update = result.trie_updates.account_nodes_ref().len()
+                    + result.trie_updates.removed_nodes_ref().len()
+                    + result.trie_updates.storage_tries_ref().len()
+                    >= LARGE_SPARSE_TRIE_PRUNE_UPDATE_LIMIT;
+                let disable_cache_pruning = disable_cache_pruning || large_trie_update;
                 let (trie, deferred) = task.into_trie_for_reuse(
                     max_hot_slots,
                     max_hot_accounts,
