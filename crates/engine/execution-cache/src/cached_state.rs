@@ -935,9 +935,10 @@ impl ExecutionCache {
                 self.insert_storage(*addr, (*key).into(), Some(slot.present_value));
             }
 
-            // Insert will update if present, so we just use the new account info as the new value
-            // for the account cache
-            self.insert_account(*addr, Some(Account::from(account_info)));
+            // Storage-only changes do not invalidate the basic-account cache entry.
+            if account.original_info.as_ref() != Some(account_info) {
+                self.insert_account(*addr, Some(Account::from(account_info)));
+            }
         }
 
         Ok(())
