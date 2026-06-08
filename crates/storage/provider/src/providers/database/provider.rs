@@ -2622,13 +2622,25 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             // In storage v2 with all outputs directed to static files, plain state and changesets
             // are written elsewhere. Only bytecodes need MDBX writes, so skip the expensive
             // to_plain_state_and_reverts conversion that iterates all accounts and storage.
-            self.write_bytecodes(
-                execution_outcome
-                    .state()
-                    .contracts()
-                    .iter()
-                    .map(|(h, b)| (*h, Bytecode::new_raw(b.original_bytes()))),
-            )?;
+            match &execution_outcome {
+                WriteStateInput::Single { outcome, .. } => {
+                    self.write_bytecodes(
+                        outcome
+                            .state
+                            .code()
+                            .map(|(h, b)| (*h, Bytecode::new_raw(b.original_bytes()))),
+                    )?;
+                }
+                WriteStateInput::Multiple(outcome) => {
+                    self.write_bytecodes(
+                        outcome
+                            .state()
+                            .contracts()
+                            .iter()
+                            .map(|(h, b)| (*h, Bytecode::new_raw(b.original_bytes()))),
+                    )?;
+                }
+            }
             return Ok(());
         }
 
