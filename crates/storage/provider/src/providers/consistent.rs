@@ -1943,7 +1943,7 @@ mod tests {
                             senders,
                         )),
                         execution_output: Arc::new(BlockExecutionOutput {
-                            state,
+                            state: state.into(),
                             result: BlockExecutionResult {
                                 receipts: Default::default(),
                                 requests: Default::default(),
@@ -2112,7 +2112,7 @@ mod tests {
                     senders,
                 )),
                 execution_output: Arc::new(BlockExecutionOutput {
-                    state,
+                    state: state.into(),
                     result: BlockExecutionResult {
                         receipts: Default::default(),
                         requests: Default::default(),
@@ -2207,7 +2207,7 @@ mod tests {
                     senders,
                 )),
                 execution_output: Arc::new(BlockExecutionOutput {
-                    state,
+                    state: state.into(),
                     result: BlockExecutionResult {
                         receipts: Default::default(),
                         requests: Default::default(),

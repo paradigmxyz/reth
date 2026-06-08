@@ -342,7 +342,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                     gas_used: num_txs * MIN_TRANSACTION_GAS,
                     blob_gas_used: 0,
                 },
-                state: block_state,
+                state: block_state.into(),
             }),
             trie_data,
         );

@@ -24,7 +24,7 @@ pub(crate) fn to_execution_outcome(
 ) -> ExecutionOutcome {
     ExecutionOutcome::from_block_states(
         block_number,
-        [block_execution_output.state.clone()],
+        [block_execution_output.state.inner().clone()],
         vec![block_execution_output.result.clone()],
     )
 }
@@ -202,7 +202,7 @@ where
     for (block, output) in outputs {
         let BlockExecutionOutput { result, state } = output;
         blocks.push(block);
-        states.push(state);
+        states.push(state.into_inner());
         results.push(result);
     }
 

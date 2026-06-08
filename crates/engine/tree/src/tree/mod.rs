@@ -2189,7 +2189,7 @@ where
         let trie_data = ComputedTrieData::new(sorted_hashed_state, sorted_trie_updates);
 
         let execution_output = Arc::new(BlockExecutionOutput {
-            state: block_state,
+            state: block_state.into(),
             result: BlockExecutionResult {
                 receipts: execution_output.receipts.pop().unwrap_or_default(),
                 requests: execution_output.requests.pop().unwrap_or_default(),

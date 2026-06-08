@@ -79,9 +79,7 @@ where
     }
 
     fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Bytecode, Self::Error> {
-        Ok(<DB as BytecodeReader>::bytecode_by_hash(&self.0, code_hash)?
-            .map(|bytecode| Bytecode::new_raw(bytecode.original_bytes()))
-            .unwrap_or_default())
+        Ok(self.0.evm2_bytecode_by_hash(code_hash)?.unwrap_or_default())
     }
 
     fn get_storage(&mut self, address: &Address, key: &Word) -> Result<Word, Self::Error> {
@@ -150,9 +148,7 @@ impl Database for BorrowedEvm2StateProviderDatabase {
     }
 
     fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Bytecode, Self::Error> {
-        Ok(BytecodeReader::bytecode_by_hash(self.provider(), code_hash)?
-            .map(|bytecode| Bytecode::new_raw(bytecode.original_bytes()))
-            .unwrap_or_default())
+        Ok(self.provider().evm2_bytecode_by_hash(code_hash)?.unwrap_or_default())
     }
 
     fn get_storage(&mut self, address: &Address, key: &Word) -> Result<Word, Self::Error> {
@@ -312,6 +308,14 @@ impl StateProofProvider for Evm2OverlayStateProvider<'_> {
 impl HashedPostStateProvider for Evm2OverlayStateProvider<'_> {}
 
 impl StateProvider for Evm2OverlayStateProvider<'_> {
+    fn evm2_bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
+        if let Some((_, bytecode)) = self.overlay.code().find(|(hash, _)| *hash == code_hash) {
+            return Ok(Some(bytecode.clone()))
+        }
+
+        self.base.evm2_bytecode_by_hash(code_hash)
+    }
+
     fn storage(&self, account: Address, storage_key: B256) -> ProviderResult<Option<U256>> {
         let slot = U256::from_be_bytes(storage_key.0);
         if let Some((_, storage)) =

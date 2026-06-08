@@ -7,7 +7,7 @@ use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
 use metrics::{Counter, Gauge, Histogram};
 use parking_lot::Once;
 use reth_errors::ProviderResult;
-use reth_execution_types::Evm2BlockState;
+use reth_execution_types::{Evm2BlockState, Evm2Bytecode};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
 use reth_provider::{
@@ -670,6 +670,25 @@ fn nonzero_storage_value(value: StorageValue) -> Option<StorageValue> {
 }
 
 impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
+    fn evm2_bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Evm2Bytecode>> {
+        match self.caches.get_or_try_insert_evm2_code_with(*code_hash, || {
+            if let Some(code) = self.caches.0.code_cache.get(code_hash) {
+                return Ok(code.map(|code| Evm2Bytecode::new_raw(code.original_bytes())))
+            }
+
+            self.state_provider.evm2_bytecode_by_hash(code_hash)
+        })? {
+            CachedStatus::NotCached(code) => {
+                self.record_code_miss();
+                Ok(code)
+            }
+            CachedStatus::Cached(code) => {
+                self.record_code_hit();
+                Ok(code)
+            }
+        }
+    }
+
     fn storage(
         &self,
         account: Address,
@@ -849,6 +868,9 @@ struct ExecutionCacheInner {
     /// Cache for contract bytecode, keyed by code hash.
     code_cache: FixedCache<B256, Option<Bytecode>, FbBuildHasher<32>>,
 
+    /// Cache for analyzed evm2 contract bytecode, keyed by code hash.
+    evm2_code_cache: FixedCache<B256, Option<Evm2Bytecode>, FbBuildHasher<32>>,
+
     /// Flat storage cache: maps `(Address, StorageKey)` to storage value.
     storage_cache: FixedCache<(Address, StorageKey), StorageValue>,
 
@@ -906,6 +928,7 @@ impl ExecutionCache {
         Self(Arc::new(ExecutionCacheInner {
             code_cache: FixedCache::new(code_capacity, FbBuildHasher::<32>::default())
                 .with_stats(Some(Stats::new(code_stats.clone()))),
+            evm2_code_cache: FixedCache::new(code_capacity, FbBuildHasher::<32>::default()),
             storage_cache: FixedCache::new(storage_capacity, DefaultHashBuilder::default())
                 .with_stats(Some(Stats::new(storage_stats.clone()))),
             account_cache: FixedCache::new(account_capacity, FbBuildHasher::<20>::default())
@@ -925,6 +948,25 @@ impl ExecutionCache {
     ) -> Result<CachedStatus<Option<Bytecode>>, E> {
         let mut miss = false;
         let result = self.0.code_cache.get_or_try_insert_with(hash, |_| {
+            miss = true;
+            f()
+        })?;
+
+        if miss {
+            Ok(CachedStatus::NotCached(result))
+        } else {
+            Ok(CachedStatus::Cached(result))
+        }
+    }
+
+    /// Gets analyzed evm2 code from cache, or inserts using the provided function.
+    pub fn get_or_try_insert_evm2_code_with<E>(
+        &self,
+        hash: B256,
+        f: impl FnOnce() -> Result<Option<Evm2Bytecode>, E>,
+    ) -> Result<CachedStatus<Option<Evm2Bytecode>>, E> {
+        let mut miss = false;
+        let result = self.0.evm2_code_cache.get_or_try_insert_with(hash, |_| {
             miss = true;
             f()
         })?;
@@ -985,6 +1027,11 @@ impl ExecutionCache {
         self.0.code_cache.insert(hash, code);
     }
 
+    /// Insert analyzed evm2 code into cache.
+    pub fn insert_evm2_code(&self, hash: B256, code: Option<Evm2Bytecode>) {
+        self.0.evm2_code_cache.insert(hash, code);
+    }
+
     /// Insert account into cache.
     pub fn insert_account(&self, address: Address, account: Option<Account>) {
         self.0.account_cache.insert(address, account);
@@ -998,6 +1045,7 @@ impl ExecutionCache {
         let _enter = debug_span!(target: "engine::tree", "contracts", len = bytecodes).entered();
         for (code_hash, bytecode) in state_updates.code() {
             self.insert_code(*code_hash, Some(Bytecode::new_raw(bytecode.original_bytes())));
+            self.insert_evm2_code(*code_hash, Some(bytecode.clone()));
         }
         drop(_enter);
 

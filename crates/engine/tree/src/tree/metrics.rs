@@ -589,7 +589,7 @@ mod tests {
         metrics.executor.gas_used_histogram.record(0.0);
 
         let output = BlockExecutionOutput::<Receipt> {
-            state: Evm2BlockState::default(),
+            state: Evm2BlockState::default().into(),
             result: BlockExecutionResult {
                 receipts: vec![],
                 requests: Requests::default(),
