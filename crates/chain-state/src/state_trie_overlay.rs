@@ -6,7 +6,6 @@
 
 use crate::{EthPrimitives, ExecutedBlock};
 use alloy_primitives::B256;
-use parking_lot::{Condvar, Mutex};
 use reth_metrics::{
     metrics::{Counter, Histogram},
     Metrics,
@@ -18,7 +17,11 @@ use reth_primitives_traits::{
 #[cfg(feature = "rayon")]
 use reth_tasks::WorkerPool;
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
-use std::{fmt, sync::Arc, time::Instant};
+use std::{
+    fmt,
+    sync::{Arc, OnceLock},
+    time::Instant,
+};
 use tracing::{debug, trace};
 
 /// Manages flattened state trie overlays for in-memory blocks.
@@ -484,28 +487,20 @@ enum OverlayLookupMode {
 }
 
 struct OverlayWaiter {
-    input: Mutex<Option<Arc<TrieInputSorted>>>,
-    ready: Condvar,
+    input: OnceLock<Arc<TrieInputSorted>>,
 }
 
 impl OverlayWaiter {
     fn new() -> Self {
-        Self { input: Mutex::new(None), ready: Condvar::new() }
+        Self { input: OnceLock::new() }
     }
 
     fn wait(&self) -> Arc<TrieInputSorted> {
-        let mut input = self.input.lock();
-        loop {
-            if let Some(input) = input.as_ref() {
-                return Arc::clone(input)
-            }
-            self.ready.wait(&mut input);
-        }
+        Arc::clone(self.input.wait())
     }
 
     fn finish(&self, computed: Arc<TrieInputSorted>) {
-        *self.input.lock() = Some(computed);
-        self.ready.notify_all();
+        let _ = self.input.set(computed);
     }
 }
 
