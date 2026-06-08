@@ -1537,8 +1537,12 @@ where
         &mut self,
         proof_nodes: &[ProofTrieNodeV2],
     ) -> Result<Option<B256>, StateProofError> {
-        // Find the root node (node at empty path)
-        let root_node = proof_nodes.iter().find(|node| node.path.is_empty());
+        // Proof nodes are emitted in depth-first order, so the empty root path is first when
+        // present. Keep the scan fallback for callers that pass a differently ordered slice.
+        let root_node = proof_nodes
+            .first()
+            .filter(|node| node.path.is_empty())
+            .or_else(|| proof_nodes.iter().find(|node| node.path.is_empty()));
 
         let Some(root) = root_node else {
             return Ok(None);
