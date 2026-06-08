@@ -881,6 +881,21 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     }
 }
 
+fn computed_to_sorted_trie_data(trie_data: ComputedTrieData) -> SortedTrieData {
+    #[cfg(feature = "lattice-state-root")]
+    {
+        SortedTrieData::new_with_lattice(
+            trie_data.hashed_state,
+            trie_data.trie_updates,
+            trie_data.lattice_accumulator_updates,
+        )
+    }
+    #[cfg(not(feature = "lattice-state-root"))]
+    {
+        SortedTrieData::new(trie_data.hashed_state, trie_data.trie_updates)
+    }
+}
+
 /// Non-empty chain of blocks.
 #[derive(Debug)]
 pub enum NewCanonicalChain<N: NodePrimitives = EthPrimitives> {
@@ -942,10 +957,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
                     )),
                     LazyTrieData::deferred(move || {
                         let trie_data = trie_data_handle.wait_cloned();
-                        SortedTrieData {
-                            hashed_state: trie_data.hashed_state,
-                            trie_updates: trie_data.trie_updates,
-                        }
+                        computed_to_sorted_trie_data(trie_data)
                     }),
                 );
                 for exec in rest {
@@ -958,10 +970,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
                         )),
                         LazyTrieData::deferred(move || {
                             let trie_data = trie_data_handle.wait_cloned();
-                            SortedTrieData {
-                                hashed_state: trie_data.hashed_state,
-                                trie_updates: trie_data.trie_updates,
-                            }
+                            computed_to_sorted_trie_data(trie_data)
                         }),
                     );
                 }

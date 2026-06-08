@@ -1,5 +1,7 @@
 use parking_lot::Mutex;
 use reth_metrics::{metrics::Counter, Metrics};
+#[cfg(feature = "lattice-state-root")]
+use reth_trie::lattice::LatticeAccumulatorUpdates;
 use reth_trie::{
     updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, HashedPostStateSorted,
@@ -30,6 +32,9 @@ pub struct ComputedTrieData {
     pub hashed_state: Arc<HashedPostStateSorted>,
     /// Sorted trie updates produced by state root computation.
     pub trie_updates: Arc<TrieUpdatesSorted>,
+    /// Lattice accumulator updates produced by lattice state root computation.
+    #[cfg(feature = "lattice-state-root")]
+    pub lattice_accumulator_updates: Arc<LatticeAccumulatorUpdates>,
 }
 
 /// Metrics for deferred trie computation.
@@ -62,6 +67,9 @@ struct PendingInputs {
     hashed_state: Arc<HashedPostState>,
     /// Unsorted trie updates from state root computation.
     trie_updates: Arc<TrieUpdates>,
+    /// Lattice accumulator updates from state root computation.
+    #[cfg(feature = "lattice-state-root")]
+    lattice_accumulator_updates: Arc<LatticeAccumulatorUpdates>,
 }
 
 impl fmt::Debug for DeferredTrieData {
@@ -81,10 +89,38 @@ impl fmt::Debug for DeferredTrieData {
 impl DeferredTrieData {
     /// Create a new pending handle with fallback inputs for synchronous computation.
     pub fn pending(hashed_state: Arc<HashedPostState>, trie_updates: Arc<TrieUpdates>) -> Self {
+        #[cfg(feature = "lattice-state-root")]
+        {
+            Self::pending_with_lattice(
+                hashed_state,
+                trie_updates,
+                Arc::new(LatticeAccumulatorUpdates::default()),
+            )
+        }
+
+        #[cfg(not(feature = "lattice-state-root"))]
+        {
+            Self {
+                state: Arc::new(Mutex::new(DeferredTrieDataInner::Pending(Some(PendingInputs {
+                    hashed_state,
+                    trie_updates,
+                })))),
+            }
+        }
+    }
+
+    /// Create a new pending handle with lattice accumulator updates.
+    #[cfg(feature = "lattice-state-root")]
+    pub fn pending_with_lattice(
+        hashed_state: Arc<HashedPostState>,
+        trie_updates: Arc<TrieUpdates>,
+        lattice_accumulator_updates: Arc<LatticeAccumulatorUpdates>,
+    ) -> Self {
         Self {
             state: Arc::new(Mutex::new(DeferredTrieDataInner::Pending(Some(PendingInputs {
                 hashed_state,
                 trie_updates,
+                lattice_accumulator_updates,
             })))),
         }
     }
@@ -128,6 +164,28 @@ impl DeferredTrieData {
         ComputedTrieData::new(Arc::new(sorted_hashed_state), Arc::new(sorted_trie_updates))
     }
 
+    /// Sorts block execution outputs and attaches lattice accumulator updates.
+    #[cfg(feature = "lattice-state-root")]
+    pub fn sort_with_lattice(
+        hashed_state: Arc<HashedPostState>,
+        _trie_updates: Arc<TrieUpdates>,
+        lattice_accumulator_updates: Arc<LatticeAccumulatorUpdates>,
+    ) -> ComputedTrieData {
+        let _span =
+            debug_span!(target: "engine::tree::deferred_trie", "sort_lattice_inputs").entered();
+
+        let sorted_hashed_state = match Arc::try_unwrap(hashed_state) {
+            Ok(state) => state.into_sorted(),
+            Err(arc) => arc.clone_into_sorted(),
+        };
+
+        ComputedTrieData::new_with_lattice(
+            Arc::new(sorted_hashed_state),
+            Arc::new(TrieUpdatesSorted::default()),
+            lattice_accumulator_updates,
+        )
+    }
+
     /// Returns trie data, computing synchronously if the async task hasn't completed.
     #[instrument(level = "debug", target = "engine::tree::deferred_trie", skip_all)]
     pub fn wait_cloned(&self) -> ComputedTrieData {
@@ -141,6 +199,13 @@ impl DeferredTrieData {
                 DEFERRED_TRIE_METRICS.deferred_trie_sync_fallback.increment(1);
 
                 let inputs = maybe_inputs.take().expect("inputs must be present in Pending state");
+                #[cfg(feature = "lattice-state-root")]
+                let computed = Self::sort_with_lattice(
+                    inputs.hashed_state,
+                    inputs.trie_updates,
+                    inputs.lattice_accumulator_updates,
+                );
+                #[cfg(not(feature = "lattice-state-root"))]
                 let computed = Self::sort(inputs.hashed_state, inputs.trie_updates);
                 *state = DeferredTrieDataInner::Ready(computed.clone());
 
@@ -152,11 +217,28 @@ impl DeferredTrieData {
 
 impl ComputedTrieData {
     /// Construct sorted trie data for one block.
-    pub const fn new(
+    pub fn new(
         hashed_state: Arc<HashedPostStateSorted>,
         trie_updates: Arc<TrieUpdatesSorted>,
     ) -> Self {
-        Self { hashed_state, trie_updates }
+        Self {
+            hashed_state,
+            trie_updates,
+            #[cfg(feature = "lattice-state-root")]
+            lattice_accumulator_updates: Arc::new(LatticeAccumulatorUpdates {
+                state: reth_trie::lattice::LatticeHashState::default(),
+            }),
+        }
+    }
+
+    /// Construct sorted trie data for one block with lattice accumulator updates.
+    #[cfg(feature = "lattice-state-root")]
+    pub fn new_with_lattice(
+        hashed_state: Arc<HashedPostStateSorted>,
+        trie_updates: Arc<TrieUpdatesSorted>,
+        lattice_accumulator_updates: Arc<LatticeAccumulatorUpdates>,
+    ) -> Self {
+        Self { hashed_state, trie_updates, lattice_accumulator_updates }
     }
 }
 

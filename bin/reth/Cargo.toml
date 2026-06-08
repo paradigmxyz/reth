@@ -109,6 +109,12 @@ js-tracer = [
 ]
 
 dev = ["reth-ethereum-cli/dev"]
+lattice-state-root = [
+    "reth-chainspec/lattice-state-root",
+    "reth-node-builder/lattice-state-root",
+    "reth-node-ethereum/lattice-state-root",
+    "reth-provider/lattice-state-root",
+]
 
 asm-keccak = [
     "reth-node-core/asm-keccak",

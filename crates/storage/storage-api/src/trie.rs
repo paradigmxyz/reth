@@ -1,11 +1,17 @@
 use alloc::vec::Vec;
+#[cfg(feature = "lattice-state-root")]
+use alloy_primitives::U256;
 use alloy_primitives::{Address, Bytes, B256};
 use reth_storage_errors::provider::ProviderResult;
+#[cfg(feature = "lattice-state-root")]
+use reth_trie_common::lattice::LatticeAccumulatorUpdates;
 use reth_trie_common::{
     updates::{StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
     AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
+#[cfg(feature = "lattice-state-root")]
+use revm_database::BundleState;
 
 /// A type that can compute the state root of a given post state.
 #[auto_impl::auto_impl(&, Box, Arc)]
@@ -30,6 +36,29 @@ pub trait StateRootProvider {
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)>;
+
+    /// Returns a lattice state root and full lattice accumulator updates for the provided EVM
+    /// bundle state.
+    #[cfg(feature = "lattice-state-root")]
+    fn lattice_state_root(
+        &self,
+        _bundle_state: &BundleState,
+    ) -> ProviderResult<(B256, LatticeAccumulatorUpdates)> {
+        Ok((B256::ZERO, Default::default()))
+    }
+
+    /// Returns the current flat lattice accumulator seed for incremental updates.
+    #[cfg(feature = "lattice-state-root")]
+    fn lattice_accumulator_seed(&self) -> ProviderResult<LatticeAccumulatorUpdates> {
+        Ok(Default::default())
+    }
+
+    /// Returns nonzero hashed storage slots for `hashed_address`, used when flattening storage
+    /// wipe deltas into the single lattice accumulator.
+    #[cfg(feature = "lattice-state-root")]
+    fn lattice_account_storage(&self, _hashed_address: B256) -> ProviderResult<Vec<(B256, U256)>> {
+        Ok(Vec::new())
+    }
 
     /// Returns state root and trie updates.
     /// See [`StateRootProvider::state_root_from_nodes`] for more info.

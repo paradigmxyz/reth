@@ -218,6 +218,29 @@ impl<S: StateRootProvider> StateRootProvider for InstrumentedStateProvider<S> {
         self.state_provider.state_root_with_updates(hashed_state)
     }
 
+    #[cfg(feature = "lattice-state-root")]
+    fn lattice_state_root(
+        &self,
+        bundle_state: &reth_revm::db::BundleState,
+    ) -> ProviderResult<(B256, reth_trie::lattice::LatticeAccumulatorUpdates)> {
+        self.state_provider.lattice_state_root(bundle_state)
+    }
+
+    #[cfg(feature = "lattice-state-root")]
+    fn lattice_accumulator_seed(
+        &self,
+    ) -> ProviderResult<reth_trie::lattice::LatticeAccumulatorUpdates> {
+        self.state_provider.lattice_accumulator_seed()
+    }
+
+    #[cfg(feature = "lattice-state-root")]
+    fn lattice_account_storage(
+        &self,
+        hashed_address: B256,
+    ) -> ProviderResult<Vec<(B256, alloy_primitives::U256)>> {
+        self.state_provider.lattice_account_storage(hashed_address)
+    }
+
     fn state_root_from_nodes_with_updates(
         &self,
         input: TrieInput,

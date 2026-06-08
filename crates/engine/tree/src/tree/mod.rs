@@ -60,6 +60,7 @@ mod persistence_state;
 pub mod precompile_cache;
 #[cfg(test)]
 mod tests;
+#[cfg(not(feature = "lattice-state-root"))]
 mod trie_updates;
 pub mod types;
 
@@ -2169,17 +2170,22 @@ where
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.header().number()))?;
         let hashed_state = self.provider.hashed_post_state(execution_output.state());
 
-        debug!(
-            target: "engine::tree",
-            number = ?block.number(),
-            "computing block trie updates",
-        );
-        let db_provider = self.provider.database_provider_ro()?;
-        let trie_updates = reth_trie_db::compute_block_trie_updates(
-            &self.changeset_cache,
-            &db_provider,
-            block.number(),
-        )?;
+        #[cfg(not(feature = "lattice-state-root"))]
+        let trie_updates = {
+            debug!(
+                target: "engine::tree",
+                number = ?block.number(),
+                "computing block trie updates",
+            );
+            let db_provider = self.provider.database_provider_ro()?;
+            reth_trie_db::compute_block_trie_updates(
+                &self.changeset_cache,
+                &db_provider,
+                block.number(),
+            )?
+        };
+        #[cfg(feature = "lattice-state-root")]
+        let trie_updates = reth_trie::updates::TrieUpdatesSorted::default();
 
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
         let sorted_trie_updates = Arc::new(trie_updates);
@@ -3262,6 +3268,12 @@ where
         } else {
             None
         };
+        #[cfg(feature = "lattice-state-root")]
+        let lattice_handle = if self.config.share_sparse_trie_with_payload_builder() {
+            self.payload_validator.lattice_root_handle_for(state.head_block_hash, &self.state)
+        } else {
+            None
+        };
 
         // send the payload to the builder and return the receiver for the pending payload
         // id, initiating payload job is handled asynchronously
@@ -3270,6 +3282,8 @@ where
             attributes,
             cache,
             trie_handle,
+            #[cfg(feature = "lattice-state-root")]
+            lattice_handle,
         });
 
         // Client software MUST respond to this method call in the following way:

@@ -8,6 +8,9 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+#[cfg(feature = "lattice-state-root")]
+use reth_trie_db as _;
+
 pub mod init;
 
 mod db_tool;

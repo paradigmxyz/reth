@@ -729,13 +729,34 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 }
                 timings.write_hashed_state += start.elapsed();
 
-                let start = Instant::now();
-                let merged_trie =
-                    TrieUpdatesSorted::merge_batch(blocks.iter().rev().map(|b| b.trie_updates()));
-                if !merged_trie.is_empty() {
-                    self.write_trie_updates_sorted(&merged_trie)?;
+                #[cfg(not(feature = "lattice-state-root"))]
+                {
+                    let start = Instant::now();
+                    let merged_trie = TrieUpdatesSorted::merge_batch(
+                        blocks.iter().rev().map(|b| b.trie_updates()),
+                    );
+                    if !merged_trie.is_empty() {
+                        self.write_trie_updates_sorted(&merged_trie)?;
+                    }
+                    timings.write_trie_updates += start.elapsed();
                 }
-                timings.write_trie_updates += start.elapsed();
+
+                #[cfg(feature = "lattice-state-root")]
+                {
+                    let start = Instant::now();
+                    let mut merged_lattice_updates =
+                        reth_trie::lattice::LatticeAccumulatorUpdates::default();
+                    for block in &blocks {
+                        let lattice_updates = block.trie_data().lattice_accumulator_updates;
+                        merged_lattice_updates.state = lattice_updates.state.clone();
+                    }
+                    if merged_lattice_updates.is_empty() {
+                        self.rebuild_lattice_accumulators()?;
+                    } else {
+                        self.write_lattice_accumulator_updates(&merged_lattice_updates)?;
+                    }
+                    timings.write_trie_updates += start.elapsed();
+                }
             }
 
             // Full mode: update history indices
@@ -860,19 +881,26 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // Unwind storage history indices.
         self.unwind_storage_history_indices(changed_storages.iter().copied())?;
 
-        // Unwind accounts/storages trie tables using the revert.
-        // Get the database tip block number
-        let db_tip_block = self
-            .get_stage_checkpoint(reth_stages_types::StageId::Finish)?
-            .as_ref()
-            .map(|chk| chk.block_number)
-            .ok_or_else(|| ProviderError::InsufficientChangesets {
-                requested: from,
-                available: 0..=0,
-            })?;
+        #[cfg(not(feature = "lattice-state-root"))]
+        {
+            // Unwind accounts/storages trie tables using the revert.
+            // Get the database tip block number
+            let db_tip_block = self
+                .get_stage_checkpoint(reth_stages_types::StageId::Finish)?
+                .as_ref()
+                .map(|chk| chk.block_number)
+                .ok_or_else(|| ProviderError::InsufficientChangesets {
+                    requested: from,
+                    available: 0..=0,
+                })?;
 
-        let trie_revert = self.changeset_cache.get_or_compute_range(self, from..=db_tip_block)?;
-        self.write_trie_updates_sorted(&trie_revert)?;
+            let trie_revert =
+                self.changeset_cache.get_or_compute_range(self, from..=db_tip_block)?;
+            self.write_trie_updates_sorted(&trie_revert)?;
+        }
+
+        #[cfg(feature = "lattice-state-root")]
+        self.rebuild_lattice_accumulators()?;
 
         Ok(())
     }
@@ -1395,6 +1423,27 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
+    #[cfg(feature = "lattice-state-root")]
+    fn write_lattice_accumulator_updates(
+        &self,
+        updates: &reth_trie::lattice::LatticeAccumulatorUpdates,
+    ) -> ProviderResult<()> {
+        self.tx_ref().put::<tables::LatticeStateAccumulator>(
+            crate::providers::state::lattice::lattice_state_accumulator_key(),
+            updates.state.clone().into_vec(),
+        )?;
+        self.tx_ref().clear::<tables::LatticeStorageAccumulators>()?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "lattice-state-root")]
+    fn rebuild_lattice_accumulators(&self) -> ProviderResult<()> {
+        let updates =
+            crate::providers::state::lattice::rebuild_lattice_accumulators(self.tx_ref())?;
+        self.write_lattice_accumulator_updates(&updates)
+    }
+
     /// Insert history index to the database.
     ///
     /// For each updated partial key, this function retrieves the last shard from the database
@@ -2817,6 +2866,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     }
                 }
             }
+
+            #[cfg(feature = "lattice-state-root")]
+            self.rebuild_lattice_accumulators()?;
         } else {
             // This is not working for blocks that are not at tip. as plain state is not the last
             // state of end range. We should rename the functions or add support to access
@@ -2980,6 +3032,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     }
                 }
             }
+
+            #[cfg(feature = "lattice-state-root")]
+            self.rebuild_lattice_accumulators()?;
 
             (state, reverts)
         } else {
@@ -3730,6 +3785,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
 
         // insert hashes and intermediate merkle nodes
         self.write_hashed_state(&hashed_state)?;
+        #[cfg(feature = "lattice-state-root")]
+        self.rebuild_lattice_accumulators()?;
         durations_recorder.record_relative(metrics::Action::InsertHashes);
 
         // Use pre-computed transitions for history indices since static file

@@ -6,12 +6,13 @@
 /// Used to implement provider traits.
 #[macro_export]
 macro_rules! delegate_impls_to_as_ref {
-    (for $target:ty => $($trait:ident $(where [$($generics:tt)*])? {  $(fn $func:ident$(<$($generic_arg:ident: $generic_arg_ty:path),*>)?(&self, $($arg:ident: $argty:ty),*) -> $ret:path;)* })* ) => {
+    (for $target:ty => $($trait:ident $(where [$($generics:tt)*])? {  $($(#[$meta:meta])* fn $func:ident$(<$($generic_arg:ident: $generic_arg_ty:path),*>)?(&self $(, $arg:ident: $argty:ty)*) -> $ret:ty;)* })* ) => {
 
         $(
           impl<'a, $($($generics)*)?> $trait for $target {
               $(
-                  fn $func$(<$($generic_arg: $generic_arg_ty),*>)?(&self, $($arg: $argty),*) -> $ret {
+                  $(#[$meta])*
+                  fn $func$(<$($generic_arg: $generic_arg_ty),*>)?(&self $(, $arg: $argty)*) -> $ret {
                     self.as_ref().$func($($arg),*)
                   }
               )*
@@ -49,6 +50,12 @@ macro_rules! delegate_provider_impls {
                 fn state_root(&self, state: reth_trie::HashedPostState) -> reth_storage_api::errors::provider::ProviderResult<alloy_primitives::B256>;
                 fn state_root_from_nodes(&self, input: reth_trie::TrieInput) -> reth_storage_api::errors::provider::ProviderResult<alloy_primitives::B256>;
                 fn state_root_with_updates(&self, state: reth_trie::HashedPostState) -> reth_storage_api::errors::provider::ProviderResult<(alloy_primitives::B256, reth_trie::updates::TrieUpdates)>;
+                #[cfg(feature = "lattice-state-root")]
+                fn lattice_state_root(&self, bundle_state: &revm_database::BundleState) -> reth_storage_api::errors::provider::ProviderResult<(alloy_primitives::B256, reth_trie::lattice::LatticeAccumulatorUpdates)>;
+                #[cfg(feature = "lattice-state-root")]
+                fn lattice_accumulator_seed(&self) -> reth_storage_api::errors::provider::ProviderResult<reth_trie::lattice::LatticeAccumulatorUpdates>;
+                #[cfg(feature = "lattice-state-root")]
+                fn lattice_account_storage(&self, hashed_address: alloy_primitives::B256) -> reth_storage_api::errors::provider::ProviderResult<Vec<(alloy_primitives::B256, alloy_primitives::U256)>>;
                 fn state_root_from_nodes_with_updates(&self, input: reth_trie::TrieInput) -> reth_storage_api::errors::provider::ProviderResult<(alloy_primitives::B256, reth_trie::updates::TrieUpdates)>;
             }
             StorageRootProvider $(where [$($generics)*])? {

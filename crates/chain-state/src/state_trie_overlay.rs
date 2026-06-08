@@ -452,7 +452,15 @@ fn compute_overlay<N: NodePrimitives>(
 fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSorted {
     let trie_data = blocks.iter().map(ExecutedBlock::trie_data).collect::<Vec<_>>();
 
-    #[cfg(feature = "rayon")]
+    #[cfg(feature = "lattice-state-root")]
+    let (nodes, state) = (
+        Arc::new(TrieUpdatesSorted::default()),
+        HashedPostStateSorted::merge_batch(
+            trie_data.iter().map(|data| Arc::clone(&data.hashed_state)),
+        ),
+    );
+
+    #[cfg(all(feature = "rayon", not(feature = "lattice-state-root")))]
     let (nodes, state) = rayon::join(
         || {
             TrieUpdatesSorted::merge_batch(
@@ -466,7 +474,7 @@ fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSo
         },
     );
 
-    #[cfg(not(feature = "rayon"))]
+    #[cfg(all(not(feature = "rayon"), not(feature = "lattice-state-root")))]
     let (nodes, state) = (
         TrieUpdatesSorted::merge_batch(trie_data.iter().map(|data| Arc::clone(&data.trie_updates))),
         HashedPostStateSorted::merge_batch(

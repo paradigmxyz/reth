@@ -19,6 +19,8 @@ alloy-trie = { workspace = true, features = ["ethereum"] }
 alloy-consensus.workspace = true
 reth-primitives-traits.workspace = true
 reth-codecs = { workspace = true, optional = true }
+commonware-cryptography = { workspace = true, optional = true }
+commonware-codec = { workspace = true, optional = true }
 
 alloy-rpc-types-eth = { workspace = true, optional = true }
 alloy-serde = { workspace = true, optional = true }
@@ -88,7 +90,10 @@ std = [
     "revm-state/std",
     "reth-codecs?/std",
     "alloy-eips/std",
+    "commonware-codec?/std",
+    "commonware-cryptography?/std",
 ]
+lattice-state-root = ["dep:commonware-codec", "dep:commonware-cryptography"]
 eip1186 = ["alloy-rpc-types-eth/serde", "dep:alloy-serde"]
 serde = [
     "dep:serde",
@@ -134,5 +139,6 @@ arbitrary = [
     "reth-codecs/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
     "alloy-eips/arbitrary",
+    "commonware-cryptography?/arbitrary",
 ]
 rayon = ["dep:rayon"]

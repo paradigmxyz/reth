@@ -3,6 +3,8 @@
 //! Provides a no-std compatible [`LazyTrieData`] type for lazily initialized
 //! trie-related data containing sorted hashed state and trie updates.
 
+#[cfg(feature = "lattice-state-root")]
+use crate::lattice::LatticeAccumulatorUpdates;
 use crate::{updates::TrieUpdatesSorted, HashedPostStateSorted};
 use alloc::sync::Arc;
 use core::fmt;
@@ -19,15 +21,36 @@ pub struct SortedTrieData {
     pub hashed_state: Arc<HashedPostStateSorted>,
     /// Sorted trie updates produced by state root computation.
     pub trie_updates: Arc<TrieUpdatesSorted>,
+    /// Lattice accumulator updates produced by lattice state root computation.
+    #[cfg(feature = "lattice-state-root")]
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub lattice_accumulator_updates: Arc<LatticeAccumulatorUpdates>,
 }
 
 impl SortedTrieData {
     /// Creates a new [`SortedTrieData`] with the given values.
-    pub const fn new(
+    pub fn new(
         hashed_state: Arc<HashedPostStateSorted>,
         trie_updates: Arc<TrieUpdatesSorted>,
     ) -> Self {
-        Self { hashed_state, trie_updates }
+        Self {
+            hashed_state,
+            trie_updates,
+            #[cfg(feature = "lattice-state-root")]
+            lattice_accumulator_updates: Arc::new(LatticeAccumulatorUpdates {
+                state: crate::lattice::LatticeHashState::default(),
+            }),
+        }
+    }
+
+    /// Creates a new [`SortedTrieData`] with lattice accumulator updates.
+    #[cfg(feature = "lattice-state-root")]
+    pub fn new_with_lattice(
+        hashed_state: Arc<HashedPostStateSorted>,
+        trie_updates: Arc<TrieUpdatesSorted>,
+        lattice_accumulator_updates: Arc<LatticeAccumulatorUpdates>,
+    ) -> Self {
+        Self { hashed_state, trie_updates, lattice_accumulator_updates }
     }
 }
 
@@ -81,6 +104,22 @@ impl LazyTrieData {
         Self { data: Arc::new(data), compute: None }
     }
 
+    /// Creates a new [`LazyTrieData`] that is already initialized with lattice updates.
+    #[cfg(feature = "lattice-state-root")]
+    pub fn ready_with_lattice(
+        hashed_state: Arc<HashedPostStateSorted>,
+        trie_updates: Arc<TrieUpdatesSorted>,
+        lattice_accumulator_updates: Arc<LatticeAccumulatorUpdates>,
+    ) -> Self {
+        let data = OnceLock::new();
+        let _ = data.set(SortedTrieData::new_with_lattice(
+            hashed_state,
+            trie_updates,
+            lattice_accumulator_updates,
+        ));
+        Self { data: Arc::new(data), compute: None }
+    }
+
     /// Creates a new [`LazyTrieData`] from pre-computed [`SortedTrieData`].
     pub fn from_sorted(sorted: SortedTrieData) -> Self {
         let data = OnceLock::new();
@@ -119,6 +158,12 @@ impl LazyTrieData {
     /// If not initialized, computes from the deferred source or panics.
     pub fn trie_updates(&self) -> Arc<TrieUpdatesSorted> {
         Arc::clone(&self.get().trie_updates)
+    }
+
+    /// Returns a clone of the lattice accumulator updates Arc.
+    #[cfg(feature = "lattice-state-root")]
+    pub fn lattice_accumulator_updates(&self) -> Arc<LatticeAccumulatorUpdates> {
+        Arc::clone(&self.get().lattice_accumulator_updates)
     }
 
     /// Returns a clone of the [`SortedTrieData`].

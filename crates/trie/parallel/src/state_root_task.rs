@@ -4,6 +4,8 @@ use crate::root::ParallelStateRootError;
 use alloy_eip7928::BlockAccessList;
 use alloy_primitives::{keccak256, B256};
 use derive_more::derive::Deref;
+#[cfg(feature = "lattice-state-root")]
+use reth_trie::lattice::LatticeAccumulatorUpdates;
 use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2};
 use revm_state::EvmState;
 use std::sync::Arc;
@@ -44,6 +46,26 @@ pub struct StateRootComputeOutcome {
     pub debug_recorders: Vec<(Option<B256>, reth_trie_sparse::debug_recorder::TrieDebugRecorder)>,
 }
 
+/// Messages used internally by the lattice root task.
+#[cfg(feature = "lattice-state-root")]
+#[derive(Debug)]
+pub enum LatticeRootMessage {
+    /// New state update from transaction execution.
+    StateUpdate(EvmState),
+    /// Signals state update stream end.
+    FinishedStateUpdates,
+}
+
+/// Outcome of the lattice root computation.
+#[cfg(feature = "lattice-state-root")]
+#[derive(Debug, Clone)]
+pub struct LatticeRootComputeOutcome {
+    /// The lattice state root checksum used as the header state root.
+    pub state_root: B256,
+    /// Full accumulator states to persist after the block is canonicalized.
+    pub accumulator_updates: Arc<LatticeAccumulatorUpdates>,
+}
+
 /// Handle to a background sparse trie state root computation.
 ///
 /// Used by both the engine (during `newPayload`) and the payload builder (during `FCU`-triggered
@@ -62,6 +84,60 @@ pub struct StateRootHandle {
         Option<std::sync::mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
     /// Receiver for the hashed post state.
     hashed_state_rx: Option<std::sync::mpsc::Receiver<HashedPostState>>,
+}
+
+/// Handle to a background lattice state root computation.
+#[cfg(feature = "lattice-state-root")]
+#[derive(Debug)]
+pub struct LatticeRootHandle {
+    /// Channel for streaming state updates into the lattice accumulator pipeline.
+    updates_tx: crossbeam_channel::Sender<LatticeRootMessage>,
+    /// Receiver for the final lattice root result.
+    lattice_root_rx: Option<
+        std::sync::mpsc::Receiver<Result<LatticeRootComputeOutcome, ParallelStateRootError>>,
+    >,
+}
+
+#[cfg(feature = "lattice-state-root")]
+impl LatticeRootHandle {
+    /// Creates a new [`LatticeRootHandle`].
+    pub const fn new(
+        updates_tx: crossbeam_channel::Sender<LatticeRootMessage>,
+        lattice_root_rx: std::sync::mpsc::Receiver<
+            Result<LatticeRootComputeOutcome, ParallelStateRootError>,
+        >,
+    ) -> Self {
+        Self { updates_tx, lattice_root_rx: Some(lattice_root_rx) }
+    }
+
+    /// Returns a reference to the updates sender channel.
+    pub const fn updates_tx(&self) -> &crossbeam_channel::Sender<LatticeRootMessage> {
+        &self.updates_tx
+    }
+
+    /// Returns a state hook that streams state updates to the background lattice task.
+    ///
+    /// The hook must be dropped after execution completes to signal the end of state updates.
+    pub fn state_hook(&self) -> impl alloy_evm::block::OnStateHook {
+        let sender = LatticeStateHookSender::new(self.updates_tx.clone());
+
+        move |state: &EvmState| {
+            let _ = sender.send(LatticeRootMessage::StateUpdate(state.clone()));
+        }
+    }
+
+    /// Awaits the lattice root computation result.
+    ///
+    /// # Panics
+    ///
+    /// If called more than once.
+    pub fn lattice_root(&mut self) -> Result<LatticeRootComputeOutcome, ParallelStateRootError> {
+        self.lattice_root_rx
+            .take()
+            .expect("lattice_root already taken")
+            .recv()
+            .map_err(|_| ParallelStateRootError::Other("lattice root task dropped".to_string()))?
+    }
 }
 
 impl StateRootHandle {
@@ -134,6 +210,26 @@ impl StateRootHandle {
     /// If called more than once.
     pub const fn take_hashed_state_rx(&mut self) -> std::sync::mpsc::Receiver<HashedPostState> {
         self.hashed_state_rx.take().expect("hashed_state already taken")
+    }
+}
+
+/// A wrapper for the lattice sender that signals completion when dropped.
+#[cfg(feature = "lattice-state-root")]
+#[derive(Deref, Debug)]
+pub struct LatticeStateHookSender(crossbeam_channel::Sender<LatticeRootMessage>);
+
+#[cfg(feature = "lattice-state-root")]
+impl LatticeStateHookSender {
+    /// Creates a new [`LatticeStateHookSender`] wrapping the given channel sender.
+    pub const fn new(inner: crossbeam_channel::Sender<LatticeRootMessage>) -> Self {
+        Self(inner)
+    }
+}
+
+#[cfg(feature = "lattice-state-root")]
+impl Drop for LatticeStateHookSender {
+    fn drop(&mut self) {
+        let _ = self.0.send(LatticeRootMessage::FinishedStateUpdates);
     }
 }
 

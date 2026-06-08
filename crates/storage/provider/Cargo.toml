@@ -91,6 +91,12 @@ tokio-stream = { workspace = true, features = ["sync"] }
 
 [features]
 jemalloc = ["rocksdb/jemalloc"]
+lattice-state-root = [
+    "reth-chain-state/lattice-state-root",
+    "reth-storage-api/lattice-state-root",
+    "reth-trie/lattice-state-root",
+    "reth-trie-db/lattice-state-root",
+]
 test-utils = [
     "reth-db/test-utils",
     "reth-nippy-jar/test-utils",

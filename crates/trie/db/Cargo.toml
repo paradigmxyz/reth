@@ -60,6 +60,7 @@ similar-asserts.workspace = true
 
 [features]
 metrics = ["reth-trie/metrics", "dep:reth-metrics", "dep:metrics"]
+lattice-state-root = ["reth-trie/lattice-state-root"]
 serde = [
     "similar-asserts/serde",
     "alloy-consensus/serde",

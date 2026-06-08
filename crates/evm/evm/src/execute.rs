@@ -21,6 +21,8 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::StateProvider;
 pub use reth_storage_errors::provider::ProviderError;
+#[cfg(feature = "lattice-state-root")]
+use reth_trie_common::lattice::LatticeAccumulatorUpdates;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::{
     database::{states::bundle_state::BundleRetention, BundleState, State},
@@ -312,6 +314,9 @@ pub struct BlockBuilderOutcome<N: NodePrimitives> {
     pub hashed_state: HashedPostState,
     /// Trie updates collected during state root calculation.
     pub trie_updates: TrieUpdates,
+    /// Lattice accumulator updates collected during lattice state root calculation.
+    #[cfg(feature = "lattice-state-root")]
+    pub lattice_accumulator_updates: reth_trie_common::lattice::LatticeAccumulatorUpdates,
     /// The built block.
     pub block: RecoveredBlock<N::Block>,
     /// Block access list built during execution (EIP-7928, Amsterdam).
@@ -377,6 +382,20 @@ pub trait BlockBuilder {
         state_provider: impl StateProvider,
         state_root_precomputed: Option<(B256, TrieUpdates)>,
     ) -> Result<BlockBuilderOutcome<Self::Primitives>, BlockExecutionError>;
+
+    /// Completes the block building process with an optional precomputed lattice root.
+    #[cfg(feature = "lattice-state-root")]
+    fn finish_with_lattice(
+        self,
+        state_provider: impl StateProvider,
+        state_root_precomputed: Option<(B256, TrieUpdates)>,
+        _lattice_root_precomputed: Option<(B256, LatticeAccumulatorUpdates)>,
+    ) -> Result<BlockBuilderOutcome<Self::Primitives>, BlockExecutionError>
+    where
+        Self: Sized,
+    {
+        self.finish(state_provider, state_root_precomputed)
+    }
 
     /// Provides mutable access to the inner [`BlockExecutor`].
     fn executor_mut(&mut self) -> &mut Self::Executor;
@@ -504,6 +523,8 @@ where
         state: impl StateProvider,
         state_root_precomputed: Option<(B256, TrieUpdates)>,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
+        #[cfg(feature = "lattice-state-root")]
+        let _ = state_root_precomputed;
         let (evm, result) = self.executor.finish()?;
         let (db, evm_env) = evm.finish();
 
@@ -515,6 +536,12 @@ where
             block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal.as_slice()));
 
         let hashed_state = state.hashed_post_state(&db.bundle_state);
+        #[cfg(feature = "lattice-state-root")]
+        let (state_root, lattice_accumulator_updates) =
+            state.lattice_state_root(&db.bundle_state).map_err(BlockExecutionError::other)?;
+        #[cfg(feature = "lattice-state-root")]
+        let trie_updates = TrieUpdates::default();
+        #[cfg(not(feature = "lattice-state-root"))]
         let (state_root, trie_updates) = match state_root_precomputed {
             Some(precomputed) => precomputed,
             None => state
@@ -543,6 +570,61 @@ where
             execution_result: result,
             hashed_state,
             trie_updates,
+            #[cfg(feature = "lattice-state-root")]
+            lattice_accumulator_updates,
+            block,
+            block_access_list,
+        })
+    }
+
+    #[cfg(feature = "lattice-state-root")]
+    fn finish_with_lattice(
+        self,
+        state: impl StateProvider,
+        _state_root_precomputed: Option<(B256, TrieUpdates)>,
+        lattice_root_precomputed: Option<(B256, LatticeAccumulatorUpdates)>,
+    ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
+        let (evm, result) = self.executor.finish()?;
+        let (db, evm_env) = evm.finish();
+
+        // merge all transitions into bundle state
+        db.merge_transitions(BundleRetention::Reverts);
+
+        let block_access_list = db.take_built_alloy_bal();
+        let block_access_list_hash =
+            block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal.as_slice()));
+
+        let hashed_state = state.hashed_post_state(&db.bundle_state);
+        let (state_root, lattice_accumulator_updates) =
+            if let Some((lattice_root, lattice_updates)) = lattice_root_precomputed {
+                (lattice_root, lattice_updates)
+            } else {
+                state.lattice_state_root(&db.bundle_state).map_err(BlockExecutionError::other)?
+            };
+        let trie_updates = TrieUpdates::default();
+
+        let (transactions, senders) =
+            self.transactions.into_iter().map(|tx| tx.into_parts()).unzip();
+
+        let block = self.assembler.assemble_block(BlockAssemblerInput {
+            evm_env,
+            execution_ctx: self.ctx,
+            parent: self.parent,
+            transactions,
+            output: &result,
+            bundle_state: &db.bundle_state,
+            state_provider: &state,
+            state_root,
+            block_access_list_hash,
+        })?;
+
+        let block = RecoveredBlock::new_unhashed(block, senders);
+
+        Ok(BlockBuilderOutcome {
+            execution_result: result,
+            hashed_state,
+            trie_updates,
+            lattice_accumulator_updates,
             block,
             block_access_list,
         })

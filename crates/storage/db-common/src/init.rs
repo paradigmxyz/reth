@@ -10,6 +10,8 @@ use alloy_primitives::{
 use reth_chainspec::EthChainSpec;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
+#[cfg(feature = "lattice-state-root")]
+use reth_db_api::cursor::{DbCursorRO, DbDupCursorRO};
 use reth_db_api::{
     cursor::{DbCursorRW, DbDupCursorRW},
     models::{
@@ -17,7 +19,7 @@ use reth_db_api::{
         ShardedKey,
     },
     tables,
-    transaction::DbTxMut,
+    transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
 use reth_etl::Collector;
@@ -35,12 +37,15 @@ use reth_provider::{
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
+#[cfg(not(feature = "lattice-state-root"))]
 use reth_trie::{
     prefix_set::TriePrefixSets, IntermediateStateRootState, StateRoot as StateRootComputer,
     StateRootProgress,
 };
+#[cfg(not(feature = "lattice-state-root"))]
 use reth_trie_db::DatabaseStateRoot;
 
+#[cfg(not(feature = "lattice-state-root"))]
 type DbStateRoot<'a, TX, A> = StateRootComputer<
     reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
     reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
@@ -62,6 +67,7 @@ pub use reth_provider::init::{
 pub const DEFAULT_SOFT_LIMIT_BYTE_LEN_ACCOUNTS_CHUNK: usize = 1_000_000_000;
 
 /// Soft limit for the number of flushed updates after which to log progress summary.
+#[cfg(not(feature = "lattice-state-root"))]
 const SOFT_LIMIT_COUNT_FLUSHED_UPDATES: usize = 1_000_000;
 
 /// Max number of storage "units" (1 per account + 1 per storage slot) before committing
@@ -70,6 +76,7 @@ const SOFT_LIMIT_COUNT_FLUSHED_UPDATES: usize = 1_000_000;
 const STORAGE_COMMIT_THRESHOLD: usize = 100_000;
 
 /// Max number of trie updates retained before init-state state root computation commits progress.
+#[cfg(not(feature = "lattice-state-root"))]
 const STATE_ROOT_COMMIT_THRESHOLD: u64 = 25_000;
 
 /// Storage initialization error type.
@@ -294,7 +301,10 @@ where
     insert_genesis_state(&provider_rw, alloc.iter())?;
 
     // compute state root to populate trie tables
+    #[cfg(not(feature = "lattice-state-root"))]
     compute_state_root(&provider_rw, None)?;
+    #[cfg(feature = "lattice-state-root")]
+    let _ = rebuild_lattice_accumulators(&provider_rw)?;
 
     // set stage checkpoint to genesis block number for all stages
     let checkpoint = StageCheckpoint::new(genesis_block_number);
@@ -593,6 +603,7 @@ where
     info!(target: "reth::cli", "All accounts written to database, starting state root computation (may take some time)");
 
     // clear trie tables so state root is computed from scratch
+    #[cfg(not(feature = "lattice-state-root"))]
     {
         let provider_rw = provider_factory.database_provider_rw()?;
         provider_rw.tx_ref().clear::<tables::AccountsTrie>()?;
@@ -1122,6 +1133,7 @@ where
 
 /// Computes the state root (from scratch) based on the accounts and storages present in the
 /// database.
+#[cfg(not(feature = "lattice-state-root"))]
 fn compute_state_root<Provider>(
     provider: &Provider,
     prefix_sets: Option<TriePrefixSets>,
@@ -1134,6 +1146,7 @@ where
     })
 }
 
+#[cfg(not(feature = "lattice-state-root"))]
 fn compute_state_root_inner<Provider, A>(
     provider: &Provider,
     prefix_sets: Option<TriePrefixSets>,
@@ -1194,6 +1207,38 @@ where
     }
 }
 
+#[cfg(feature = "lattice-state-root")]
+fn rebuild_lattice_accumulators<Provider>(provider: &Provider) -> Result<B256, InitStorageError>
+where
+    Provider: DBProvider<Tx: DbTx + DbTxMut>,
+{
+    use reth_trie::lattice::LatticeRoot;
+
+    let tx = provider.tx_ref();
+    let mut lattice_root = LatticeRoot::default();
+
+    let mut account_cursor = tx.cursor_read::<tables::HashedAccounts>()?;
+    let mut account_entry = account_cursor.seek(B256::ZERO)?;
+    while let Some((hashed_address, account)) = account_entry {
+        lattice_root.add_account(hashed_address, account);
+
+        let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorages>()?;
+        for entry in storage_cursor.walk_dup(Some(hashed_address), None)? {
+            let (_, StorageEntry { key, value }) = entry?;
+            if !value.is_zero() {
+                lattice_root.add_slot(hashed_address, key, value);
+            }
+        }
+
+        account_entry = account_cursor.next()?;
+    }
+
+    tx.clear::<tables::LatticeStorageAccumulators>()?;
+    tx.put::<tables::LatticeStateAccumulator>(0, lattice_root.state().into_vec())?;
+
+    Ok(lattice_root.root())
+}
+
 /// Computes the state root (from scratch) with periodic commits to free MDBX dirty pages.
 ///
 /// Opens a fresh transaction each iteration to release dirty pages, preventing OOM on large
@@ -1201,17 +1246,29 @@ where
 fn compute_state_root_chunked<PF>(provider_factory: &PF) -> Result<B256, InitStorageError>
 where
     PF: DatabaseProviderFactory<
-        ProviderRW: DBProvider<Tx: DbTxMut> + TrieWriter + StorageSettingsCache,
+        ProviderRW: DBProvider<Tx: DbTx + DbTxMut> + TrieWriter + StorageSettingsCache,
     >,
 {
-    let provider_rw = provider_factory.database_provider_rw().map_err(provider_db_err)?;
+    #[cfg(feature = "lattice-state-root")]
+    {
+        let provider_rw = provider_factory.database_provider_rw().map_err(provider_db_err)?;
+        let root = rebuild_lattice_accumulators(&provider_rw)?;
+        provider_rw.commit().map_err(provider_db_err)?;
+        return Ok(root)
+    }
 
-    reth_trie_db::with_adapter!(&provider_rw, |A| {
-        drop(provider_rw);
-        compute_state_root_chunked_inner::<PF, A>(provider_factory)
-    })
+    #[cfg(not(feature = "lattice-state-root"))]
+    {
+        let provider_rw = provider_factory.database_provider_rw().map_err(provider_db_err)?;
+
+        reth_trie_db::with_adapter!(&provider_rw, |A| {
+            drop(provider_rw);
+            compute_state_root_chunked_inner::<PF, A>(provider_factory)
+        })
+    }
 }
 
+#[cfg(not(feature = "lattice-state-root"))]
 fn compute_state_root_chunked_inner<PF, A>(provider_factory: &PF) -> Result<B256, InitStorageError>
 where
     PF: DatabaseProviderFactory<
@@ -1257,6 +1314,9 @@ where
                     total_flushed_updates,
                     "State root computation complete"
                 );
+
+                #[cfg(feature = "lattice-state-root")]
+                rebuild_lattice_accumulators(&provider_rw)?;
 
                 provider_rw.commit().map_err(provider_db_err)?;
                 return Ok(root)

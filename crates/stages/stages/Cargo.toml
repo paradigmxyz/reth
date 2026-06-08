@@ -97,6 +97,11 @@ paste.workspace = true
 tempfile.workspace = true
 
 [features]
+lattice-state-root = [
+    "reth-provider/lattice-state-root",
+    "reth-trie/lattice-state-root",
+    "reth-trie-db/lattice-state-root",
+]
 test-utils = [
     "reth-network-p2p/test-utils",
     "reth-db/test-utils",

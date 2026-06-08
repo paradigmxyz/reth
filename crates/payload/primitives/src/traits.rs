@@ -26,6 +26,9 @@ pub struct BuiltPayloadExecutedBlock<N: NodePrimitives> {
     pub hashed_state: Arc<HashedPostState>,
     /// Trie updates that result from calculating the state root for the block (unsorted).
     pub trie_updates: Arc<TrieUpdates>,
+    /// Lattice accumulator updates that should be persisted when the block is canonicalized.
+    #[cfg(feature = "lattice-state-root")]
+    pub lattice_accumulator_updates: Arc<reth_trie_common::lattice::LatticeAccumulatorUpdates>,
 }
 
 /// Represents a successfully built execution payload (block).

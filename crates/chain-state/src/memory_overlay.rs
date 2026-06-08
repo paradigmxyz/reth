@@ -138,6 +138,72 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
         self.state_root_from_nodes_with_updates(TrieInput::from_state(state))
     }
 
+    #[cfg(feature = "lattice-state-root")]
+    fn lattice_state_root(
+        &self,
+        bundle_state: &BundleState,
+    ) -> ProviderResult<(B256, reth_trie::lattice::LatticeAccumulatorUpdates)> {
+        let mut cumulative_state = BundleState::default();
+        for block in self.in_memory.iter().rev() {
+            cumulative_state.extend(block.execution_outcome().state.clone());
+        }
+        cumulative_state.extend(bundle_state.clone());
+
+        self.historical.lattice_state_root(&cumulative_state)
+    }
+
+    #[cfg(feature = "lattice-state-root")]
+    fn lattice_accumulator_seed(
+        &self,
+    ) -> ProviderResult<reth_trie::lattice::LatticeAccumulatorUpdates> {
+        if self.in_memory.is_empty() {
+            return self.historical.lattice_accumulator_seed()
+        }
+
+        let mut cumulative_state = BundleState::default();
+        for block in self.in_memory.iter().rev() {
+            cumulative_state.extend(block.execution_outcome().state.clone());
+        }
+
+        self.historical.lattice_state_root(&cumulative_state).map(|(_, updates)| updates)
+    }
+
+    #[cfg(feature = "lattice-state-root")]
+    fn lattice_account_storage(
+        &self,
+        hashed_address: B256,
+    ) -> ProviderResult<Vec<(B256, alloy_primitives::U256)>> {
+        let mut storage = self
+            .historical
+            .lattice_account_storage(hashed_address)?
+            .into_iter()
+            .collect::<alloy_primitives::map::B256Map<_>>();
+
+        for block in self.in_memory.iter().rev() {
+            for (address, account) in &block.execution_outcome().state.state {
+                if keccak256(address) != hashed_address {
+                    continue
+                }
+
+                if account.was_destroyed() {
+                    storage.clear();
+                }
+
+                for (slot, value) in &account.storage {
+                    let hashed_slot = keccak256(slot.to_be_bytes::<32>());
+                    let present_value = value.present_value();
+                    if present_value.is_zero() {
+                        storage.remove(&hashed_slot);
+                    } else {
+                        storage.insert(hashed_slot, present_value);
+                    }
+                }
+            }
+        }
+
+        Ok(storage.into_iter().collect())
+    }
+
     fn state_root_from_nodes_with_updates(
         &self,
         mut input: TrieInput,

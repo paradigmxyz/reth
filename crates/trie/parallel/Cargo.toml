@@ -65,6 +65,7 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
 
 [features]
 default = ["metrics"]
+lattice-state-root = ["reth-trie/lattice-state-root"]
 metrics = ["reth-metrics", "dep:metrics", "reth-trie/metrics"]
 trie-debug = [
     "dep:rand",

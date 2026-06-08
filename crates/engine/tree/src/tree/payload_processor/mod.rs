@@ -48,6 +48,8 @@ use std::{
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
 pub mod bal;
+#[cfg(feature = "lattice-state-root")]
+mod lattice;
 pub mod multiproof;
 mod preserved_sparse_trie;
 pub mod prewarm;
@@ -279,7 +281,7 @@ where
         parallel_bal_execution: bool,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
-        P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        P: BlockReader + StateProviderFactory + StateReader + Clone + Send + 'static,
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
             + Clone
             + Send
@@ -308,6 +310,9 @@ where
         // `saved_cache` is absent below, so prewarm skips cache-backed state prefetching.
         // `disable_bal_batch_io` controls the prefetch half when a cache exists.
         let install_state_hook = !parallel_bal_execution;
+        #[cfg(feature = "lattice-state-root")]
+        let lattice_root_handle =
+            install_state_hook.then(|| self.spawn_lattice_root(provider_builder.clone()));
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
@@ -318,6 +323,8 @@ where
 
         PayloadHandle {
             state_root_handle: Some(state_root_handle),
+            #[cfg(feature = "lattice-state-root")]
+            lattice_root_handle,
             install_state_hook,
             prewarm_handle,
             transactions: execution_rx,
@@ -334,16 +341,25 @@ where
         env: ExecutionEnv<Evm>,
         transactions: I,
         provider_builder: StateProviderBuilder<N, P>,
+        parallel_bal_execution: bool,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
-        P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        P: BlockReader + StateProviderFactory + StateReader + Clone + Send + 'static,
     {
+        #[cfg(not(feature = "lattice-state-root"))]
+        let _ = parallel_bal_execution;
+
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count);
+        #[cfg(feature = "lattice-state-root")]
+        let lattice_root_handle =
+            (!parallel_bal_execution).then(|| self.spawn_lattice_root(provider_builder.clone()));
         let prewarm_handle =
             self.spawn_caching_with(env, prewarm_rx, provider_builder, None, false);
         PayloadHandle {
             state_root_handle: None,
+            #[cfg(feature = "lattice-state-root")]
+            lattice_root_handle,
             install_state_hook: false,
             prewarm_handle,
             transactions: execution_rx,
@@ -398,6 +414,27 @@ where
         );
 
         StateRootHandle::new(parent_state_root, updates_tx, state_root_rx, hashed_state_rx)
+    }
+
+    /// Spawns a streaming lattice root task.
+    #[cfg(feature = "lattice-state-root")]
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
+    pub fn spawn_lattice_root<P>(
+        &self,
+        provider_builder: StateProviderBuilder<N, P>,
+    ) -> LatticeRootHandle
+    where
+        P: BlockReader + StateProviderFactory + StateReader + Clone + Send + 'static,
+    {
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (lattice_root_tx, lattice_root_rx) = channel();
+
+        self.executor.spawn_blocking_named("lattice-root", move || {
+            let result = lattice::run_lattice_root_task(provider_builder, updates_rx);
+            let _ = lattice_root_tx.send(result);
+        });
+
+        LatticeRootHandle::new(updates_tx, lattice_root_rx)
     }
 
     /// Transaction count threshold below which proof workers are halved, since fewer transactions
@@ -799,6 +836,9 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
 pub struct PayloadHandle<Tx, Err, R> {
     /// Handle to the background state root computation, if spawned.
     state_root_handle: Option<StateRootHandle>,
+    /// Handle to the background lattice root computation, if spawned.
+    #[cfg(feature = "lattice-state-root")]
+    lattice_root_handle: Option<LatticeRootHandle>,
     /// Whether main execution should stream per-tx state updates into the sparse trie task.
     install_state_hook: bool,
     // must include the receiver of the state root wired to the sparse trie
@@ -825,6 +865,14 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
         self.state_root_handle.as_mut().expect("state_root_handle is None").state_root()
     }
 
+    /// Awaits the lattice state root, if a lattice task was spawned.
+    #[cfg(feature = "lattice-state-root")]
+    pub fn lattice_root(
+        &mut self,
+    ) -> Option<Result<LatticeRootComputeOutcome, ParallelStateRootError>> {
+        self.lattice_root_handle.as_mut().map(|handle| handle.lattice_root())
+    }
+
     /// Takes the state root receiver out of the handle for use with custom waiting logic
     /// (e.g., timeout-based waiting).
     ///
@@ -837,13 +885,46 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
         self.state_root_handle.as_mut().expect("state_root_handle is None").take_state_root_rx()
     }
 
-    /// Returns a state hook to stream execution state updates to the sparse trie cache task.
+    /// Returns a state hook to stream execution state updates to background root tasks.
     ///
     /// Returns `None` when BAL-driven hashed state streaming feeds the sparse trie task.
     pub fn state_hook(&self) -> Option<impl OnStateHook> {
-        self.install_state_hook
-            .then(|| self.state_root_handle.as_ref().map(|handle| handle.state_hook()))
-            .flatten()
+        let sparse_sender = self
+            .install_state_hook
+            .then(|| {
+                self.state_root_handle
+                    .as_ref()
+                    .map(|handle| StateHookSender::new(handle.updates_tx().clone()))
+            })
+            .flatten();
+        #[cfg(feature = "lattice-state-root")]
+        let lattice_sender = self
+            .lattice_root_handle
+            .as_ref()
+            .map(|handle| LatticeStateHookSender::new(handle.updates_tx().clone()));
+
+        #[cfg(not(feature = "lattice-state-root"))]
+        {
+            sparse_sender.map(|sender| {
+                move |state: &reth_revm::state::EvmState| {
+                    let _ = sender.send(StateRootMessage::StateUpdate(state.clone()));
+                }
+            })
+        }
+
+        #[cfg(feature = "lattice-state-root")]
+        {
+            (sparse_sender.is_some() || lattice_sender.is_some()).then(move || {
+                move |state: &reth_revm::state::EvmState| {
+                    if let Some(sender) = &sparse_sender {
+                        let _ = sender.send(StateRootMessage::StateUpdate(state.clone()));
+                    }
+                    if let Some(sender) = &lattice_sender {
+                        let _ = sender.send(LatticeRootMessage::StateUpdate(state.clone()));
+                    }
+                }
+            })
+        }
     }
 
     /// Returns a clone of the sender that streams updates into the sparse-trie task. The BAL

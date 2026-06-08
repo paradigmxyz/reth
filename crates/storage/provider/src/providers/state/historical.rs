@@ -444,6 +444,29 @@ where
         })
     }
 
+    #[cfg(feature = "lattice-state-root")]
+    fn lattice_state_root(
+        &self,
+        bundle_state: &revm_database::BundleState,
+    ) -> ProviderResult<(B256, reth_trie::lattice::LatticeAccumulatorUpdates)> {
+        crate::providers::state::lattice::lattice_state_root(self.tx(), bundle_state)
+    }
+
+    #[cfg(feature = "lattice-state-root")]
+    fn lattice_accumulator_seed(
+        &self,
+    ) -> ProviderResult<reth_trie::lattice::LatticeAccumulatorUpdates> {
+        crate::providers::state::lattice::lattice_accumulator_seed(self.tx())
+    }
+
+    #[cfg(feature = "lattice-state-root")]
+    fn lattice_account_storage(
+        &self,
+        hashed_address: B256,
+    ) -> ProviderResult<Vec<(B256, alloy_primitives::U256)>> {
+        crate::providers::state::lattice::lattice_account_storage(self.tx(), hashed_address)
+    }
+
     fn state_root_from_nodes_with_updates(
         &self,
         input: TrieInput,

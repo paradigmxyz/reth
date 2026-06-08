@@ -31,6 +31,7 @@ reth-revm = { workspace = true, features = ["test-utils"] }
 revm-state.workspace = true
 
 [features]
+lattice-state-root = ["reth-provider/lattice-state-root", "reth-trie/lattice-state-root"]
 test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-revm/test-utils",

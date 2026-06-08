@@ -46,5 +46,12 @@ reth-db = { workspace = true, features = ["mdbx"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tasks.workspace = true
 
+[features]
+default = []
+lattice-state-root = [
+    "reth-provider/lattice-state-root",
+    "reth-trie/lattice-state-root",
+]
+
 [lints]
 workspace = true
