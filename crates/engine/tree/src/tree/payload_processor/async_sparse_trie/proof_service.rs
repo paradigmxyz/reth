@@ -17,23 +17,16 @@ use reth_trie_parallel::{
     },
     root::ParallelStateRootError,
 };
-use tokio::sync::{
-    mpsc::{error::TryRecvError, UnboundedReceiver, UnboundedSender},
-    oneshot,
-};
+use tokio::sync::mpsc::{error::TryRecvError, UnboundedReceiver, UnboundedSender};
 use tracing::{debug_span, error, instrument};
+
+const PROOF_SERVICE_DRAIN_LIMIT_ENV: &str = "RETH_ASYNC_SPARSE_TRIE_PROOF_DRAIN_LIMIT";
+const DEFAULT_PROOF_SERVICE_DRAIN_LIMIT: usize = 40;
 
 pub(super) enum ProofServiceCommand {
     AccountTargets(Vec<ProofV2Target>),
-    StorageTargets {
-        address: B256,
-        targets: Vec<ProofV2Target>,
-    },
-    RegisterStorageActor {
-        address: B256,
-        tx: UnboundedSender<StorageTrieCommand>,
-        ack: oneshot::Sender<()>,
-    },
+    StorageTargets { address: B256, targets: Vec<ProofV2Target> },
+    RegisterStorageActor { address: B256, tx: UnboundedSender<StorageTrieCommand> },
 }
 
 pub(super) struct ProofService {
@@ -49,6 +42,7 @@ pub(super) struct ProofService {
     fetched_storage_targets: B256Map<B256Map<u8>>,
     chunk_size: usize,
     max_targets_for_chunking: usize,
+    drain_limit: usize,
     inflight: usize,
     commands_closed: bool,
 }
@@ -77,6 +71,7 @@ impl ProofService {
             fetched_storage_targets: B256Map::default(),
             chunk_size,
             max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
+            drain_limit: proof_service_drain_limit(),
             inflight: 0,
             commands_closed: false,
         }
@@ -106,9 +101,8 @@ impl ProofService {
                             self.on_command(command);
                             self.drain_ready_commands();
                             if !self.pending_targets.is_empty() {
-                                tokio::task::yield_now().await;
-                                self.drain_ready_commands();
                                 self.dispatch_pending_targets();
+                                tokio::task::yield_now().await;
                             }
                         }
                         None => self.commands_closed = true,
@@ -132,7 +126,7 @@ impl ProofService {
     }
 
     fn drain_ready_commands(&mut self) {
-        loop {
+        for _ in 0..self.drain_limit {
             match self.command_rx.try_recv() {
                 Ok(command) => self.on_command(command),
                 Err(TryRecvError::Empty) => return,
@@ -152,9 +146,8 @@ impl ProofService {
             ProofServiceCommand::StorageTargets { address, targets } => {
                 self.queue_storage_targets(address, targets);
             }
-            ProofServiceCommand::RegisterStorageActor { address, tx, ack } => {
+            ProofServiceCommand::RegisterStorageActor { address, tx } => {
                 self.storage_txs.insert(address, tx);
-                let _ = ack.send(());
             }
         }
     }
@@ -317,6 +310,14 @@ impl ProofService {
 
         self.inflight += dispatched;
     }
+}
+
+fn proof_service_drain_limit() -> usize {
+    std::env::var(PROOF_SERVICE_DRAIN_LIMIT_ENV)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|limit| *limit > 0)
+        .unwrap_or(DEFAULT_PROOF_SERVICE_DRAIN_LIMIT)
 }
 
 #[derive(Default)]
