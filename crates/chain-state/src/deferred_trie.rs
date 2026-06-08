@@ -213,9 +213,8 @@ mod tests {
     #[test]
     fn pending_wait_blocks_until_task_publishes() {
         let (deferred, task) = empty_pending();
-        let deferred_waiter = deferred.clone();
 
-        let handle = thread::spawn(move || deferred_waiter.wait_cloned());
+        let handle = thread::spawn(move || deferred.wait_cloned());
         thread::sleep(Duration::from_millis(20));
         assert!(!handle.is_finished());
 
