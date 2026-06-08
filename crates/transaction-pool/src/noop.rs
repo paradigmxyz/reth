@@ -22,7 +22,7 @@ use alloy_eips::{
 use alloy_primitives::{map::AddressSet, Address, TxHash, B128, B256, U256};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives_traits::Recovered;
-use std::{marker::PhantomData, sync::Arc};
+use std::{future::ready, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
 /// A [`TransactionPool`] implementation that does nothing.
@@ -66,49 +66,49 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         }
     }
 
-    async fn add_transaction_and_subscribe(
+    fn add_transaction_and_subscribe(
         &self,
         _origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> PoolResult<TransactionEvents> {
+    ) -> impl Future<Output = PoolResult<TransactionEvents>> + Send {
         let hash = *transaction.hash();
-        Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
+        ready(Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction)))))
     }
 
-    async fn add_transaction(
+    fn add_transaction(
         &self,
         _origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> PoolResult<AddedTransactionOutcome> {
+    ) -> impl Future<Output = PoolResult<AddedTransactionOutcome>> + Send {
         let hash = *transaction.hash();
-        Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
+        ready(Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction)))))
     }
 
-    async fn add_transactions(
+    fn add_transactions(
         &self,
         _origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
-    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
-        transactions
+    ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send {
+        ready(transactions
             .into_iter()
             .map(|transaction| {
                 let hash = *transaction.hash();
                 Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
             })
-            .collect()
+            .collect())
     }
 
-    async fn add_transactions_with_origins(
+    fn add_transactions_with_origins(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
-    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
-        transactions
+    ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send {
+        ready(transactions
             .into_iter()
             .map(|(_, transaction)| {
                 let hash = *transaction.hash();
                 Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
             })
-            .collect()
+            .collect())
     }
 
     fn transaction_event_listener(&self, _tx_hash: TxHash) -> Option<TransactionEvents> {

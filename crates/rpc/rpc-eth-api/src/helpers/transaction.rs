@@ -16,7 +16,7 @@ use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::{TransactionBuilder, TransactionBuilder4844};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use alloy_rpc_types_eth::{state::EvmOverrides, TransactionInfo};
-use futures::{Future, StreamExt};
+use futures::{future, Future, StreamExt, TryFutureExt};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_primitives_traits::{
     BlockBody, Recovered, RecoveredBlock, SignedTransaction, TxTy, WithEncoded,
@@ -80,11 +80,12 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         &self,
         tx: Bytes,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
-        async move {
-            let recovered = recover_raw_transaction::<PoolPooledTx<Self::Pool>>(&tx)?;
+        future::ready(
+            recover_raw_transaction::<PoolPooledTx<Self::Pool>>(&tx).map_err(Self::Error::from),
+        )
+        .and_then(move |recovered| {
             self.send_transaction(TransactionOrigin::External, WithEncoded::new(tx, recovered))
-                .await
-        }
+        })
     }
 
     /// Submits the transaction to the pool with the given [`TransactionOrigin`].
