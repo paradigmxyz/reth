@@ -1,4 +1,3 @@
-use parking_lot::Mutex;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_trie::{
     updates::{TrieUpdates, TrieUpdatesSorted},
@@ -8,7 +7,6 @@ use std::{
     fmt,
     sync::{Arc, LazyLock, OnceLock},
 };
-use tokio::sync::oneshot;
 use tracing::{debug_span, instrument};
 
 /// Shared handle to asynchronously populated sorted per-block trie data.
@@ -19,13 +17,13 @@ use tracing::{debug_span, instrument};
 #[derive(Clone)]
 pub struct DeferredTrieData {
     /// Shared deferred result populated by the corresponding [`DeferredTrieTask`].
-    inner: Arc<DeferredTrieDataInner>,
+    value: Arc<OnceLock<ComputedTrieData>>,
 }
 
 /// Owned task that computes and publishes sorted trie data for a [`DeferredTrieData`] handle.
 pub struct DeferredTrieTask {
-    /// Sender used to publish the computed trie data exactly once.
-    tx: oneshot::Sender<ComputedTrieData>,
+    /// Shared result initialized exactly once by this task.
+    value: Arc<OnceLock<ComputedTrieData>>,
     /// Unsorted inputs consumed by the background task.
     inputs: PendingInputs,
 }
@@ -61,14 +59,6 @@ struct DeferredTrieMetrics {
 static DEFERRED_TRIE_METRICS: LazyLock<DeferredTrieMetrics> =
     LazyLock::new(DeferredTrieMetrics::default);
 
-/// Internal state for deferred trie data shared by cloned handles.
-struct DeferredTrieDataInner {
-    /// Cached result once the publishing task completes or once this handle is created ready.
-    value: OnceLock<ComputedTrieData>,
-    /// Receiver for the publishing task. Taken by the first caller that needs to wait.
-    rx: Mutex<Option<oneshot::Receiver<ComputedTrieData>>>,
-}
-
 /// Inputs kept while a deferred trie computation is pending.
 #[derive(Clone, Debug)]
 struct PendingInputs {
@@ -81,7 +71,7 @@ struct PendingInputs {
 impl fmt::Debug for DeferredTrieData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DeferredTrieData")
-            .field("state", &if self.inner.value.get().is_some() { "ready" } else { "pending" })
+            .field("state", &if self.value.get().is_some() { "ready" } else { "pending" })
             .finish()
     }
 }
@@ -92,26 +82,16 @@ impl DeferredTrieData {
         hashed_state: Arc<HashedPostState>,
         trie_updates: Arc<TrieUpdates>,
     ) -> (Self, DeferredTrieTask) {
-        let (tx, rx) = oneshot::channel();
+        let value = Arc::new(OnceLock::new());
         (
-            Self {
-                inner: Arc::new(DeferredTrieDataInner {
-                    value: OnceLock::new(),
-                    rx: Mutex::new(Some(rx)),
-                }),
-            },
-            DeferredTrieTask { tx, inputs: PendingInputs { hashed_state, trie_updates } },
+            Self { value: Arc::clone(&value) },
+            DeferredTrieTask { value, inputs: PendingInputs { hashed_state, trie_updates } },
         )
     }
 
     /// Create a handle that is already populated with the given [`ComputedTrieData`].
     pub fn ready(bundle: ComputedTrieData) -> Self {
-        Self {
-            inner: Arc::new(DeferredTrieDataInner {
-                value: OnceLock::from(bundle),
-                rx: Mutex::new(None),
-            }),
-        }
+        Self { value: Arc::new(OnceLock::from(bundle)) }
     }
 
     /// Sorts block execution outputs.
@@ -151,22 +131,16 @@ impl DeferredTrieData {
     /// Returns trie data, waiting for the async publishing task if it has not completed.
     #[instrument(level = "debug", target = "engine::tree::deferred_trie", skip_all)]
     pub fn wait_cloned(&self) -> ComputedTrieData {
-        let mut initialized_from_task = false;
-        let bundle = self.inner.value.get_or_init(|| {
-            initialized_from_task = true;
-            DEFERRED_TRIE_METRICS.deferred_trie_task_wait.increment(1);
-            let rx = self
-                .inner
-                .rx
-                .lock()
-                .take()
-                .expect("deferred trie receiver already taken before data was published");
-            rx.blocking_recv().expect("deferred trie task dropped before publishing trie data")
-        });
-
-        if !initialized_from_task {
-            DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
-        }
+        let bundle = match self.value.get() {
+            Some(bundle) => {
+                DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
+                bundle
+            }
+            None => {
+                DEFERRED_TRIE_METRICS.deferred_trie_task_wait.increment(1);
+                self.value.wait()
+            }
+        };
 
         bundle.clone()
     }
@@ -175,9 +149,9 @@ impl DeferredTrieData {
 impl DeferredTrieTask {
     /// Computes sorted trie data, publishes it to waiters, and returns it to the task owner.
     pub fn compute_and_publish(self) -> ComputedTrieData {
-        let Self { tx, inputs } = self;
+        let Self { value, inputs } = self;
         let computed = DeferredTrieData::sort(inputs.hashed_state, inputs.trie_updates);
-        let _ = tx.send(computed.clone());
+        let _ = value.set(computed.clone());
         computed
     }
 }
