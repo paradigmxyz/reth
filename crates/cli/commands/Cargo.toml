@@ -29,6 +29,7 @@ reth-era-downloader.workspace = true
 reth-era-utils.workspace = true
 reth-etl.workspace = true
 reth-evm.workspace = true
+reth-execution-types.workspace = true
 reth-exex.workspace = true
 reth-fs-util.workspace = true
 reth-net-nat.workspace = true

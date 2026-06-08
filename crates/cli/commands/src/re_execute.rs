@@ -13,11 +13,15 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
 use reth_evm::{ConfigureEvm, ConfigureEvm2BlockExecutor};
+use reth_execution_types::{
+    evm2_block_reverts_from_state_source, evm2_block_state_accumulator_extend,
+    evm2_state_source_size_hint, Evm2AccountInfo, Evm2BlockReverts, Evm2BlockStateAccumulator,
+};
 use reth_node_core::args::JitArgs;
 use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
 use reth_provider::{
-    BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory, Evm2AccountInfo,
-    Evm2BundleState, ReceiptProvider, StaticFileProviderFactory, TransactionVariant,
+    BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory, ReceiptProvider,
+    StaticFileProviderFactory, TransactionVariant,
 };
 use reth_stages::stages::calculate_gas_used_from_headers;
 use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader};
@@ -156,7 +160,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     }
                     let chunk_end = (chunk_start + blocks_per_chunk).min(max_block);
 
-                    let mut bundle: Option<Evm2BundleState> = None;
+                    let mut state = Evm2BlockStateAccumulator::new();
+                    let mut block_reverts = Vec::new();
                     let mut executor_created = Instant::now();
 
                     'blocks: for block in chunk_start..chunk_end {
@@ -176,7 +181,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             Ok(output) => output,
                             Err(err) => {
                                 if skip_invalid_blocks {
-                                    bundle = None;
+                                    state = Evm2BlockStateAccumulator::new();
+                                    block_reverts.clear();
                                     let _ =
                                         info_tx.send((block, eyre::eyre!(err.to_string())));
                                     continue
@@ -235,7 +241,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                                         error!(number=?block.number(), ?mismatch, "Gas usage mismatch");
                                         if skip_invalid_blocks {
-                                            bundle = None;
+                                            state = Evm2BlockStateAccumulator::new();
+                                            block_reverts.clear();
                                             let _ = info_tx.send((block, err));
                                             continue 'blocks;
                                         }
@@ -250,27 +257,28 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         }
                         let _ = stats_tx.send((block.number(), block.gas_used()));
 
-                        let block_state =
-                            Evm2BundleState::from_state_source(block.number(), &output.state);
-                        match &mut bundle {
-                            Some(bundle) => bundle.extend(block_state),
-                            None => bundle = Some(block_state),
-                        }
+                        evm2_block_state_accumulator_extend(&mut state, &output.state);
+                        block_reverts.push(evm2_block_reverts_from_state_source(&output.state));
 
                         // Verify and drop accumulated state once in a while to avoid OOM.
-                        if bundle.as_ref().map(bundle_size_hint).unwrap_or_default() > 5_000_000 ||
+                        if evm2_state_source_size_hint(&state) > 5_000_000 ||
                             executor_created.elapsed() > executor_lifetime
                         {
                             let last_block = block.number();
-                            let verified_bundle = bundle.take().expect("bundle has just been extended");
-                            verify_bundle_against_changesets(&provider, &verified_bundle, last_block)?;
+                            verify_reverts_against_changesets(
+                                &provider,
+                                &block_reverts,
+                                last_block,
+                            )?;
+                            state = Evm2BlockStateAccumulator::new();
+                            block_reverts.clear();
                             executor_created = Instant::now();
                         }
                     }
 
                     // Full verification at chunk end for remaining unverified blocks
-                    if let Some(bundle) = bundle {
-                        verify_bundle_against_changesets(&provider, &bundle, chunk_end - 1)?;
+                    if !block_reverts.is_empty() {
+                        verify_reverts_against_changesets(&provider, &block_reverts, chunk_end - 1)?;
                     }
                 }
 
@@ -359,27 +367,21 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
     }
 }
 
-fn bundle_size_hint(bundle: &Evm2BundleState) -> usize {
-    bundle.accounts().len() +
-        bundle.storage().values().map(|storage| storage.slots.len()).sum::<usize>() +
-        bundle.contracts().len()
-}
-
 /// Verifies reverts against database changesets.
 ///
 /// For each block, reverts must match changeset entries exactly. No extra slots/accounts
 /// in reverts for non-destroyed accounts. Destroyed accounts may have extra changeset slots
 /// (from DB storage wipe) absent from reverts.
-fn verify_bundle_against_changesets<P>(
+fn verify_reverts_against_changesets<P>(
     provider: &P,
-    bundle: &Evm2BundleState,
+    reverts: &[Evm2BlockReverts],
     last_block: u64,
 ) -> eyre::Result<()>
 where
     P: ChangeSetReader + StorageChangeSetReader,
 {
     // Verify reverts against changesets per block
-    for (i, block_reverts) in bundle.block_reverts().iter().rev().enumerate() {
+    for (i, block_reverts) in reverts.iter().rev().enumerate() {
         let block_number = last_block - i as u64;
 
         let mut cs_accounts: HashMap<Address, Option<Account>> = provider
