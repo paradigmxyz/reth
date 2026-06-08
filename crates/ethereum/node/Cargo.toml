@@ -31,6 +31,7 @@ reth-rpc-eth-api.workspace = true
 reth-rpc-builder.workspace = true
 reth-rpc-server-types.workspace = true
 reth-node-api.workspace = true
+reth-node-core.workspace = true
 reth-chainspec.workspace = true
 reth-revm = { workspace = true, features = ["std"] }
 reth-rpc-eth-types.workspace = true
@@ -38,6 +39,7 @@ reth-engine-local.workspace = true
 reth-engine-primitives = { workspace = true, features = ["std"] }
 reth-payload-primitives.workspace = true
 # ethereum
+alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 jsonrpsee.workspace = true
@@ -56,6 +58,8 @@ revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg", "memory_lim
 eyre.workspace = true
 ethereum_ssz.workspace = true
 http-body-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 tower.workspace = true
 
 [dev-dependencies]
@@ -76,7 +80,6 @@ alloy-signer.workspace = true
 alloy-sol-types.workspace = true
 alloy-contract.workspace = true
 alloy-rpc-types-beacon = { workspace = true, features = ["ssz"] }
-alloy-consensus.workspace = true
 
 futures.workspace = true
 tokio.workspace = true
