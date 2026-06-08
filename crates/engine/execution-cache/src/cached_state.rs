@@ -1157,12 +1157,32 @@ impl SavedCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{map::AddressMap, U256};
-    use evm2::evm::{AccountInfo, Tracked};
-    use reth_execution_types::{
-        evm2_block_state_from_state_source, Evm2BundleState, Evm2StorageChangeSet,
-    };
+    use alloy_primitives::U256;
+    use evm2::evm::{AccountChangeRef, AccountInfo, AccountInfoRef, StateChangeSink};
+    use reth_execution_types::{Evm2BlockState, Evm2BlockStateAccumulator};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
+
+    fn destroyed_account_state(address: Address, original: Option<AccountInfo>) -> Evm2BlockState {
+        let mut accumulator = Evm2BlockStateAccumulator::new();
+        accumulator
+            .account(AccountChangeRef {
+                address,
+                original: original.as_ref().map(account_info_ref),
+                current: None,
+            })
+            .unwrap();
+        accumulator.storage_wipe(address).unwrap();
+        accumulator.freeze()
+    }
+
+    fn account_info_ref(info: &AccountInfo) -> AccountInfoRef<'_> {
+        AccountInfoRef {
+            balance: info.balance,
+            nonce: info.nonce,
+            code_hash: info.code_hash,
+            code: info.code.as_ref(),
+        }
+    }
 
     #[test]
     fn test_empty_storage_cached_state_provider() {
@@ -1286,32 +1306,18 @@ mod tests {
         assert!(caches.0.storage_cache.get(&(addr1, storage_key)).is_some());
 
         let destroyed_addr = Address::random();
-        let bundle = Evm2BundleState::from_parts(
-            0,
-            AddressMap::from_iter([(
-                destroyed_addr,
-                Tracked {
-                    original: Some(AccountInfo {
-                        balance: U256::ZERO,
-                        nonce: 1,
-                        code_hash: B256::random(), // Non-empty code hash
-                        code: None,
-                        _non_exhaustive: (),
-                    }),
-                    current: None,
-                    _non_exhaustive: (),
-                },
-            )]),
-            AddressMap::from_iter([(
-                destroyed_addr,
-                Evm2StorageChangeSet { wipe: true, slots: Default::default() },
-            )]),
-            Default::default(),
-            Default::default(),
+        let state = destroyed_account_state(
+            destroyed_addr,
+            Some(AccountInfo {
+                balance: U256::ZERO,
+                nonce: 1,
+                code_hash: B256::random(), // Non-empty code hash
+                code: None,
+                _non_exhaustive: (),
+            }),
         );
 
         // Insert state should clear all caches because a contract was destroyed
-        let state = evm2_block_state_from_state_source(&bundle);
         let result = caches.insert_block_state(&state);
         assert!(result.is_ok());
 
@@ -1333,32 +1339,18 @@ mod tests {
         caches.insert_account(addr2, Some(Account::default()));
         caches.insert_storage(addr1, storage_key, Some(U256::from(42)));
 
-        let bundle = Evm2BundleState::from_parts(
-            0,
-            AddressMap::from_iter([(
-                addr1,
-                Tracked {
-                    original: Some(AccountInfo {
-                        balance: U256::from(100),
-                        nonce: 1,
-                        code_hash: alloy_primitives::KECCAK256_EMPTY, // Empty code hash = EOA
-                        code: None,
-                        _non_exhaustive: (),
-                    }),
-                    current: None,
-                    _non_exhaustive: (),
-                },
-            )]),
-            AddressMap::from_iter([(
-                addr1,
-                Evm2StorageChangeSet { wipe: true, slots: Default::default() },
-            )]),
-            Default::default(),
-            Default::default(),
+        let state = destroyed_account_state(
+            addr1,
+            Some(AccountInfo {
+                balance: U256::from(100),
+                nonce: 1,
+                code_hash: alloy_primitives::KECCAK256_EMPTY, // Empty code hash = EOA
+                code: None,
+                _non_exhaustive: (),
+            }),
         );
 
         // Insert state should only remove the destroyed account
-        let state = evm2_block_state_from_state_source(&bundle);
         assert!(caches.insert_block_state(&state).is_ok());
 
         // Verify only addr1 was removed, other data is still present
@@ -1373,21 +1365,8 @@ mod tests {
         assert_eq!(caches.0.account_stats.size(), 0);
 
         let addr = Address::random();
-        let bundle = Evm2BundleState::from_parts(
-            0,
-            AddressMap::from_iter([(
-                addr,
-                Tracked { original: None, current: None, _non_exhaustive: () },
-            )]),
-            AddressMap::from_iter([(
-                addr,
-                Evm2StorageChangeSet { wipe: true, slots: Default::default() },
-            )]),
-            Default::default(),
-            Default::default(),
-        );
+        let state = destroyed_account_state(addr, None);
 
-        let state = evm2_block_state_from_state_source(&bundle);
         assert!(caches.insert_block_state(&state).is_ok());
         assert_eq!(caches.0.account_stats.size(), 0);
         assert!(caches.0.account_cache.get(&addr).is_none());

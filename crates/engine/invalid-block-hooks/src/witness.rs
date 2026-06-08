@@ -4,8 +4,6 @@ use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::ConfigureEvm2BlockExecutor;
-#[cfg(test)]
-use reth_execution_types::Evm2BundleState;
 use reth_execution_types::{evm2_state_source_hashed_post_state, Evm2AccountInfo, Evm2BlockState};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
@@ -32,18 +30,6 @@ struct StorageDeltaSorted {
     pub current: U256,
 }
 
-/// Serializable version of [`Evm2BundleState`] for deterministic comparison.
-#[cfg(test)]
-#[derive(Debug, PartialEq, Eq, Serialize)]
-struct BundleStateSorted {
-    /// Account state
-    pub state: BTreeMap<Address, BundleAccountSorted>,
-    /// All created contracts in this block.
-    pub contracts: BTreeMap<B256, Bytes>,
-    /// Changes to revert
-    pub reverts: Vec<BlockRevertsSorted>,
-}
-
 /// Serializable version of an evm2 tracked account.
 #[derive(Debug, PartialEq, Eq, Serialize)]
 struct BundleAccountSorted {
@@ -58,69 +44,6 @@ struct AccountInfoSorted {
     pub nonce: u64,
     pub code_hash: B256,
     pub code: Option<Bytes>,
-}
-
-/// Serializable version of one block of evm2 reverts.
-#[cfg(test)]
-#[derive(Debug, PartialEq, Eq, Serialize)]
-struct BlockRevertsSorted {
-    pub accounts: BTreeMap<Address, Option<AccountInfoSorted>>,
-    pub storage: BTreeMap<Address, StorageRevertSorted>,
-}
-
-/// Serializable version of an evm2 storage revert.
-#[cfg(test)]
-#[derive(Debug, PartialEq, Eq, Serialize)]
-struct StorageRevertSorted {
-    pub wiped: bool,
-    pub previous_wipe: bool,
-    pub slots: BTreeMap<U256, U256>,
-}
-
-/// Converts bundle state to sorted format for deterministic comparison
-#[cfg(test)]
-fn sort_bundle_state_for_comparison(bundle_state: &Evm2BundleState) -> BundleStateSorted {
-    BundleStateSorted {
-        state: bundle_state
-            .accounts()
-            .iter()
-            .map(|(addr, acc)| {
-                (
-                    *addr,
-                    BundleAccountSorted {
-                        current: acc.current.as_ref().map(account_info_sorted),
-                        original: acc.original.as_ref().map(account_info_sorted),
-                    },
-                )
-            })
-            .collect(),
-        contracts: bundle_state.contracts().iter().map(|(k, v)| (*k, v.original_bytes())).collect(),
-        reverts: bundle_state
-            .block_reverts()
-            .iter()
-            .map(|block| BlockRevertsSorted {
-                accounts: block
-                    .accounts
-                    .iter()
-                    .map(|(addr, account)| (*addr, account.as_ref().map(account_info_sorted)))
-                    .collect(),
-                storage: block
-                    .storage
-                    .iter()
-                    .map(|(addr, storage)| {
-                        (
-                            *addr,
-                            StorageRevertSorted {
-                                wiped: storage.wiped,
-                                previous_wipe: storage.previous_wipe,
-                                slots: storage.slots.clone(),
-                            },
-                        )
-                    })
-                    .collect(),
-            })
-            .collect(),
-    }
 }
 
 /// Converts block state to sorted format for deterministic comparison.
@@ -453,21 +376,19 @@ where
 mod tests {
     use super::*;
     use alloy_eips::eip7685::Requests;
-    use alloy_primitives::{map::AddressMap, Address, Bytes, B256, U256};
+    use alloy_primitives::{Bytes, B256, U256};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_execution_types::{
-        evm2_block_state_from_state_source, Evm2BlockReverts, Evm2StorageReverts,
-    };
+    use reth_execution_types::evm2_block_state_from_init;
     use reth_primitives_traits::{Account, Bytecode as RethBytecode};
     use reth_provider::test_utils::MockEthProvider;
     use tempfile::TempDir;
 
     use reth_testing_utils::generators::{self, random_block, random_eoa_accounts, BlockParams};
 
-    /// Creates a test bundle state with realistic accounts, contracts, and reverts.
-    fn create_bundle_state() -> Evm2BundleState {
+    /// Creates a test block state with realistic accounts and contracts.
+    fn create_block_state() -> Evm2BlockState {
         let mut rng = generators::rng();
         let mut bundle_accounts = Vec::new();
 
@@ -499,29 +420,16 @@ mod tests {
             (B256::random(), RethBytecode::new_raw(bytecode))
         });
 
-        // Add reverts for multiple blocks using different accounts
-        let addresses: Vec<Address> = bundle_accounts.iter().map(|(addr, _)| *addr).collect();
-        let reverts = addresses.iter().take(2).enumerate().map(|(i, addr)| Evm2BlockReverts {
-            accounts: AddressMap::default(),
-            storage: AddressMap::from_iter([(
-                *addr,
-                Evm2StorageReverts { wiped: i == 0, ..Default::default() },
-            )]),
-        });
-
-        Evm2BundleState::new_init(0, bundle_accounts, reverts, contracts)
+        evm2_block_state_from_init(bundle_accounts, contracts)
     }
 
-    fn create_block_state() -> Evm2BlockState {
-        evm2_block_state_from_state_source(&create_bundle_state())
-    }
     #[test]
-    fn test_sort_bundle_state_for_comparison() {
+    fn test_sort_block_state_for_comparison() {
         // Use the fixture function to create test data
-        let bundle_state = create_bundle_state();
+        let block_state = create_block_state();
 
         // Call the function under test
-        let sorted = sort_bundle_state_for_comparison(&bundle_state);
+        let sorted = sort_block_state_for_comparison(&block_state);
 
         // Verify state contains our mock accounts
         assert_eq!(sorted.state.len(), 3); // We added 3 accounts
@@ -529,9 +437,8 @@ mod tests {
         // Verify contracts contains our mock contracts
         assert_eq!(sorted.contracts.len(), 3); // We added 3 contracts
 
-        // Verify reverts is an array with multiple blocks of reverts
-        let reverts = &sorted.reverts;
-        assert_eq!(reverts.len(), 2); // Fixture has two blocks of reverts
+        // Verify storage contains our mock entries
+        assert_eq!(sorted.storage.len(), 3); // We added storage for 3 accounts
 
         // Verify that the state accounts have the expected structure
         for account_data in sorted.state.values() {
@@ -921,15 +828,13 @@ mod tests {
 
         // Add extra contract to state2
         let extra_contract_hash = B256::random();
-        let state2 = evm2_block_state_from_state_source(&Evm2BundleState::new_init(
-            0,
-            [],
+        let state2 = evm2_block_state_from_init(
             [],
             [(
                 extra_contract_hash,
                 RethBytecode::new_raw(Bytes::from(vec![0x60, 0x00, 0x60, 0x00, 0xfd])),
             )],
-        ));
+        );
 
         let block_prefix = "different_contracts_test";
         let result = hook.validate_block_state(&state1, &state2, block_prefix);

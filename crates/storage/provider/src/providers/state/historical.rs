@@ -899,8 +899,7 @@ mod tests {
         BlockNumberList,
     };
     use reth_execution_types::{
-        evm2_block_state_from_state_source, Evm2AccountInfo, Evm2BlockReverts, Evm2BundleState,
-        Evm2StorageReverts,
+        evm2_block_state_from_init, Evm2AccountInfo, Evm2BlockReverts, Evm2StorageReverts,
     };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{
@@ -1392,15 +1391,14 @@ mod tests {
         reverts[10] = vec![(ADDRESS, Some(account.clone()), vec![(slot, U256::from(10))])];
         reverts[15] = vec![(ADDRESS, Some(account.clone()), vec![(slot, U256::from(15))])];
 
-        let bundle = Evm2BundleState::new_init(
-            0,
+        let state = evm2_block_state_from_init(
             [
                 (ADDRESS, (None, Some(account), addr_storage)),
                 (HIGHER_ADDRESS, (None, Some(higher_account), higher_storage)),
             ],
-            reverts.into_iter().map(evm2_revert),
             [],
         );
+        let block_reverts = reverts.into_iter().map(evm2_revert).collect();
 
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
@@ -1410,8 +1408,8 @@ mod tests {
                     .map(|b| b.try_recover().expect("failed to seal block with senders"))
                     .collect(),
                 &ExecutionOutcome::from_state_and_reverts(
-                    evm2_block_state_from_state_source(&bundle),
-                    bundle.block_reverts().clone(),
+                    state,
+                    block_reverts,
                     Vec::new(),
                     0,
                     Vec::new(),

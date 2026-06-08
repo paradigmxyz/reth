@@ -7,7 +7,7 @@ use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
 use eyre::{eyre, Result};
 use reth_chainspec::ChainSpec;
 use reth_ethereum_primitives::Block;
-use reth_execution_types::Evm2BundleState;
+use reth_execution_types::Evm2BlockState;
 use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
 use reth_node_api::{EngineTypes, NodeTypes, PayloadTypes, TreeConfig};
 use reth_node_core::primitives::RecoveredBlock;
@@ -28,7 +28,7 @@ pub struct Setup<I> {
     /// Blocks to replay during setup
     pub blocks: Vec<RecoveredBlock<Block>>,
     /// Initial state to load
-    pub state: Option<Evm2BundleState>,
+    pub state: Option<Evm2BlockState>,
     /// Network configuration
     pub network: NetworkSetup,
     /// Engine tree configuration
@@ -105,7 +105,7 @@ where
     }
 
     /// Set the initial state
-    pub fn with_state(mut self, state: Evm2BundleState) -> Self {
+    pub fn with_state(mut self, state: Evm2BlockState) -> Self {
         self.state = Some(state);
         self
     }

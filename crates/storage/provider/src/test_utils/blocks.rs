@@ -11,8 +11,7 @@ use alloy_primitives::Signature;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices, tables};
 use reth_ethereum_primitives::{BlockBody, Receipt, Transaction, TransactionSigned, TxType};
 use reth_execution_types::{
-    evm2_block_state_from_state_source, Evm2AccountInfo, Evm2BlockReverts, Evm2BundleState,
-    Evm2StorageReverts,
+    evm2_block_state_from_init, Evm2AccountInfo, Evm2BlockReverts, Evm2StorageReverts,
 };
 use reth_node_types::NodeTypes;
 use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock, SealedHeader};
@@ -201,12 +200,10 @@ fn execution_outcome(
     block_reverts: Evm2BlockReverts,
     receipts: Vec<Receipt>,
 ) -> ExecutionOutcome {
-    let bundle = Evm2BundleState::new_init(number, accounts, [block_reverts], []);
-    let block_reverts = bundle.block_reverts().clone();
-    let state = evm2_block_state_from_state_source(&bundle);
+    let state = evm2_block_state_from_init(accounts, []);
     ExecutionOutcome::from_state_and_reverts(
         state,
-        block_reverts,
+        vec![block_reverts],
         vec![receipts],
         number,
         Vec::new(),
@@ -278,8 +275,7 @@ fn block2(
     let account: Address = [0x60; 20].into();
     let slot = U256::from(5);
 
-    let bundle = Evm2BundleState::new_init(
-        number,
+    let state = evm2_block_state_from_init(
         [(
             account,
             (
@@ -288,31 +284,31 @@ fn block2(
                 BTreeMap::from_iter([(slot, (U256::from(10), U256::from(15)))]),
             ),
         )],
-        [Evm2BlockReverts {
-            accounts: HashMap::from_iter([(
-                account,
-                Some(Evm2AccountInfo {
-                    nonce: 1,
-                    balance: U256::from(10),
-                    code_hash: alloy_primitives::KECCAK256_EMPTY,
-                    code: None,
-                    _non_exhaustive: (),
-                }),
-            )]),
-            storage: HashMap::from_iter([(
-                account,
-                Evm2StorageReverts {
-                    wiped: false,
-                    previous_wipe: false,
-                    slots: BTreeMap::from_iter([(slot, U256::from(10))]),
-                },
-            )]),
-        }],
         [],
     );
+    let block_reverts = vec![Evm2BlockReverts {
+        accounts: HashMap::from_iter([(
+            account,
+            Some(Evm2AccountInfo {
+                nonce: 1,
+                balance: U256::from(10),
+                code_hash: alloy_primitives::KECCAK256_EMPTY,
+                code: None,
+                _non_exhaustive: (),
+            }),
+        )]),
+        storage: HashMap::from_iter([(
+            account,
+            Evm2StorageReverts {
+                wiped: false,
+                previous_wipe: false,
+                slots: BTreeMap::from_iter([(slot, U256::from(10))]),
+            },
+        )]),
+    }];
     let execution_outcome = ExecutionOutcome::from_state_and_reverts(
-        evm2_block_state_from_state_source(&bundle),
-        bundle.block_reverts().clone(),
+        state,
+        block_reverts,
         vec![vec![Receipt {
             tx_type: TxType::Eip1559,
             success: false,
