@@ -921,11 +921,8 @@ mod tests {
         // Insert receipts into the database
         if let Some(first_block) = database_blocks.first() {
             provider_rw.write_state(
-                &ExecutionOutcome {
-                    first_block: first_block.number,
-                    receipts: receipts.iter().take(database_blocks.len()).cloned().collect(),
-                    ..Default::default()
-                },
+                &ExecutionOutcome::new_empty(first_block.number)
+                    .with_receipts(receipts.iter().take(database_blocks.len()).cloned().collect()),
                 OriginalValuesKnown::No,
                 StateWriteConfig::default(),
             )?;
@@ -1703,8 +1700,8 @@ mod tests {
                 .into_iter()
                 .map(|b| b.try_recover().expect("failed to seal block with senders"))
                 .collect(),
-            &ExecutionOutcome {
-                bundle: Evm2BundleState::new_init(
+            &ExecutionOutcome::new(
+                Evm2BundleState::new_init(
                     first_database_block,
                     database_state.into_iter().map(|(address, (account, _))| {
                         (address, (None, Some(account), BTreeMap::default()))
@@ -1718,9 +1715,10 @@ mod tests {
                     }),
                     [],
                 ),
-                first_block: first_database_block,
-                ..Default::default()
-            },
+                Vec::new(),
+                first_database_block,
+                Vec::new(),
+            ),
             Default::default(),
         )?;
         provider_rw.commit()?;

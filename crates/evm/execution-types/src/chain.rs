@@ -816,12 +816,7 @@ mod tests {
 
         // Create an ExecutionOutcome object with the created bundle, receipts, an empty requests
         // vector, and first_block set to 10
-        let execution_outcome = ExecutionOutcome {
-            bundle: Default::default(),
-            receipts,
-            requests: vec![],
-            first_block: 10,
-        };
+        let execution_outcome = ExecutionOutcome::new_empty(10).with_receipts(receipts);
 
         // Create a Chain object with a BTreeMap of blocks mapped to their block numbers,
         // including block1_hash and block2_hash, and the execution_outcome
@@ -835,12 +830,8 @@ mod tests {
         assert_eq!(chain.receipts_by_block_hash(block1_hash), Some(vec![&receipt1]));
 
         // Create an ExecutionOutcome object with a single receipt vector containing receipt1
-        let execution_outcome1 = ExecutionOutcome {
-            bundle: Default::default(),
-            receipts: vec![vec![receipt1]],
-            requests: vec![],
-            first_block: 10,
-        };
+        let execution_outcome1 =
+            ExecutionOutcome::new_empty(10).with_receipts(vec![vec![receipt1]]);
 
         // Assert that the execution outcome at the first block contains only the first receipt
         assert_eq!(chain.execution_outcome_at_block(10), Some(execution_outcome1));

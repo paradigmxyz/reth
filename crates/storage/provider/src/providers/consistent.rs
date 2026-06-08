@@ -1887,8 +1887,8 @@ mod tests {
                 .into_iter()
                 .map(|b| b.try_recover().expect("failed to seal block with senders"))
                 .collect(),
-            &ExecutionOutcome {
-                bundle: Evm2BundleState::new_init(
+            &ExecutionOutcome::new(
+                Evm2BundleState::new_init(
                     first_database_block,
                     database_state.into_iter().map(|(address, (account, _))| {
                         (address, (None, Some(account), BTreeMap::default()))
@@ -1902,9 +1902,10 @@ mod tests {
                     }),
                     [],
                 ),
-                first_block: first_database_block,
-                ..Default::default()
-            },
+                Vec::new(),
+                first_database_block,
+                Vec::new(),
+            ),
             Default::default(),
         )?;
         provider_rw.commit()?;
@@ -2009,8 +2010,8 @@ mod tests {
                 .into_iter()
                 .map(|b| b.try_recover().expect("failed to seal block with senders"))
                 .collect(),
-            &ExecutionOutcome {
-                bundle: single_account_bundle(
+            &ExecutionOutcome::new(
+                single_account_bundle(
                     0,
                     address,
                     account,
@@ -2020,9 +2021,10 @@ mod tests {
                         evm2_revert([(address, Some(account), vec![(slot, U256::ZERO)])]),
                     ],
                 ),
-                first_block: 0,
-                ..Default::default()
-            },
+                Vec::new(),
+                0,
+                Vec::new(),
+            ),
             Default::default(),
         )?;
 
@@ -2078,17 +2080,18 @@ mod tests {
                 .into_iter()
                 .map(|b| b.try_recover().expect("failed to seal block with senders"))
                 .collect(),
-            &ExecutionOutcome {
-                bundle: single_account_bundle(
+            &ExecutionOutcome::new(
+                single_account_bundle(
                     0,
                     address,
                     account,
                     [(slot, (U256::ZERO, U256::from(100)))],
                     [evm2_revert([(address, Some(account), vec![(slot, U256::ZERO)])])],
                 ),
-                first_block: 0,
-                ..Default::default()
-            },
+                Vec::new(),
+                0,
+                Vec::new(),
+            ),
             Default::default(),
         )?;
         provider_rw.commit()?;
@@ -2172,8 +2175,8 @@ mod tests {
                 .into_iter()
                 .map(|b| b.try_recover().expect("failed to seal block with senders"))
                 .collect(),
-            &ExecutionOutcome {
-                bundle: single_account_bundle(
+            &ExecutionOutcome::new(
+                single_account_bundle(
                     0,
                     address,
                     account,
@@ -2183,9 +2186,10 @@ mod tests {
                         Evm2BlockReverts::default(),
                     ],
                 ),
-                first_block: 0,
-                ..Default::default()
-            },
+                Vec::new(),
+                0,
+                Vec::new(),
+            ),
             Default::default(),
         )?;
         provider_rw.commit()?;

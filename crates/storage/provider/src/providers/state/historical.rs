@@ -1408,7 +1408,7 @@ mod tests {
                     .into_iter()
                     .map(|b| b.try_recover().expect("failed to seal block with senders"))
                     .collect(),
-                &ExecutionOutcome { bundle, first_block: 0, ..Default::default() },
+                &ExecutionOutcome::new(bundle, Vec::new(), 0, Vec::new()),
                 Default::default(),
             )
             .unwrap();
