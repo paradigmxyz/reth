@@ -273,6 +273,28 @@ impl RocksDBProvider {
             .map(|cp| cp.block_number)
             .unwrap_or(0);
 
+        let sf_tip = provider
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::StorageChangeSets)
+            .unwrap_or(0);
+
+        if sf_tip < checkpoint {
+            // This should never happen in normal operation - static files are always
+            // committed before RocksDB. If we get here, something is seriously wrong.
+            // The unwind is a best-effort attempt but is probably futile.
+            tracing::warn!(
+                target: "reth::providers::rocksdb",
+                sf_tip,
+                checkpoint,
+                "StoragesHistory: static file tip behind checkpoint, unwind needed"
+            );
+            return Ok(Some(sf_tip));
+        }
+
+        if sf_tip == checkpoint {
+            return Ok(None);
+        }
+
         // Fast path: clear and re-insert genesis history.
         if checkpoint == 0 {
             tracing::info!(
@@ -295,28 +317,6 @@ impl RocksDBProvider {
                 }
             }
 
-            return Ok(None);
-        }
-
-        let sf_tip = provider
-            .static_file_provider()
-            .get_highest_static_file_block(StaticFileSegment::StorageChangeSets)
-            .unwrap_or(0);
-
-        if sf_tip < checkpoint {
-            // This should never happen in normal operation - static files are always
-            // committed before RocksDB. If we get here, something is seriously wrong.
-            // The unwind is a best-effort attempt but is probably futile.
-            tracing::warn!(
-                target: "reth::providers::rocksdb",
-                sf_tip,
-                checkpoint,
-                "StoragesHistory: static file tip behind checkpoint, unwind needed"
-            );
-            return Ok(Some(sf_tip));
-        }
-
-        if sf_tip == checkpoint {
             return Ok(None);
         }
 
@@ -386,24 +386,6 @@ impl RocksDBProvider {
             .map(|cp| cp.block_number)
             .unwrap_or(0);
 
-        // Fast path: clear and re-insert genesis history.
-        if checkpoint == 0 {
-            tracing::info!(
-                target: "reth::providers::rocksdb",
-                "AccountsHistory: checkpoint is 0, clearing stale data"
-            );
-            self.clear::<tables::AccountsHistory>()?;
-
-            let chain_spec = provider.chain_spec();
-            let genesis = chain_spec.genesis();
-            let list = tables::BlockNumberList::new([0]).expect("single block always fits");
-            for addr in genesis.alloc.keys() {
-                self.put::<tables::AccountsHistory>(ShardedKey::last(*addr), &list)?;
-            }
-
-            return Ok(None);
-        }
-
         let sf_tip = provider
             .static_file_provider()
             .get_highest_static_file_block(StaticFileSegment::AccountChangeSets)
@@ -423,6 +405,24 @@ impl RocksDBProvider {
         }
 
         if sf_tip == checkpoint {
+            return Ok(None);
+        }
+
+        // Fast path: clear and re-insert genesis history.
+        if checkpoint == 0 {
+            tracing::info!(
+                target: "reth::providers::rocksdb",
+                "AccountsHistory: checkpoint is 0, clearing stale data"
+            );
+            self.clear::<tables::AccountsHistory>()?;
+
+            let chain_spec = provider.chain_spec();
+            let genesis = chain_spec.genesis();
+            let list = tables::BlockNumberList::new([0]).expect("single block always fits");
+            for addr in genesis.alloc.keys() {
+                self.put::<tables::AccountsHistory>(ShardedKey::last(*addr), &list)?;
+            }
+
             return Ok(None);
         }
 
@@ -572,11 +572,7 @@ mod tests {
 
         let result = rocksdb.heal_accounts_history(&provider).unwrap();
         assert_eq!(result, None, "AccountsHistory should return early at checkpoint 0");
-        // Genesis account history entries are re-inserted
-        assert_eq!(
-            rocksdb.iter::<tables::AccountsHistory>().unwrap().count(),
-            factory.chain_spec().genesis().alloc.len()
-        );
+        assert_eq!(rocksdb.iter::<tables::AccountsHistory>().unwrap().count(), 0);
     }
 
     #[test]
