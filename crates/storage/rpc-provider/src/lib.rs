@@ -57,9 +57,7 @@ use reth_storage_api::{
     BlockBodyIndicesProvider, BlockReaderIdExt, BlockSource, DBProvider, NodePrimitivesProvider,
     ReceiptProviderIdExt, StatsReader,
 };
-use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, KeccakKeyHasher, MultiProof, TrieInput,
-};
+use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, MultiProof, TrieInput};
 pub use rpc_response::{EthRpcConverter, RpcResponseConverter};
 use std::{
     collections::BTreeMap,
@@ -1316,12 +1314,6 @@ where
     N: Network,
     Node: NodeTypes,
 {
-    fn hashed_post_state(
-        &self,
-        bundle_state: &reth_execution_types::Evm2BundleState,
-    ) -> HashedPostState {
-        bundle_state.hashed_post_state::<KeccakKeyHasher>()
-    }
 }
 
 impl<P, Node, N> StateReader for RpcBlockchainStateProvider<P, Node, N>

@@ -1094,14 +1094,7 @@ mod tests {
         }
     }
 
-    impl HashedPostStateProvider for MockStateProvider {
-        fn hashed_post_state(
-            &self,
-            _bundle_state: &reth_execution_types::Evm2BundleState,
-        ) -> HashedPostState {
-            HashedPostState::default()
-        }
-    }
+    impl HashedPostStateProvider for MockStateProvider {}
 
     impl StorageRootProvider for MockStateProvider {
         fn storage_root(

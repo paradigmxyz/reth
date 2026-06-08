@@ -21,7 +21,6 @@ use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
-use reth_execution_types::Evm2BundleState;
 use reth_node_types::{
     BlockTy, HeaderTy, NodeTypesWithDB, NodeTypesWithDBAdapter, ReceiptTy, TxTy,
 };
@@ -34,7 +33,6 @@ use reth_storage_api::{
     NodePrimitivesProvider, StorageSettings, StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::HashedPostState;
 use reth_trie_db::ChangesetCache;
 use std::{
     ops::{RangeBounds, RangeInclusive},
@@ -53,7 +51,6 @@ pub use provider::{
 };
 
 use super::ProviderNodeTypes;
-use reth_trie::KeccakKeyHasher;
 
 mod builder;
 pub use builder::{ProviderFactoryBuilder, ReadOnlyConfig};
@@ -945,11 +942,7 @@ impl<N: ProviderNodeTypes> PruneCheckpointReader for ProviderFactory<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> HashedPostStateProvider for ProviderFactory<N> {
-    fn hashed_post_state(&self, bundle_state: &Evm2BundleState) -> HashedPostState {
-        bundle_state.hashed_post_state::<KeccakKeyHasher>()
-    }
-}
+impl<N: ProviderNodeTypes> HashedPostStateProvider for ProviderFactory<N> {}
 
 impl<N: ProviderNodeTypes> MetadataProvider for ProviderFactory<N> {
     fn get_metadata(&self, key: &str) -> ProviderResult<Option<Vec<u8>>> {
