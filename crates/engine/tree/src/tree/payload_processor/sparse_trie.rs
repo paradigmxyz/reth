@@ -298,6 +298,11 @@ where
 
                     self.on_message(update);
                     self.pending_updates += 1;
+
+                    while let Ok(update) = self.updates.try_recv() {
+                        self.on_message(update);
+                        self.pending_updates += 1;
+                    }
                 }
                 recv(self.proof_result_rx) -> message => {
                     let phase_end = Instant::now();
