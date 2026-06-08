@@ -8874,6 +8874,7 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rpc-types-engine",
+ "alloy-sol-types",
  "evm2",
  "metrics",
  "reth-chainspec",

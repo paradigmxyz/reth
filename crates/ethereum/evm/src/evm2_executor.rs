@@ -1,15 +1,23 @@
 //! Evm2-backed Ethereum execution helpers.
 
 use crate::{evm2_recovered_tx, RethReceiptBuilder};
-use alloc::{format, string::String, vec::Vec};
-use alloy_consensus::{constants::ETH_TO_WEI, transaction::Recovered, BlockHeader, Header};
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
+use alloy_consensus::{constants::ETH_TO_WEI, transaction::Recovered, BlockHeader, Header, TxType};
 use alloy_eips::{
-    eip4895::Withdrawal, eip7002::WITHDRAWAL_REQUEST_TYPE, eip7251::CONSOLIDATION_REQUEST_TYPE,
+    eip4895::Withdrawal,
+    eip6110::{DEPOSIT_REQUEST_TYPE, MAINNET_DEPOSIT_CONTRACT_ADDRESS},
+    eip7002::WITHDRAWAL_REQUEST_TYPE,
+    eip7251::CONSOLIDATION_REQUEST_TYPE,
     eip7685::Requests,
 };
 #[cfg(feature = "std")]
 use alloy_primitives::{address, b256, keccak256};
 use alloy_primitives::{map::AddressMap, Address, Bytes, B256, KECCAK256_EMPTY, U256};
+use alloy_sol_types::{sol, SolEvent};
 use evm2::{
     env::BlockEnv,
     ethereum::{ethereum_tx_registry, RecoveredTxEnvelope},
@@ -33,6 +41,19 @@ use reth_storage_errors::provider::ProviderError;
 #[cfg(feature = "std")]
 use tracing::warn;
 
+const DEPOSIT_BYTES_SIZE: usize = 48 + 32 + 8 + 96 + 8;
+
+sol! {
+    #[allow(missing_docs)]
+    event DepositEvent(
+        bytes pubkey,
+        bytes withdrawal_credentials,
+        bytes amount,
+        bytes signature,
+        bytes index
+    );
+}
+
 /// Error returned by evm2-backed Ethereum execution.
 #[derive(Debug)]
 pub enum Evm2ExecutionError<E> {
@@ -53,6 +74,8 @@ pub enum Evm2ExecutionError<E> {
         /// Evm2 stop reason for the failed call.
         reason: String,
     },
+    /// Deposit request logs could not be decoded.
+    DepositRequestDecode(String),
 }
 
 impl<E> core::fmt::Display for Evm2ExecutionError<E>
@@ -75,6 +98,7 @@ where
             Self::SystemCallFailed { address, reason } => {
                 write!(f, "evm2 system call to {address} failed: {reason}")
             }
+            Self::DepositRequestDecode(err) => write!(f, "failed to decode deposit request: {err}"),
         }
     }
 }
@@ -92,11 +116,19 @@ pub struct Evm2BlockExecutionContext<'a> {
     pub ommers: Option<&'a [Header]>,
     /// Post-block withdrawals to apply after transaction execution.
     pub withdrawals: Option<&'a [Withdrawal]>,
+    /// Deposit contract address used to derive EIP-6110 deposit requests from receipts.
+    pub deposit_contract_address: Option<Address>,
 }
 
 impl Default for Evm2BlockExecutionContext<'_> {
     fn default() -> Self {
-        Self { chain_id: 1, system_calls: None, ommers: None, withdrawals: None }
+        Self {
+            chain_id: 1,
+            system_calls: None,
+            ommers: None,
+            withdrawals: None,
+            deposit_contract_address: None,
+        }
     }
 }
 
@@ -148,7 +180,13 @@ where
         database,
         block_number,
         transactions,
-        Evm2BlockExecutionContext { chain_id: 1, system_calls: None, ommers: None, withdrawals },
+        Evm2BlockExecutionContext {
+            chain_id: 1,
+            system_calls: None,
+            ommers: None,
+            withdrawals,
+            deposit_contract_address: None,
+        },
     )
 }
 
@@ -208,11 +246,13 @@ where
         results.push((tx_type, outcome));
     }
 
-    let requests = post_execution_system_call_state_changes::<DB>(
+    let mut requests = block_requests_from_tx_results::<DB>(spec_id, context, &results)?;
+    post_execution_system_call_state_changes::<DB>(
         &mut evm,
         &mut block_state,
         spec_id,
         context,
+        &mut requests,
     )?;
 
     post_block_balance_state_changes::<DB>(
@@ -647,18 +687,70 @@ where
     Ok(())
 }
 
-fn post_execution_system_call_state_changes<DB>(
-    evm: &mut Evm<BaseEvmTypes>,
-    block_state: &mut BlockStateAccumulator,
+fn block_requests_from_tx_results<DB>(
     spec_id: SpecId,
     context: Evm2BlockExecutionContext<'_>,
+    results: &[(TxType, TxOutcome)],
 ) -> Result<Requests, Evm2ExecutionError<DB::Error>>
 where
     DB: Database + 'static,
 {
     let mut requests = Requests::default();
     if context.system_calls.is_none() || !spec_id.enables(SpecId::PRAGUE) {
-        return Ok(requests);
+        return Ok(requests)
+    }
+
+    let deposit_requests = parse_deposit_requests_from_tx_results::<DB>(
+        context.deposit_contract_address.unwrap_or(MAINNET_DEPOSIT_CONTRACT_ADDRESS),
+        results,
+    )?;
+    requests.push_request_with_type(DEPOSIT_REQUEST_TYPE, deposit_requests);
+
+    Ok(requests)
+}
+
+fn parse_deposit_requests_from_tx_results<DB>(
+    deposit_contract_address: Address,
+    results: &[(TxType, TxOutcome)],
+) -> Result<Vec<u8>, Evm2ExecutionError<DB::Error>>
+where
+    DB: Database + 'static,
+{
+    let mut out = Vec::new();
+    for (_, outcome) in results {
+        for log in &outcome.logs {
+            if log.address != deposit_contract_address ||
+                log.topics().first() != Some(&DepositEvent::SIGNATURE_HASH)
+            {
+                continue
+            }
+
+            let decoded = DepositEvent::decode_log(log)
+                .map_err(|err| Evm2ExecutionError::DepositRequestDecode(err.to_string()))?;
+            out.reserve(DEPOSIT_BYTES_SIZE);
+            out.extend_from_slice(decoded.pubkey.as_ref());
+            out.extend_from_slice(decoded.withdrawal_credentials.as_ref());
+            out.extend_from_slice(decoded.amount.as_ref());
+            out.extend_from_slice(decoded.signature.as_ref());
+            out.extend_from_slice(decoded.index.as_ref());
+        }
+    }
+
+    Ok(out)
+}
+
+fn post_execution_system_call_state_changes<DB>(
+    evm: &mut Evm<BaseEvmTypes>,
+    block_state: &mut BlockStateAccumulator,
+    spec_id: SpecId,
+    context: Evm2BlockExecutionContext<'_>,
+    requests: &mut Requests,
+) -> Result<(), Evm2ExecutionError<DB::Error>>
+where
+    DB: Database + 'static,
+{
+    if context.system_calls.is_none() || !spec_id.enables(SpecId::PRAGUE) {
+        return Ok(());
     }
 
     let withdrawal_requests =
@@ -675,7 +767,7 @@ where
         consolidation_requests.output.iter().copied(),
     );
 
-    Ok(requests)
+    Ok(())
 }
 
 fn execute_system_call<DB>(
@@ -807,7 +899,7 @@ mod tests {
         eip4895::Withdrawal,
         eip7002::WITHDRAWAL_REQUEST_PREDEPLOY_CODE,
     };
-    use alloy_primitives::{address, Address, Bytes, Signature, TxKind, B256, U256};
+    use alloy_primitives::{address, Address, Bytes, Log, Signature, TxKind, B256, U256};
     use core::convert::Infallible;
     use evm2::{
         bytecode::Bytecode,
@@ -1009,6 +1101,7 @@ mod tests {
                 }),
                 ommers: None,
                 withdrawals: None,
+                deposit_contract_address: None,
             },
         )
         .expect_err("missing parent beacon block root should fail");
@@ -1033,6 +1126,7 @@ mod tests {
                 }),
                 ommers: None,
                 withdrawals: None,
+                deposit_contract_address: None,
             },
         )
         .expect_err("nonzero Cancun genesis parent beacon block root should fail");
@@ -1069,6 +1163,7 @@ mod tests {
                 }),
                 ommers: None,
                 withdrawals: None,
+                deposit_contract_address: None,
             },
         )
         .expect("beacon roots system call succeeds");
@@ -1107,6 +1202,7 @@ mod tests {
                 }),
                 ommers: None,
                 withdrawals: None,
+                deposit_contract_address: None,
             },
         )
         .expect("history storage system call succeeds");
@@ -1133,6 +1229,7 @@ mod tests {
                 }),
                 ommers: None,
                 withdrawals: None,
+                deposit_contract_address: None,
             },
         )
         .expect("system calls to absent contracts are no-ops");
@@ -1167,6 +1264,7 @@ mod tests {
                 }),
                 ommers: None,
                 withdrawals: None,
+                deposit_contract_address: None,
             },
         )
         .expect("system calls succeed");
@@ -1179,6 +1277,42 @@ mod tests {
             ]
         );
         assert!(output.result.receipts.is_empty());
+    }
+
+    #[test]
+    fn collects_deposit_requests_from_transaction_logs() {
+        let deposit = DepositEvent {
+            pubkey: Bytes::from(vec![0x11; 48]),
+            withdrawal_credentials: Bytes::from(vec![0x22; 32]),
+            amount: Bytes::from(vec![0x33; 8]),
+            signature: Bytes::from(vec![0x44; 96]),
+            index: Bytes::from(vec![0x55; 8]),
+        };
+        let log = DepositEvent::encode_log(&Log {
+            address: MAINNET_DEPOSIT_CONTRACT_ADDRESS,
+            data: deposit,
+        });
+        let outcome = TxOutcome { status: true, logs: vec![log], ..Default::default() };
+
+        let requests = block_requests_from_tx_results::<TestDatabase>(
+            SpecId::PRAGUE,
+            Evm2BlockExecutionContext {
+                chain_id: 1,
+                system_calls: Some(Evm2BlockSystemCalls {
+                    parent_hash: B256::ZERO,
+                    parent_beacon_block_root: Some(B256::ZERO),
+                }),
+                ommers: None,
+                withdrawals: None,
+                deposit_contract_address: None,
+            },
+            &[(TxType::Legacy, outcome)],
+        )
+        .expect("deposit log decodes");
+
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0][0], DEPOSIT_REQUEST_TYPE);
+        assert_eq!(requests[0].len(), 1 + DEPOSIT_BYTES_SIZE);
     }
 
     #[test]
@@ -1230,6 +1364,7 @@ mod tests {
                 }),
                 ommers: None,
                 withdrawals: None,
+                deposit_contract_address: None,
             },
         )
         .expect("withdrawal request transaction succeeds");
