@@ -86,71 +86,6 @@ asm-keccak = [
     "reth-evm-ethereum?/asm-keccak",
     "reth-storage-api?/asm-keccak",
 ]
-secp256k1 = [
-    "reth-ethereum-cli?/secp256k1",
-    "reth-node-ethereum?/secp256k1",
-    "reth-node-core?/secp256k1",
-    "reth-evm?/secp256k1",
-    "reth-evm-ethereum?/secp256k1",
-    "reth-storage-api?/secp256k1",
-    "reth-primitives-traits/secp256k1",
-]
-gmp = [
-    "reth-ethereum-cli?/gmp",
-    "reth-node-ethereum?/gmp",
-    "reth-node-core?/gmp",
-    "reth-evm?/gmp",
-    "reth-evm-ethereum?/gmp",
-    "reth-storage-api?/gmp",
-]
-bn = [
-    "reth-ethereum-cli?/bn",
-    "reth-node-ethereum?/bn",
-    "reth-node-core?/bn",
-    "reth-evm?/bn",
-    "reth-evm-ethereum?/bn",
-    "reth-storage-api?/bn",
-]
-c-kzg = [
-    "reth-ethereum-cli?/c-kzg",
-    "reth-node-ethereum?/c-kzg",
-    "reth-node-core?/c-kzg",
-    "reth-evm?/c-kzg",
-    "reth-evm-ethereum?/c-kzg",
-    "reth-storage-api?/c-kzg",
-]
-blst = [
-    "reth-ethereum-cli?/blst",
-    "reth-node-ethereum?/blst",
-    "reth-node-core?/blst",
-    "reth-evm?/blst",
-    "reth-evm-ethereum?/blst",
-    "reth-storage-api?/blst",
-]
-bn254-mcl = [
-    "reth-ethereum-cli?/bn254-mcl",
-    "reth-node-ethereum?/bn254-mcl",
-    "reth-node-core?/bn254-mcl",
-    "reth-evm?/bn254-mcl",
-    "reth-evm-ethereum?/bn254-mcl",
-    "reth-storage-api?/bn254-mcl",
-]
-p256-aws-lc-rs = [
-    "reth-ethereum-cli?/p256-aws-lc-rs",
-    "reth-node-ethereum?/p256-aws-lc-rs",
-    "reth-node-core?/p256-aws-lc-rs",
-    "reth-evm?/p256-aws-lc-rs",
-    "reth-evm-ethereum?/p256-aws-lc-rs",
-    "reth-storage-api?/p256-aws-lc-rs",
-]
-parse = [
-    "reth-ethereum-cli?/parse",
-    "reth-node-ethereum?/parse",
-    "reth-node-core?/parse",
-    "reth-evm?/parse",
-    "reth-evm-ethereum?/parse",
-    "reth-storage-api?/parse",
-]
 keccak-cache-global = [
     "reth-node-ethereum?/keccak-cache-global",
     "reth-node-core?/keccak-cache-global",
@@ -247,14 +182,7 @@ otlp = [
     "reth-ethereum-cli?/otlp",
     "reth-node-core?/otlp",
 ]
-portable = [
-    "reth-ethereum-cli?/portable",
-    "reth-node-ethereum?/portable",
-    "reth-node-core?/portable",
-    "reth-evm?/portable",
-    "reth-evm-ethereum?/portable",
-    "reth-storage-api?/portable",
-]
+portable = []
 provider = ["storage-api", "tasks", "dep:reth-provider", "dep:reth-db", "dep:reth-codecs"]
 storage-api = ["dep:reth-storage-api"]
 trie = ["dep:reth-trie"]
