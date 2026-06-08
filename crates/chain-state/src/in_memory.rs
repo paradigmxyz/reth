@@ -1543,12 +1543,9 @@ mod tests {
             .insert(1, LazyTrieData::ready(block1.hashed_state(), block1.trie_updates()));
 
         // Build expected execution outcome (first_block matches first block number)
-        let commit_execution_outcome = ExecutionOutcome {
-            receipts: vec![vec![], vec![]],
-            requests: vec![Requests::default(), Requests::default()],
-            first_block: 0,
-            ..Default::default()
-        };
+        let commit_execution_outcome = ExecutionOutcome::new_empty(0)
+            .with_receipts(vec![vec![], vec![]])
+            .with_requests(vec![Requests::default(), Requests::default()]);
 
         assert_eq!(
             chain_commit.to_chain_notification(),
@@ -1581,12 +1578,9 @@ mod tests {
 
         // Build expected execution outcome for reorg chains (first_block matches first block
         // number)
-        let reorg_execution_outcome = ExecutionOutcome {
-            receipts: vec![vec![], vec![]],
-            requests: vec![Requests::default(), Requests::default()],
-            first_block: 1,
-            ..Default::default()
-        };
+        let reorg_execution_outcome = ExecutionOutcome::new_empty(1)
+            .with_receipts(vec![vec![], vec![]])
+            .with_requests(vec![Requests::default(), Requests::default()]);
 
         assert_eq!(
             chain_reorg.to_chain_notification(),
