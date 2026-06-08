@@ -1061,7 +1061,8 @@ impl PeersManager {
     }
 
     /// Disconnects one eligible peer (inbound or outbound) to open a slot for new nodes,
-    /// mirroring geth's peer dropper logic.
+    /// mirroring Geth's peer dropper logic:
+    /// <https://github.com/ethereum/go-ethereum/blob/c5c75977ab55e4d7ea6147cc0e221b588e5e3754/eth/dropper.go#L106-L138>
     ///
     /// A peer is eligible when its pool (inbound or outbound) is at capacity, the peer is not
     /// trusted or static, and it has been connected for at least [`PEER_ROTATION_MIN_UPTIME`].
