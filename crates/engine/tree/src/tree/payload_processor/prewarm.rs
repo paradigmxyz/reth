@@ -246,12 +246,10 @@ where
                 return;
             }
 
-            if index > 0 {
+            if index > 0 && let Some(to_sparse_trie_task) = to_sparse_trie_task {
                 let (targets, storage_targets) = multiproof_targets_from_state(res.state);
                 ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
-                if let Some(to_sparse_trie_task) = to_sparse_trie_task {
-                    let _ = to_sparse_trie_task.send(StateRootMessage::PrefetchProofs(targets));
-                }
+                let _ = to_sparse_trie_task.send(StateRootMessage::PrefetchProofs(targets));
             }
 
             ctx.metrics.total_runtime.record(start.elapsed());
