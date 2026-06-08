@@ -1,7 +1,7 @@
 use super::{
     drain_update_chunk, encode_account_leaf_value, insert_leaf_update,
     proof_service::ProofServiceCommand, to_parallel_sparse_error, ActorTrie, CoordinatorEvent,
-    PendingAccountUpdate, MAX_ACCOUNT_UPDATES_PER_DRIVE,
+    PendingAccountUpdate, RevealBatch, MAX_ACCOUNT_UPDATES_PER_DRIVE,
 };
 use alloy_primitives::{
     map::{B256Map, B256Set, Entry, HashMap},
@@ -84,12 +84,13 @@ impl AccountTrieActor {
     )]
     pub(super) async fn run(mut self) {
         while let Some(command) = self.rx.recv().await {
+            let mut reveal_batch = RevealBatch::default();
             let mut should_drive = match command {
                 AccountTrieCommand::ReturnTrie { tx } => {
                     let _ = tx.send((self.trie, self.deferred));
                     return;
                 }
-                command => match self.apply_command(command) {
+                command => match self.apply_command(command, &mut reveal_batch) {
                     Ok(should_drive) => should_drive,
                     Err(error) => {
                         let _ = self.event_tx.send(CoordinatorEvent::Error(error));
@@ -103,6 +104,10 @@ impl AccountTrieActor {
             while let Ok(command) = self.rx.try_recv() {
                 match command {
                     AccountTrieCommand::ReturnTrie { tx } => {
+                        if let Err(error) = self.apply_reveal_batch(reveal_batch) {
+                            let _ = self.event_tx.send(CoordinatorEvent::Error(error));
+                            return;
+                        }
                         if should_drive {
                             if let Err(error) = self.drive().await {
                                 let _ = self.event_tx.send(CoordinatorEvent::Error(error));
@@ -111,7 +116,7 @@ impl AccountTrieActor {
                         let _ = tx.send((self.trie, self.deferred));
                         return;
                     }
-                    command => match self.apply_command(command) {
+                    command => match self.apply_command(command, &mut reveal_batch) {
                         Ok(command_should_drive) => should_drive |= command_should_drive,
                         Err(error) => {
                             let _ = self.event_tx.send(CoordinatorEvent::Error(error));
@@ -119,6 +124,14 @@ impl AccountTrieActor {
                             break;
                         }
                     },
+                }
+            }
+
+            match self.apply_reveal_batch(reveal_batch) {
+                Ok(revealed) => should_drive |= revealed,
+                Err(error) => {
+                    let _ = self.event_tx.send(CoordinatorEvent::Error(error));
+                    continue;
                 }
             }
 
@@ -133,7 +146,9 @@ impl AccountTrieActor {
         &mut self,
         command: AccountTrieCommand,
     ) -> Result<(), ParallelStateRootError> {
-        let should_drive = self.apply_command(command)?;
+        let mut reveal_batch = RevealBatch::default();
+        let mut should_drive = self.apply_command(command, &mut reveal_batch)?;
+        should_drive |= self.apply_reveal_batch(reveal_batch)?;
         if should_drive {
             self.drive().await
         } else {
@@ -144,18 +159,15 @@ impl AccountTrieActor {
     fn apply_command(
         &mut self,
         command: AccountTrieCommand,
+        reveal_batch: &mut RevealBatch,
     ) -> Result<bool, ParallelStateRootError> {
         let should_drive = match command {
             AccountTrieCommand::Touch(address) => {
                 self.insert_account_update(address, LeafUpdate::Touched);
                 true
             }
-            AccountTrieCommand::Reveal { mut nodes, targets } => {
-                self.trie
-                    .reveal_v2_proof_nodes(&mut nodes, true)
-                    .map_err(to_parallel_sparse_error)?;
-                self.deferred.proof_nodes_bufs.push(nodes);
-                self.promote_blocked_account_targets(targets);
+            AccountTrieCommand::Reveal { nodes, targets } => {
+                reveal_batch.push(nodes, targets);
                 true
             }
             AccountTrieCommand::Drive => true,
@@ -167,6 +179,44 @@ impl AccountTrieActor {
         };
 
         Ok(should_drive)
+    }
+
+    fn apply_reveal_batch(&mut self, batch: RevealBatch) -> Result<bool, ParallelStateRootError> {
+        if batch.is_empty() {
+            return Ok(false)
+        }
+
+        let _span = debug_span!(
+            target: "engine::tree::payload_processor::async_sparse_trie",
+            "async_sr_account_reveal_batch",
+            reveals = batch.len(),
+            nodes = batch.nodes_len(),
+            targets = batch.targets_len(),
+        )
+        .entered();
+        let (mut nodes, targets) = batch.into_parts();
+        {
+            let _span = debug_span!(
+                target: "engine::tree::payload_processor::async_sparse_trie",
+                "async_sr_account_reveal_v2_proof_nodes",
+            )
+            .entered();
+            self.trie.reveal_v2_proof_nodes(&mut nodes, true).map_err(to_parallel_sparse_error)?;
+        }
+        self.deferred.proof_nodes_bufs.push(nodes);
+        {
+            let _span = debug_span!(
+                target: "engine::tree::payload_processor::async_sparse_trie",
+                "async_sr_promote_blocked_account_targets",
+                targets = targets.len(),
+                blocked_updates = self.blocked_update_count(),
+                blocked_targets = self.blocked_updates.len(),
+            )
+            .entered();
+            self.promote_blocked_account_targets(targets);
+        }
+
+        Ok(true)
     }
 
     #[instrument(

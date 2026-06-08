@@ -13,7 +13,7 @@ use alloy_rlp::Encodable;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
 use reth_primitives_traits::{Account, FastInstant as Instant};
 use reth_tasks::Runtime;
-use reth_trie::{HashedPostState, EMPTY_ROOT_HASH};
+use reth_trie::{HashedPostState, ProofTrieNodeV2, ProofV2Target, EMPTY_ROOT_HASH};
 use reth_trie_parallel::{proof_task::ProofWorkerHandle, root::ParallelStateRootError};
 use reth_trie_sparse::{
     ArenaParallelSparseTrie, ConfigurableSparseTrie, LeafUpdate, RevealableSparseTrie,
@@ -51,6 +51,41 @@ const BRIDGE_RECV_TIMEOUT: Duration = Duration::from_millis(10);
 
 type StateTrie = SparseStateTrie<ConfigurableSparseTrie, ConfigurableSparseTrie>;
 type ActorTrie = RevealableSparseTrie<ConfigurableSparseTrie>;
+
+#[derive(Default)]
+struct RevealBatch {
+    nodes: Vec<ProofTrieNodeV2>,
+    targets: Vec<ProofV2Target>,
+    reveals: usize,
+}
+
+impl RevealBatch {
+    fn push(&mut self, nodes: Vec<ProofTrieNodeV2>, targets: Vec<ProofV2Target>) {
+        self.reveals += 1;
+        self.nodes.extend(nodes);
+        self.targets.extend(targets);
+    }
+
+    const fn is_empty(&self) -> bool {
+        self.reveals == 0
+    }
+
+    const fn len(&self) -> usize {
+        self.reveals
+    }
+
+    fn nodes_len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    fn targets_len(&self) -> usize {
+        self.targets.len()
+    }
+
+    fn into_parts(self) -> (Vec<ProofTrieNodeV2>, Vec<ProofV2Target>) {
+        (self.nodes, self.targets)
+    }
+}
 
 mod account_actor;
 mod bridge;
