@@ -593,6 +593,7 @@ impl PeersManager {
         if let Some(peer) = self.peers.get_mut(peer_id) {
             self.connection_info.decr_state(peer.state);
             peer.state = PeerConnectionState::Idle;
+            peer.mark_disconnected();
         }
     }
 
