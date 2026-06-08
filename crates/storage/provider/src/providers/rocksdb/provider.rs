@@ -1861,7 +1861,11 @@ impl<'a> RocksDBBatch<'a> {
         let last_shard_opt = self.provider.get::<tables::AccountsHistory>(last_key.clone())?;
         let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
 
-        last_shard.append(indices).map_err(ProviderError::other)?;
+        if indices.len() == 1 {
+            last_shard.push(indices[0]).map_err(ProviderError::other)?;
+        } else {
+            last_shard.append(indices).map_err(ProviderError::other)?;
+        }
 
         // Fast path: all indices fit in one shard
         if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
@@ -1923,7 +1927,11 @@ impl<'a> RocksDBBatch<'a> {
         let last_shard_opt = self.provider.get::<tables::StoragesHistory>(last_key.clone())?;
         let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
 
-        last_shard.append(indices).map_err(ProviderError::other)?;
+        if indices.len() == 1 {
+            last_shard.push(indices[0]).map_err(ProviderError::other)?;
+        } else {
+            last_shard.append(indices).map_err(ProviderError::other)?;
+        }
 
         // Fast path: all indices fit in one shard
         if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
