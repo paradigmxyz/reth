@@ -7,7 +7,7 @@ use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN
 use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction};
 use reth_evm::{execute::BlockExecutionOutput, ConfigureEvm2BlockExecutor};
 use reth_evm_ethereum::EthEvmConfig;
-use reth_execution_types::{evm2_block_state_hashed_post_state_sorted, Evm2BundleState};
+use reth_execution_types::evm2_block_state_hashed_post_state_sorted;
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
@@ -22,12 +22,11 @@ pub(crate) fn to_execution_outcome(
     block_number: u64,
     block_execution_output: &BlockExecutionOutput<Receipt>,
 ) -> ExecutionOutcome {
-    ExecutionOutcome {
-        bundle: Evm2BundleState::from_state_source(block_number, &block_execution_output.state),
-        receipts: vec![block_execution_output.receipts.clone()],
-        first_block: block_number,
-        requests: vec![block_execution_output.requests.clone()],
-    }
+    ExecutionOutcome::from_block_states(
+        block_number,
+        [block_execution_output.state.clone()],
+        vec![block_execution_output.result.clone()],
+    )
 }
 
 pub(crate) fn chain_spec(address: Address) -> Arc<ChainSpec> {
@@ -197,27 +196,17 @@ where
     let outputs = blocks_and_execution_outputs(provider_factory, chain_spec, key_pair)?;
     let first_block = outputs.first().map(|(block, _)| block.number()).unwrap_or_default();
     let mut blocks = Vec::with_capacity(outputs.len());
-    let mut receipts = Vec::with_capacity(outputs.len());
-    let mut requests = Vec::with_capacity(outputs.len());
-    let mut bundle: Option<reth_execution_types::Evm2BundleState> = None;
+    let mut states = Vec::with_capacity(outputs.len());
+    let mut results = Vec::with_capacity(outputs.len());
 
     for (block, output) in outputs {
         let BlockExecutionOutput { result, state } = output;
         blocks.push(block);
-        receipts.push(result.receipts);
-        requests.push(result.requests);
-        match &mut bundle {
-            Some(bundle) => bundle.extend(state),
-            None => bundle = Some(state),
-        }
+        states.push(state);
+        results.push(result);
     }
 
-    let execution_outcome = ExecutionOutcome {
-        bundle: bundle.unwrap_or_else(|| reth_execution_types::Evm2BundleState::new(first_block)),
-        receipts,
-        first_block,
-        requests,
-    };
+    let execution_outcome = ExecutionOutcome::from_block_states(first_block, states, results);
 
     Ok((blocks, execution_outcome))
 }

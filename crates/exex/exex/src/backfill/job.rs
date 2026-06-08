@@ -10,7 +10,9 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::BlockNumber;
 use reth_ethereum_primitives::Receipt;
 use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput};
-use reth_execution_types::Evm2BundleState;
+use reth_execution_types::{
+    evm2_block_state_accumulator_extend, evm2_state_source_size_hint, Evm2BlockStateAccumulator,
+};
 use reth_node_api::{Block as _, BlockBody as _, NodePrimitives};
 use reth_primitives_traits::{format_gas_throughput, RecoveredBlock, SignedTransaction};
 use reth_provider::{
@@ -83,7 +85,8 @@ where
 
         let mut blocks = Vec::new();
         let mut results = Vec::new();
-        let mut bundle: Option<Evm2BundleState> = None;
+        let mut state = Evm2BlockStateAccumulator::new();
+        let mut block_states = Vec::new();
         for block_number in self.range.clone() {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -121,11 +124,8 @@ where
                 .map_err(evm2_execution_error)?;
             execution_duration += execute_start.elapsed();
 
-            let block_state = Evm2BundleState::from_state_source(block_number, &output.state);
-            match &mut bundle {
-                Some(bundle) => bundle.extend(block_state),
-                None => bundle = Some(block_state),
-            }
+            evm2_block_state_accumulator_extend(&mut state, &output.state);
+            block_states.push(output.state);
             results.push(output.result);
 
             // Seal the block back and save it
@@ -133,7 +133,7 @@ where
             // Check if we should commit now
             if self.thresholds.is_end_of_batch(
                 block_number - *self.range.start() + 1,
-                bundle.as_ref().map(bundle_size_hint).unwrap_or_default() as u64,
+                evm2_state_source_size_hint(&state) as u64,
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
@@ -153,11 +153,8 @@ where
         );
         self.range = last_block_number + 1..=*self.range.end();
 
-        let outcome = ExecutionOutcome::from_blocks(
-            first_block_number,
-            bundle.expect("blocks should not be empty"),
-            results,
-        );
+        let outcome =
+            ExecutionOutcome::from_block_states(first_block_number, block_states, results);
         let chain = Chain::new(blocks, outcome, BTreeMap::new());
         Ok(chain)
     }
@@ -236,12 +233,6 @@ where
 
         Ok((block_with_senders, block_execution_output))
     }
-}
-
-fn bundle_size_hint(bundle: &Evm2BundleState) -> usize {
-    bundle.accounts().len() +
-        bundle.storage().values().map(|storage| storage.slots.len()).sum::<usize>() +
-        bundle.contracts().len()
 }
 
 fn evm2_execution_error(error: Box<dyn core::error::Error + Send + Sync>) -> BlockExecutionError {
