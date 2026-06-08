@@ -1281,7 +1281,8 @@ where
 
             senders.push(tx_signer);
 
-            let _enter = tracing::enabled!(target: "engine::tree", Level::TRACE).then(|| {
+            let trace_enabled = tracing::enabled!(target: "engine::tree", Level::TRACE);
+            let _enter = trace_enabled.then(|| {
                 tracing::trace_span!(
                     target: "engine::tree",
                     "execute tx",
@@ -1289,7 +1290,7 @@ where
                 )
                 .entered()
             });
-            if tracing::enabled!(target: "engine::tree", Level::TRACE) {
+            if trace_enabled {
                 trace!(target: "engine::tree", "Executing transaction");
             }
 
