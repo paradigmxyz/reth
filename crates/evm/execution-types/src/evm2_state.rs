@@ -1,6 +1,9 @@
 use alloc::vec::Vec;
 use alloy_consensus::constants::KECCAK_EMPTY;
-use alloy_primitives::{map::B256Map, B256};
+use alloy_primitives::{
+    map::{AddressMap, B256Map},
+    Address, B256, U256,
+};
 use core::{convert::Infallible, marker::PhantomData};
 use evm2::{
     bytecode::Bytecode,
@@ -13,6 +16,34 @@ use reth_primitives_traits::Account;
 use reth_trie_common::{
     HashedPostState, HashedPostStateSorted, HashedStorage, HashedStorageSorted, KeyHasher,
 };
+
+/// Reverts for one block of evm2 state changes.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Evm2BlockReverts {
+    /// Original accounts before the block changed them.
+    pub accounts: AddressMap<Option<AccountInfo>>,
+    /// Original storage before the block changed it.
+    pub storage: AddressMap<Evm2StorageReverts>,
+}
+
+impl Evm2BlockReverts {
+    /// Clears account and storage revert entries.
+    pub fn clear(&mut self) {
+        self.accounts.clear();
+        self.storage.clear();
+    }
+}
+
+/// Storage reverts for one account in one block.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Evm2StorageReverts {
+    /// Whether the block wiped the account storage.
+    pub wiped: bool,
+    /// Whether earlier aggregate state had already marked this account storage as wiped.
+    pub previous_wipe: bool,
+    /// Original storage slots before the block changed them.
+    pub slots: alloc::collections::BTreeMap<U256, U256>,
+}
 
 /// Returns the hashed post-state represented by an evm2 state-change source.
 pub fn evm2_state_source_hashed_post_state<KH, S>(source: &S) -> HashedPostState
@@ -60,6 +91,19 @@ where
         Err(err) => match err {},
     }
     sink.size
+}
+
+/// Returns the per-block reverts represented by an evm2 state-change source.
+pub fn evm2_block_reverts_from_state_source<S>(source: &S) -> Evm2BlockReverts
+where
+    S: StateChangeSource,
+{
+    let mut sink = BlockRevertsSink::default();
+    match source.visit(&mut sink) {
+        Ok(()) => {}
+        Err(err) => match err {},
+    }
+    sink.reverts
 }
 
 /// Returns trie-ready sorted hashed post-state for an evm2 block state.
@@ -115,6 +159,11 @@ struct StateSizeHintSink {
     size: usize,
 }
 
+#[derive(Default)]
+struct BlockRevertsSink {
+    reverts: Evm2BlockReverts,
+}
+
 impl<KH> Default for HashedPostStateSink<KH> {
     fn default() -> Self {
         Self { state: HashedPostState::default(), _key_hasher: PhantomData }
@@ -141,6 +190,38 @@ impl StateChangeSink for StateSizeHintSink {
 
     fn storage(&mut self, _change: StorageChangeRef) -> Result<(), Self::Error> {
         self.size += 1;
+        Ok(())
+    }
+}
+
+impl StateChangeSink for BlockRevertsSink {
+    type Error = Infallible;
+
+    fn bytecode(&mut self, _code_hash: B256, _code: &Bytecode) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn account(&mut self, change: AccountChangeRef<'_>) -> Result<(), Self::Error> {
+        self.reverts
+            .accounts
+            .entry(change.address)
+            .or_insert_with(|| change.original.map(AccountInfoRef::to_account_info));
+        Ok(())
+    }
+
+    fn storage_wipe(&mut self, address: Address) -> Result<(), Self::Error> {
+        self.reverts.storage.entry(address).or_default().wiped = true;
+        Ok(())
+    }
+
+    fn storage(&mut self, change: StorageChangeRef) -> Result<(), Self::Error> {
+        self.reverts
+            .storage
+            .entry(change.address)
+            .or_default()
+            .slots
+            .entry(change.key)
+            .or_insert(change.original);
         Ok(())
     }
 }
@@ -198,6 +279,127 @@ fn account_info_to_reth(info: &AccountInfo) -> Account {
 fn account_parts_to_reth(nonce: u64, balance: alloy_primitives::U256, code_hash: B256) -> Account {
     let bytecode_hash = (!code_hash.is_zero() && code_hash != KECCAK_EMPTY).then_some(code_hash);
     Account { nonce, balance, bytecode_hash }
+}
+
+#[cfg(feature = "serde")]
+mod serde_impl {
+    use super::*;
+    use alloy_primitives::Bytes;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    #[derive(Serialize, Deserialize)]
+    struct BlockRevertsSerde {
+        accounts: AddressMap<Option<AccountInfoSerde>>,
+        storage: AddressMap<StorageRevertsSerde>,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct StorageRevertsSerde {
+        wiped: bool,
+        previous_wipe: bool,
+        slots: alloc::collections::BTreeMap<U256, U256>,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct AccountInfoSerde {
+        balance: U256,
+        nonce: u64,
+        code_hash: B256,
+        code: Option<Bytes>,
+    }
+
+    impl Serialize for Evm2BlockReverts {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            BlockRevertsSerde::from(self).serialize(serializer)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Evm2BlockReverts {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            BlockRevertsSerde::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    impl From<&Evm2BlockReverts> for BlockRevertsSerde {
+        fn from(value: &Evm2BlockReverts) -> Self {
+            Self {
+                accounts: value
+                    .accounts
+                    .iter()
+                    .map(|(address, account)| {
+                        (*address, account.as_ref().map(AccountInfoSerde::from))
+                    })
+                    .collect(),
+                storage: value
+                    .storage
+                    .iter()
+                    .map(|(address, storage)| (*address, StorageRevertsSerde::from(storage)))
+                    .collect(),
+            }
+        }
+    }
+
+    impl From<BlockRevertsSerde> for Evm2BlockReverts {
+        fn from(value: BlockRevertsSerde) -> Self {
+            Self {
+                accounts: value
+                    .accounts
+                    .into_iter()
+                    .map(|(address, account)| (address, account.map(Into::into)))
+                    .collect(),
+                storage: value
+                    .storage
+                    .into_iter()
+                    .map(|(address, storage)| (address, storage.into()))
+                    .collect(),
+            }
+        }
+    }
+
+    impl From<&Evm2StorageReverts> for StorageRevertsSerde {
+        fn from(value: &Evm2StorageReverts) -> Self {
+            Self {
+                wiped: value.wiped,
+                previous_wipe: value.previous_wipe,
+                slots: value.slots.clone(),
+            }
+        }
+    }
+
+    impl From<StorageRevertsSerde> for Evm2StorageReverts {
+        fn from(value: StorageRevertsSerde) -> Self {
+            Self { wiped: value.wiped, previous_wipe: value.previous_wipe, slots: value.slots }
+        }
+    }
+
+    impl From<&AccountInfo> for AccountInfoSerde {
+        fn from(value: &AccountInfo) -> Self {
+            Self {
+                balance: value.balance,
+                nonce: value.nonce,
+                code_hash: value.code_hash,
+                code: value.code.as_ref().map(Bytecode::original_bytes),
+            }
+        }
+    }
+
+    impl From<AccountInfoSerde> for AccountInfo {
+        fn from(value: AccountInfoSerde) -> Self {
+            Self {
+                balance: value.balance,
+                nonce: value.nonce,
+                code_hash: value.code_hash,
+                code: value.code.map(Bytecode::new_raw),
+                _non_exhaustive: (),
+            }
+        }
+    }
 }
 
 #[cfg(test)]
