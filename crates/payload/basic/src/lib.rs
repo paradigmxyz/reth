@@ -69,6 +69,8 @@ pub struct BasicPayloadJobGenerator<Client, Builder> {
     builder: Builder,
     /// Stored `cached_reads` for new payload jobs.
     pre_cached: Option<PrecachedState>,
+    /// Stored parent block information for new payload jobs.
+    pre_cached_parent_block_info: Option<PrecachedParentBlockInfo>,
 }
 
 // === impl BasicPayloadJobGenerator ===
@@ -89,6 +91,7 @@ impl<Client, Builder> BasicPayloadJobGenerator<Client, Builder> {
             config,
             builder,
             pre_cached: None,
+            pre_cached_parent_block_info: None,
         }
     }
 
@@ -131,6 +134,14 @@ impl<Client, Builder> BasicPayloadJobGenerator<Client, Builder> {
 
         self.pre_cached.as_ref().filter(|pc| pc.block == parent).map(|pc| pc.cached.clone())
     }
+
+    /// Returns the cached parent block information if it matches the requested parent.
+    fn maybe_parent_block_info(&self, parent: B256) -> Option<PayloadParentBlockInfo> {
+        self.pre_cached_parent_block_info
+            .as_ref()
+            .filter(|info| info.block == parent)
+            .map(|info| info.parent_block_info)
+    }
 }
 
 // === impl BasicPayloadJobGenerator ===
@@ -167,9 +178,12 @@ where
                 .ok_or_else(|| PayloadBuilderError::MissingParentHeader(input.parent_hash))?
         };
 
-        let cached_reads = self.maybe_pre_cached(parent_header.hash());
+        let parent_hash = parent_header.hash();
+        let cached_reads = self.maybe_pre_cached(parent_hash);
+        let parent_block_info = self.maybe_parent_block_info(parent_hash);
 
-        let config = PayloadConfig::new(Arc::new(parent_header), input.attributes, id);
+        let config = PayloadConfig::new(Arc::new(parent_header), input.attributes, id)
+            .with_parent_block_info(parent_block_info);
 
         let until = self.job_deadline(config.attributes.timestamp());
         let deadline = Box::pin(tokio::time::sleep_until(until));
@@ -217,7 +231,14 @@ where
             }
         }
 
-        self.pre_cached = Some(PrecachedState { block: committed.tip().hash(), cached });
+        let tip = committed.tip();
+        let block = tip.hash();
+        let parent_block_info =
+            PayloadParentBlockInfo { transaction_count: tip.transaction_count() };
+
+        self.pre_cached = Some(PrecachedState { block, cached });
+        self.pre_cached_parent_block_info =
+            Some(PrecachedParentBlockInfo { block, parent_block_info });
     }
 }
 
@@ -230,6 +251,15 @@ pub struct PrecachedState {
     pub block: B256,
     /// Cached state for the block.
     pub cached: CachedReads,
+}
+
+/// Pre-filled parent block information for a specific block.
+#[derive(Debug, Clone, Copy)]
+struct PrecachedParentBlockInfo {
+    /// The block for which the parent block information is cached.
+    block: B256,
+    /// Cached parent block information.
+    parent_block_info: PayloadParentBlockInfo,
 }
 
 /// Restricts how many generator tasks can be executed at once.
@@ -724,10 +754,19 @@ impl<P> Future for PendingPayload<P> {
 pub struct PayloadConfig<Attributes, Header = alloy_consensus::Header> {
     /// The parent header.
     pub parent_header: Arc<SealedHeader<Header>>,
+    /// Additional parent block information, if available.
+    pub parent_block_info: Option<PayloadParentBlockInfo>,
     /// Requested attributes for the payload.
     pub attributes: Attributes,
     /// The payload id.
     pub payload_id: PayloadId,
+}
+
+/// Additional information about the parent block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PayloadParentBlockInfo {
+    /// Number of transactions in the parent block.
+    pub transaction_count: usize,
 }
 
 impl<Attributes, Header> PayloadConfig<Attributes, Header>
@@ -740,7 +779,16 @@ where
         attributes: Attributes,
         payload_id: PayloadId,
     ) -> Self {
-        Self { parent_header, attributes, payload_id }
+        Self { parent_header, parent_block_info: None, attributes, payload_id }
+    }
+
+    /// Attaches cached parent block information.
+    pub const fn with_parent_block_info(
+        mut self,
+        parent_block_info: Option<PayloadParentBlockInfo>,
+    ) -> Self {
+        self.parent_block_info = parent_block_info;
+        self
     }
 
     /// Returns the payload id.

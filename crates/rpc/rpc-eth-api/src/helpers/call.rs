@@ -98,7 +98,12 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let parent = base_block.sealed_header().clone();
             let max_simulate_blocks = self.max_simulate_blocks();
 
-            self.spawn_with_state_at_block(block, move |this, mut db| {
+            self.spawn_with_state_at_block(block, move |this, db| {
+                let state_provider = db.database.0 .0;
+                let mut db = State::builder()
+                    .with_database(StateProviderDatabase::new(&state_provider))
+                    .with_bundle_update()
+                    .build();
                 let mut parent = parent;
 
                 let chain_id = this.provider().chain_spec().chain_id();
@@ -209,9 +214,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                         simulate::execute_transactions(
                             builder,
+                            &state_provider,
                             calls,
                             &mut remaining_call_gas_limit,
                             chain_id,
+                            this.compute_state_root_for_eth_simulate(),
                             this.converter(),
                         )
                         .map_err(map_err)?
@@ -229,9 +236,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                         simulate::execute_transactions(
                             builder,
+                            &state_provider,
                             calls,
                             &mut remaining_call_gas_limit,
                             chain_id,
+                            this.compute_state_root_for_eth_simulate(),
                             this.converter(),
                         )
                         .map_err(map_err)?
@@ -529,6 +538,9 @@ pub trait Call:
 
     /// Returns the maximum number of blocks accepted for `eth_simulateV1`.
     fn max_simulate_blocks(&self) -> u64;
+
+    /// Returns whether `eth_simulateV1` should compute state roots.
+    fn compute_state_root_for_eth_simulate(&self) -> bool;
 
     /// Returns the maximum memory the EVM can allocate per RPC request.
     fn evm_memory_limit(&self) -> u64;

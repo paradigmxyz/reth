@@ -114,6 +114,8 @@ pub trait FileReader: StreamReader<File> {
     }
 }
 
+impl<T: StreamReader<File>> FileReader for T {}
+
 /// [`StreamWriter`] for writing era-format files
 pub trait StreamWriter<W: Write>: Sized {
     /// The file type this writer handles
@@ -182,7 +184,10 @@ impl EraFileType {
     /// order-independent.
     const ALL: [Self; 3] = [Self::Era, Self::Era1, Self::Ere];
 
-    /// Get the file extension for this type, dot included
+    /// Get the canonical file extension for this type, dot included.
+    ///
+    /// Used when writing files. For recognizing downloaded files, which may use an alternate
+    /// extension, see [`extensions`](Self::extensions).
     pub const fn extension(&self) -> &'static str {
         match self {
             Self::Era => ".era",
@@ -191,9 +196,28 @@ impl EraFileType {
         }
     }
 
+    /// All file extensions this type may be published with, dot included, ordered longest-first.
+    ///
+    /// `ere` files are served as either `.erae` (current ethPandaOps naming) or `.ere`. The
+    /// longest-first order matters for substring scans so `.ere` never matches inside `.erae`.
+    pub const fn extensions(&self) -> &'static [&'static str] {
+        match self {
+            Self::Era => &[".era"],
+            Self::Era1 => &[".era1"],
+            Self::Ere => &[".erae", ".ere"],
+        }
+    }
+
+    /// Whether files of this type are published with a `checksums.txt` for verification.
+    ///
+    /// Execution-layer files (`era1`, `ere`) ship checksums; consensus-layer `era` files do not.
+    pub const fn has_checksums(&self) -> bool {
+        matches!(self, Self::Era1 | Self::Ere)
+    }
+
     /// Detect file type from a filename
     pub fn from_filename(filename: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|ty| filename.ends_with(ty.extension()))
+        Self::ALL.into_iter().find(|ty| ty.extensions().iter().any(|ext| filename.ends_with(ext)))
     }
 
     /// Generate era file name.
@@ -228,6 +252,8 @@ impl EraFileType {
         }
         if url.contains("era1") {
             Self::Era1
+        } else if url.contains("erae") {
+            Self::Ere
         } else {
             Self::Era
         }
@@ -272,6 +298,10 @@ mod tests {
         // substring.
         assert_eq!(EraFileType::from_url("https://mainnet.era1.nimbus.team/"), EraFileType::Era1);
         assert_eq!(EraFileType::from_url("https://era.ithaca.xyz/"), EraFileType::Era);
+        assert_eq!(
+            EraFileType::from_url("https://data.ethpandaops.io/erae/mainnet/"),
+            EraFileType::Ere
+        );
     }
 
     #[test]
@@ -288,9 +318,18 @@ mod tests {
             EraFileType::from_filename("mainnet-00000-abcd1234.ere"),
             Some(EraFileType::Ere)
         );
+        // The alternate `.erae` extension also resolves to `Ere`.
+        assert_eq!(
+            EraFileType::from_filename("mainnet-00000-abcd1234.erae"),
+            Some(EraFileType::Ere)
+        );
         // Profile postfixes don't change extension detection.
         assert_eq!(
             EraFileType::from_filename("mainnet-00000-abcd1234-noproofs.ere"),
+            Some(EraFileType::Ere)
+        );
+        assert_eq!(
+            EraFileType::from_filename("mainnet-00000-abcd1234-noproofs.erae"),
             Some(EraFileType::Ere)
         );
         assert_eq!(EraFileType::from_filename("mainnet-00000-abcd1234.txt"), None);

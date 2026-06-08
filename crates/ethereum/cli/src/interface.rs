@@ -22,7 +22,7 @@ use reth_node_core::{
     version::version_metadata,
 };
 use reth_rpc_server_types::{DefaultRpcModuleValidator, RethRpcModule, RpcModuleValidator};
-use reth_tracing::{FileWorkerGuard, Layers};
+use reth_tracing::{Layers, TracingGuards};
 use std::{ffi::OsString, fmt, future::Future, marker::PhantomData, sync::Arc};
 use tracing::{info, warn};
 
@@ -210,8 +210,7 @@ impl<
 
     /// Initializes tracing with the configured options.
     ///
-    /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
-    /// that all logs are flushed to disk.
+    /// Returns tracing guards that must be kept alive to ensure outputs are flushed to disk.
     ///
     /// If an OTLP endpoint is specified, it will export traces and logs to the configured
     /// collector.
@@ -219,13 +218,13 @@ impl<
         &mut self,
         runner: &CliRunner,
         mut layers: Layers,
-    ) -> eyre::Result<Option<FileWorkerGuard>> {
+    ) -> eyre::Result<TracingGuards> {
         let otlp_status = runner.block_on(self.traces.init_otlp_tracing(&mut layers))?;
         let otlp_logs_status = runner.block_on(self.traces.init_otlp_logs(&mut layers))?;
 
         // Enable reload support if debug RPC namespace is available
         let enable_reload = self.command.debug_namespace_enabled();
-        let file_guard = self.logs.init_tracing_with_layers(layers, enable_reload)?;
+        let guards = self.logs.init_tracing_with_layers(layers, enable_reload)?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
 
         match otlp_status {
@@ -248,7 +247,7 @@ impl<
             OtlpLogsStatus::Disabled => {}
         }
 
-        Ok(file_guard)
+        Ok(guards)
     }
 }
 
