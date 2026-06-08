@@ -913,25 +913,19 @@ impl PeersManager {
         trace!(target: "net::peers", ?peer_id, "remove discovered node");
         self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
 
-        let is_disconnecting = matches!(
-            peer.state,
-            PeerConnectionState::DisconnectingIn | PeerConnectionState::DisconnectingOut
-        );
-        if peer.state.is_connected() || is_disconnecting {
-            trace!(target: "net::peers", ?peer_id, "waiting for disconnect on remove from discovery");
+        if peer.state.is_connected() {
+            trace!(target: "net::peers", ?peer_id, "disconnecting on remove from discovery");
             // we terminate the active session here, but only remove the peer after the session
             // was disconnected, this prevents the case where the session is scheduled for
             // disconnect but the node is immediately rediscovered, See also
             // [`Self::on_disconnected()`]
             peer.remove_after_disconnect = true;
-            if !is_disconnecting {
-                peer.state.disconnect();
-                self.queued_actions.push_back(PeerAction::Disconnect {
-                    peer_id,
-                    reason: Some(DisconnectReason::DisconnectRequested),
-                })
-            }
+            peer.state.disconnect();
             self.peers.insert(peer_id, peer);
+            self.queued_actions.push_back(PeerAction::Disconnect {
+                peer_id,
+                reason: Some(DisconnectReason::DisconnectRequested),
+            })
         }
     }
 
@@ -1103,9 +1097,6 @@ impl PeersManager {
 
         trace!(target: "net::peers", ?peer_id, "rotating peer to open slot for new nodes");
 
-        if let Some(peer) = self.peers.get_mut(&peer_id) {
-            peer.state.disconnect();
-        }
         self.queued_actions.push_back(PeerAction::Disconnect {
             peer_id,
             reason: Some(DisconnectReason::UselessPeer),
@@ -3541,7 +3532,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_rotation_then_remove_waits_for_session_close() {
+    async fn test_rotation_then_remove_uses_active_session_removal() {
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 7)), 8008);
         let peer = PeerId::random();
         let mut peers = PeersManager::new(
@@ -3575,12 +3566,19 @@ mod tests {
             }
             _ => unreachable!(),
         }
-        assert_eq!(peers.peers.get(&peer).unwrap().state, PeerConnectionState::DisconnectingOut);
+        assert_eq!(peers.peers.get(&peer).unwrap().state, PeerConnectionState::Out);
         assert_eq!(peers.connection_info.num_outbound, 1);
 
         peers.remove_peer(peer);
         match event!(peers) {
             PeerAction::PeerRemoved(peer_id) => assert_eq!(peer_id, peer),
+            _ => unreachable!(),
+        }
+        match event!(peers) {
+            PeerAction::Disconnect { peer_id, reason } => {
+                assert_eq!(peer_id, peer);
+                assert_eq!(reason, Some(DisconnectReason::DisconnectRequested));
+            }
             _ => unreachable!(),
         }
 
