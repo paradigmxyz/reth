@@ -325,10 +325,6 @@ impl SparseTrie for ParallelSparseTrie {
         // Reveal lower subtrie nodes in parallel
         {
             use rayon::iter::{IntoParallelIterator, ParallelIterator};
-            use tracing::Span;
-
-            // Capture the current span so it can be propagated to rayon worker threads
-            let parent_span = Span::current();
 
             // Capture reference to upper subtrie nodes for boundary leaf reachability checks
             let upper_nodes = &self.upper_subtrie.nodes;
@@ -394,10 +390,6 @@ impl SparseTrie for ParallelSparseTrie {
                 .collect::<Vec<_>>()
                 .into_par_iter()
                 .map(|(subtrie_idx, mut subtrie, nodes)| {
-                    // Enter the parent span to propagate context (e.g., hashed_address for storage
-                    // tries) to the worker thread
-                    let _guard = parent_span.enter();
-
                     // reserve space in the HashMap ahead of time; doing it on a node-by-node basis
                     // can cause multiple re-allocations as the hashmap grows.
                     subtrie.nodes.reserve(nodes.size_hint().1.unwrap_or(0));
