@@ -38,7 +38,7 @@ use reth_rpc_eth_types::{
     simulate::{self, EthSimulateError},
     EthApiError, StateCacheDb,
 };
-use reth_storage_api::{BlockIdReader, ProviderTx, StateProvider, StateProviderBox};
+use reth_storage_api::{BlockIdReader, ProviderTx, StateProviderBox};
 use revm::{
     context::Block,
     context_interface::{result::ResultAndState, Transaction},
@@ -214,7 +214,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                         simulate::execute_transactions(
                             builder,
-                            state_provider.as_ref() as &dyn StateProvider,
+                            &state_provider,
                             calls,
                             &mut remaining_call_gas_limit,
                             chain_id,
@@ -236,7 +236,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                         simulate::execute_transactions(
                             builder,
-                            state_provider.as_ref() as &dyn StateProvider,
+                            &state_provider,
                             calls,
                             &mut remaining_call_gas_limit,
                             chain_id,
