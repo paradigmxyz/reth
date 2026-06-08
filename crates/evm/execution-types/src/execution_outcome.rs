@@ -89,6 +89,19 @@ impl<T> ExecutionOutcome<T> {
         Self { bundle, receipts, first_block, requests }
     }
 
+    /// Creates a new `ExecutionOutcome` from evm2 aggregate state and per-block reverts.
+    pub fn from_state_and_reverts(
+        state: Evm2BlockState,
+        block_reverts: Vec<Evm2BlockReverts>,
+        receipts: Vec<Vec<T>>,
+        first_block: BlockNumber,
+        requests: Vec<Requests>,
+    ) -> Self {
+        let mut bundle = Evm2BundleState::from_state_source(first_block, &state);
+        *bundle.block_reverts_mut() = block_reverts;
+        Self { bundle, receipts, first_block, requests }
+    }
+
     /// Creates an empty execution outcome beginning at `first_block`.
     pub fn new_empty(first_block: BlockNumber) -> Self {
         Self::new(Evm2BundleState::new(first_block), Vec::new(), first_block, Vec::new())
