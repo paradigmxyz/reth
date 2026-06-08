@@ -107,6 +107,72 @@ asm-keccak = [
     "alloy-primitives/asm-keccak",
     "reth-node-ethereum/asm-keccak",
 ]
+secp256k1 = [
+    "evm2/secp256k1",
+    "reth-evm/secp256k1",
+    "reth-evm-ethereum/secp256k1",
+    "reth-execution-types/secp256k1",
+    "reth-node-ethereum/secp256k1",
+    "reth-primitives-traits/secp256k1",
+    "alloy-consensus/secp256k1",
+    "alloy-primitives/secp256k1",
+]
+gmp = [
+    "evm2/gmp",
+    "reth-evm/gmp",
+    "reth-evm-ethereum/gmp",
+    "reth-execution-types/gmp",
+    "reth-node-ethereum/gmp",
+]
+bn = [
+    "evm2/bn",
+    "reth-evm/bn",
+    "reth-evm-ethereum/bn",
+    "reth-execution-types/bn",
+    "reth-node-ethereum/bn",
+]
+c-kzg = [
+    "evm2/c-kzg",
+    "reth-evm/c-kzg",
+    "reth-evm-ethereum/c-kzg",
+    "reth-execution-types/c-kzg",
+    "reth-node-ethereum/c-kzg",
+]
+blst = [
+    "evm2/blst",
+    "reth-evm/blst",
+    "reth-evm-ethereum/blst",
+    "reth-execution-types/blst",
+    "reth-node-ethereum/blst",
+]
+bn254-mcl = [
+    "evm2/bn254-mcl",
+    "reth-evm/bn254-mcl",
+    "reth-evm-ethereum/bn254-mcl",
+    "reth-execution-types/bn254-mcl",
+    "reth-node-ethereum/bn254-mcl",
+]
+portable = [
+    "evm2/portable",
+    "reth-evm/portable",
+    "reth-evm-ethereum/portable",
+    "reth-execution-types/portable",
+    "reth-node-ethereum/portable",
+]
+p256-aws-lc-rs = [
+    "evm2/p256-aws-lc-rs",
+    "reth-evm/p256-aws-lc-rs",
+    "reth-evm-ethereum/p256-aws-lc-rs",
+    "reth-execution-types/p256-aws-lc-rs",
+    "reth-node-ethereum/p256-aws-lc-rs",
+]
+parse = [
+    "evm2/parse",
+    "reth-evm/parse",
+    "reth-evm-ethereum/parse",
+    "reth-execution-types/parse",
+    "reth-node-ethereum/parse",
+]
 test-utils = [
     "reth-chain-state/test-utils",
     "reth-chainspec/test-utils",

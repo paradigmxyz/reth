@@ -82,6 +82,21 @@ asm-keccak = [
     "alloy-primitives/asm-keccak",
     "reth-storage-api/asm-keccak",
 ]
+secp256k1 = [
+    "reth-storage-api/secp256k1",
+    "reth-primitives-traits/secp256k1",
+    "reth-network-peers/secp256k1",
+    "alloy-consensus/secp256k1",
+    "alloy-primitives/secp256k1",
+]
+gmp = ["reth-storage-api/gmp"]
+bn = ["reth-storage-api/bn"]
+c-kzg = ["reth-storage-api/c-kzg"]
+blst = ["reth-storage-api/blst"]
+bn254-mcl = ["reth-storage-api/bn254-mcl"]
+portable = ["reth-storage-api/portable"]
+p256-aws-lc-rs = ["reth-storage-api/p256-aws-lc-rs"]
+parse = ["reth-storage-api/parse"]
 keccak-cache-global = ["alloy-primitives/keccak-cache-global"]
 otlp = ["reth-tracing/otlp", "reth-tracing-otlp/otlp"]
 otlp-logs = ["reth-tracing/otlp-logs", "reth-tracing-otlp/otlp-logs"]
