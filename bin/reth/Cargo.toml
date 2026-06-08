@@ -90,6 +90,7 @@ default = [
     "keccak-cache-global",
     "asm-keccak",
     "min-trace-logs",
+    "portable",
 ]
 
 jit = [
@@ -120,6 +121,7 @@ asm-keccak = [
     "reth-node-ethereum/asm-keccak",
     "alloy-primitives/asm-keccak",
 ]
+portable = ["reth-node-ethereum/portable"]
 keccak-cache-global = [
     "reth-node-core/keccak-cache-global",
     "reth-node-ethereum/keccak-cache-global",
