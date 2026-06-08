@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{collections::BTreeMap, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
     map::{AddressMap, B256Map},
@@ -6,13 +6,13 @@ use alloy_primitives::{
 };
 use core::{convert::Infallible, marker::PhantomData};
 use evm2::{
-    bytecode::Bytecode,
+    bytecode::Bytecode as Evm2Bytecode,
     evm::{
         AccountChangeRef, AccountInfo, AccountInfoRef, BlockStateAccumulator, FrozenBlockState,
         StateChangeSink, StateChangeSource, StorageChangeRef,
     },
 };
-use reth_primitives_traits::Account;
+use reth_primitives_traits::{Account, Bytecode as RethBytecode};
 use reth_trie_common::{
     HashedPostState, HashedPostStateSorted, HashedStorage, HashedStorageSorted, KeyHasher,
 };
@@ -67,6 +67,36 @@ where
     let mut state = BlockStateAccumulator::new();
     evm2_block_state_accumulator_extend(&mut state, source);
     state.freeze()
+}
+
+/// Creates an evm2 block state from Reth account, storage, and bytecode initialization data.
+pub fn evm2_block_state_from_init(
+    accounts: impl IntoIterator<
+        Item = (Address, (Option<Account>, Option<Account>, BTreeMap<U256, (U256, U256)>)),
+    >,
+    contracts: impl IntoIterator<Item = (B256, RethBytecode)>,
+) -> FrozenBlockState {
+    let mut accumulator = BlockStateAccumulator::new();
+    for (address, (original, current, storage)) in accounts {
+        accumulator
+            .account(AccountChangeRef {
+                address,
+                original: original.as_ref().map(account_ref_to_info_ref),
+                current: current.as_ref().map(account_ref_to_info_ref),
+            })
+            .expect("infallible");
+        for (slot, (original, current)) in storage {
+            accumulator
+                .storage(StorageChangeRef { address, key: slot, original, current })
+                .expect("infallible");
+        }
+    }
+    for (code_hash, bytecode) in contracts {
+        accumulator
+            .bytecode(code_hash, &Evm2Bytecode::new_raw(bytecode.original_bytes()))
+            .expect("infallible");
+    }
+    accumulator.freeze()
 }
 
 /// Extends an evm2 block-state accumulator with any evm2 state-change source.
@@ -173,7 +203,7 @@ impl<KH> Default for HashedPostStateSink<KH> {
 impl StateChangeSink for StateSizeHintSink {
     type Error = Infallible;
 
-    fn bytecode(&mut self, _code_hash: B256, _code: &Bytecode) -> Result<(), Self::Error> {
+    fn bytecode(&mut self, _code_hash: B256, _code: &Evm2Bytecode) -> Result<(), Self::Error> {
         self.size += 1;
         Ok(())
     }
@@ -197,7 +227,7 @@ impl StateChangeSink for StateSizeHintSink {
 impl StateChangeSink for BlockRevertsSink {
     type Error = Infallible;
 
-    fn bytecode(&mut self, _code_hash: B256, _code: &Bytecode) -> Result<(), Self::Error> {
+    fn bytecode(&mut self, _code_hash: B256, _code: &Evm2Bytecode) -> Result<(), Self::Error> {
         Ok(())
     }
 
@@ -238,7 +268,7 @@ where
 {
     type Error = Infallible;
 
-    fn bytecode(&mut self, _code_hash: B256, _code: &Bytecode) -> Result<(), Self::Error> {
+    fn bytecode(&mut self, _code_hash: B256, _code: &Evm2Bytecode) -> Result<(), Self::Error> {
         Ok(())
     }
 
@@ -274,6 +304,15 @@ fn account_info_ref_to_reth(info: AccountInfoRef<'_>) -> Account {
 
 fn account_info_to_reth(info: &AccountInfo) -> Account {
     account_parts_to_reth(info.nonce, info.balance, info.code_hash)
+}
+
+fn account_ref_to_info_ref(account: &Account) -> AccountInfoRef<'_> {
+    AccountInfoRef {
+        balance: account.balance,
+        nonce: account.nonce,
+        code_hash: account.get_bytecode_hash(),
+        code: None,
+    }
 }
 
 fn account_parts_to_reth(nonce: u64, balance: alloy_primitives::U256, code_hash: B256) -> Account {
@@ -384,7 +423,7 @@ mod serde_impl {
                 balance: value.balance,
                 nonce: value.nonce,
                 code_hash: value.code_hash,
-                code: value.code.as_ref().map(Bytecode::original_bytes),
+                code: value.code.as_ref().map(Evm2Bytecode::original_bytes),
             }
         }
     }
@@ -395,7 +434,7 @@ mod serde_impl {
                 balance: value.balance,
                 nonce: value.nonce,
                 code_hash: value.code_hash,
-                code: value.code.map(Bytecode::new_raw),
+                code: value.code.map(Evm2Bytecode::new_raw),
                 _non_exhaustive: (),
             }
         }
