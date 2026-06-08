@@ -1,6 +1,6 @@
 use crate::{
     evm2_bundle::account_to_info, BlockExecutionOutput, BlockExecutionResult, Evm2BlockReverts,
-    Evm2BundleState, Evm2StorageReverts,
+    Evm2BlockState, Evm2BundleState, Evm2StorageReverts,
 };
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
@@ -166,6 +166,19 @@ impl<T> ExecutionOutcome<T> {
             value.requests.push(result.requests);
         }
         value
+    }
+
+    /// Creates a new `ExecutionOutcome` from evm2 block states and execution results.
+    pub fn from_block_states(
+        first_block: u64,
+        states: impl IntoIterator<Item = Evm2BlockState>,
+        results: Vec<BlockExecutionResult<T>>,
+    ) -> Self {
+        let mut bundle = Evm2BundleState::new(first_block);
+        for (idx, state) in states.into_iter().enumerate() {
+            bundle.extend(Evm2BundleState::from_state_source(first_block + idx as u64, &state));
+        }
+        Self::from_blocks(first_block, bundle, results)
     }
 
     /// Return bundle state.
