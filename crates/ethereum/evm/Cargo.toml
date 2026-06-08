@@ -47,63 +47,6 @@ asm-keccak = [
     "reth-storage-api?/asm-keccak",
     "alloy-primitives/asm-keccak",
 ]
-secp256k1 = [
-    "evm2/secp256k1",
-    "reth-evm/secp256k1",
-    "reth-execution-types/secp256k1",
-    "reth-storage-api?/secp256k1",
-    "reth-primitives-traits/secp256k1",
-    "alloy-consensus/secp256k1",
-    "alloy-primitives/secp256k1",
-]
-gmp = [
-    "evm2/gmp",
-    "reth-evm/gmp",
-    "reth-execution-types/gmp",
-    "reth-storage-api?/gmp",
-]
-bn = [
-    "evm2/bn",
-    "reth-evm/bn",
-    "reth-execution-types/bn",
-    "reth-storage-api?/bn",
-]
-c-kzg = [
-    "evm2/c-kzg",
-    "reth-evm/c-kzg",
-    "reth-execution-types/c-kzg",
-    "reth-storage-api?/c-kzg",
-]
-blst = [
-    "evm2/blst",
-    "reth-evm/blst",
-    "reth-execution-types/blst",
-    "reth-storage-api?/blst",
-]
-bn254-mcl = [
-    "evm2/bn254-mcl",
-    "reth-evm/bn254-mcl",
-    "reth-execution-types/bn254-mcl",
-    "reth-storage-api?/bn254-mcl",
-]
-portable = [
-    "evm2/portable",
-    "reth-evm/portable",
-    "reth-execution-types/portable",
-    "reth-storage-api?/portable",
-]
-p256-aws-lc-rs = [
-    "evm2/p256-aws-lc-rs",
-    "reth-evm/p256-aws-lc-rs",
-    "reth-execution-types/p256-aws-lc-rs",
-    "reth-storage-api?/p256-aws-lc-rs",
-]
-parse = [
-    "evm2/parse",
-    "reth-evm/parse",
-    "reth-execution-types/parse",
-    "reth-storage-api?/parse",
-]
 std = [
     "alloy-consensus/std",
     "alloy-eips/std",
