@@ -20,8 +20,9 @@ use reth_execution_types::Evm2BundleState;
 use reth_primitives_traits::{Account, Bytecode as RethBytecode};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::{
-    updates::TrieUpdates, AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage,
-    KeccakKeyHasher, MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    updates::TrieUpdates, AccountProof, ExecutionWitnessMode, HashedPostState,
+    HashedPostStateSorted, HashedStorage, KeccakKeyHasher, MultiProof, MultiProofTargets,
+    StorageMultiProof, StorageProof, TrieInput,
 };
 
 /// An evm2 [`Database`] implementation backed by a Reth [`StateProvider`].
@@ -221,6 +222,10 @@ impl StateRootProvider for Evm2OverlayStateProvider<'_> {
         self.base.state_root(hashed_state)
     }
 
+    fn state_root_sorted(&self, hashed_state: HashedPostStateSorted) -> ProviderResult<B256> {
+        self.base.state_root_sorted(hashed_state)
+    }
+
     fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
         self.base.state_root_from_nodes(input)
     }
@@ -230,6 +235,13 @@ impl StateRootProvider for Evm2OverlayStateProvider<'_> {
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         self.base.state_root_with_updates(hashed_state)
+    }
+
+    fn state_root_sorted_with_updates(
+        &self,
+        hashed_state: HashedPostStateSorted,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        self.base.state_root_sorted_with_updates(hashed_state)
     }
 
     fn state_root_from_nodes_with_updates(

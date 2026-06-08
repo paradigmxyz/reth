@@ -25,6 +25,7 @@ use reth_evm_ethereum::{
     execute_evm2_block_with_borrowed_state_provider_context, EthEvmConfig,
     Evm2BlockExecutionContext, Evm2BlockSystemCalls,
 };
+use reth_execution_types::evm2_block_state_hashed_post_state_sorted;
 use reth_payload_builder::{BlobSidecars, EthBuiltPayload};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadAttributes as _;
@@ -290,9 +291,8 @@ where
     }
 
     let state_root =
-        state_provider.state_root(reth_execution_types::evm2_state_source_hashed_post_state::<
+        state_provider.state_root_sorted(evm2_block_state_hashed_post_state_sorted::<
             KeccakKeyHasher,
-            _,
         >(&output.state))?;
     let receipts_root =
         reth_ethereum_primitives::calculate_receipt_root_no_memo(&output.result.receipts);
