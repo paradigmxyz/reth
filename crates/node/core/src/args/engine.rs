@@ -283,7 +283,7 @@ impl Default for DefaultEngineValues {
             storage_worker_count: None,
             account_worker_count: None,
             prewarming_threads: None,
-            cache_metrics_disabled: false,
+            cache_metrics_disabled: true,
             sparse_trie_max_hot_slots: DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
             sparse_trie_max_hot_accounts: DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
             slow_block_threshold: None,

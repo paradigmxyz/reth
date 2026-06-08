@@ -228,7 +228,7 @@ impl Default for TreeConfig {
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
             allow_unwind_canonical_header: false,
-            disable_cache_metrics: false,
+            disable_cache_metrics: true,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
             sparse_trie_max_hot_slots: DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
             sparse_trie_max_hot_accounts: DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
