@@ -28,7 +28,6 @@ alloy-eips.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-sol-types.workspace = true
-tracing.workspace = true
 
 metrics = { workspace = true, optional = true }
 reth-metrics = { workspace = true, optional = true }
@@ -67,7 +66,6 @@ std = [
     "dep:reth-storage-api",
     "reth-storage-api/std",
     "alloy-sol-types/std",
-    "tracing/std",
 ]
 test-utils = [
     "std",
