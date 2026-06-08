@@ -42,6 +42,11 @@ use std::sync::{
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
+/// Large BALs already provide deterministic state access for execution and state-root work.
+/// Above this account count, batch-prefetching storage mostly warms a future cache while adding
+/// foreground IO to the current payload.
+const LARGE_BAL_PREFETCH_ACCOUNT_LIMIT: usize = 4_096;
+
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 #[derive(Debug)]
 pub enum PrewarmMode<Tx> {
@@ -394,7 +399,10 @@ where
             let _ = stream_tx.send(());
         }
 
-        if ctx.saved_cache.is_some() && !ctx.disable_bal_batch_io {
+        if ctx.saved_cache.is_some()
+            && !ctx.disable_bal_batch_io
+            && bal.len() <= LARGE_BAL_PREFETCH_ACCOUNT_LIMIT
+        {
             executor.prewarming_pool().spawn(move || {
                 let branch_span = debug_span!(
                     target: "engine::tree::payload_processor::prewarm",
