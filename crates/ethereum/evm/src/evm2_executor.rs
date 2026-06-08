@@ -12,9 +12,10 @@ use evm2::{
     env::BlockEnv,
     ethereum::{ethereum_tx_registry, RecoveredTxEnvelope},
     evm::{
-        AccountInfo, BlockStateAccumulator, Database, Db, DbErrorCode, StateChangeSource,
-        StateChanges, Tracked, BEACON_ROOTS_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS,
-        HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
+        AccountChangeRef, AccountInfo, BlockStateAccumulator, Database, Db, DbErrorCode,
+        StateChangeSink, StateChangeSource, StateChanges, StorageChangeRef, Tracked,
+        BEACON_ROOTS_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS,
+        WITHDRAWAL_REQUEST_ADDRESS,
     },
     registry::HandlerError,
     BaseEvmTypes, Evm, ExecutionConfig, Precompiles, SpecId, TxOutcome, Version,
@@ -27,6 +28,8 @@ use reth_storage_api::{
 };
 #[cfg(feature = "std")]
 use reth_storage_errors::provider::ProviderError;
+#[cfg(feature = "std")]
+use tracing::warn;
 
 /// Error returned by evm2-backed Ethereum execution.
 #[derive(Debug)]
@@ -180,10 +183,26 @@ where
     )?;
     let mut results = Vec::new();
 
-    for transaction in transactions {
+    for (transaction_index, transaction) in transactions.into_iter().enumerate() {
         let tx_type = transaction.inner().tx_type();
         let transaction = evm2_recovered_tx(transaction);
-        let outcome = execute_transaction::<DB>(&mut evm, &mut block_state, &transaction)?;
+        let outcome = execute_transaction::<DB>(
+            &mut evm,
+            &mut block_state,
+            &transaction,
+            block_number,
+            transaction_index,
+        )?;
+        #[cfg(feature = "std")]
+        if should_log_tx_diagnostics(block_number, transaction_index) {
+            warn!(
+                target: "reth::evm2::diagnostics",
+                block_number,
+                transaction_index,
+                gas_used = outcome.gas_used,
+                "evm2 transaction diagnostic"
+            );
+        }
         results.push((tx_type, outcome));
     }
 
@@ -324,6 +343,8 @@ fn execute_transaction<DB>(
     evm: &mut Evm<BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     transaction: &RecoveredTxEnvelope,
+    block_number: u64,
+    transaction_index: usize,
 ) -> Result<TxOutcome, Evm2ExecutionError<DB::Error>>
 where
     DB: Database + 'static,
@@ -339,6 +360,23 @@ where
             if let Some(code) = executed.outcome().db_error_code {
                 executed.discard();
                 TransactionResolution::DatabaseError(code)
+            } else if should_log_tx_diagnostics(block_number, transaction_index) {
+                #[cfg(feature = "std")]
+                {
+                    let mut sink = DiagnosticStateChangeSink {
+                        inner: block_state,
+                        block_number,
+                        transaction_index,
+                    };
+                    match executed.commit_with(&mut sink) {
+                        Ok(outcome) => TransactionResolution::Outcome(outcome),
+                        Err(err) => match err {},
+                    }
+                }
+                #[cfg(not(feature = "std"))]
+                {
+                    TransactionResolution::Outcome(executed.commit_to(block_state))
+                }
             } else {
                 TransactionResolution::Outcome(executed.commit_to(block_state))
             }
@@ -350,6 +388,80 @@ where
         TransactionResolution::Outcome(outcome) => Ok(outcome),
         TransactionResolution::DatabaseError(code) => Err(map_db_error_code::<DB>(evm, code)),
         TransactionResolution::HandlerError(err) => Err(map_handler_error::<DB>(evm, err)),
+    }
+}
+
+fn should_log_tx_diagnostics(block_number: u64, transaction_index: usize) -> bool {
+    block_number == 25_266_573 && transaction_index == 131
+}
+
+#[cfg(feature = "std")]
+struct DiagnosticStateChangeSink<'a> {
+    inner: &'a mut BlockStateAccumulator,
+    block_number: u64,
+    transaction_index: usize,
+}
+
+#[cfg(feature = "std")]
+impl StateChangeSink for DiagnosticStateChangeSink<'_> {
+    type Error = core::convert::Infallible;
+
+    fn bytecode(
+        &mut self,
+        code_hash: B256,
+        code: &evm2::bytecode::Bytecode,
+    ) -> Result<(), Self::Error> {
+        warn!(
+            target: "reth::evm2::diagnostics",
+            block_number = self.block_number,
+            transaction_index = self.transaction_index,
+            ?code_hash,
+            code_len = code.original_bytes().len(),
+            "evm2 tx state bytecode"
+        );
+        self.inner.bytecode(code_hash, code)
+    }
+
+    fn account(&mut self, change: AccountChangeRef<'_>) -> Result<(), Self::Error> {
+        warn!(
+            target: "reth::evm2::diagnostics",
+            block_number = self.block_number,
+            transaction_index = self.transaction_index,
+            address = ?change.address,
+            original_nonce = change.original.as_ref().map(|account| account.nonce),
+            current_nonce = change.current.as_ref().map(|account| account.nonce),
+            original_balance = ?change.original.as_ref().map(|account| account.balance),
+            current_balance = ?change.current.as_ref().map(|account| account.balance),
+            original_code_hash = ?change.original.as_ref().map(|account| account.code_hash),
+            current_code_hash = ?change.current.as_ref().map(|account| account.code_hash),
+            "evm2 tx state account"
+        );
+        self.inner.account(change)
+    }
+
+    fn storage_wipe(&mut self, address: Address) -> Result<(), Self::Error> {
+        warn!(
+            target: "reth::evm2::diagnostics",
+            block_number = self.block_number,
+            transaction_index = self.transaction_index,
+            ?address,
+            "evm2 tx state storage wipe"
+        );
+        self.inner.storage_wipe(address)
+    }
+
+    fn storage(&mut self, change: StorageChangeRef) -> Result<(), Self::Error> {
+        warn!(
+            target: "reth::evm2::diagnostics",
+            block_number = self.block_number,
+            transaction_index = self.transaction_index,
+            address = ?change.address,
+            key = ?change.key,
+            original = ?change.original,
+            current = ?change.current,
+            "evm2 tx state storage"
+        );
+        self.inner.storage(change)
     }
 }
 
