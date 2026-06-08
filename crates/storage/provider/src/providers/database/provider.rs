@@ -119,7 +119,12 @@ pub(crate) fn evm2_block_state_and_reverts_to_plain_state_and_reverts(
                 .accounts
                 .iter()
                 .map(|(address, account)| {
-                    (*address, account.as_ref().map(evm2_account_info_to_reth))
+                    (
+                        *address,
+                        account
+                            .as_ref()
+                            .map(|account| evm2_account_info_to_reth(&account.to_account_info())),
+                    )
                 })
                 .collect(),
         );

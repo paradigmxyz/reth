@@ -19,9 +19,10 @@ use reth_trie_common::{
 
 /// Reverts for one block of evm2 state changes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Evm2BlockReverts {
     /// Original accounts before the block changed them.
-    pub accounts: AddressMap<Option<AccountInfo>>,
+    pub accounts: AddressMap<Option<Evm2RevertAccount>>,
     /// Original storage before the block changed it.
     pub storage: AddressMap<Evm2StorageReverts>,
 }
@@ -34,8 +35,70 @@ impl Evm2BlockReverts {
     }
 }
 
+/// Serializable account information used by block reverts.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Evm2RevertAccount {
+    /// Account balance.
+    pub balance: U256,
+    /// Account nonce.
+    pub nonce: u64,
+    /// Hash of the account bytecode, or the empty code hash.
+    pub code_hash: B256,
+    /// Optional account bytecode.
+    pub code: Option<Evm2Bytecode>,
+}
+
+impl Evm2RevertAccount {
+    /// Converts this account into evm2 account info.
+    pub fn to_account_info(&self) -> AccountInfo {
+        AccountInfo {
+            balance: self.balance,
+            nonce: self.nonce,
+            code_hash: self.code_hash,
+            code: self.code.clone(),
+            _non_exhaustive: (),
+        }
+    }
+}
+
+impl From<AccountInfo> for Evm2RevertAccount {
+    fn from(value: AccountInfo) -> Self {
+        Self {
+            balance: value.balance,
+            nonce: value.nonce,
+            code_hash: value.code_hash,
+            code: value.code,
+        }
+    }
+}
+
+impl From<AccountInfoRef<'_>> for Evm2RevertAccount {
+    fn from(value: AccountInfoRef<'_>) -> Self {
+        Self {
+            balance: value.balance,
+            nonce: value.nonce,
+            code_hash: value.code_hash,
+            code: value.code.cloned(),
+        }
+    }
+}
+
+impl From<Evm2RevertAccount> for AccountInfo {
+    fn from(value: Evm2RevertAccount) -> Self {
+        Self {
+            balance: value.balance,
+            nonce: value.nonce,
+            code_hash: value.code_hash,
+            code: value.code,
+            _non_exhaustive: (),
+        }
+    }
+}
+
 /// Storage reverts for one account in one block.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Evm2StorageReverts {
     /// Whether the block wiped the account storage.
     pub wiped: bool,
@@ -235,7 +298,7 @@ impl StateChangeSink for BlockRevertsSink {
         self.reverts
             .accounts
             .entry(change.address)
-            .or_insert_with(|| change.original.map(AccountInfoRef::to_account_info));
+            .or_insert_with(|| change.original.map(Evm2RevertAccount::from));
         Ok(())
     }
 
@@ -318,127 +381,6 @@ fn account_ref_to_info_ref(account: &Account) -> AccountInfoRef<'_> {
 fn account_parts_to_reth(nonce: u64, balance: alloy_primitives::U256, code_hash: B256) -> Account {
     let bytecode_hash = (!code_hash.is_zero() && code_hash != KECCAK_EMPTY).then_some(code_hash);
     Account { nonce, balance, bytecode_hash }
-}
-
-#[cfg(feature = "serde")]
-mod serde_impl {
-    use super::*;
-    use alloy_primitives::Bytes;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    #[derive(Serialize, Deserialize)]
-    struct BlockRevertsSerde {
-        accounts: AddressMap<Option<AccountInfoSerde>>,
-        storage: AddressMap<StorageRevertsSerde>,
-    }
-
-    #[derive(Serialize, Deserialize)]
-    struct StorageRevertsSerde {
-        wiped: bool,
-        previous_wipe: bool,
-        slots: alloc::collections::BTreeMap<U256, U256>,
-    }
-
-    #[derive(Serialize, Deserialize)]
-    struct AccountInfoSerde {
-        balance: U256,
-        nonce: u64,
-        code_hash: B256,
-        code: Option<Bytes>,
-    }
-
-    impl Serialize for Evm2BlockReverts {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
-        {
-            BlockRevertsSerde::from(self).serialize(serializer)
-        }
-    }
-
-    impl<'de> Deserialize<'de> for Evm2BlockReverts {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            BlockRevertsSerde::deserialize(deserializer).map(Into::into)
-        }
-    }
-
-    impl From<&Evm2BlockReverts> for BlockRevertsSerde {
-        fn from(value: &Evm2BlockReverts) -> Self {
-            Self {
-                accounts: value
-                    .accounts
-                    .iter()
-                    .map(|(address, account)| {
-                        (*address, account.as_ref().map(AccountInfoSerde::from))
-                    })
-                    .collect(),
-                storage: value
-                    .storage
-                    .iter()
-                    .map(|(address, storage)| (*address, StorageRevertsSerde::from(storage)))
-                    .collect(),
-            }
-        }
-    }
-
-    impl From<BlockRevertsSerde> for Evm2BlockReverts {
-        fn from(value: BlockRevertsSerde) -> Self {
-            Self {
-                accounts: value
-                    .accounts
-                    .into_iter()
-                    .map(|(address, account)| (address, account.map(Into::into)))
-                    .collect(),
-                storage: value
-                    .storage
-                    .into_iter()
-                    .map(|(address, storage)| (address, storage.into()))
-                    .collect(),
-            }
-        }
-    }
-
-    impl From<&Evm2StorageReverts> for StorageRevertsSerde {
-        fn from(value: &Evm2StorageReverts) -> Self {
-            Self {
-                wiped: value.wiped,
-                previous_wipe: value.previous_wipe,
-                slots: value.slots.clone(),
-            }
-        }
-    }
-
-    impl From<StorageRevertsSerde> for Evm2StorageReverts {
-        fn from(value: StorageRevertsSerde) -> Self {
-            Self { wiped: value.wiped, previous_wipe: value.previous_wipe, slots: value.slots }
-        }
-    }
-
-    impl From<&AccountInfo> for AccountInfoSerde {
-        fn from(value: &AccountInfo) -> Self {
-            Self {
-                balance: value.balance,
-                nonce: value.nonce,
-                code_hash: value.code_hash,
-                code: value.code.as_ref().map(Evm2Bytecode::original_bytes),
-            }
-        }
-    }
-
-    impl From<AccountInfoSerde> for AccountInfo {
-        fn from(value: AccountInfoSerde) -> Self {
-            Self {
-                balance: value.balance,
-                nonce: value.nonce,
-                code_hash: value.code_hash,
-                code: value.code.map(Evm2Bytecode::new_raw),
-                _non_exhaustive: (),
-            }
-        }
-    }
 }
 
 #[cfg(test)]

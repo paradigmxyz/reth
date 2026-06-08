@@ -11,7 +11,8 @@ use alloy_primitives::Signature;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices, tables};
 use reth_ethereum_primitives::{BlockBody, Receipt, Transaction, TransactionSigned, TxType};
 use reth_execution_types::{
-    evm2_block_state_from_init, Evm2AccountInfo, Evm2BlockReverts, Evm2StorageReverts,
+    evm2_block_state_from_init, Evm2AccountInfo, Evm2BlockReverts, Evm2RevertAccount,
+    Evm2StorageReverts,
 };
 use reth_node_types::NodeTypes;
 use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock, SealedHeader};
@@ -289,12 +290,11 @@ fn block2(
     let block_reverts = vec![Evm2BlockReverts {
         accounts: HashMap::from_iter([(
             account,
-            Some(Evm2AccountInfo {
+            Some(Evm2RevertAccount {
                 nonce: 1,
                 balance: U256::from(10),
                 code_hash: alloy_primitives::KECCAK256_EMPTY,
                 code: None,
-                _non_exhaustive: (),
             }),
         )]),
         storage: HashMap::from_iter([(
@@ -440,12 +440,11 @@ fn block4(
         ));
         block_reverts.accounts.insert(
             address,
-            Some(Evm2AccountInfo {
+            Some(Evm2RevertAccount {
                 nonce: 1,
                 balance: U256::from(idx),
                 code_hash: alloy_primitives::KECCAK256_EMPTY,
                 code: None,
-                _non_exhaustive: (),
             }),
         );
         block_reverts.storage.insert(
@@ -531,12 +530,11 @@ fn block5(
         if idx.is_multiple_of(2) {
             block_reverts.accounts.insert(
                 address,
-                Some(Evm2AccountInfo {
+                Some(Evm2RevertAccount {
                     nonce: 1,
                     balance: U256::from(idx * 2),
                     code_hash: alloy_primitives::KECCAK256_EMPTY,
                     code: None,
-                    _non_exhaustive: (),
                 }),
             );
             block_reverts.storage.insert(

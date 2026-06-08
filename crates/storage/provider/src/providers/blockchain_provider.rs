@@ -812,7 +812,7 @@ mod tests {
     use reth_ethereum_primitives::{Block, Receipt};
     use reth_execution_types::{
         evm2_block_state_from_init, BlockExecutionOutput, BlockExecutionResult, Chain,
-        Evm2AccountInfo, Evm2BlockReverts, ExecutionOutcome,
+        Evm2BlockReverts, Evm2RevertAccount, ExecutionOutcome,
     };
     use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock, SignerRecoverable};
     use reth_storage_api::{
@@ -869,13 +869,12 @@ mod tests {
         (database_blocks.to_vec(), in_memory_blocks.to_vec())
     }
 
-    fn account_to_evm2(account: Account) -> Evm2AccountInfo {
-        Evm2AccountInfo {
+    fn account_to_revert(account: Account) -> Evm2RevertAccount {
+        Evm2RevertAccount {
             balance: account.balance,
             nonce: account.nonce,
             code_hash: account.bytecode_hash.unwrap_or(KECCAK256_EMPTY),
             code: None,
-            _non_exhaustive: (),
         }
     }
 
@@ -1712,7 +1711,7 @@ mod tests {
                     .map(|block_changesets| {
                         let mut accounts = AddressMap::default();
                         for (address, account, _) in block_changesets {
-                            accounts.insert(*address, Some(account_to_evm2(*account)));
+                            accounts.insert(*address, Some(account_to_revert(*account)));
                         }
                         Evm2BlockReverts { accounts, storage: AddressMap::default() }
                     })

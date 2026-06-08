@@ -1,7 +1,7 @@
 use crate::{
     evm2_block_reverts_from_state_source, evm2_block_state_accumulator_extend,
     evm2_state_source_hashed_post_state, BlockExecutionOutput, BlockExecutionResult,
-    Evm2BlockReverts, Evm2BlockState, Evm2StorageReverts,
+    Evm2BlockReverts, Evm2BlockState, Evm2RevertAccount, Evm2StorageReverts,
 };
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
@@ -177,7 +177,7 @@ impl<T> ExecutionOutcome<T> {
                 accounts: reverts
                     .iter()
                     .filter_map(|(address, (original, _))| {
-                        original.map(|account| (*address, account.map(account_to_info)))
+                        original.map(|account| (*address, account.map(account_to_revert)))
                     })
                     .collect(),
                 storage: reverts
@@ -606,13 +606,12 @@ fn account_info_ref_from_reth(account: &Account) -> AccountInfoRef<'_> {
     }
 }
 
-fn account_to_info(account: Account) -> AccountInfo {
-    AccountInfo {
+fn account_to_revert(account: Account) -> Evm2RevertAccount {
+    Evm2RevertAccount {
         balance: account.balance,
         nonce: account.nonce,
         code_hash: account.get_bytecode_hash(),
         code: None,
-        _non_exhaustive: (),
     }
 }
 
@@ -624,6 +623,9 @@ fn account_info_to_reth(info: &AccountInfo) -> Account {
 
 #[cfg(any(feature = "serde", feature = "serde-bincode-compat"))]
 mod serde_state {
+    // `FrozenBlockState` lives in evm2 with private fields and does not currently implement
+    // serde. Until evm2 exposes serde derives for it upstream, this adapter is the narrow
+    // boundary that serializes it through the public `StateChangeSource` stream.
     use super::*;
     use alloy_primitives::Bytes;
     use evm2::{bytecode::Bytecode as Evm2Bytecode, evm::StateChangeSource};
@@ -631,7 +633,7 @@ mod serde_state {
 
     #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
     pub(super) struct BlockStateSerde {
-        accounts: AddressMap<TrackedSerde<Option<AccountInfoSerde>>>,
+        accounts: AddressMap<TrackedSerde<Option<Evm2RevertAccount>>>,
         storage: AddressMap<StorageChangeSetSerde>,
         contracts: B256Map<Bytes>,
     }
@@ -646,14 +648,6 @@ mod serde_state {
     struct TrackedSerde<T> {
         original: T,
         current: T,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-    struct AccountInfoSerde {
-        balance: U256,
-        nonce: u64,
-        code_hash: B256,
-        code: Option<Bytes>,
     }
 
     impl From<&Evm2BlockState> for BlockStateSerde {
@@ -691,8 +685,8 @@ mod serde_state {
                 }
             }
             for (address, account) in value.accounts {
-                let original = account.original.map(AccountInfo::from);
-                let current = account.current.map(AccountInfo::from);
+                let original = account.original.map(|account| account.to_account_info());
+                let current = account.current.map(|account| account.to_account_info());
                 accumulator
                     .account(AccountChangeRef {
                         address,
@@ -732,8 +726,8 @@ mod serde_state {
             self.state.accounts.insert(
                 change.address,
                 TrackedSerde {
-                    original: change.original.map(AccountInfoSerde::from),
-                    current: change.current.map(AccountInfoSerde::from),
+                    original: change.original.map(Evm2RevertAccount::from),
+                    current: change.current.map(Evm2RevertAccount::from),
                 },
             );
             Ok(())
@@ -759,29 +753,6 @@ mod serde_state {
             nonce: info.nonce,
             code_hash: info.code_hash,
             code: info.code.as_ref(),
-        }
-    }
-
-    impl From<AccountInfoRef<'_>> for AccountInfoSerde {
-        fn from(value: AccountInfoRef<'_>) -> Self {
-            Self {
-                balance: value.balance,
-                nonce: value.nonce,
-                code_hash: value.code_hash,
-                code: value.code.map(Evm2Bytecode::original_bytes),
-            }
-        }
-    }
-
-    impl From<AccountInfoSerde> for AccountInfo {
-        fn from(value: AccountInfoSerde) -> Self {
-            Self {
-                balance: value.balance,
-                nonce: value.nonce,
-                code_hash: value.code_hash,
-                code: value.code.map(Evm2Bytecode::new_raw),
-                _non_exhaustive: (),
-            }
         }
     }
 }
