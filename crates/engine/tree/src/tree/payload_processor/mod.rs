@@ -864,7 +864,7 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
 /// Handle to all the spawned tasks.
 ///
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the
-/// caching task without cloning the expensive bundle state.
+/// caching task without cloning the expensive execution state.
 #[derive(Debug)]
 pub struct PayloadHandle<Tx, Err, R> {
     /// Handle to the background state root computation, if spawned.
@@ -960,8 +960,8 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     /// Terminates the entire caching task.
     ///
     /// If the [`BlockExecutionOutput`] is provided it will update the shared cache using its
-    /// bundle state. Using `Arc<ExecutionOutcome>` allows sharing with the main execution
-    /// path without cloning the expensive bundle state.
+    /// execution state. Using `Arc<ExecutionOutcome>` allows sharing with the main execution
+    /// path without cloning the expensive execution state.
     ///
     /// Returns a sender for the channel that should be notified on block validation success.
     pub fn terminate_caching(
@@ -990,7 +990,7 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 /// Access to the spawned [`PrewarmCacheTask`].
 ///
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the
-/// prewarm task without cloning the expensive bundle state.
+/// prewarm task without cloning the expensive execution state.
 #[derive(Debug)]
 pub struct CacheTaskHandle<R> {
     /// The shared cache the task operates with.
@@ -1017,7 +1017,7 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
     /// Terminates the entire pre-warming task.
     ///
     /// If the [`BlockExecutionOutput`] is provided it will update the shared cache using its
-    /// bundle state. Using `Arc<ExecutionOutcome>` avoids cloning the expensive bundle state.
+    /// execution state. Using `Arc<ExecutionOutcome>` avoids cloning the expensive execution state.
     #[must_use = "sender must be used and notified on block validation success"]
     pub fn terminate_caching(
         &mut self,

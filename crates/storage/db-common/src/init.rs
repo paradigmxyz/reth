@@ -27,7 +27,7 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileWriter, BlockHashReader, BlockNumReader,
-    BundleStateInit, ChainSpecProvider, DBProvider, DatabaseProviderFactory, ExecutionOutcome,
+    ChainSpecProvider, DBProvider, DatabaseProviderFactory, ExecutionOutcome, ExecutionStateInit,
     HashingWriter, HeaderProvider, HistoryWriter, MetadataProvider, MetadataWriter,
     NodePrimitivesProvider, OriginalValuesKnown, ProviderError, RevertsInit,
     RocksDBProviderFactory, StageCheckpointReader, StageCheckpointWriter, StateWriteConfig,
@@ -361,7 +361,7 @@ where
         + AsRef<Provider>,
 {
     let capacity = alloc.size_hint().1.unwrap_or(0);
-    let mut state_init: BundleStateInit =
+    let mut state_init: ExecutionStateInit =
         AddressMap::with_capacity_and_hasher(capacity, Default::default());
     let mut reverts_init: AddressMap<_> =
         AddressMap::with_capacity_and_hasher(capacity, Default::default());
@@ -672,7 +672,7 @@ fn parse_accounts(
 /// Takes a [`Collector`] and writes all accounts directly to database tables.
 ///
 /// This bypasses the higher-level `insert_state`/`insert_genesis_hashes`/`insert_history`
-/// functions which build intermediate structures (`BundleStateInit`, `RevertsInit`,
+/// functions which build intermediate structures (`ExecutionStateInit`, `RevertsInit`,
 /// `ExecutionOutcome`) that duplicate all storage data 2-3x in memory. For accounts with
 /// millions of storage entries this causes OOM.
 ///

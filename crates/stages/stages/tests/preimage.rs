@@ -178,12 +178,12 @@ async fn test_pipeline_v2_single_batch_write_then_selfdestruct_changesets_plain_
 }
 
 /// Scenario coverage:
-/// 1. A slot appears only in intermediate reverts (not final bundle state).
+/// 1. A slot appears only in intermediate reverts (not final execution state).
 /// 2. A later block in the same execution batch wipes the account.
 /// 3. Wipe changesets still contain the required plain slot key/value.
 ///
 /// Covers the edge case where a slot appears in intermediate block reverts but not in the final
-/// bundle state, then gets wiped by a later selfdestruct in the same execution batch.
+/// execution state, then gets wiped by a later selfdestruct in the same execution batch.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_pipeline_v2_single_batch_reverted_slot_then_selfdestruct_changesets_plain_slots(
 ) -> eyre::Result<()> {

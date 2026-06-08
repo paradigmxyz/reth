@@ -800,8 +800,8 @@ mod tests {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = vec![vec![receipt1.clone()], vec![receipt2]];
 
-        // Create an ExecutionOutcome object with the created bundle, receipts, an empty requests
-        // vector, and first_block set to 10
+        // Create an ExecutionOutcome object with the created execution outcome, receipts, an empty
+        // requests vector, and first_block set to 10
         let execution_outcome = ExecutionOutcome::new_empty(10).with_receipts(receipts);
 
         // Create a Chain object with a BTreeMap of blocks mapped to their block numbers,

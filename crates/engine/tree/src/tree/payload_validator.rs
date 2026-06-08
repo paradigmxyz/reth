@@ -692,7 +692,7 @@ where
 
         // Create ExecutionOutcome early so we can terminate caching before validation and state
         // root computation. Using Arc allows sharing with both the caching task and the deferred
-        // trie task without cloning the expensive bundle state.
+        // trie task without cloning the expensive execution state.
         let output = Arc::new(output);
 
         // Terminate caching task early since execution is complete and caching is no longer

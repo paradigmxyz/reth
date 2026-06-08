@@ -11,10 +11,10 @@ use crate::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
-    BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
-    DBProvider, EitherReader, EitherWriter, EitherWriterDestination, HashingWriter, HeaderProvider,
-    HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
-    LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
+    BlockReader, BlockWriter, ChainStateBlockReader, ChainStateBlockWriter, DBProvider,
+    EitherReader, EitherWriter, EitherWriterDestination, ExecutionStateInit, HashingWriter,
+    HeaderProvider, HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef,
+    HistoryWriter, LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
     PruneCheckpointReader, PruneCheckpointWriter, RawRocksDBBatch, RevertsInit, RocksBatchArg,
     RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateWriter,
     StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
@@ -1393,20 +1393,20 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         })
     }
 
-    /// Populate a [`BundleStateInit`] and [`RevertsInit`] using cursors over the
+    /// Populate a [`ExecutionStateInit`] and [`RevertsInit`] using cursors over the
     /// [`tables::PlainAccountState`] and [`tables::PlainStorageState`] tables, based on the given
     /// storage and account changesets.
-    fn populate_bundle_state(
+    fn populate_execution_state(
         &self,
         account_changeset: Vec<(u64, AccountBeforeTx)>,
         storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
         mut get_account: impl FnMut(Address) -> ProviderResult<Option<Account>>,
         mut get_storage: impl FnMut(Address, StorageKey) -> ProviderResult<Option<StorageValue>>,
-    ) -> ProviderResult<(BundleStateInit, RevertsInit)> {
+    ) -> ProviderResult<(ExecutionStateInit, RevertsInit)> {
         // iterate previous value and get plain state value to create changeset
         // Double option around Account represent if Account state is know (first option) and
         // account is removed (Second Option)
-        let mut state: BundleStateInit = HashMap::default();
+        let mut state: ExecutionStateInit = HashMap::default();
 
         // This is not working for blocks that are not at tip. as plain state is not the last
         // state of end range. We should rename the functions or add support to access
@@ -1467,16 +1467,16 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         Ok((state, reverts))
     }
 
-    /// Invokes [`populate_bundle_state`](Self::populate_bundle_state) with the given plain state
-    /// cursors.
-    fn populate_bundle_state_plain(
+    /// Invokes [`populate_execution_state`](Self::populate_execution_state) with the given plain
+    /// state cursors.
+    fn populate_execution_state_plain(
         &self,
         account_changeset: Vec<(u64, AccountBeforeTx)>,
         storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
         plain_accounts_cursor: &mut impl DbCursorRO<tables::PlainAccountState>,
         plain_storage_cursor: &mut impl DbDupCursorRO<tables::PlainStorageState>,
-    ) -> ProviderResult<(BundleStateInit, RevertsInit)> {
-        self.populate_bundle_state(
+    ) -> ProviderResult<(ExecutionStateInit, RevertsInit)> {
+        self.populate_execution_state(
             account_changeset,
             storage_changeset,
             |address| Ok(plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1)),
@@ -1489,18 +1489,18 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         )
     }
 
-    /// Like [`populate_bundle_state`](Self::populate_bundle_state), but reads current values from
-    /// `HashedAccounts`/`HashedStorages`. Addresses and storage keys are hashed via `keccak256`
-    /// for DB lookups. The output `BundleStateInit`/`RevertsInit` structures remain keyed by
-    /// plain address and plain storage key.
-    fn populate_bundle_state_hashed(
+    /// Like [`populate_execution_state`](Self::populate_execution_state), but reads current values
+    /// from `HashedAccounts`/`HashedStorages`. Addresses and storage keys are hashed via
+    /// `keccak256` for DB lookups. The output `ExecutionStateInit`/`RevertsInit` structures
+    /// remain keyed by plain address and plain storage key.
+    fn populate_execution_state_hashed(
         &self,
         account_changeset: Vec<(u64, AccountBeforeTx)>,
         storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
         hashed_accounts_cursor: &mut impl DbCursorRO<tables::HashedAccounts>,
         hashed_storage_cursor: &mut impl DbDupCursorRO<tables::HashedStorages>,
-    ) -> ProviderResult<(BundleStateInit, RevertsInit)> {
-        self.populate_bundle_state(
+    ) -> ProviderResult<(ExecutionStateInit, RevertsInit)> {
+        self.populate_execution_state(
             account_changeset,
             storage_changeset,
             |address| Ok(hashed_accounts_cursor.seek_exact(keccak256(address))?.map(|kv| kv.1)),
@@ -1514,13 +1514,13 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         )
     }
 
-    fn populate_bundle_state_with_provider(
+    fn populate_execution_state_with_provider(
         &self,
         account_changeset: Vec<(u64, AccountBeforeTx)>,
         storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
         state_provider: impl StateProvider,
-    ) -> ProviderResult<(BundleStateInit, RevertsInit)> {
-        self.populate_bundle_state(
+    ) -> ProviderResult<(ExecutionStateInit, RevertsInit)> {
+        self.populate_execution_state(
             account_changeset,
             storage_changeset,
             |address| state_provider.basic_account(&address),
@@ -1807,7 +1807,7 @@ impl<Tx: DbTx + 'static, N: NodeTypesForProvider> StateReader for DatabaseProvid
 
         let Some(block_hash) = self.block_hash(block)? else { return Ok(None) };
         let state_provider = self.history_by_block_hash(block_hash)?;
-        let (state, reverts) = self.populate_bundle_state_with_provider(
+        let (state, reverts) = self.populate_execution_state_with_provider(
             account_changeset,
             storage_changeset,
             state_provider,
@@ -2941,7 +2941,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
             let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
 
-            let (state, _) = self.populate_bundle_state_hashed(
+            let (state, _) = self.populate_execution_state_hashed(
                 account_changeset,
                 storage_changeset,
                 &mut hashed_accounts_cursor,
@@ -2985,7 +2985,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             let mut plain_storage_cursor =
                 self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
 
-            let (state, _) = self.populate_bundle_state_plain(
+            let (state, _) = self.populate_execution_state_plain(
                 account_changeset,
                 storage_changeset,
                 &mut plain_accounts_cursor,
@@ -3104,7 +3104,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
             let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
 
-            let (state, reverts) = self.populate_bundle_state_hashed(
+            let (state, reverts) = self.populate_execution_state_hashed(
                 account_changeset,
                 storage_changeset,
                 &mut hashed_accounts_cursor,
@@ -3150,7 +3150,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             let mut plain_storage_cursor =
                 self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
 
-            let (state, reverts) = self.populate_bundle_state_plain(
+            let (state, reverts) = self.populate_execution_state_plain(
                 account_changeset,
                 storage_changeset,
                 &mut plain_accounts_cursor,
@@ -3858,7 +3858,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
 
         let mut durations_recorder = metrics::DurationsRecorder::new(&self.metrics);
 
-        // Extract account and storage transitions from the bundle reverts BEFORE writing state.
+        // Extract account and storage transitions from the block reverts BEFORE writing state.
         // This is necessary because with edge storage, changesets are written to static files
         // whose index isn't updated until commit, making them invisible to subsequent reads
         // within the same transaction.
@@ -4933,7 +4933,7 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
 
-        let mut state_init: BundleStateInit = AddressMap::default();
+        let mut state_init: ExecutionStateInit = AddressMap::default();
         let mut storage_map: B256Map<(U256, U256)> = B256Map::default();
         storage_map.insert(slot_key, (U256::ZERO, U256::from(10)));
         state_init.insert(

@@ -18,7 +18,7 @@ type CollectionResult =
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
 struct BlockStateSorted {
-    pub state: BTreeMap<Address, BundleAccountSorted>,
+    pub state: BTreeMap<Address, StateAccountSorted>,
     pub contracts: BTreeMap<B256, Bytes>,
     pub storage_wipes: Vec<Address>,
     pub storage: BTreeMap<Address, BTreeMap<U256, StorageDeltaSorted>>,
@@ -32,7 +32,7 @@ struct StorageDeltaSorted {
 
 /// Serializable version of an evm2 tracked account.
 #[derive(Debug, PartialEq, Eq, Serialize)]
-struct BundleAccountSorted {
+struct StateAccountSorted {
     pub current: Option<AccountInfoSorted>,
     pub original: Option<AccountInfoSorted>,
 }
@@ -63,7 +63,7 @@ fn sort_block_state_for_comparison(block_state: &Evm2BlockState) -> BlockStateSo
             .map(|(addr, acc)| {
                 (
                     addr,
-                    BundleAccountSorted {
+                    StateAccountSorted {
                         current: acc.current.as_ref().map(account_info_sorted),
                         original: acc.original.as_ref().map(account_info_sorted),
                     },
@@ -184,10 +184,10 @@ where
             .evm_config
             .execute_evm2_block_with_state_provider_ref(&*state_provider, block)
             .map_err(|err| eyre::eyre!(err.to_string()))?;
-        let (codes, preimages, hashed_state, bundle_state) = collect_execution_data(output.state)?;
+        let (codes, preimages, hashed_state, block_state) = collect_execution_data(output.state)?;
         let witness = generate(codes, preimages, hashed_state, state_provider)?;
 
-        Ok((witness, bundle_state))
+        Ok((witness, block_state))
     }
 
     /// Handles witness generation, saving, and comparison with healthy node
@@ -240,11 +240,11 @@ where
             let output_state_sorted = sort_block_state_for_comparison(original_state);
             let original_path = self.save_file(original_filename, &output_state_sorted)?;
             let re_executed_filename = format!("{}.block_state.re_executed.json", block_prefix);
-            let bundle_state_sorted = sort_block_state_for_comparison(re_executed_state);
-            let re_executed_path = self.save_file(re_executed_filename, &bundle_state_sorted)?;
+            let block_state_sorted = sort_block_state_for_comparison(re_executed_state);
+            let re_executed_path = self.save_file(re_executed_filename, &block_state_sorted)?;
 
             let filename = format!("{}.block_state.diff", block_prefix);
-            let diff_path = self.save_diff(filename, &output_state_sorted, &bundle_state_sorted)?;
+            let diff_path = self.save_diff(filename, &output_state_sorted, &block_state_sorted)?;
 
             warn!(
                 target: "engine::invalid_block_hooks::witness",
@@ -390,7 +390,7 @@ mod tests {
     /// Creates a test block state with realistic accounts and contracts.
     fn create_block_state() -> Evm2BlockState {
         let mut rng = generators::rng();
-        let mut bundle_accounts = Vec::new();
+        let mut state_accounts = Vec::new();
 
         // Generate realistic EOA accounts using generators
         let accounts = random_eoa_accounts(&mut rng, 3);
@@ -407,7 +407,7 @@ mod tests {
                 bytecode_hash: account.bytecode_hash,
             });
 
-            bundle_accounts.push((addr, (original, Some(account), storage)));
+            state_accounts.push((addr, (original, Some(account), storage)));
         }
 
         // Generate realistic contract bytecode using generators
@@ -420,7 +420,7 @@ mod tests {
             (B256::random(), RethBytecode::new_raw(bytecode))
         });
 
-        evm2_block_state_from_init(bundle_accounts, contracts)
+        evm2_block_state_from_init(state_accounts, contracts)
     }
 
     #[test]
@@ -442,7 +442,7 @@ mod tests {
 
         // Verify that the state accounts have the expected structure
         for account_data in sorted.state.values() {
-            // BundleAccountSorted has current and original account info fields.
+            // StateAccountSorted has current and original account info fields.
             // Just verify the structure exists by accessing the fields
             let _current = &account_data.current;
             let _original = &account_data.original;

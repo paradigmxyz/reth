@@ -167,7 +167,7 @@ pub fn genesis() -> SealedBlock<reth_ethereum_primitives::Block> {
     )
 }
 
-fn bundle_state_root(execution_outcome: &ExecutionOutcome) -> B256 {
+fn execution_state_root(execution_outcome: &ExecutionOutcome) -> B256 {
     let block_state = execution_outcome.evm2_block_state();
     state_root_unhashed(block_state.accounts().filter_map(|(address, account)| {
         account.current.as_ref().map(|info| {
@@ -249,7 +249,7 @@ fn block1(
         }],
     );
 
-    let state_root = bundle_state_root(&execution_outcome);
+    let state_root = execution_state_root(&execution_outcome);
     assert_eq!(
         state_root,
         b256!("0x5d035ccb3e75a9057452ff060b773b213ec1fc353426174068edfc3971a0b6bd")
@@ -325,7 +325,7 @@ fn block2(
 
     let mut extended = prev_execution_outcome.clone();
     extended.extend(execution_outcome.clone());
-    let state_root = bundle_state_root(&extended);
+    let state_root = execution_state_root(&extended);
     assert_eq!(
         state_root,
         b256!("0x90101a13dd059fa5cca99ed93d1dc23657f63626c5b8f993a2ccbdf7446b64f8")
@@ -387,7 +387,7 @@ fn block3(
 
     let mut extended = prev_execution_outcome.clone();
     extended.extend(execution_outcome.clone());
-    let state_root = bundle_state_root(&extended);
+    let state_root = execution_state_root(&extended);
 
     let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
     body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
@@ -478,7 +478,7 @@ fn block4(
 
     let mut extended = prev_execution_outcome.clone();
     extended.extend(execution_outcome.clone());
-    let state_root = bundle_state_root(&extended);
+    let state_root = execution_state_root(&extended);
 
     let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
     body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
@@ -572,7 +572,7 @@ fn block5(
 
     let mut extended = prev_execution_outcome.clone();
     extended.extend(execution_outcome.clone());
-    let state_root = bundle_state_root(&extended);
+    let state_root = execution_state_root(&extended);
 
     let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
     body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));

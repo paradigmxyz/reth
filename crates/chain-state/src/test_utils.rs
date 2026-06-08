@@ -17,8 +17,8 @@ use reth_ethereum_primitives::{
     Block, BlockBody, EthPrimitives, Receipt, Transaction, TransactionSigned,
 };
 use reth_execution_types::{
-    evm2_block_state_hashed_post_state_sorted, BlockExecutionOutput, BlockExecutionResult,
-    BundleStateInit, Chain, ExecutionOutcome, RevertsInit,
+    evm2_block_state_hashed_post_state_sorted, BlockExecutionOutput, BlockExecutionResult, Chain,
+    ExecutionOutcome, ExecutionStateInit, RevertsInit,
 };
 use reth_primitives_traits::{
     proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
@@ -59,7 +59,7 @@ pub struct TestBlockBuilder<N: NodePrimitives = EthPrimitives> {
     /// Used to construct proper reverts when building blocks on different forks.
     pub post_block_state: B256HashMap<(Account, U256)>,
     /// When true, generated blocks include proper state changes and reverts.
-    /// When false, blocks use an empty bundle state.
+    /// When false, blocks use an empty execution state.
     pub with_state: bool,
     _prims: PhantomData<N>,
 }
@@ -281,7 +281,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         let new_slot_value = U256::from(block_number).wrapping_add(U256::from(1));
 
         let storage_key = B256::new(TEST_STORAGE_SLOT.to_be_bytes());
-        let mut state_init = BundleStateInit::default();
+        let mut state_init = ExecutionStateInit::default();
         state_init.insert(
             self.signer,
             (Some(pre_info.clone()), Some(post_info.clone()), Default::default()),
@@ -386,7 +386,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
     }
 
     /// Returns the execution outcome for a block created with this builder.
-    /// In order to properly include the bundle state, the signer balance is
+    /// In order to properly include the execution state, the signer balance is
     /// updated.
     pub fn get_execution_outcome(
         &mut self,
@@ -415,7 +415,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             })
             .collect::<Vec<_>>();
 
-        let mut state_init = BundleStateInit::default();
+        let mut state_init = ExecutionStateInit::default();
         state_init.insert(
             self.signer,
             (
