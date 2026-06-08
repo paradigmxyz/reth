@@ -899,7 +899,7 @@ mod tests {
         BlockNumberList,
     };
     use reth_execution_types::{
-        evm2_block_state_from_init, Evm2AccountInfo, Evm2BlockReverts, Evm2StorageReverts,
+        evm2_block_state_from_init, Evm2BlockReverts, Evm2RevertAccount, Evm2StorageReverts,
     };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{
@@ -916,13 +916,12 @@ mod tests {
     const STORAGE: B256 =
         b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
 
-    fn account_to_evm2(account: Account) -> Evm2AccountInfo {
-        Evm2AccountInfo {
+    fn account_to_revert(account: Account) -> Evm2RevertAccount {
+        Evm2RevertAccount {
             balance: account.balance,
             nonce: account.nonce,
             code_hash: account.bytecode_hash.unwrap_or(KECCAK256_EMPTY),
             code: None,
-            _non_exhaustive: (),
         }
     }
 
@@ -932,7 +931,7 @@ mod tests {
         let mut accounts = AddressMap::default();
         let mut storage = AddressMap::default();
         for (address, account, storage_revert) in changes {
-            accounts.insert(address, account.map(account_to_evm2));
+            accounts.insert(address, account.map(account_to_revert));
             if !storage_revert.is_empty() {
                 storage.insert(
                     address,

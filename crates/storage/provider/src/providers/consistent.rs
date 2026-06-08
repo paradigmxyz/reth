@@ -1529,8 +1529,8 @@ mod tests {
     use reth_db_api::models::AccountBeforeTx;
     use reth_ethereum_primitives::Block;
     use reth_execution_types::{
-        evm2_block_state_from_init, BlockExecutionOutput, BlockExecutionResult, Evm2AccountInfo,
-        Evm2BlockReverts, Evm2BlockState, Evm2StorageReverts, ExecutionOutcome,
+        evm2_block_state_from_init, BlockExecutionOutput, BlockExecutionResult, Evm2BlockReverts,
+        Evm2BlockState, Evm2RevertAccount, Evm2StorageReverts, ExecutionOutcome,
     };
     use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock};
     use reth_storage_api::{BlockReader, BlockSource, ChangeSetReader, StateReader};
@@ -1578,13 +1578,12 @@ mod tests {
         (database_blocks.to_vec(), in_memory_blocks.to_vec())
     }
 
-    fn account_to_evm2(account: Account) -> Evm2AccountInfo {
-        Evm2AccountInfo {
+    fn account_to_revert(account: Account) -> Evm2RevertAccount {
+        Evm2RevertAccount {
             balance: account.balance,
             nonce: account.nonce,
             code_hash: account.bytecode_hash.unwrap_or(KECCAK256_EMPTY),
             code: None,
-            _non_exhaustive: (),
         }
     }
 
@@ -1594,7 +1593,7 @@ mod tests {
         let mut accounts = AddressMap::default();
         let mut storage = AddressMap::default();
         for (address, account, storage_revert) in changes {
-            accounts.insert(address, account.map(account_to_evm2));
+            accounts.insert(address, account.map(account_to_revert));
             if !storage_revert.is_empty() {
                 storage.insert(
                     address,
@@ -1913,7 +1912,7 @@ mod tests {
                     .map(|block_changesets| {
                         let mut accounts = AddressMap::default();
                         for (address, account, _) in block_changesets {
-                            accounts.insert(*address, Some(account_to_evm2(*account)));
+                            accounts.insert(*address, Some(account_to_revert(*account)));
                         }
                         Evm2BlockReverts { accounts, storage: AddressMap::default() }
                     })

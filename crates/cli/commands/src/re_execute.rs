@@ -15,7 +15,7 @@ use reth_consensus::FullConsensus;
 use reth_evm::{ConfigureEvm, ConfigureEvm2BlockExecutor};
 use reth_execution_types::{
     evm2_block_reverts_from_state_source, evm2_block_state_accumulator_extend,
-    evm2_state_source_size_hint, Evm2AccountInfo, Evm2BlockReverts, Evm2BlockStateAccumulator,
+    evm2_state_source_size_hint, Evm2BlockReverts, Evm2BlockStateAccumulator, Evm2RevertAccount,
 };
 use reth_node_core::args::JitArgs;
 use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
@@ -444,7 +444,7 @@ where
     Ok(())
 }
 
-fn account_from_evm2(info: &Evm2AccountInfo) -> Account {
+fn account_from_evm2(info: &Evm2RevertAccount) -> Account {
     Account {
         nonce: info.nonce,
         balance: info.balance,
