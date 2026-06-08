@@ -380,8 +380,9 @@ async fn run_pipeline_forward_and_unwind(
         );
 
         // Write the plain state to database so subsequent blocks build on it
-        let execution_outcome = reth_execution_types::ExecutionOutcome::new(
+        let execution_outcome = reth_execution_types::ExecutionOutcome::from_state_and_reverts(
             output.state.clone(),
+            vec![],
             vec![],
             block_num,
             vec![],
@@ -395,7 +396,7 @@ async fn run_pipeline_forward_and_unwind(
                 write_storage_changesets: false,
             },
         )?;
-        provider.write_hashed_state(&hashed_state.into_sorted())?;
+        provider.write_hashed_state(&hashed_state)?;
         provider.commit()?;
 
         parent_hash = block.hash();

@@ -681,7 +681,7 @@ pub(super) mod serde_bincode_compat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Evm2BlockReverts, Evm2BundleState};
+    use crate::{evm2_block_state_from_state_source, Evm2BlockReverts, Evm2BundleState};
     use alloy_consensus::TxType;
     use alloy_primitives::{Address, B256};
     use reth_ethereum_primitives::Receipt;
@@ -721,31 +721,29 @@ mod tests {
 
     #[test]
     fn test_number_split() {
-        let execution_outcome1: ExecutionOutcome = ExecutionOutcome::new(
-            Evm2BundleState::new_init(
-                1,
-                vec![(
-                    Address::new([2; 20]),
-                    (None, Some(Account::default()), BTreeMap::default()),
-                )],
-                vec![Evm2BlockReverts::default()],
-                vec![],
-            ),
+        let bundle1 = Evm2BundleState::new_init(
+            1,
+            vec![(Address::new([2; 20]), (None, Some(Account::default()), BTreeMap::default()))],
+            vec![Evm2BlockReverts::default()],
+            vec![],
+        );
+        let execution_outcome1: ExecutionOutcome = ExecutionOutcome::from_state_and_reverts(
+            evm2_block_state_from_state_source(&bundle1),
+            bundle1.block_reverts().clone(),
             vec![vec![]],
             1,
             vec![],
         );
 
-        let execution_outcome2 = ExecutionOutcome::new(
-            Evm2BundleState::new_init(
-                2,
-                vec![(
-                    Address::new([3; 20]),
-                    (None, Some(Account::default()), BTreeMap::default()),
-                )],
-                vec![Evm2BlockReverts::default()],
-                vec![],
-            ),
+        let bundle2 = Evm2BundleState::new_init(
+            2,
+            vec![(Address::new([3; 20]), (None, Some(Account::default()), BTreeMap::default()))],
+            vec![Evm2BlockReverts::default()],
+            vec![],
+        );
+        let execution_outcome2 = ExecutionOutcome::from_state_and_reverts(
+            evm2_block_state_from_state_source(&bundle2),
+            bundle2.block_reverts().clone(),
             vec![vec![]],
             2,
             vec![],

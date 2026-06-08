@@ -988,8 +988,9 @@ fn execute_and_commit_block(
         BlockBody { transactions, ommers: Vec::new(), withdrawals: None },
     );
 
-    let execution_outcome = reth_execution_types::ExecutionOutcome::new(
+    let execution_outcome = reth_execution_types::ExecutionOutcome::from_state_and_reverts(
         output.state.clone(),
+        vec![],
         vec![],
         block_num,
         vec![],
@@ -1003,7 +1004,7 @@ fn execute_and_commit_block(
             write_storage_changesets: false,
         },
     )?;
-    provider.write_hashed_state(&hashed_state.into_sorted())?;
+    provider.write_hashed_state(&hashed_state)?;
     provider.commit()?;
 
     Ok(block)
