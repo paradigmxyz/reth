@@ -15,8 +15,8 @@ use reth_provider::{
     StateProvider, StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage,
+    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use std::{
     cell::Cell,
@@ -728,6 +728,10 @@ impl<S: StateRootProvider> StateRootProvider for CachedStateProvider<S> {
         self.state_provider.state_root(hashed_state)
     }
 
+    fn state_root_sorted(&self, hashed_state: HashedPostStateSorted) -> ProviderResult<B256> {
+        self.state_provider.state_root_sorted(hashed_state)
+    }
+
     fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
         self.state_provider.state_root_from_nodes(input)
     }
@@ -737,6 +741,13 @@ impl<S: StateRootProvider> StateRootProvider for CachedStateProvider<S> {
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         self.state_provider.state_root_with_updates(hashed_state)
+    }
+
+    fn state_root_sorted_with_updates(
+        &self,
+        hashed_state: HashedPostStateSorted,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        self.state_provider.state_root_sorted_with_updates(hashed_state)
     }
 
     fn state_root_from_nodes_with_updates(
