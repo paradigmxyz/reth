@@ -435,6 +435,7 @@ impl PeersManager {
                 }
 
                 peer.state = PeerConnectionState::In;
+                peer.mark_connected();
 
                 is_trusted = is_trusted || peer.is_trusted();
             }
@@ -442,6 +443,7 @@ impl PeersManager {
                 // peer is missing in the table, we add it but mark it as to be removed after
                 // disconnect, because we only know the outgoing port
                 let mut peer = Peer::with_state(PeerAddr::from_tcp(addr), PeerConnectionState::In);
+                peer.mark_connected();
                 peer.remove_after_disconnect = true;
                 entry.insert(peer);
                 self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
@@ -451,9 +453,6 @@ impl PeersManager {
         let has_in_capacity = self.connection_info.has_in_capacity();
         // increment new incoming connection
         self.connection_info.inc_in();
-        if let Some(peer) = self.peers.get_mut(&peer_id) {
-            peer.mark_connected();
-        }
 
         // disconnect the peer if we don't have capacity for more inbound connections
         if !is_trusted && !has_in_capacity {
