@@ -1,15 +1,20 @@
 use crate::{
-    evm2_block_state_from_state_source, evm2_bundle::account_to_info, BlockExecutionOutput,
-    BlockExecutionResult, Evm2BlockReverts, Evm2BlockState, Evm2BundleState, Evm2StorageReverts,
+    evm2_block_reverts_from_state_source, evm2_block_state_accumulator_extend,
+    evm2_state_source_hashed_post_state, BlockExecutionOutput, BlockExecutionResult,
+    Evm2BlockReverts, Evm2BlockState, Evm2StorageReverts,
 };
 use alloc::{collections::BTreeMap, vec, vec::Vec};
+use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{
     logs_bloom,
     map::{AddressMap, B256Map, HashMap},
     Address, BlockNumber, Bloom, Log, B256, U256,
 };
-use evm2::evm::{AccountInfo, Tracked};
+use evm2::evm::{
+    AccountChangeRef, AccountInfo, AccountInfoRef, BlockAccountDelta, BlockStateAccumulator,
+    StateChangeSink, StorageChangeRef,
+};
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
 
 /// Type used to initialize bundle state.
@@ -44,10 +49,13 @@ impl ChangedAccount {
 /// The `ExecutionOutcome` structure aggregates the state changes over an arbitrary number of
 /// blocks, capturing the resulting state, receipts, and requests following the execution.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ExecutionOutcome<T = reth_ethereum_primitives::Receipt> {
-    /// Bundle state with reverts.
-    bundle: Evm2BundleState,
+    /// Aggregated evm2 state changes.
+    state: Evm2BlockState,
+    /// Per-block evm2 state changes when available.
+    block_states: Vec<Evm2BlockState>,
+    /// Per-block reverts.
+    block_reverts: Vec<Evm2BlockReverts>,
     /// The collection of receipts.
     /// Outer vector stores receipts for each block sequentially.
     /// The inner vector stores receipts ordered by transaction number.
@@ -66,7 +74,9 @@ pub struct ExecutionOutcome<T = reth_ethereum_primitives::Receipt> {
 impl<T> Default for ExecutionOutcome<T> {
     fn default() -> Self {
         Self {
-            bundle: Default::default(),
+            state: Default::default(),
+            block_states: Default::default(),
+            block_reverts: Default::default(),
             receipts: Default::default(),
             first_block: Default::default(),
             requests: Default::default(),
@@ -74,14 +84,33 @@ impl<T> Default for ExecutionOutcome<T> {
     }
 }
 
+#[cfg(any(feature = "serde", feature = "serde-bincode-compat"))]
 impl<T> ExecutionOutcome<T> {
-    const fn from_bundle(
-        bundle: Evm2BundleState,
+    fn bundle_for_compat(&self) -> crate::Evm2BundleState {
+        let mut bundle = crate::Evm2BundleState::from_state_source(self.first_block, &self.state);
+        *bundle.block_reverts_mut() = self.block_reverts.clone();
+        bundle
+    }
+}
+
+impl<T> ExecutionOutcome<T> {
+    fn aggregate_block_states(states: &[Evm2BlockState]) -> Evm2BlockState {
+        let mut accumulator = BlockStateAccumulator::new();
+        for state in states {
+            evm2_block_state_accumulator_extend(&mut accumulator, state);
+        }
+        accumulator.freeze()
+    }
+
+    fn from_parts(
+        state: Evm2BlockState,
+        block_states: Vec<Evm2BlockState>,
+        block_reverts: Vec<Evm2BlockReverts>,
         receipts: Vec<Vec<T>>,
         first_block: BlockNumber,
         requests: Vec<Requests>,
     ) -> Self {
-        Self { bundle, receipts, first_block, requests }
+        Self { state, block_states, block_reverts, receipts, first_block, requests }
     }
 
     /// Creates a new `ExecutionOutcome` from evm2 aggregate state and per-block reverts.
@@ -92,14 +121,21 @@ impl<T> ExecutionOutcome<T> {
         first_block: BlockNumber,
         requests: Vec<Requests>,
     ) -> Self {
-        let mut bundle = Evm2BundleState::from_state_source(first_block, &state);
-        *bundle.block_reverts_mut() = block_reverts;
-        Self { bundle, receipts, first_block, requests }
+        let block_states =
+            (block_reverts.len() <= 1).then(|| vec![state.clone()]).unwrap_or_default();
+        Self::from_parts(state, block_states, block_reverts, receipts, first_block, requests)
     }
 
     /// Creates an empty execution outcome beginning at `first_block`.
     pub fn new_empty(first_block: BlockNumber) -> Self {
-        Self::from_bundle(Evm2BundleState::new(first_block), Vec::new(), first_block, Vec::new())
+        Self::from_parts(
+            Default::default(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            first_block,
+            Vec::new(),
+        )
     }
 
     /// Creates a new `ExecutionOutcome` from initialization parameters.
@@ -118,15 +154,35 @@ impl<T> ExecutionOutcome<T> {
         let mut reverts = revert_init.into_iter().collect::<Vec<_>>();
         reverts.sort_unstable_by_key(|a| a.0);
 
-        let bundle = Evm2BundleState::new_init(
-            first_block,
-            state_init.into_iter().map(|(address, (original, present, storage))| {
-                (
+        let mut accumulator = BlockStateAccumulator::new();
+        for (address, (original, current, storage)) in state_init {
+            accumulator
+                .account(AccountChangeRef {
                     address,
-                    (original, present, storage.into_iter().map(|(k, s)| (k.into(), s)).collect()),
-                )
-            }),
-            reverts.into_iter().map(|(_, reverts)| Evm2BlockReverts {
+                    original: original.as_ref().map(account_info_ref_from_reth),
+                    current: current.as_ref().map(account_info_ref_from_reth),
+                })
+                .expect("infallible");
+            for (slot, (original, current)) in storage {
+                accumulator
+                    .storage(StorageChangeRef {
+                        address,
+                        key: U256::from_be_bytes(slot.0),
+                        original,
+                        current,
+                    })
+                    .expect("infallible");
+            }
+        }
+        for (code_hash, bytecode) in contracts_init {
+            accumulator
+                .bytecode(code_hash, &evm2::bytecode::Bytecode::new_raw(bytecode.original_bytes()))
+                .expect("infallible");
+        }
+
+        let block_reverts = reverts
+            .into_iter()
+            .map(|(_, reverts)| Evm2BlockReverts {
                 accounts: reverts
                     .iter()
                     .filter_map(|(address, (original, _))| {
@@ -146,17 +202,27 @@ impl<T> ExecutionOutcome<T> {
                         ))
                     })
                     .collect(),
-            }),
-            contracts_init,
-        );
+            })
+            .collect::<Vec<_>>();
 
-        Self { bundle, receipts, first_block, requests }
+        Self::from_parts(
+            accumulator.freeze(),
+            Vec::new(),
+            block_reverts,
+            receipts,
+            first_block,
+            requests,
+        )
     }
 
     /// Creates a new `ExecutionOutcome` from a single block execution result.
     pub fn single(block_number: u64, output: BlockExecutionOutput<T>) -> Self {
+        let block_reverts = evm2_block_reverts_from_state_source(&output.state);
+        let state = output.state;
         Self {
-            bundle: Evm2BundleState::from_state_source(block_number, &output.state),
+            state: state.clone(),
+            block_states: vec![state],
+            block_reverts: vec![block_reverts],
             receipts: vec![output.result.receipts],
             first_block: block_number,
             requests: vec![output.result.requests],
@@ -169,17 +235,21 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Creates a new `ExecutionOutcome` from multiple [`BlockExecutionResult`]s.
-    pub fn from_blocks(
+    fn from_blocks(
         first_block: u64,
-        bundle: Evm2BundleState,
+        state: Evm2BlockState,
+        block_states: Vec<Evm2BlockState>,
+        block_reverts: Vec<Evm2BlockReverts>,
         results: Vec<BlockExecutionResult<T>>,
     ) -> Self {
-        let mut value = Self {
-            bundle,
+        let mut value = Self::from_parts(
+            state,
+            block_states,
+            block_reverts,
+            Vec::with_capacity(results.len()),
             first_block,
-            receipts: Vec::with_capacity(results.len()),
-            requests: Vec::with_capacity(results.len()),
-        };
+            Vec::with_capacity(results.len()),
+        );
         for result in results {
             value.receipts.push(result.receipts);
             value.requests.push(result.requests);
@@ -193,56 +263,53 @@ impl<T> ExecutionOutcome<T> {
         states: impl IntoIterator<Item = Evm2BlockState>,
         results: Vec<BlockExecutionResult<T>>,
     ) -> Self {
-        let mut bundle = Evm2BundleState::new(first_block);
-        for (idx, state) in states.into_iter().enumerate() {
-            bundle.extend(Evm2BundleState::from_state_source(first_block + idx as u64, &state));
-        }
-        Self::from_blocks(first_block, bundle, results)
+        let block_states = states.into_iter().collect::<Vec<_>>();
+        let mut block_reverts =
+            block_states.iter().map(evm2_block_reverts_from_state_source).collect::<Vec<_>>();
+        Self::adjust_reverts_for_prior_wipes(&Evm2BlockState::default(), &mut block_reverts);
+        let state = Self::aggregate_block_states(&block_states);
+        Self::from_blocks(first_block, state, block_states, block_reverts, results)
     }
 
     /// Returns mutable per-block reverts.
     pub const fn block_reverts_mut(&mut self) -> &mut Vec<Evm2BlockReverts> {
-        self.bundle.block_reverts_mut()
+        &mut self.block_reverts
     }
 
     /// Returns per-block reverts.
     pub const fn block_reverts(&self) -> &Vec<Evm2BlockReverts> {
-        self.bundle.block_reverts()
+        &self.block_reverts
     }
 
     /// Returns changed storage slot indices for all changed accounts.
     pub fn storage_change_keys(&self) -> impl Iterator<Item = (Address, U256)> + '_ {
-        self.bundle.storage().iter().flat_map(|(address, storage)| {
-            storage.slots.keys().copied().map(move |slot| (*address, slot))
-        })
+        self.state.storage().map(|(key, _)| (key.address(), key.key()))
     }
 
     /// Returns current changed storage values for `address`.
     pub fn storage_changes_for(&self, address: Address) -> impl Iterator<Item = (U256, U256)> + '_ {
-        self.bundle
+        self.state
             .storage()
-            .get(&address)
-            .into_iter()
-            .flat_map(|storage| storage.slots.iter().map(|(slot, value)| (*slot, value.current)))
+            .filter(move |(key, _)| key.address() == address)
+            .map(|(key, value)| (key.key(), value.current))
     }
 
     /// Returns bytecodes changed by this execution outcome.
     pub fn bytecodes(&self) -> impl Iterator<Item = (B256, Bytecode)> + '_ {
-        self.bundle
-            .contracts()
-            .iter()
+        self.state
+            .code()
             .filter(|(hash, _)| **hash != alloy_consensus::constants::KECCAK_EMPTY)
             .map(|(hash, bytecode)| (*hash, Bytecode::new_raw(bytecode.original_bytes())))
     }
 
     /// Returns the number of changed accounts.
     pub fn changed_account_count(&self) -> usize {
-        self.bundle.accounts().len()
+        self.state.accounts().count()
     }
 
     /// Returns the current state changes as an evm2 frozen block state.
     pub fn evm2_block_state(&self) -> Evm2BlockState {
-        evm2_block_state_from_state_source(&self.bundle)
+        self.state.clone()
     }
 
     /// Set first block.
@@ -252,29 +319,37 @@ impl<T> ExecutionOutcome<T> {
 
     /// Return iterator over all accounts
     pub fn accounts_iter(&self) -> impl Iterator<Item = (Address, Option<&AccountInfo>)> {
-        self.bundle.accounts_iter()
+        self.state.accounts().map(|(address, account)| (address, account.current.as_ref()))
     }
 
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
-        self.bundle.account(address)
+        self.account_state(address)
+            .map(|account| account.current.as_ref().map(account_info_to_reth))
     }
 
     /// Returns the state account change for the given account.
-    pub fn account_state(&self, address: &Address) -> Option<&Tracked<Option<AccountInfo>>> {
-        self.bundle.accounts().get(address)
+    pub fn account_state(&self, address: &Address) -> Option<&BlockAccountDelta> {
+        self.state
+            .accounts()
+            .find_map(|(changed, account)| (changed == *address).then_some(account))
     }
 
     /// Get storage if value is known.
     ///
     /// This means that depending on status we can potentially return `U256::ZERO`.
     pub fn storage(&self, address: &Address, storage_key: U256) -> Option<U256> {
-        self.bundle.storage_slot(address, storage_key)
+        self.state.storage().find_map(|(key, storage)| {
+            (key.address() == *address && key.key() == storage_key).then_some(storage.current)
+        })
     }
 
     /// Return bytecode if known.
     pub fn bytecode(&self, code_hash: &B256) -> Option<Bytecode> {
-        self.bundle.bytecode(code_hash)
+        self.state
+            .code()
+            .find(|(hash, _)| *hash == code_hash)
+            .map(|(_, bytecode)| Bytecode::new_raw(bytecode.original_bytes()))
     }
 
     /// Returns [`HashedPostState`] for this execution outcome.
@@ -282,7 +357,7 @@ impl<T> ExecutionOutcome<T> {
     pub fn hash_state_slow<KH: reth_trie_common::KeyHasher>(
         &self,
     ) -> reth_trie_common::HashedPostState {
-        self.bundle.hashed_post_state::<KH>()
+        evm2_state_source_hashed_post_state::<KH, _>(&self.state)
     }
 
     /// Transform block number to the index of block.
@@ -364,14 +439,13 @@ impl<T> ExecutionOutcome<T> {
 
         // +1 is for number of blocks that we have as index is included.
         let new_len = index + 1;
-        let rm_trx: usize = self.len() - new_len;
-
         // remove receipts
         self.receipts.truncate(new_len);
         // remove requests
         self.requests.truncate(new_len);
         // Revert last n reverts.
-        self.bundle.revert_blocks(rm_trx);
+        self.block_reverts.truncate(new_len);
+        self.truncate_block_states(new_len);
 
         true
     }
@@ -405,7 +479,8 @@ impl<T> ExecutionOutcome<T> {
         if at_idx < higher_state.requests.len() {
             higher_state.requests = higher_state.requests.split_off(at_idx);
         }
-        higher_state.bundle.drop_first_reverts(at_idx);
+        higher_state.block_reverts.drain(..at_idx.min(higher_state.block_reverts.len()));
+        higher_state.drop_first_block_states(at_idx);
         higher_state.first_block = at;
 
         (Some(lower_state), higher_state)
@@ -417,9 +492,62 @@ impl<T> ExecutionOutcome<T> {
     /// we know that other state was build on top of this one.
     /// In most cases this would be true.
     pub fn extend(&mut self, other: Self) {
-        self.bundle.extend(other.bundle);
-        self.receipts.extend(other.receipts);
-        self.requests.extend(other.requests);
+        let Self {
+            state: other_state,
+            block_states: other_block_states,
+            mut block_reverts,
+            receipts,
+            requests,
+            ..
+        } = other;
+        let other_receipts_len = receipts.len();
+        Self::adjust_reverts_for_prior_wipes(&self.state, &mut block_reverts);
+        let mut accumulator = BlockStateAccumulator::new();
+        evm2_block_state_accumulator_extend(&mut accumulator, &self.state);
+        evm2_block_state_accumulator_extend(&mut accumulator, &other_state);
+        self.state = accumulator.freeze();
+        self.extend_block_states(other_block_states, other_receipts_len);
+        self.block_reverts.extend(block_reverts);
+        self.receipts.extend(receipts);
+        self.requests.extend(requests);
+    }
+
+    fn truncate_block_states(&mut self, new_len: usize) {
+        if !self.block_states.is_empty() {
+            self.block_states.truncate(new_len);
+            self.state = Self::aggregate_block_states(&self.block_states);
+        }
+    }
+
+    fn drop_first_block_states(&mut self, n: usize) {
+        if !self.block_states.is_empty() {
+            self.block_states.drain(..n.min(self.block_states.len()));
+            self.state = Self::aggregate_block_states(&self.block_states);
+        }
+    }
+
+    fn extend_block_states(&mut self, other: Vec<Evm2BlockState>, other_receipts_len: usize) {
+        if self.block_states.len() == self.receipts.len() && other.len() == other_receipts_len {
+            self.block_states.extend(other);
+        } else {
+            self.block_states.clear();
+        }
+    }
+
+    fn adjust_reverts_for_prior_wipes(
+        prior_state: &Evm2BlockState,
+        block_reverts: &mut [Evm2BlockReverts],
+    ) {
+        for address in prior_state.storage_wipes() {
+            for reverts in block_reverts.iter_mut() {
+                if let Some(storage_reverts) = reverts.storage.get_mut(&address) &&
+                    storage_reverts.wiped
+                {
+                    storage_reverts.previous_wipe = true;
+                    break
+                }
+            }
+        }
     }
 
     /// Create a new instance with updated receipts.
@@ -478,6 +606,95 @@ impl<T> From<(BlockExecutionOutput<T>, BlockNumber)> for ExecutionOutcome<T> {
     }
 }
 
+fn account_info_ref_from_reth(account: &Account) -> AccountInfoRef<'_> {
+    AccountInfoRef {
+        balance: account.balance,
+        nonce: account.nonce,
+        code_hash: account.get_bytecode_hash(),
+        code: None,
+    }
+}
+
+fn account_to_info(account: Account) -> AccountInfo {
+    AccountInfo {
+        balance: account.balance,
+        nonce: account.nonce,
+        code_hash: account.get_bytecode_hash(),
+        code: None,
+        _non_exhaustive: (),
+    }
+}
+
+fn account_info_to_reth(info: &AccountInfo) -> Account {
+    let bytecode_hash =
+        (!info.code_hash.is_zero() && info.code_hash != KECCAK_EMPTY).then_some(info.code_hash);
+    Account { nonce: info.nonce, balance: info.balance, bytecode_hash }
+}
+
+#[cfg(feature = "serde")]
+mod serde_impl {
+    use super::*;
+    use alloc::vec::Vec;
+    use alloy_eips::eip7685::Requests;
+    use alloy_primitives::BlockNumber;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    #[derive(Serialize)]
+    struct ExecutionOutcomeSerde<'a, T> {
+        bundle: crate::Evm2BundleState,
+        receipts: &'a Vec<Vec<T>>,
+        first_block: BlockNumber,
+        requests: &'a Vec<Requests>,
+    }
+
+    #[derive(Deserialize)]
+    struct ExecutionOutcomeSerdeOwned<T> {
+        bundle: crate::Evm2BundleState,
+        receipts: Vec<Vec<T>>,
+        first_block: BlockNumber,
+        requests: Vec<Requests>,
+    }
+
+    impl<T> Serialize for ExecutionOutcome<T>
+    where
+        T: Serialize,
+    {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            ExecutionOutcomeSerde {
+                bundle: self.bundle_for_compat(),
+                receipts: &self.receipts,
+                first_block: self.first_block,
+                requests: &self.requests,
+            }
+            .serialize(serializer)
+        }
+    }
+
+    impl<'de, T> Deserialize<'de> for ExecutionOutcome<T>
+    where
+        T: Deserialize<'de>,
+    {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let value = ExecutionOutcomeSerdeOwned::<T>::deserialize(deserializer)?;
+            let block_reverts = value.bundle.block_reverts().clone();
+            let state = crate::evm2_block_state_from_state_source(&value.bundle);
+            Ok(ExecutionOutcome::from_state_and_reverts(
+                state,
+                block_reverts,
+                value.receipts,
+                value.first_block,
+                value.requests,
+            ))
+        }
+    }
+}
+
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
     use crate::Evm2BundleState;
@@ -518,7 +735,7 @@ pub(super) mod serde_bincode_compat {
     {
         fn from(value: &'a super::ExecutionOutcome<T>) -> Self {
             ExecutionOutcome {
-                bundle: Cow::Borrowed(&value.bundle),
+                bundle: Cow::Owned(value.bundle_for_compat()),
                 receipts: value
                     .receipts
                     .iter()
@@ -537,9 +754,13 @@ pub(super) mod serde_bincode_compat {
         T: Receipt,
     {
         fn from(value: ExecutionOutcome<'_>) -> Self {
-            Self {
-                bundle: value.bundle.into_owned(),
-                receipts: value
+            let bundle = value.bundle.into_owned();
+            let block_reverts = bundle.block_reverts().clone();
+            let state = crate::evm2_block_state_from_state_source(&bundle);
+            Self::from_state_and_reverts(
+                state,
+                block_reverts,
+                value
                     .receipts
                     .into_iter()
                     .map(|vec| {
@@ -551,9 +772,9 @@ pub(super) mod serde_bincode_compat {
                             .collect()
                     })
                     .collect(),
-                first_block: value.first_block,
-                requests: value.requests.into_owned(),
-            }
+                value.first_block,
+                value.requests.into_owned(),
+            )
         }
     }
 
@@ -603,14 +824,7 @@ pub(super) mod serde_bincode_compat {
 
             let mut bytes = [0u8; 1024];
             rand::rng().fill(bytes.as_mut_slice());
-            let data = Data {
-                data: ExecutionOutcome {
-                    bundle: Default::default(),
-                    receipts: vec![],
-                    first_block: 0,
-                    requests: vec![],
-                },
-            };
+            let data = Data { data: ExecutionOutcome::new_empty(0) };
 
             let encoded = bincode::serialize(&data).unwrap();
             let decoded = bincode::deserialize::<Data<Receipt>>(&encoded).unwrap();
@@ -622,8 +836,17 @@ pub(super) mod serde_bincode_compat {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{evm2_block_state_from_state_source, Evm2BundleState};
     use alloy_consensus::TxType;
     use alloy_primitives::{bytes, Address, LogData};
+
+    fn outcome_with_receipts<T>(
+        first_block: BlockNumber,
+        receipts: Vec<Vec<T>>,
+        requests: Vec<Requests>,
+    ) -> ExecutionOutcome<T> {
+        ExecutionOutcome::new_empty(first_block).with_receipts(receipts).with_requests(requests)
+    }
 
     #[test]
     fn test_initialization() {
@@ -669,18 +892,23 @@ mod tests {
             vec![],
         );
 
-        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
-        // first_block
-        let exec_res = ExecutionOutcome {
-            bundle: bundle.clone(),
-            receipts: receipts.clone(),
-            requests: requests.clone(),
+        let exec_res = ExecutionOutcome::from_state_and_reverts(
+            evm2_block_state_from_state_source(&bundle),
+            bundle.block_reverts().clone(),
+            receipts.clone(),
             first_block,
-        };
+            requests.clone(),
+        );
 
         // Assert that creating a new ExecutionOutcome using the constructor matches exec_res
         assert_eq!(
-            ExecutionOutcome::from_bundle(bundle, receipts.clone(), first_block, requests.clone()),
+            ExecutionOutcome::from_state_and_reverts(
+                evm2_block_state_from_state_source(&bundle),
+                bundle.block_reverts().clone(),
+                receipts.clone(),
+                first_block,
+                requests.clone(),
+            ),
             exec_res
         );
 
@@ -714,12 +942,7 @@ mod tests {
 
         // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
-        let exec_res = ExecutionOutcome {
-            bundle: Default::default(),
-            receipts,
-            requests: vec![],
-            first_block,
-        };
+        let exec_res = outcome_with_receipts(first_block, receipts, vec![]);
 
         // Test before the first block
         assert_eq!(exec_res.block_number_to_index(12), None);
@@ -746,12 +969,7 @@ mod tests {
 
         // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
-        let exec_res = ExecutionOutcome {
-            bundle: Default::default(),
-            receipts,
-            requests: vec![],
-            first_block,
-        };
+        let exec_res = outcome_with_receipts(first_block, receipts, vec![]);
 
         // Get logs for block number 123
         let logs: Vec<&Log> = exec_res.logs(123).unwrap().collect();
@@ -775,12 +993,7 @@ mod tests {
 
         // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
-        let exec_res = ExecutionOutcome {
-            bundle: Default::default(), // Default value for bundle
-            receipts,                   // Include the created receipts
-            requests: vec![],           // Empty vector for requests
-            first_block,                // Set the first block number
-        };
+        let exec_res = outcome_with_receipts(first_block, receipts, vec![]);
 
         // Get receipts for block number 123 and convert the result into a vector
         let receipts_by_block: Vec<_> = exec_res.receipts_by_block(123).iter().collect();
@@ -815,12 +1028,7 @@ mod tests {
 
         // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
-        let exec_res = ExecutionOutcome {
-            bundle: Default::default(), // Default value for bundle
-            receipts,                   // Include the created receipts
-            requests: vec![],           // Empty vector for requests
-            first_block,                // Set the first block number
-        };
+        let exec_res = outcome_with_receipts(first_block, receipts, vec![]);
 
         // Assert that the length of receipts in exec_res is 1
         assert_eq!(exec_res.len(), 1);
@@ -829,12 +1037,8 @@ mod tests {
         assert!(!exec_res.is_empty());
 
         // Create a ExecutionOutcome object with an empty Receipts object
-        let exec_res_empty_receipts: ExecutionOutcome = ExecutionOutcome {
-            bundle: Default::default(), // Default value for bundle
-            receipts: receipts_empty,   // Include the empty receipts
-            requests: vec![],           // Empty vector for requests
-            first_block,                // Set the first block number
-        };
+        let exec_res_empty_receipts: ExecutionOutcome =
+            outcome_with_receipts(first_block, receipts_empty, vec![]);
 
         // Assert that the length of receipts in exec_res_empty_receipts is 0
         assert_eq!(exec_res_empty_receipts.len(), 0);
@@ -868,8 +1072,7 @@ mod tests {
 
         // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
-        let mut exec_res =
-            ExecutionOutcome { bundle: Default::default(), receipts, requests, first_block };
+        let mut exec_res = outcome_with_receipts(first_block, receipts, requests);
 
         // Assert that the revert_to method returns true when reverting to the initial block number.
         assert!(exec_res.revert_to(123));
@@ -912,8 +1115,7 @@ mod tests {
         let first_block = 123;
 
         // Create an ExecutionOutcome object.
-        let mut exec_res =
-            ExecutionOutcome { bundle: Default::default(), receipts, requests, first_block };
+        let mut exec_res = outcome_with_receipts(first_block, receipts, requests);
 
         // Extend the ExecutionOutcome object by itself.
         exec_res.extend(exec_res.clone());
@@ -921,12 +1123,11 @@ mod tests {
         // Assert the extended ExecutionOutcome matches the expected outcome.
         assert_eq!(
             exec_res,
-            ExecutionOutcome {
-                bundle: Default::default(),
-                receipts: vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
-                requests: vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
-                first_block: 123,
-            }
+            outcome_with_receipts(
+                123,
+                vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
+                vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
+            )
         );
     }
 
@@ -962,27 +1163,24 @@ mod tests {
 
         // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
-        let exec_res =
-            ExecutionOutcome { bundle: Default::default(), receipts, requests, first_block };
+        let exec_res = outcome_with_receipts(first_block, receipts, requests);
 
         // Split the ExecutionOutcome at block number 124
         let result = exec_res.clone().split_at(124);
 
         // Define the expected lower ExecutionOutcome after splitting
-        let lower_execution_outcome = ExecutionOutcome {
-            bundle: Default::default(),
-            receipts: vec![vec![Some(receipt.clone())]],
-            requests: vec![Requests::new(vec![request.clone()])],
+        let lower_execution_outcome = outcome_with_receipts(
             first_block,
-        };
+            vec![vec![Some(receipt.clone())]],
+            vec![Requests::new(vec![request.clone()])],
+        );
 
         // Define the expected higher ExecutionOutcome after splitting
-        let higher_execution_outcome = ExecutionOutcome {
-            bundle: Default::default(),
-            receipts: vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
-            requests: vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
-            first_block: 124,
-        };
+        let higher_execution_outcome = outcome_with_receipts(
+            124,
+            vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
+            vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
+        );
 
         // Assert that the split result matches the expected lower and higher outcomes
         assert_eq!(result.0, Some(lower_execution_outcome));
@@ -1024,12 +1222,13 @@ mod tests {
             vec![],
         );
 
-        let execution_outcome: ExecutionOutcome = ExecutionOutcome {
-            bundle: bundle_state,
-            receipts: Default::default(),
-            first_block: 0,
-            requests: vec![],
-        };
+        let execution_outcome: ExecutionOutcome = ExecutionOutcome::from_state_and_reverts(
+            evm2_block_state_from_state_source(&bundle_state),
+            bundle_state.block_reverts().clone(),
+            Default::default(),
+            0,
+            vec![],
+        );
 
         // Get the changed accounts
         let changed_accounts: Vec<ChangedAccount> = execution_outcome.changed_accounts().collect();
