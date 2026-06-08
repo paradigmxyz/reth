@@ -183,9 +183,7 @@ where
         let mut total_idle_time = std::time::Duration::ZERO;
         let mut idle_start = Instant::now();
 
-        while let Ok(message) = updates.recv() {
-            total_idle_time += idle_start.elapsed();
-
+        let forward_message = |message| {
             let msg = match message {
                 StateRootMessage::PrefetchProofs(targets) => {
                     SparseTrieTaskMessage::PrefetchProofs(targets)
@@ -199,15 +197,27 @@ where
                     SparseTrieTaskMessage::FinishedStateUpdates
                 }
                 StateRootMessage::BlockAccessList(_) => {
-                    idle_start = Instant::now();
-                    continue;
+                    return true;
                 }
                 StateRootMessage::HashedStateUpdate(state) => {
                     SparseTrieTaskMessage::HashedState(state)
                 }
             };
-            if hashed_state_tx.send(msg).is_err() {
+
+            hashed_state_tx.send(msg).is_ok()
+        };
+
+        'receive: while let Ok(message) = updates.recv() {
+            total_idle_time += idle_start.elapsed();
+
+            if !forward_message(message) {
                 break;
+            }
+
+            while let Ok(message) = updates.try_recv() {
+                if !forward_message(message) {
+                    break 'receive;
+                }
             }
 
             idle_start = Instant::now();
