@@ -17,13 +17,23 @@ use reth_trie_parallel::{
     },
     root::ParallelStateRootError,
 };
-use tokio::sync::mpsc::{error::TryRecvError, UnboundedReceiver, UnboundedSender};
+use tokio::sync::{
+    mpsc::{error::TryRecvError, UnboundedReceiver, UnboundedSender},
+    oneshot,
+};
 use tracing::{debug_span, error, instrument};
 
 pub(super) enum ProofServiceCommand {
     AccountTargets(Vec<ProofV2Target>),
-    StorageTargets { address: B256, targets: Vec<ProofV2Target> },
-    RegisterStorageActor { address: B256, tx: UnboundedSender<StorageTrieCommand> },
+    StorageTargets {
+        address: B256,
+        targets: Vec<ProofV2Target>,
+    },
+    RegisterStorageActor {
+        address: B256,
+        tx: UnboundedSender<StorageTrieCommand>,
+        ack: oneshot::Sender<()>,
+    },
 }
 
 pub(super) struct ProofService {
@@ -142,8 +152,9 @@ impl ProofService {
             ProofServiceCommand::StorageTargets { address, targets } => {
                 self.queue_storage_targets(address, targets);
             }
-            ProofServiceCommand::RegisterStorageActor { address, tx } => {
+            ProofServiceCommand::RegisterStorageActor { address, tx, ack } => {
                 self.storage_txs.insert(address, tx);
+                let _ = ack.send(());
             }
         }
     }

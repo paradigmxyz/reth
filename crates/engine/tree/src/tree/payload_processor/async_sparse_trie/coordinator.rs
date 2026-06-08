@@ -65,6 +65,7 @@ impl AsyncSparseTrieCoordinator {
         parent_state_root: B256,
         chunk_size: usize,
     ) -> Self {
+        let started_at = Instant::now();
         let (state_tx, state_rx) = unbounded_channel();
         let state_bridge = spawn_state_message_bridge(from_multi_proof, state_tx);
 
@@ -116,7 +117,7 @@ impl AsyncSparseTrieCoordinator {
             finished_state_updates: false,
             finalize_sent: false,
             metrics,
-            started_at: Instant::now(),
+            started_at,
         }
     }
 
@@ -258,6 +259,7 @@ impl AsyncSparseTrieCoordinator {
             storage_slots,
         )
         .entered();
+        drop(_span);
 
         match (accounts_len, storages_len) {
             (0, 0) => Ok(()),
@@ -286,7 +288,7 @@ impl AsyncSparseTrieCoordinator {
                         .or_insert(PendingAccountUpdate::StorageOnly);
                     self.pending_storage_roots.insert(address);
 
-                    let storage_tx = self.ensure_storage_actor(address)?;
+                    let storage_tx = self.ensure_storage_actor(address).await?;
                     send_storage_command(
                         &storage_tx,
                         StorageTrieCommand::ApplyHashedStorage(storage),
@@ -318,6 +320,7 @@ impl AsyncSparseTrieCoordinator {
             storage_targets,
         )
         .entered();
+        drop(_span);
 
         for target in targets.account_targets {
             self.send_account_command(AccountTrieCommand::Touch(target.key()))?;
@@ -325,7 +328,7 @@ impl AsyncSparseTrieCoordinator {
 
         for (address, slots) in targets.storage_targets {
             if !slots.is_empty() {
-                let storage_tx = self.ensure_storage_actor(address)?;
+                let storage_tx = self.ensure_storage_actor(address).await?;
                 let slots = slots.into_iter().map(|target| target.key()).collect();
                 send_storage_command(&storage_tx, StorageTrieCommand::TouchSlots(slots))?;
                 send_storage_command(&storage_tx, StorageTrieCommand::Drive)?;
@@ -337,7 +340,7 @@ impl AsyncSparseTrieCoordinator {
         Ok(())
     }
 
-    fn ensure_storage_actor(
+    async fn ensure_storage_actor(
         &mut self,
         address: B256,
     ) -> Result<UnboundedSender<StorageTrieCommand>, ParallelStateRootError> {
@@ -355,9 +358,16 @@ impl AsyncSparseTrieCoordinator {
             ?address,
         )));
 
+        let (ack_tx, ack_rx) = oneshot::channel();
         self.send_proof_command(ProofServiceCommand::RegisterStorageActor {
             address,
             tx: tx.clone(),
+            ack: ack_tx,
+        })?;
+        ack_rx.await.map_err(|_| {
+            ParallelStateRootError::Other(format!(
+                "async sparse trie proof service dropped before registering storage actor {address:?}"
+            ))
         })?;
         self.storage_actors.insert(address, StorageActorHandle { tx: tx.clone() });
 
@@ -376,7 +386,7 @@ impl AsyncSparseTrieCoordinator {
 
         self.send_account_command(AccountTrieCommand::Drive)?;
         for actor in self.storage_actors.values() {
-            send_storage_command(&actor.tx, StorageTrieCommand::Drive)?;
+            send_storage_command(&actor.tx, StorageTrieCommand::Finalize)?;
         }
         Ok(())
     }

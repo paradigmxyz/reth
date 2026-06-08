@@ -84,25 +84,71 @@ impl AccountTrieActor {
     )]
     pub(super) async fn run(mut self) {
         while let Some(command) = self.rx.recv().await {
-            if let AccountTrieCommand::ReturnTrie { tx } = command {
-                let _ = tx.send((self.trie, self.deferred));
-                return;
+            let mut should_drive = match command {
+                AccountTrieCommand::ReturnTrie { tx } => {
+                    let _ = tx.send((self.trie, self.deferred));
+                    return;
+                }
+                command => match self.apply_command(command) {
+                    Ok(should_drive) => should_drive,
+                    Err(error) => {
+                        let _ = self.event_tx.send(CoordinatorEvent::Error(error));
+                        continue;
+                    }
+                },
+            };
+
+            tokio::task::yield_now().await;
+
+            while let Ok(command) = self.rx.try_recv() {
+                match command {
+                    AccountTrieCommand::ReturnTrie { tx } => {
+                        if should_drive {
+                            if let Err(error) = self.drive().await {
+                                let _ = self.event_tx.send(CoordinatorEvent::Error(error));
+                            }
+                        }
+                        let _ = tx.send((self.trie, self.deferred));
+                        return;
+                    }
+                    command => match self.apply_command(command) {
+                        Ok(command_should_drive) => should_drive |= command_should_drive,
+                        Err(error) => {
+                            let _ = self.event_tx.send(CoordinatorEvent::Error(error));
+                            should_drive = false;
+                            break;
+                        }
+                    },
+                }
             }
 
-            if let Err(error) = self.on_command(command).await {
+            if should_drive && let Err(error) = self.drive().await {
                 let _ = self.event_tx.send(CoordinatorEvent::Error(error));
             }
         }
     }
 
+    #[cfg(test)]
     async fn on_command(
         &mut self,
         command: AccountTrieCommand,
     ) -> Result<(), ParallelStateRootError> {
+        let should_drive = self.apply_command(command)?;
+        if should_drive {
+            self.drive().await
+        } else {
+            Ok(())
+        }
+    }
+
+    fn apply_command(
+        &mut self,
+        command: AccountTrieCommand,
+    ) -> Result<bool, ParallelStateRootError> {
         let should_drive = match command {
             AccountTrieCommand::Touch(address) => {
                 self.insert_account_update(address, LeafUpdate::Touched);
-                false
+                true
             }
             AccountTrieCommand::Reveal { mut nodes, targets } => {
                 self.trie
@@ -120,11 +166,7 @@ impl AccountTrieActor {
             AccountTrieCommand::ReturnTrie { .. } => unreachable!("handled by run"),
         };
 
-        if should_drive {
-            self.drive().await
-        } else {
-            Ok(())
-        }
+        Ok(should_drive)
     }
 
     #[instrument(
@@ -158,6 +200,9 @@ impl AccountTrieActor {
         loop {
             if self.updates.is_empty() {
                 self.try_build_final_updates()?;
+                if !self.updates.is_empty() {
+                    continue;
+                }
                 if self.has_blocked_updates() {
                     self.record_drive_summary(
                         &span,
@@ -530,13 +575,12 @@ mod tests {
         assert_eq!(actor.blocked_updates.len(), 1);
 
         actor.on_command(AccountTrieCommand::Touch(ready_address)).await.unwrap();
-        assert_eq!(actor.updates.len(), 1);
-        assert_eq!(actor.blocked_updates.len(), 1);
-
-        actor.on_command(AccountTrieCommand::Drive).await.unwrap();
         assert!(matches!(proof_rx.recv().await.unwrap(), ProofServiceCommand::AccountTargets(_)));
         assert!(actor.updates.is_empty());
         assert_eq!(actor.blocked_updates.len(), 2);
+
+        actor.on_command(AccountTrieCommand::Drive).await.unwrap();
+        assert!(matches!(proof_rx.try_recv(), Err(TryRecvError::Empty)));
     }
 
     #[tokio::test]
@@ -547,13 +591,17 @@ mod tests {
 
         actor.on_command(AccountTrieCommand::Touch(first_address)).await.unwrap();
         actor.on_command(AccountTrieCommand::Touch(second_address)).await.unwrap();
-        actor.on_command(AccountTrieCommand::Drive).await.unwrap();
 
-        let targets = match proof_rx.recv().await.unwrap() {
+        let first_targets = match proof_rx.recv().await.unwrap() {
             ProofServiceCommand::AccountTargets(targets) => targets,
             _ => panic!("expected account proof targets"),
         };
-        assert_eq!(targets.len(), 2);
+        let second_targets = match proof_rx.recv().await.unwrap() {
+            ProofServiceCommand::AccountTargets(targets) => targets,
+            _ => panic!("expected account proof targets"),
+        };
+        assert_eq!(first_targets.len(), 1);
+        assert_eq!(second_targets.len(), 1);
         assert!(actor.updates.is_empty());
         assert_eq!(actor.blocked_update_count(), 2);
         assert_eq!(actor.blocked_updates.len(), 2);

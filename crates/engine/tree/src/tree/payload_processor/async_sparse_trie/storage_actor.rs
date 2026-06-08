@@ -20,6 +20,7 @@ pub(super) enum StorageTrieCommand {
     ApplyHashedStorage(HashedStorage),
     Reveal { nodes: Vec<ProofTrieNodeV2>, targets: Vec<ProofV2Target> },
     Drive,
+    Finalize,
     ReturnTrie { tx: oneshot::Sender<(ActorTrie, DeferredDrops, Vec<B256>, HashedStorage)> },
 }
 
@@ -30,6 +31,7 @@ pub(super) struct StorageTrieActor {
     blocked_updates: HashMap<BlockedStorageTarget, B256Map<LeafUpdate>>,
     blocked_update_targets: B256Map<Vec<BlockedStorageTarget>>,
     needs_root: bool,
+    finalizing: bool,
     root: Option<B256>,
     fetched_targets: B256Map<u8>,
     deferred: DeferredDrops,
@@ -55,6 +57,7 @@ impl StorageTrieActor {
             blocked_updates: HashMap::default(),
             blocked_update_targets: B256Map::default(),
             needs_root: false,
+            finalizing: false,
             root: None,
             fetched_targets: B256Map::default(),
             deferred: DeferredDrops::default(),
@@ -75,32 +78,83 @@ impl StorageTrieActor {
     )]
     pub(super) async fn run(mut self) {
         while let Some(command) = self.rx.recv().await {
-            if let StorageTrieCommand::ReturnTrie { tx } = command {
-                let _ = tx.send((
-                    self.trie,
-                    self.deferred,
-                    self.touched_slots,
-                    self.final_hashed_storage,
-                ));
-                return;
+            let mut should_drive = match command {
+                StorageTrieCommand::ReturnTrie { tx } => {
+                    let _ = tx.send((
+                        self.trie,
+                        self.deferred,
+                        self.touched_slots,
+                        self.final_hashed_storage,
+                    ));
+                    return;
+                }
+                command => match self.apply_command(command) {
+                    Ok(should_drive) => should_drive,
+                    Err(error) => {
+                        let _ = self.event_tx.send(CoordinatorEvent::Error(error));
+                        continue;
+                    }
+                },
+            };
+
+            tokio::task::yield_now().await;
+
+            while let Ok(command) = self.rx.try_recv() {
+                match command {
+                    StorageTrieCommand::ReturnTrie { tx } => {
+                        if should_drive {
+                            if let Err(error) = self.drive().await {
+                                let _ = self.event_tx.send(CoordinatorEvent::Error(error));
+                            }
+                        }
+                        let _ = tx.send((
+                            self.trie,
+                            self.deferred,
+                            self.touched_slots,
+                            self.final_hashed_storage,
+                        ));
+                        return;
+                    }
+                    command => match self.apply_command(command) {
+                        Ok(command_should_drive) => should_drive |= command_should_drive,
+                        Err(error) => {
+                            let _ = self.event_tx.send(CoordinatorEvent::Error(error));
+                            should_drive = false;
+                            break;
+                        }
+                    },
+                }
             }
 
-            if let Err(error) = self.on_command(command).await {
+            if should_drive && let Err(error) = self.drive().await {
                 let _ = self.event_tx.send(CoordinatorEvent::Error(error));
             }
         }
     }
 
+    #[cfg(test)]
     async fn on_command(
         &mut self,
         command: StorageTrieCommand,
     ) -> Result<(), ParallelStateRootError> {
+        let should_drive = self.apply_command(command)?;
+        if should_drive {
+            self.drive().await
+        } else {
+            Ok(())
+        }
+    }
+
+    fn apply_command(
+        &mut self,
+        command: StorageTrieCommand,
+    ) -> Result<bool, ParallelStateRootError> {
         let should_drive = match command {
             StorageTrieCommand::TouchSlots(slots) => {
                 for slot in slots {
                     self.insert_storage_update(slot, LeafUpdate::Touched);
                 }
-                false
+                true
             }
             StorageTrieCommand::ApplyHashedStorage(storage) => {
                 if storage.wiped {
@@ -123,7 +177,7 @@ impl StorageTrieActor {
                 }
                 self.needs_root = true;
                 self.root = None;
-                false
+                true
             }
             StorageTrieCommand::Reveal { mut nodes, targets } => {
                 self.trie
@@ -134,14 +188,14 @@ impl StorageTrieActor {
                 true
             }
             StorageTrieCommand::Drive => true,
+            StorageTrieCommand::Finalize => {
+                self.finalizing = true;
+                true
+            }
             StorageTrieCommand::ReturnTrie { .. } => unreachable!("handled by run"),
         };
 
-        if should_drive {
-            self.drive().await
-        } else {
-            Ok(())
-        }
+        Ok(should_drive)
     }
 
     #[instrument(
@@ -153,6 +207,7 @@ impl StorageTrieActor {
             address = ?self.address,
             updates = self.updates.len(),
             needs_root = self.needs_root,
+            finalizing = self.finalizing,
             root_cached = self.root.is_some(),
         )
     )]
@@ -163,7 +218,7 @@ impl StorageTrieActor {
                     return Ok(())
                 }
 
-                if self.needs_root && self.root.is_none() {
+                if self.finalizing && self.needs_root && self.root.is_none() {
                     let _span = debug_span!(
                         target: "engine::tree::payload_processor::async_sparse_trie",
                         "async_sr_storage_root",
@@ -337,6 +392,7 @@ struct BlockedStorageTarget {
 mod tests {
     use super::*;
     use crate::tree::payload_processor::async_sparse_trie::proof_service::ProofServiceCommand;
+    use alloy_primitives::U256;
     use reth_trie_sparse::{ArenaParallelSparseTrie, ConfigurableSparseTrie, RevealableSparseTrie};
     use tokio::sync::mpsc::{error::TryRecvError, unbounded_channel, UnboundedReceiver};
 
@@ -380,6 +436,26 @@ mod tests {
         assert!(actor.updates.is_empty());
         assert_eq!(actor.blocked_update_targets.len(), 1);
         assert_eq!(actor.blocked_updates.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn apply_hashed_storage_drives_proofs_without_finalizing_root() {
+        let (mut actor, mut proof_rx, mut event_rx) = blind_actor();
+        let slot = B256::with_last_byte(2);
+        let mut storage = HashedStorage::default();
+        storage.storage.insert(slot, U256::from(3));
+
+        actor.on_command(StorageTrieCommand::ApplyHashedStorage(storage)).await.unwrap();
+
+        let targets = match proof_rx.recv().await.unwrap() {
+            ProofServiceCommand::StorageTargets { targets, .. } => targets,
+            _ => panic!("expected storage proof targets"),
+        };
+        assert_eq!(targets.len(), 1);
+        assert!(matches!(event_rx.try_recv(), Err(TryRecvError::Empty)));
+        assert!(actor.needs_root);
+        assert!(!actor.finalizing);
+        assert!(actor.root.is_none());
     }
 
     #[test]
