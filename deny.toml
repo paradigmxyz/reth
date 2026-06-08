@@ -20,6 +20,9 @@ ignore = [
     # moved from hickory-proto to hickory-net in 0.26.0; we use hickory-net 0.26.1 which has
     # the fix, and no patched hickory-proto release exists
     "RUSTSEC-2026-0118",
+    # https://rustsec.org/advisories/RUSTSEC-2026-0173 proc-macro-error2 is unmaintained
+    # and is pulled in transitively by upstream crates with no safe upgrade available.
+    "RUSTSEC-2026-0173",
 ]
 
 # This section is considered when running `cargo deny check bans`.
