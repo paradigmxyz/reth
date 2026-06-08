@@ -262,9 +262,9 @@ pub fn apply_precompile_overrides(
     for (source, dest) in &moves {
         if source == dest {
             if precompiles.get(source).is_none() {
-                return Err(EthSimulateError::NotAPrecompile(*source));
+                return Err(EthSimulateError::NotAPrecompile(*source))
             }
-            return Err(EthSimulateError::MovePrecompileToSelf(*source));
+            return Err(EthSimulateError::MovePrecompileToSelf(*source))
         }
     }
 
@@ -340,7 +340,7 @@ where
             };
 
             if exceeds_gas_limit {
-                return Err(EthApiError::other(EthSimulateError::BlockGasLimitExceeded));
+                return Err(EthApiError::other(EthSimulateError::BlockGasLimitExceeded))
             }
         }
 
@@ -377,7 +377,7 @@ where
         let gas_used = gas_output.tx_gas_used();
         if let Some(remaining_call_gas_limit) = remaining_call_gas_limit.as_mut() {
             if gas_used > *remaining_call_gas_limit {
-                return Err(EthApiError::other(EthSimulateError::GasLimitReached));
+                return Err(EthApiError::other(EthSimulateError::GasLimitReached))
             }
             *remaining_call_gas_limit -= gas_used;
         }
