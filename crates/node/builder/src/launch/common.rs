@@ -502,7 +502,6 @@ where
             RocksDBProvider::builder(self.data_dir().rocksdb())
                 .with_default_tables()
                 .with_metrics()
-                .with_statistics()
                 .build()?
         };
 
