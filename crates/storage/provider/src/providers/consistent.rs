@@ -1529,8 +1529,8 @@ mod tests {
     use reth_db_api::models::AccountBeforeTx;
     use reth_ethereum_primitives::Block;
     use reth_execution_types::{
-        BlockExecutionOutput, BlockExecutionResult, Evm2AccountInfo, Evm2BlockReverts,
-        Evm2BundleState, Evm2StorageReverts, ExecutionOutcome,
+        evm2_block_state_from_state_source, BlockExecutionOutput, BlockExecutionResult,
+        Evm2AccountInfo, Evm2BlockReverts, Evm2BundleState, Evm2StorageReverts, ExecutionOutcome,
     };
     use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock};
     use reth_storage_api::{BlockReader, BlockSource, ChangeSetReader, StateReader};
@@ -1621,6 +1621,21 @@ mod tests {
             [(address, (None, Some(account), BTreeMap::from_iter(storage)))],
             reverts,
             [],
+        )
+    }
+
+    fn execution_outcome_from_bundle(
+        bundle: Evm2BundleState,
+        first_block: u64,
+    ) -> ExecutionOutcome {
+        let block_reverts = bundle.block_reverts().clone();
+        let state = evm2_block_state_from_state_source(&bundle);
+        ExecutionOutcome::from_state_and_reverts(
+            state,
+            block_reverts,
+            Vec::new(),
+            first_block,
+            Vec::new(),
         )
     }
 
@@ -1887,7 +1902,7 @@ mod tests {
                 .into_iter()
                 .map(|b| b.try_recover().expect("failed to seal block with senders"))
                 .collect(),
-            &ExecutionOutcome::new(
+            &execution_outcome_from_bundle(
                 Evm2BundleState::new_init(
                     first_database_block,
                     database_state.into_iter().map(|(address, (account, _))| {
@@ -1902,9 +1917,7 @@ mod tests {
                     }),
                     [],
                 ),
-                Vec::new(),
                 first_database_block,
-                Vec::new(),
             ),
             Default::default(),
         )?;
@@ -1918,28 +1931,29 @@ mod tests {
                 .first()
                 .map(|block| {
                     let senders = block.senders().expect("failed to recover senders");
+                    let bundle = Evm2BundleState::new_init(
+                        first_in_memory_block,
+                        in_memory_state.into_iter().map(|(address, (account, _))| {
+                            (address, (None, Some(account), BTreeMap::default()))
+                        }),
+                        [Evm2BlockReverts {
+                            accounts: in_memory_changesets
+                                .iter()
+                                .map(|(address, account, _)| {
+                                    (*address, Some(account_to_evm2(*account)))
+                                })
+                                .collect(),
+                            storage: AddressMap::default(),
+                        }],
+                        [],
+                    );
                     ExecutedBlock {
                         recovered_block: Arc::new(RecoveredBlock::new_sealed(
                             block.clone(),
                             senders,
                         )),
                         execution_output: Arc::new(BlockExecutionOutput {
-                            state: Evm2BundleState::new_init(
-                                first_in_memory_block,
-                                in_memory_state.into_iter().map(|(address, (account, _))| {
-                                    (address, (None, Some(account), BTreeMap::default()))
-                                }),
-                                [Evm2BlockReverts {
-                                    accounts: in_memory_changesets
-                                        .iter()
-                                        .map(|(address, account, _)| {
-                                            (*address, Some(account_to_evm2(*account)))
-                                        })
-                                        .collect(),
-                                    storage: AddressMap::default(),
-                                }],
-                                [],
-                            ),
+                            state: evm2_block_state_from_state_source(&bundle),
                             result: BlockExecutionResult {
                                 receipts: Default::default(),
                                 requests: Default::default(),
@@ -2010,7 +2024,7 @@ mod tests {
                 .into_iter()
                 .map(|b| b.try_recover().expect("failed to seal block with senders"))
                 .collect(),
-            &ExecutionOutcome::new(
+            &execution_outcome_from_bundle(
                 single_account_bundle(
                     0,
                     address,
@@ -2021,9 +2035,7 @@ mod tests {
                         evm2_revert([(address, Some(account), vec![(slot, U256::ZERO)])]),
                     ],
                 ),
-                Vec::new(),
                 0,
-                Vec::new(),
             ),
             Default::default(),
         )?;
@@ -2041,12 +2053,13 @@ mod tests {
 
         let outcome = consistent_provider.get_state(1)?.expect("should return execution outcome");
 
-        let storage = outcome.storage_changes().get(&address).expect("should have account storage");
-
-        let storage_slot = storage.slots.get(&slot).expect("should have the slot in storage");
+        let storage_slot = outcome
+            .storage_changes_for(address)
+            .find(|(storage_slot, _)| *storage_slot == slot)
+            .expect("should have the slot in storage");
 
         assert_eq!(
-            storage_slot.current,
+            storage_slot.1,
             U256::from(100),
             "present_value should be 100 (the actual value in PlainStorageState)"
         );
@@ -2080,7 +2093,7 @@ mod tests {
                 .into_iter()
                 .map(|b| b.try_recover().expect("failed to seal block with senders"))
                 .collect(),
-            &ExecutionOutcome::new(
+            &execution_outcome_from_bundle(
                 single_account_bundle(
                     0,
                     address,
@@ -2088,9 +2101,7 @@ mod tests {
                     [(slot, (U256::ZERO, U256::from(100)))],
                     [evm2_revert([(address, Some(account), vec![(slot, U256::ZERO)])])],
                 ),
-                Vec::new(),
                 0,
-                Vec::new(),
             ),
             Default::default(),
         )?;
@@ -2100,6 +2111,13 @@ mod tests {
 
         let in_mem_block = in_memory_blocks.first().unwrap();
         let senders = in_mem_block.senders().expect("failed to recover senders");
+        let bundle = single_account_bundle(
+            in_mem_block.number,
+            address,
+            account,
+            [(slot, (U256::from(100), U256::from(200)))],
+            [evm2_revert([(address, Some(account), vec![(slot, U256::from(100))])])],
+        );
         let chain = NewCanonicalChain::Commit {
             new: vec![ExecutedBlock {
                 recovered_block: Arc::new(RecoveredBlock::new_sealed(
@@ -2107,13 +2125,7 @@ mod tests {
                     senders,
                 )),
                 execution_output: Arc::new(BlockExecutionOutput {
-                    state: single_account_bundle(
-                        in_mem_block.number,
-                        address,
-                        account,
-                        [(slot, (U256::from(100), U256::from(200)))],
-                        [evm2_revert([(address, Some(account), vec![(slot, U256::from(100))])])],
-                    ),
+                    state: evm2_block_state_from_state_source(&bundle),
                     result: BlockExecutionResult {
                         receipts: Default::default(),
                         requests: Default::default(),
@@ -2175,7 +2187,7 @@ mod tests {
                 .into_iter()
                 .map(|b| b.try_recover().expect("failed to seal block with senders"))
                 .collect(),
-            &ExecutionOutcome::new(
+            &execution_outcome_from_bundle(
                 single_account_bundle(
                     0,
                     address,
@@ -2186,9 +2198,7 @@ mod tests {
                         Evm2BlockReverts::default(),
                     ],
                 ),
-                Vec::new(),
                 0,
-                Vec::new(),
             ),
             Default::default(),
         )?;
@@ -2198,6 +2208,13 @@ mod tests {
 
         let in_mem_block = in_memory_blocks.first().unwrap();
         let senders = in_mem_block.senders().expect("failed to recover senders");
+        let bundle = single_account_bundle(
+            in_mem_block.number,
+            address,
+            account,
+            [(slot, (U256::from(100), U256::from(200)))],
+            [evm2_revert([(address, Some(account), vec![(slot, U256::from(100))])])],
+        );
         let chain = NewCanonicalChain::Commit {
             new: vec![ExecutedBlock {
                 recovered_block: Arc::new(RecoveredBlock::new_sealed(
@@ -2205,13 +2222,7 @@ mod tests {
                     senders,
                 )),
                 execution_output: Arc::new(BlockExecutionOutput {
-                    state: single_account_bundle(
-                        in_mem_block.number,
-                        address,
-                        account,
-                        [(slot, (U256::from(100), U256::from(200)))],
-                        [evm2_revert([(address, Some(account), vec![(slot, U256::from(100))])])],
-                    ),
+                    state: evm2_block_state_from_state_source(&bundle),
                     result: BlockExecutionResult {
                         receipts: Default::default(),
                         requests: Default::default(),

@@ -899,7 +899,8 @@ mod tests {
         BlockNumberList,
     };
     use reth_execution_types::{
-        Evm2AccountInfo, Evm2BlockReverts, Evm2BundleState, Evm2StorageReverts,
+        evm2_block_state_from_state_source, Evm2AccountInfo, Evm2BlockReverts, Evm2BundleState,
+        Evm2StorageReverts,
     };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{
@@ -1408,7 +1409,13 @@ mod tests {
                     .into_iter()
                     .map(|b| b.try_recover().expect("failed to seal block with senders"))
                     .collect(),
-                &ExecutionOutcome::new(bundle, Vec::new(), 0, Vec::new()),
+                &ExecutionOutcome::from_state_and_reverts(
+                    evm2_block_state_from_state_source(&bundle),
+                    bundle.block_reverts().clone(),
+                    Vec::new(),
+                    0,
+                    Vec::new(),
+                ),
                 Default::default(),
             )
             .unwrap();

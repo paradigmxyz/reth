@@ -4107,8 +4107,8 @@ mod tests {
     use reth_db_api::models::StorageSettings;
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{
-        AccountRevertInit, BlockExecutionOutput, BlockExecutionResult, Evm2BlockReverts,
-        Evm2BundleState, Evm2StorageReverts,
+        evm2_block_state_from_state_source, AccountRevertInit, BlockExecutionOutput,
+        BlockExecutionResult, Evm2BlockReverts, Evm2BundleState, Evm2StorageReverts,
     };
     use reth_primitives_traits::SealedBlock;
     use reth_storage_api::MetadataWriter;
@@ -5152,7 +5152,13 @@ mod tests {
             BTreeMap::from_iter([(slot, (U256::ZERO, U256::from(10)))]),
         );
 
-        let execution_outcome = ExecutionOutcome::new(bundle.clone(), vec![vec![]], 1, Vec::new());
+        let execution_outcome = ExecutionOutcome::from_state_and_reverts(
+            evm2_block_state_from_state_source(&bundle),
+            bundle.block_reverts().clone(),
+            vec![vec![]],
+            1,
+            Vec::new(),
+        );
 
         provider_rw
             .tx
@@ -5327,7 +5333,7 @@ mod tests {
                         gas_used: 0,
                         blob_gas_used: 0,
                     },
-                    state: bundle,
+                    state: evm2_block_state_from_state_source(&bundle),
                 }),
                 ComputedTrieData { hashed_state: Arc::new(hashed_state), ..Default::default() },
             );
@@ -5565,7 +5571,13 @@ mod tests {
             BTreeMap::from_iter([(slot, (U256::ZERO, U256::from(10)))]),
         );
 
-        let execution_outcome = ExecutionOutcome::new(bundle.clone(), vec![vec![]], 1, Vec::new());
+        let execution_outcome = ExecutionOutcome::from_state_and_reverts(
+            evm2_block_state_from_state_source(&bundle),
+            bundle.block_reverts().clone(),
+            vec![vec![]],
+            1,
+            Vec::new(),
+        );
 
         provider_rw
             .write_state(
