@@ -8415,6 +8415,7 @@ dependencies = [
  "reth-db-common",
  "reth-era",
  "reth-era-downloader",
+ "reth-ethereum-primitives",
  "reth-etl",
  "reth-fs-util",
  "reth-primitives-traits",
