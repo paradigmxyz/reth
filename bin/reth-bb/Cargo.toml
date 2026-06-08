@@ -98,6 +98,10 @@ asm-keccak = [
     "reth-node-core/asm-keccak",
     "reth-ethereum-cli/asm-keccak",
     "reth-node-ethereum/asm-keccak",
+    "reth-engine-tree/asm-keccak",
+    "reth-evm/asm-keccak",
+    "reth-evm-ethereum/asm-keccak",
+    "reth-storage-api/asm-keccak",
     "alloy-primitives/asm-keccak",
     "evm2/asm-keccak",
 ]
