@@ -217,6 +217,36 @@ impl<T> ExecutionOutcome<T> {
         self.bundle.storage()
     }
 
+    /// Returns changed storage slot indices for all changed accounts.
+    pub fn storage_change_keys(&self) -> impl Iterator<Item = (Address, U256)> + '_ {
+        self.bundle.storage().iter().flat_map(|(address, storage)| {
+            storage.slots.keys().copied().map(move |slot| (*address, slot))
+        })
+    }
+
+    /// Returns current changed storage values for `address`.
+    pub fn storage_changes_for(&self, address: Address) -> impl Iterator<Item = (U256, U256)> + '_ {
+        self.bundle
+            .storage()
+            .get(&address)
+            .into_iter()
+            .flat_map(|storage| storage.slots.iter().map(|(slot, value)| (*slot, value.current)))
+    }
+
+    /// Returns bytecodes changed by this execution outcome.
+    pub fn bytecodes(&self) -> impl Iterator<Item = (B256, Bytecode)> + '_ {
+        self.bundle
+            .contracts()
+            .iter()
+            .filter(|(hash, _)| **hash != alloy_consensus::constants::KECCAK_EMPTY)
+            .map(|(hash, bytecode)| (*hash, Bytecode::new_raw(bytecode.original_bytes())))
+    }
+
+    /// Returns the number of changed accounts.
+    pub fn changed_account_count(&self) -> usize {
+        self.bundle.accounts().len()
+    }
+
     /// Returns the current state changes as an evm2 frozen block state.
     pub fn evm2_block_state(&self) -> Evm2BlockState {
         evm2_block_state_from_state_source(&self.bundle)
