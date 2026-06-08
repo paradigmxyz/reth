@@ -4,6 +4,7 @@ use crate::{
 };
 use alloc::{boxed::Box, vec::Vec};
 use alloy_consensus::transaction::{Either, Recovered};
+use alloy_primitives::Address;
 use rayon::prelude::*;
 use reth_execution_types::BlockExecutionOutput;
 use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, RecoveredBlock, TxTy};
@@ -31,6 +32,9 @@ pub trait ConfigureEngineEvm<ExecutionData>: ConfigureEvm {
 pub trait ConfigureEvm2Engine<ExecutionData>: ConfigureEngineEvm<ExecutionData> {
     /// Returns the chain id used by evm2 for transaction validation and the `CHAINID` opcode.
     fn evm2_chain_id(&self) -> u64;
+
+    /// Returns the deposit contract address used to derive EIP-6110 deposit requests.
+    fn evm2_deposit_contract_address(&self) -> Option<Address>;
 
     /// Returns the evm2 spec id for the given block header.
     fn evm2_spec_for_header(

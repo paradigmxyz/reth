@@ -345,6 +345,10 @@ where
         self.chain_spec.chain_id()
     }
 
+    fn evm2_deposit_contract_address(&self) -> Option<alloy_primitives::Address> {
+        self.chain_spec.deposit_contract_address()
+    }
+
     fn evm2_spec_for_header(&self, header: &Header) -> Result<evm2::SpecId, Self::Error> {
         Ok(evm2_spec(self.chain_spec.as_ref(), header))
     }
@@ -436,6 +440,7 @@ where
             }),
             ommers: Some(&block.body().ommers),
             withdrawals: block.body().withdrawals().map(|withdrawals| withdrawals.as_slice()),
+            deposit_contract_address: self.chain_spec.deposit_contract_address(),
         };
 
         execute_evm2_block_with_state_provider_context(
@@ -476,6 +481,7 @@ where
             }),
             ommers: Some(&block.body().ommers),
             withdrawals: block.body().withdrawals().map(|withdrawals| withdrawals.as_slice()),
+            deposit_contract_address: self.chain_spec.deposit_contract_address(),
         };
 
         execute_evm2_block_with_borrowed_state_provider_context(

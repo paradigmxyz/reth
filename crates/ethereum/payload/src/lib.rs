@@ -18,7 +18,7 @@ use reth_basic_payload_builder::{
     is_better_payload, BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder,
     PayloadConfig,
 };
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthExecutorSpec, EthereumHardforks};
 use reth_ethereum_primitives::TransactionSigned;
 use reth_evm_ethereum::{
     evm2_block_env_with_blob_params, evm2_spec,
@@ -79,8 +79,9 @@ impl<Pool, Client, EvmConfig> PayloadBuilder for EthereumPayloadBuilder<Pool, Cl
 where
     EvmConfig: Clone + Send + Sync,
     Client: StateProviderFactory
-        + ChainSpecProvider<ChainSpec: EthereumHardforks + EthChainSpec<Header = Header>>
-        + Clone,
+        + ChainSpecProvider<
+            ChainSpec: EthereumHardforks + EthExecutorSpec + EthChainSpec<Header = Header>,
+        > + Clone,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
     type Attributes = EthPayloadAttributes;
@@ -154,7 +155,9 @@ pub fn default_ethereum_payload<EvmConfig, Client, Pool, F>(
 where
     EvmConfig: Clone + Send + Sync,
     Client: StateProviderFactory
-        + ChainSpecProvider<ChainSpec: EthereumHardforks + EthChainSpec<Header = Header>>,
+        + ChainSpecProvider<
+            ChainSpec: EthereumHardforks + EthExecutorSpec + EthChainSpec<Header = Header>,
+        >,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
@@ -281,6 +284,7 @@ where
             }),
             ommers: Some(&body.ommers),
             withdrawals: body.withdrawals.as_ref().map(|withdrawals| withdrawals.as_slice()),
+            deposit_contract_address: chain_spec.deposit_contract_address(),
         },
     )
     .map_err(PayloadBuilderError::evm)?;

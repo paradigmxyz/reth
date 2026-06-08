@@ -1098,6 +1098,7 @@ where
             }),
             ommers: None,
             withdrawals: env.withdrawals.as_deref(),
+            deposit_contract_address: self.evm_config.evm2_deposit_contract_address(),
         };
 
         let output = debug_span!(target: "engine::tree", "execute_evm2_block")

@@ -152,6 +152,10 @@ where
         self.inner().evm2_chain_id()
     }
 
+    fn evm2_deposit_contract_address(&self) -> Option<alloy_primitives::Address> {
+        self.inner().evm2_deposit_contract_address()
+    }
+
     fn evm2_spec_for_header(
         &self,
         header: &HeaderTy<Self::Primitives>,
