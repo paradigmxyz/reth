@@ -40,7 +40,6 @@ use std::sync::{
 };
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
-
 use super::bal_prewarm_pool::BalPrewarmPool;
 
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.

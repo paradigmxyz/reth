@@ -54,7 +54,7 @@ impl BalPrewarmPool {
             workers.push(tx);
             handles.push(
                 std::thread::Builder::new()
-                    .name(format!("bal-prewarm-{i}"))
+                    .name(format!("bal-prewarm-{i:03}"))
                     .spawn(move || prewarm_loop(rx))
                     .expect("spawn bal-prewarm thread"),
             );
