@@ -7,7 +7,7 @@ use reth_config::config::ExecutionConfig;
 use reth_consensus::FullConsensus;
 use reth_db::{static_file::HeaderMask, tables};
 use reth_evm::{metrics::ExecutorMetrics, ConfigureEvm2BlockExecutor};
-use reth_execution_types::{Chain, Evm2BundleState};
+use reth_execution_types::{evm2_block_state_from_state_source, Chain, Evm2BundleState};
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
@@ -356,7 +356,8 @@ where
 
             let output = self.metrics.metered_one(&block, |input| {
                 let state_provider = LatestStateProviderRef::new(provider);
-                let state_provider = Evm2OverlayStateProvider::new(&state_provider, state.state());
+                let overlay_state = evm2_block_state_from_state_source(state.state());
+                let state_provider = Evm2OverlayStateProvider::new(&state_provider, &overlay_state);
                 self.evm_config
                     .execute_evm2_block_with_state_provider_ref(&state_provider, input)
                     .map_err(|error| StageError::Block {

@@ -250,9 +250,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         }
                         let _ = stats_tx.send((block.number(), block.gas_used()));
 
+                        let block_state =
+                            Evm2BundleState::from_state_source(block.number(), &output.state);
                         match &mut bundle {
-                            Some(bundle) => bundle.extend(output.state),
-                            None => bundle = Some(output.state),
+                            Some(bundle) => bundle.extend(block_state),
+                            None => bundle = Some(block_state),
                         }
 
                         // Verify and drop accumulated state once in a while to avoid OOM.
