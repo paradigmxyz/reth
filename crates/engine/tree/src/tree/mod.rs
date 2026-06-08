@@ -24,7 +24,9 @@ use reth_engine_primitives::{
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
-use reth_execution_types::evm2_block_state_from_state_source;
+use reth_execution_types::{
+    evm2_block_state_from_state_source, evm2_block_state_hashed_post_state_sorted,
+};
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle};
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadTypes};
 use reth_primitives_traits::{
@@ -2168,7 +2170,9 @@ where
             .provider
             .get_state(block.header().number())?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.header().number()))?;
-        let hashed_state = execution_output.hash_state_slow::<reth_trie::KeccakKeyHasher>();
+        let block_state = evm2_block_state_from_state_source(&execution_output.bundle);
+        let hashed_state =
+            evm2_block_state_hashed_post_state_sorted::<reth_trie::KeccakKeyHasher>(&block_state);
 
         debug!(
             target: "engine::tree",
@@ -2182,12 +2186,12 @@ where
             block.number(),
         )?;
 
-        let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
+        let sorted_hashed_state = Arc::new(hashed_state);
         let sorted_trie_updates = Arc::new(trie_updates);
         let trie_data = ComputedTrieData::new(sorted_hashed_state, sorted_trie_updates);
 
         let execution_output = Arc::new(BlockExecutionOutput {
-            state: evm2_block_state_from_state_source(&execution_output.bundle),
+            state: block_state,
             result: BlockExecutionResult {
                 receipts: execution_output.receipts.pop().unwrap_or_default(),
                 requests: execution_output.requests.pop().unwrap_or_default(),
