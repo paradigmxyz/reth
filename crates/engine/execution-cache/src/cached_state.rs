@@ -1,13 +1,13 @@
 //! Execution cache implementation for block processing.
 use alloy_primitives::{
-    map::{DefaultHashBuilder, FbBuildHasher},
+    map::{AddressSet, DefaultHashBuilder, FbBuildHasher},
     Address, StorageKey, StorageValue, B256, KECCAK256_EMPTY,
 };
 use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
 use metrics::{Counter, Gauge, Histogram};
 use parking_lot::Once;
 use reth_errors::ProviderResult;
-use reth_execution_types::Evm2BundleState;
+use reth_execution_types::{Evm2BlockState, Evm2BundleState};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
 use reth_provider::{
@@ -1078,6 +1078,74 @@ impl ExecutionCache {
             // for the account cache
             self.insert_account(
                 *addr,
+                Some(Account {
+                    nonce: account_info.nonce,
+                    balance: account_info.balance,
+                    bytecode_hash: (!account_info.code_hash.is_zero() &&
+                        account_info.code_hash != KECCAK256_EMPTY)
+                        .then_some(account_info.code_hash),
+                }),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Inserts one block of evm2 post-execution state changes into the cache.
+    #[instrument(level = "debug", target = "engine::caching", skip_all)]
+    #[expect(clippy::result_unit_err)]
+    pub fn insert_block_state(&self, state_updates: &Evm2BlockState) -> Result<(), ()> {
+        let bytecodes = state_updates.code().count();
+        let _enter = debug_span!(target: "engine::tree", "contracts", len = bytecodes).entered();
+        for (code_hash, bytecode) in state_updates.code() {
+            self.insert_code(*code_hash, Some(Bytecode::new_raw(bytecode.original_bytes())));
+        }
+        drop(_enter);
+
+        let accounts = state_updates.accounts().count();
+        let storages = state_updates.storage().count();
+        let _enter = debug_span!(
+            target: "engine::tree",
+            "accounts",
+            accounts,
+            storages
+        )
+        .entered();
+        for (key, slot) in state_updates.storage() {
+            self.insert_storage(key.address(), key.key().into(), Some(slot.current));
+        }
+
+        let storage_wipes = state_updates.storage_wipes().collect::<AddressSet>();
+        for (addr, account) in state_updates.accounts() {
+            if storage_wipes.contains(&addr) {
+                let had_code = account.original.as_ref().is_some_and(|info| {
+                    !info.code_hash.is_zero() && info.code_hash != KECCAK256_EMPTY
+                });
+                if had_code {
+                    self.0.selfdestruct_encountered.call_once(|| {
+                        warn!(
+                            target: "engine::caching",
+                            address = ?addr,
+                            info = ?account.current,
+                            original_info = ?account.original,
+                            "Encountered an inter-transaction SELFDESTRUCT that reset the storage cache. Are you running a pre-Dencun network?"
+                        );
+                    });
+                    self.clear();
+                    return Ok(())
+                }
+
+                self.0.account_cache.remove(&addr);
+                continue;
+            }
+
+            let Some(ref account_info) = account.current else {
+                trace!(target: "engine::caching", ?account, "Account with None account info found in state updates");
+                return Err(())
+            };
+
+            self.insert_account(
+                addr,
                 Some(Account {
                     nonce: account_info.nonce,
                     balance: account_info.balance,

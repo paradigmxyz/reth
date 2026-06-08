@@ -1,8 +1,11 @@
 use alloc::vec::Vec;
 use alloy_consensus::TxType;
-use evm2::{evm::StateChanges, StateChangeSource, TxOutcome, TxResult};
+use evm2::{
+    evm::{BlockStateAccumulator, FrozenBlockState, StateChanges},
+    StateChangeSource, TxOutcome, TxResult,
+};
 use reth_ethereum_primitives::Receipt;
-use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Evm2BundleState};
+use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
 
 /// A builder that operates on Reth primitive types, specifically [`TransactionSigned`] and
 /// [`Receipt`].
@@ -54,26 +57,27 @@ impl RethReceiptBuilder {
     /// post-block state changes.
     pub fn build_evm2_block_output_with_surrounding_state_changes(
         &self,
-        block_number: u64,
+        _block_number: u64,
         pre_state_changes: impl IntoIterator<Item = StateChanges>,
         txs: impl IntoIterator<Item = (TxType, TxResult)>,
         post_state_changes: impl IntoIterator<Item = StateChanges>,
     ) -> BlockExecutionOutput<Receipt> {
         let mut receipts = Vec::new();
-        let mut state_changes = Vec::new();
+        let mut state = BlockStateAccumulator::new();
         let mut cumulative_gas_used = 0;
 
-        state_changes.extend(pre_state_changes);
+        for changes in pre_state_changes {
+            append_to_block_state(&mut state, &changes);
+        }
         for (tx_type, result) in txs {
             cumulative_gas_used += result.gas_used;
             let logs = result.logs;
             receipts.push(Receipt { tx_type, success: result.status, cumulative_gas_used, logs });
-            state_changes.push(result.state_changes);
+            append_to_block_state(&mut state, &result.state_changes);
         }
-        state_changes.extend(post_state_changes);
-
-        let mut state = Evm2BundleState::new(block_number);
-        state.append_block(state_changes);
+        for changes in post_state_changes {
+            append_to_block_state(&mut state, &changes);
+        }
 
         BlockExecutionOutput {
             result: BlockExecutionResult {
@@ -82,7 +86,7 @@ impl RethReceiptBuilder {
                 gas_used: cumulative_gas_used,
                 blob_gas_used: 0,
             },
-            state,
+            state: state.freeze(),
         }
     }
 
@@ -90,7 +94,7 @@ impl RethReceiptBuilder {
     /// accumulated evm2 block state source.
     pub fn build_evm2_block_output_from_state_source<S>(
         &self,
-        block_number: u64,
+        _block_number: u64,
         txs: impl IntoIterator<Item = (TxType, TxOutcome)>,
         state_source: &S,
     ) -> BlockExecutionOutput<Receipt>
@@ -117,8 +121,58 @@ impl RethReceiptBuilder {
                 gas_used: cumulative_gas_used,
                 blob_gas_used: 0,
             },
-            state: Evm2BundleState::from_state_source(block_number, state_source),
+            state: block_state_from_source(state_source),
         }
+    }
+
+    /// Builds a block execution output from result-only evm2 transaction outcomes and an owned
+    /// accumulated evm2 block state.
+    pub fn build_evm2_block_output_from_block_state(
+        &self,
+        txs: impl IntoIterator<Item = (TxType, TxOutcome)>,
+        state: FrozenBlockState,
+    ) -> BlockExecutionOutput<Receipt> {
+        let mut receipts = Vec::new();
+        let mut cumulative_gas_used = 0;
+
+        for (tx_type, outcome) in txs {
+            cumulative_gas_used += outcome.gas_used;
+            receipts.push(Receipt {
+                tx_type,
+                success: outcome.status,
+                cumulative_gas_used,
+                logs: outcome.logs,
+            });
+        }
+
+        BlockExecutionOutput {
+            result: BlockExecutionResult {
+                receipts,
+                requests: Default::default(),
+                gas_used: cumulative_gas_used,
+                blob_gas_used: 0,
+            },
+            state,
+        }
+    }
+}
+
+fn block_state_from_source<S>(source: &S) -> FrozenBlockState
+where
+    S: StateChangeSource,
+{
+    let mut state = BlockStateAccumulator::new();
+    append_to_block_state(&mut state, source);
+    state.freeze()
+}
+
+fn append_to_block_state<S>(state: &mut BlockStateAccumulator, source: &S)
+where
+    S: StateChangeSource,
+{
+    match source.visit(state) {
+        Ok(()) => {}
+        Err(err) => match err {},
     }
 }
 
@@ -174,11 +228,7 @@ mod tests {
 
         assert_eq!(output.result.gas_used, 21_000);
         assert_eq!(output.result.receipts[0].logs, vec![log]);
-        assert_eq!(output.state.first_block(), 7);
-        assert_eq!(
-            output.state.accounts().get(&address).unwrap().current.as_ref().unwrap().nonce,
-            1
-        );
+        assert_eq!(output.account_state(&address).unwrap().current.as_ref().unwrap().nonce, 1);
     }
 
     #[test]
@@ -208,10 +258,9 @@ mod tests {
 
         assert!(output.result.receipts.is_empty());
         assert_eq!(
-            output.state.accounts().get(&address).unwrap().current.as_ref().unwrap().balance,
+            output.account_state(&address).unwrap().current.as_ref().unwrap().balance,
             U256::from(5)
         );
-        assert_eq!(output.state.block_reverts().len(), 1);
     }
 
     #[test]
@@ -276,18 +325,17 @@ mod tests {
             [post],
         );
 
-        assert_eq!(output.state.block_reverts().len(), 1);
-        assert_eq!(output.state.accounts().len(), 3);
+        assert_eq!(output.state.accounts().count(), 3);
         assert_eq!(
-            output.state.accounts().get(&pre_address).unwrap().current.as_ref().unwrap().balance,
+            output.account_state(&pre_address).unwrap().current.as_ref().unwrap().balance,
             U256::from(1)
         );
         assert_eq!(
-            output.state.accounts().get(&tx_address).unwrap().current.as_ref().unwrap().balance,
+            output.account_state(&tx_address).unwrap().current.as_ref().unwrap().balance,
             U256::from(2)
         );
         assert_eq!(
-            output.state.accounts().get(&post_address).unwrap().current.as_ref().unwrap().balance,
+            output.account_state(&post_address).unwrap().current.as_ref().unwrap().balance,
             U256::from(3)
         );
     }

@@ -1,7 +1,7 @@
 use super::{DatabaseProviderRO, ProviderFactory, ProviderNodeTypes};
 use crate::{
     providers::{
-        evm2_bundle_to_plain_state_and_reverts, StaticFileProvider, StaticFileProviderRWRefMut,
+        evm2_block_state_to_plain_state_and_reverts, StaticFileProvider, StaticFileProviderRWRefMut,
     },
     to_range, AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
     BlockReaderIdExt, BlockSource, ChainSpecProvider, ChangeSetReader, HeaderProvider,
@@ -1192,7 +1192,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
         if let Some(state) =
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
-            let (_, reverts) = evm2_bundle_to_plain_state_and_reverts(
+            let (_, reverts) = evm2_block_state_to_plain_state_and_reverts(
                 &state.block().execution_output.state,
                 OriginalValuesKnown::Yes,
             );
@@ -1244,7 +1244,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
         if let Some(state) =
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
-            let (_, reverts) = evm2_bundle_to_plain_state_and_reverts(
+            let (_, reverts) = evm2_block_state_to_plain_state_and_reverts(
                 &state.block_ref().execution_output.state,
                 OriginalValuesKnown::Yes,
             );
@@ -1292,7 +1292,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
             database_end = head_block.anchor().number;
 
             for state in head_block.chain() {
-                let (_, reverts) = evm2_bundle_to_plain_state_and_reverts(
+                let (_, reverts) = evm2_block_state_to_plain_state_and_reverts(
                     &state.block_ref().execution_output.state,
                     OriginalValuesKnown::Yes,
                 );
@@ -1344,7 +1344,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
         if let Some(state) =
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
-            let (_, reverts) = evm2_bundle_to_plain_state_and_reverts(
+            let (_, reverts) = evm2_block_state_to_plain_state_and_reverts(
                 &state.block_ref().execution_output.state,
                 OriginalValuesKnown::Yes,
             );
@@ -1388,7 +1388,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
             // Search in-memory state for the account changeset
-            let (_, reverts) = evm2_bundle_to_plain_state_and_reverts(
+            let (_, reverts) = evm2_block_state_to_plain_state_and_reverts(
                 &state.block_ref().execution_output.state,
                 OriginalValuesKnown::Yes,
             );
@@ -1439,7 +1439,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
 
             for state in head_block.chain() {
                 // found block in memory, collect its changesets
-                let (_, reverts) = evm2_bundle_to_plain_state_and_reverts(
+                let (_, reverts) = evm2_block_state_to_plain_state_and_reverts(
                     &state.block_ref().execution_output.state,
                     OriginalValuesKnown::Yes,
                 );

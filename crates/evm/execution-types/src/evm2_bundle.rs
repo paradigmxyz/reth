@@ -10,8 +10,8 @@ use core::convert::Infallible;
 use evm2::{
     bytecode::Bytecode,
     evm::{
-        AccountChangeRef, AccountInfo, StateChangeSink, StateChangeSource, StateChanges,
-        StorageChangeRef, StorageChangeSet, Tracked,
+        AccountChangeRef, AccountInfo, AccountInfoRef, StateChangeSink, StateChangeSource,
+        StateChanges, StorageChangeRef, StorageChangeSet, Tracked,
     },
 };
 use reth_primitives_traits::{Account, Bytecode as RethBytecode};
@@ -389,6 +389,54 @@ impl Evm2BundleState {
                 }
             }
         }
+    }
+}
+
+impl StateChangeSource for Evm2BundleState {
+    fn visit<S: StateChangeSink>(&self, sink: &mut S) -> Result<(), S::Error> {
+        let mut code_entries = self.contracts.iter().collect::<Vec<_>>();
+        code_entries.sort_by_key(|(code_hash, _)| **code_hash);
+        for (&code_hash, code) in code_entries {
+            sink.bytecode(code_hash, code)?;
+        }
+
+        let mut storage_entries = self.storage.iter().collect::<Vec<_>>();
+        storage_entries.sort_by_key(|(address, _)| **address);
+        for (&address, storage) in storage_entries {
+            if storage.wipe {
+                sink.storage_wipe(address)?;
+            }
+
+            for (&key, slot) in &storage.slots {
+                sink.storage(StorageChangeRef {
+                    address,
+                    key,
+                    original: slot.original,
+                    current: slot.current,
+                })?;
+            }
+        }
+
+        let mut account_entries = self.accounts.iter().collect::<Vec<_>>();
+        account_entries.sort_by_key(|(address, _)| **address);
+        for (&address, account) in account_entries {
+            sink.account(AccountChangeRef {
+                address,
+                original: account.original.as_ref().map(account_info_ref),
+                current: account.current.as_ref().map(account_info_ref),
+            })?;
+        }
+
+        Ok(())
+    }
+}
+
+fn account_info_ref(info: &AccountInfo) -> AccountInfoRef<'_> {
+    AccountInfoRef {
+        balance: info.balance,
+        nonce: info.nonce,
+        code_hash: info.code_hash,
+        code: info.code.as_ref(),
     }
 }
 

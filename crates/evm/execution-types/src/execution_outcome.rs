@@ -142,7 +142,7 @@ impl<T> ExecutionOutcome<T> {
     /// Creates a new `ExecutionOutcome` from a single block execution result.
     pub fn single(block_number: u64, output: BlockExecutionOutput<T>) -> Self {
         Self {
-            bundle: output.state,
+            bundle: Evm2BundleState::from_state_source(block_number, &output.state),
             receipts: vec![output.result.receipts],
             first_block: block_number,
             requests: vec![output.result.requests],

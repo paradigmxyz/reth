@@ -112,7 +112,10 @@ use alloy_consensus::transaction::Either;
 #[cfg(any())]
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
-use alloy_primitives::{map::B256Set, Address, B256, KECCAK256_EMPTY as KECCAK_EMPTY};
+use alloy_primitives::{
+    map::{AddressSet, B256Set},
+    Address, B256, KECCAK256_EMPTY as KECCAK_EMPTY,
+};
 use reth_tasks::LazyHandle;
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
@@ -133,6 +136,7 @@ use reth_evm_ethereum::{
     execute_evm2_block_with_state_provider_context, Evm2BlockExecutionContext, Evm2BlockSystemCalls,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
+use reth_execution_types::evm2_state_source_hashed_post_state;
 use reth_payload_primitives::{
     BuiltPayload, BuiltPayloadExecutedBlock, InvalidPayloadAttributesError, NewPayloadError,
     PayloadTypes,
@@ -699,7 +703,6 @@ where
         // block conversion and receipt root computation. This is a pure CPU-bound task
         // (keccak256 hashing of all changed addresses and storage slots).
         let hashed_state_output = output.clone();
-        let hashed_state_provider = self.provider.clone();
         let mut hashed_state_rx = handle.take_hashed_state_rx();
         let mut hashed_state: LazyHashedPostState =
             self.payload_processor.executor().spawn_blocking_named("hash-post-state", move || {
@@ -711,7 +714,9 @@ where
                 let state = if let Some(Ok(state)) = hashed_state_rx.as_mut().map(|rx| rx.recv()) {
                     state
                 } else {
-                    hashed_state_provider.hashed_post_state(&hashed_state_output.state)
+                    evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(
+                        &hashed_state_output.state,
+                    )
                 };
                 Arc::new(state)
             });
@@ -848,7 +853,10 @@ where
                 // validation.
                 if maybe_new_hashed_state.is_some() || state_root_task_failed {
                     hashed_state = maybe_new_hashed_state.unwrap_or_else(|| {
-                        LazyHandle::ready(Arc::new(self.provider.hashed_post_state(&output.state)))
+                        LazyHandle::ready(Arc::new(evm2_state_source_hashed_post_state::<
+                            KeccakKeyHasher,
+                            _,
+                        >(&output.state)))
                     });
                     hashed_state_validate_result =
                         self.validator.validate_block_post_execution_with_hashed_state(
@@ -1189,7 +1197,8 @@ where
         drop(receipt_tx);
 
         if let Some(updates_tx) = handle.sparse_trie_updates_tx() {
-            let hashed_state = output.state.hashed_post_state::<KeccakKeyHasher>();
+            let hashed_state =
+                evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&output.state);
             let _ = updates_tx.send(StateRootMessage::HashedStateUpdate(hashed_state));
             let _ = updates_tx.send(StateRootMessage::FinishedStateUpdates);
         }
@@ -1309,7 +1318,12 @@ where
                 self.payload_processor.executor().spawn_blocking_named("serial-root", move || {
                     let result = state_provider_builder.build().and_then(|provider| {
                         let hashed_state =
-                            LazyHandle::ready(Arc::new(provider.hashed_post_state(&output.state)));
+                            LazyHandle::ready(Arc::new(evm2_state_source_hashed_post_state::<
+                                KeccakKeyHasher,
+                                _,
+                            >(
+                                &output.state
+                            )));
                         let (state_root, trie_updates) =
                             Self::compute_state_root_serial(provider, &hashed_state)?;
 
@@ -1393,7 +1407,8 @@ where
         debug!(target: "engine::tree::payload_validator", "Comparing trie updates with serial computation");
 
         match state_provider_builder.build().and_then(|provider| {
-            let hashed_state = Arc::new(provider.hashed_post_state(&output.state));
+            let hashed_state =
+                Arc::new(evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&output.state));
             Self::compute_state_root_serial(provider, &LazyHandle::ready(hashed_state))
         }) {
             Ok((serial_root, serial_trie_updates)) => {
@@ -1818,31 +1833,24 @@ where
         let code_bytes_read = provider_stats.total_code_fetched_bytes();
 
         // Write stats from the final state changes.
-        let accounts_changed = output.state.accounts().len();
+        let storage_wipes = output.state.storage_wipes().collect::<AddressSet>();
+        let accounts_changed = output.state.accounts().count();
         let accounts_deleted = output
             .state
             .accounts()
-            .iter()
-            .filter(|(address, acc)| {
-                acc.current.is_none() ||
-                    output.state.storage().get(*address).is_some_and(|storage| storage.wipe)
-            })
+            .filter(|(address, acc)| acc.current.is_none() || storage_wipes.contains(address))
             .count();
-        let storage_slots_changed =
-            output.state.storage().values().map(|storage| storage.slots.len()).sum::<usize>();
+        let storage_slots_changed = output.state.storage().count();
         let storage_slots_deleted = output
             .state
             .storage()
-            .values()
-            .flat_map(|storage| storage.slots.values())
-            .filter(|slot| slot.current.is_zero() && !slot.original.is_zero())
+            .filter(|(_, slot)| slot.current.is_zero() && !slot.original.is_zero())
             .count();
 
         let bytecodes_changed = output
             .state
             .accounts()
-            .values()
-            .filter(|acc| {
+            .filter(|(_, acc)| {
                 let has_code_now =
                     acc.current.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
                 let had_no_code_before = acc
@@ -1858,8 +1866,7 @@ where
         let unique_new_code_hashes: B256Set = output
             .state
             .accounts()
-            .values()
-            .filter(|acc| {
+            .filter(|(_, acc)| {
                 let has_code_now =
                     acc.current.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
                 let had_no_code_before = acc
@@ -1869,12 +1876,14 @@ where
                     .unwrap_or(true);
                 has_code_now && had_no_code_before
             })
-            .filter_map(|acc| acc.current.as_ref().map(|info| info.code_hash))
+            .filter_map(|(_, acc)| acc.current.as_ref().map(|info| info.code_hash))
             .collect();
         let code_bytes_written: usize = unique_new_code_hashes
             .iter()
             .filter_map(|hash| {
-                output.state.contracts().get(hash).map(|bytecode| bytecode.original_bytes().len())
+                output.state.code().find_map(|(code_hash, bytecode)| {
+                    (code_hash == hash).then(|| bytecode.original_bytes().len())
+                })
             })
             .sum();
 
@@ -1886,7 +1895,7 @@ where
         // EIP-7702 delegation tracking from bytecode changes
         // Count new EIP-7702 bytecodes as delegations set
         let eip7702_delegations_set =
-            output.state.contracts().values().filter(|bytecode| bytecode.is_eip7702()).count();
+            output.state.code().filter(|(_, bytecode)| bytecode.is_eip7702()).count();
         // Delegations cleared: accounts where bytecode changed FROM EIP-7702 TO empty
         // This detects when an EIP-7702 delegation is removed by setting code to empty
         // Note: Clearing a delegation does NOT destroy the account - it just empties the
@@ -1894,8 +1903,7 @@ where
         let eip7702_delegations_cleared = output
             .state
             .accounts()
-            .values()
-            .filter(|acc| {
+            .filter(|(_, acc)| {
                 // Check if original bytecode was EIP-7702
                 let original_was_eip7702 = acc
                     .original

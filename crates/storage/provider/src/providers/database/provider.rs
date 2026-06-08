@@ -29,7 +29,7 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
     map::{hash_map, AddressSet, B256Map, HashMap},
-    Address, BlockHash, BlockNumber, StorageKey, StorageValue, TxHash, TxNumber, B256,
+    Address, BlockHash, BlockNumber, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use itertools::Itertools;
 use parking_lot::RwLock;
@@ -50,7 +50,8 @@ use reth_db_api::{
     BlockNumberList,
 };
 use reth_execution_types::{
-    BlockExecutionOutput, BlockExecutionResult, Chain, Evm2BundleState, ExecutionOutcome,
+    BlockExecutionOutput, BlockExecutionResult, Chain, Evm2AccountInfo, Evm2BlockState,
+    Evm2BundleState, ExecutionOutcome,
 };
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
@@ -190,6 +191,93 @@ pub(crate) fn evm2_bundle_to_plain_state_and_reverts(
     }
 
     (StateChangeset { accounts, storage, contracts }, reverts)
+}
+
+pub(crate) fn evm2_block_state_to_plain_state_and_reverts(
+    state: &Evm2BlockState,
+    is_value_known: OriginalValuesKnown,
+) -> (StateChangeset, PlainStateReverts) {
+    let mut accounts = Vec::new();
+    for (address, account) in state.accounts() {
+        if is_value_known.is_not_known() || account.original != account.current {
+            accounts.push((address, account.current.as_ref().map(evm2_account_info_to_reth)));
+        }
+    }
+
+    let mut storage_by_address = BTreeMap::<Address, (bool, Vec<(U256, U256)>)>::new();
+    for address in state.storage_wipes() {
+        storage_by_address.entry(address).or_default().0 = true;
+    }
+    for (key, slot) in state.storage() {
+        let address = key.address();
+        let storage_key = key.key();
+        let entry = storage_by_address.entry(address).or_default();
+        let wipe_and_not_zero = entry.0 && !slot.current.is_zero();
+        let not_wiped_and_changed = !entry.0 && slot.original != slot.current;
+        if is_value_known.is_not_known() || wipe_and_not_zero || not_wiped_and_changed {
+            entry.1.push((storage_key, slot.current));
+        }
+    }
+
+    let storage = storage_by_address
+        .iter()
+        .filter_map(|(address, (wipe_storage, changed_storage))| {
+            (!changed_storage.is_empty() || *wipe_storage).then(|| PlainStorageChangeset {
+                address: *address,
+                wipe_storage: *wipe_storage,
+                storage: changed_storage.clone(),
+            })
+        })
+        .collect();
+
+    let contracts = state
+        .code()
+        .filter(|(hash, _)| **hash != KECCAK_EMPTY)
+        .map(|(hash, bytecode)| (*hash, Bytecode::new_raw(bytecode.original_bytes())))
+        .collect();
+
+    let mut reverts = PlainStateReverts::with_capacity(1);
+    reverts.accounts.push(
+        state
+            .accounts()
+            .map(|(address, account)| {
+                (address, account.original.as_ref().map(evm2_account_info_to_reth))
+            })
+            .collect(),
+    );
+
+    let mut storage_reverts = BTreeMap::<Address, (bool, Vec<(U256, RevertToSlot)>)>::new();
+    for address in state.storage_wipes() {
+        storage_reverts.entry(address).or_default().0 = true;
+    }
+    for (key, slot) in state.storage() {
+        let address = key.address();
+        let entry = storage_reverts.entry(address).or_default();
+        if !entry.0 || !slot.original.is_zero() {
+            entry.1.push((key.key(), RevertToSlot::Some(slot.original)));
+        }
+    }
+    reverts.storage.push(
+        storage_reverts
+            .into_iter()
+            .map(|(address, (wiped, storage_revert))| PlainStorageRevert {
+                address,
+                wiped,
+                storage_revert,
+            })
+            .collect(),
+    );
+
+    (StateChangeset { accounts, storage, contracts }, reverts)
+}
+
+fn evm2_account_info_to_reth(info: &Evm2AccountInfo) -> Account {
+    Account {
+        balance: info.balance,
+        nonce: info.nonce,
+        bytecode_hash: (!info.code_hash.is_zero() && info.code_hash != KECCAK_EMPTY)
+            .then_some(info.code_hash),
+    }
 }
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
@@ -2551,8 +2639,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         }
 
         let first_block = execution_outcome.first_block();
-        let (plain_state, reverts) =
-            evm2_bundle_to_plain_state_and_reverts(execution_outcome.state(), is_value_known);
+        let state = execution_outcome.state();
+        let (plain_state, reverts) = evm2_bundle_to_plain_state_and_reverts(&state, is_value_known);
 
         self.write_state_reverts(reverts, first_block, config)?;
         self.write_state_changes(plain_state)?;
