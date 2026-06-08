@@ -1233,18 +1233,18 @@ impl PeersManager {
                 self.fill_outbound_slots();
             }
 
-            let rotation_ready = self
+            if self
                 .peer_rotation_sleep
                 .as_mut()
-                .map(|sleep| sleep.as_mut().poll(cx).is_ready())
-                .unwrap_or(false);
-            if rotation_ready {
+                .is_some_and(|sleep| sleep.as_mut().poll(cx).is_ready())
+            {
                 self.try_rotate_peer();
-                if let Some(mean) = self.peer_rotation_mean {
-                    let next = tokio::time::Instant::now() + jitter_rotation_interval(mean);
-                    if let Some(ref mut sleep) = self.peer_rotation_sleep {
-                        sleep.as_mut().reset(next);
-                    }
+                if let Some((mean, sleep)) =
+                    self.peer_rotation_mean.zip(self.peer_rotation_sleep.as_mut())
+                {
+                    sleep
+                        .as_mut()
+                        .reset(tokio::time::Instant::now() + jitter_rotation_interval(mean));
                 }
             }
 
