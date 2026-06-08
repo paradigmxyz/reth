@@ -175,7 +175,7 @@ async fn test_selfdestruct_post_dencun() -> eyre::Result<()> {
     let execution_outcome = chain.execution_outcome();
 
     // Verify the output state: post-Dencun, account should NOT be destroyed
-    let account_state = execution_outcome.bundle.account(&contract_address);
+    let account_state = execution_outcome.account(&contract_address);
     assert!(
         !matches!(account_state, Some(None)),
         "Post-Dencun (EIP-6780): Account should NOT be destroyed when SELFDESTRUCT called on existing contract"
@@ -203,7 +203,7 @@ async fn test_selfdestruct_post_dencun() -> eyre::Result<()> {
     let execution_outcome = chain.execution_outcome();
 
     // Verify the output state still shows account NOT destroyed
-    let account_state = execution_outcome.bundle.account(&contract_address);
+    let account_state = execution_outcome.account(&contract_address);
     assert!(
         !matches!(account_state, Some(None)),
         "Post-Dencun: Account should still NOT be destroyed after second SELFDESTRUCT call"
@@ -261,7 +261,7 @@ async fn test_selfdestruct_same_tx_post_dencun() -> eyre::Result<()> {
     let execution_outcome = chain.execution_outcome();
 
     // Verify the output state: same-tx SELFDESTRUCT should destroy the account
-    let account_state = execution_outcome.bundle.account(&contract_address);
+    let account_state = execution_outcome.account(&contract_address);
     assert!(
         account_state.is_none(),
         "Post-Dencun same-tx: Account was created and selfdestructed in the same transaction, no trace in bundle state"
@@ -349,7 +349,7 @@ async fn test_selfdestruct_pre_dencun() -> eyre::Result<()> {
     let execution_outcome = chain.execution_outcome();
 
     // Verify the output state: pre-Dencun, account MUST be destroyed
-    let account_state = execution_outcome.bundle.account(&contract_address);
+    let account_state = execution_outcome.account(&contract_address);
     assert!(
         matches!(account_state, Some(None)),
         "Pre-Dencun: Account MUST be marked as destroyed in output state"
@@ -378,7 +378,7 @@ async fn test_selfdestruct_pre_dencun() -> eyre::Result<()> {
     let execution_outcome = chain.execution_outcome();
 
     // Verify the output state shows the account exists (received ETH) but has no code
-    let account_state = execution_outcome.bundle.account(&contract_address);
+    let account_state = execution_outcome.account(&contract_address);
     // After receiving ETH, the account should exist with balance but no code
     assert!(
         matches!(account_state, Some(Some(_))),
@@ -476,7 +476,7 @@ async fn test_selfdestruct_same_tx_preexisting_account_post_dencun() -> eyre::Re
     // Verify the output state: same-tx exception DOES apply because contract was created this tx
     // The account should be marked as destroyed. Since it had prior state (ETH balance),
     // the bundle will contain it with status Destroyed and original_info set.
-    let account_state = execution_outcome.bundle.account(&future_contract_address);
+    let account_state = execution_outcome.account(&future_contract_address);
     assert!(
         matches!(account_state, Some(None)),
         "Post-Dencun same-tx with prior ETH: Account MUST be marked as destroyed"

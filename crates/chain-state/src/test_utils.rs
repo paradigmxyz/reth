@@ -17,7 +17,7 @@ use reth_ethereum_primitives::{
     Block, BlockBody, EthPrimitives, Receipt, Transaction, TransactionSigned,
 };
 use reth_execution_types::{
-    evm2_block_state_from_state_source, BlockExecutionOutput, BlockExecutionResult,
+    evm2_block_state_hashed_post_state_sorted, BlockExecutionOutput, BlockExecutionResult,
     BundleStateInit, Chain, ExecutionOutcome, RevertsInit,
 };
 use reth_primitives_traits::{
@@ -299,17 +299,18 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         let mut revert_init = RevertsInit::default();
         revert_init.insert(block_number, revert_accounts);
 
-        let bundle = ExecutionOutcome::<Receipt>::new_init(
+        let execution_outcome = ExecutionOutcome::<Receipt>::new_init(
             state_init,
             revert_init,
             [],
             vec![],
             block_number,
             Vec::new(),
-        )
-        .bundle;
+        );
 
-        let hashed_state = bundle.hashed_post_state::<reth_trie::KeccakKeyHasher>().into_sorted();
+        let block_state = execution_outcome.evm2_block_state();
+        let hashed_state =
+            evm2_block_state_hashed_post_state_sorted::<reth_trie::KeccakKeyHasher>(&block_state);
 
         let block_receipts = if receipts.is_empty() {
             recovered
@@ -341,7 +342,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                     gas_used: num_txs * MIN_TRANSACTION_GAS,
                     blob_gas_used: 0,
                 },
-                state: evm2_block_state_from_state_source(&bundle),
+                state: block_state,
             }),
             trie_data,
         );
@@ -423,21 +424,17 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                 Default::default(),
             ),
         );
-        let bundle_state = ExecutionOutcome::<Receipt>::new_init(
+        let execution_outcome = ExecutionOutcome::<Receipt>::new_init(
             state_init,
             RevertsInit::default(),
             [],
-            vec![],
+            vec![vec![]],
             block.number,
             Vec::new(),
-        )
-        .bundle;
+        );
 
         self.signer_execute_account_info.balance = final_balance;
         self.signer_execute_account_info.nonce = final_nonce;
-
-        let execution_outcome =
-            ExecutionOutcome::new(bundle_state, vec![vec![]], block.number, Vec::new());
 
         execution_outcome.with_receipts(vec![receipts])
     }
