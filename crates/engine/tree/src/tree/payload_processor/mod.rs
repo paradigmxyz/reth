@@ -20,7 +20,7 @@ use reth_evm::{
     execute::{ExecutableTxFor, ExecutableTxParts, WithTxEnv},
     ConfigureEvm, ConvertTx, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, SpecFor, TxEnvFor,
 };
-use reth_execution_types::Evm2BundleState;
+use reth_execution_types::Evm2BlockState;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader,
@@ -765,7 +765,7 @@ where
     pub fn on_inserted_executed_block(
         &self,
         block_with_parent: BlockWithParent,
-        bundle_state: &Evm2BundleState,
+        block_state: &Evm2BlockState,
     ) {
         let cache_state_metrics = self.cache_state_metrics.clone();
         self.execution_cache.update_with_guard(|cached| {
@@ -794,9 +794,9 @@ where
                 None => ExecutionCache::new(self.cross_block_cache_size),
             };
 
-            // Insert the block's bundle state into cache
+            // Insert the block's state into cache.
             let new_cache = SavedCache::new(block_with_parent.block.hash, caches);
-            if new_cache.cache().insert_state(bundle_state).is_err() {
+            if new_cache.cache().insert_block_state(block_state).is_err() {
                 *cached = None;
                 debug!(target: "engine::caching", "cleared execution cache on update error");
                 return

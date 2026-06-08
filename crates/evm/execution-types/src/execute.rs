@@ -1,7 +1,7 @@
-use crate::Evm2BundleState;
 use alloc::vec::Vec;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Address, B256, U256};
+use evm2::evm::{AccountInfo, BlockAccountDelta, FrozenBlockState};
 use reth_primitives_traits::{Account, Bytecode};
 
 /// The result of executing a block.
@@ -47,33 +47,38 @@ pub struct BlockExecutionOutput<T> {
     #[deref_mut]
     pub result: BlockExecutionResult<T>,
     /// The changed state of the block after execution.
-    pub state: Evm2BundleState,
+    pub state: FrozenBlockState,
 }
 
 impl<T> BlockExecutionOutput<T> {
     /// Return bytecode if known.
     pub fn bytecode(&self, code_hash: &B256) -> Option<Bytecode> {
-        self.state.bytecode(code_hash)
+        self.state
+            .code()
+            .find(|(hash, _)| *hash == code_hash)
+            .map(|(_, bytecode)| Bytecode::new_raw(bytecode.original_bytes()))
     }
 
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
-        self.state.account(address)
+        self.account_state(address)
+            .map(|account| account.current.as_ref().map(account_info_to_reth))
     }
 
     /// Returns the state account change for the given address.
-    pub fn account_state(
-        &self,
-        address: &Address,
-    ) -> Option<&evm2::evm::Tracked<Option<evm2::evm::AccountInfo>>> {
-        self.state.accounts().get(address)
+    pub fn account_state(&self, address: &Address) -> Option<&BlockAccountDelta> {
+        self.state
+            .accounts()
+            .find_map(|(changed, account)| (changed == *address).then_some(account))
     }
 
     /// Get storage if value is known.
     ///
     /// This means that depending on status we can potentially return `U256::ZERO`.
     pub fn storage(&self, address: &Address, storage_key: U256) -> Option<U256> {
-        self.state.storage_slot(address, storage_key)
+        self.state.storage().find_map(|(key, storage)| {
+            (key.address() == *address && key.key() == storage_key).then_some(storage.current)
+        })
     }
 }
 
@@ -88,5 +93,13 @@ impl<T> Default for BlockExecutionOutput<T> {
             },
             state: Default::default(),
         }
+    }
+}
+
+fn account_info_to_reth(info: &AccountInfo) -> Account {
+    Account {
+        balance: info.balance,
+        nonce: info.nonce,
+        bytecode_hash: (!info.code_hash.is_zero()).then_some(info.code_hash),
     }
 }

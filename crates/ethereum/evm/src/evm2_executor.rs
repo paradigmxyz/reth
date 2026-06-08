@@ -204,12 +204,8 @@ where
         context.withdrawals,
     )?;
 
-    let frozen_state = block_state.freeze();
-    let mut output = RethReceiptBuilder.build_evm2_block_output_from_state_source(
-        block_number,
-        results,
-        &frozen_state,
-    );
+    let mut output =
+        RethReceiptBuilder.build_evm2_block_output_from_block_state(results, block_state.freeze());
     output.result.requests = requests;
 
     Ok(output)
@@ -641,7 +637,7 @@ mod tests {
         assert_eq!(output.result.receipts.len(), 1);
         assert!(output.result.receipts[0].success);
         assert_eq!(
-            output.state.accounts().get(&target).unwrap().current.as_ref().unwrap().balance,
+            output.account_state(&target).unwrap().current.as_ref().unwrap().balance,
             U256::from(1)
         );
     }
@@ -692,10 +688,7 @@ mod tests {
         .expect("evm2 execution succeeds");
 
         assert_eq!(output.result.receipts[0].cumulative_gas_used, 43_106);
-        assert_eq!(
-            output.state.storage().get(&contract).unwrap().slots[&U256::ZERO].current,
-            U256::from(10)
-        );
+        assert_eq!(output.storage(&contract, U256::ZERO).unwrap(), U256::from(10));
     }
 
     #[test]
@@ -756,14 +749,13 @@ mod tests {
 
         assert!(output.result.receipts.is_empty());
         assert_eq!(
-            output.state.accounts().get(&existing).unwrap().current.as_ref().unwrap().balance,
+            output.account_state(&existing).unwrap().current.as_ref().unwrap().balance,
             U256::from(1_000_000_100)
         );
         assert_eq!(
-            output.state.accounts().get(&new).unwrap().current.as_ref().unwrap().balance,
+            output.account_state(&new).unwrap().current.as_ref().unwrap().balance,
             U256::from(5_000_000_000u64)
         );
-        assert_eq!(output.state.block_reverts().len(), 1);
     }
 
     #[test]
@@ -846,12 +838,11 @@ mod tests {
         )
         .expect("beacon roots system call succeeds");
 
-        let storage = output.state.storage().get(&BEACON_ROOTS_ADDRESS).unwrap();
         let timestamp_index = timestamp % U256::from(HISTORY_SERVE_WINDOW);
         let root_index = timestamp_index + U256::from(HISTORY_SERVE_WINDOW);
-        assert_eq!(storage.slots.get(&timestamp_index).unwrap().current, timestamp);
+        assert_eq!(output.storage(&BEACON_ROOTS_ADDRESS, timestamp_index).unwrap(), timestamp);
         assert_eq!(
-            storage.slots.get(&root_index).unwrap().current,
+            output.storage(&BEACON_ROOTS_ADDRESS, root_index).unwrap(),
             U256::from_be_bytes(parent_beacon_block_root.0)
         );
     }
@@ -885,9 +876,8 @@ mod tests {
         )
         .expect("history storage system call succeeds");
 
-        let storage = output.state.storage().get(&HISTORY_STORAGE_ADDRESS).unwrap();
         assert_eq!(
-            storage.slots.get(&U256::ZERO).unwrap().current,
+            output.storage(&HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap(),
             U256::from_be_bytes(parent_hash.0)
         );
     }
@@ -913,8 +903,7 @@ mod tests {
         .expect("system calls to absent contracts are no-ops");
 
         assert!(output.result.receipts.is_empty());
-        assert!(output.state.accounts().is_empty());
-        assert_eq!(output.state.block_reverts().len(), 1);
+        assert_eq!(output.state.accounts().count(), 0);
     }
 
     #[test]

@@ -290,7 +290,10 @@ where
     }
 
     let state_root =
-        state_provider.state_root(output.state.hashed_post_state::<KeccakKeyHasher>())?;
+        state_provider.state_root(reth_execution_types::evm2_state_source_hashed_post_state::<
+            KeccakKeyHasher,
+            _,
+        >(&output.state))?;
     let receipts_root =
         reth_ethereum_primitives::calculate_receipt_root_no_memo(&output.result.receipts);
     let logs_bloom =

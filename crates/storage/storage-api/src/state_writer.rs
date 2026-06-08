@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::transaction::Either;
 use alloy_primitives::{Address, BlockNumber, B256, U256};
 use reth_execution_types::{BlockExecutionOutput, Evm2BundleState, ExecutionOutcome};
@@ -55,10 +55,12 @@ impl<'a, R> WriteStateInput<'a, R> {
     }
 
     /// Returns a reference to the execution bundle state.
-    pub const fn state(&self) -> &Evm2BundleState {
+    pub fn state(&self) -> Cow<'_, Evm2BundleState> {
         match self {
-            Self::Single { outcome, .. } => &outcome.state,
-            Self::Multiple(outcome) => &outcome.bundle,
+            Self::Single { outcome, block } => {
+                Cow::Owned(Evm2BundleState::from_state_source(*block, &outcome.state))
+            }
+            Self::Multiple(outcome) => Cow::Borrowed(&outcome.bundle),
         }
     }
 
