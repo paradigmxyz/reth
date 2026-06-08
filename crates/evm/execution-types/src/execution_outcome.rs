@@ -17,8 +17,8 @@ use evm2::evm::{
 };
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
 
-/// Type used to initialize bundle state.
-pub type BundleStateInit = AddressMap<(Option<Account>, Option<Account>, B256Map<(U256, U256)>)>;
+/// Type used to initialize execution state.
+pub type ExecutionStateInit = AddressMap<(Option<Account>, Option<Account>, B256Map<(U256, U256)>)>;
 
 /// Types used inside `RevertsInit` to initialize reverts.
 pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
@@ -60,7 +60,7 @@ pub struct ExecutionOutcome<T = reth_ethereum_primitives::Receipt> {
     /// Outer vector stores receipts for each block sequentially.
     /// The inner vector stores receipts ordered by transaction number.
     pub receipts: Vec<Vec<T>>,
-    /// First block of bundle state.
+    /// First block of execution state.
     pub first_block: BlockNumber,
     /// The collection of EIP-7685 requests.
     /// Outer vector stores requests for each block sequentially.
@@ -134,7 +134,7 @@ impl<T> ExecutionOutcome<T> {
     /// This constructor initializes a new `ExecutionOutcome` instance using detailed
     /// initialization parameters.
     pub fn new_init(
-        state_init: BundleStateInit,
+        state_init: ExecutionStateInit,
         revert_init: RevertsInit,
         contracts_init: impl IntoIterator<Item = (B256, Bytecode)>,
         receipts: Vec<Vec<T>>,
@@ -420,11 +420,11 @@ impl<T> ExecutionOutcome<T> {
 
     /// Revert the state to the given block number.
     ///
-    /// Returns false if the block number is not in the bundle state.
+    /// Returns false if the block number is not in the execution state.
     ///
     /// # Note
     ///
-    /// The provided block number will stay inside the bundle state.
+    /// The provided block number will stay inside the execution state.
     pub fn revert_to(&mut self, block_number: BlockNumber) -> bool {
         let Some(index) = self.block_number_to_index(block_number) else { return false };
 
@@ -443,7 +443,7 @@ impl<T> ExecutionOutcome<T> {
 
     /// Splits the block range state at a given block number.
     /// Returns two split states ([..at], [at..]).
-    /// The plain state of the 2nd bundle state will contain extra changes
+    /// The plain state of the 2nd execution state will contain extra changes
     /// that were made in state transitions belonging to the lower state.
     ///
     /// # Panics
@@ -1018,8 +1018,8 @@ mod tests {
         // Define the first block number
         let first_block = 123;
 
-        // Create a BundleStateInit object and insert initial data
-        let mut state_init: BundleStateInit = AddressMap::default();
+        // Create a ExecutionStateInit object and insert initial data
+        let mut state_init: ExecutionStateInit = AddressMap::default();
         state_init
             .insert(Address::new([2; 20]), (None, Some(Account::default()), B256Map::default()));
 
@@ -1093,8 +1093,8 @@ mod tests {
         // Define the first block number
         let first_block = 123;
 
-        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
-        // first_block
+        // Create a ExecutionOutcome object with the created execution outcome, receipts, requests,
+        // and first_block
         let exec_res = outcome_with_receipts(first_block, receipts, vec![]);
 
         // Test before the first block
@@ -1120,8 +1120,8 @@ mod tests {
         // Define the first block number
         let first_block = 123;
 
-        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
-        // first_block
+        // Create a ExecutionOutcome object with the created execution outcome, receipts, requests,
+        // and first_block
         let exec_res = outcome_with_receipts(first_block, receipts, vec![]);
 
         // Get logs for block number 123
@@ -1144,8 +1144,8 @@ mod tests {
         // Define the first block number
         let first_block = 123;
 
-        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
-        // first_block
+        // Create a ExecutionOutcome object with the created execution outcome, receipts, requests,
+        // and first_block
         let exec_res = outcome_with_receipts(first_block, receipts, vec![]);
 
         // Get receipts for block number 123 and convert the result into a vector
@@ -1179,8 +1179,8 @@ mod tests {
         // Define the first block number
         let first_block = 123;
 
-        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
-        // first_block
+        // Create a ExecutionOutcome object with the created execution outcome, receipts, requests,
+        // and first_block
         let exec_res = outcome_with_receipts(first_block, receipts, vec![]);
 
         // Assert that the length of receipts in exec_res is 1
@@ -1223,8 +1223,8 @@ mod tests {
         let requests =
             vec![Requests::new(vec![request.clone()]), Requests::new(vec![request.clone()])];
 
-        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
-        // first_block
+        // Create a ExecutionOutcome object with the created execution outcome, receipts, requests,
+        // and first_block
         let mut exec_res = outcome_with_receipts(first_block, receipts, requests);
 
         // Assert that the revert_to method returns true when reverting to the initial block number.
@@ -1314,8 +1314,8 @@ mod tests {
             Requests::new(vec![request.clone()]),
         ];
 
-        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
-        // first_block
+        // Create a ExecutionOutcome object with the created execution outcome, receipts, requests,
+        // and first_block
         let exec_res = outcome_with_receipts(first_block, receipts, requests);
 
         // Split the ExecutionOutcome at block number 124

@@ -71,7 +71,7 @@ impl<'a, R> From<&'a ExecutionOutcome<R>> for WriteStateInput<'a, R> {
     }
 }
 
-/// Whether the original values in a bundle are known to match the database state.
+/// Whether the original values in an execution state are known to match the database state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum OriginalValuesKnown {
     /// Original values are known.

@@ -117,7 +117,7 @@ impl SlotPreimagesReader {
     }
 }
 
-/// Collects `keccak256(slot) → slot` preimage entries from the bundle state and stores
+/// Collects `keccak256(slot) → slot` preimage entries from the execution state and stores
 /// them in the auxiliary preimage database, then rewrites wipe reverts for self-destructed
 /// accounts to use plain slot keys instead of relying on the hashed-storage DB walk.
 ///
@@ -128,7 +128,7 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     provider: &P,
     state: &mut ExecutionOutcome<R>,
 ) -> Result<(), StageError> {
-    // Collect preimage entries from bundle state and reverts.
+    // Collect preimage entries from execution state and reverts.
     // Storage keys are represented as U256 plain EVM slot indices.
     let mut preimage_entries = Vec::new();
     let mut seen_hashes = HashSet::new();
