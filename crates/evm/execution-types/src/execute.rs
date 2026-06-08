@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Address, B256, U256};
-use evm2::evm::{AccountInfo, BlockAccountDelta, FrozenBlockState};
+use evm2::evm::{AccountInfo, FrozenBlockState, Tracked};
 use reth_primitives_traits::{Account, Bytecode};
 
 /// The result of executing a block.
@@ -66,7 +66,7 @@ impl<T> BlockExecutionOutput<T> {
     }
 
     /// Returns the state account change for the given address.
-    pub fn account_state(&self, address: &Address) -> Option<&BlockAccountDelta> {
+    pub fn account_state(&self, address: &Address) -> Option<&Tracked<Option<AccountInfo>>> {
         self.state
             .accounts()
             .find_map(|(changed, account)| (changed == *address).then_some(account))

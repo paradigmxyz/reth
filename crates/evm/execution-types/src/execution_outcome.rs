@@ -12,8 +12,8 @@ use alloy_primitives::{
     Address, BlockNumber, Bloom, Log, B256, U256,
 };
 use evm2::evm::{
-    AccountChangeRef, AccountInfo, AccountInfoRef, BlockAccountDelta, BlockStateAccumulator,
-    StateChangeSink, StorageChangeRef,
+    AccountChangeRef, AccountInfo, AccountInfoRef, BlockStateAccumulator, StateChangeSink,
+    StorageChangeRef, Tracked,
 };
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
 
@@ -320,7 +320,7 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Returns the state account change for the given account.
-    pub fn account_state(&self, address: &Address) -> Option<&BlockAccountDelta> {
+    pub fn account_state(&self, address: &Address) -> Option<&Tracked<Option<AccountInfo>>> {
         self.state
             .accounts()
             .find_map(|(changed, account)| (changed == *address).then_some(account))
