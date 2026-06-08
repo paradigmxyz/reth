@@ -133,9 +133,7 @@ impl<DB: DatabaseRef> Database for CachedReadsDbMut<'_, DB> {
                 let info = self.db.basic_ref(address)?;
                 let (account, value) = if info.is_some() {
                     let value = self.db.storage_ref(address, index)?;
-                    let mut account = CachedAccount::new(info);
-                    account.storage.insert(index, value);
-                    (account, value)
+                    (CachedAccount::with_storage(info, index, value), value)
                 } else {
                     (CachedAccount::new(info), U256::ZERO)
                 };
@@ -202,6 +200,13 @@ pub struct CachedAccount {
 impl CachedAccount {
     fn new(info: Option<AccountInfo>) -> Self {
         Self { info, storage: U256Map::default() }
+    }
+
+    fn with_storage(info: Option<AccountInfo>, index: U256, value: U256) -> Self {
+        let mut storage = U256Map::default();
+        storage.reserve(1);
+        storage.insert(index, value);
+        Self { info, storage }
     }
 }
 
