@@ -1,7 +1,6 @@
 use crate::{
     evm2_block_state_from_state_source, evm2_bundle::account_to_info, BlockExecutionOutput,
-    BlockExecutionResult, Evm2BlockReverts, Evm2BlockState, Evm2BundleState, Evm2StorageChangeSet,
-    Evm2StorageReverts,
+    BlockExecutionResult, Evm2BlockReverts, Evm2BlockState, Evm2BundleState, Evm2StorageReverts,
 };
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
@@ -205,16 +204,6 @@ impl<T> ExecutionOutcome<T> {
         Self::from_blocks(first_block, bundle, results)
     }
 
-    /// Return bundle state.
-    pub const fn state(&self) -> &Evm2BundleState {
-        &self.bundle
-    }
-
-    /// Returns mutable bundle state.
-    pub const fn state_mut(&mut self) -> &mut Evm2BundleState {
-        &mut self.bundle
-    }
-
     /// Returns mutable per-block reverts.
     pub const fn block_reverts_mut(&mut self) -> &mut Vec<Evm2BlockReverts> {
         self.bundle.block_reverts_mut()
@@ -223,11 +212,6 @@ impl<T> ExecutionOutcome<T> {
     /// Returns per-block reverts.
     pub const fn block_reverts(&self) -> &Vec<Evm2BlockReverts> {
         self.bundle.block_reverts()
-    }
-
-    /// Returns aggregated storage changes.
-    pub const fn storage_changes(&self) -> &AddressMap<Evm2StorageChangeSet> {
-        self.bundle.storage()
     }
 
     /// Returns changed storage slot indices for all changed accounts.
@@ -440,22 +424,6 @@ impl<T> ExecutionOutcome<T> {
         self.bundle.extend(other.bundle);
         self.receipts.extend(other.receipts);
         self.requests.extend(other.requests);
-    }
-
-    /// Prepends present the state with the given bundle state.
-    /// It adds changes from the given state but does not override any existing changes.
-    ///
-    /// Reverts and receipts are not updated.
-    pub fn prepend_state(&mut self, mut other: Evm2BundleState) {
-        let other_len = other.block_reverts().len();
-        // take this bundle
-        let this_bundle = core::mem::take(&mut self.bundle);
-        // extend other bundle with this
-        other.extend(this_bundle);
-        // discard other reverts
-        other.drop_first_reverts(other_len);
-        // swap bundles
-        core::mem::swap(&mut self.bundle, &mut other)
     }
 
     /// Create a new instance with updated receipts.
