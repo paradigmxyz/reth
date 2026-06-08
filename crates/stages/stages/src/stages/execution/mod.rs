@@ -9,7 +9,7 @@ use reth_db::{static_file::HeaderMask, tables};
 use reth_evm::{metrics::ExecutorMetrics, ConfigureEvm2BlockExecutor};
 use reth_execution_types::{
     evm2_block_state_accumulator_extend, evm2_block_state_hashed_post_state_sorted,
-    evm2_state_source_size_hint, Chain, Evm2BlockStateAccumulator, Evm2BundleState,
+    evm2_state_source_size_hint, Chain, Evm2BlockStateAccumulator,
 };
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
@@ -330,12 +330,7 @@ where
         let batch_start = Instant::now();
 
         let mut blocks = Vec::new();
-        let mut state = ExecutionOutcome::new(
-            Evm2BundleState::new(start_block),
-            Vec::new(),
-            start_block,
-            Vec::new(),
-        );
+        let mut state = ExecutionOutcome::new_empty(start_block);
         let mut evm2_state = Evm2BlockStateAccumulator::new();
         for block_number in start_block..=max_block {
             // Fetch the block
@@ -380,7 +375,7 @@ where
                 })
             }
             evm2_block_state_accumulator_extend(&mut evm2_state, &output.state);
-            state.extend(ExecutionOutcome::single(block_number, output));
+            state.push_block(block_number, output);
 
             execution_duration += execute_start.elapsed();
 
@@ -460,7 +455,7 @@ where
             // Iterate over all reverts and clear them if pruning is configured.
             for block_number in start_block..=max_block {
                 let Some(reverts) =
-                    state.bundle.block_reverts_mut().get_mut((block_number - start_block) as usize)
+                    state.block_reverts_mut().get_mut((block_number - start_block) as usize)
                 else {
                     break
                 };

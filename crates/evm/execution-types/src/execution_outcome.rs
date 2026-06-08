@@ -88,6 +88,11 @@ impl<T> ExecutionOutcome<T> {
         Self { bundle, receipts, first_block, requests }
     }
 
+    /// Creates an empty execution outcome beginning at `first_block`.
+    pub fn new_empty(first_block: BlockNumber) -> Self {
+        Self::new(Evm2BundleState::new(first_block), Vec::new(), first_block, Vec::new())
+    }
+
     /// Creates a new `ExecutionOutcome` from initialization parameters.
     ///
     /// This constructor initializes a new `ExecutionOutcome` instance using detailed
@@ -149,6 +154,11 @@ impl<T> ExecutionOutcome<T> {
         }
     }
 
+    /// Appends a single block execution output.
+    pub fn push_block(&mut self, block_number: u64, output: BlockExecutionOutput<T>) {
+        self.extend(Self::single(block_number, output));
+    }
+
     /// Creates a new `ExecutionOutcome` from multiple [`BlockExecutionResult`]s.
     pub fn from_blocks(
         first_block: u64,
@@ -189,6 +199,11 @@ impl<T> ExecutionOutcome<T> {
     /// Returns mutable bundle state.
     pub const fn state_mut(&mut self) -> &mut Evm2BundleState {
         &mut self.bundle
+    }
+
+    /// Returns mutable per-block reverts.
+    pub const fn block_reverts_mut(&mut self) -> &mut Vec<Evm2BlockReverts> {
+        self.bundle.block_reverts_mut()
     }
 
     /// Set first block.
