@@ -84,7 +84,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
         if let Some(path) = self.import.path {
             let stream = read_dir(path, next_block)?;
 
-            era::import(stream, &provider_factory, &mut hash_collector)?;
+            era::import::<era::Era1, _, _, _, _, _, _>(
+                stream,
+                &provider_factory,
+                &mut hash_collector,
+            )?;
         } else {
             let url = match self.import.url {
                 Some(url) => url,
@@ -99,7 +103,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
             let client = EraClient::new(Client::new(), url, folder);
             let stream = EraStream::new(client, config);
 
-            era::import(stream, &provider_factory, &mut hash_collector)?;
+            era::import::<era::Era1, _, _, _, _, _, _>(
+                stream,
+                &provider_factory,
+                &mut hash_collector,
+            )?;
         }
 
         Ok(())

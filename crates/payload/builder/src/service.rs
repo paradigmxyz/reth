@@ -32,6 +32,8 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, debug_span, info, trace, warn, Span};
 
 type PayloadFuture<P> = Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send>>;
+type PayloadJobEntry<Job> = (Job, PayloadId, Span);
+type ResolvePayloadResult<P, Job> = (Option<PayloadFuture<P>>, Option<PayloadJobEntry<Job>>);
 
 /// A communication channel to the [`PayloadBuilderService`] that can retrieve payloads.
 ///
@@ -307,13 +309,15 @@ where
         res
     }
 
-    /// Returns the best payload for the given identifier that has been built so far and terminates
-    /// the job if requested.
+    /// Returns the best payload for the given identifier that has been built so far.
+    ///
+    /// If the job should be terminated, this removes it from active polling and returns it so the
+    /// caller can drop it after the response is sent.
     fn resolve(
         &mut self,
         id: PayloadId,
         kind: PayloadKind,
-    ) -> Option<PayloadFuture<T::BuiltPayload>> {
+    ) -> ResolvePayloadResult<T::BuiltPayload, Gen::Job> {
         let start = Instant::now();
         debug!(target: "payload_builder", %id, "resolving payload job");
 
@@ -321,17 +325,17 @@ where
             *cached == id
         {
             self.metrics.resolve_duration_seconds.record(start.elapsed());
-            return Some(Box::pin(core::future::ready(Ok(payload.clone()))));
+            return (Some(Box::pin(core::future::ready(Ok(payload.clone())))), None);
         }
 
-        let job = self.payload_jobs.iter().position(|(_, job_id, _)| *job_id == id)?;
+        let Some(job) = self.payload_jobs.iter().position(|(_, job_id, _)| *job_id == id) else {
+            return (None, None)
+        };
         let (fut, keep_alive) = self.payload_jobs[job].0.resolve_kind(kind);
         let payload_timestamp = self.payload_jobs[job].0.payload_timestamp();
 
-        if keep_alive == KeepPayloadJobAlive::No {
-            let (_, id, _) = self.payload_jobs.swap_remove(job);
-            debug!(target: "payload_builder", %id, "terminated resolved job");
-        }
+        let resolved_job =
+            (keep_alive == KeepPayloadJobAlive::No).then(|| self.payload_jobs.swap_remove(job));
 
         // Since the fees will not be known until the payload future is resolved / awaited, we wrap
         // the future in a new future that will update the metrics.
@@ -357,7 +361,7 @@ where
             res.map(|p| p.into())
         };
 
-        Some(Box::pin(fut))
+        (Some(Box::pin(fut)), resolved_job)
     }
 
     /// Returns the payload timestamp for the given payload.
@@ -491,7 +495,12 @@ where
                         let _ = tx.send(timestamp);
                     }
                     PayloadServiceCommand::Resolve(id, strategy, tx) => {
-                        let _ = tx.send(this.resolve(id, strategy));
+                        let (payload_fut, resolved_job) = this.resolve(id, strategy);
+                        let _ = tx.send(payload_fut);
+
+                        if let Some((_job, id, _job_span)) = resolved_job {
+                            debug!(target: "payload_builder", %id, "terminated resolved job");
+                        }
                     }
                     PayloadServiceCommand::Subscribe(tx) => {
                         let new_rx = this.payload_events.subscribe();
