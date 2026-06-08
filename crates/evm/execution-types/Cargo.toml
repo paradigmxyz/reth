@@ -42,6 +42,20 @@ asm-keccak = [
     "evm2/asm-keccak",
     "alloy-primitives/asm-keccak",
 ]
+secp256k1 = [
+    "evm2/secp256k1",
+    "alloy-consensus/secp256k1",
+    "alloy-primitives/secp256k1",
+    "reth-primitives-traits/secp256k1",
+]
+gmp = ["evm2/gmp"]
+bn = ["evm2/bn"]
+c-kzg = ["evm2/c-kzg"]
+blst = ["evm2/blst"]
+bn254-mcl = ["evm2/bn254-mcl"]
+portable = ["evm2/portable"]
+p256-aws-lc-rs = ["evm2/p256-aws-lc-rs"]
+parse = ["evm2/parse"]
 serde = [
     "dep:serde",
     "rand/serde",

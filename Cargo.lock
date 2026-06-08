@@ -3532,19 +3532,24 @@ dependencies = [
  "ark-serialize 0.6.0",
  "arrayref",
  "aurora-engine-modexp",
+ "aws-lc-rs",
  "blst",
  "c-kzg",
  "cfg-if",
  "derive-where",
  "evm2-macros",
+ "gmp-mpfr-sys",
  "k256",
+ "mcl_rust",
  "once_cell",
  "p256",
+ "paste",
  "phf",
  "ripemd 0.2.0",
  "secp256k1 0.31.1",
  "serde",
  "sha2 0.11.0",
+ "substrate-bn",
  "thiserror 2.0.18",
 ]
 
@@ -4429,6 +4434,16 @@ dependencies = [
  "serde_json",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "gmp-mpfr-sys"
+version = "1.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7db155b537cb791b133341f99f68371d86ee7fa4c79aacfbc376d72d23c70531"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5683,6 +5698,9 @@ name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
+dependencies = [
+ "spin",
+]
 
 [[package]]
 name = "leb128fmt"
@@ -6007,6 +6025,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9"
 dependencies = [
  "regex-automata",
+]
+
+[[package]]
+name = "mcl_rust"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61afef54cd29837bdc9c27de4bef59554898bc751128ca943eacaa696551858c"
+dependencies = [
+ "cmake",
 ]
 
 [[package]]
@@ -12121,6 +12148,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "substrate-bn"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72b5bbfa79abbae15dd642ea8176a21a635ff3c00059961d1ea27ad04e5b441c"
+dependencies = [
+ "byteorder",
+ "crunchy",
+ "lazy_static",
+ "rand 0.8.6",
+ "rustc-hex",
 ]
 
 [[package]]

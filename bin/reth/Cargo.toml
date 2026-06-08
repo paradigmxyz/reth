@@ -120,6 +120,53 @@ asm-keccak = [
     "reth-node-ethereum/asm-keccak",
     "alloy-primitives/asm-keccak",
 ]
+secp256k1 = [
+    "reth-node-core/secp256k1",
+    "reth-ethereum-cli/secp256k1",
+    "reth-node-ethereum/secp256k1",
+    "reth-primitives-traits/secp256k1",
+    "alloy-primitives/secp256k1",
+]
+gmp = [
+    "reth-node-core/gmp",
+    "reth-ethereum-cli/gmp",
+    "reth-node-ethereum/gmp",
+]
+bn = [
+    "reth-node-core/bn",
+    "reth-ethereum-cli/bn",
+    "reth-node-ethereum/bn",
+]
+c-kzg = [
+    "reth-node-core/c-kzg",
+    "reth-ethereum-cli/c-kzg",
+    "reth-node-ethereum/c-kzg",
+]
+blst = [
+    "reth-node-core/blst",
+    "reth-ethereum-cli/blst",
+    "reth-node-ethereum/blst",
+]
+bn254-mcl = [
+    "reth-node-core/bn254-mcl",
+    "reth-ethereum-cli/bn254-mcl",
+    "reth-node-ethereum/bn254-mcl",
+]
+portable = [
+    "reth-node-core/portable",
+    "reth-ethereum-cli/portable",
+    "reth-node-ethereum/portable",
+]
+p256-aws-lc-rs = [
+    "reth-node-core/p256-aws-lc-rs",
+    "reth-ethereum-cli/p256-aws-lc-rs",
+    "reth-node-ethereum/p256-aws-lc-rs",
+]
+parse = [
+    "reth-node-core/parse",
+    "reth-ethereum-cli/parse",
+    "reth-node-ethereum/parse",
+]
 keccak-cache-global = [
     "reth-node-core/keccak-cache-global",
     "reth-node-ethereum/keccak-cache-global",
