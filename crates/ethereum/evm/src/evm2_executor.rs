@@ -7,13 +7,15 @@ use alloy_eips::{
     eip4895::Withdrawal, eip7002::WITHDRAWAL_REQUEST_TYPE, eip7251::CONSOLIDATION_REQUEST_TYPE,
     eip7685::Requests,
 };
+#[cfg(feature = "std")]
+use alloy_primitives::{address, b256};
 use alloy_primitives::{map::AddressMap, Address, Bytes, B256, KECCAK256_EMPTY, U256};
 use evm2::{
     env::BlockEnv,
     ethereum::{ethereum_tx_registry, RecoveredTxEnvelope},
     evm::{
         AccountChangeRef, AccountInfo, BlockStateAccumulator, Database, Db, DbErrorCode,
-        StateChangeSink, StateChangeSource, StateChanges, StorageChangeRef, Tracked,
+        DynDatabase, StateChangeSink, StateChangeSource, StateChanges, StorageChangeRef, Tracked,
         BEACON_ROOTS_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS,
         WITHDRAWAL_REQUEST_ADDRESS,
     },
@@ -355,6 +357,11 @@ where
         HandlerError(HandlerError),
     }
 
+    #[cfg(feature = "std")]
+    if should_log_tx_diagnostics(block_number, transaction_index) {
+        log_pre_tx_diagnostics::<DB>(evm, block_number, transaction_index)?;
+    }
+
     let resolution = match evm.transact(transaction) {
         Ok(executed) => {
             if let Some(code) = executed.outcome().db_error_code {
@@ -393,6 +400,109 @@ where
 
 fn should_log_tx_diagnostics(block_number: u64, transaction_index: usize) -> bool {
     block_number == 25_266_573 && transaction_index == 131
+}
+
+#[cfg(feature = "std")]
+fn log_pre_tx_diagnostics<DB>(
+    evm: &mut Evm<BaseEvmTypes>,
+    block_number: u64,
+    transaction_index: usize,
+) -> Result<(), Evm2ExecutionError<DB::Error>>
+where
+    DB: Database + 'static,
+{
+    for address in [
+        address!("7ddd68906c0b3c0f7b507b942b2d0c3de00fd07b"),
+        address!("9e6b1022be9bbf5afd152483dad9b88911bc8611"),
+        address!("48e6c30b97748d1e2e03bf3e9fbe3890ca5f8cca"),
+        address!("f411903cbc70a74d22900a5de66a2dda66507255"),
+        address!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+    ] {
+        let account =
+            evm.account_info(&address).map_err(|code| map_db_error_code::<DB>(evm, code))?;
+        warn!(
+            target: "reth::evm2::diagnostics",
+            block_number,
+            transaction_index,
+            ?address,
+            nonce = account.as_ref().map(|account| account.nonce),
+            balance = ?account.as_ref().map(|account| account.balance),
+            code_hash = ?account.as_ref().map(|account| account.code_hash),
+            "evm2 pre tx account"
+        );
+    }
+
+    for (address, key) in [
+        (
+            address!("48e6c30b97748d1e2e03bf3e9fbe3890ca5f8cca"),
+            diagnostic_word(b256!(
+                "0000000000000000000000000000000000000000000000000000000000000067"
+            )),
+        ),
+        (
+            address!("48e6c30b97748d1e2e03bf3e9fbe3890ca5f8cca"),
+            diagnostic_word(b256!(
+                "0000000000000000000000000000000000000000000000000000000000000087"
+            )),
+        ),
+        (
+            address!("48e6c30b97748d1e2e03bf3e9fbe3890ca5f8cca"),
+            diagnostic_word(b256!(
+                "0000000000000000000000000000000000000000000000000000000000000068"
+            )),
+        ),
+        (
+            address!("f411903cbc70a74d22900a5de66a2dda66507255"),
+            diagnostic_word(b256!(
+                "3c2dd7f9bf16609d7a472ad818cb2793c8a044504f64347eb9e62914cfa65ec8"
+            )),
+        ),
+        (
+            address!("f411903cbc70a74d22900a5de66a2dda66507255"),
+            diagnostic_word(b256!(
+                "257b92bcf49981a3fdf6bd5c205a5fd789ea9aa6e0eb98ce896df279ee93aca6"
+            )),
+        ),
+        (
+            address!("f411903cbc70a74d22900a5de66a2dda66507255"),
+            diagnostic_word(b256!(
+                "df7de25b7f1fd6d0b5205f0e18f1f35bd7b8d84cce336588d184533ce43a6f76"
+            )),
+        ),
+        (
+            address!("f411903cbc70a74d22900a5de66a2dda66507255"),
+            diagnostic_word(b256!(
+                "c9d7e5361495aac4cf1b8cbd68421981b8241fc3688cf509a24ca9483ab0e744"
+            )),
+        ),
+        (
+            address!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+            diagnostic_word(b256!(
+                "9c9ac1e9c0173ba157c0c3148144deca1941988af9242d9758c9b924acb7fadc"
+            )),
+        ),
+    ] {
+        let value = evm
+            .overlay_db_mut()
+            .get_storage(&address, &key)
+            .map_err(|code| map_db_error_code::<DB>(evm, code))?;
+        warn!(
+            target: "reth::evm2::diagnostics",
+            block_number,
+            transaction_index,
+            ?address,
+            ?key,
+            ?value,
+            "evm2 pre tx storage"
+        );
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "std")]
+fn diagnostic_word(value: B256) -> U256 {
+    U256::from_be_bytes(value.0)
 }
 
 #[cfg(feature = "std")]
