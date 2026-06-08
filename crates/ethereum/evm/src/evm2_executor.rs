@@ -8,7 +8,7 @@ use alloy_eips::{
     eip7685::Requests,
 };
 #[cfg(feature = "std")]
-use alloy_primitives::{address, b256};
+use alloy_primitives::{address, b256, keccak256};
 use alloy_primitives::{map::AddressMap, Address, Bytes, B256, KECCAK256_EMPTY, U256};
 use evm2::{
     env::BlockEnv,
@@ -417,6 +417,8 @@ where
         address!("48e6c30b97748d1e2e03bf3e9fbe3890ca5f8cca"),
         address!("f411903cbc70a74d22900a5de66a2dda66507255"),
         address!("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+        address!("c005dc82818d67af737725bd4bf75435d065d239"),
+        address!("60031819a16266d896268cfea5d5be0b6c2b5d75"),
     ] {
         let account =
             evm.account_info(&address).map_err(|code| map_db_error_code::<DB>(evm, code))?;
@@ -429,6 +431,17 @@ where
             balance = ?account.as_ref().map(|account| account.balance),
             code_hash = ?account.as_ref().map(|account| account.code_hash),
             "evm2 pre tx account"
+        );
+        let bytecode =
+            evm.account_code(&address).map_err(|code| map_db_error_code::<DB>(evm, code))?;
+        warn!(
+            target: "reth::evm2::diagnostics",
+            block_number,
+            transaction_index,
+            ?address,
+            code_len = bytecode.original_bytes().len(),
+            code_hash = ?keccak256(bytecode.original_bytes()),
+            "evm2 pre tx code"
         );
     }
 
