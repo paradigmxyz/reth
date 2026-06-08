@@ -21,17 +21,9 @@ const MINIMUM_HISTORY_DISTANCE: u64 = 10064;
 
 /// Writes a [`Config`] as TOML to `<data_dir>/reth.toml`.
 ///
-/// If the file already exists, it is not overwritten. Returns `true` if the file was written.
+/// Returns `true` if the file was written.
 pub fn write_config(config: &Config, data_dir: &Path) -> eyre::Result<bool> {
     let config_path = data_dir.join("reth.toml");
-
-    if config_path.exists() {
-        info!(target: "reth::cli",
-            path = ?config_path,
-            "reth.toml already exists, skipping config generation"
-        );
-        return Ok(false);
-    }
 
     let toml_str = toml::to_string_pretty(config)?;
     reth_fs_util::write(&config_path, toml_str)?;
@@ -295,6 +287,36 @@ mod tests {
             reth_version: None,
             components: BTreeMap::new(),
         }
+    }
+
+    #[test]
+    fn write_config_overwrites_existing_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("reth.toml");
+
+        let archive_config = Config::default();
+        write_config(&archive_config, dir.path()).unwrap();
+
+        let mut selections = BTreeMap::new();
+        selections.insert(SnapshotComponentType::State, ComponentSelection::All);
+        selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
+        let minimal_config = config_for_selections(
+            &selections,
+            &empty_manifest(),
+            None,
+            None::<&reth_chainspec::ChainSpec>,
+        );
+
+        assert!(write_config(&minimal_config, dir.path()).unwrap());
+
+        let written = std::fs::read_to_string(config_path).unwrap();
+        let parsed: Config = toml::from_str(&written).unwrap();
+        assert_eq!(parsed.prune.segments.sender_recovery, Some(PruneMode::Full));
+        assert_eq!(parsed.prune.segments.transaction_lookup, Some(PruneMode::Full));
+        assert_eq!(
+            parsed.prune.segments.receipts,
+            Some(PruneMode::Distance(MINIMUM_RECEIPTS_DISTANCE))
+        );
     }
 
     #[test]
