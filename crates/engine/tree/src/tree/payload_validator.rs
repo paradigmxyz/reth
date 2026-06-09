@@ -1154,7 +1154,8 @@ where
     ///
     /// Inside, this:
     /// 1. Creates a shared parent-state cache handle for provider-backed workers.
-    /// 2. Relies on BAL prewarm to stream sparse-trie updates and optional state prefetches.
+    /// 2. Lets BAL prewarm fill the execution cache while canonical BAL execution feeds sparse
+    ///    trie updates through the normal state hook.
     /// 3. Spawns the receipt-root task.
     /// 4. Calls [`crate::tree::payload_processor::bal::execute_block`].
     /// 5. Returns the rebuilt BAL for post-execution consensus validation.
@@ -1195,6 +1196,8 @@ where
                 .map_err(crate::tree::payload_processor::bal::BalExecutionError::Provider)?;
             Ok(StateProviderDatabase::new(provider))
         };
+        let state_hook =
+            handle.state_hook().map(|hook| Box::new(hook) as Box<dyn OnStateHook + 'static>);
         let execution_start = Instant::now();
         let ctx =
             self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
@@ -1208,6 +1211,7 @@ where
             env.transaction_count,
             handle.clone_transaction_receiver(),
             receipt_tx,
+            state_hook,
         )?;
         let execution_duration = execution_start.elapsed();
 

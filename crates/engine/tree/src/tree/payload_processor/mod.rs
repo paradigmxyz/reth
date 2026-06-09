@@ -355,20 +355,17 @@ where
             halve_workers,
             config,
         );
-        // BAL blocks only bypass the normal execution state hook when the validator decided that
-        // the parallel BAL executor will consume this block. If not, treat the BAL as absent here
-        // so the block follows today's sequential execution and transaction-prewarm path.
-        //
-        // In the parallel BAL path, prewarm owns BAL-derived sparse-trie updates and optional
-        // BAL state prefetching. State-cache disabled mode still uses the BAL executor, but
-        // `saved_cache` is absent below, so prewarm skips cache-backed state prefetching.
-        // `disable_bal_batch_io` controls the prefetch half when a cache exists.
-        let install_state_hook = !parallel_bal_execution;
+        // BAL validation feeds sparse trie updates from canonical BAL execution. Prewarm may still
+        // do cache-backed BAL state prefetching, but it must not own sparse-trie completion for
+        // validation.
+        let install_state_hook = true;
+        let to_sparse_trie_task =
+            (!parallel_bal_execution).then(|| state_root_handle.updates_tx().clone());
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
             provider_builder,
-            Some(state_root_handle.updates_tx().clone()),
+            to_sparse_trie_task,
             parallel_bal_execution,
         );
 
@@ -1156,9 +1153,8 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
         self.state_root_handle.as_mut().expect("state_root_handle is None").take_state_root_rx()
     }
 
-    /// Returns a state hook to stream execution state updates to the sparse trie cache task.
-    ///
-    /// Returns `None` when BAL-driven hashed state streaming feeds the sparse trie task.
+    /// Returns a state hook to stream canonical execution state updates to the sparse trie cache
+    /// task.
     pub fn state_hook(&self) -> Option<impl OnStateHook> {
         self.install_state_hook
             .then(|| self.state_root_handle.as_ref().map(|handle| handle.state_hook()))

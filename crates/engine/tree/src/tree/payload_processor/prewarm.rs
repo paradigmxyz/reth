@@ -318,13 +318,12 @@ where
         }
     }
 
-    /// Runs BAL-based prewarming and sparse-trie work inline.
+    /// Runs BAL-based prewarming and, when wired to a sparse-trie task, BAL-derived sparse-trie
+    /// work inline.
     ///
-    /// Spawns two halves concurrently on separate pools, then waits for both to complete:
-    /// 1. Hashed state streaming on the BAL streaming pool so storage updates can reach the sparse
-    ///    trie before account reads finish.
-    /// 2. Storage prefetch on the prewarming pool to populate the execution cache, unless BAL batch
-    ///    I/O is disabled.
+    /// When a sparse-trie sender is supplied, spawns BAL hashed-state streaming on the BAL
+    /// streaming pool. Independently, storage prefetch populates the execution cache unless BAL
+    /// batch I/O is disabled.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn run_bal_prewarm(
         &self,
