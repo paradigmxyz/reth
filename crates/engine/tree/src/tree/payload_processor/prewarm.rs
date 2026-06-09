@@ -133,7 +133,8 @@ where
         let ctx = self.ctx.clone();
         let span = Span::current();
 
-        self.executor.spawn_blocking_named("prewarm-txs", move || {
+        // This task waits on the transaction stream and must not occupy a global named worker.
+        let _ = self.executor.spawn_blocking(move || {
             let _enter = debug_span!(
                 target: "engine::tree::payload_processor::prewarm",
                 parent: &span,

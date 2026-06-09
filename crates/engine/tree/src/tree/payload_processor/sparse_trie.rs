@@ -141,7 +141,9 @@ where
 
         let parent_span = tracing::Span::current();
         let hashing_metrics = metrics.clone();
-        executor.spawn_blocking_named("trie-hashing", move || {
+        // This task can legitimately wait on its input channel while a speculative payload is
+        // gated, so it must not use a shared named worker that validation also needs.
+        let _ = executor.spawn_blocking(move || {
             let _span = trace_span!(parent: parent_span, "run_hashing_task").entered();
             Self::run_hashing_task(updates, hashed_state_tx, hashing_metrics)
         });
@@ -199,7 +201,8 @@ where
                     SparseTrieTaskMessage::HashedState(hashed)
                 }
                 StateRootMessage::FinishedStateUpdates => {
-                    SparseTrieTaskMessage::FinishedStateUpdates
+                    let _ = hashed_state_tx.send(SparseTrieTaskMessage::FinishedStateUpdates);
+                    break;
                 }
                 StateRootMessage::BlockAccessList(_) => {
                     idle_start = Instant::now();
@@ -949,17 +952,18 @@ mod tests {
 
         let expected_state = hashed_state.clone();
 
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
         let handle = std::thread::spawn(move || {
             SparseTrieCacheTask::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::run_hashing_task(
                 updates_rx,
                 hashed_state_tx,
                 MultiProofTaskMetrics::default(),
             );
+            done_tx.send(()).unwrap();
         });
 
         updates_tx.send(StateRootMessage::HashedStateUpdate(hashed_state)).unwrap();
         updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
-        drop(updates_tx);
 
         let SparseTrieTaskMessage::HashedState(received) = hashed_state_rx.recv().unwrap() else {
             panic!("expected HashedState message");
@@ -975,7 +979,12 @@ mod tests {
         let second = hashed_state_rx.recv().unwrap();
         assert!(matches!(second, SparseTrieTaskMessage::FinishedStateUpdates));
 
-        assert!(hashed_state_rx.recv().is_err());
+        assert!(
+            done_rx.recv_timeout(std::time::Duration::from_millis(100)).is_ok(),
+            "hashing task should exit after FinishedStateUpdates without waiting for sender drop"
+        );
+        assert!(hashed_state_rx.recv_timeout(std::time::Duration::from_millis(100)).is_err());
+        drop(updates_tx);
         handle.join().unwrap();
     }
 

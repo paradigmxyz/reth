@@ -527,7 +527,7 @@ where
                 transaction_count,
                 "using sequential sig recovery for small block"
             );
-            self.executor.spawn_blocking_named("tx-iterator", move || {
+            let _ = self.executor.spawn_blocking(move || {
                 let (transactions, convert) = transactions.into_parts();
                 convert_serial(transactions.into_iter(), &convert, &prewarm_tx, &execute_tx);
             });
@@ -540,7 +540,7 @@ where
             // entering the parallel iterator for the remainder.
             let prefetch = Self::PARALLEL_PREFETCH_COUNT.min(transaction_count);
             let executor = self.executor.clone();
-            self.executor.spawn_blocking_named("tx-iterator", move || {
+            let _ = self.executor.spawn_blocking(move || {
                 let (transactions, convert) = transactions.into_parts();
                 let mut all: Vec<_> = transactions.into_iter().collect();
                 let rest = all.split_off(prefetch.min(all.len()));
@@ -628,7 +628,9 @@ where
         );
         {
             let to_prewarm_task = to_prewarm_task.clone();
-            self.executor.spawn_blocking_named("prewarm", move || {
+            // The prewarm task may wait for validation success before saving cache state. Do not
+            // serialize every payload behind a single named worker.
+            let _ = self.executor.spawn_blocking(move || {
                 prewarm_task.run(mode, to_prewarm_task);
             });
         }
@@ -939,7 +941,7 @@ impl StateRootSpawner {
         let executor = self.executor.clone();
 
         let parent_span = Span::current();
-        self.executor.spawn_blocking_named(sparse_trie_worker_name, move || {
+        let run_sparse_trie_task = move || {
             reth_tasks::once!(increase_thread_priority);
 
             let _enter = debug_span!(
@@ -1059,7 +1061,14 @@ impl StateRootSpawner {
                 published.publish(state_root, preserved_sparse_trie.clone());
             }
             executor.spawn_drop(deferred);
-        });
+        };
+
+        if sparse_trie_worker_name == PAYLOAD_BUILDER_SPARSE_TRIE_WORKER_NAME {
+            let _ = self.executor.spawn_blocking(run_sparse_trie_task);
+        } else {
+            self.executor
+                .spawn_blocking_named(sparse_trie_worker_name, run_sparse_trie_task);
+        }
     }
 }
 

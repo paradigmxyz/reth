@@ -1229,9 +1229,10 @@ where
         let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
         let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
-        self.payload_processor
+        let _ = self
+            .payload_processor
             .executor()
-            .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
+            .spawn_blocking(move || task_handle.run(receipts_len));
 
         (receipt_tx, result_rx)
     }
@@ -1422,7 +1423,7 @@ where
 
                 let (seq_tx, seq_rx) = std::sync::mpsc::channel();
 
-                self.payload_processor.executor().spawn_blocking_named("serial-root", move || {
+                let _ = self.payload_processor.executor().spawn_blocking(move || {
                     let result = state_provider_builder.build().and_then(|provider| {
                         let hashed_state =
                             LazyHandle::ready(Arc::new(provider.hashed_post_state(&output.state)));
@@ -1954,10 +1955,9 @@ where
             }
         };
 
-        // Spawn task that computes trie data asynchronously.
-        self.payload_processor
-            .executor()
-            .spawn_blocking_named(DEFERRED_TRIE_WORKER_NAME, compute_trie_input_task);
+        // Spawn task that computes trie data asynchronously. This can outlive validation, so keep
+        // it off the named worker used by the next block's changeset-provider preparation.
+        let _ = self.payload_processor.executor().spawn_blocking(compute_trie_input_task);
 
         ExecutedBlock::with_deferred_trie_data(block, execution_outcome, deferred_trie_data)
     }
