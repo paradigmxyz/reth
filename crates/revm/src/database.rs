@@ -4,7 +4,9 @@ use core::ops::{Deref, DerefMut};
 use reth_primitives_traits::Account;
 use reth_storage_api::{AccountReader, BlockHashReader, BytecodeReader, StateProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
+use revm::{
+    bytecode::Bytecode, primitives::KECCAK_EMPTY, state::AccountInfo, Database, DatabaseRef,
+};
 
 /// A helper trait responsible for providing state necessary for EVM execution.
 ///
@@ -151,6 +153,10 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     ///
     /// Returns `Ok` with the bytecode if found, or the default bytecode otherwise.
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        if code_hash == KECCAK_EMPTY {
+            return Ok(Bytecode::default());
+        }
+
         Ok(self.bytecode_by_hash(&code_hash)?.unwrap_or_default().0)
     }
 
