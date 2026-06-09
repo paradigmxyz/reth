@@ -414,15 +414,7 @@ where
             let build = Arc::new(move || provider_builder.build());
 
             pool.begin_block(build, caches);
-            for account in prefetch_bal.as_bal() {
-                pool.warm_account(account.address);
-                for change in &account.storage_changes {
-                    pool.warm_storage(account.address, change.slot.into());
-                }
-                for &slot in &account.storage_reads {
-                    pool.warm_storage(account.address, slot.into());
-                }
-            }
+            pool.warm_read_set(prefetch_bal.as_bal());
             pool.end_block();
             let _ = prefetch_tx.send(());
         } else {

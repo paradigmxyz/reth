@@ -1,3 +1,4 @@
+use alloy_eip7928::AccountChanges;
 use alloy_primitives::{Address, StorageKey};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache};
 use reth_provider::{
@@ -72,14 +73,25 @@ impl BalPrewarmPool {
         }
     }
 
-    /// Fire-and-forget: warm an account (basic account + bytecode) on some worker.
-    pub(crate) fn warm_account(&self, addr: Address) {
-        self.send_warm(PrewarmTarget::Account(addr));
-    }
-
-    /// Fire-and-forget: warm one storage slot on some worker.
-    pub(crate) fn warm_storage(&self, addr: Address, slot: StorageKey) {
-        self.send_warm(PrewarmTarget::Storage(addr, slot));
+    /// Fire-and-forget: warm a full BAL read-set while reserving round-robin slots once.
+    pub(crate) fn warm_read_set(&self, accounts: &[AccountChanges]) {
+        let target_count = accounts
+            .iter()
+            .map(|account| 1 + account.storage_changes.len() + account.storage_reads.len())
+            .sum();
+        let mut next = self.next.fetch_add(target_count, Ordering::Relaxed);
+        for account in accounts {
+            self.send_warm_at(&mut next, PrewarmTarget::Account(account.address));
+            for change in &account.storage_changes {
+                self.send_warm_at(
+                    &mut next,
+                    PrewarmTarget::Storage(account.address, change.slot.into()),
+                );
+            }
+            for &slot in &account.storage_reads {
+                self.send_warm_at(&mut next, PrewarmTarget::Storage(account.address, slot.into()));
+            }
+        }
     }
 
     /// Ends the block: every worker drops its provider (and read txn) once it has drained the warm
@@ -90,9 +102,17 @@ impl BalPrewarmPool {
         }
     }
 
-    fn send_warm(&self, target: PrewarmTarget) {
-        let i = self.next.fetch_add(1, Ordering::Relaxed) % self.workers.len();
+    fn send_warm_at(&self, next: &mut usize, target: PrewarmTarget) {
+        let i = self.worker_index(*next);
+        *next = next.wrapping_add(1);
         let _ = self.workers[i].send(PrewarmMsg::Warm(target));
+    }
+
+    #[inline]
+    fn worker_index(&self, next: usize) -> usize {
+        let len = self.workers.len();
+        debug_assert!(len > 0);
+        if len.is_power_of_two() { next & (len - 1) } else { next % len }
     }
 }
 
