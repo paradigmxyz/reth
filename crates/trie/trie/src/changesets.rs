@@ -162,6 +162,15 @@ fn compute_wiped_storage_changesets(
     cursor: &mut impl TrieStorageCursor,
     storage_updates: &StorageTrieUpdatesSorted,
 ) -> ChangesetResult<Vec<(Nibbles, Option<BranchNodeCompact>)>> {
+    if storage_updates.storage_nodes.is_empty() {
+        let mut storage_changesets = Vec::new();
+        for result in TrieCursorIter::new(cursor) {
+            let (path, node) = result?;
+            storage_changesets.push((path, Some(node)));
+        }
+        return Ok(storage_changesets);
+    }
+
     // Set the hashed address for this account's storage trie
     // Create an iterator that yields all nodes in the storage trie
     let all_nodes = TrieCursorIter::new(cursor);
