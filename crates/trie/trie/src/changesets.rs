@@ -106,9 +106,11 @@ where
 
     // For each changed account node, look up its current value
     // The input is already sorted, so the output will be sorted
-    for (path, _new_node) in trie_updates.account_nodes_ref() {
+    for (path, new_node) in trie_updates.account_nodes_ref() {
         let old_node = cursor.seek_exact(*path)?.map(|(_path, node)| node);
-        account_changesets.push((*path, old_node));
+        if old_node.as_ref() != new_node.as_ref() {
+            account_changesets.push((*path, old_node));
+        }
     }
 
     Ok(account_changesets)
@@ -133,9 +135,11 @@ fn compute_storage_changesets(
 
     // For each changed storage node, look up its current value
     // The input is already sorted, so the output will be sorted
-    for (path, _new_node) in &storage_updates.storage_nodes {
+    for (path, new_node) in &storage_updates.storage_nodes {
         let old_node = cursor.seek_exact(*path)?.map(|(_path, node)| node);
-        storage_changesets.push((*path, old_node));
+        if old_node.as_ref() != new_node.as_ref() {
+            storage_changesets.push((*path, old_node));
+        }
     }
 
     Ok(storage_changesets)
@@ -357,6 +361,50 @@ mod tests {
         // path3 should have None (it didn't exist before)
         assert_eq!(storage_changesets.storage_nodes[1].0, path3);
         assert_eq!(storage_changesets.storage_nodes[1].1, None);
+    }
+
+    #[test]
+    fn test_unchanged_account_node_is_skipped() {
+        let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
+        let node = BranchNodeCompact::new(0b1111, 0b1010, 0, vec![], None);
+
+        let mut account_nodes = BTreeMap::new();
+        account_nodes.insert(path, node.clone());
+
+        let mut storage_tries = B256Map::default();
+        storage_tries.insert(B256::default(), BTreeMap::new());
+        let factory = MockTrieCursorFactory::new(account_nodes, storage_tries);
+
+        let updates = TrieUpdatesSorted::new(vec![(path, Some(node))], B256Map::default());
+        let changesets = compute_trie_changesets(&factory, &updates).unwrap();
+
+        assert!(changesets.account_nodes_ref().is_empty());
+    }
+
+    #[test]
+    fn test_unchanged_storage_node_is_skipped() {
+        let hashed_address = B256::from([1u8; 32]);
+        let path = Nibbles::from_nibbles([0x1, 0x2]);
+        let node = BranchNodeCompact::new(0b1111, 0b0011, 0, vec![], None);
+
+        let mut storage_nodes = BTreeMap::new();
+        storage_nodes.insert(path, node.clone());
+
+        let mut storage_tries = B256Map::default();
+        storage_tries.insert(B256::default(), BTreeMap::new());
+        storage_tries.insert(hashed_address, storage_nodes);
+        let factory = MockTrieCursorFactory::new(BTreeMap::new(), storage_tries);
+
+        let mut storage_updates = B256Map::default();
+        storage_updates.insert(
+            hashed_address,
+            StorageTrieUpdatesSorted { is_deleted: false, storage_nodes: vec![(path, Some(node))] },
+        );
+
+        let updates = TrieUpdatesSorted::new(vec![], storage_updates);
+        let changesets = compute_trie_changesets(&factory, &updates).unwrap();
+
+        assert!(changesets.storage_tries_ref().is_empty());
     }
 
     #[test]
