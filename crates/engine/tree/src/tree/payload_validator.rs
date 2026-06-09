@@ -116,6 +116,9 @@ const MAX_EXPECTED_GAS_USAGE_MULTIPLIER: u64 = 2;
 /// Worker name for deferred trie data and changeset provider preparation.
 const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
 
+/// Rebuilt BALs below this transaction count are cheaper to hash inline than to schedule.
+const DEFERRED_BAL_HASH_TX_THRESHOLD: usize = 4096;
+
 type ReceiptRootSender<N> =
     crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
 type ReceiptRootReceiver = tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>;
@@ -574,6 +577,7 @@ where
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
         let execute_block_start = Instant::now();
+        let transaction_count = env.transaction_count;
         let execution_result = if parallel_bal_execution {
             self.execute_block_bal(env, &input, &handle, &make_state_provider)
         } else {
@@ -600,6 +604,21 @@ where
         // Terminate caching task early since execution is complete and caching is no longer
         // needed. This frees up resources while state root computation continues.
         let valid_block_tx = handle.terminate_caching(Some(output.clone()));
+
+        let mut block_access_list_hash = built_bal.map(|bal| {
+            if transaction_count >= DEFERRED_BAL_HASH_TX_THRESHOLD {
+                self.payload_processor.executor().spawn_blocking_named("bal-hash", move || {
+                    let _span = debug_span!(
+                        target: "engine::tree::payload_validator",
+                        "block_access_list_hash",
+                    )
+                    .entered();
+                    compute_block_access_list_hash(&bal)
+                })
+            } else {
+                LazyHandle::ready(compute_block_access_list_hash(&bal))
+            }
+        });
 
         // Spawn hashed post state computation in background so it runs concurrently with
         // block conversion and receipt root computation. This is a pure CPU-bound task
@@ -644,6 +663,9 @@ where
                 .ok()
         };
 
+        let block_access_list_hash =
+            block_access_list_hash.as_mut().map(|hash_handle| *hash_handle.get());
+
         ensure_ok_post_block!(
             self.validate_post_execution(
                 &block,
@@ -651,7 +673,7 @@ where
                 &output,
                 &mut ctx,
                 receipt_root_bloom,
-                built_bal
+                block_access_list_hash
             ),
             block
         );
@@ -1604,7 +1626,7 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
         ctx: &mut TreeCtx<'_, N>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
-        built_bal: Option<BlockAccessList>,
+        block_access_list_hash: Option<B256>,
     ) -> Result<(), InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
@@ -1617,8 +1639,6 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
-        let block_access_list_hash =
-            built_bal.as_ref().map(|bal| compute_block_access_list_hash(bal));
 
         if let Err(err) = self.consensus.validate_block_post_execution(
             block,
