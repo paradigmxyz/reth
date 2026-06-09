@@ -750,9 +750,10 @@ where
             let span = trace_span!("promote_updates", promoted = tracing::field::Empty).entered();
             // Now handle pending account updates that can be upgraded to a proper update.
             let account_rlp_buf = &mut self.account_rlp_buf;
+            let has_storage_updates = !self.storage_updates.is_empty();
             let mut num_promoted = 0;
             self.pending_account_updates.retain(|addr, account| {
-                if let Some(updates) = self.storage_updates.get(addr) {
+                if has_storage_updates && let Some(updates) = self.storage_updates.get(addr) {
                     if !updates.is_empty() {
                         // If account has pending storage updates, it is still pending.
                         return true;
