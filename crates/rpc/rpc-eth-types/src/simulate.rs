@@ -27,7 +27,7 @@ use reth_primitives_traits::{
 };
 use reth_rpc_convert::{RpcBlock, RpcConvert, RpcTxReq};
 use reth_rpc_server_types::result::rpc_err;
-use reth_storage_api::noop::NoopProvider;
+use reth_storage_api::{noop::NoopProvider, StateProvider};
 use revm::{
     context::Block,
     context_interface::result::ExecutionResult,
@@ -309,9 +309,11 @@ pub fn apply_precompile_overrides(
 #[expect(clippy::type_complexity)]
 pub fn execute_transactions<S, T>(
     mut builder: S,
+    state_provider: impl StateProvider,
     calls: Vec<RpcTxReq<T::Network>>,
     remaining_call_gas_limit: &mut Option<u64>,
     chain_id: u64,
+    compute_state_root: bool,
     converter: &T,
 ) -> Result<
     (
@@ -402,8 +404,11 @@ where
         block_state_gas_used = block_state_gas_used.saturating_add(gas_output.state_gas_used());
     }
 
-    // Pass noop provider to skip state root calculations.
-    let result = builder.finish(NoopProvider::default(), None)?;
+    let result = if compute_state_root {
+        builder.finish(state_provider, None)?
+    } else {
+        builder.finish(NoopProvider::default(), None)?
+    };
 
     Ok((result, results))
 }
