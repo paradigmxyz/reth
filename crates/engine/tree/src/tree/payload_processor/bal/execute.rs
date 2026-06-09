@@ -527,6 +527,7 @@ mod tests {
             transaction_count,
             tx_stream(txs),
             receipt_tx,
+            None,
         )
         .map(|(output, _, built_bal)| (output, built_bal))
     }
@@ -1154,6 +1155,7 @@ mod tests {
             1, // transaction_count = 1 → exactly one worker spawned
             tx_rx,
             receipt_tx,
+            None,
         );
 
         assert!(

@@ -185,7 +185,19 @@ where
         let mut total_idle_time = std::time::Duration::ZERO;
         let mut idle_start = Instant::now();
 
-        while let Ok(message) = updates.recv() {
+        loop {
+            let message = match updates.recv() {
+                Ok(message) => message,
+                Err(_) => {
+                    debug!(
+                        target: "engine::tree::payload_processor::sparse_trie",
+                        "state root update channel closed; finalizing sparse trie"
+                    );
+                    let _ = hashed_state_tx.send(SparseTrieTaskMessage::FinishedStateUpdates);
+                    break;
+                }
+            };
+
             total_idle_time += idle_start.elapsed();
 
             let msg = match message {
@@ -981,6 +993,27 @@ mod tests {
         );
         assert!(hashed_state_rx.recv_timeout(std::time::Duration::from_millis(100)).is_err());
         drop(updates_tx);
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn test_run_hashing_task_sender_drop_finalizes_updates() {
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
+
+        let handle = std::thread::spawn(move || {
+            SparseTrieCacheTask::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::run_hashing_task(
+                updates_rx,
+                hashed_state_tx,
+                MultiProofTaskMetrics::default(),
+            );
+        });
+
+        drop(updates_tx);
+
+        let message = hashed_state_rx.recv().unwrap();
+        assert!(matches!(message, SparseTrieTaskMessage::FinishedStateUpdates));
+        assert!(hashed_state_rx.recv_timeout(std::time::Duration::from_millis(100)).is_err());
         handle.join().unwrap();
     }
 
