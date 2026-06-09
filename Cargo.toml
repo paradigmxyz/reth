@@ -314,6 +314,9 @@ panic = "abort"
 codegen-units = 1
 incremental = false
 
+[patch.crates-io]
+keccak-asm = { git = "https://github.com/DaniPopes/keccak-asm", branch = "perf/zen5-x8664-default" }
+
 [workspace.dependencies]
 # reth
 reth = { path = "bin/reth" }
