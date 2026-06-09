@@ -291,19 +291,30 @@ where
 
         let mut total_idle_time = std::time::Duration::ZERO;
         let mut idle_start = Instant::now();
+        let mut updates = self.updates.clone();
+        let closed_updates = crossbeam_channel::never();
 
         loop {
             let mut t = Instant::now();
             crossbeam_channel::select_biased! {
-                recv(self.updates) -> message => {
+                recv(updates) -> message => {
                     let wake = Instant::now();
 
                     let update = match message {
-                        Ok(m) => m,
+                        Ok(message) => Some(message),
                         Err(_) => {
-                            return Err(ParallelStateRootError::Other(
-                                "updates channel disconnected before state root calculation".to_string(),
-                            ))
+                            if self.finished_state_updates {
+                                debug!(
+                                    target: "engine::tree::payload_processor::sparse_trie",
+                                    "sparse trie update channel closed after finish signal; draining pending work"
+                                );
+                                updates = closed_updates.clone();
+                                None
+                            } else {
+                                return Err(ParallelStateRootError::Other(
+                                    "updates channel disconnected before state root calculation".to_string(),
+                                ))
+                            }
                         }
                     };
 
@@ -312,8 +323,10 @@ where
                         .sparse_trie_channel_wait_duration_histogram
                         .record(wake.duration_since(t));
 
-                    self.on_message(update)?;
-                    self.pending_updates += 1;
+                    if let Some(update) = update {
+                        self.on_message(update)?;
+                        self.pending_updates += 1;
+                    }
                 }
                 recv(self.proof_result_rx) -> message => {
                     let phase_end = Instant::now();
@@ -1090,5 +1103,68 @@ mod tests {
         assert_eq!(outcome.state_root, parent_state_root);
         assert!(outcome.trie_updates.is_empty());
         assert!(task.trie.state_trie_ref().is_none(), "blind trie should not be revealed");
+    }
+
+    #[test]
+    fn run_drains_after_update_channel_closes_following_finish_signal() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = provider_factory.chain_spec().genesis_hash();
+        let overlay_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayBuilder::<reth_chain_state::EthPrimitives>::new(
+                anchor_hash,
+                ChangesetCache::new(),
+            ),
+        );
+        let proof_worker_handle =
+            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
+
+        let default_trie = RevealableSparseTrie::blind_from(ConfigurableSparseTrie::Arena(
+            ArenaParallelSparseTrie::default(),
+        ));
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        drop(updates_tx);
+
+        let parent_state_root = B256::from([0x55; 32]);
+        let mut task = SparseTrieCacheTask {
+            proof_result_tx,
+            proof_result_rx,
+            updates: updates_rx,
+            final_hashed_state_tx: Some(std::sync::mpsc::channel().0),
+            trie,
+            parent_state_root,
+            proof_worker_handle,
+            chunk_size: 1,
+            max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
+            account_updates: Default::default(),
+            storage_updates: Default::default(),
+            new_account_updates: Default::default(),
+            new_storage_updates: Default::default(),
+            pending_account_updates: Default::default(),
+            fetched_account_targets: Default::default(),
+            fetched_storage_targets: Default::default(),
+            account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
+            finished_state_updates: true,
+            account_cache_hits: 0,
+            account_cache_misses: 0,
+            storage_cache_hits: 0,
+            storage_cache_misses: 0,
+            pending_targets: Default::default(),
+            pending_updates: 1,
+            final_hashed_state: Default::default(),
+            metrics: MultiProofTaskMetrics::default(),
+        };
+
+        let outcome = task.run().expect("closed updates after finish should drain");
+
+        assert_eq!(outcome.state_root, parent_state_root);
+        assert!(outcome.trie_updates.is_empty());
     }
 }
