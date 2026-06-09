@@ -4,7 +4,7 @@
 //! parent has not been persisted yet. [`StateTrieOverlayManager`] tracks those in-memory blocks and
 //! builds reusable flattened state trie overlays on demand.
 
-use crate::{EthPrimitives, ExecutedBlock};
+use crate::{ComputedTrieData, EthPrimitives, ExecutedBlock};
 use alloy_primitives::B256;
 use reth_metrics::{
     metrics::{Counter, Histogram},
@@ -573,28 +573,37 @@ fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSo
     let trie_data = blocks.iter().map(ExecutedBlock::trie_data).collect::<Vec<_>>();
 
     #[cfg(feature = "rayon")]
-    let (nodes, state) = rayon::join(
-        || {
-            TrieUpdatesSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.trie_updates)),
-            )
-        },
-        || {
-            HashedPostStateSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.hashed_state)),
-            )
-        },
-    );
+    let (nodes, state) =
+        rayon::join(|| merge_trie_updates(&trie_data), || merge_hashed_state(&trie_data));
 
     #[cfg(not(feature = "rayon"))]
-    let (nodes, state) = (
-        TrieUpdatesSorted::merge_batch(trie_data.iter().map(|data| Arc::clone(&data.trie_updates))),
-        HashedPostStateSorted::merge_batch(
-            trie_data.iter().map(|data| Arc::clone(&data.hashed_state)),
-        ),
-    );
+    let (nodes, state) = (merge_trie_updates(&trie_data), merge_hashed_state(&trie_data));
 
     TrieInputSorted::new(nodes, state, Default::default())
+}
+
+fn merge_trie_updates(trie_data: &[ComputedTrieData]) -> Arc<TrieUpdatesSorted> {
+    match trie_data {
+        [] => Arc::new(TrieUpdatesSorted::default()),
+        [data] => Arc::clone(&data.trie_updates),
+        _ => {
+            let updates =
+                trie_data.iter().map(|data| data.trie_updates.as_ref()).collect::<Vec<_>>();
+            Arc::new(TrieUpdatesSorted::merge_slice(&updates))
+        }
+    }
+}
+
+fn merge_hashed_state(trie_data: &[ComputedTrieData]) -> Arc<HashedPostStateSorted> {
+    match trie_data {
+        [] => Arc::new(HashedPostStateSorted::default()),
+        [data] => Arc::clone(&data.hashed_state),
+        _ => {
+            let states =
+                trie_data.iter().map(|data| data.hashed_state.as_ref()).collect::<Vec<_>>();
+            Arc::new(HashedPostStateSorted::merge_slice(&states))
+        }
+    }
 }
 
 fn extend_overlay(
