@@ -487,6 +487,10 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     {
         let db_tip_block = self.overlay_builder.get_db_tip_block(provider)?;
 
+        if let Some(overlay) = self.overlay_cache.get(&db_tip_block.hash) {
+            return Ok(overlay.clone());
+        }
+
         let overlay = match self.overlay_cache.entry(db_tip_block.hash) {
             dashmap::Entry::Occupied(entry) => entry.get().clone(),
             dashmap::Entry::Vacant(entry) => {
