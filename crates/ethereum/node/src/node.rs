@@ -519,13 +519,17 @@ fn jit_runtime_config(jit: &JitArgs) -> RuntimeConfig {
 ///
 /// This is the shared setup used by both [`EthereumExecutorBuilder`] and `reth re-execute`.
 ///
-/// Returns the evm config, the JIT backend (for periodic metrics polling), and the
-/// metrics recorder.
+/// Returns the evm config and metrics recorder if JIT starts enabled.
 pub fn build_jit_evm_config<C: EthereumHardforks>(
     chain_spec: Arc<C>,
     jit: &JitArgs,
     dump_dir: Option<std::path::PathBuf>,
-) -> eyre::Result<(EthEvmConfig<C, RethEvmFactory>, Arc<RevmcMetrics>)> {
+) -> eyre::Result<(EthEvmConfig<C, RethEvmFactory>, Option<Arc<RevmcMetrics>>)> {
+    if !jit.enabled {
+        let factory = RethEvmFactory::disabled();
+        return Ok((EthEvmConfig::new_with_evm_factory(chain_spec, factory), None));
+    }
+
     let mut config = jit_runtime_config(jit);
     config.dump_dir = dump_dir;
 
@@ -539,20 +543,18 @@ pub fn build_jit_evm_config<C: EthereumHardforks>(
     let jit_mode = config.jit_mode;
     let backend = JitBackend::new(config)?;
 
-    if jit.enabled {
-        warn!(target: "reth::cli",
-            hot_threshold = tuning.jit_hot_threshold,
-            workers = tuning.jit_worker_count,
-            mode = ?jit_mode,
-            blocking = jit.blocking,
-            "Started experimental revmc JIT backend; this may cause instability",
-        );
-    }
+    warn!(target: "reth::cli",
+        hot_threshold = tuning.jit_hot_threshold,
+        workers = tuning.jit_worker_count,
+        mode = ?jit_mode,
+        blocking = jit.blocking,
+        "Started experimental revmc JIT backend; this may cause instability",
+    );
 
     let factory = RethEvmFactory::new_with_metrics(backend, revmc_metrics.as_ref().clone());
     let evm_config = EthEvmConfig::new_with_evm_factory(chain_spec, factory);
 
-    Ok((evm_config, revmc_metrics))
+    Ok((evm_config, Some(revmc_metrics)))
 }
 
 /// A regular ethereum evm and executor builder.
@@ -578,19 +580,20 @@ where
 
         let (evm_config, revmc_metrics) = build_jit_evm_config(ctx.chain_spec(), jit, dump_dir)?;
 
-        // Periodically record JIT metrics.
-        let metrics_backend = evm_config.executor_factory.evm_factory().backend().clone();
-        ctx.task_executor().spawn_with_graceful_shutdown_signal(|shutdown| async move {
-            let mut shutdown = std::pin::pin!(shutdown);
-            loop {
-                tokio::select! {
-                    _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
-                        revmc_metrics.record(&metrics_backend.stats());
+        if let Some(revmc_metrics) = revmc_metrics {
+            let metrics_backend = evm_config.executor_factory.evm_factory().backend().clone();
+            ctx.task_executor().spawn_with_graceful_shutdown_signal(|shutdown| async move {
+                let mut shutdown = std::pin::pin!(shutdown);
+                loop {
+                    tokio::select! {
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
+                            revmc_metrics.record(&metrics_backend.stats());
+                        }
+                        _ = &mut shutdown => break,
                     }
-                    _ = &mut shutdown => break,
                 }
-            }
-        });
+            });
+        }
 
         Ok(evm_config)
     }
