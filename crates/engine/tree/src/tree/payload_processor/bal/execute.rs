@@ -290,9 +290,13 @@ impl BlockGasTracker {
 
     const fn record_result<H>(&mut self, result: &ResultAndState<H>) {
         let gas = result.result.gas();
-        self.cumulative_tx_gas_used = self.cumulative_tx_gas_used.saturating_add(gas.tx_gas_used());
-        self.block_regular_gas_used =
-            self.block_regular_gas_used.saturating_add(gas.block_regular_gas_used());
+        if self.enable_amsterdam_eip8037 {
+            self.block_regular_gas_used =
+                self.block_regular_gas_used.saturating_add(gas.block_regular_gas_used());
+        } else {
+            self.cumulative_tx_gas_used =
+                self.cumulative_tx_gas_used.saturating_add(gas.tx_gas_used());
+        }
     }
 }
 
