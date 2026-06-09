@@ -1256,11 +1256,6 @@ where
             .in_scope(|| executor.apply_pre_execution_changes())?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
 
-        // Bump BAL index after pre-execution changes (EIP-7928: index 0 is pre-execution)
-        if has_bal {
-            executor.evm_mut().db_mut().bump_bal_index();
-        }
-
         // Execute transactions
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
         let mut transactions = transactions.into_iter();
@@ -1269,49 +1264,95 @@ where
         // In that case, invoking the callback on every transaction would resend the previous
         // receipt with the same index and can panic the ordered root builder.
         let mut last_sent_len = 0usize;
-        loop {
-            // Measure time spent waiting for next transaction from iterator
-            // (e.g., parallel signature recovery)
-            let wait_start = Instant::now();
-            let Some(tx_result) = transactions.next() else { break };
-            self.metrics.record_transaction_wait(wait_start.elapsed());
+        if has_bal {
+            // Bump BAL index after pre-execution changes (EIP-7928: index 0 is pre-execution).
+            executor.evm_mut().db_mut().bump_bal_index();
 
-            let tx = tx_result.map_err(BlockExecutionError::other)?;
-            let tx_signer = *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(&tx);
+            loop {
+                // Measure time spent waiting for next transaction from iterator
+                // (e.g., parallel signature recovery)
+                let wait_start = Instant::now();
+                let Some(tx_result) = transactions.next() else { break };
+                self.metrics.record_transaction_wait(wait_start.elapsed());
 
-            senders.push(tx_signer);
+                let tx = tx_result.map_err(BlockExecutionError::other)?;
+                let tx_signer = *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(&tx);
 
-            let _enter = tracing::enabled!(target: "engine::tree", Level::TRACE).then(|| {
-                tracing::trace_span!(
-                    target: "engine::tree",
-                    "execute tx",
-                    tx_index = senders.len() - 1,
-                )
-                .entered()
-            });
-            if tracing::enabled!(target: "engine::tree", Level::TRACE) {
-                trace!(target: "engine::tree", "Executing transaction");
-            }
+                senders.push(tx_signer);
 
-            let tx_start = Instant::now();
-            executor.execute_transaction(tx)?;
-            self.metrics.record_transaction_execution(tx_start.elapsed());
-
-            // advance the shared counter so prewarm workers skip already-executed txs
-            executed_tx_index.store(senders.len(), Ordering::Relaxed);
-
-            let current_len = executor.receipts().len();
-            if current_len > last_sent_len {
-                last_sent_len = current_len;
-                // Send the latest receipt to the background task for incremental root computation.
-                if let Some(receipt) = executor.receipts().last() {
-                    let tx_index = current_len - 1;
-                    let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
+                let _enter = tracing::enabled!(target: "engine::tree", Level::TRACE).then(|| {
+                    tracing::trace_span!(
+                        target: "engine::tree",
+                        "execute tx",
+                        tx_index = senders.len() - 1,
+                    )
+                    .entered()
+                });
+                if tracing::enabled!(target: "engine::tree", Level::TRACE) {
+                    trace!(target: "engine::tree", "Executing transaction");
                 }
-            }
-            // Bump BAL index after each transaction (EIP-7928)
-            if has_bal {
+
+                let tx_start = Instant::now();
+                executor.execute_transaction(tx)?;
+                self.metrics.record_transaction_execution(tx_start.elapsed());
+
+                // advance the shared counter so prewarm workers skip already-executed txs
+                executed_tx_index.store(senders.len(), Ordering::Relaxed);
+
+                let current_len = executor.receipts().len();
+                if current_len > last_sent_len {
+                    last_sent_len = current_len;
+                    // Send the latest receipt to the background task for incremental root computation.
+                    if let Some(receipt) = executor.receipts().last() {
+                        let tx_index = current_len - 1;
+                        let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
+                    }
+                }
+
+                // Bump BAL index after each transaction (EIP-7928).
                 executor.evm_mut().db_mut().bump_bal_index();
+            }
+        } else {
+            loop {
+                // Measure time spent waiting for next transaction from iterator
+                // (e.g., parallel signature recovery)
+                let wait_start = Instant::now();
+                let Some(tx_result) = transactions.next() else { break };
+                self.metrics.record_transaction_wait(wait_start.elapsed());
+
+                let tx = tx_result.map_err(BlockExecutionError::other)?;
+                let tx_signer = *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(&tx);
+
+                senders.push(tx_signer);
+
+                let _enter = tracing::enabled!(target: "engine::tree", Level::TRACE).then(|| {
+                    tracing::trace_span!(
+                        target: "engine::tree",
+                        "execute tx",
+                        tx_index = senders.len() - 1,
+                    )
+                    .entered()
+                });
+                if tracing::enabled!(target: "engine::tree", Level::TRACE) {
+                    trace!(target: "engine::tree", "Executing transaction");
+                }
+
+                let tx_start = Instant::now();
+                executor.execute_transaction(tx)?;
+                self.metrics.record_transaction_execution(tx_start.elapsed());
+
+                // advance the shared counter so prewarm workers skip already-executed txs
+                executed_tx_index.store(senders.len(), Ordering::Relaxed);
+
+                let current_len = executor.receipts().len();
+                if current_len > last_sent_len {
+                    last_sent_len = current_len;
+                    // Send the latest receipt to the background task for incremental root computation.
+                    if let Some(receipt) = executor.receipts().last() {
+                        let tx_index = current_len - 1;
+                        let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
+                    }
+                }
             }
         }
 
