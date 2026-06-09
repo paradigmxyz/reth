@@ -262,7 +262,7 @@ impl NodeState {
             }
             ConsensusEngineEvent::CanonicalChainCommitted(head, elapsed) => {
                 self.latest_block = Some(head.number());
-                info!(number=head.number(), hash=?head.hash(), ?elapsed, "Canonical chain committed");
+                debug!(number=head.number(), hash=?head.hash(), ?elapsed, "Canonical chain committed");
             }
             ConsensusEngineEvent::ForkBlockAdded(executed, elapsed) => {
                 let block = executed.sealed_block();
