@@ -542,6 +542,11 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
+        if self.caches.0.account_cache.get(&account).is_some_and(|account| account.is_none()) {
+            self.record_storage_hit();
+            return Ok(None);
+        }
+
         if self.should_fill_on_miss() {
             match self.caches.get_or_try_insert_storage_with(account, storage_key, || {
                 self.state_provider.storage(account, storage_key).map(Option::unwrap_or_default)
