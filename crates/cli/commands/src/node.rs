@@ -211,7 +211,8 @@ where
         let db_path = data_dir.db();
 
         tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let database = init_db(db_path.clone(), self.db.database_args())?.with_metrics();
+        let database = init_db(db_path.clone(), self.db.database_args())?
+            .with_metrics_if(self.db.metrics_enabled());
 
         if with_unused_ports {
             node_config = node_config.with_unused_ports();

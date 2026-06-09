@@ -18,7 +18,7 @@ use reth_node_ethereum::{consensus::EthBeaconConsensus, EthereumNode};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_rpc_server_types::RpcModuleValidator;
 use reth_tasks::RayonConfig;
-use reth_tracing::{FileWorkerGuard, Layers};
+use reth_tracing::{Layers, TracingGuards};
 use std::{fmt, sync::Arc};
 
 /// A wrapper around a parsed CLI that handles command execution.
@@ -32,7 +32,7 @@ pub struct CliApp<
     cli: Cli<Spec, Ext, Rpc, SubCmd>,
     runner: Option<CliRunner>,
     layers: Option<Layers>,
-    guard: Option<FileWorkerGuard>,
+    guard: Option<TracingGuards>,
 }
 
 impl<C, Ext, Rpc, SubCmd> CliApp<C, Ext, Rpc, SubCmd>
@@ -149,7 +149,7 @@ where
     /// See [`Cli::init_tracing`] for more information.
     pub fn init_tracing(&mut self, runner: &CliRunner) -> Result<()> {
         if let Some(layers) = self.layers.take() {
-            self.guard = self.cli.init_tracing(runner, layers)?;
+            self.guard = Some(self.cli.init_tracing(runner, layers)?);
         }
 
         Ok(())

@@ -7,16 +7,39 @@
 //   BENCH_CORES          – CPU core limit (0 = all)
 //   BENCH_WARMUP_BLOCKS  – Number of warmup blocks
 //   BENCH_SAMPLY         – 'true' if samply profiling was enabled
+//   BENCH_TRACING_CHROME – 'true' if Chrome trace recording was enabled
 //   BENCH_RUN_PAIRS      – Number of configured benchmark run pairs
 //
 // Usage from actions/github-script:
 //   const jobSummary = require('./.github/scripts/bench-job-summary.js');
-//   await jobSummary({ core, context, chartSha, grafanaUrl, runId });
+//   await jobSummary({ core, context, chartSha, grafanaUrl, logsUrl, tracesUrl, runId });
 
 const fs = require('fs');
-const { verdict, loadSamplyUrls, blocksLabel, metricRows, waitTimeRows } = require('./bench-utils');
+const {
+  verdict,
+  loadSamplyUrls,
+  loadTracingChromeUrls,
+  blocksLabel,
+  metricRows,
+  waitTimeRows,
+  fmtChange,
+} = require('./bench-utils');
 
-module.exports = async function ({ core, context, chartSha, grafanaUrl, runId }) {
+function fmtMetricValue(v) {
+  if (v === null || v === undefined || !Number.isFinite(v)) return 'n/a';
+  const abs = Math.abs(v);
+  if ((abs !== 0 && abs < 0.001) || abs >= 100000) return v.toExponential(3);
+  if (abs < 1) return v.toPrecision(3);
+  if (abs < 100) return v.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+  return v.toFixed(1).replace(/\.0$/, '');
+}
+
+function fmtTargetMetricValue(metric, v) {
+  if (metric.unit === 'seconds') return `${(v * 1000).toFixed(2)}ms`;
+  return fmtMetricValue(v);
+}
+
+module.exports = async function ({ core, context, chartSha, grafanaUrl, logsUrl, tracesUrl, runId }) {
   let summary;
   try {
     summary = JSON.parse(fs.readFileSync(process.env.BENCH_WORK_DIR + '/summary.json', 'utf8'));
@@ -31,6 +54,10 @@ module.exports = async function ({ core, context, chartSha, grafanaUrl, runId })
   const commitUrl = `https://github.com/${repo}/commit`;
 
   const { emoji, label } = verdict(summary.changes);
+  const observability = summary.observability || {};
+  const resolvedGrafanaUrl = grafanaUrl || observability.grafana_url;
+  const resolvedLogsUrl = logsUrl || observability.logs_url;
+  const resolvedTracesUrl = tracesUrl || observability.traces_url;
   const baselineLink = `[\`${summary.baseline.name}\`](${commitUrl}/${summary.baseline.ref})`;
   const featureLink = `[\`${summary.feature.name}\`](${commitUrl}/${summary.feature.ref})`;
   const diffUrl = `https://github.com/${repo}/compare/${summary.baseline.ref}...${summary.feature.ref}`;
@@ -67,6 +94,23 @@ module.exports = async function ({ core, context, chartSha, grafanaUrl, runId })
     md += '\n';
   }
 
+  // Target metrics
+  const targetMetrics = summary.target_metrics;
+  const changedTargetMetrics = targetMetrics?.changed || [];
+  if (changedTargetMetrics.length > 0) {
+    md += `### Target Metrics\n\n`;
+    md += `| Metric | Baseline | Feature | Change |\n`;
+    md += `|--------|----------|---------|--------|\n`;
+    for (const metric of changedTargetMetrics) {
+      for (const statName of metric.display_stats || []) {
+        const change = metric.changes?.[statName];
+        if (!change || change.sig === 'neutral') continue;
+        md += `| \`${metric.name} ${statName}\` | ${fmtTargetMetricValue(metric, change.baseline)} | ${fmtTargetMetricValue(metric, change.feature)} | ${fmtChange(change)} |\n`;
+      }
+    }
+    md += '\n';
+  }
+
   // Charts
   if (chartSha) {
     const prNum = prNumber || '0';
@@ -91,9 +135,20 @@ module.exports = async function ({ core, context, chartSha, grafanaUrl, runId })
     md += `### Samply Profiles\n\n${samplyLinks.join('\n')}\n\n`;
   }
 
-  // Grafana
-  if (grafanaUrl) {
-    md += `### Grafana Dashboard\n\n[View real-time metrics](${grafanaUrl})\n\n`;
+  const tracingChromeUrls = loadTracingChromeUrls(process.env.BENCH_WORK_DIR);
+  const tracingChromeLinks = Object.entries(tracingChromeUrls)
+    .map(([run, url]) => `- **${run}**: [Perfetto](${url})`);
+  if (tracingChromeLinks.length > 0) {
+    md += `### Chrome Traces\n\n${tracingChromeLinks.join('\n')}\n\n`;
+  }
+
+  // Observability
+  const observabilityLinks = [];
+  if (resolvedGrafanaUrl) observabilityLinks.push(`- [Grafana Dashboard](${resolvedGrafanaUrl})`);
+  if (resolvedLogsUrl) observabilityLinks.push(`- [Logs](${resolvedLogsUrl})`);
+  if (resolvedTracesUrl) observabilityLinks.push(`- [Traces](${resolvedTracesUrl})`);
+  if (observabilityLinks.length > 0) {
+    md += `### Observability\n\n${observabilityLinks.join('\n')}\n\n`;
   }
 
   // Node errors

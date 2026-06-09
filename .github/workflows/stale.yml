@@ -29,4 +29,5 @@ jobs:
           close-issue-message: "This issue was closed because it has been inactive for 7 days since being marked as stale."
           exempt-all-milestones: true
           exempt-all-assignees: true
+          operations-per-run: 1000
           repo-token: ${{ secrets.GITHUB_TOKEN }}

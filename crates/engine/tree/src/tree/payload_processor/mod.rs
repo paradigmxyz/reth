@@ -4,8 +4,9 @@ use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     payload_processor::prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
     sparse_trie::SparseTrieCacheTask,
-    CacheWaitDurations, CachedStateMetrics, CachedStateMetricsSource, ExecutionCache,
-    PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig, WaitForCaches,
+    CacheWaitDurations, CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource,
+    ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
+    WaitForCaches,
 };
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
@@ -41,12 +42,13 @@ use std::{
     sync::{
         atomic::{AtomicBool, AtomicUsize},
         mpsc::{self, channel},
-        Arc,
+        Arc, OnceLock,
     },
 };
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
 pub mod bal;
+pub(crate) mod bal_prewarm_pool;
 pub mod multiproof;
 mod preserved_sparse_trie;
 pub mod prewarm;
@@ -121,6 +123,8 @@ where
     execution_cache: PayloadExecutionCache,
     /// Metrics for the execution cache.
     cache_metrics: Option<CachedStateMetrics>,
+    /// Metrics for shared execution cache state.
+    cache_state_metrics: Option<CachedStateCacheMetrics>,
     /// Metrics for trie operations
     trie_metrics: MultiProofTaskMetrics,
     /// Cross-block cache size in bytes.
@@ -150,6 +154,9 @@ where
     disable_bal_parallel_state_root: bool,
     /// Whether BAL state prefetching during prewarm is disabled.
     disable_bal_batch_io: bool,
+    /// Dedicated blocking pool for warming the BAL read-set, created lazily on the first BAL block
+    /// (see [`Self::bal_prewarm_pool`]). Its threads exit when the processor is dropped.
+    bal_prewarm_pool: OnceLock<Arc<bal_prewarm_pool::BalPrewarmPool>>,
 }
 
 impl<N, Evm> PayloadProcessor<Evm>
@@ -185,9 +192,22 @@ where
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
             cache_metrics: (!config.disable_cache_metrics())
                 .then(|| CachedStateMetrics::zeroed(CachedStateMetricsSource::Engine)),
+            cache_state_metrics: (!config.disable_cache_metrics())
+                .then(CachedStateCacheMetrics::default),
             disable_bal_parallel_state_root: config.disable_bal_parallel_state_root(),
             disable_bal_batch_io: config.disable_bal_batch_io(),
+            bal_prewarm_pool: OnceLock::new(),
         }
+    }
+
+    /// Returns the dedicated BAL read-set prewarm pool, spawning its blocking worker threads on
+    /// first use (only the BAL parallel execution path calls this).
+    fn bal_prewarm_pool(&self) -> Arc<bal_prewarm_pool::BalPrewarmPool> {
+        self.bal_prewarm_pool
+            .get_or_init(|| {
+                bal_prewarm_pool::BalPrewarmPool::new(bal_prewarm_pool::DEFAULT_BAL_PREWARM_THREADS)
+            })
+            .clone()
     }
 }
 
@@ -271,6 +291,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         multiproof_provider_factory: F,
         config: &TreeConfig,
+        parallel_bal_execution: bool,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -293,17 +314,14 @@ where
             halve_workers,
             config,
         );
-        // BAL blocks only bypass the normal execution state hook when the parallel BAL executor
-        // consumes the BAL. If parallel BAL execution is disabled, or if state caching is
-        // disabled so the BAL executor cannot use a shared cache, treat the BAL as absent here so
-        // the block follows today's sequential execution and transaction-prewarm path.
+        // BAL blocks only bypass the normal execution state hook when the validator decided that
+        // the parallel BAL executor will consume this block. If not, treat the BAL as absent here
+        // so the block follows today's sequential execution and transaction-prewarm path.
         //
         // In the parallel BAL path, prewarm owns BAL-derived sparse-trie updates and optional
-        // BAL state prefetching. `disable_bal_batch_io` controls the prefetch half inside
-        // prewarm, not this dispatch decision.
-        let parallel_bal_execution = !config.disable_state_cache() &&
-            !config.disable_bal_parallel_execution() &&
-            env.decoded_bal.is_some();
+        // BAL state prefetching. State-cache disabled mode still uses the BAL executor, but
+        // `saved_cache` is absent below, so prewarm skips cache-backed state prefetching.
+        // `disable_bal_batch_io` controls the prefetch half when a cache exists.
         let install_state_hook = !parallel_bal_execution;
         let prewarm_handle = self.spawn_caching_with(
             env,
@@ -525,8 +543,10 @@ where
             evm_config: self.evm_config.clone(),
             saved_cache: saved_cache.clone(),
             provider: provider_builder,
+            bal_prewarm_pool: parallel_bal_execution.then(|| self.bal_prewarm_pool()),
             metrics: PrewarmMetrics::default(),
             cache_metrics: self.cache_metrics.clone(),
+            cache_state_metrics: self.cache_state_metrics.clone(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::clone(&executed_tx_index),
             precompile_cache_disabled: self.precompile_cache_disabled,
@@ -722,7 +742,7 @@ where
         block_with_parent: BlockWithParent,
         bundle_state: &BundleState,
     ) {
-        let cache_metrics = self.cache_metrics.clone();
+        let cache_state_metrics = self.cache_state_metrics.clone();
         self.execution_cache.update_with_guard(|cached| {
             if cached.as_ref().is_some_and(|c| c.executed_block_hash() != block_with_parent.parent) {
                 debug!(
@@ -756,7 +776,7 @@ where
                 debug!(target: "engine::caching", "cleared execution cache on update error");
                 return
             }
-            new_cache.update_metrics(cache_metrics.as_ref());
+            new_cache.update_metrics(cache_state_metrics.as_ref());
 
             // Replace with the updated cache
             *cached = Some(new_cache);
@@ -1020,7 +1040,6 @@ mod tests {
         ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
     };
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
-    use alloy_evm::block::StateChangeSource;
     use rand::Rng;
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
@@ -1367,12 +1386,13 @@ mod tests {
                 OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
             ),
             &TreeConfig::default(),
+            false,
         );
 
         let mut state_hook = handle.state_hook().expect("state hook is None");
 
-        for (i, update) in state_updates.into_iter().enumerate() {
-            state_hook.on_state(StateChangeSource::Transaction(i), &update);
+        for update in state_updates {
+            state_hook.on_state(&update);
         }
         drop(state_hook);
 

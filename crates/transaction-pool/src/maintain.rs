@@ -380,7 +380,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                 changed_accounts.extend(new_changed_accounts.into_iter().map(|entry| entry.0));
 
                 // all transactions mined in the new chain
-                let new_mined_transactions: HashSet<_> = new_blocks.transaction_hashes().collect();
+                let new_mined_transactions = new_blocks.transaction_hashes_set();
 
                 // update the pool then re-inject the pruned transactions
                 // find all transactions that were mined in the old chain but not in the new chain
