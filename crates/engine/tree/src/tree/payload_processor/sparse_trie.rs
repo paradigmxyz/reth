@@ -537,14 +537,14 @@ where
         // Firstly apply all new storage and account updates to the tries.
         self.process_leaf_updates(true)?;
 
-        for (address, mut new) in self.new_storage_updates.drain() {
+        for (address, new) in self.new_storage_updates.drain() {
             match self.storage_updates.entry(address) {
                 Entry::Vacant(entry) => {
                     entry.insert(new); // insert the whole map at once, no per-slot loop
                 }
                 Entry::Occupied(mut entry) => {
                     let updates = entry.get_mut();
-                    for (slot, new) in new.drain() {
+                    for (slot, new) in new {
                         match updates.entry(slot) {
                             Entry::Occupied(mut slot_entry) => {
                                 if new.is_changed() {
