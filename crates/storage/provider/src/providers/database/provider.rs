@@ -2711,6 +2711,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
                     db_entry.key == entry.key
                 {
+                    if !entry.value.is_zero() && db_entry.value == entry.value {
+                        continue;
+                    }
                     hashed_storage_cursor.delete_current()?;
                 }
 
@@ -3953,7 +3956,8 @@ mod tests {
     use reth_storage_api::MetadataWriter;
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
-        HashedPostState, KeccakKeyHasher, Nibbles, StoredNibbles, StoredNibblesSubKey,
+        HashedPostState, HashedStorageSorted, KeccakKeyHasher, Nibbles, StoredNibbles,
+        StoredNibblesSubKey,
     };
     use revm_database::BundleState;
     use revm_state::AccountInfo;
@@ -4665,6 +4669,73 @@ mod tests {
             .expect("entry should exist");
         assert_eq!(entry.key, hashed_slot);
         assert_eq!(entry.value, old_value);
+    }
+
+    #[test]
+    fn test_write_hashed_state_preserves_existing_storage_value() {
+        let factory = create_test_provider_factory();
+
+        let hashed_address = B256::random();
+        let hashed_slot = B256::random();
+        let value = U256::from(100);
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .tx
+            .cursor_dup_write::<tables::HashedStorages>()
+            .unwrap()
+            .upsert(hashed_address, &StorageEntry { key: hashed_slot, value })
+            .unwrap();
+
+        let mut storages = B256Map::default();
+        storages.insert(
+            hashed_address,
+            HashedStorageSorted { storage_slots: vec![(hashed_slot, value)], wiped: false },
+        );
+
+        provider_rw.write_hashed_state(&HashedPostStateSorted::new(Vec::new(), storages)).unwrap();
+
+        let entry = provider_rw
+            .tx
+            .cursor_dup_read::<tables::HashedStorages>()
+            .unwrap()
+            .seek_by_key_subkey(hashed_address, hashed_slot)
+            .unwrap()
+            .expect("entry should exist");
+        assert_eq!(entry.key, hashed_slot);
+        assert_eq!(entry.value, value);
+    }
+
+    #[test]
+    fn test_write_hashed_state_removes_zero_storage_rows() {
+        let factory = create_test_provider_factory();
+
+        let hashed_address = B256::random();
+        let hashed_slot = B256::random();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .tx
+            .cursor_dup_write::<tables::HashedStorages>()
+            .unwrap()
+            .upsert(hashed_address, &StorageEntry { key: hashed_slot, value: U256::ZERO })
+            .unwrap();
+
+        let mut storages = B256Map::default();
+        storages.insert(
+            hashed_address,
+            HashedStorageSorted { storage_slots: vec![(hashed_slot, U256::ZERO)], wiped: false },
+        );
+
+        provider_rw.write_hashed_state(&HashedPostStateSorted::new(Vec::new(), storages)).unwrap();
+
+        let entry = provider_rw
+            .tx
+            .cursor_dup_read::<tables::HashedStorages>()
+            .unwrap()
+            .seek_by_key_subkey(hashed_address, hashed_slot)
+            .unwrap();
+        assert!(entry.is_none() || entry.unwrap().key != hashed_slot);
     }
 
     #[test]
