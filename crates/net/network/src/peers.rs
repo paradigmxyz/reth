@@ -1076,24 +1076,28 @@ impl PeersManager {
 
         let now = std::time::Instant::now();
 
-        let candidate = self
+        let candidates = self
             .peers
             .iter()
-            .find(|(peer_id, peer)| {
+            .filter_map(|(peer_id, peer)| {
                 let eligible = match peer.state {
                     PeerConnectionState::Out => outbound_at_capacity,
                     PeerConnectionState::In => inbound_at_capacity,
                     _ => false,
                 };
-                eligible &&
+                (eligible &&
                     !peer.is_trusted() &&
                     !peer.is_static() &&
-                    !self.trusted_peer_ids.contains(*peer_id) &&
-                    peer.connected_for_at_least(now, PEER_ROTATION_MIN_UPTIME)
+                    !self.trusted_peer_ids.contains(peer_id) &&
+                    peer.connected_for_at_least(now, PEER_ROTATION_MIN_UPTIME))
+                .then_some(*peer_id)
             })
-            .map(|(peer_id, _)| *peer_id);
+            .collect::<Vec<_>>();
 
-        let Some(peer_id) = candidate else { return };
+        if candidates.is_empty() {
+            return
+        }
+        let peer_id = candidates[rand::rng().random_range(0..candidates.len())];
 
         trace!(target: "net::peers", ?peer_id, "rotating peer to open slot for new nodes");
 
