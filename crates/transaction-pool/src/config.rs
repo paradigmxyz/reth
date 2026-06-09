@@ -213,6 +213,35 @@ impl Default for PriceBumpConfig {
     }
 }
 
+/// Configuration for transaction batching
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct BatchConfig {
+    /// Maximum number of transactions to batch before processing.
+    pub max_batch_size: usize,
+    /// Maximum duration to wait after the first buffered transaction before processing a partial
+    /// batch.
+    /// If None, batching is disabled (immediate processing).
+    pub batch_timeout: Option<Duration>,
+    /// Maximum number of insertion batches to process concurrently.
+    ///
+    /// This bounds how many spawned insertion batches can compete for transaction validation at
+    /// once. Size this from the number of txpool validation tasks plus a small buffer so
+    /// validation workers stay saturated while submission bursts cannot create unbounded
+    /// in-flight batches.
+    pub max_concurrent_batches: usize,
+}
+
+impl Default for BatchConfig {
+    fn default() -> Self {
+        Self {
+            max_batch_size: 1,
+            batch_timeout: None,
+            max_concurrent_batches: DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS.saturating_add(3),
+        }
+    }
+}
+
 /// Configuration options for the locally received transactions:
 /// [`TransactionOrigin::Local`](TransactionOrigin)
 #[derive(Debug, Clone, Eq, PartialEq)]

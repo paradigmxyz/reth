@@ -2,17 +2,29 @@
 //!
 //! This module provides transaction batching logic to reduce lock contention when processing
 //! many concurrent transaction pool insertions.
+//!
+//! The batcher supports an optional timeout mechanism: when `batch_timeout` is `Some`,
+//! transactions are batched until either `max_batch_size` is reached or the timeout expires after
+//! the first transaction is buffered. When `batch_timeout` is `None`, the batcher processes
+//! requests immediately.
 
 use crate::{
-    error::PoolError, AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
+    config::BatchConfig, error::PoolError, AddedTransactionOutcome, PoolTransaction,
+    TransactionOrigin, TransactionPool,
 };
 use pin_project::pin_project;
 use std::{
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{ready, Context, Poll},
+    time::Duration,
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore},
+    time::Sleep,
+};
+use tokio_util::sync::PollSemaphore;
 
 /// A single batch transaction request
 #[derive(Debug)]
@@ -40,14 +52,42 @@ where
 }
 
 /// Transaction batch processor that handles batch processing
+///
+/// Supports two modes:
+/// - **Immediate mode** (`batch_timeout = None`): Processes requests as soon as available (greedy)
+/// - **Batch-and-timeout mode** (`batch_timeout = Some(...)`): Waits for `max_batch_size` OR
+///   timeout before processing
 #[pin_project]
-#[derive(Debug)]
 pub struct BatchTxProcessor<Pool: TransactionPool> {
     pool: Pool,
     max_batch_size: usize,
+    /// Timeout for partial batches. `None` keeps the immediate processing mode.
+    batch_timeout: Option<Duration>,
     buf: Vec<BatchTxRequest<Pool::Transaction>>,
     #[pin]
     request_rx: mpsc::UnboundedReceiver<BatchTxRequest<Pool::Transaction>>,
+    /// Deadline armed when the first request enters an empty batch.
+    #[pin]
+    batch_deadline: Option<Sleep>,
+    /// Tracks an expired deadline while waiting for an insertion permit.
+    flush_due: bool,
+    /// Limits how many insertion batches can be processed concurrently.
+    batch_permits: PollSemaphore,
+}
+
+impl<Pool> std::fmt::Debug for BatchTxProcessor<Pool>
+where
+    Pool: TransactionPool + std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BatchTxProcessor")
+            .field("pool", &self.pool)
+            .field("max_batch_size", &self.max_batch_size)
+            .field("batch_timeout", &self.batch_timeout)
+            .field("buf_len", &self.buf.len())
+            .field("has_batch_deadline", &self.batch_deadline.is_some())
+            .finish()
+    }
 }
 
 impl<Pool> BatchTxProcessor<Pool>
@@ -57,11 +97,32 @@ where
     /// Create a new `BatchTxProcessor`
     pub fn new(
         pool: Pool,
-        max_batch_size: usize,
+        config: BatchConfig,
     ) -> (Self, mpsc::UnboundedSender<BatchTxRequest<Pool::Transaction>>) {
         let (request_tx, request_rx) = mpsc::unbounded_channel();
+        let BatchConfig { max_batch_size, batch_timeout, max_concurrent_batches } = config;
+        let max_batch_size = max_batch_size.max(1);
+        let max_concurrent_batches = max_concurrent_batches.clamp(1, Semaphore::MAX_PERMITS);
 
-        let processor = Self { pool, max_batch_size, buf: Vec::with_capacity(1), request_rx };
+        let processor = Self {
+            pool,
+            max_batch_size,
+            batch_timeout,
+            buf: Vec::with_capacity(max_batch_size),
+            request_rx,
+            batch_deadline: None,
+            flush_due: false,
+            batch_permits: PollSemaphore::new(Arc::new(Semaphore::new(max_concurrent_batches))),
+        };
+
+        tracing::debug!(
+            target: "txpool::batcher",
+            max_batch_size,
+            ?batch_timeout,
+            max_concurrent_batches,
+            mode = if batch_timeout.is_none() { "immediate" } else { "batch-and-timeout" },
+            "Transaction batcher initialized"
+        );
 
         (processor, request_tx)
     }
@@ -88,6 +149,23 @@ where
             let _ = response_tx.send(pool_result);
         }
     }
+
+    /// Spawn a batch processing task
+    fn spawn_batch(
+        pool: &Pool,
+        buf: &mut Vec<BatchTxRequest<Pool::Transaction>>,
+        permit: OwnedSemaphorePermit,
+    ) {
+        if buf.is_empty() {
+            return;
+        }
+        let batch = std::mem::take(buf);
+        let pool = pool.clone();
+        tokio::spawn(async move {
+            let _permit = permit;
+            Self::process_batch(&pool, batch).await;
+        });
+    }
 }
 
 impl<Pool> Future for BatchTxProcessor<Pool>
@@ -100,22 +178,59 @@ where
         let mut this = self.project();
 
         loop {
-            // Drain all available requests from the receiver
-            ready!(this.request_rx.poll_recv_many(cx, this.buf, *this.max_batch_size));
-
-            if !this.buf.is_empty() {
-                let batch = std::mem::take(this.buf);
-                let pool = this.pool.clone();
-                tokio::spawn(async move {
-                    Self::process_batch(&pool, batch).await;
-                });
-                this.buf.reserve(1);
-
-                continue;
+            while this.buf.len() < *this.max_batch_size {
+                let was_empty = this.buf.is_empty();
+                let remaining_capacity = *this.max_batch_size - this.buf.len();
+                match this.request_rx.as_mut().poll_recv_many(cx, this.buf, remaining_capacity) {
+                    Poll::Ready(0) => {
+                        if !this.buf.is_empty() {
+                            let Some(permit) = ready!(this.batch_permits.poll_acquire(cx)) else {
+                                return Poll::Ready(())
+                            };
+                            Self::spawn_batch(this.pool, this.buf, permit);
+                            this.batch_deadline.set(None);
+                            *this.flush_due = false;
+                        }
+                        return Poll::Ready(())
+                    }
+                    Poll::Ready(_n) => {
+                        if was_empty && let Some(timeout) = *this.batch_timeout {
+                            this.batch_deadline.set(Some(tokio::time::sleep(timeout)));
+                            *this.flush_due = false;
+                        }
+                    }
+                    Poll::Pending => break,
+                }
             }
 
-            // No requests available, return Pending to wait for more
-            return Poll::Pending;
+            if this.buf.is_empty() {
+                return Poll::Pending
+            }
+
+            if this.buf.len() >= *this.max_batch_size {
+                let Some(permit) = ready!(this.batch_permits.poll_acquire(cx)) else {
+                    return Poll::Ready(())
+                };
+                Self::spawn_batch(this.pool, this.buf, permit);
+                this.batch_deadline.set(None);
+                *this.flush_due = false;
+                continue
+            }
+
+            if this.batch_timeout.is_some() && !*this.flush_due {
+                let Some(deadline) = this.batch_deadline.as_mut().as_pin_mut() else {
+                    return Poll::Pending
+                };
+                ready!(deadline.poll(cx));
+                *this.flush_due = true;
+            }
+
+            let Some(permit) = ready!(this.batch_permits.poll_acquire(cx)) else {
+                return Poll::Ready(())
+            };
+            Self::spawn_batch(this.pool, this.buf, permit);
+            this.batch_deadline.set(None);
+            *this.flush_due = false;
         }
     }
 }
@@ -124,9 +239,30 @@ where
 mod tests {
     use super::*;
     use crate::test_utils::{testing_pool, MockTransaction};
-    use futures::stream::{FuturesUnordered, StreamExt};
-    use std::time::Duration;
+    use futures::{
+        stream::{FuturesUnordered, StreamExt},
+        task::{waker_ref, ArcWake},
+    };
+    use std::{
+        sync::atomic::{AtomicUsize, Ordering},
+        time::Duration,
+    };
     use tokio::time::timeout;
+
+    #[derive(Default)]
+    struct WakeCounter {
+        wakes: AtomicUsize,
+    }
+
+    impl ArcWake for WakeCounter {
+        fn wake_by_ref(arc_self: &std::sync::Arc<Self>) {
+            arc_self.wakes.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    fn batch_config(max_batch_size: usize, batch_timeout: Option<Duration>) -> BatchConfig {
+        BatchConfig { max_batch_size, batch_timeout, ..Default::default() }
+    }
 
     #[tokio::test]
     async fn test_process_batch() {
@@ -157,7 +293,8 @@ mod tests {
     #[tokio::test]
     async fn test_batch_processor() {
         let pool = testing_pool();
-        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), 1000);
+        let config = batch_config(1000, None);
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
 
         // Spawn the processor
         let handle = tokio::spawn(processor);
@@ -191,7 +328,8 @@ mod tests {
     #[tokio::test]
     async fn test_add_transaction() {
         let pool = testing_pool();
-        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), 1000);
+        let config = batch_config(1000, None);
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
 
         // Spawn the processor
         let handle = tokio::spawn(processor);
@@ -219,7 +357,8 @@ mod tests {
     async fn test_max_batch_size() {
         let pool = testing_pool();
         let max_batch_size = 10;
-        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), max_batch_size);
+        let config = batch_config(max_batch_size, None);
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
 
         // Spawn batch processor with threshold
         let handle = tokio::spawn(processor);
@@ -246,5 +385,452 @@ mod tests {
         }
 
         handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_max_batch_size_zero_is_clamped() {
+        let pool = testing_pool();
+        let config = batch_config(0, None);
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
+        assert_eq!(processor.max_batch_size, 1);
+
+        let handle = tokio::spawn(processor);
+
+        let tx = MockTransaction::legacy().with_nonce(0).with_gas_price(100);
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        request_tx
+            .send(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx))
+            .expect("Could not send batch tx");
+
+        let result = timeout(Duration::from_millis(50), response_rx)
+            .await
+            .expect("max_batch_size = 0 should be clamped and not hang")
+            .expect("Response channel was closed unexpectedly");
+        assert!(result.is_ok());
+
+        handle.abort();
+    }
+
+    /// Test that batch is flushed when timeout expires (even if batch is not full)
+    #[tokio::test]
+    async fn test_batch_timeout_triggers_flush() {
+        let pool = testing_pool();
+        // Large batch size, small timeout - timeout should trigger the flush
+        let batch_timeout = Duration::from_millis(50);
+        let config = batch_config(1000, Some(batch_timeout));
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
+
+        let handle = tokio::spawn(processor);
+
+        // Send fewer transactions than max_batch_size
+        let mut responses = Vec::new();
+        for i in 0..5 {
+            let tx = MockTransaction::legacy().with_nonce(i).with_gas_price(100);
+            let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+            request_tx
+                .send(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx))
+                .expect("Could not send batch tx");
+            responses.push(response_rx);
+        }
+
+        // Wait slightly longer than batch_timeout
+        tokio::time::sleep(batch_timeout + Duration::from_millis(20)).await;
+
+        // All transactions should be processed even though batch wasn't full
+        for rx in responses {
+            let result = timeout(Duration::from_millis(10), rx)
+                .await
+                .expect("Timeout waiting for response - batch timeout did not trigger flush")
+                .expect("Response channel was closed unexpectedly");
+            assert!(result.is_ok());
+        }
+
+        drop(request_tx);
+        handle.abort();
+    }
+
+    /// Test that `max_batch_size` triggers flush before timeout
+    #[tokio::test]
+    async fn test_max_batch_size_triggers_before_timeout() {
+        let pool = testing_pool();
+        let max_batch_size = 5;
+        // Long timeout, small batch size - batch size should trigger first
+        let batch_timeout = Duration::from_secs(60);
+        let config = batch_config(max_batch_size, Some(batch_timeout));
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
+
+        let handle = tokio::spawn(processor);
+
+        // Send exactly max_batch_size transactions
+        let mut responses = Vec::new();
+        for i in 0..max_batch_size {
+            let tx = MockTransaction::legacy().with_nonce(i as u64).with_gas_price(100);
+            let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+            request_tx
+                .send(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx))
+                .expect("Could not send batch tx");
+            responses.push(response_rx);
+        }
+
+        // Should complete quickly without waiting for the 60s timeout
+        for rx in responses {
+            let result = timeout(Duration::from_millis(100), rx)
+                .await
+                .expect("Timeout - max_batch_size did not trigger flush before timeout")
+                .expect("Response channel was closed unexpectedly");
+            assert!(result.is_ok());
+        }
+
+        drop(request_tx);
+        handle.abort();
+    }
+
+    /// Test that `None` timeout maintains original immediate processing behavior
+    #[tokio::test]
+    async fn test_none_timeout_immediate_processing() {
+        let pool = testing_pool();
+        let config = batch_config(1000, None);
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
+
+        let handle = tokio::spawn(processor);
+
+        // Send a single transaction
+        let tx = MockTransaction::legacy().with_nonce(0).with_gas_price(100);
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        request_tx
+            .send(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx))
+            .expect("Could not send batch tx");
+
+        // Should be processed immediately (within a few ms)
+        let result = timeout(Duration::from_millis(10), response_rx)
+            .await
+            .expect("None timeout mode should process immediately")
+            .expect("Response channel was closed unexpectedly");
+        assert!(result.is_ok());
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_timeout_starts_when_first_item_is_buffered() {
+        use std::future::Future;
+
+        let pool = testing_pool();
+        let batch_timeout = Duration::from_millis(25);
+        let config = batch_config(10, Some(batch_timeout));
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
+        let mut processor = Box::pin(processor);
+
+        tokio::time::sleep(batch_timeout + Duration::from_millis(10)).await;
+
+        let tx = MockTransaction::legacy().with_nonce(0).with_gas_price(100);
+        let (response_tx, mut response_rx) = tokio::sync::oneshot::channel();
+        request_tx
+            .send(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx))
+            .expect("send failed");
+
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let result = processor.as_mut().poll(&mut cx);
+        assert!(result.is_pending(), "Partial batch should wait for its own deadline");
+        assert!(response_rx.try_recv().is_err(), "Timeout should not fire from idle time");
+
+        tokio::time::sleep(batch_timeout + Duration::from_millis(10)).await;
+
+        let result = processor.as_mut().poll(&mut cx);
+        assert!(result.is_pending(), "Should return Pending after spawning timed-out batch");
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(response_rx.try_recv().is_ok(), "Batch should flush after its own timeout");
+    }
+
+    // ===== Manual Poll Tests =====
+
+    /// Test that polling with empty buffer returns Pending
+    #[tokio::test]
+    async fn test_poll_empty_returns_pending() {
+        use std::future::Future;
+
+        let pool = testing_pool();
+        let config = batch_config(10, Some(Duration::from_secs(60)));
+        let (processor, _request_tx) = BatchTxProcessor::new(pool, config);
+
+        let mut processor = Box::pin(processor);
+
+        // Poll once - should return Pending since no items
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let result = processor.as_mut().poll(&mut cx);
+        assert!(result.is_pending(), "Empty buffer should return Pending");
+    }
+
+    /// Test that full batch spawns immediately without waiting for interval
+    #[tokio::test]
+    async fn test_poll_full_batch_spawns_immediately() {
+        use std::future::Future;
+
+        let pool = testing_pool();
+        let max_batch_size = 5;
+        // Very long timeout - should NOT be needed for full batch
+        let config = batch_config(max_batch_size, Some(Duration::from_secs(3600)));
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
+
+        let mut processor = Box::pin(processor);
+
+        // Send exactly max_batch_size items
+        let mut responses = Vec::new();
+        for i in 0..max_batch_size {
+            let tx = MockTransaction::legacy().with_nonce(i as u64).with_gas_price(100);
+            let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+            request_tx
+                .send(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx))
+                .expect("send failed");
+            responses.push(response_rx);
+        }
+
+        // Poll once - should process the full batch immediately
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let result = processor.as_mut().poll(&mut cx);
+        assert!(result.is_pending(), "Should return Pending after spawning batch");
+
+        // Give spawned task time to complete
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // All responses should be ready
+        for mut rx in responses {
+            let result = rx.try_recv();
+            assert!(result.is_ok(), "Response should be ready after batch spawned");
+        }
+    }
+
+    /// Test that batch dispatch waits for a concurrency permit.
+    #[tokio::test]
+    async fn test_poll_full_batch_waits_for_batch_permit() {
+        use std::future::Future;
+
+        let pool = testing_pool();
+        let config =
+            BatchConfig { max_batch_size: 1, batch_timeout: None, max_concurrent_batches: 1 };
+        let (mut processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
+
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let held_permit = match processor.batch_permits.poll_acquire(&mut cx) {
+            Poll::Ready(Some(permit)) => permit,
+            _ => panic!("expected available batch permit"),
+        };
+
+        let mut processor = Box::pin(processor);
+        let tx = MockTransaction::legacy().with_nonce(0).with_gas_price(100);
+        let (response_tx, mut response_rx) = tokio::sync::oneshot::channel();
+        request_tx
+            .send(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx))
+            .expect("send failed");
+
+        let result = processor.as_mut().poll(&mut cx);
+        assert!(result.is_pending(), "Should wait for a batch permit");
+        assert!(response_rx.try_recv().is_err(), "Batch should not be dispatched without permit");
+
+        drop(held_permit);
+
+        let result = processor.as_mut().poll(&mut cx);
+        assert!(result.is_pending(), "Should return Pending after spawning");
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(response_rx.try_recv().is_ok(), "Batch should be dispatched after permit release");
+    }
+
+    /// Test that partial batch with timeout waits before flushing
+    #[tokio::test]
+    async fn test_poll_partial_batch_with_timeout_waits() {
+        use std::future::Future;
+
+        let pool = testing_pool();
+        let max_batch_size = 10;
+        // Long timeout - batch should NOT flush immediately
+        let config = batch_config(max_batch_size, Some(Duration::from_secs(3600)));
+        let (processor, request_tx) = BatchTxProcessor::new(pool, config);
+
+        let mut processor = Box::pin(processor);
+
+        // Send fewer items than max_batch_size
+        let tx = MockTransaction::legacy().with_nonce(0).with_gas_price(100);
+        let (response_tx, mut response_rx) = tokio::sync::oneshot::channel();
+        request_tx
+            .send(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx))
+            .expect("send failed");
+
+        // Poll once - should return Pending (waiting for timeout)
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let result = processor.as_mut().poll(&mut cx);
+        assert!(result.is_pending(), "Partial batch with timeout should return Pending");
+
+        // Response should NOT be ready yet (batch not flushed)
+        let try_result = response_rx.try_recv();
+        assert!(try_result.is_err(), "Partial batch should not be flushed immediately");
+    }
+
+    #[tokio::test]
+    async fn test_partial_batch_registers_channel_waker() {
+        use std::future::Future;
+
+        let pool = testing_pool();
+        let config = batch_config(2, Some(Duration::from_secs(3600)));
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
+        let mut processor = Box::pin(processor);
+
+        let tx = MockTransaction::legacy().with_nonce(0).with_gas_price(100);
+        let (response_tx, response_rx_0) = tokio::sync::oneshot::channel();
+        request_tx
+            .send(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx))
+            .expect("send failed");
+
+        let wake_counter = std::sync::Arc::new(WakeCounter::default());
+        let waker = waker_ref(&wake_counter);
+        let mut cx = Context::from_waker(&waker);
+
+        let result = processor.as_mut().poll(&mut cx);
+        assert!(result.is_pending(), "Partial batch should wait for more transactions");
+
+        let wakes_before = wake_counter.wakes.load(Ordering::SeqCst);
+        let tx = MockTransaction::legacy().with_nonce(1).with_gas_price(100);
+        let (response_tx, response_rx_1) = tokio::sync::oneshot::channel();
+        request_tx
+            .send(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx))
+            .expect("send failed");
+        assert!(
+            wake_counter.wakes.load(Ordering::SeqCst) > wakes_before,
+            "Partial batch must register the channel waker while waiting for timeout"
+        );
+
+        let result = processor.as_mut().poll(&mut cx);
+        assert!(result.is_pending(), "Should return Pending after spawning full batch");
+
+        for rx in [response_rx_0, response_rx_1] {
+            let result = timeout(Duration::from_millis(50), rx)
+                .await
+                .expect("Timeout waiting for full batch response")
+                .expect("Response channel was closed unexpectedly");
+            assert!(result.is_ok());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_due_timeout_flushes_after_permit_released() {
+        use std::future::Future;
+
+        let pool = testing_pool();
+        let config = BatchConfig {
+            max_batch_size: 10,
+            batch_timeout: Some(Duration::from_millis(10)),
+            max_concurrent_batches: 1,
+        };
+        let (mut processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
+
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let held_permit = match processor.batch_permits.poll_acquire(&mut cx) {
+            Poll::Ready(Some(permit)) => permit,
+            _ => panic!("expected available batch permit"),
+        };
+
+        let mut processor = Box::pin(processor);
+        let tx = MockTransaction::legacy().with_nonce(0).with_gas_price(100);
+        let (response_tx, mut response_rx) = tokio::sync::oneshot::channel();
+        request_tx
+            .send(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx))
+            .expect("send failed");
+
+        let result = processor.as_mut().poll(&mut cx);
+        assert!(result.is_pending(), "Partial batch should wait for timeout");
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let result = processor.as_mut().poll(&mut cx);
+        assert!(result.is_pending(), "Due batch should wait for permit");
+        assert!(response_rx.try_recv().is_err(), "Batch should not flush without permit");
+
+        drop(held_permit);
+
+        let result = processor.as_mut().poll(&mut cx);
+        assert!(result.is_pending(), "Should flush due batch after permit release");
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(response_rx.try_recv().is_ok(), "Due batch should not wait for another timeout");
+    }
+
+    /// Test that partial batch in immediate mode (no interval) flushes right away
+    #[tokio::test]
+    async fn test_poll_partial_batch_immediate_mode_flushes() {
+        use std::future::Future;
+
+        let pool = testing_pool();
+        let max_batch_size = 10;
+        // No timeout = immediate mode
+        let config = batch_config(max_batch_size, None);
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
+
+        let mut processor = Box::pin(processor);
+
+        // Send a single item (partial batch)
+        let tx = MockTransaction::legacy().with_nonce(0).with_gas_price(100);
+        let (response_tx, mut response_rx) = tokio::sync::oneshot::channel();
+        request_tx
+            .send(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx))
+            .expect("send failed");
+
+        // Poll once - should spawn batch immediately in immediate mode
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let result = processor.as_mut().poll(&mut cx);
+        assert!(result.is_pending(), "Should return Pending after spawning");
+
+        // Give spawned task time to complete
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Response should be ready
+        let result = response_rx.try_recv();
+        assert!(result.is_ok(), "Immediate mode should flush partial batch right away");
+    }
+
+    /// Test that channel close flushes remaining items
+    #[tokio::test]
+    async fn test_poll_channel_close_flushes_remaining() {
+        use std::future::Future;
+
+        let pool = testing_pool();
+        let max_batch_size = 10;
+        let config = batch_config(max_batch_size, Some(Duration::from_secs(3600)));
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
+
+        let mut processor = Box::pin(processor);
+
+        // Send a partial batch
+        let tx = MockTransaction::legacy().with_nonce(0).with_gas_price(100);
+        let (response_tx, mut response_rx) = tokio::sync::oneshot::channel();
+        request_tx
+            .send(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx))
+            .expect("send failed");
+
+        // Poll once to receive the item
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let _ = processor.as_mut().poll(&mut cx);
+
+        // Drop sender to close channel
+        drop(request_tx);
+
+        // Poll again - should flush remaining and return Ready
+        let result = processor.as_mut().poll(&mut cx);
+        assert!(result.is_ready(), "Should return Ready when channel closes");
+
+        // Give spawned task time to complete
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Response should be ready
+        let result = response_rx.try_recv();
+        assert!(result.is_ok(), "Channel close should flush remaining items");
     }
 }
