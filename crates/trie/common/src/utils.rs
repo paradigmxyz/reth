@@ -42,8 +42,13 @@ where
         return;
     }
 
-    // Fast path: non-overlapping ranges - just append
-    if target.last().map(|(k, _)| k) < other.first().map(|(k, _)| k) {
+    // Fast path: non-overlapping ranges - just append.
+    //
+    // Both inputs are known non-empty here, so compare keys directly instead of routing the hot
+    // boundary check through `Option` ordering.
+    let target_last = &target.last().expect("checked non-empty").0;
+    let other_first = &other.first().expect("checked non-empty").0;
+    if target_last < other_first {
         target.extend_from_slice(other);
         return;
     }
