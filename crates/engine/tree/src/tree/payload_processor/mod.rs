@@ -302,8 +302,14 @@ where
             + 'static,
     {
         // start preparing transactions immediately
-        let (prewarm_rx, execution_rx) =
-            self.spawn_tx_iterator(transactions, env.transaction_count);
+        let send_transaction_prewarm = !parallel_bal_execution
+            && !self.disable_transaction_prewarming
+            && env.transaction_count >= SMALL_BLOCK_TX_THRESHOLD;
+        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(
+            transactions,
+            env.transaction_count,
+            send_transaction_prewarm,
+        );
 
         let span = Span::current();
 
@@ -354,7 +360,7 @@ where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
         let (prewarm_rx, execution_rx) =
-            self.spawn_tx_iterator(transactions, env.transaction_count);
+            self.spawn_tx_iterator(transactions, env.transaction_count, true);
         let prewarm_handle =
             self.spawn_caching_with(env, prewarm_rx, provider_builder, None, false);
         PayloadHandle {
@@ -447,6 +453,7 @@ where
         &self,
         transactions: I,
         transaction_count: usize,
+        send_transaction_prewarm: bool,
     ) -> (IteratorPrewarmTxReceiver<Evm, I>, IteratorExecuteTxReceiver<Evm, I>) {
         let (prewarm_tx, prewarm_rx) = mpsc::sync_channel(transaction_count);
         let (execute_tx, execute_rx) = crossbeam_channel::bounded(transaction_count);
@@ -463,7 +470,12 @@ where
             );
             self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
-                convert_serial(transactions.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                convert_serial(
+                    transactions.into_iter(),
+                    &convert,
+                    send_transaction_prewarm.then_some(&prewarm_tx),
+                    &execute_tx,
+                );
             });
         } else {
             // Parallel path — recover signatures in parallel on rayon, stream results
@@ -481,7 +493,12 @@ where
 
                 // Convert the first few transactions sequentially so execution can
                 // start immediately without waiting for rayon work-stealing.
-                convert_serial(all.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                convert_serial(
+                    all.into_iter(),
+                    &convert,
+                    send_transaction_prewarm.then_some(&prewarm_tx),
+                    &execute_tx,
+                );
 
                 // Convert the remaining transactions in parallel.
                 rest.into_par_iter()
@@ -494,7 +511,9 @@ where
                     .for_each_ordered_in(executor.cpu_pool(), |(idx, tx)| {
                         let tx = tx.map(|tx| {
                             let tx = WithTxEnv::new(tx);
-                            let _ = prewarm_tx.send((idx, tx.clone()));
+                            if send_transaction_prewarm {
+                                let _ = prewarm_tx.send((idx, tx.clone()));
+                            }
                             tx
                         });
                         let _ = execute_tx.send((idx, tx));
@@ -789,7 +808,7 @@ where
 fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     iter: impl Iterator<Item = RawTx>,
     convert: &C,
-    prewarm_tx: &mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>,
+    prewarm_tx: Option<&mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>>,
     execute_tx: &ExecuteTxSender<TxEnv, Recovered, Err>,
 ) where
     Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = Recovered>,
@@ -800,7 +819,9 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
         let tx = convert.convert(raw_tx);
         let tx = tx.map(|tx| WithTxEnv::new(tx));
         if let Ok(tx) = &tx {
-            let _ = prewarm_tx.send((idx, tx.clone()));
+            if let Some(prewarm_tx) = prewarm_tx {
+                let _ = prewarm_tx.send((idx, tx.clone()));
+            }
         }
         let _ = execute_tx.send((idx, tx));
         trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
