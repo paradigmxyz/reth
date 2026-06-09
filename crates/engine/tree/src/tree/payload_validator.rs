@@ -954,10 +954,11 @@ where
         })
     }
 
-    /// Spawns a background task that creates the changeset provider used by the deferred trie task.
+    /// Spawns a background task that creates the changeset provider used by the deferred trie
+    /// producer.
     ///
     /// This is started before execution so overlay construction can run concurrently with payload
-    /// validation, then awaited before the deferred trie task is spawned.
+    /// validation, then awaited before the deferred trie producer is spawned.
     fn spawn_changeset_provider_task(
         &self,
         overlay_factory: OverlayStateProviderFactory<P, N>,
@@ -1879,7 +1880,7 @@ where
                             target: "engine::tree::changeset",
                             ?block_number,
                             ?e,
-                            "Failed to compute changesets in deferred trie task"
+                            "Failed to compute changesets for deferred trie producer"
                         );
                     }
                 }

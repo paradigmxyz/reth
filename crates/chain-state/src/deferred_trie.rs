@@ -11,27 +11,29 @@ use tracing::{debug_span, instrument};
 
 /// Shared handle to asynchronously populated sorted per-block trie data.
 ///
-/// The corresponding [`DeferredTrieTask`] owns the unsorted inputs and publishes the sorted data
-/// when the background task completes. Callers wait for that result instead of computing it
+/// The corresponding [`DeferredTrieDataProducer`] owns the unsorted inputs and publishes the sorted
+/// data when the background task completes. Callers wait for that result instead of computing it
 /// synchronously.
 #[derive(Clone)]
 pub struct DeferredTrieData {
-    /// Shared deferred result populated by the corresponding [`DeferredTrieTask`].
+    /// Shared deferred result populated by the corresponding [`DeferredTrieDataProducer`].
     value: Arc<OnceLock<ComputedTrieData>>,
 }
 
-/// Owned task that computes and publishes sorted trie data for a [`DeferredTrieData`] handle.
-#[must_use = "DeferredTrieTask must be consumed with compute_and_publish to wake trie data waiters"]
-pub struct DeferredTrieTask {
-    /// Shared result initialized exactly once by this task.
+/// Producer consumed by a spawned task to compute sorted trie data for a [`DeferredTrieData`] handle.
+#[must_use = "DeferredTrieDataProducer must be consumed with compute_and_publish to wake trie data waiters"]
+pub struct DeferredTrieDataProducer {
+    /// Shared result initialized exactly once by this producer.
     value: Arc<OnceLock<ComputedTrieData>>,
-    /// Unsorted inputs consumed by the background task.
+    /// Unsorted inputs consumed when the producer computes trie data.
     inputs: PendingInputs,
 }
 
-impl fmt::Debug for DeferredTrieTask {
+impl fmt::Debug for DeferredTrieDataProducer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("DeferredTrieTask").field("inputs", &self.inputs).finish_non_exhaustive()
+        f.debug_struct("DeferredTrieDataProducer")
+            .field("inputs", &self.inputs)
+            .finish_non_exhaustive()
     }
 }
 
@@ -77,7 +79,7 @@ impl fmt::Debug for DeferredTrieData {
     }
 }
 
-impl DeferredTrieTask {
+impl DeferredTrieDataProducer {
     /// Computes sorted trie data, publishes it to waiters, and returns it to the task owner.
     pub fn compute_and_publish(self) -> ComputedTrieData {
         let Self { value, inputs } = self;
@@ -92,11 +94,11 @@ impl DeferredTrieData {
     pub fn pending(
         hashed_state: Arc<HashedPostState>,
         trie_updates: Arc<TrieUpdates>,
-    ) -> (Self, DeferredTrieTask) {
+    ) -> (Self, DeferredTrieDataProducer) {
         let value = Arc::new(OnceLock::new());
         (
             Self { value: Arc::clone(&value) },
-            DeferredTrieTask { value, inputs: PendingInputs { hashed_state, trie_updates } },
+            DeferredTrieDataProducer { value, inputs: PendingInputs { hashed_state, trie_updates } },
         )
     }
 
@@ -178,7 +180,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    fn empty_pending() -> (DeferredTrieData, DeferredTrieTask) {
+    fn empty_pending() -> (DeferredTrieData, DeferredTrieDataProducer) {
         DeferredTrieData::pending(
             Arc::new(HashedPostState::default()),
             Arc::new(TrieUpdates::default()),
