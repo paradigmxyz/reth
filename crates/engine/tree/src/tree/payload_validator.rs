@@ -49,10 +49,12 @@ use crate::tree::{
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
+use alloy_eip7928::{
+    bal::DecodedBal, compute_block_access_list_hash, AccountChanges, BlockAccessList,
+};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
-use alloy_primitives::{map::B256Set, B256};
+use alloy_primitives::{map::B256Set, B256, U256};
 use reth_tasks::LazyHandle;
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
@@ -998,7 +1000,14 @@ where
         decoded_bal: &DecodedBal,
         gas_limit: u64,
     ) -> Result<(), ConsensusError> {
-        decoded_bal.as_bal().validate_gas_limit(gas_limit).map_err(ConsensusError::from)
+        let bal = decoded_bal.as_bal();
+        if sorted_bal_item_count(bal.as_slice())
+            .is_some_and(|items| items <= gas_limit / alloy_eip7928::constants::ITEM_COST as u64)
+        {
+            return Ok(())
+        }
+
+        bal.validate_gas_limit(gas_limit).map_err(ConsensusError::from)
     }
 
     /// Executes a block with the given state provider.
@@ -2038,6 +2047,72 @@ where
     }
 }
 
+fn sorted_bal_item_count(bal: &[AccountChanges]) -> Option<u64> {
+    let mut items = 0u64;
+    for account in bal {
+        items = items.checked_add(1)?;
+        items = items.checked_add(sorted_account_storage_item_count(account)?)?;
+    }
+    Some(items)
+}
+
+fn sorted_account_storage_item_count(account: &AccountChanges) -> Option<u64> {
+    let storage_changes = account.storage_changes();
+    let storage_reads = account.storage_reads();
+
+    if storage_changes.windows(2).any(|window| window[0].slot > window[1].slot) ||
+        storage_reads.windows(2).any(|window| window[0] > window[1])
+    {
+        return None;
+    }
+
+    let mut changes = storage_changes.iter().peekable();
+    let mut reads = storage_reads.iter().peekable();
+    let mut last = None::<U256>;
+    let mut items = 0u64;
+
+    loop {
+        let Some(slot) = (match (changes.peek(), reads.peek()) {
+            (Some(change), Some(read)) => match change.slot.cmp(*read) {
+                std::cmp::Ordering::Less => {
+                    let slot = change.slot;
+                    changes.next();
+                    Some(slot)
+                }
+                std::cmp::Ordering::Equal => {
+                    let slot = change.slot;
+                    changes.next();
+                    reads.next();
+                    Some(slot)
+                }
+                std::cmp::Ordering::Greater => {
+                    let slot = **read;
+                    reads.next();
+                    Some(slot)
+                }
+            },
+            (Some(change), None) => {
+                let slot = change.slot;
+                changes.next();
+                Some(slot)
+            }
+            (None, Some(read)) => {
+                let slot = **read;
+                reads.next();
+                Some(slot)
+            }
+            (None, None) => None,
+        }) else {
+            return Some(items)
+        };
+
+        if last != Some(slot) {
+            items = items.checked_add(1)?;
+            last = Some(slot);
+        }
+    }
+}
+
 /// Strategy describing how to compute the state root.
 #[derive(derive_more::Debug, Clone)]
 enum StateRootStrategy<N: NodePrimitives> {
@@ -2377,3 +2452,38 @@ pub type CustomStateRoot<N> = Arc<
         + Sync
         + 'static,
 >;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_eip7928::SlotChanges;
+    use alloy_primitives::Address;
+
+    fn account_with_slots(reads: &[u64], writes: &[u64]) -> AccountChanges {
+        let mut account = AccountChanges::new(Address::ZERO);
+        account.storage_reads = reads.iter().copied().map(U256::from).collect();
+        account.storage_changes = writes
+            .iter()
+            .copied()
+            .map(|slot| SlotChanges::new(U256::from(slot), Vec::new()))
+            .collect();
+        account
+    }
+
+    #[test]
+    fn sorted_bal_item_count_dedupes_storage_reads_and_writes() {
+        let bal = vec![
+            account_with_slots(&[1, 2, 2, 5], &[2, 3, 5]),
+            account_with_slots(&[], &[7, 7, 8]),
+        ];
+
+        // 2 accounts + {1,2,3,5} + {7,8}
+        assert_eq!(sorted_bal_item_count(&bal), Some(8));
+    }
+
+    #[test]
+    fn sorted_bal_item_count_rejects_unsorted_storage_lists() {
+        assert_eq!(sorted_bal_item_count(&vec![account_with_slots(&[2, 1], &[])]), None);
+        assert_eq!(sorted_bal_item_count(&vec![account_with_slots(&[], &[2, 1])]), None);
+    }
+}
