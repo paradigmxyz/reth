@@ -77,6 +77,16 @@ impl fmt::Debug for DeferredTrieData {
     }
 }
 
+impl DeferredTrieTask {
+    /// Computes sorted trie data, publishes it to waiters, and returns it to the task owner.
+    pub fn compute_and_publish(self) -> ComputedTrieData {
+        let Self { value, inputs } = self;
+        let computed = DeferredTrieData::sort(inputs.hashed_state, inputs.trie_updates);
+        let _ = value.set(computed.clone());
+        computed
+    }
+}
+
 impl DeferredTrieData {
     /// Create a new pending handle and task that will publish the computed trie data.
     pub fn pending(
@@ -144,16 +154,6 @@ impl DeferredTrieData {
         };
 
         bundle.clone()
-    }
-}
-
-impl DeferredTrieTask {
-    /// Computes sorted trie data, publishes it to waiters, and returns it to the task owner.
-    pub fn compute_and_publish(self) -> ComputedTrieData {
-        let Self { value, inputs } = self;
-        let computed = DeferredTrieData::sort(inputs.hashed_state, inputs.trie_updates);
-        let _ = value.set(computed.clone());
-        computed
     }
 }
 
