@@ -290,9 +290,16 @@ impl BlockGasTracker {
 
     const fn record_result<H>(&mut self, result: &ResultAndState<H>) {
         let gas = result.result.gas();
-        self.cumulative_tx_gas_used = self.cumulative_tx_gas_used.saturating_add(gas.tx_gas_used());
-        self.block_regular_gas_used =
-            self.block_regular_gas_used.saturating_add(gas.block_regular_gas_used());
+        debug_assert!(
+            self.cumulative_tx_gas_used <= u64::MAX - gas.tx_gas_used(),
+            "block transaction gas accounting overflowed"
+        );
+        debug_assert!(
+            self.block_regular_gas_used <= u64::MAX - gas.block_regular_gas_used(),
+            "block regular gas accounting overflowed"
+        );
+        self.cumulative_tx_gas_used += gas.tx_gas_used();
+        self.block_regular_gas_used += gas.block_regular_gas_used();
     }
 }
 
