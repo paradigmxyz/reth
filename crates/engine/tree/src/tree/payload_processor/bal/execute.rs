@@ -1134,7 +1134,7 @@ mod tests {
             .iter_mut()
             .find(|account| account.address() == sstore_contract)
             .expect("SSTORE contract must be present in BAL");
-        account.storage_root = Some(B256::from([0x99; 32]));
+        account.storage_root = Some(alloy_eip7928::StorageRoot::Root(B256::from([0x99; 32])));
 
         let tampered_hash = alloy_eip7928::compute_block_access_list_hash(&tampered_bal);
         let block = empty_amsterdam_block(tampered_hash);
