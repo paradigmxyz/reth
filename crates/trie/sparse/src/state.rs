@@ -7,8 +7,7 @@ use crate::{
 use alloc::vec::Vec;
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rlp::{Decodable, Encodable};
-use either::Either;
-use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
+use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind, SparseTrieResult};
 use reth_primitives_traits::Account;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
@@ -301,30 +300,34 @@ where
         &mut self,
         multiproof: reth_trie_common::DecodedMultiProofV2,
     ) -> SparseStateTrieResult<()> {
-        let reth_trie_common::DecodedMultiProofV2 { account_proofs, mut storage_proofs, .. } =
+        enum RevealTarget<'a, A, S> {
+            Account(&'a mut RevealableSparseTrie<A>, Vec<ProofTrieNodeV2>),
+            Storage(B256, RevealableSparseTrie<S>, Vec<ProofTrieNodeV2>),
+        }
+
+        enum RevealResult<S> {
+            Account(SparseTrieResult<()>, Vec<ProofTrieNodeV2>),
+            Storage(B256, RevealableSparseTrie<S>, SparseTrieResult<()>, Vec<ProofTrieNodeV2>),
+        }
+
+        let reth_trie_common::DecodedMultiProofV2 { account_proofs, storage_proofs, .. } =
             multiproof;
 
         // Collect `(trie, proof_nodes)` pairs for both the account trie and every storage trie
         // touched by this multiproof.
         let mut targets = Vec::with_capacity(storage_proofs.len() + 1);
 
+        for (account, nodes) in storage_proofs {
+            #[cfg(feature = "metrics")]
+            self.metrics.increment_total_storage_nodes(nodes.len() as u64);
+            let trie = self.take_or_create_storage_trie(&account);
+            targets.push(RevealTarget::Storage(account, trie, nodes));
+        }
+
         if !account_proofs.is_empty() {
             #[cfg(feature = "metrics")]
             self.metrics.increment_total_account_nodes(account_proofs.len() as u64);
-            targets.push((Either::Left(&mut self.state), account_proofs));
-        }
-
-        // Ensure a storage trie exists for every address whose proofs we're about to reveal
-        for &account in storage_proofs.keys() {
-            let _ = self.storage.get_or_create_trie_mut(account);
-        }
-
-        for (account, trie) in &mut self.storage.tries {
-            if let Some(nodes) = storage_proofs.remove(account) {
-                #[cfg(feature = "metrics")]
-                self.metrics.increment_total_storage_nodes(nodes.len() as u64);
-                targets.push((Either::Right(trie), nodes));
-            }
+            targets.push(RevealTarget::Account(&mut self.state, account_proofs));
         }
 
         let retain_updates = self.retain_updates;
@@ -332,12 +335,15 @@ where
         #[cfg(not(feature = "std"))]
         let results: Vec<_> = targets
             .into_iter()
-            .map(|(target, mut nodes)| {
-                let result = match target {
-                    Either::Left(trie) => trie.reveal_v2_proof_nodes(&mut nodes, retain_updates),
-                    Either::Right(trie) => trie.reveal_v2_proof_nodes(&mut nodes, retain_updates),
-                };
-                (result, nodes)
+            .map(|target| match target {
+                RevealTarget::Account(trie, mut nodes) => {
+                    let result = trie.reveal_v2_proof_nodes(&mut nodes, retain_updates);
+                    RevealResult::Account(result, nodes)
+                }
+                RevealTarget::Storage(account, mut trie, mut nodes) => {
+                    let result = trie.reveal_v2_proof_nodes(&mut nodes, retain_updates);
+                    RevealResult::Storage(account, trie, result, nodes)
+                }
             })
             .collect();
 
@@ -349,27 +355,37 @@ where
             targets
                 .into_iter()
                 .par_bridge_buffered()
-                .map(|(target, mut nodes)| {
-                    let result = match target {
-                        Either::Left(trie) => {
-                            trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
-                        }
-                        Either::Right(trie) => {
-                            trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
-                        }
-                    };
-                    (result, nodes)
+                .map(|target| match target {
+                    RevealTarget::Account(trie, mut nodes) => {
+                        let result = trie.reveal_v2_proof_nodes(&mut nodes, retain_updates);
+                        RevealResult::Account(result, nodes)
+                    }
+                    RevealTarget::Storage(account, mut trie, mut nodes) => {
+                        let result = trie.reveal_v2_proof_nodes(&mut nodes, retain_updates);
+                        RevealResult::Storage(account, trie, result, nodes)
+                    }
                 })
                 .collect()
         };
 
         // Accumulate the first error and defer dropping the proof node buffers.
         let mut any_err = Ok(());
-        for (result, nodes) in results {
-            if result.is_err() && any_err.is_ok() {
-                any_err = result.map_err(Into::into);
+        for result in results {
+            match result {
+                RevealResult::Account(result, nodes) => {
+                    if result.is_err() && any_err.is_ok() {
+                        any_err = result.map_err(Into::into);
+                    }
+                    self.deferred_drops.proof_nodes_bufs.push(nodes);
+                }
+                RevealResult::Storage(account, trie, result, nodes) => {
+                    self.insert_storage_trie(account, trie);
+                    if result.is_err() && any_err.is_ok() {
+                        any_err = result.map_err(Into::into);
+                    }
+                    self.deferred_drops.proof_nodes_bufs.push(nodes);
+                }
             }
-            self.deferred_drops.proof_nodes_bufs.push(nodes);
         }
 
         any_err
