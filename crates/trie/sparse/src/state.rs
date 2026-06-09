@@ -15,8 +15,6 @@ use reth_trie_common::{
     DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2, TrieAccount, EMPTY_ROOT_HASH,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-#[cfg(feature = "std")]
-use tracing::debug;
 use tracing::{instrument, trace};
 
 /// Holds data that should be dropped after any locks are released.
@@ -770,7 +768,7 @@ where
             || self.storage.prune_by_retained_slots(retained),
         );
 
-        debug!(
+        trace!(
             target: "trie::sparse",
             retained_accounts,
             retained_storage_tries,
