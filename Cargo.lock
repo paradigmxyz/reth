@@ -9516,6 +9516,7 @@ dependencies = [
  "once_cell",
  "proptest",
  "proptest-arbitrary-interop",
+ "quanta",
  "rayon",
  "reth-codecs",
  "revm-bytecode",
