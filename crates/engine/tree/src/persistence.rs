@@ -199,8 +199,10 @@ where
             debug!(target: "engine::persistence", block_num=?block_number, "Running pruner");
             let prune_start = Instant::now();
             let provider_rw = self.provider.database_provider_rw()?;
-            let _ = self.pruner.run_with_provider(&provider_rw, block_number)?;
-            provider_rw.commit()?;
+            let output = self.pruner.run_with_provider(&provider_rw, block_number)?;
+            if !output.segments.is_empty() {
+                provider_rw.commit()?;
+            }
             let pruned_bals = self
                 .provider
                 .bal_store()
