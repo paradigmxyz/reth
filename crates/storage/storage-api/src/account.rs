@@ -2,7 +2,7 @@ use alloc::{
     collections::{BTreeMap, BTreeSet},
     vec::Vec,
 };
-use alloy_primitives::{Address, BlockNumber};
+use alloy_primitives::{Address, BlockNumber, B256};
 use auto_impl::auto_impl;
 use core::ops::{RangeBounds, RangeInclusive};
 use reth_db_models::AccountBeforeTx;
@@ -16,6 +16,26 @@ pub trait AccountReader {
     ///
     /// Returns `None` if the account doesn't exist.
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>>;
+
+    /// Get basic account information using a precomputed `keccak256(address)`.
+    ///
+    /// Callers that already have the hashed address (e.g. while building a `HashedPostState`) can
+    /// use this to avoid re-hashing in providers that key state by hashed address (hashed-state /
+    /// "v2" storage). `address` is still
+    /// required for providers that key by plain address (plain storage, in-memory overlays) and for
+    /// account caches.
+    ///
+    /// The default implementation ignores `hashed_address` and forwards to
+    /// [`basic_account`](Self::basic_account), so it is always correct; only providers that key by
+    /// hashed address override it to skip the redundant hash.
+    fn basic_account_by_hashed(
+        &self,
+        address: &Address,
+        hashed_address: B256,
+    ) -> ProviderResult<Option<Account>> {
+        let _ = hashed_address;
+        self.basic_account(address)
+    }
 }
 
 /// Account reader

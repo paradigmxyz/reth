@@ -650,10 +650,12 @@ where
             return;
         }
         let address = account_changes.address;
-        let mut hashed_address = None;
+        // Hash the address once and reuse it for both the account read and the `HashedPostState`
+        // keys below. The hashed-state ("v2") read path keys `HashedAccounts` by this hash, so
+        // passing it avoids a second `keccak256(address)` inside `basic_account`.
+        let hashed_address = keccak256(address);
 
         if !account_changes.storage_changes.is_empty() {
-            let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
             let mut storage_map = reth_trie::HashedStorage::new(false);
 
             for slot_changes in &account_changes.storage_changes {
@@ -700,7 +702,8 @@ where
         }
         let account_reader = provider.as_ref().expect("provider just initialized");
 
-        let existing_account = account_reader.basic_account(&address).ok().flatten();
+        let existing_account =
+            account_reader.basic_account_by_hashed(&address, hashed_address).ok().flatten();
 
         let balance = account_changes.balance_changes.last().map(|change| change.post_balance);
         let nonce = account_changes.nonce_changes.last().map(|change| change.new_nonce);
@@ -738,7 +741,6 @@ where
             }),
         };
 
-        let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
         let mut hashed_state = reth_trie::HashedPostState::default();
         hashed_state.accounts.insert(hashed_address, Some(account));
 

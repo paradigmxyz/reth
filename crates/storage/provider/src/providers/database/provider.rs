@@ -1462,6 +1462,18 @@ impl<TX: DbTx, N: NodeTypes> AccountReader for DatabaseProvider<TX, N> {
             Ok(self.tx.get_by_encoded_key::<tables::PlainAccountState>(address)?)
         }
     }
+
+    fn basic_account_by_hashed(
+        &self,
+        address: &Address,
+        hashed_address: B256,
+    ) -> ProviderResult<Option<Account>> {
+        if self.cached_storage_settings().use_hashed_state() {
+            Ok(self.tx.get_by_encoded_key::<tables::HashedAccounts>(&hashed_address)?)
+        } else {
+            Ok(self.tx.get_by_encoded_key::<tables::PlainAccountState>(address)?)
+        }
+    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> AccountExtReader for DatabaseProvider<TX, N> {

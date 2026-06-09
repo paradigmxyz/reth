@@ -525,6 +525,34 @@ impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
             self.state_provider.basic_account(address)
         }
     }
+
+    fn basic_account_by_hashed(
+        &self,
+        address: &Address,
+        hashed_address: B256,
+    ) -> ProviderResult<Option<Account>> {
+        // The cache is keyed by plain `address`; only the underlying read uses the precomputed hash.
+        if self.should_fill_on_miss() {
+            match self.caches.get_or_try_insert_account_with(*address, || {
+                self.state_provider.basic_account_by_hashed(address, hashed_address)
+            })? {
+                CachedStatus::NotCached(value) => {
+                    self.record_account_miss();
+                    Ok(value)
+                }
+                CachedStatus::Cached(value) => {
+                    self.record_account_hit();
+                    Ok(value)
+                }
+            }
+        } else if let Some(account) = self.caches.0.account_cache.get(address) {
+            self.record_account_hit();
+            Ok(account)
+        } else {
+            self.record_account_miss();
+            self.state_provider.basic_account_by_hashed(address, hashed_address)
+        }
+    }
 }
 
 #[inline]
