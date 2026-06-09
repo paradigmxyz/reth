@@ -57,7 +57,7 @@ use crate::{
         state::SubPool, BestTransactionFilter, NewTransactionEvent, TransactionEvents,
         TransactionListenerKind,
     },
-    validate::ValidPoolTransaction,
+    validate::{TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction},
     AddedTransactionOutcome, AllTransactionsEvents,
 };
 use alloy_consensus::{error::ValueError, transaction::TxHashRef, BlockHeader, Signed, Typed2718};
@@ -789,6 +789,30 @@ pub trait TransactionPoolExt: TransactionPool {
 
     /// Maintenance function to cleanup blobs that are no longer needed.
     fn cleanup_blobs(&self);
+}
+
+/// Extension for [`TransactionPool`] that exposes the pool's underlying [`TransactionValidator`].
+///
+/// This is implemented by pools that validate transactions through a single validator before
+/// insertion (e.g. [`Pool`](crate::Pool)). It lets consumers and wrapper pools reach the validator
+/// directly, for example to validate a transaction without inserting it into the pool.
+pub trait ValidatingPool: TransactionPool {
+    /// The validator used to validate transactions before they are inserted into the pool.
+    type Validator: TransactionValidator<Transaction = Self::Transaction>;
+
+    /// Returns a reference to the pool's transaction validator.
+    fn validator(&self) -> &Self::Validator;
+
+    /// Validates the given transaction without inserting it into the pool.
+    ///
+    /// This is a convenience wrapper around [`TransactionValidator::validate_transaction`].
+    fn validate(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> impl Future<Output = TransactionValidationOutcome<Self::Transaction>> + Send {
+        self.validator().validate_transaction(origin, transaction)
+    }
 }
 
 /// A Helper type that bundles all transactions in the pool.

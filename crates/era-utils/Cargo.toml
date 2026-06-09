@@ -38,6 +38,7 @@ tracing.workspace = true
 reth-provider.workspace = true
 reth-provider.features = ["test-utils"]
 reth-db-common.workspace = true
+reth-ethereum-primitives.workspace = true
 
 # async
 tokio-util.workspace = true
