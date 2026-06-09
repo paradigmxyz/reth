@@ -37,6 +37,16 @@ impl fmt::Debug for DeferredTrieDataProducer {
     }
 }
 
+impl DeferredTrieDataProducer {
+    /// Computes sorted trie data, publishes it to waiters, and returns it to the task owner.
+    pub fn compute_and_publish(self) -> ComputedTrieData {
+        let Self { value, inputs } = self;
+        let computed = DeferredTrieData::sort(inputs.hashed_state, inputs.trie_updates);
+        let _ = value.set(computed.clone());
+        computed
+    }
+}
+
 /// Sorted trie data computed for one executed block.
 ///
 /// Cumulative overlays are intentionally managed by
@@ -76,16 +86,6 @@ impl fmt::Debug for DeferredTrieData {
         f.debug_struct("DeferredTrieData")
             .field("state", &if self.value.get().is_some() { "ready" } else { "pending" })
             .finish()
-    }
-}
-
-impl DeferredTrieDataProducer {
-    /// Computes sorted trie data, publishes it to waiters, and returns it to the task owner.
-    pub fn compute_and_publish(self) -> ComputedTrieData {
-        let Self { value, inputs } = self;
-        let computed = DeferredTrieData::sort(inputs.hashed_state, inputs.trie_updates);
-        let _ = value.set(computed.clone());
-        computed
     }
 }
 
