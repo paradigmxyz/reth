@@ -96,7 +96,7 @@ use std::{
     panic::{self, AssertUnwindSafe},
     sync::{
         atomic::{AtomicUsize, Ordering},
-        mpsc::RecvTimeoutError,
+        mpsc::{RecvTimeoutError, TryRecvError},
         Arc,
     },
     time::Duration,
@@ -607,7 +607,13 @@ where
         let hashed_state_output = output.clone();
         let hashed_state_provider = self.provider.clone();
         let mut hashed_state_rx = handle.take_hashed_state_rx();
-        let mut hashed_state: LazyHashedPostState =
+        let ready_hashed_state = hashed_state_rx.as_mut().and_then(|rx| match rx.try_recv() {
+            Ok(state) => Some(state),
+            Err(TryRecvError::Empty | TryRecvError::Disconnected) => None,
+        });
+        let mut hashed_state: LazyHashedPostState = if let Some(state) = ready_hashed_state {
+            LazyHandle::ready(Arc::new(state))
+        } else {
             self.payload_processor.executor().spawn_blocking_named("hash-post-state", move || {
                 let _span = debug_span!(
                     target: "engine::tree::payload_validator",
@@ -620,7 +626,8 @@ where
                     hashed_state_provider.hashed_post_state(&hashed_state_output.state)
                 };
                 Arc::new(state)
-            });
+            })
+        };
 
         let block = validated_block.try_into_inner().expect("sole handle")?;
         let block = block.with_senders(senders);
