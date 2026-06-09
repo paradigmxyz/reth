@@ -1366,11 +1366,13 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         // first sort the changeset by address
         changeset.sort_by_key(|change| change.address);
 
-        let mut count: u64 = 0;
-
+        let count = changeset.len() as u64;
         for change in changeset {
-            self.append_change(&change)?;
-            count += 1;
+            self.append_column(&change)?;
+        }
+
+        if let Some(ref mut offset) = self.current_changeset_offset {
+            *offset = ChangesetOffset::new(offset.offset(), offset.num_changes() + count);
         }
 
         if let Some(metrics) = &self.metrics {
@@ -1430,10 +1432,13 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         // sort by address + storage key
         changeset.sort_by_key(|change| (change.address, change.key));
 
-        let mut count: u64 = 0;
+        let count = changeset.len() as u64;
         for change in changeset {
-            self.append_change(&change)?;
-            count += 1;
+            self.append_column(&change)?;
+        }
+
+        if let Some(ref mut offset) = self.current_changeset_offset {
+            *offset = ChangesetOffset::new(offset.offset(), offset.num_changes() + count);
         }
 
         if let Some(metrics) = &self.metrics {
