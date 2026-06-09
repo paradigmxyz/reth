@@ -3091,6 +3091,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             match updated_node {
                 Some(node) => {
                     if !key.is_empty() {
+                        if account_trie_cursor
+                            .seek_exact(A::AccountKey::from(*key))?
+                            .is_some_and(|(_, existing_node)| existing_node == *node)
+                        {
+                            continue;
+                        }
                         *num_entries += 1;
                         account_trie_cursor.upsert(nibbles, node)?;
                     }
@@ -4235,6 +4241,13 @@ mod tests {
 
         let factory = create_test_provider_factory();
         let provider_rw = factory.provider_rw().unwrap();
+        let unchanged_node = BranchNodeCompact::new(
+            0b0011_0011_0011_0011,
+            0b0000_0000_0000_0000,
+            0b0000_0000_0000_0000,
+            vec![],
+            None,
+        );
 
         // Pre-populate account trie with data that will be deleted
         {
@@ -4270,6 +4283,10 @@ mod tests {
                     ),
                 )
                 .unwrap();
+
+            // Add account node that should be left untouched by an identical update
+            let unchanged = StoredNibbles(Nibbles::from_nibbles([0x7, 0x8]));
+            cursor.upsert(unchanged, &unchanged_node).unwrap();
         }
 
         // Pre-populate storage tries with data
@@ -4352,6 +4369,7 @@ mod tests {
                     None,
                 )),
             ),
+            (Nibbles::from_nibbles([0x7, 0x8]), Some(unchanged_node.clone())),
         ];
 
         // Create sorted storage trie updates
@@ -4387,7 +4405,7 @@ mod tests {
         let num_entries = provider_rw.write_trie_updates_sorted(&trie_updates).unwrap();
 
         // We should have 2 account insertions + 1 account deletion + 1 storage insertion + 1
-        // storage deletion = 5
+        // storage deletion = 5. The identical account trie update is skipped.
         assert_eq!(num_entries, 5);
 
         // Verify account trie updates were written correctly
@@ -4414,6 +4432,11 @@ mod tests {
         let nibbles3 = StoredNibbles(Nibbles::from_nibbles([0x5, 0x6]));
         let entry3 = cursor.seek_exact(nibbles3).unwrap();
         assert!(entry3.is_some(), "New account node should exist");
+
+        // Check unchanged account node still exists and was not counted as a modified entry
+        let nibbles4 = StoredNibbles(Nibbles::from_nibbles([0x7, 0x8]));
+        let entry4 = cursor.seek_exact(nibbles4).unwrap();
+        assert_eq!(entry4.unwrap().1, unchanged_node);
 
         // Verify storage trie updates were written correctly
         let mut storage_cursor = tx.cursor_dup_read::<tables::StoragesTrie>().unwrap();
