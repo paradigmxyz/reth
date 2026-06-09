@@ -272,7 +272,16 @@ pub fn apply_precompile_overrides(
         }
     }
 
-    let mut moved_precompiles = HashMap::with_capacity(moves.len());
+    // Validate every source before mutating the map, matching `move_precompiles`.
+    for (source, _) in &moves {
+        if precompiles.get(source).is_none() {
+            return Err(EthSimulateError::NotAPrecompile(*source))
+        }
+    }
+
+    // Extract all sources before handling destinations so swaps and chained moves retain the
+    // original precompiles.
+    let mut extracted = Vec::with_capacity(moves.len());
     for (source, dest) in moves {
         let mut moved_precompile = None;
         precompiles.apply_precompile(&source, |existing| {
@@ -280,13 +289,19 @@ pub fn apply_precompile_overrides(
             None
         });
 
-        let Some(precompile) = moved_precompile else {
-            return Err(EthSimulateError::NotAPrecompile(source))
-        };
-        moved_precompiles.insert(dest, precompile);
+        if let Some(precompile) = moved_precompile {
+            extracted.push((dest, precompile));
+        }
     }
 
-    if !moved_precompiles.is_empty() {
+    if !extracted.is_empty() {
+        let mut moved_precompiles = HashMap::with_capacity(extracted.len());
+        for (dest, precompile) in extracted {
+            // Dynamic lookups are only consulted for addresses absent from the main map.
+            precompiles.apply_precompile(&dest, |_| None);
+            moved_precompiles.insert(dest, precompile);
+        }
+
         precompiles.set_precompile_lookup(move |address: &Address| -> Option<DynPrecompile> {
             moved_precompiles.get(address).cloned()
         });
@@ -580,7 +595,7 @@ mod tests {
     use crate::EthApiError;
     use alloy_chains::Chain;
     use alloy_consensus::Header;
-    use alloy_evm::precompiles::PrecompilesMap;
+    use alloy_evm::precompiles::{Precompile, PrecompilesMap};
     use alloy_primitives::{address, U256};
     use alloy_rpc_types_eth::{
         simulate::SimBlock,
@@ -649,6 +664,49 @@ mod tests {
 
         assert!(precompiles.get(&source).is_none());
         assert!(precompiles.get(&dest).is_some());
+        assert!(!precompiles.addresses().any(|address| address == &dest));
+    }
+
+    #[test]
+    fn invalid_precompile_move_does_not_apply_valid_moves() {
+        let source = address!("0000000000000000000000000000000000000001");
+        let dest = address!("0000000000000000000000000000000000123456");
+        let invalid_source = address!("c100000000000000000000000000000000000000");
+        let invalid_dest = address!("c200000000000000000000000000000000000000");
+        let mut state_overrides = StateOverride::default();
+        state_overrides.insert(
+            source,
+            AccountOverride { move_precompile_to: Some(dest), ..Default::default() },
+        );
+        state_overrides.insert(
+            invalid_source,
+            AccountOverride { move_precompile_to: Some(invalid_dest), ..Default::default() },
+        );
+        let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+
+        let err = apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap_err();
+
+        assert!(matches!(err, EthSimulateError::NotAPrecompile(addr) if addr == invalid_source));
+        assert!(precompiles.get(&source).is_some());
+        assert!(precompiles.get(&dest).is_none());
+    }
+
+    #[test]
+    fn moved_precompile_replaces_existing_destination() {
+        let source = address!("0000000000000000000000000000000000000001");
+        let dest = address!("0000000000000000000000000000000000000004");
+        let mut state_overrides = StateOverride::default();
+        state_overrides.insert(
+            source,
+            AccountOverride { move_precompile_to: Some(dest), ..Default::default() },
+        );
+        let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+        let source_id = precompiles.get(&source).unwrap().precompile_id().clone();
+
+        apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap();
+
+        assert!(precompiles.get(&source).is_none());
+        assert_eq!(precompiles.get(&dest).unwrap().precompile_id(), &source_id);
         assert!(!precompiles.addresses().any(|address| address == &dest));
     }
 
