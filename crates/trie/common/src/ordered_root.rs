@@ -75,6 +75,26 @@ impl OrderedTrieRootEncodedBuilder {
         Self::default()
     }
 
+    /// Creates a builder with small internal stack capacity based on the largest expected index.
+    ///
+    /// The ordered root only needs hash-builder stacks proportional to the encoded key depth, not
+    /// the number of leaves. Supplying the final item count avoids repeated small reallocations on
+    /// large receipt and transaction roots while keeping short roots compact.
+    pub fn with_item_count_hint(item_count: usize) -> Self {
+        if item_count == 0 {
+            return Self::new()
+        }
+
+        let depth = rlp_index_nibble_len(item_count - 1);
+        let mut hb = HashBuilder::default();
+        hb.stack.reserve(depth + 1);
+        hb.state_masks.reserve(depth);
+        hb.tree_masks.reserve(depth);
+        hb.hash_masks.reserve(depth);
+
+        Self { hb, ..Default::default() }
+    }
+
     /// Pushes the next pre-encoded item.
     ///
     /// Items must be pushed in their final contiguous order.
@@ -141,6 +161,16 @@ impl OrderedTrieRootEncodedBuilder {
     }
 }
 
+const fn rlp_index_nibble_len(index: usize) -> usize {
+    let encoded_bytes = if index <= 0x7f {
+        1
+    } else {
+        let bits = usize::BITS as usize - index.leading_zeros() as usize;
+        1 + ((bits + 7) / 8)
+    };
+    encoded_bytes * 2
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,6 +234,20 @@ mod tests {
 
         builder.push_next(b"item_1");
         assert_eq!(builder.pushed_count(), 2);
+    }
+
+    #[test]
+    fn hinted_builder_matches_default_builder() {
+        for len in [0, 1, 2, 127, 128, 129, 512, 16_384] {
+            let items = items(len);
+            assert_eq!(root_with_push_next(&items), {
+                let mut builder = OrderedTrieRootEncodedBuilder::with_item_count_hint(len);
+                for item in &items {
+                    builder.push_next(item);
+                }
+                builder.finalize()
+            });
+        }
     }
 
     #[test]
