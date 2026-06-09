@@ -273,8 +273,7 @@ jobs:
 
       - name: Print reth client logs
         if: ${{ failure() }}
-        run: |
-          cat hivetests/workspace/logs/reth/client-*.log
+        run: .github/scripts/hive/print_client_logs.sh
 
   test-osaka:
     timeout-minutes: 120
@@ -455,8 +454,7 @@ jobs:
 
       - name: Print reth client logs
         if: ${{ failure() }}
-        run: |
-          cat hivetests/workspace/logs/reth/client-*.log
+        run: .github/scripts/hive/print_client_logs.sh
   notify-on-error:
     needs:
       - test-amsterdam

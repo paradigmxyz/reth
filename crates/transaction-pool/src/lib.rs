@@ -865,6 +865,20 @@ where
     }
 }
 
+impl<V, T, S> ValidatingPool for Pool<V, T, S>
+where
+    V: TransactionValidator,
+    <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
+    S: BlobStore + Clone,
+{
+    type Validator = V;
+
+    fn validator(&self) -> &Self::Validator {
+        self.inner().validator()
+    }
+}
+
 impl<V, T: TransactionOrdering, S> Clone for Pool<V, T, S> {
     fn clone(&self) -> Self {
         Self { pool: Arc::clone(&self.pool) }
