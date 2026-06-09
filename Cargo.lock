@@ -306,24 +306,6 @@ dependencies = [
 
 [[package]]
 name = "alloy-evm"
-version = "0.35.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58673bde58f17022886547b618346aeae9b147ed398f9c847105fa91c49f97eb"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-hardforks 0.4.7",
- "alloy-primitives",
- "alloy-sol-types",
- "auto_impl",
- "derive_more",
- "revm",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "alloy-evm"
 version = "0.36.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6e494529570a4d25eb4d1a7456d8f969c3202aceaf703e4006cec5f730aee96"
@@ -3612,7 +3594,7 @@ name = "example-custom-beacon-withdrawals"
 version = "0.0.0"
 dependencies = [
  "alloy-eips",
- "alloy-evm 0.36.0",
+ "alloy-evm",
  "alloy-sol-types",
  "eyre",
  "reth-ethereum",
@@ -3653,7 +3635,7 @@ dependencies = [
 name = "example-custom-evm"
 version = "0.0.0"
 dependencies = [
- "alloy-evm 0.36.0",
+ "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
@@ -3667,7 +3649,7 @@ name = "example-custom-inspector"
 version = "0.0.0"
 dependencies = [
  "alloy-eips",
- "alloy-evm 0.36.0",
+ "alloy-evm",
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "clap",
@@ -3857,7 +3839,7 @@ dependencies = [
 name = "example-precompile-cache"
 version = "0.0.0"
 dependencies = [
- "alloy-evm 0.36.0",
+ "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
@@ -6585,9 +6567,9 @@ dependencies = [
 
 [[package]]
 name = "oxc_index"
-version = "4.1.0"
+version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb3e6120999627ec9703025eab7c9f410ebb7e95557632a8902ca48210416c2b"
+checksum = "191884bee6c3744909a51acc7d78d4ae370d817b25875b10642f632327b6296e"
 dependencies = [
  "nonmax",
 ]
@@ -7704,7 +7686,7 @@ version = "2.2.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "alloy-evm 0.36.0",
+ "alloy-evm",
  "alloy-hardforks 0.4.7",
  "alloy-primitives",
  "alloy-rlp",
@@ -7786,7 +7768,7 @@ dependencies = [
  "alloy-chains",
  "alloy-consensus",
  "alloy-eips",
- "alloy-evm 0.36.0",
+ "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
@@ -8396,7 +8378,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eip7928 0.4.1",
  "alloy-eips",
- "alloy-evm 0.36.0",
+ "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-engine",
@@ -8808,7 +8790,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eip7928 0.4.1",
  "alloy-eips",
- "alloy-evm 0.36.0",
+ "alloy-evm",
  "alloy-primitives",
  "auto_impl",
  "derive_more",
@@ -8832,7 +8814,7 @@ version = "2.2.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "alloy-evm 0.36.0",
+ "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -8873,7 +8855,7 @@ dependencies = [
 name = "reth-execution-errors"
 version = "2.2.0"
 dependencies = [
- "alloy-evm 0.36.0",
+ "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
  "nybbles",
@@ -8887,7 +8869,7 @@ version = "2.2.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "alloy-evm 0.36.0",
+ "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
@@ -9820,7 +9802,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
  "alloy-eips",
- "alloy-evm 0.36.0",
+ "alloy-evm",
  "alloy-genesis",
  "alloy-network",
  "alloy-primitives",
@@ -10004,7 +9986,7 @@ name = "reth-rpc-convert"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus",
- "alloy-evm 0.36.0",
+ "alloy-evm",
  "alloy-json-rpc",
  "alloy-network",
  "alloy-primitives",
@@ -10083,7 +10065,7 @@ dependencies = [
  "alloy-dyn-abi",
  "alloy-eip7928 0.4.1",
  "alloy-eips",
- "alloy-evm 0.36.0",
+ "alloy-evm",
  "alloy-json-rpc",
  "alloy-network",
  "alloy-primitives",
@@ -10129,7 +10111,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eip7928 0.4.1",
  "alloy-eips",
- "alloy-evm 0.36.0",
+ "alloy-evm",
  "alloy-network",
  "alloy-primitives",
  "alloy-rpc-client",
@@ -10681,7 +10663,7 @@ name = "reth-trie-parallel"
 version = "2.2.0"
 dependencies = [
  "alloy-eip7928 0.4.1",
- "alloy-evm 0.36.0",
+ "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
  "crossbeam-channel",
@@ -10971,7 +10953,7 @@ dependencies = [
 [[package]]
 name = "revmc"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#89c73ea507a9234c78b480a09efa185465744e9f"
+source = "git+https://github.com/paradigmxyz/revmc?branch=main#5ca04c3896c0be9447430853355ab11c0e9c6c24"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -10991,7 +10973,7 @@ dependencies = [
 [[package]]
 name = "revmc-backend"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#89c73ea507a9234c78b480a09efa185465744e9f"
+source = "git+https://github.com/paradigmxyz/revmc?branch=main#5ca04c3896c0be9447430853355ab11c0e9c6c24"
 dependencies = [
  "eyre",
  "ruint",
@@ -11000,12 +10982,12 @@ dependencies = [
 [[package]]
 name = "revmc-build"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#89c73ea507a9234c78b480a09efa185465744e9f"
+source = "git+https://github.com/paradigmxyz/revmc?branch=main#5ca04c3896c0be9447430853355ab11c0e9c6c24"
 
 [[package]]
 name = "revmc-builtins"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#89c73ea507a9234c78b480a09efa185465744e9f"
+source = "git+https://github.com/paradigmxyz/revmc?branch=main#5ca04c3896c0be9447430853355ab11c0e9c6c24"
 dependencies = [
  "paste",
  "revm-bytecode",
@@ -11020,7 +11002,7 @@ dependencies = [
 [[package]]
 name = "revmc-codegen"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#89c73ea507a9234c78b480a09efa185465744e9f"
+source = "git+https://github.com/paradigmxyz/revmc?branch=main#5ca04c3896c0be9447430853355ab11c0e9c6c24"
 dependencies = [
  "alloy-primitives",
  "bitflags 2.11.1",
@@ -11051,7 +11033,7 @@ dependencies = [
 [[package]]
 name = "revmc-context"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#89c73ea507a9234c78b480a09efa185465744e9f"
+source = "git+https://github.com/paradigmxyz/revmc?branch=main#5ca04c3896c0be9447430853355ab11c0e9c6c24"
 dependencies = [
  "revm-context",
  "revm-context-interface",
@@ -11066,7 +11048,7 @@ dependencies = [
 [[package]]
 name = "revmc-llvm"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#89c73ea507a9234c78b480a09efa185465744e9f"
+source = "git+https://github.com/paradigmxyz/revmc?branch=main#5ca04c3896c0be9447430853355ab11c0e9c6c24"
 dependencies = [
  "alloy-primitives",
  "cc",
@@ -11079,9 +11061,9 @@ dependencies = [
 [[package]]
 name = "revmc-runtime"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#89c73ea507a9234c78b480a09efa185465744e9f"
+source = "git+https://github.com/paradigmxyz/revmc?branch=main#5ca04c3896c0be9447430853355ab11c0e9c6c24"
 dependencies = [
- "alloy-evm 0.35.1",
+ "alloy-evm",
  "alloy-primitives",
  "crossbeam-channel",
  "crossbeam-queue",
