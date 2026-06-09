@@ -20,7 +20,8 @@ pub struct DeferredTrieData {
     value: Arc<OnceLock<ComputedTrieData>>,
 }
 
-/// Producer consumed by a spawned task to compute sorted trie data for a [`DeferredTrieData`] handle.
+/// Producer consumed by a spawned task to compute sorted trie data for a [`DeferredTrieData`]
+/// handle.
 #[must_use = "DeferredTrieDataProducer must be consumed with compute_and_publish to wake trie data waiters"]
 pub struct DeferredTrieDataProducer {
     /// Shared result initialized exactly once by this producer.
@@ -98,7 +99,10 @@ impl DeferredTrieData {
         let value = Arc::new(OnceLock::new());
         (
             Self { value: Arc::clone(&value) },
-            DeferredTrieDataProducer { value, inputs: PendingInputs { hashed_state, trie_updates } },
+            DeferredTrieDataProducer {
+                value,
+                inputs: PendingInputs { hashed_state, trie_updates },
+            },
         )
     }
 
