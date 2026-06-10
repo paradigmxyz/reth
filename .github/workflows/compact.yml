@@ -19,7 +19,24 @@ name: compact-codec
 permissions: {}
 
 jobs:
+  changes:
+    name: classify changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      run_heavy_rust: ${{ steps.classify.outputs.run_heavy_rust }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: classify
+        run: python3 .github/scripts/ci-classify.py
+
   compact-codec:
+    needs: changes
+    if: needs.changes.outputs.run_heavy_rust == 'true'
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     permissions:
       contents: read

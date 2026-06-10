@@ -20,8 +20,26 @@ concurrency:
 permissions: {}
 
 jobs:
+  changes:
+    name: classify changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      run_heavy_rust: ${{ steps.classify.outputs.run_heavy_rust }}
+      e2e_allowed_skips: ${{ steps.classify.outputs.e2e_allowed_skips }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: classify
+        run: python3 .github/scripts/ci-classify.py
+
   test:
     name: e2e-testsuite
+    needs: changes
+    if: needs.changes.outputs.run_heavy_rust == 'true'
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -54,6 +72,8 @@ jobs:
 
   rocksdb:
     name: e2e-rocksdb
+    needs: changes
+    if: needs.changes.outputs.run_heavy_rust == 'true'
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -79,3 +99,16 @@ jobs:
             --locked \
             -p reth-e2e-test-utils \
             -E 'binary(rocksdb)'
+
+  e2e-success:
+    name: e2e success
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [changes, test, rocksdb]
+    timeout-minutes: 30
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # release/v1
+        with:
+          allowed-skips: ${{ needs.changes.outputs.e2e_allowed_skips }}
+          jobs: ${{ toJSON(needs) }}

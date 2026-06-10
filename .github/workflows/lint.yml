@@ -13,8 +13,31 @@ env:
 permissions: {}
 
 jobs:
+  changes:
+    name: classify changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      run_heavy_rust: ${{ steps.classify.outputs.run_heavy_rust }}
+      run_dependency_checks: ${{ steps.classify.outputs.run_dependency_checks }}
+      run_release_version_check: ${{ steps.classify.outputs.run_release_version_check }}
+      run_cargo_validation: ${{ steps.classify.outputs.run_cargo_validation }}
+      run_cli_docs: ${{ steps.classify.outputs.run_cli_docs }}
+      run_grafana: ${{ steps.classify.outputs.run_grafana }}
+      lint_allowed_skips: ${{ steps.classify.outputs.lint_allowed_skips }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: classify
+        run: python3 .github/scripts/ci-classify.py
+
   clippy-binaries:
     name: clippy binaries / ${{ matrix.type }}
+    needs: changes
+    if: needs.changes.outputs.run_heavy_rust == 'true'
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -48,6 +71,8 @@ jobs:
 
   clippy:
     name: clippy
+    needs: changes
+    if: needs.changes.outputs.run_heavy_rust == 'true'
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -69,6 +94,8 @@ jobs:
           RUSTFLAGS: -D warnings
 
   wasm:
+    needs: changes
+    if: needs.changes.outputs.run_heavy_rust == 'true'
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -95,6 +122,8 @@ jobs:
           .github/scripts/check_wasm.sh
 
   riscv:
+    needs: changes
+    if: needs.changes.outputs.run_heavy_rust == 'true'
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -120,6 +149,8 @@ jobs:
 
   crate-checks:
     name: crate-checks (${{ matrix.partition }}/${{ matrix.total_partitions }})
+    needs: changes
+    if: needs.changes.outputs.run_heavy_rust == 'true'
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -145,6 +176,8 @@ jobs:
 
   msrv:
     name: MSRV
+    needs: changes
+    if: needs.changes.outputs.run_heavy_rust == 'true'
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-8' || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -167,6 +200,8 @@ jobs:
 
   docs:
     name: docs
+    needs: changes
+    if: needs.changes.outputs.run_heavy_rust == 'true'
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -207,6 +242,8 @@ jobs:
 
   udeps:
     name: udeps
+    needs: changes
+    if: needs.changes.outputs.run_heavy_rust == 'true'
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -228,6 +265,8 @@ jobs:
 
   book:
     name: book
+    needs: changes
+    if: needs.changes.outputs.run_cli_docs == 'true'
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -276,6 +315,8 @@ jobs:
           config-path: dprint.json
 
   grafana:
+    needs: changes
+    if: needs.changes.outputs.run_grafana == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -290,6 +331,8 @@ jobs:
           cmd: jq empty etc/grafana/dashboards/overview.json
 
   no-test-deps:
+    needs: changes
+    if: needs.changes.outputs.run_dependency_checks == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -305,6 +348,8 @@ jobs:
 
   # Check crates correctly propagate features
   feature-propagation:
+    needs: changes
+    if: needs.changes.outputs.run_dependency_checks == 'true'
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -324,15 +369,34 @@ jobs:
       - run: zepter run check
 
   deny:
+    needs: changes
+    if: needs.changes.outputs.run_dependency_checks == 'true'
     permissions:
       contents: read
     uses: tempoxyz/ci/.github/workflows/deny.yml@main
+
+  release-version:
+    name: release version
+    needs: changes
+    if: needs.changes.outputs.run_release_version_check == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Validate release version bump
+        run: python3 .github/scripts/check-release-version.py
 
   lint-success:
     name: lint success
     runs-on: ubuntu-latest
     if: always()
     needs:
+      - changes
       - clippy-binaries
       - clippy
       - wasm
@@ -346,9 +410,11 @@ jobs:
       - no-test-deps
       - feature-propagation
       - deny
+      - release-version
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # release/v1
         with:
+          allowed-skips: ${{ needs.changes.outputs.lint_allowed_skips }}
           jobs: ${{ toJSON(needs) }}
