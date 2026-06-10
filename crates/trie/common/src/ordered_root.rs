@@ -126,6 +126,7 @@ impl OrderedTrieRootEncodedBuilder {
         self.hb.root()
     }
 
+    #[inline]
     fn flush_zero(&mut self) {
         if self.zero.is_none() {
             return;
@@ -135,6 +136,7 @@ impl OrderedTrieRootEncodedBuilder {
         self.add_leaf(0, &zero);
     }
 
+    #[inline]
     fn add_leaf(&mut self, index: usize, bytes: &[u8]) {
         let index_buffer = alloy_rlp::encode_fixed_size(&index);
         self.hb.add_leaf(Nibbles::unpack(&index_buffer), bytes);
