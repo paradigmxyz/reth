@@ -691,15 +691,27 @@ where
         lower_bound: Nibbles,
         upper_bound: Option<Nibbles>,
     ) -> Result<(), StateProofError> {
-        // A helper closure for mapping entries returned from the `hashed_cursor`, converting the
-        // key to Nibbles and immediately creating the DeferredValueEncoder so that encoding of the
-        // leaf value can begin ASAP.
-        let mut map_hashed_cursor_entry = |(key_b256, val): (B256, _)| {
+        #[inline]
+        fn map_hashed_cursor_entry<VE: LeafValueEncoder>(
+            value_encoder: &mut VE,
+            (key_b256, val): (B256, VE::Value),
+        ) -> (Nibbles, VE::DeferredEncoder) {
             debug_assert_eq!(key_b256.len(), 32);
             let key = Nibbles::unpack_array(key_b256.as_ref());
             let val = value_encoder.deferred_encoder(key_b256, val);
             (key, val)
-        };
+        }
+
+        #[inline]
+        fn map_optional_hashed_cursor_entry<VE: LeafValueEncoder>(
+            value_encoder: &mut VE,
+            entry: Option<(B256, VE::Value)>,
+        ) -> Option<(Nibbles, VE::DeferredEncoder)> {
+            match entry {
+                Some(entry) => Some(map_hashed_cursor_entry(value_encoder, entry)),
+                None => None,
+            }
+        }
 
         // If the cursor hasn't been used, or the last iterated key is prior to this range's
         // key range, then seek forward to at least the first key.
@@ -711,8 +723,10 @@ where
             );
 
             let lower_key = B256::right_padding_from(&lower_bound.pack());
-            *hashed_cursor_current =
-                self.hashed_cursor.seek(lower_key)?.map(&mut map_hashed_cursor_entry);
+            *hashed_cursor_current = map_optional_hashed_cursor_entry(
+                value_encoder,
+                self.hashed_cursor.seek(lower_key)?,
+            );
         }
 
         // Loop over all keys in the range, calling `push_leaf` on each.
@@ -722,7 +736,8 @@ where
             let (key, val) =
                 core::mem::take(hashed_cursor_current).expect("while-let checks for Some");
             self.push_leaf(targets, key, val)?;
-            *hashed_cursor_current = self.hashed_cursor.next()?.map(&mut map_hashed_cursor_entry);
+            *hashed_cursor_current =
+                map_optional_hashed_cursor_entry(value_encoder, self.hashed_cursor.next()?);
         }
 
         trace!(target: TRACE_TARGET, "No further keys within range");
