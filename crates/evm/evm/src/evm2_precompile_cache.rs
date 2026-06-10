@@ -188,8 +188,8 @@ impl<S> PrecompileProvider<BaseEvmTypes> for CachedPrecompileProvider<S>
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
-    fn warm_addresses(&self) -> Vec<Address> {
-        self.inner.warm_addresses()
+    fn addresses(&self) -> Vec<Address> {
+        self.inner.addresses()
     }
 
     fn contains(&self, address: &Address) -> bool {
