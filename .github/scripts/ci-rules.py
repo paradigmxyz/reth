@@ -52,19 +52,30 @@ def read_event() -> dict:
     return json.loads(Path(event_path).read_text(encoding="utf-8"))
 
 
-def resolve_refs() -> tuple[str | None, str | None, bool]:
+def is_main_branch_ref(ref: str | None, ref_name: str | None) -> bool:
+    return ref == "refs/heads/main" or ref_name == "main"
+
+
+def is_main_branch() -> bool:
+    return is_main_branch_ref(os.environ.get("GITHUB_REF"), os.environ.get("GITHUB_REF_NAME"))
+
+
+def resolve_refs() -> tuple[str | None, str | None, str | None]:
     base = os.environ.get("CI_CLASSIFY_BASE")
     head = os.environ.get("CI_CLASSIFY_HEAD")
     if base and head:
-        return base, head, False
+        return base, head, None
+
+    if is_main_branch():
+        return None, None, "main-branch"
 
     if os.environ.get("GITHUB_EVENT_NAME", "") != "pull_request":
-        return None, None, True
+        return None, None, "non-pr-event"
 
     event = read_event()
     base = event.get("pull_request", {}).get("base", {}).get("sha")
     head = os.environ.get("GITHUB_SHA", "HEAD")
-    return base, head, not bool(base and head)
+    return base, head, None
 
 
 def ensure_ref(ref: str) -> bool:
@@ -254,9 +265,9 @@ def classify_outputs(files: list[str], workspace_bump: bool) -> dict[str, str]:
 
 
 def classify() -> int:
-    base, head, force_full = resolve_refs()
-    if force_full:
-        set_outputs(full_outputs("non-pr-event"))
+    base, head, force_full_reason = resolve_refs()
+    if force_full_reason:
+        set_outputs(full_outputs(force_full_reason))
         return 0
     if not base or not head or not ensure_ref(base) or not ensure_ref(head):
         set_outputs(full_outputs("missing-diff-ref"))
@@ -318,6 +329,13 @@ def expect_classification(files: list[str], workspace_bump: bool, expected: dict
 
 
 def self_test() -> int:
+    if not is_main_branch_ref("refs/heads/main", None):
+        raise AssertionError("refs/heads/main should force full CI")
+    if not is_main_branch_ref(None, "main"):
+        raise AssertionError("GITHUB_REF_NAME=main should force full CI")
+    if is_main_branch_ref("refs/pull/1/merge", "1/merge"):
+        raise AssertionError("pull request refs should not be treated as main")
+
     expect_classification(
         ["Cargo.toml", "Cargo.lock", "docs/vocs/vocs.config.ts"],
         True,
