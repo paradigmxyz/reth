@@ -461,8 +461,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         for (block, &first_tx) in blocks.iter().zip(tx_nums) {
             let b = block.recovered_block();
             w.increment_block(b.number())?;
-            for (i, tx) in b.body().transactions().iter().enumerate() {
-                w.append_transaction(first_tx + i as u64, tx)?;
+            let mut tx_num = first_tx;
+            for tx in b.body().transactions() {
+                w.append_transaction(tx_num, tx)?;
+                tx_num += 1;
             }
         }
         Ok(())
@@ -478,8 +480,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         for (block, &first_tx) in blocks.iter().zip(tx_nums) {
             let b = block.recovered_block();
             w.increment_block(b.number())?;
-            for (i, sender) in b.senders_iter().enumerate() {
-                w.append_transaction_sender(first_tx + i as u64, sender)?;
+            let mut tx_num = first_tx;
+            for sender in b.senders_iter() {
+                w.append_transaction_sender(tx_num, sender)?;
+                tx_num += 1;
             }
         }
         Ok(())
@@ -505,8 +509,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 continue
             }
 
-            for (i, receipt) in block.execution_outcome().receipts.iter().enumerate() {
-                w.append_receipt(first_tx + i as u64, receipt)?;
+            let mut tx_num = first_tx;
+            for receipt in &block.execution_outcome().receipts {
+                w.append_receipt(tx_num, receipt)?;
+                tx_num += 1;
             }
         }
         Ok(())
