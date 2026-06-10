@@ -2,39 +2,34 @@
 
 use crate::{
     error::{api::FromEthApiError, FromEvmError, ToRpcError},
-    EthApiError, RpcInvalidTransactionError,
+    EthApiError,
 };
 use alloy_chains::Chain;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_eips::eip2718::WithEncoded;
-use alloy_evm::{
-    block::TxResult,
-    precompiles::PrecompilesMap,
-    TransactionEnvMut,
-};
+use alloy_evm::{block::TxResult, precompiles::PrecompilesMap};
 use alloy_network::{NetworkTransactionBuilder, TransactionBuilder};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimCallResult, SimulateError, SimulatedBlock},
     state::StateOverride,
     BlockOverrides, BlockTransactionsKind,
 };
-use jsonrpsee_types::ErrorObject;
+use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor, ExecutorTx},
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
     Evm, HaltReasonFor,
 };
 use reth_primitives_traits::{
     BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock, SealedHeader,
 };
 use reth_rpc_convert::{RpcBlock, RpcConvert, RpcTxReq};
-use reth_rpc_server_types::result::{internal_rpc_err, rpc_err};
+use reth_rpc_server_types::result::rpc_err;
 use reth_storage_api::{noop::NoopProvider, StateProvider};
 use revm::{
     context::Block,
     context_interface::result::ExecutionResult,
-    primitives::{Address, AddressMap, Bytes, TxKind, U256},
-    state::Account,
-    Database, DatabaseCommit,
+    primitives::{Address, Bytes, TxKind, U256},
+    Database,
 };
 
 /// Fallback seconds added between simulated block timestamps when neither the user nor the chain
@@ -92,6 +87,9 @@ pub enum EthSimulateError {
     /// Transaction nonce is too high.
     #[error("nonce too high")]
     NonceTooHigh,
+    /// Transaction nonce cannot be incremented.
+    #[error("nonce has max value")]
+    NonceMaxValue,
     /// Transaction's baseFeePerGas is too low.
     #[error("max fee per gas less than block base fee")]
     BaseFeePerGasTooLow,
@@ -126,6 +124,7 @@ impl EthSimulateError {
         match self {
             Self::NonceTooLow { .. } => -38010,
             Self::NonceTooHigh => -38011,
+            Self::NonceMaxValue => INTERNAL_ERROR_CODE,
             Self::BaseFeePerGasTooLow => -38012,
             Self::IntrinsicGasTooLow => -38013,
             Self::InsufficientFunds { .. } => -38014,
@@ -310,10 +309,7 @@ pub fn execute_transactions<S, T>(
     EthApiError,
 >
 where
-    S: BlockBuilder<Executor: BlockExecutor>,
-    <<S::Executor as BlockExecutor>::Evm as Evm>::DB:
-        Database<Error: Into<EthApiError>> + DatabaseCommit,
-    <<S::Executor as BlockExecutor>::Evm as Evm>::Tx: TransactionEnvMut,
+    S: BlockBuilder<Executor: BlockExecutor<Evm: Evm<DB: Database<Error: Into<EthApiError>>>>>,
     T: RpcConvert<Primitives = S::Primitives>,
 {
     builder.apply_pre_execution_changes()?;
@@ -361,8 +357,6 @@ where
             }
         }
 
-        let from = call.as_ref().from().unwrap_or_default();
-
         // Resolve transaction, populate missing fields and enforce calls
         // correctness.
         let tx = resolve_transaction(
@@ -370,45 +364,19 @@ where
             default_gas_limit,
             builder.evm().block().basefee(),
             chain_id,
+            builder.evm().cfg_env().disable_nonce_check,
             builder.evm_mut().db_mut(),
             converter,
         )?;
-        let tx_nonce = tx.nonce();
-        let disable_nonce_check = builder.evm().cfg_env().disable_nonce_check;
-        if !disable_nonce_check && tx_nonce == u64::MAX {
-            return Err(EthApiError::other(internal_rpc_err(
-                RpcInvalidTransactionError::NonceMaxValue.to_string(),
-            )))
-        }
-        let wrap_nonce = disable_nonce_check && tx_nonce == u64::MAX;
         // Create transaction with an empty envelope.
         // The effect for a layer-2 execution client is that it does not charge L1 cost.
         let tx = WithEncoded::new(Default::default(), tx);
 
         let mut tx_regular_gas_used = 0;
-        let gas_output = if wrap_nonce {
-            let (mut tx_env, tx) = ExecutorTx::<S::Executor>::into_parts(tx);
-            // Wrap nonce for max nonce values
-            tx_env.set_nonce(0);
-            builder.execute_transaction_with_result_closure((tx_env, tx), |result| {
-                tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
-                results.push(result.result().result.clone())
-            })?
-        } else {
-            builder.execute_transaction_with_result_closure(tx, |result| {
-                tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
-                results.push(result.result().result.clone())
-            })?
-        };
-
-        if wrap_nonce &&
-            let Some(mut info) = builder.evm_mut().db_mut().basic(from).map_err(Into::into)?
-        {
-            info.nonce = 0;
-            let mut changes = AddressMap::default();
-            changes.insert(from, Account::from(info).with_touched_mark());
-            builder.evm_mut().db_mut().commit(changes);
-        }
+        let gas_output = builder.execute_transaction_with_result_closure(tx, |result| {
+            tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
+            results.push(result.result().result.clone())
+        })?;
 
         let gas_used = gas_output.tx_gas_used();
         if let Some(remaining_call_gas_limit) = remaining_call_gas_limit.as_mut() {
@@ -443,6 +411,7 @@ pub fn resolve_transaction<DB: Database, Tx, T>(
     default_gas_limit: u64,
     block_base_fee_per_gas: u64,
     chain_id: u64,
+    disable_nonce_check: bool,
     db: &mut DB,
     converter: &T,
 ) -> Result<Recovered<Tx>, EthApiError>
@@ -465,6 +434,9 @@ where
         tx.as_mut().set_nonce(
             db.basic(from).map_err(Into::into)?.map(|acc| acc.nonce).unwrap_or_default(),
         );
+    }
+    if disable_nonce_check && tx.as_ref().nonce() == Some(u64::MAX) {
+        tx.as_mut().set_nonce(0);
     }
 
     if tx.as_ref().gas_limit().is_none() {
@@ -595,8 +567,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_precompile_overrides, sanitize_chain, EthSimulateError};
-    use crate::EthApiError;
+    use super::{
+        apply_precompile_overrides, sanitize_chain, EthSimulateError, INTERNAL_ERROR_CODE,
+    };
+    use crate::{error::ToRpcError, EthApiError};
     use alloy_chains::Chain;
     use alloy_consensus::Header;
     use alloy_evm::precompiles::PrecompilesMap;
@@ -608,6 +582,14 @@ mod tests {
     };
     use reth_primitives_traits::SealedHeader;
     use revm::precompile::Precompiles;
+
+    #[test]
+    fn nonce_max_value_error_uses_internal_error_code() {
+        let err = EthSimulateError::NonceMaxValue.to_rpc_error();
+
+        assert_eq!(err.code(), INTERNAL_ERROR_CODE);
+        assert_eq!(err.message(), "nonce has max value");
+    }
 
     fn parent_at(number: u64, timestamp: u64) -> SealedHeader<Header> {
         SealedHeader::seal_slow(Header { number, timestamp, ..Default::default() })
