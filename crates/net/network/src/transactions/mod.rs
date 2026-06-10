@@ -2,6 +2,7 @@
 
 use alloy_consensus::transaction::TxHashRef;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use smallvec::SmallVec;
 
 /// Aggregation on configurable parameters for [`TransactionsManager`].
 pub mod config;
@@ -293,7 +294,7 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     ///
     /// This way we can track incoming transactions and prevent multiple pool imports for the same
     /// transaction
-    transactions_by_peers: B256Map<HashSet<PeerId>>,
+    transactions_by_peers: B256Map<SmallVec<[PeerId; 1]>>,
     /// Transactions that are currently imported into the `Pool`.
     ///
     /// The import process includes:
@@ -1404,7 +1405,10 @@ where
         // cheap in-memory checks against local maps
         transactions.retain(|tx| {
             if let Entry::Occupied(mut entry) = self.transactions_by_peers.entry(*tx.tx_hash()) {
-                entry.get_mut().insert(peer_id);
+                let peers = entry.get_mut();
+                if !peers.contains(&peer_id) {
+                    peers.push(peer_id);
+                }
                 return false
             }
             if self.bad_imports.contains(tx.tx_hash()) {
@@ -1452,7 +1456,7 @@ where
 
         // Record the transactions as seen by the peer
         for tx in &new_txs {
-            self.transactions_by_peers.insert(*tx.hash(), HashSet::from([peer_id]));
+            self.transactions_by_peers.insert(*tx.hash(), smallvec::smallvec![peer_id]);
         }
 
         // 3. import new transactions as a batch to minimize lock contention on the underlying
@@ -2268,7 +2272,6 @@ mod tests {
     };
     use secp256k1::SecretKey;
     use std::{
-        collections::HashSet,
         future::poll_fn,
         net::{IpAddr, Ipv4Addr, SocketAddr},
         str::FromStr,
@@ -2643,7 +2646,7 @@ mod tests {
         let hash = B256::from_slice(&[1; 32]);
 
         tx_manager.network.update_sync_state(SyncState::Idle);
-        tx_manager.transactions_by_peers.insert(hash, HashSet::from([peer_id]));
+        tx_manager.transactions_by_peers.insert(hash, smallvec::smallvec![peer_id]);
 
         let err = PoolError::new(
             hash,
@@ -2664,7 +2667,7 @@ mod tests {
         let hash = B256::from_slice(&[3; 32]);
 
         tx_manager.network.update_sync_state(SyncState::Idle);
-        tx_manager.transactions_by_peers.insert(hash, HashSet::from([peer_id]));
+        tx_manager.transactions_by_peers.insert(hash, smallvec::smallvec![peer_id]);
 
         let err = PoolError::new(
             hash,
@@ -2685,7 +2688,7 @@ mod tests {
         let hash = B256::from_slice(&[2; 32]);
 
         tx_manager.network.update_sync_state(SyncState::Idle);
-        tx_manager.transactions_by_peers.insert(hash, HashSet::from([peer_id]));
+        tx_manager.transactions_by_peers.insert(hash, smallvec::smallvec![peer_id]);
 
         let err = PoolError::new(
             hash,
