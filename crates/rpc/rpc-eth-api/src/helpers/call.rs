@@ -38,6 +38,7 @@ use reth_rpc_eth_types::{
     simulate::{self, EthSimulateError},
     EthApiError, StateCacheDb,
 };
+use reth_rpc_server_types::result::{block_id_to_str, rpc_error_with_code};
 use reth_storage_api::{BlockIdReader, ProviderTx, StateProviderBox};
 use revm::{
     context::Block,
@@ -93,8 +94,12 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
             let _permit = self.acquire_owned_blocking_io().await;
 
-            let base_block =
-                self.recovered_block(block).await?.ok_or(EthApiError::HeaderNotFound(block))?;
+            let base_block = self.recovered_block(block).await?.ok_or_else(|| {
+                EthApiError::other(rpc_error_with_code(
+                    -32000,
+                    format!("block not found: {}", block_id_to_str(block)),
+                ))
+            })?;
             let parent = base_block.sealed_header().clone();
             let max_simulate_blocks = self.max_simulate_blocks();
 
