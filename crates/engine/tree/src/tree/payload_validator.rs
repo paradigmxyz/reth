@@ -74,7 +74,8 @@ use reth_evm::{
     execute::ExecutableTxFor, ConfigureEvm, ConfigureEvm2Prewarm, EvmEnvFor, ExecutionCtxFor,
 };
 use reth_evm_ethereum::{
-    execute_evm2_block_with_state_provider_context, Evm2BlockExecutionContext, Evm2BlockSystemCalls,
+    execute_evm2_block_with_state_provider_context_and_hook, Evm2BlockExecutionContext,
+    Evm2BlockSystemCalls,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
 use reth_execution_types::evm2_state_source_hashed_post_state;
@@ -1064,7 +1065,6 @@ where
             })
             .collect::<Result<Vec<_>, BlockExecutionError>>()?;
         let senders = transactions.iter().map(|tx| tx.signer()).collect();
-        executed_tx_index.store(transactions.len(), Ordering::Relaxed);
 
         let spec_id = match input {
             BlockOrPayload::Payload(payload) => self
@@ -1100,13 +1100,16 @@ where
 
         let output = debug_span!(target: "engine::tree", "execute_evm2_block")
             .in_scope(|| {
-                execute_evm2_block_with_state_provider_context(
+                execute_evm2_block_with_state_provider_context_and_hook(
                     spec_id,
                     block_env,
                     state_provider,
                     block_number,
                     transactions,
                     context,
+                    |executed| {
+                        executed_tx_index.store(executed, Ordering::Relaxed);
+                    },
                 )
             })
             .map_err(BlockExecutionError::other)?;

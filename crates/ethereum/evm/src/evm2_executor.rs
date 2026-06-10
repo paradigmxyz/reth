@@ -197,6 +197,31 @@ pub fn execute_evm2_block_with_context<DB>(
 where
     DB: Database + 'static,
 {
+    execute_evm2_block_with_context_and_hook(
+        spec_id,
+        block_env,
+        database,
+        block_number,
+        transactions,
+        context,
+        |_| {},
+    )
+}
+
+/// Executes a block worth of recovered Ethereum transactions with additional block-level context,
+/// invoking `on_transaction_executed` after each transaction is committed to the block state.
+fn execute_evm2_block_with_context_and_hook<DB>(
+    spec_id: SpecId,
+    block_env: BlockEnv,
+    database: DB,
+    block_number: u64,
+    transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
+    context: Evm2BlockExecutionContext<'_>,
+    mut on_transaction_executed: impl FnMut(usize),
+) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<DB::Error>>
+where
+    DB: Database + 'static,
+{
     let block_beneficiary = block_env.beneficiary;
     let mut version = Version::new(spec_id);
     version.chain_id = context.chain_id;
@@ -218,11 +243,12 @@ where
     )?;
     let mut results = Vec::new();
 
-    for transaction in transactions {
+    for (index, transaction) in transactions.into_iter().enumerate() {
         let tx_type = transaction.inner().tx_type();
         let transaction = evm2_recovered_tx(transaction);
         let outcome = execute_transaction::<DB>(&mut evm, &mut block_state, &transaction)?;
         results.push((tx_type, outcome));
+        on_transaction_executed(index + 1);
     }
 
     let mut requests = block_requests_from_tx_results::<DB>(spec_id, context, &results)?;
@@ -318,6 +344,33 @@ where
         block_number,
         transactions,
         context,
+    )
+}
+
+/// Executes a block worth of recovered Ethereum transactions with additional block-level context
+/// and an evm2 database adapter backed by a Reth state provider, invoking
+/// `on_transaction_executed` after each transaction is committed to the block state.
+#[cfg(feature = "std")]
+pub fn execute_evm2_block_with_state_provider_context_and_hook<DB>(
+    spec_id: SpecId,
+    block_env: BlockEnv,
+    state_provider: DB,
+    block_number: u64,
+    transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
+    context: Evm2BlockExecutionContext<'_>,
+    on_transaction_executed: impl FnMut(usize),
+) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<ProviderError>>
+where
+    DB: StateProvider + Send + 'static,
+{
+    execute_evm2_block_with_context_and_hook(
+        spec_id,
+        block_env,
+        Evm2StateProviderDatabase::new(state_provider),
+        block_number,
+        transactions,
+        context,
+        on_transaction_executed,
     )
 }
 
