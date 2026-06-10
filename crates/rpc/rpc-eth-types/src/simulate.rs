@@ -12,7 +12,7 @@ use alloy_network::{NetworkTransactionBuilder, TransactionBuilder};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimCallResult, SimulateError, SimulatedBlock},
     state::StateOverride,
-    BlockOverrides, BlockTransactionsKind,
+    BlockId, BlockOverrides, BlockTransactionsKind,
 };
 use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_evm::{
@@ -23,7 +23,7 @@ use reth_primitives_traits::{
     BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock, SealedHeader,
 };
 use reth_rpc_convert::{RpcBlock, RpcConvert, RpcTxReq};
-use reth_rpc_server_types::result::rpc_err;
+use reth_rpc_server_types::result::{block_id_to_str, rpc_err};
 use reth_storage_api::{noop::NoopProvider, StateProvider};
 use revm::{
     context::Block,
@@ -60,6 +60,12 @@ pub enum EthSimulateError {
     /// Max gas limit for entire operation exceeded.
     #[error("Client adjustable limit reached")]
     GasLimitReached,
+    /// Base block for the simulation was not found.
+    #[error("block not found: {}", block_id_to_str(*block))]
+    BlockNotFound {
+        /// The block id that was requested.
+        block: BlockId,
+    },
     /// Block number in sequence did not increase.
     #[error("block numbers must be in order: {got} <= {parent}")]
     BlockNumberInvalid {
@@ -135,7 +141,7 @@ impl EthSimulateError {
             Self::MaxInitCodeSizeExceeded => -38025,
             Self::TooManyBlocks | Self::GasLimitReached => -38026,
             Self::MovePrecompileToSelf(_) => -38022,
-            Self::NotAPrecompile(_) => -32000,
+            Self::BlockNotFound { .. } | Self::NotAPrecompile(_) => -32000,
         }
     }
 }
@@ -590,6 +596,14 @@ mod tests {
 
         assert_eq!(err.code(), INTERNAL_ERROR_CODE);
         assert_eq!(err.message(), "nonce has max value");
+    }
+
+    #[test]
+    fn block_not_found_error_uses_simulate_code() {
+        let err = EthSimulateError::BlockNotFound { block: 100000.into() }.to_rpc_error();
+
+        assert_eq!(err.code(), -32000);
+        assert_eq!(err.message(), "block not found: 0x186a0");
     }
 
     fn parent_at(number: u64, timestamp: u64) -> SealedHeader<Header> {
