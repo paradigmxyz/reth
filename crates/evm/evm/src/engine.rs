@@ -108,6 +108,19 @@ pub trait ConfigureEvm2Prewarm: ConfigureEvm {
     where
         DB: StateProvider + Send + 'static;
 
+    /// Returns the evm2 spec id for a prewarm environment.
+    fn evm2_prewarm_spec(&self, env: &EvmEnvFor<Self>) -> evm2::SpecId;
+
+    /// Creates a prewarm evm over the provided state with the provided precompile provider.
+    fn evm2_prewarm_evm_with_precompiles<DB>(
+        &self,
+        state_provider: DB,
+        env: EvmEnvFor<Self>,
+        precompiles: Box<dyn evm2::precompile::PrecompileProvider<evm2::BaseEvmTypes>>,
+    ) -> Self::PrewarmEvm<DB>
+    where
+        DB: StateProvider + Send + 'static;
+
     /// Executes a transaction for prewarming and returns its detached state changes.
     fn evm2_prewarm_tx<DB>(
         &self,

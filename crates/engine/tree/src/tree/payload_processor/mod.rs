@@ -19,7 +19,7 @@ use rayon::prelude::*;
 use reth_evm::{
     execute::{ExecutableTxFor, ExecutableTxParts, WithTxEnv},
     ConfigureEvm, ConfigureEvm2Prewarm, ConvertTx, EvmEnvFor, ExecutableTxIterator,
-    ExecutableTxTuple, SpecFor, TxEnvFor,
+    ExecutableTxTuple, TxEnvFor,
 };
 use reth_execution_types::Evm2BlockState;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
@@ -117,11 +117,9 @@ where
     /// Determines how to configure the evm for execution.
     evm_config: Evm,
     /// Whether precompile cache should be disabled.
-    #[cfg(any())]
     precompile_cache_disabled: bool,
     /// Precompile cache map.
-    #[cfg(any())]
-    precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+    precompile_cache_map: PrecompileCacheMap<evm2::SpecId>,
     /// A preserved `SparseStateTrie`, kept around as a cache of already revealed trie nodes and to
     /// re-use allocated memory. Stored with the block hash it was computed for to enable trie
     /// preservation across sequential payload validations.
@@ -184,7 +182,7 @@ where
         executor: Runtime,
         _evm_config: Evm,
         config: &TreeConfig,
-        _precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+        _precompile_cache_map: PrecompileCacheMap<evm2::SpecId>,
     ) -> Self {
         Self {
             executor,
@@ -194,9 +192,7 @@ where
             disable_transaction_prewarming: config.disable_prewarming(),
             evm_config: _evm_config,
             disable_state_cache: config.disable_state_cache(),
-            #[cfg(any())]
             precompile_cache_disabled: config.precompile_cache_disabled(),
-            #[cfg(any())]
             precompile_cache_map: _precompile_cache_map,
             sparse_state_trie: SharedPreservedSparseTrie::default(),
             sparse_trie_max_hot_slots: config.sparse_trie_max_hot_slots(),
@@ -605,9 +601,7 @@ where
             cache_state_metrics: self.cache_state_metrics.clone(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::clone(&executed_tx_index),
-            #[cfg(any())]
             precompile_cache_disabled: self.precompile_cache_disabled,
-            #[cfg(any())]
             precompile_cache_map: self.precompile_cache_map.clone(),
             disable_bal_parallel_state_root: self.disable_bal_parallel_state_root,
             disable_bal_batch_io: self.disable_bal_batch_io,

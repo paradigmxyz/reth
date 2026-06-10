@@ -13,7 +13,8 @@
 
 use super::bal_prewarm_pool::BalPrewarmPool;
 use crate::tree::{
-    payload_processor::multiproof::StateRootMessage, precompile_cache::PrecompileCacheMap,
+    payload_processor::multiproof::StateRootMessage,
+    precompile_cache::{CachedPrecompileProvider, PrecompileCacheMap},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
     PayloadExecutionCache, SavedCache, StateProviderBuilder,
 };
@@ -565,11 +566,9 @@ where
     /// been executed.
     pub executed_tx_index: Arc<AtomicUsize>,
     /// Whether the precompile cache is disabled.
-    #[cfg(any())]
     pub precompile_cache_disabled: bool,
     /// The precompile cache map.
-    #[cfg(any())]
-    pub precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+    pub precompile_cache_map: PrecompileCacheMap<evm2::SpecId>,
     /// Whether to disable BAL-driven parallel state root computation.
     /// Only valid when BAL parallel execution is also disabled.
     pub disable_bal_parallel_state_root: bool,
@@ -609,7 +608,21 @@ where
             state_provider = Box::new(CachedStateProvider::new_prewarm(state_provider, caches));
         }
 
-        Some(self.evm_config.evm2_prewarm_evm(state_provider, self.env.evm_env.clone()))
+        let env = self.env.evm_env.clone();
+        let spec = self.evm_config.evm2_prewarm_spec(&env);
+        let precompiles: Box<dyn evm2::precompile::PrecompileProvider<evm2::BaseEvmTypes>> =
+            if self.precompile_cache_disabled {
+                Box::new(evm2::Precompiles::base(spec))
+            } else {
+                Box::new(CachedPrecompileProvider::new(
+                    evm2::Precompiles::base(spec),
+                    self.precompile_cache_map.clone(),
+                    spec,
+                    None,
+                ))
+            };
+
+        Some(self.evm_config.evm2_prewarm_evm_with_precompiles(state_provider, env, precompiles))
     }
 
     /// Returns `true` if prewarming should stop.

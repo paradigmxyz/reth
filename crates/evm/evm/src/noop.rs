@@ -136,6 +136,22 @@ where
         self.inner().evm2_prewarm_evm(state_provider, env)
     }
 
+    fn evm2_prewarm_spec(&self, env: &EvmEnvFor<Self>) -> evm2::SpecId {
+        self.inner().evm2_prewarm_spec(env)
+    }
+
+    fn evm2_prewarm_evm_with_precompiles<DB>(
+        &self,
+        state_provider: DB,
+        env: EvmEnvFor<Self>,
+        precompiles: Box<dyn evm2::precompile::PrecompileProvider<evm2::BaseEvmTypes>>,
+    ) -> Self::PrewarmEvm<DB>
+    where
+        DB: StateProvider + Send + 'static,
+    {
+        self.inner().evm2_prewarm_evm_with_precompiles(state_provider, env, precompiles)
+    }
+
     fn evm2_prewarm_tx<DB>(
         &self,
         evm: &mut Self::PrewarmEvm<DB>,
