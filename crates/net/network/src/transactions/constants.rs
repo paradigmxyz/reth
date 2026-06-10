@@ -62,6 +62,15 @@ pub mod tx_manager {
     /// tasks. When the budget is exhausted, new events are dropped (see metric
     /// `total_dropped_tx_events_at_full_capacity`).
     pub const DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES: usize = 1024 * 1024 * 1024;
+
+    /// Minimum number of transactions in a message for signature recovery to be dispatched to the
+    /// rayon thread pool, also used as the minimum work unit size when the batch is split across
+    /// the pool.
+    ///
+    /// Recovering a few signatures inline is cheaper than the cost of dispatching the batch to
+    /// the pool and blocking on the result, and per-item work units make rayon's join overhead
+    /// cost more CPU than the signature recovery itself.
+    pub const MIN_TX_COUNT_FOR_PARALLEL_RECOVERY: usize = 16;
 }
 
 /// Constants used by [`TransactionFetcher`](super::TransactionFetcher).
