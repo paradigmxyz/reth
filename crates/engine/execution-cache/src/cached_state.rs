@@ -3,6 +3,7 @@ use alloy_primitives::{
     map::{DefaultHashBuilder, FbBuildHasher},
     Address, StorageKey, StorageValue, B256,
 };
+use crossbeam_utils::CachePadded;
 use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
 use metrics::{Counter, Gauge, Histogram};
 use parking_lot::Once;
@@ -338,17 +339,17 @@ impl CachedStateMetrics {
 #[derive(Debug, Default)]
 pub struct CacheStats {
     /// Account cache hits
-    account_hits: AtomicUsize,
+    account_hits: CachePadded<AtomicUsize>,
     /// Account cache misses
-    account_misses: AtomicUsize,
+    account_misses: CachePadded<AtomicUsize>,
     /// Storage cache hits
-    storage_hits: AtomicUsize,
+    storage_hits: CachePadded<AtomicUsize>,
     /// Storage cache misses
-    storage_misses: AtomicUsize,
+    storage_misses: CachePadded<AtomicUsize>,
     /// Code cache hits
-    code_hits: AtomicUsize,
+    code_hits: CachePadded<AtomicUsize>,
     /// Code cache misses
-    code_misses: AtomicUsize,
+    code_misses: CachePadded<AtomicUsize>,
 }
 
 impl CacheStats {
@@ -429,15 +430,19 @@ impl CacheStats {
 /// Collisions (evicting a different key) don't change size since they replace an existing entry.
 #[derive(Debug)]
 pub struct CacheStatsHandler {
-    collisions: AtomicU64,
-    size: AtomicUsize,
+    collisions: CachePadded<AtomicU64>,
+    size: CachePadded<AtomicUsize>,
     capacity: usize,
 }
 
 impl CacheStatsHandler {
     /// Creates a new stats handler with all counters initialized to zero.
     pub const fn new(capacity: usize) -> Self {
-        Self { collisions: AtomicU64::new(0), size: AtomicUsize::new(0), capacity }
+        Self {
+            collisions: CachePadded::new(AtomicU64::new(0)),
+            size: CachePadded::new(AtomicUsize::new(0)),
+            capacity,
+        }
     }
 
     /// Returns the number of cache collisions.

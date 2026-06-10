@@ -68,6 +68,7 @@ tracing.workspace = true
 derive_more.workspace = true
 parking_lot.workspace = true
 crossbeam-channel.workspace = true
+crossbeam-utils.workspace = true
 
 # optional deps for test-utils
 reth-prune-types = { workspace = true, optional = true }
@@ -99,6 +100,7 @@ reth-e2e-test-utils.workspace = true
 revm-database-interface.workspace = true
 
 assert_matches.workspace = true
+criterion.workspace = true
 eyre.workspace = true
 serde_json.workspace = true
 proptest.workspace = true
@@ -145,3 +147,7 @@ trie-debug = [
 [[test]]
 name = "e2e_testsuite"
 path = "tests/e2e-testsuite/main.rs"
+
+[[bench]]
+name = "stats_false_sharing"
+harness = false

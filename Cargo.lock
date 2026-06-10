@@ -8270,7 +8270,9 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-engine",
  "assert_matches",
+ "codspeed-criterion-compat",
  "crossbeam-channel",
+ "crossbeam-utils",
  "derive_more",
  "eyre",
  "futures",
@@ -8722,6 +8724,7 @@ name = "reth-execution-cache"
 version = "2.3.0"
 dependencies = [
  "alloy-primitives",
+ "crossbeam-utils",
  "fixed-cache",
  "metrics",
  "parking_lot",

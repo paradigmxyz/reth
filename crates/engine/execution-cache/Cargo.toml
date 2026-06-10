@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 alloy-primitives.workspace = true
+crossbeam-utils.workspace = true
 fixed-cache = { workspace = true, features = ["stats"] }
 metrics.workspace = true
 parking_lot.workspace = true
