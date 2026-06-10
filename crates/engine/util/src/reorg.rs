@@ -242,7 +242,7 @@ where
 }
 
 #[cfg(any())]
-mod revm_reorg_head {
+mod legacy_reorg_head {
     use super::*;
     use alloy_consensus::Transaction;
     use reth_chainspec::EthChainSpec;

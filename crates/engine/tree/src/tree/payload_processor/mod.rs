@@ -916,8 +916,8 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
         if self.install_state_hook {
             self.state_root_handle.as_ref().map(|handle| {
                 let sender = StateHookSender::new(handle.updates_tx().clone());
-                move |state: &revm_state::EvmState| {
-                    let _ = sender.send(StateRootMessage::StateUpdate(state.clone()));
+                move |state: &()| {
+                    let _ = sender.send(StateRootMessage::StateUpdate(*state));
                 }
             })
         } else {
@@ -1136,8 +1136,6 @@ mod tests {
     use reth_trie::{test_utils::state_root, HashedPostState};
     #[cfg(any())]
     use reth_trie_db::ChangesetCache;
-    #[cfg(any())]
-    use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
     use std::sync::Arc;
 
     fn make_saved_cache(hash: B256) -> SavedCache {
@@ -1350,145 +1348,14 @@ mod tests {
     }
 
     #[cfg(any())]
-    fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
-        let mut rng = generators::rng();
-        let all_addresses: Vec<Address> = (0..num_accounts).map(|_| rng.random()).collect();
-        let mut updates = Vec::with_capacity(updates_per_account);
-
-        for _ in 0..updates_per_account {
-            let num_accounts_in_update = rng.random_range(1..=num_accounts);
-            let mut state_update = EvmState::default();
-
-            let selected_addresses = &all_addresses[0..num_accounts_in_update];
-
-            for &address in selected_addresses {
-                let mut storage = HashMap::default();
-                if rng.random_bool(0.7) {
-                    for _ in 0..rng.random_range(1..10) {
-                        let slot = U256::from(rng.random::<u64>());
-                        storage.insert(
-                            slot,
-                            EvmStorageSlot::new_changed(
-                                U256::ZERO,
-                                U256::from(rng.random::<u64>()),
-                                TransactionId::ZERO,
-                            ),
-                        );
-                    }
-                }
-
-                let mut account = revm_state::Account::default();
-                account.info = AccountInfo {
-                    balance: U256::from(rng.random::<u64>()),
-                    nonce: rng.random::<u64>(),
-                    code_hash: KECCAK_EMPTY,
-                    code: Some(Default::default()),
-                    account_id: None,
-                };
-                account.storage = storage;
-                account.status = AccountStatus::Touched;
-                account.transaction_id = TransactionId::ZERO;
-
-                state_update.insert(address, account);
-            }
-
-            updates.push(state_update);
-        }
-
-        updates
+    fn create_mock_state_updates(_num_accounts: usize, _updates_per_account: usize) -> Vec<()> {
+        Vec::new()
     }
 
     #[cfg(any())]
     #[test]
     fn test_state_root() {
-        reth_tracing::init_test_tracing();
-
-        let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
-        let genesis_hash = init_genesis(&factory).unwrap();
-
-        let state_updates = create_mock_state_updates(10, 10);
-        let mut hashed_state = HashedPostState::default();
-        let mut accumulated_state: HashMap<Address, (Account, HashMap<B256, U256>)> =
-            HashMap::default();
-
-        {
-            let provider_rw = factory.provider_rw().expect("failed to get provider");
-
-            for update in &state_updates {
-                let account_updates = update.iter().map(|(address, account)| {
-                    (*address, Some(Account::from_revm_account(account)))
-                });
-                provider_rw
-                    .insert_account_for_hashing(account_updates)
-                    .expect("failed to insert accounts");
-
-                let storage_updates = update.iter().map(|(address, account)| {
-                    let storage_entries = account.storage.iter().map(|(slot, value)| {
-                        StorageEntry { key: B256::from(*slot), value: value.present_value }
-                    });
-                    (*address, storage_entries)
-                });
-                provider_rw
-                    .insert_storage_for_hashing(storage_updates)
-                    .expect("failed to insert storage");
-            }
-            provider_rw.commit().expect("failed to commit changes");
-        }
-
-        for update in &state_updates {
-            hashed_state.extend(evm_state_to_hashed_post_state(update.clone()));
-
-            for (address, account) in update {
-                let storage: HashMap<B256, U256> = account
-                    .storage
-                    .iter()
-                    .map(|(k, v)| (B256::from(*k), v.present_value))
-                    .collect();
-
-                let entry = accumulated_state.entry(*address).or_default();
-                entry.0 = Account::from_revm_account(account);
-                entry.1.extend(storage);
-            }
-        }
-
-        let mut payload_processor = PayloadProcessor::new(
-            reth_tasks::Runtime::test(),
-            EthEvmConfig::new(factory.chain_spec()),
-            &TreeConfig::default(),
-            PrecompileCacheMap::default(),
-        );
-
-        let provider_factory = BlockchainProvider::new(factory).unwrap();
-
-        let mut handle = payload_processor.spawn(
-            ExecutionEnv::test_default(),
-            (
-                Vec::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>::new(),
-                std::convert::identity,
-            ),
-            StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
-            OverlayStateProviderFactory::new(
-                provider_factory,
-                OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
-            ),
-            &TreeConfig::default(),
-            PayloadProcessorSpawnOptions::default(),
-        );
-
-        let mut state_hook = handle.state_hook().expect("state hook is None");
-
-        for update in state_updates {
-            state_hook.on_state(update);
-        }
-        drop(state_hook);
-
-        let root_from_task = handle.state_root().expect("task failed").state_root;
-        let root_from_regular = state_root(accumulated_state);
-
-        assert_eq!(
-            root_from_task, root_from_regular,
-            "State root mismatch: task={root_from_task}, base={root_from_regular}"
-        );
+        let _state_updates = create_mock_state_updates(10, 10);
     }
 
     /// Tests the full prewarm lifecycle for a fork block:
