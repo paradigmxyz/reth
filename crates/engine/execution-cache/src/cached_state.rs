@@ -1220,7 +1220,7 @@ mod tests {
             })
             .unwrap();
         accumulator.storage_wipe(address).unwrap();
-        accumulator.freeze()
+        accumulator
     }
 
     fn account_info_ref(info: &AccountInfo) -> AccountInfoRef<'_> {

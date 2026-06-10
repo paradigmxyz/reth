@@ -353,7 +353,7 @@ where
 
             let output = self.metrics.metered_one(&block, |input| {
                 let state_provider = LatestStateProviderRef::new(provider);
-                let overlay_state = evm2_state.clone().freeze();
+                let overlay_state = evm2_state.clone();
                 let state_provider = Evm2OverlayStateProvider::new(&state_provider, &overlay_state);
                 self.evm_config
                     .execute_evm2_block_with_state_provider_ref(&state_provider, input)
@@ -500,7 +500,6 @@ where
         provider.write_state(&state, OriginalValuesKnown::Yes, StateWriteConfig::default())?;
 
         if provider.cached_storage_settings().use_hashed_state() {
-            let evm2_state = evm2_state.freeze();
             let hashed_state =
                 evm2_block_state_hashed_post_state_sorted::<KeccakKeyHasher>(&evm2_state);
             provider.write_hashed_state(&hashed_state)?;

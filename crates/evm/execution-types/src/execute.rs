@@ -7,7 +7,7 @@ use alloy_primitives::{
 use core::ops::Deref;
 use evm2::{
     bytecode::Bytecode as Evm2Bytecode,
-    evm::{AccountInfo, FrozenBlockState, StateChangeSink, StateChangeSource, Tracked},
+    evm::{AccountInfo, BlockStateAccumulator, StateChangeSink, StateChangeSource, Tracked},
 };
 use reth_primitives_traits::{Account, Bytecode};
 
@@ -59,7 +59,7 @@ pub struct BlockExecutionOutput<T> {
 
 impl<T> BlockExecutionOutput<T> {
     /// Creates a new block execution output and indexes the changed state for hot overlay lookups.
-    pub fn new(result: BlockExecutionResult<T>, state: FrozenBlockState) -> Self {
+    pub fn new(result: BlockExecutionResult<T>, state: BlockStateAccumulator) -> Self {
         Self { result, state: state.into() }
     }
 
@@ -114,7 +114,7 @@ impl<T> Default for BlockExecutionOutput<T> {
 /// Indexed evm2 block state used by in-memory overlay providers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IndexedBlockState {
-    inner: FrozenBlockState,
+    inner: BlockStateAccumulator,
     accounts: AddressMap<Tracked<Option<AccountInfo>>>,
     storage_wipes: AddressSet,
     storage: AddressMap<U256Map<U256>>,
@@ -122,13 +122,13 @@ pub struct IndexedBlockState {
 }
 
 impl IndexedBlockState {
-    /// Returns the underlying evm2 frozen block state.
-    pub const fn inner(&self) -> &FrozenBlockState {
+    /// Returns the underlying evm2 block state.
+    pub const fn inner(&self) -> &BlockStateAccumulator {
         &self.inner
     }
 
-    /// Consumes this wrapper and returns the underlying evm2 frozen block state.
-    pub fn into_inner(self) -> FrozenBlockState {
+    /// Consumes this wrapper and returns the underlying evm2 block state.
+    pub fn into_inner(self) -> BlockStateAccumulator {
         self.inner
     }
 
@@ -163,8 +163,8 @@ impl IndexedBlockState {
     }
 }
 
-impl From<FrozenBlockState> for IndexedBlockState {
-    fn from(inner: FrozenBlockState) -> Self {
+impl From<BlockStateAccumulator> for IndexedBlockState {
+    fn from(inner: BlockStateAccumulator) -> Self {
         let accounts =
             inner.accounts().map(|(address, account)| (address, account.clone())).collect();
         let storage_wipes = inner.storage_wipes().collect();
@@ -181,12 +181,12 @@ impl From<FrozenBlockState> for IndexedBlockState {
 
 impl Default for IndexedBlockState {
     fn default() -> Self {
-        FrozenBlockState::default().into()
+        BlockStateAccumulator::default().into()
     }
 }
 
 impl Deref for IndexedBlockState {
-    type Target = FrozenBlockState;
+    type Target = BlockStateAccumulator;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
