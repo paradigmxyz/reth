@@ -124,6 +124,10 @@ def docs_without_version(docs_config: str, version: str) -> str:
     return pattern.sub(r"\1v<workspace-version>\2", docs_config)
 
 
+def docs_points_to_version(docs_config: str, version: str) -> bool:
+    return re.search(rf"text:\s*['\"]v{re.escape(version)}['\"]", docs_config) is not None
+
+
 def is_workspace_version_bump(base: str, head: str, changes: list[dict[str, str]]) -> bool:
     allowed_files = {"Cargo.toml", "Cargo.lock", "docs/vocs/vocs.config.ts"}
     files = [change["path"] for change in changes]
@@ -167,7 +171,7 @@ def is_workspace_version_bump(base: str, head: str, changes: list[dict[str, str]
 def is_docs_path(path: str) -> bool:
     return (
         path.startswith("docs/")
-        or re.search(r"\.(md|mdx|txt|png|jpg|jpeg|gif|webp|svg)$", path, re.I) is not None
+        or re.search(r"\.(md|mdx|png|jpg|jpeg|gif|webp|svg)$", path, re.I) is not None
     )
 
 
@@ -195,11 +199,11 @@ def full_outputs(reason: str) -> dict[str, str]:
         "workspace_version_bump": FALSE,
         "run_heavy_rust": TRUE,
         "run_dependency_checks": TRUE,
-        "run_version_sync_check": FALSE,
+        "run_version_sync_check": TRUE,
         "run_docs_site": TRUE,
         "run_cli_docs": TRUE,
         "run_grafana": TRUE,
-        "lint_allowed_skips": "version-sync",
+        "lint_allowed_skips": "",
         "unit_allowed_skips": "",
         "integration_allowed_skips": "",
         "e2e_allowed_skips": "",
@@ -292,7 +296,7 @@ def check_version_sync() -> int:
         raise RuntimeError("workspace.package.version is missing from Cargo.toml")
 
     docs_config = Path("docs/vocs/vocs.config.ts").read_text(encoding="utf-8")
-    if f"text: 'v{version}'" not in docs_config:
+    if not docs_points_to_version(docs_config, version):
         raise RuntimeError(f"docs/vocs/vocs.config.ts does not point at v{version}")
 
     metadata = json.loads(command("cargo", "metadata", "--locked", "--format-version=1"))
@@ -335,6 +339,14 @@ def self_test() -> int:
         raise AssertionError("GITHUB_REF_NAME=main should force full CI")
     if is_main_branch_ref("refs/pull/1/merge", "1/merge"):
         raise AssertionError("pull request refs should not be treated as main")
+    if full_outputs("main-branch")["run_version_sync_check"] != TRUE:
+        raise AssertionError("full CI paths should include version sync")
+    if full_outputs("main-branch")["lint_allowed_skips"]:
+        raise AssertionError("full CI paths should not allow skipped lint jobs")
+    if not docs_points_to_version("text: 'v1.2.3'", "1.2.3"):
+        raise AssertionError("single-quoted docs version should be accepted")
+    if not docs_points_to_version('text: "v1.2.3"', "1.2.3"):
+        raise AssertionError("double-quoted docs version should be accepted")
 
     expect_classification(
         ["Cargo.toml", "Cargo.lock", "docs/vocs/vocs.config.ts"],
@@ -354,6 +366,15 @@ def self_test() -> int:
             "reason": "behavioral-change",
             "run_heavy_rust": TRUE,
             "run_dependency_checks": TRUE,
+            "run_cli_docs": TRUE,
+        },
+    )
+    expect_classification(
+        ["crates/era-downloader/tests/res/era1/checksums.txt"],
+        False,
+        {
+            "reason": "behavioral-change",
+            "run_heavy_rust": TRUE,
             "run_cli_docs": TRUE,
         },
     )
