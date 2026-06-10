@@ -34,7 +34,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - id: classify
-        run: python3 .github/scripts/ci-classify.py
+        run: python3 .github/scripts/ci-rules.py classify
 
   test:
     name: test / ${{ matrix.type }}

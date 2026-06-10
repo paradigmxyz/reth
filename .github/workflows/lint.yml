@@ -21,8 +21,7 @@ jobs:
     outputs:
       run_heavy_rust: ${{ steps.classify.outputs.run_heavy_rust }}
       run_dependency_checks: ${{ steps.classify.outputs.run_dependency_checks }}
-      run_release_version_check: ${{ steps.classify.outputs.run_release_version_check }}
-      run_cargo_validation: ${{ steps.classify.outputs.run_cargo_validation }}
+      run_version_sync_check: ${{ steps.classify.outputs.run_version_sync_check }}
       run_cli_docs: ${{ steps.classify.outputs.run_cli_docs }}
       run_grafana: ${{ steps.classify.outputs.run_grafana }}
       lint_allowed_skips: ${{ steps.classify.outputs.lint_allowed_skips }}
@@ -32,7 +31,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - id: classify
-        run: python3 .github/scripts/ci-classify.py
+        run: python3 .github/scripts/ci-rules.py classify
 
   clippy-binaries:
     name: clippy binaries / ${{ matrix.type }}
@@ -375,10 +374,10 @@ jobs:
       contents: read
     uses: tempoxyz/ci/.github/workflows/deny.yml@main
 
-  release-version:
-    name: release version
+  version-sync:
+    name: version sync
     needs: changes
-    if: needs.changes.outputs.run_release_version_check == 'true'
+    if: needs.changes.outputs.run_version_sync_check == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -388,8 +387,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-      - name: Validate release version bump
-        run: python3 .github/scripts/check-release-version.py
+      - name: Validate version sync bump
+        run: python3 .github/scripts/ci-rules.py check-version-sync
 
   lint-success:
     name: lint success
@@ -410,7 +409,7 @@ jobs:
       - no-test-deps
       - feature-propagation
       - deny
-      - release-version
+      - version-sync
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed

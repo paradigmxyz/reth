@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 import json
 import os
 import re
@@ -11,6 +12,10 @@ from pathlib import Path
 
 TRUE = "true"
 FALSE = "false"
+
+
+def command(*args: str) -> str:
+    return subprocess.check_output(args, text=True)
 
 
 def git(*args: str) -> str:
@@ -108,13 +113,13 @@ def docs_without_version(docs_config: str, version: str) -> str:
     return pattern.sub(r"\1v<workspace-version>\2", docs_config)
 
 
-def is_release_version_only(base: str, head: str, changes: list[dict[str, str]]) -> bool:
-    release_files = {"Cargo.toml", "Cargo.lock", "docs/vocs/vocs.config.ts"}
+def is_workspace_version_bump(base: str, head: str, changes: list[dict[str, str]]) -> bool:
+    allowed_files = {"Cargo.toml", "Cargo.lock", "docs/vocs/vocs.config.ts"}
     files = [change["path"] for change in changes]
 
     if "Cargo.toml" not in files or "Cargo.lock" not in files:
         return False
-    if any(file not in release_files for file in files):
+    if any(file not in allowed_files for file in files):
         return False
     if any(change["status"] != "M" for change in changes):
         return False
@@ -172,15 +177,14 @@ def is_cargo_path(path: str) -> bool:
 def full_outputs(reason: str) -> dict[str, str]:
     return {
         "reason": reason,
-        "version_only": FALSE,
+        "workspace_version_bump": FALSE,
         "run_heavy_rust": TRUE,
         "run_dependency_checks": TRUE,
-        "run_release_version_check": FALSE,
-        "run_cargo_validation": TRUE,
+        "run_version_sync_check": FALSE,
         "run_docs_site": TRUE,
         "run_cli_docs": TRUE,
         "run_grafana": TRUE,
-        "lint_allowed_skips": "release-version",
+        "lint_allowed_skips": "version-sync",
         "unit_allowed_skips": "",
         "integration_allowed_skips": "",
         "e2e_allowed_skips": "",
@@ -188,7 +192,7 @@ def full_outputs(reason: str) -> dict[str, str]:
     }
 
 
-def main() -> int:
+def classify() -> int:
     base, head, force_full = resolve_refs()
     if force_full:
         set_outputs(full_outputs("non-pr-event"))
@@ -199,19 +203,18 @@ def main() -> int:
 
     changes = parse_changes(base, head)
     files = [change["path"] for change in changes]
-    version_only = is_release_version_only(base, head, changes)
+    workspace_bump = is_workspace_version_bump(base, head, changes)
     non_behavioral_only = (
-        version_only
+        workspace_bump
         or not files
         or all(is_docs_path(file) or is_grafana_path(file) or is_ci_path(file) for file in files)
     )
     has_cargo_change = any(is_cargo_path(file) for file in files)
-    dependency_checks = has_cargo_change and not version_only
+    dependency_checks = has_cargo_change and not workspace_bump
     run_heavy_rust = not non_behavioral_only
     run_docs_site = any(file.startswith("docs/vocs/") for file in files)
     run_grafana = any(is_grafana_path(file) for file in files)
-    run_release_version_check = version_only
-    run_cargo_validation = has_cargo_change or version_only
+    run_version_sync_check = workspace_bump
     run_cli_docs = run_heavy_rust
 
     lint_allowed_skips = []
@@ -221,14 +224,14 @@ def main() -> int:
         )
     if not dependency_checks:
         lint_allowed_skips.extend(["deny", "no-test-deps", "feature-propagation"])
-    if not run_release_version_check:
-        lint_allowed_skips.append("release-version")
+    if not run_version_sync_check:
+        lint_allowed_skips.append("version-sync")
     if not run_grafana:
         lint_allowed_skips.append("grafana")
 
     reason = "no-changes"
-    if version_only:
-        reason = "version-only"
+    if workspace_bump:
+        reason = "workspace-version-bump"
     elif run_heavy_rust:
         reason = "behavioral-change"
     elif files:
@@ -237,11 +240,10 @@ def main() -> int:
     set_outputs(
         {
             "reason": reason,
-            "version_only": as_bool(version_only),
+            "workspace_version_bump": as_bool(workspace_bump),
             "run_heavy_rust": as_bool(run_heavy_rust),
             "run_dependency_checks": as_bool(dependency_checks),
-            "run_release_version_check": as_bool(run_release_version_check),
-            "run_cargo_validation": as_bool(run_cargo_validation),
+            "run_version_sync_check": as_bool(run_version_sync_check),
             "run_docs_site": as_bool(run_docs_site),
             "run_cli_docs": as_bool(run_cli_docs),
             "run_grafana": as_bool(run_grafana),
@@ -253,6 +255,58 @@ def main() -> int:
         }
     )
     return 0
+
+
+def manifest_uses_workspace_version(path: str) -> bool:
+    manifest = Path(path).read_text(encoding="utf-8")
+    return any(line.strip() == "version.workspace = true" for line in manifest.splitlines())
+
+
+def check_version_sync() -> int:
+    version = workspace_version(Path("Cargo.toml").read_text(encoding="utf-8"))
+    if not version:
+        raise RuntimeError("workspace.package.version is missing from Cargo.toml")
+
+    docs_config = Path("docs/vocs/vocs.config.ts").read_text(encoding="utf-8")
+    if f"text: 'v{version}'" not in docs_config:
+        raise RuntimeError(f"docs/vocs/vocs.config.ts does not point at v{version}")
+
+    metadata = json.loads(command("cargo", "metadata", "--locked", "--format-version=1"))
+    workspace_members = set(metadata["workspace_members"])
+    packages_by_id = {package["id"]: package for package in metadata["packages"]}
+    mismatches = []
+
+    for package_id in workspace_members:
+        package = packages_by_id.get(package_id)
+        if not package:
+            continue
+        manifest_path = package["manifest_path"]
+        if manifest_path.endswith("/reth/Cargo.toml") or manifest_uses_workspace_version(manifest_path):
+            if package["version"] != version:
+                mismatches.append(f"{package['name']}: {package['version']}")
+
+    if mismatches:
+        raise RuntimeError(
+            f"workspace package versions do not match {version}: {', '.join(mismatches)}"
+        )
+
+    print(f"workspace version {version} is consistent")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Evaluate CI rules for PR changes")
+    subcommands = parser.add_subparsers(dest="command", required=True)
+    subcommands.add_parser("classify", help="classify a PR diff and emit GitHub Actions outputs")
+    subcommands.add_parser("check-version-sync", help="validate workspace version metadata")
+    args = parser.parse_args()
+
+    if args.command == "classify":
+        return classify()
+    if args.command == "check-version-sync":
+        return check_version_sync()
+
+    raise RuntimeError(f"unknown command: {args.command}")
 
 
 if __name__ == "__main__":
