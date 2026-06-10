@@ -144,28 +144,40 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     /// Returns `Ok` with `Some(AccountInfo)` if the account exists,
     /// `None` if it doesn't, or an error if encountered.
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        Ok(self.basic_account(&address)?.map(Into::into))
+        match self.basic_account(&address)? {
+            Some(account) => Ok(Some(account.into())),
+            None => Ok(None),
+        }
     }
 
     /// Retrieves the bytecode associated with a given code hash.
     ///
     /// Returns `Ok` with the bytecode if found, or the default bytecode otherwise.
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        Ok(self.bytecode_by_hash(&code_hash)?.unwrap_or_default().0)
+        match self.bytecode_by_hash(&code_hash)? {
+            Some(bytecode) => Ok(bytecode.0),
+            None => Ok(Bytecode::default()),
+        }
     }
 
     /// Retrieves the storage value at a specific index for a given address.
     ///
     /// Returns `Ok` with the storage value, or the default value if not found.
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        Ok(self.0.storage(address, B256::new(index.to_be_bytes()))?.unwrap_or_default())
+        let key = B256::new(index.to_be_bytes());
+        match self.0.storage(address, key)? {
+            Some(value) => Ok(value),
+            None => Ok(U256::ZERO),
+        }
     }
 
     /// Retrieves the block hash for a given block number.
     ///
     /// Returns `Ok` with the block hash if found, or the default hash otherwise.
     fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
-        // Get the block hash or default hash with an attempt to convert U256 block number to u64
-        Ok(self.0.block_hash(number)?.unwrap_or_default())
+        match self.0.block_hash(number)? {
+            Some(hash) => Ok(hash),
+            None => Ok(B256::ZERO),
+        }
     }
 }
