@@ -91,7 +91,10 @@ impl BalPrewarmPool {
     }
 
     fn send_warm(&self, target: PrewarmTarget) {
-        let i = self.next.fetch_add(1, Ordering::Relaxed) % self.workers.len();
+        let next = self.next.fetch_add(1, Ordering::Relaxed);
+        let len = self.workers.len();
+        debug_assert!(len > 0, "BAL prewarm pool must have at least one worker");
+        let i = if len.is_power_of_two() { next & (len - 1) } else { next % len };
         let _ = self.workers[i].send(PrewarmMsg::Warm(target));
     }
 }
