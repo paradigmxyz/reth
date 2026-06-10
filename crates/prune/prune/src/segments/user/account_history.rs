@@ -288,12 +288,11 @@ impl AccountHistory {
         sorted_accounts.sort_unstable_by_key(|(addr, _)| *addr);
 
         provider.with_rocksdb_batch(|mut batch| {
-            let targets: Vec<_> = sorted_accounts
-                .iter()
-                .map(|(addr, highest)| (*addr, (*highest).min(last_changeset_pruned_block)))
-                .collect();
-
-            let outcomes = batch.prune_account_history_batch(&targets)?;
+            let outcomes = batch.prune_account_history_batch_iter(
+                sorted_accounts
+                    .iter()
+                    .map(|(addr, highest)| (*addr, (*highest).min(last_changeset_pruned_block))),
+            )?;
             deleted_shards = outcomes.deleted;
             updated_shards = outcomes.updated;
 

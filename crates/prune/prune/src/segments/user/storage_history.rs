@@ -292,14 +292,11 @@ impl StorageHistory {
         sorted_storages.sort_unstable_by_key(|((addr, key), _)| (*addr, *key));
 
         provider.with_rocksdb_batch(|mut batch| {
-            let targets: Vec<_> = sorted_storages
-                .iter()
-                .map(|((addr, key), highest)| {
+            let outcomes = batch.prune_storage_history_batch_iter(
+                sorted_storages.iter().map(|((addr, key), highest)| {
                     ((*addr, *key), (*highest).min(last_changeset_pruned_block))
-                })
-                .collect();
-
-            let outcomes = batch.prune_storage_history_batch(&targets)?;
+                }),
+            )?;
             deleted_shards = outcomes.deleted;
             updated_shards = outcomes.updated;
 

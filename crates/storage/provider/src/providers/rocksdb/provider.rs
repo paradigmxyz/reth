@@ -2125,14 +2125,24 @@ impl<'a> RocksDBBatch<'a> {
         &mut self,
         targets: &[(Address, BlockNumber)],
     ) -> ProviderResult<PrunedIndices> {
-        if targets.is_empty() {
+        self.prune_account_history_batch_iter(targets.iter().copied())
+    }
+
+    /// Prunes account history for multiple addresses from a sorted iterator.
+    ///
+    /// `targets` MUST be sorted by address for correctness and optimal performance
+    /// (matches on-disk key order).
+    pub fn prune_account_history_batch_iter<I>(
+        &mut self,
+        targets: I,
+    ) -> ProviderResult<PrunedIndices>
+    where
+        I: IntoIterator<Item = (Address, BlockNumber)>,
+    {
+        let mut targets = targets.into_iter().peekable();
+        if targets.peek().is_none() {
             return Ok(PrunedIndices::default());
         }
-
-        debug_assert!(
-            targets.windows(2).all(|w| w[0].0 <= w[1].0),
-            "prune_account_history_batch: targets must be sorted by address"
-        );
 
         // ShardedKey<Address> layout: [address: 20][block: 8] = 28 bytes
         // The first 20 bytes are the "prefix" that identifies the address
@@ -2141,10 +2151,17 @@ impl<'a> RocksDBBatch<'a> {
         let cf = self.provider.get_cf_handle::<tables::AccountsHistory>()?;
         let mut iter = self.provider.0.raw_iterator_cf(cf);
         let mut outcomes = PrunedIndices::default();
+        let mut previous_address = None;
 
         for (address, to_block) in targets {
+            debug_assert!(
+                previous_address.is_none_or(|previous| previous <= address),
+                "prune_account_history_batch: targets must be sorted by address"
+            );
+            previous_address = Some(address);
+
             // Build the target prefix (first 20 bytes = address)
-            let start_key = ShardedKey::new(*address, 0u64).encode();
+            let start_key = ShardedKey::new(address, 0u64).encode();
             let target_prefix = &start_key[..PREFIX_LEN];
 
             // Check if we need to seek or if the iterator is already positioned correctly.
@@ -2200,12 +2217,12 @@ impl<'a> RocksDBBatch<'a> {
 
             match self.prune_history_shards_inner(
                 shards,
-                *to_block,
+                to_block,
                 |key| key.highest_block_number,
                 |key| key.highest_block_number == u64::MAX,
                 |batch, key| batch.delete::<tables::AccountsHistory>(key),
                 |batch, key, value| batch.put::<tables::AccountsHistory>(key, value),
-                || ShardedKey::new(*address, u64::MAX),
+                || ShardedKey::new(address, u64::MAX),
             )? {
                 PruneShardOutcome::Deleted => outcomes.deleted += 1,
                 PruneShardOutcome::Updated => outcomes.updated += 1,
@@ -2252,14 +2269,25 @@ impl<'a> RocksDBBatch<'a> {
         &mut self,
         targets: &[((Address, B256), BlockNumber)],
     ) -> ProviderResult<PrunedIndices> {
-        if targets.is_empty() {
+        self.prune_storage_history_batch_iter(targets.iter().copied())
+    }
+
+    /// Prunes storage history for multiple (address, `storage_key`) pairs from a sorted
+    /// iterator.
+    ///
+    /// `targets` MUST be sorted by (address, `storage_key`) for correctness and optimal
+    /// performance (matches on-disk key order).
+    pub fn prune_storage_history_batch_iter<I>(
+        &mut self,
+        targets: I,
+    ) -> ProviderResult<PrunedIndices>
+    where
+        I: IntoIterator<Item = ((Address, B256), BlockNumber)>,
+    {
+        let mut targets = targets.into_iter().peekable();
+        if targets.peek().is_none() {
             return Ok(PrunedIndices::default());
         }
-
-        debug_assert!(
-            targets.windows(2).all(|w| w[0].0 <= w[1].0),
-            "prune_storage_history_batch: targets must be sorted by (address, storage_key)"
-        );
 
         // StorageShardedKey layout: [address: 20][storage_key: 32][block: 8] = 60 bytes
         // The first 52 bytes are the "prefix" that identifies (address, storage_key)
@@ -2268,10 +2296,17 @@ impl<'a> RocksDBBatch<'a> {
         let cf = self.provider.get_cf_handle::<tables::StoragesHistory>()?;
         let mut iter = self.provider.0.raw_iterator_cf(cf);
         let mut outcomes = PrunedIndices::default();
+        let mut previous_target = None;
 
         for ((address, storage_key), to_block) in targets {
+            debug_assert!(
+                previous_target.is_none_or(|previous| previous <= (address, storage_key)),
+                "prune_storage_history_batch: targets must be sorted by (address, storage_key)"
+            );
+            previous_target = Some((address, storage_key));
+
             // Build the target prefix (first 52 bytes of encoded key)
-            let start_key = StorageShardedKey::new(*address, *storage_key, 0u64).encode();
+            let start_key = StorageShardedKey::new(address, storage_key, 0u64).encode();
             let target_prefix = &start_key[..PREFIX_LEN];
 
             // Check if we need to seek or if the iterator is already positioned correctly.
@@ -2328,12 +2363,12 @@ impl<'a> RocksDBBatch<'a> {
             // Use existing prune_history_shards_inner logic
             match self.prune_history_shards_inner(
                 shards,
-                *to_block,
+                to_block,
                 |key| key.sharded_key.highest_block_number,
                 |key| key.sharded_key.highest_block_number == u64::MAX,
                 |batch, key| batch.delete::<tables::StoragesHistory>(key),
                 |batch, key, value| batch.put::<tables::StoragesHistory>(key, value),
-                || StorageShardedKey::last(*address, *storage_key),
+                || StorageShardedKey::last(address, storage_key),
             )? {
                 PruneShardOutcome::Deleted => outcomes.deleted += 1,
                 PruneShardOutcome::Updated => outcomes.updated += 1,
