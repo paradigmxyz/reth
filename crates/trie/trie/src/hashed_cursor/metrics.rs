@@ -141,6 +141,7 @@ pub struct InstrumentedHashedCursor<'metrics, C> {
 
 impl<'metrics, C> InstrumentedHashedCursor<'metrics, C> {
     /// Create a new metrics cursor wrapping the given cursor.
+    #[inline]
     pub const fn new(cursor: C, metrics: &'metrics mut HashedCursorMetricsCache) -> Self {
         Self { cursor, metrics }
     }
@@ -152,6 +153,7 @@ where
 {
     type Value = C::Value;
 
+    #[inline]
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         let start = Instant::now();
         self.metrics.seek_count += 1;
@@ -160,6 +162,7 @@ where
         result
     }
 
+    #[inline]
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         let start = Instant::now();
         self.metrics.next_count += 1;
@@ -168,6 +171,7 @@ where
         result
     }
 
+    #[inline]
     fn reset(&mut self) {
         self.cursor.reset()
     }
@@ -177,6 +181,7 @@ impl<'metrics, C> HashedStorageCursor for InstrumentedHashedCursor<'metrics, C>
 where
     C: HashedStorageCursor,
 {
+    #[inline]
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
         let start = Instant::now();
         self.metrics.is_storage_empty_count += 1;
@@ -185,6 +190,7 @@ where
         result
     }
 
+    #[inline]
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.cursor.set_hashed_address(hashed_address)
     }

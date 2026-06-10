@@ -138,12 +138,14 @@ pub struct InstrumentedTrieCursor<'metrics, C> {
 
 impl<'metrics, C> InstrumentedTrieCursor<'metrics, C> {
     /// Create a new metrics cursor wrapping the given cursor.
+    #[inline]
     pub const fn new(cursor: C, metrics: &'metrics mut TrieCursorMetricsCache) -> Self {
         Self { cursor, metrics }
     }
 }
 
 impl<'metrics, C: TrieCursor> TrieCursor for InstrumentedTrieCursor<'metrics, C> {
+    #[inline]
     fn seek_exact(
         &mut self,
         key: Nibbles,
@@ -155,6 +157,7 @@ impl<'metrics, C: TrieCursor> TrieCursor for InstrumentedTrieCursor<'metrics, C>
         result
     }
 
+    #[inline]
     fn seek(
         &mut self,
         key: Nibbles,
@@ -166,6 +169,7 @@ impl<'metrics, C: TrieCursor> TrieCursor for InstrumentedTrieCursor<'metrics, C>
         result
     }
 
+    #[inline]
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let start = Instant::now();
         self.metrics.next_count += 1;
@@ -174,16 +178,19 @@ impl<'metrics, C: TrieCursor> TrieCursor for InstrumentedTrieCursor<'metrics, C>
         result
     }
 
+    #[inline]
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         self.cursor.current()
     }
 
+    #[inline]
     fn reset(&mut self) {
         self.cursor.reset()
     }
 }
 
 impl<'metrics, C: TrieStorageCursor> TrieStorageCursor for InstrumentedTrieCursor<'metrics, C> {
+    #[inline]
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.cursor.set_hashed_address(hashed_address)
     }
