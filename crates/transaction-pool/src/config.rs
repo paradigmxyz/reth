@@ -229,6 +229,9 @@ pub struct BatchConfig {
     /// once. Size this from the number of txpool validation tasks plus a small buffer so
     /// validation workers stay saturated while submission bursts cannot create unbounded
     /// in-flight batches.
+    ///
+    /// Only applies in batch-and-timeout mode (`batch_timeout` set); immediate mode spawns
+    /// insertions without a concurrency bound.
     pub max_concurrent_batches: usize,
 }
 

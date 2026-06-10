@@ -3,10 +3,13 @@
 //! This module provides transaction batching logic to reduce lock contention when processing
 //! many concurrent transaction pool insertions.
 //!
-//! The batcher supports an optional timeout mechanism: when `batch_timeout` is `Some`,
-//! transactions are batched until either `max_batch_size` is reached or the timeout expires after
-//! the first transaction is buffered. When `batch_timeout` is `None`, the batcher processes
-//! requests immediately.
+//! The batcher operates in one of two modes:
+//! - **Immediate mode** (`batch_timeout = None`, the default): requests are processed as soon as
+//!   they arrive and each insertion task is spawned without a concurrency bound, identical to an
+//!   unbatched processor.
+//! - **Batch-and-timeout mode** (`batch_timeout = Some(..)`): requests are coalesced until either
+//!   `max_batch_size` is reached or the timeout expires after the first request was buffered.
+//!   Spawned insertion batches are bounded by `max_concurrent_batches`.
 
 use crate::{
     config::BatchConfig, error::PoolError, AddedTransactionOutcome, PoolTransaction,
@@ -54,9 +57,10 @@ where
 /// Transaction batch processor that handles batch processing
 ///
 /// Supports two modes:
-/// - **Immediate mode** (`batch_timeout = None`): Processes requests as soon as available (greedy)
+/// - **Immediate mode** (`batch_timeout = None`): Processes requests as soon as available (greedy),
+///   spawning insertion tasks without a concurrency bound
 /// - **Batch-and-timeout mode** (`batch_timeout = Some(...)`): Waits for `max_batch_size` OR
-///   timeout before processing
+///   timeout before processing, with spawned batches bounded by `batch_permits`
 #[pin_project]
 pub struct BatchTxProcessor<Pool: TransactionPool> {
     pool: Pool,
@@ -72,6 +76,8 @@ pub struct BatchTxProcessor<Pool: TransactionPool> {
     /// Tracks an expired deadline while waiting for an insertion permit.
     flush_due: bool,
     /// Limits how many insertion batches can be processed concurrently.
+    ///
+    /// Only used in batch-and-timeout mode; immediate mode spawns unbounded.
     batch_permits: PollSemaphore,
 }
 
@@ -150,11 +156,12 @@ where
         }
     }
 
-    /// Spawn a batch processing task
+    /// Spawn a batch processing task, holding the concurrency permit (if any) until the batch is
+    /// fully processed
     fn spawn_batch(
         pool: &Pool,
         buf: &mut Vec<BatchTxRequest<Pool::Transaction>>,
-        permit: OwnedSemaphorePermit,
+        permit: Option<OwnedSemaphorePermit>,
     ) {
         if buf.is_empty() {
             return;
@@ -166,15 +173,29 @@ where
             Self::process_batch(&pool, batch).await;
         });
     }
-}
 
-impl<Pool> Future for BatchTxProcessor<Pool>
-where
-    Pool: TransactionPool + 'static,
-{
-    type Output = ();
+    /// Immediate mode: greedily spawn whatever requests are available, without a concurrency
+    /// bound.
+    ///
+    /// This is the pass-through path used when no `batch_timeout` is configured and matches the
+    /// behavior of an unbatched processor.
+    fn poll_immediate(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        let mut this = self.project();
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        loop {
+            let n =
+                ready!(this.request_rx.as_mut().poll_recv_many(cx, this.buf, *this.max_batch_size));
+            Self::spawn_batch(this.pool, this.buf, None);
+            if n == 0 {
+                // channel closed
+                return Poll::Ready(())
+            }
+        }
+    }
+
+    /// Batch-and-timeout mode: coalesce requests until the batch is full or the deadline armed by
+    /// the first buffered request expires, bounding spawned batches with `batch_permits`.
+    fn poll_batched(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
         let mut this = self.project();
 
         loop {
@@ -183,13 +204,12 @@ where
                 let remaining_capacity = *this.max_batch_size - this.buf.len();
                 match this.request_rx.as_mut().poll_recv_many(cx, this.buf, remaining_capacity) {
                     Poll::Ready(0) => {
+                        // Channel closed, flush remaining and exit
                         if !this.buf.is_empty() {
                             let Some(permit) = ready!(this.batch_permits.poll_acquire(cx)) else {
                                 return Poll::Ready(())
                             };
-                            Self::spawn_batch(this.pool, this.buf, permit);
-                            this.batch_deadline.set(None);
-                            *this.flush_due = false;
+                            Self::spawn_batch(this.pool, this.buf, Some(permit));
                         }
                         return Poll::Ready(())
                     }
@@ -207,17 +227,8 @@ where
                 return Poll::Pending
             }
 
-            if this.buf.len() >= *this.max_batch_size {
-                let Some(permit) = ready!(this.batch_permits.poll_acquire(cx)) else {
-                    return Poll::Ready(())
-                };
-                Self::spawn_batch(this.pool, this.buf, permit);
-                this.batch_deadline.set(None);
-                *this.flush_due = false;
-                continue
-            }
-
-            if this.batch_timeout.is_some() && !*this.flush_due {
+            // A full batch flushes without consulting the deadline
+            if this.buf.len() < *this.max_batch_size && !*this.flush_due {
                 let Some(deadline) = this.batch_deadline.as_mut().as_pin_mut() else {
                     return Poll::Pending
                 };
@@ -228,9 +239,24 @@ where
             let Some(permit) = ready!(this.batch_permits.poll_acquire(cx)) else {
                 return Poll::Ready(())
             };
-            Self::spawn_batch(this.pool, this.buf, permit);
+            Self::spawn_batch(this.pool, this.buf, Some(permit));
             this.batch_deadline.set(None);
             *this.flush_due = false;
+        }
+    }
+}
+
+impl<Pool> Future for BatchTxProcessor<Pool>
+where
+    Pool: TransactionPool + 'static,
+{
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if self.batch_timeout.is_none() {
+            self.poll_immediate(cx)
+        } else {
+            self.poll_batched(cx)
         }
     }
 }
@@ -604,14 +630,17 @@ mod tests {
         }
     }
 
-    /// Test that batch dispatch waits for a concurrency permit.
+    /// Test that batch dispatch waits for a concurrency permit in batch-and-timeout mode.
     #[tokio::test]
     async fn test_poll_full_batch_waits_for_batch_permit() {
         use std::future::Future;
 
         let pool = testing_pool();
-        let config =
-            BatchConfig { max_batch_size: 1, batch_timeout: None, max_concurrent_batches: 1 };
+        let config = BatchConfig {
+            max_batch_size: 1,
+            batch_timeout: Some(Duration::from_secs(3600)),
+            max_concurrent_batches: 1,
+        };
         let (mut processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
 
         let waker = futures::task::noop_waker();
@@ -639,6 +668,41 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(response_rx.try_recv().is_ok(), "Batch should be dispatched after permit release");
+    }
+
+    /// Test that immediate mode spawns insertions without acquiring a concurrency permit.
+    #[tokio::test]
+    async fn test_immediate_mode_ignores_permit_cap() {
+        use std::future::Future;
+
+        let pool = testing_pool();
+        let config =
+            BatchConfig { max_batch_size: 1, batch_timeout: None, max_concurrent_batches: 1 };
+        let (mut processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
+
+        // Hold the only permit; immediate mode must dispatch regardless
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let _held_permit = match processor.batch_permits.poll_acquire(&mut cx) {
+            Poll::Ready(Some(permit)) => permit,
+            _ => panic!("expected available batch permit"),
+        };
+
+        let mut processor = Box::pin(processor);
+        let tx = MockTransaction::legacy().with_nonce(0).with_gas_price(100);
+        let (response_tx, mut response_rx) = tokio::sync::oneshot::channel();
+        request_tx
+            .send(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx))
+            .expect("send failed");
+
+        let result = processor.as_mut().poll(&mut cx);
+        assert!(result.is_pending(), "Should return Pending after spawning");
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            response_rx.try_recv().is_ok(),
+            "Immediate mode should dispatch without a concurrency permit"
+        );
     }
 
     /// Test that partial batch with timeout waits before flushing
