@@ -36,8 +36,7 @@ jobs:
 
   compact-codec:
     needs: changes
-    if: needs.changes.outputs.run_heavy_rust == 'true'
-    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.run_heavy_rust == 'true' && github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     permissions:
       contents: read
     strategy:
@@ -45,26 +44,49 @@ jobs:
         bin:
           - cargo run --bin reth --features "dev"
     steps:
+      - name: Skip compact codec compatibility check
+        if: needs.changes.outputs.run_heavy_rust != 'true'
+        run: echo "Skipping compact codec compatibility check for non-behavioral change"
       - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
+        if: needs.changes.outputs.run_heavy_rust == 'true'
       - uses: dtolnay/rust-toolchain@stable
+        if: needs.changes.outputs.run_heavy_rust == 'true'
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+        if: needs.changes.outputs.run_heavy_rust == 'true'
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        if: needs.changes.outputs.run_heavy_rust == 'true'
         with:
           cache-on-failure: true
       - name: Checkout base
+        if: needs.changes.outputs.run_heavy_rust == 'true'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.base_ref || 'main' }}
           persist-credentials: false
       # On `main` branch, generates test vectors and serializes them to disk using `Compact`.
       - name: Generate compact vectors
+        if: needs.changes.outputs.run_heavy_rust == 'true'
         run: |
           ${{ matrix.bin }} -- test-vectors compact --write
       - name: Checkout PR
+        if: needs.changes.outputs.run_heavy_rust == 'true'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           clean: false
           persist-credentials: false
       # On incoming merge try to read and decode previously generated vectors with `Compact`
       - name: Read vectors
+        if: needs.changes.outputs.run_heavy_rust == 'true'
         run: ${{ matrix.bin }} -- test-vectors compact --read
+
+  compact-codec-success:
+    name: compact-codec success
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [changes, compact-codec]
+    timeout-minutes: 30
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}

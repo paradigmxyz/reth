@@ -26,15 +26,19 @@ jobs:
 
   check-dashboard:
     needs: changes
-    if: needs.changes.outputs.run_grafana == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
+      - name: Skip dashboard check
+        if: needs.changes.outputs.run_grafana != 'true'
+        run: echo "Skipping dashboard check for change that does not affect Grafana dashboards"
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        if: needs.changes.outputs.run_grafana == 'true'
         with:
           persist-credentials: false
       - name: Validate dashboard format
+        if: needs.changes.outputs.run_grafana == 'true'
         run: |
           python3 -c "
           import json, sys
@@ -53,3 +57,15 @@ jobs:
               sys.exit(1)
           print('✓ overview.json is a valid exported dashboard')
           "
+
+  grafana-success:
+    name: grafana success
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [changes, check-dashboard]
+    timeout-minutes: 30
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}

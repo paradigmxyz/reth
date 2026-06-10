@@ -30,23 +30,29 @@ jobs:
 
   build:
     needs: changes
-    if: needs.changes.outputs.run_docs_site == 'true'
-    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-8' || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.run_docs_site == 'true' && github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-8' || 'ubuntu-latest' }}
     permissions:
       contents: read
     timeout-minutes: 90
     steps:
+      - name: Skip docs build
+        if: needs.changes.outputs.run_docs_site != 'true'
+        run: echo "Skipping docs build for change that does not affect the docs site"
+
       - name: Checkout
+        if: needs.changes.outputs.run_docs_site == 'true'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
       - name: Install bun
+        if: needs.changes.outputs.run_docs_site == 'true'
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: v1.2.23
 
       - name: Install Playwright browsers
+        if: needs.changes.outputs.run_docs_site == 'true'
         # Required for rehype-mermaid to render Mermaid diagrams during build
         run: |
           cd docs/vocs/
@@ -54,12 +60,15 @@ jobs:
           npx playwright install --with-deps chromium
 
       - name: Install Rust nightly
+        if: needs.changes.outputs.run_docs_site == 'true'
         uses: dtolnay/rust-toolchain@nightly
 
       - name: Build docs
+        if: needs.changes.outputs.run_docs_site == 'true'
         run: cd docs/vocs && bash scripts/build-cargo-docs.sh
 
       - name: Build Vocs
+        if: needs.changes.outputs.run_docs_site == 'true'
         run: |
           cd docs/vocs/ && bun run build
           test -f docs/dist/public/index.html
@@ -70,9 +79,11 @@ jobs:
           echo "Vocs Build Complete"
 
       - name: Setup Pages
+        if: needs.changes.outputs.run_docs_site == 'true'
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       - name: Upload artifact
+        if: needs.changes.outputs.run_docs_site == 'true'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: "./docs/vocs/docs/dist/public"
@@ -98,3 +109,16 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+
+  book-success:
+    name: book success
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [changes, build, deploy]
+    timeout-minutes: 30
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # release/v1
+        with:
+          allowed-skips: deploy
+          jobs: ${{ toJSON(needs) }}
