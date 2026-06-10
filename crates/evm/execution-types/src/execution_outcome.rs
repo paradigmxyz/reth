@@ -777,7 +777,7 @@ mod serde_impl {
             S: Serializer,
         {
             ExecutionOutcomeSerde {
-                state: serde_state::BlockStateSerde::from(&self.state),
+                state: serde_state::BlockStateSerde::from(self.state.inner()),
                 block_reverts: &self.block_reverts,
                 receipts: &self.receipts,
                 first_block: self.first_block,
@@ -847,7 +847,7 @@ pub(super) mod serde_bincode_compat {
     {
         fn from(value: &'a super::ExecutionOutcome<T>) -> Self {
             ExecutionOutcome {
-                state: super::serde_state::BlockStateSerde::from(&value.state),
+                state: super::serde_state::BlockStateSerde::from(value.state.inner()),
                 block_reverts: value.block_reverts.clone(),
                 receipts: value
                     .receipts

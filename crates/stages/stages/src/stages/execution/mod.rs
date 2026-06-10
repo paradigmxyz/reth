@@ -25,7 +25,7 @@ use reth_stages_api::{
     UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_api::Evm2OverlayStateProvider;
+use reth_storage_api::SharedEvm2StateProviderDatabase;
 use reth_trie::KeccakKeyHasher;
 use std::{
     cmp::{max, Ordering},
@@ -334,6 +334,10 @@ where
         let mut blocks = Vec::new();
         let mut state = ExecutionOutcome::new_empty(start_block);
         let mut evm2_state = Evm2BlockStateAccumulator::new();
+        let state_provider = LatestStateProviderRef::new(provider);
+        // SAFETY: The shared database is scoped to this synchronous stage execution and is dropped
+        // before `state_provider`.
+        let batch_db = unsafe { SharedEvm2StateProviderDatabase::new(&state_provider) };
         for block_number in start_block..=max_block {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -354,17 +358,14 @@ where
             let execute_start = Instant::now();
 
             let output = self.metrics.metered_one(&block, |input| {
-                let state_provider = LatestStateProviderRef::new(provider);
-                let overlay_state = evm2_state.clone();
-                let state_provider = Evm2OverlayStateProvider::new(&state_provider, &overlay_state);
-                self.evm_config
-                    .execute_evm2_block_with_state_provider_ref(&state_provider, input)
-                    .map_err(|error| StageError::Block {
+                self.evm_config.execute_evm2_block_with_database(batch_db.clone(), input).map_err(
+                    |error| StageError::Block {
                         block: Box::new(block.block_with_parent()),
                         error: BlockErrorKind::Execution(
                             reth_evm::execute::BlockExecutionError::msg(error),
                         ),
-                    })
+                    },
+                )
             })?;
             let result = output.result.clone();
 
@@ -376,6 +377,12 @@ where
                     error: BlockErrorKind::Validation(err),
                 })
             }
+            batch_db.commit_source(&output.state).map_err(|error| StageError::Block {
+                block: Box::new(block.block_with_parent()),
+                error: BlockErrorKind::Execution(reth_evm::execute::BlockExecutionError::msg(
+                    error,
+                )),
+            })?;
             evm2_block_state_accumulator_extend(&mut evm2_state, &output.state);
             state.push_block(block_number, output);
 

@@ -117,6 +117,21 @@ where
     > {
         self.inner().execute_evm2_block_with_state_provider_ref(state_provider, block)
     }
+
+    fn execute_evm2_block_with_database<DB>(
+        &self,
+        database: DB,
+        block: &RecoveredBlock<BlockTy<<Self as ConfigureEvm2BlockExecutor>::Primitives>>,
+    ) -> Result<
+        BlockExecutionOutput<ReceiptTy<<Self as ConfigureEvm2BlockExecutor>::Primitives>>,
+        Box<dyn core::error::Error + Send + Sync>,
+    >
+    where
+        DB: evm2::evm::Database + 'static,
+        DB::Error: Send + Sync,
+    {
+        self.inner().execute_evm2_block_with_database(database, block)
+    }
 }
 
 #[cfg(feature = "std")]

@@ -90,6 +90,19 @@ pub trait ConfigureEvm2BlockExecutor: Clone + core::fmt::Debug + Send + Sync + U
         BlockExecutionOutput<ReceiptTy<Self::Primitives>>,
         Box<dyn core::error::Error + Send + Sync>,
     >;
+
+    /// Executes a recovered block using evm2 against the provided evm2 database.
+    fn execute_evm2_block_with_database<DB>(
+        &self,
+        database: DB,
+        block: &RecoveredBlock<BlockTy<Self::Primitives>>,
+    ) -> Result<
+        BlockExecutionOutput<ReceiptTy<Self::Primitives>>,
+        Box<dyn core::error::Error + Send + Sync>,
+    >
+    where
+        DB: evm2::evm::Database + 'static,
+        DB::Error: Send + Sync;
 }
 
 /// Configuration for evm2-native transaction prewarming.
