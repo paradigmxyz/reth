@@ -48,6 +48,15 @@ where
         return;
     }
 
+    if target.len() == other.len()
+        && target.iter().zip(other).all(|(left, right)| left.0 == right.0)
+    {
+        for ((_, target_value), (_, other_value)) in target.iter_mut().zip(other) {
+            *target_value = other_value.clone();
+        }
+        return;
+    }
+
     // Move ownership of target to avoid cloning owned elements
     let left = core::mem::take(target);
     let mut out = Vec::with_capacity(left.len() + other.len());
@@ -113,6 +122,19 @@ mod tests {
         extend_sorted_vec(&mut target, &other);
         // other takes precedence
         assert_eq!(target, vec![(1, "new1"), (2, "new2"), (3, "new3")]);
+    }
+
+    #[test]
+    fn test_extend_sorted_vec_all_duplicates_keeps_capacity() {
+        let mut target = Vec::with_capacity(3);
+        target.extend([(1, "old1"), (2, "old2"), (3, "old3")]);
+        let capacity = target.capacity();
+        let other = vec![(1, "new1"), (2, "new2"), (3, "new3")];
+
+        extend_sorted_vec(&mut target, &other);
+
+        assert_eq!(target, vec![(1, "new1"), (2, "new2"), (3, "new3")]);
+        assert_eq!(target.capacity(), capacity);
     }
 
     #[test]
