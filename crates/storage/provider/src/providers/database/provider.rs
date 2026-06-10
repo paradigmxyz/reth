@@ -50,8 +50,9 @@ use reth_db_api::{
     BlockNumberList,
 };
 use reth_execution_types::{
-    BlockExecutionOutput, BlockExecutionResult, Chain, Evm2AccountInfo, Evm2BlockReverts,
-    Evm2BlockState, ExecutionOutcome,
+    BlockExecutionOutput, BlockExecutionResult, Chain, Evm2AccountChangeRef, Evm2AccountInfo,
+    Evm2AccountInfoRef, Evm2BlockReverts, Evm2Bytecode, Evm2StateChangeSink, Evm2StateChangeSource,
+    Evm2StorageChange, ExecutionOutcome,
 };
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
@@ -80,6 +81,7 @@ use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
+    convert::Infallible,
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     path::PathBuf,
@@ -105,11 +107,14 @@ impl CommitOrder {
     }
 }
 
-pub(crate) fn evm2_block_state_and_reverts_to_plain_state_and_reverts(
-    state: &Evm2BlockState,
+pub(crate) fn evm2_block_state_and_reverts_to_plain_state_and_reverts<S>(
+    state: &S,
     block_reverts: &[Evm2BlockReverts],
     is_value_known: OriginalValuesKnown,
-) -> (StateChangeset, PlainStateReverts) {
+) -> (StateChangeset, PlainStateReverts)
+where
+    S: Evm2StateChangeSource,
+{
     let (plain_state, _) = evm2_block_state_to_plain_state_and_reverts(state, is_value_known);
 
     let mut reverts = PlainStateReverts::with_capacity(block_reverts.len());
@@ -149,82 +154,19 @@ pub(crate) fn evm2_block_state_and_reverts_to_plain_state_and_reverts(
     (plain_state, reverts)
 }
 
-pub(crate) fn evm2_block_state_to_plain_state_and_reverts(
-    state: &Evm2BlockState,
+pub(crate) fn evm2_block_state_to_plain_state_and_reverts<S>(
+    state: &S,
     is_value_known: OriginalValuesKnown,
-) -> (StateChangeset, PlainStateReverts) {
-    let mut accounts = Vec::new();
-    for (address, account) in state.accounts() {
-        if is_value_known.is_not_known() || account.original != account.current {
-            accounts.push((address, account.current.as_ref().map(evm2_account_info_to_reth)));
-        }
+) -> (StateChangeset, PlainStateReverts)
+where
+    S: Evm2StateChangeSource,
+{
+    let mut sink = PlainStateAndRevertsSink::new(is_value_known);
+    match state.visit(&mut sink) {
+        Ok(()) => {}
+        Err(err) => match err {},
     }
-
-    let mut storage_by_address = BTreeMap::<Address, (bool, Vec<(U256, U256)>)>::new();
-    for address in state.storage_wipes() {
-        storage_by_address.entry(address).or_default().0 = true;
-    }
-    for (key, slot) in state.storage() {
-        let address = key.address();
-        let storage_key = key.key();
-        let entry = storage_by_address.entry(address).or_default();
-        let wipe_and_not_zero = entry.0 && !slot.current.is_zero();
-        let not_wiped_and_changed = !entry.0 && slot.original != slot.current;
-        if is_value_known.is_not_known() || wipe_and_not_zero || not_wiped_and_changed {
-            entry.1.push((storage_key, slot.current));
-        }
-    }
-
-    let storage = storage_by_address
-        .iter()
-        .filter_map(|(address, (wipe_storage, changed_storage))| {
-            (!changed_storage.is_empty() || *wipe_storage).then(|| PlainStorageChangeset {
-                address: *address,
-                wipe_storage: *wipe_storage,
-                storage: changed_storage.clone(),
-            })
-        })
-        .collect();
-
-    let contracts = state
-        .code()
-        .filter(|(hash, _)| **hash != KECCAK_EMPTY)
-        .map(|(hash, bytecode)| (*hash, Bytecode::new_raw(bytecode.original_bytes())))
-        .collect();
-
-    let mut reverts = PlainStateReverts::with_capacity(1);
-    reverts.accounts.push(
-        state
-            .accounts()
-            .map(|(address, account)| {
-                (address, account.original.as_ref().map(evm2_account_info_to_reth))
-            })
-            .collect(),
-    );
-
-    let mut storage_reverts = BTreeMap::<Address, (bool, Vec<(U256, RevertToSlot)>)>::new();
-    for address in state.storage_wipes() {
-        storage_reverts.entry(address).or_default().0 = true;
-    }
-    for (key, slot) in state.storage() {
-        let address = key.address();
-        let entry = storage_reverts.entry(address).or_default();
-        if !entry.0 || !slot.original.is_zero() {
-            entry.1.push((key.key(), RevertToSlot::Some(slot.original)));
-        }
-    }
-    reverts.storage.push(
-        storage_reverts
-            .into_iter()
-            .map(|(address, (wiped, storage_revert))| PlainStorageRevert {
-                address,
-                wiped,
-                storage_revert,
-            })
-            .collect(),
-    );
-
-    (StateChangeset { accounts, storage, contracts }, reverts)
+    sink.finish()
 }
 
 fn evm2_account_info_to_reth(info: &Evm2AccountInfo) -> Account {
@@ -233,6 +175,110 @@ fn evm2_account_info_to_reth(info: &Evm2AccountInfo) -> Account {
         nonce: info.nonce,
         bytecode_hash: (!info.code_hash.is_zero() && info.code_hash != KECCAK_EMPTY)
             .then_some(info.code_hash),
+    }
+}
+
+fn evm2_account_info_ref_to_reth(info: Evm2AccountInfoRef<'_>) -> Account {
+    Account {
+        balance: info.balance,
+        nonce: info.nonce,
+        bytecode_hash: (!info.code_hash.is_zero() && info.code_hash != KECCAK_EMPTY)
+            .then_some(info.code_hash),
+    }
+}
+
+struct PlainStateAndRevertsSink {
+    is_value_known: OriginalValuesKnown,
+    accounts: Vec<(Address, Option<Account>)>,
+    account_reverts: Vec<(Address, Option<Account>)>,
+    storage_by_address: BTreeMap<Address, (bool, Vec<(U256, U256)>)>,
+    storage_reverts: BTreeMap<Address, (bool, Vec<(U256, RevertToSlot)>)>,
+    contracts: Vec<(B256, Bytecode)>,
+}
+
+impl PlainStateAndRevertsSink {
+    fn new(is_value_known: OriginalValuesKnown) -> Self {
+        Self {
+            is_value_known,
+            accounts: Vec::new(),
+            account_reverts: Vec::new(),
+            storage_by_address: BTreeMap::new(),
+            storage_reverts: BTreeMap::new(),
+            contracts: Vec::new(),
+        }
+    }
+
+    fn finish(self) -> (StateChangeset, PlainStateReverts) {
+        let Self {
+            accounts, account_reverts, storage_by_address, storage_reverts, contracts, ..
+        } = self;
+
+        let storage = storage_by_address
+            .into_iter()
+            .filter_map(|(address, (wipe_storage, changed_storage))| {
+                (!changed_storage.is_empty() || wipe_storage).then(|| PlainStorageChangeset {
+                    address,
+                    wipe_storage,
+                    storage: changed_storage,
+                })
+            })
+            .collect();
+
+        let mut reverts = PlainStateReverts::with_capacity(1);
+        reverts.accounts.push(account_reverts);
+        reverts.storage.push(
+            storage_reverts
+                .into_iter()
+                .map(|(address, (wiped, storage_revert))| PlainStorageRevert {
+                    address,
+                    wiped,
+                    storage_revert,
+                })
+                .collect(),
+        );
+
+        (StateChangeset { accounts, storage, contracts }, reverts)
+    }
+}
+
+impl Evm2StateChangeSink for PlainStateAndRevertsSink {
+    type Error = Infallible;
+
+    fn bytecode(&mut self, code_hash: B256, bytecode: &Evm2Bytecode) -> Result<(), Self::Error> {
+        if code_hash != KECCAK_EMPTY {
+            self.contracts.push((code_hash, Bytecode::new_raw(bytecode.original_bytes())));
+        }
+        Ok(())
+    }
+
+    fn account(&mut self, change: Evm2AccountChangeRef<'_>) -> Result<(), Self::Error> {
+        if self.is_value_known.is_not_known() || change.original != change.current {
+            self.accounts.push((change.address, change.current.map(evm2_account_info_ref_to_reth)));
+        }
+        self.account_reverts
+            .push((change.address, change.original.map(evm2_account_info_ref_to_reth)));
+        Ok(())
+    }
+
+    fn storage_wipe(&mut self, address: Address) -> Result<(), Self::Error> {
+        self.storage_by_address.entry(address).or_default().0 = true;
+        self.storage_reverts.entry(address).or_default().0 = true;
+        Ok(())
+    }
+
+    fn storage(&mut self, change: Evm2StorageChange) -> Result<(), Self::Error> {
+        let entry = self.storage_by_address.entry(change.address).or_default();
+        let wipe_and_not_zero = entry.0 && !change.current.is_zero();
+        let not_wiped_and_changed = !entry.0 && change.original != change.current;
+        if self.is_value_known.is_not_known() || wipe_and_not_zero || not_wiped_and_changed {
+            entry.1.push((change.key, change.current));
+        }
+
+        let revert_entry = self.storage_reverts.entry(change.address).or_default();
+        if !revert_entry.0 || !change.original.is_zero() {
+            revert_entry.1.push((change.key, RevertToSlot::Some(change.original)));
+        }
+        Ok(())
     }
 }
 
@@ -4175,6 +4221,50 @@ mod tests {
                 address,
                 wiped: false,
                 storage_revert: vec![(slot, RevertToSlot::Some(value))],
+            }]]
+        );
+    }
+
+    #[test]
+    fn evm2_plain_state_conversion_streams_accounts_and_storage() {
+        let address = Address::random();
+        let slot = U256::from(1);
+        let original_slot = U256::from(2);
+        let current_slot = U256::from(3);
+        let original_account = Account { balance: U256::from(4), nonce: 1, bytecode_hash: None };
+        let current_account = Account { balance: U256::from(5), nonce: 2, bytecode_hash: None };
+        let state = evm2_block_state_from_init(
+            [(
+                address,
+                (
+                    Some(original_account),
+                    Some(current_account),
+                    BTreeMap::from([(slot, (original_slot, current_slot))]),
+                ),
+            )],
+            [],
+        );
+
+        let (plain_state, reverts) =
+            evm2_block_state_to_plain_state_and_reverts(&state, OriginalValuesKnown::Yes);
+
+        assert_eq!(plain_state.accounts, vec![(address, Some(current_account))]);
+        assert_eq!(
+            plain_state.storage,
+            vec![PlainStorageChangeset {
+                address,
+                wipe_storage: false,
+                storage: vec![(slot, current_slot)],
+            }]
+        );
+        assert!(plain_state.contracts.is_empty());
+        assert_eq!(reverts.accounts, vec![vec![(address, Some(original_account))]]);
+        assert_eq!(
+            reverts.storage,
+            vec![vec![PlainStorageRevert {
+                address,
+                wiped: false,
+                storage_revert: vec![(slot, RevertToSlot::Some(original_slot))],
             }]]
         );
     }

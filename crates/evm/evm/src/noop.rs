@@ -187,15 +187,17 @@ where
         self.inner().evm2_prewarm_evm_with_precompiles(state_provider, env, precompiles)
     }
 
-    fn evm2_prewarm_tx<DB>(
+    fn evm2_prewarm_tx<DB, S>(
         &self,
         evm: &mut Self::PrewarmEvm<DB>,
         tx: crate::TxEnvFor<Self>,
-    ) -> Result<evm2::TxResultWithState, Box<dyn core::error::Error + Send + Sync>>
+        sink: &mut S,
+    ) -> Result<evm2::TxResult, Box<dyn core::error::Error + Send + Sync>>
     where
         DB: StateProvider + Send + 'static,
+        S: evm2::evm::StateChangeSink<Error = core::convert::Infallible>,
     {
-        self.inner().evm2_prewarm_tx(evm, tx)
+        self.inner().evm2_prewarm_tx(evm, tx, sink)
     }
 }
 

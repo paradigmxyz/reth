@@ -14,8 +14,8 @@ use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
 use reth_evm::{ConfigureEvm, ConfigureEvm2BlockExecutor};
 use reth_execution_types::{
-    evm2_block_reverts_from_state_source, evm2_block_state_accumulator_extend,
-    evm2_state_source_size_hint, Evm2BlockReverts, Evm2BlockStateAccumulator, Evm2RevertAccount,
+    evm2_block_reverts_and_accumulator_extend, evm2_state_source_size_hint, Evm2BlockReverts,
+    Evm2BlockStateAccumulator, Evm2RevertAccount,
 };
 use reth_node_core::args::JitArgs;
 use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
@@ -257,8 +257,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         }
                         let _ = stats_tx.send((block.number(), block.gas_used()));
 
-                        evm2_block_state_accumulator_extend(&mut state, &output.state);
-                        block_reverts.push(evm2_block_reverts_from_state_source(&output.state));
+                        block_reverts.push(evm2_block_reverts_and_accumulator_extend(
+                            &mut state,
+                            &output.state,
+                        ));
 
                         // Verify and drop accumulated state once in a while to avoid OOM.
                         if evm2_state_source_size_hint(&state) > 5_000_000 ||

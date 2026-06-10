@@ -23,11 +23,12 @@ use alloy_consensus::transaction::TxHashRef;
 #[cfg(any())]
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, map::B256Map, B256, U256};
+use alloy_primitives::{keccak256, Address, B256, U256};
 #[cfg(any())]
 use alloy_primitives::StorageKey;
+use core::convert::Infallible;
 use crossbeam_channel::Sender as CrossbeamSender;
-use evm2::evm::StateChanges;
+use evm2::evm::{AccountChangeRef, StateChangeSink, StorageChange};
 use metrics::{Counter, Gauge, Histogram};
 #[cfg(any())]
 use rayon::prelude::*;
@@ -234,18 +235,16 @@ where
             let (tx_env, _tx) = tx.into_parts();
             // Prewarm workers must not commit speculative writes into the reused worker EVM:
             // task scheduling would otherwise make later prewarm reads observe non-canonical state.
-            let res = match ctx.evm_config.evm2_prewarm_tx(evm, tx_env) {
-                Ok(res) => res,
-                Err(err) => {
-                    trace!(
-                        target: "engine::tree::payload_processor::prewarm",
-                        %err,
-                        "Error when executing prewarm transaction",
-                    );
-                    ctx.metrics.transaction_errors.increment(1);
-                    return;
-                }
-            };
+            let mut proof_targets = PrewarmProofTargetsSink::default();
+            if let Err(err) = ctx.evm_config.evm2_prewarm_tx(evm, tx_env, &mut proof_targets) {
+                trace!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    %err,
+                    "Error when executing prewarm transaction",
+                );
+                ctx.metrics.transaction_errors.increment(1);
+                return;
+            }
             ctx.metrics.execution_duration.record(start.elapsed());
 
             if ctx.should_stop() {
@@ -253,7 +252,7 @@ where
             }
 
             if index > 0 {
-                let (targets, storage_targets) = multiproof_targets_from_state(&res.state_changes);
+                let (targets, storage_targets) = proof_targets.into_parts();
                 ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
                 if let Some(to_sparse_trie_task) = to_sparse_trie_task {
                     let _ = to_sparse_trie_task.send(StateRootMessage::PrefetchProofs(targets));
@@ -300,7 +299,7 @@ where
 
                 // Insert state into cache while holding the lock.
                 // Access the execution state through the shared execution output.
-                if new_cache.cache().insert_block_state(&execution_outcome.state).is_err() {
+                if new_cache.cache().insert_state_source(&execution_outcome.state).is_err() {
                     // Clear the cache on error to prevent having a polluted cache
                     *cached = None;
                     debug!(target: "engine::caching", "cleared execution cache on update error");
@@ -852,32 +851,42 @@ const fn bal_account_changes_state_root(
     !account_fields.is_empty() || !account_changes.storage_changes.is_empty()
 }
 
-/// Returns proof targets from an evm2 transaction prewarm result.
-fn multiproof_targets_from_state(state: &StateChanges) -> (MultiProofTargetsV2, usize) {
-    let mut targets = MultiProofTargetsV2 {
-        account_targets: Vec::with_capacity(state.accounts.len()),
-        storage_targets: B256Map::default(),
-    };
+#[derive(Debug, Default)]
+struct PrewarmProofTargetsSink {
+    targets: MultiProofTargetsV2,
+    storage_targets: usize,
+}
 
-    for address in state.accounts.keys() {
-        targets.account_targets.push(ProofV2Target::new(keccak256(address)));
+impl PrewarmProofTargetsSink {
+    fn into_parts(self) -> (MultiProofTargetsV2, usize) {
+        (self.targets, self.storage_targets)
     }
 
-    let mut storage_targets = 0;
-    for (address, storage) in &state.storage {
-        let hashed_address = keccak256(address);
-        let slots = targets.storage_targets.entry(hashed_address).or_default();
-        if storage.wipe {
-            targets.account_targets.push(ProofV2Target::new(hashed_address));
-        }
-        slots.reserve(storage.slots.len());
-        for slot in storage.slots.keys() {
-            slots.push(ProofV2Target::new(keccak256(slot.to_be_bytes::<32>())));
-            storage_targets += 1;
-        }
+    fn storage_targets_for_address(&mut self, address: Address) -> &mut Vec<ProofV2Target> {
+        self.targets.storage_targets.entry(keccak256(address)).or_default()
+    }
+}
+
+impl StateChangeSink for PrewarmProofTargetsSink {
+    type Error = Infallible;
+
+    fn account(&mut self, change: AccountChangeRef<'_>) -> Result<(), Self::Error> {
+        self.targets.account_targets.push(ProofV2Target::new(keccak256(change.address)));
+        Ok(())
     }
 
-    (targets, storage_targets)
+    fn storage_wipe(&mut self, address: Address) -> Result<(), Self::Error> {
+        self.targets.account_targets.push(ProofV2Target::new(keccak256(address)));
+        self.storage_targets_for_address(address);
+        Ok(())
+    }
+
+    fn storage(&mut self, change: StorageChange) -> Result<(), Self::Error> {
+        self.storage_targets_for_address(change.address)
+            .push(ProofV2Target::new(keccak256(change.key.to_be_bytes::<32>())));
+        self.storage_targets += 1;
+        Ok(())
+    }
 }
 
 /// Returns [`MultiProofTargetsV2`] for withdrawal addresses.

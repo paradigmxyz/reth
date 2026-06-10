@@ -7,7 +7,10 @@ use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
 use metrics::{Counter, Gauge, Histogram};
 use parking_lot::Once;
 use reth_errors::ProviderResult;
-use reth_execution_types::{Evm2BlockState, Evm2Bytecode};
+use reth_execution_types::{
+    Evm2AccountChangeRef, Evm2Bytecode, Evm2StateChangeSink, Evm2StateChangeSource,
+    Evm2StorageChange,
+};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
 use reth_provider::{
@@ -90,7 +93,7 @@ type FixedCache<K, V, H = DefaultHashBuilder> = fixed_cache::Cache<K, V, H, Epoc
 /// prewarmers and speculative execution workers that intentionally seed the cache for other
 /// readers. Canonical execution usually leaves this disabled because the EVM database `State`
 /// already caches reads during the block, and the shared cache is updated after the block from the
-/// final [`Evm2BlockState`]. See also [`ExecutionCache::insert_block_state`].
+/// final evm2 block state. See also [`ExecutionCache::insert_state_source`].
 ///
 /// Normal cache hit/miss metrics are recorded when [`CachedStateMetrics`] is provided. Slow-block
 /// [`CacheStats`] are controlled separately by [`Self::new_with_mode`].
@@ -1037,73 +1040,20 @@ impl ExecutionCache {
         self.0.account_cache.insert(address, account);
     }
 
-    /// Inserts one block of evm2 post-execution state changes into the cache.
+    /// Inserts evm2 post-execution state changes into the cache.
     #[instrument(level = "debug", target = "engine::caching", skip_all)]
     #[expect(clippy::result_unit_err)]
-    pub fn insert_block_state(&self, state_updates: &Evm2BlockState) -> Result<(), ()> {
-        let bytecodes = state_updates.code().count();
-        let _enter = debug_span!(target: "engine::tree", "contracts", len = bytecodes).entered();
-        for (code_hash, bytecode) in state_updates.code() {
-            self.insert_code(*code_hash, Some(Bytecode::new_raw(bytecode.original_bytes())));
-            self.insert_evm2_code(*code_hash, Some(bytecode.clone()));
-        }
-        drop(_enter);
-
-        let accounts = state_updates.accounts().count();
-        let storages = state_updates.storage().count();
-        let _enter = debug_span!(
-            target: "engine::tree",
-            "accounts",
-            accounts,
-            storages
-        )
-        .entered();
-        for (key, slot) in state_updates.storage() {
-            self.insert_storage(key.address(), key.key().into(), Some(slot.current));
-        }
-
-        let storage_wipes = state_updates.storage_wipes().collect::<AddressSet>();
-        for (addr, account) in state_updates.accounts() {
-            if storage_wipes.contains(&addr) || account.current.is_none() {
-                let had_code = account.original.as_ref().is_some_and(|info| {
-                    !info.code_hash.is_zero() && info.code_hash != KECCAK256_EMPTY
-                });
-                if had_code {
-                    self.0.selfdestruct_encountered.call_once(|| {
-                        warn!(
-                            target: "engine::caching",
-                            address = ?addr,
-                            info = ?account.current,
-                            original_info = ?account.original,
-                            "Encountered an inter-transaction SELFDESTRUCT that reset the storage cache. Are you running a pre-Dencun network?"
-                        );
-                    });
-                    self.clear();
-                    return Ok(())
-                }
-
-                self.0.account_cache.remove(&addr);
-                continue;
-            }
-
-            let Some(ref account_info) = account.current else {
-                trace!(target: "engine::caching", ?account, "Account with None account info found in state updates");
-                return Err(())
-            };
-
-            self.insert_account(
-                addr,
-                Some(Account {
-                    nonce: account_info.nonce,
-                    balance: account_info.balance,
-                    bytecode_hash: (!account_info.code_hash.is_zero() &&
-                        account_info.code_hash != KECCAK256_EMPTY)
-                        .then_some(account_info.code_hash),
-                }),
-            );
-        }
-
-        Ok(())
+    pub fn insert_state_source<S>(&self, state_updates: &S) -> Result<(), ()>
+    where
+        S: Evm2StateChangeSource,
+    {
+        let _enter = debug_span!(target: "engine::tree", "state_source").entered();
+        let mut sink = ExecutionCacheInsertSink {
+            cache: self,
+            storage_wipes: AddressSet::default(),
+            cleared: false,
+        };
+        state_updates.visit(&mut sink)
     }
 
     /// Clears storage and account caches, resetting them to empty state.
@@ -1135,6 +1085,90 @@ impl ExecutionCache {
         metrics.account_cache_capacity.set(self.0.account_stats.capacity() as f64);
         metrics.account_cache_collisions.set(self.0.account_stats.collisions() as f64);
         self.0.account_stats.reset_stats();
+    }
+}
+
+struct ExecutionCacheInsertSink<'a> {
+    cache: &'a ExecutionCache,
+    storage_wipes: AddressSet,
+    cleared: bool,
+}
+
+impl Evm2StateChangeSink for ExecutionCacheInsertSink<'_> {
+    type Error = ();
+
+    fn bytecode(&mut self, code_hash: B256, bytecode: &Evm2Bytecode) -> Result<(), Self::Error> {
+        if self.cleared {
+            return Ok(())
+        }
+
+        self.cache.insert_code(code_hash, Some(Bytecode::new_raw(bytecode.original_bytes())));
+        self.cache.insert_evm2_code(code_hash, Some(bytecode.clone()));
+        Ok(())
+    }
+
+    fn storage_wipe(&mut self, address: Address) -> Result<(), Self::Error> {
+        if self.cleared {
+            return Ok(())
+        }
+
+        self.storage_wipes.insert(address);
+        Ok(())
+    }
+
+    fn storage(&mut self, change: Evm2StorageChange) -> Result<(), Self::Error> {
+        if self.cleared {
+            return Ok(())
+        }
+
+        self.cache.insert_storage(change.address, change.key.into(), Some(change.current));
+        Ok(())
+    }
+
+    fn account(&mut self, account: Evm2AccountChangeRef<'_>) -> Result<(), Self::Error> {
+        if self.cleared {
+            return Ok(())
+        }
+
+        if self.storage_wipes.contains(&account.address) || account.current.is_none() {
+            let had_code = account
+                .original
+                .is_some_and(|info| !info.code_hash.is_zero() && info.code_hash != KECCAK256_EMPTY);
+            if had_code {
+                self.cache.0.selfdestruct_encountered.call_once(|| {
+                    warn!(
+                        target: "engine::caching",
+                        address = ?account.address,
+                        info = ?account.current,
+                        original_info = ?account.original,
+                        "Encountered an inter-transaction SELFDESTRUCT that reset the storage cache. Are you running a pre-Dencun network?"
+                    );
+                });
+                self.cache.clear();
+                self.cleared = true;
+                return Ok(())
+            }
+
+            self.cache.0.account_cache.remove(&account.address);
+            return Ok(())
+        }
+
+        let Some(account_info) = account.current else {
+            trace!(target: "engine::caching", ?account, "Account with None account info found in state updates");
+            return Err(())
+        };
+
+        self.cache.insert_account(
+            account.address,
+            Some(Account {
+                nonce: account_info.nonce,
+                balance: account_info.balance,
+                bytecode_hash: (!account_info.code_hash.is_zero() &&
+                    account_info.code_hash != KECCAK256_EMPTY)
+                    .then_some(account_info.code_hash),
+            }),
+        );
+        Ok(())
     }
 }
 
@@ -1337,7 +1371,7 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_block_state_destroyed_account_with_code_clears_cache() {
+    fn test_insert_state_source_destroyed_account_with_code_clears_cache() {
         let caches = ExecutionCache::new(1000);
 
         // Pre-populate caches with some data
@@ -1366,7 +1400,7 @@ mod tests {
         );
 
         // Insert state should clear all caches because a contract was destroyed
-        let result = caches.insert_block_state(&state);
+        let result = caches.insert_state_source(&state);
         assert!(result.is_ok());
 
         // Verify all caches were cleared
@@ -1376,7 +1410,7 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_block_state_destroyed_account_without_code_removes_only_account() {
+    fn test_insert_state_source_destroyed_account_without_code_removes_only_account() {
         let caches = ExecutionCache::new(1000);
 
         // Pre-populate caches with some data
@@ -1399,7 +1433,7 @@ mod tests {
         );
 
         // Insert state should only remove the destroyed account
-        assert!(caches.insert_block_state(&state).is_ok());
+        assert!(caches.insert_state_source(&state).is_ok());
 
         // Verify only addr1 was removed, other data is still present
         assert!(caches.0.account_cache.get(&addr1).is_none());
@@ -1408,14 +1442,14 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_block_state_destroyed_uncached_account_keeps_size_zero() {
+    fn test_insert_state_source_destroyed_uncached_account_keeps_size_zero() {
         let caches = ExecutionCache::new(1000);
         assert_eq!(caches.0.account_stats.size(), 0);
 
         let addr = Address::random();
         let state = destroyed_account_state(addr, None);
 
-        assert!(caches.insert_block_state(&state).is_ok());
+        assert!(caches.insert_state_source(&state).is_ok());
         assert_eq!(caches.0.account_stats.size(), 0);
         assert!(caches.0.account_cache.get(&addr).is_none());
     }
