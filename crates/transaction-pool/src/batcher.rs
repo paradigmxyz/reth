@@ -80,6 +80,21 @@ where
             return
         }
 
+        // Same-origin batches can skip the per-transaction origins allocation.
+        let mut batch_iter = batch.iter();
+        if let Some(origin) = batch_iter.next().map(|req| req.origin) &&
+            batch_iter.all(|req| req.origin == origin)
+        {
+            let (transactions, response_txs): (Vec<_>, Vec<_>) =
+                batch.into_iter().map(|req| (req.pool_tx, req.response_tx)).unzip();
+
+            let pool_results = pool.add_transactions(origin, transactions).await;
+            for (response_tx, pool_result) in response_txs.into_iter().zip(pool_results) {
+                let _ = response_tx.send(pool_result);
+            }
+            return
+        }
+
         let (transactions, response_txs): (Vec<_>, Vec<_>) =
             batch.into_iter().map(|req| ((req.origin, req.pool_tx), req.response_tx)).unzip();
 
@@ -140,6 +155,36 @@ mod tests {
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
             batch_requests.push(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx));
+            responses.push(response_rx);
+        }
+
+        BatchTxProcessor::process_batch(&pool, batch_requests).await;
+
+        for response_rx in responses {
+            let result = timeout(Duration::from_millis(5), response_rx)
+                .await
+                .expect("Timeout waiting for response")
+                .expect("Response channel was closed unexpectedly");
+            assert!(result.is_ok());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_process_batch_mixed_origins() {
+        let pool = testing_pool();
+
+        let mut batch_requests = Vec::new();
+        let mut responses = Vec::new();
+
+        for (nonce, origin) in [
+            (0, TransactionOrigin::Local),
+            (1, TransactionOrigin::External),
+            (2, TransactionOrigin::Private),
+        ] {
+            let tx = MockTransaction::legacy().with_nonce(nonce).with_gas_price(100);
+            let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+
+            batch_requests.push(BatchTxRequest::new(origin, tx, response_tx));
             responses.push(response_rx);
         }
 
