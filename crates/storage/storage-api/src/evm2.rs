@@ -17,7 +17,7 @@ use core::{
 };
 use evm2::{
     bytecode::Bytecode,
-    evm::{AccountInfo, Database},
+    evm::{AccountInfo, CacheDB, Database, Db, DbErrorCode, DynDatabase, StateChangeSource},
     interpreter::Word,
 };
 use reth_execution_types::{Evm2AccountInfo, Evm2BlockState};
@@ -28,6 +28,7 @@ use reth_trie_common::{
     HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
     StorageProof, TrieInput,
 };
+use std::sync::{Arc, Mutex, MutexGuard};
 
 /// An evm2 [`Database`] implementation backed by a Reth [`StateProvider`].
 #[derive(Clone)]
@@ -161,6 +162,92 @@ impl Database for BorrowedEvm2StateProviderDatabase {
     fn get_block_hash(&mut self, number: &Word) -> Result<Option<B256>, Self::Error> {
         let number = u256_to_u64_saturating(*number);
         BlockHashReader::block_hash(self.provider(), number)
+    }
+}
+
+/// A cloneable evm2 database handle that shares one cache over a borrowed Reth state provider.
+///
+/// This is intended for sequential execution of multiple short-lived evm2 instances against the
+/// same underlying provider. Reads missed by one EVM remain cached for later EVMs, and callers can
+/// apply accepted block state with [`Self::commit_source`] to make prior writes visible.
+#[derive(Clone)]
+pub struct SharedEvm2StateProviderDatabase {
+    inner: Arc<Mutex<CacheDB<Db<BorrowedEvm2StateProviderDatabase>>>>,
+}
+
+impl SharedEvm2StateProviderDatabase {
+    /// Creates a new shared cache over a borrowed state provider.
+    ///
+    /// # Safety
+    ///
+    /// This has the same lifetime erasure requirements as
+    /// [`BorrowedEvm2StateProviderDatabase::new`]. The returned handle and its clones must not
+    /// outlive `provider`.
+    pub unsafe fn new(provider: &dyn StateProvider) -> Self {
+        Self {
+            // SAFETY: The caller upholds the lifetime requirements for the borrowed provider.
+            inner: Arc::new(Mutex::new(CacheDB::new(Db::new(unsafe {
+                BorrowedEvm2StateProviderDatabase::new(provider)
+            })))),
+        }
+    }
+
+    /// Applies accepted state changes into the shared cache.
+    pub fn commit_source<S: StateChangeSource>(&self, source: &S) -> ProviderResult<()> {
+        let mut db = self.lock()?;
+        db.commit_source(source);
+        Ok(())
+    }
+
+    fn lock(
+        &self,
+    ) -> ProviderResult<MutexGuard<'_, CacheDB<Db<BorrowedEvm2StateProviderDatabase>>>> {
+        self.inner.lock().map_err(|err| {
+            ProviderError::other(std::io::Error::other(format!(
+                "shared evm2 database lock poisoned: {err}"
+            )))
+        })
+    }
+
+    fn provider_error(
+        db: &mut CacheDB<Db<BorrowedEvm2StateProviderDatabase>>,
+        code: DbErrorCode,
+    ) -> ProviderError {
+        let err = db.error(code);
+        match err.downcast::<ProviderError>() {
+            Ok(err) => *err,
+            Err(err) => ProviderError::other(std::io::Error::other(err.to_string())),
+        }
+    }
+}
+
+impl core::fmt::Debug for SharedEvm2StateProviderDatabase {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("SharedEvm2StateProviderDatabase").finish_non_exhaustive()
+    }
+}
+
+impl Database for SharedEvm2StateProviderDatabase {
+    type Error = ProviderError;
+
+    fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
+        let mut db = self.lock()?;
+        db.get_account(address).map_err(|code| Self::provider_error(&mut db, code))
+    }
+
+    fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Bytecode, Self::Error> {
+        let mut db = self.lock()?;
+        db.get_code_by_hash(code_hash).map_err(|code| Self::provider_error(&mut db, code))
+    }
+
+    fn get_storage(&mut self, address: &Address, key: &Word) -> Result<Word, Self::Error> {
+        let mut db = self.lock()?;
+        db.get_storage(address, key).map_err(|code| Self::provider_error(&mut db, code))
+    }
+
+    fn get_block_hash(&mut self, number: &Word) -> Result<Option<B256>, Self::Error> {
+        let mut db = self.lock()?;
+        db.get_block_hash(number).map_err(|code| Self::provider_error(&mut db, code))
     }
 }
 

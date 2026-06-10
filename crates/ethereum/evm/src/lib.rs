@@ -609,6 +609,51 @@ where
             alloc::boxed::Box::new(err) as alloc::boxed::Box<dyn core::error::Error + Send + Sync>
         })
     }
+
+    fn execute_evm2_block_with_database<DB>(
+        &self,
+        database: DB,
+        block: &RecoveredBlock<Block>,
+    ) -> Result<
+        reth_execution_types::BlockExecutionOutput<reth_ethereum_primitives::Receipt>,
+        alloc::boxed::Box<dyn core::error::Error + Send + Sync>,
+    >
+    where
+        DB: evm2::evm::Database + 'static,
+        DB::Error: Send + Sync,
+    {
+        let header = block.header();
+        let transactions = block
+            .senders_iter()
+            .zip(block.body().transactions())
+            .map(|(signer, tx)| Recovered::new_unchecked(tx.clone(), *signer))
+            .collect::<Vec<_>>();
+        let context = Evm2BlockExecutionContext {
+            chain_id: self.chain_spec.chain_id(),
+            system_calls: Some(Evm2BlockSystemCalls {
+                parent_hash: header.parent_hash,
+                parent_beacon_block_root: header.parent_beacon_block_root,
+            }),
+            ommers: Some(&block.body().ommers),
+            withdrawals: block.body().withdrawals().map(|withdrawals| withdrawals.as_slice()),
+            deposit_contract_address: self.chain_spec.deposit_contract_address(),
+        };
+
+        execute_evm2_block_with_context(
+            evm2_spec(self.chain_spec.as_ref(), header),
+            evm2_block_env_with_blob_params(
+                header,
+                self.chain_spec.as_ref().blob_params_at_timestamp(header.timestamp),
+            ),
+            database,
+            header.number,
+            transactions,
+            context,
+        )
+        .map_err(|err| {
+            alloc::boxed::Box::new(err) as alloc::boxed::Box<dyn core::error::Error + Send + Sync>
+        })
+    }
 }
 
 #[cfg(test)]
