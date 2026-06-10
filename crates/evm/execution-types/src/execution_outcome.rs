@@ -1,7 +1,7 @@
 use crate::{
     evm2_block_reverts_from_state_source, evm2_block_state_accumulator_extend,
     evm2_state_source_hashed_post_state, BlockExecutionOutput, BlockExecutionResult,
-    Evm2BlockReverts, Evm2BlockState, Evm2RevertAccount, Evm2StorageReverts,
+    Evm2BlockReverts, Evm2BlockState, Evm2RevertAccount, Evm2StorageReverts, IndexedBlockState,
 };
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
@@ -51,7 +51,7 @@ impl ChangedAccount {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionOutcome<T = reth_ethereum_primitives::Receipt> {
     /// Aggregated evm2 state changes.
-    state: Evm2BlockState,
+    state: IndexedBlockState,
     /// Per-block evm2 state changes when available.
     block_states: Vec<Evm2BlockState>,
     /// Per-block reverts.
@@ -101,7 +101,7 @@ impl<T> ExecutionOutcome<T> {
         first_block: BlockNumber,
         requests: Vec<Requests>,
     ) -> Self {
-        Self { state, block_states, block_reverts, receipts, first_block, requests }
+        Self { state: state.into(), block_states, block_reverts, receipts, first_block, requests }
     }
 
     /// Creates a new `ExecutionOutcome` from evm2 aggregate state and per-block reverts.
@@ -199,10 +199,10 @@ impl<T> ExecutionOutcome<T> {
     /// Creates a new `ExecutionOutcome` from a single block execution result.
     pub fn single(block_number: u64, output: BlockExecutionOutput<T>) -> Self {
         let block_reverts = evm2_block_reverts_from_state_source(&output.state);
-        let state = output.state.into_inner();
+        let block_state = output.state.inner().clone();
         Self {
-            state: state.clone(),
-            block_states: vec![state],
+            state: output.state,
+            block_states: vec![block_state],
             block_reverts: vec![block_reverts],
             receipts: vec![output.result.receipts],
             first_block: block_number,
@@ -290,7 +290,7 @@ impl<T> ExecutionOutcome<T> {
 
     /// Returns the current state changes as an evm2 frozen block state.
     pub fn evm2_block_state(&self) -> Evm2BlockState {
-        self.state.clone()
+        self.state.inner().clone()
     }
 
     /// Set first block.
@@ -311,26 +311,19 @@ impl<T> ExecutionOutcome<T> {
 
     /// Returns the state account change for the given account.
     pub fn account_state(&self, address: &Address) -> Option<&Tracked<Option<AccountInfo>>> {
-        self.state
-            .accounts()
-            .find_map(|(changed, account)| (changed == *address).then_some(account))
+        self.state.account_state(address)
     }
 
     /// Get storage if value is known.
     ///
     /// This means that depending on status we can potentially return `U256::ZERO`.
     pub fn storage(&self, address: &Address, storage_key: U256) -> Option<U256> {
-        self.state.storage().find_map(|(key, storage)| {
-            (key.address() == *address && key.key() == storage_key).then_some(storage.current)
-        })
+        self.state.storage_value(address, storage_key)
     }
 
     /// Return bytecode if known.
     pub fn bytecode(&self, code_hash: &B256) -> Option<Bytecode> {
-        self.state
-            .code()
-            .find(|(hash, _)| *hash == code_hash)
-            .map(|(_, bytecode)| Bytecode::new_raw(bytecode.original_bytes()))
+        self.state.bytecode(code_hash)
     }
 
     /// Returns [`HashedPostState`] for this execution outcome.
@@ -486,7 +479,7 @@ impl<T> ExecutionOutcome<T> {
         let mut accumulator = BlockStateAccumulator::new();
         evm2_block_state_accumulator_extend(&mut accumulator, &self.state);
         evm2_block_state_accumulator_extend(&mut accumulator, &other_state);
-        self.state = accumulator;
+        self.state = accumulator.into();
         self.extend_block_states(other_block_states, other_receipts_len);
         self.block_reverts.extend(block_reverts);
         self.receipts.extend(receipts);
@@ -496,14 +489,14 @@ impl<T> ExecutionOutcome<T> {
     fn truncate_block_states(&mut self, new_len: usize) {
         if !self.block_states.is_empty() {
             self.block_states.truncate(new_len);
-            self.state = Self::aggregate_block_states(&self.block_states);
+            self.state = Self::aggregate_block_states(&self.block_states).into();
         }
     }
 
     fn drop_first_block_states(&mut self, n: usize) {
         if !self.block_states.is_empty() {
             self.block_states.drain(..n.min(self.block_states.len()));
-            self.state = Self::aggregate_block_states(&self.block_states);
+            self.state = Self::aggregate_block_states(&self.block_states).into();
         }
     }
 
