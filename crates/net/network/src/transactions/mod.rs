@@ -1048,9 +1048,9 @@ where
             // determine whether to send full tx objects or hashes.
             let mut builder = if num_full_peers < max_num_full {
                 num_full_peers += 1;
-                PropagateTransactionsBuilder::full(peer.version)
+                PropagateTransactionsBuilder::full(peer.version, to_propagate.len())
             } else {
-                PropagateTransactionsBuilder::pooled(peer.version)
+                PropagateTransactionsBuilder::pooled(peer.version, to_propagate.len())
             };
 
             if propagation_mode.is_forced() {
@@ -1776,14 +1776,16 @@ enum PropagateTransactionsBuilder<T> {
 }
 
 impl<T> PropagateTransactionsBuilder<T> {
-    /// Create a builder for pooled transactions
-    fn pooled(version: EthVersion) -> Self {
-        Self::Pooled(PooledTransactionsHashesBuilder::new(version))
+    /// Create a builder for pooled transactions with capacity for the expected number of
+    /// transactions.
+    fn pooled(version: EthVersion, capacity: usize) -> Self {
+        Self::Pooled(PooledTransactionsHashesBuilder::with_capacity(version, capacity))
     }
 
-    /// Create a builder that sends transactions in full and records transactions that don't fit.
-    fn full(version: EthVersion) -> Self {
-        Self::Full(FullTransactionsBuilder::new(version))
+    /// Create a builder that sends transactions in full and records transactions that don't fit,
+    /// with capacity for the expected number of transactions.
+    fn full(version: EthVersion, capacity: usize) -> Self {
+        Self::Full(FullTransactionsBuilder::with_capacity(version, capacity))
     }
 
     /// Returns true if no transactions are recorded.
@@ -1851,6 +1853,18 @@ impl<T> FullTransactionsBuilder<T> {
             total_size: 0,
             pooled: PooledTransactionsHashesBuilder::new(version),
             transactions: vec![],
+        }
+    }
+
+    /// Create a builder with capacity for the expected number of full transactions.
+    ///
+    /// The overflow hashes builder remains lazily allocated since most transactions are expected
+    /// to be broadcast in full.
+    fn with_capacity(version: EthVersion, capacity: usize) -> Self {
+        Self {
+            total_size: 0,
+            pooled: PooledTransactionsHashesBuilder::new(version),
+            transactions: Vec::with_capacity(capacity),
         }
     }
 
@@ -1993,6 +2007,20 @@ impl PooledTransactionsHashesBuilder {
                 Self::Eth68(Default::default())
             }
             EthVersion::Eth72 => Self::Eth72(Default::default()),
+        }
+    }
+
+    /// Create a builder for the negotiated version of the peer's session with capacity for the
+    /// expected number of hashes.
+    fn with_capacity(version: EthVersion, capacity: usize) -> Self {
+        match version {
+            EthVersion::Eth66 | EthVersion::Eth67 => {
+                Self::Eth66(NewPooledTransactionHashes66::with_capacity(capacity))
+            }
+            EthVersion::Eth68 | EthVersion::Eth69 | EthVersion::Eth70 | EthVersion::Eth71 => {
+                Self::Eth68(NewPooledTransactionHashes68::with_capacity(capacity))
+            }
+            EthVersion::Eth72 => Self::Eth72(NewPooledTransactionHashes72::with_capacity(capacity)),
         }
     }
 
@@ -2971,7 +2999,7 @@ mod tests {
     #[test]
     fn test_transaction_builder_empty() {
         let mut builder =
-            PropagateTransactionsBuilder::<TransactionSigned>::pooled(EthVersion::Eth68);
+            PropagateTransactionsBuilder::<TransactionSigned>::pooled(EthVersion::Eth68, 0);
         assert!(builder.is_empty());
 
         let mut factory = MockTransactionFactory::default();
@@ -2988,7 +3016,7 @@ mod tests {
     #[test]
     fn test_transaction_builder_large() {
         let mut builder =
-            PropagateTransactionsBuilder::<TransactionSigned>::full(EthVersion::Eth68);
+            PropagateTransactionsBuilder::<TransactionSigned>::full(EthVersion::Eth68, 0);
         assert!(builder.is_empty());
 
         let mut factory = MockTransactionFactory::default();
@@ -3017,7 +3045,7 @@ mod tests {
     #[test]
     fn test_transaction_builder_eip4844() {
         let mut builder =
-            PropagateTransactionsBuilder::<TransactionSigned>::full(EthVersion::Eth68);
+            PropagateTransactionsBuilder::<TransactionSigned>::full(EthVersion::Eth68, 0);
         assert!(builder.is_empty());
 
         let mut factory = MockTransactionFactory::default();
