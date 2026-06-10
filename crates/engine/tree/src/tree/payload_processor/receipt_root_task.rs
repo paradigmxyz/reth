@@ -6,6 +6,7 @@
 //! [`OrderedTrieRootEncodedBuilder`] when possible. When the channel closes, the task returns the
 //! computed root.
 
+use alloy_consensus::ReceiptWithBloom;
 use alloy_eips::Encodable2718;
 use alloy_primitives::{map::HashMap, Bloom, B256};
 use crossbeam_channel::Receiver;
@@ -84,12 +85,19 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
         let mut pending = HashMap::new();
 
         let mut push = |receipt: R| {
-            let receipt_with_bloom = receipt.with_bloom_ref();
+            let has_logs = !receipt.logs().is_empty();
+            let receipt_with_bloom = if has_logs {
+                receipt.with_bloom_ref()
+            } else {
+                ReceiptWithBloom::new(&receipt, Bloom::ZERO)
+            };
 
             encode_buf.clear();
             receipt_with_bloom.encode_2718(&mut encode_buf);
 
-            aggregated_bloom |= *receipt_with_bloom.bloom_ref();
+            if has_logs {
+                aggregated_bloom |= *receipt_with_bloom.bloom_ref();
+            }
             builder.push_next(&encode_buf);
         };
 
