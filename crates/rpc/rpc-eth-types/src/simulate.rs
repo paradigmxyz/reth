@@ -388,7 +388,7 @@ where
         let mut tx_regular_gas_used = 0;
         let gas_output = if wrap_nonce {
             let (mut tx_env, tx) = ExecutorTx::<S::Executor>::into_parts(tx);
-            // Non-validating simulations follow geth's uint64 account nonce wraparound.
+            // Wrap nonce for max nonce values
             tx_env.set_nonce(0);
             builder.execute_transaction_with_result_closure((tx_env, tx), |result| {
                 tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
