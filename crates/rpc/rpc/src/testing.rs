@@ -17,17 +17,19 @@
 use alloy_consensus::{Header, Transaction};
 use alloy_eips::{eip1559::calculate_block_gas_limit, eip2718::Decodable2718};
 use alloy_evm::{Evm, RecoveredTx};
-use alloy_primitives::{map::HashSet, Address, U256};
+use alloy_primitives::{map::HashSet, Address, Bytes, B256, U256};
 use alloy_rlp::Encodable;
-use alloy_rpc_types_engine::ExecutionPayloadEnvelopeV5;
+use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV5, ForkchoiceState, PayloadAttributes};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
+use reth_engine_primitives::ConsensusEngineHandle;
 use reth_errors::RethError;
 use reth_ethereum_engine_primitives::EthBuiltPayload;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{execute::BlockBuilder, ConfigureEvm, NextBlockEnvAttributes};
+use reth_payload_primitives::PayloadTypes;
 use reth_primitives_traits::{
     transaction::{recover::try_recover_signers, signed::RecoveryError},
     AlloyBlockHeader as BlockTrait, TxTy,
@@ -36,7 +38,7 @@ use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_api::{TestingApiServer, TestingBuildBlockRequestV1};
 use reth_rpc_eth_api::{helpers::Call, FromEthApiError};
 use reth_rpc_eth_types::EthApiError;
-use reth_storage_api::{BlockReader, HeaderProvider};
+use reth_storage_api::{BlockReader, BlockReaderIdExt, HeaderProvider};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::context::Block;
 use revm_primitives::map::DefaultHashBuilder;
@@ -45,24 +47,35 @@ use tracing::debug;
 
 /// Testing API handler.
 #[derive(Debug, Clone)]
-pub struct TestingApi<Eth, Evm> {
+pub struct TestingApi<
+    Eth,
+    Evm,
+    Payload: PayloadTypes = reth_ethereum_engine_primitives::EthEngineTypes,
+> {
     eth_api: Eth,
     evm_config: Evm,
     /// Desired gas limit to move toward while respecting the consensus gas limit bounds.
     desired_gas_limit: u64,
+    engine_handle: ConsensusEngineHandle<Payload>,
     /// If true, skip invalid transactions instead of failing.
     skip_invalid_transactions: bool,
     /// If set, override the block gas limit in `testing_buildBlockV1`.
     gas_limit_override: Option<u64>,
 }
 
-impl<Eth, Evm> TestingApi<Eth, Evm> {
+impl<Eth, Evm, Payload: PayloadTypes> TestingApi<Eth, Evm, Payload> {
     /// Create a new testing API handler.
-    pub const fn new(eth_api: Eth, evm_config: Evm, desired_gas_limit: u64) -> Self {
+    pub const fn new(
+        eth_api: Eth,
+        evm_config: Evm,
+        desired_gas_limit: u64,
+        engine_handle: ConsensusEngineHandle<Payload>,
+    ) -> Self {
         Self {
             eth_api,
             evm_config,
             desired_gas_limit,
+            engine_handle,
             skip_invalid_transactions: false,
             gas_limit_override: None,
         }
@@ -83,21 +96,26 @@ impl<Eth, Evm> TestingApi<Eth, Evm> {
     }
 }
 
-impl<Eth, Evm> TestingApi<Eth, Evm>
+impl<Eth, Evm, Payload> TestingApi<Eth, Evm, Payload>
 where
+    Payload: PayloadTypes,
+    Payload::ExecutionData: From<EthBuiltPayload>,
     Eth: Call<
-        Provider: BlockReader<Header = Header> + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+        Provider: BlockReader<Header = Header>
+                      + BlockReaderIdExt<Header = Header>
+                      + ChainSpecProvider<ChainSpec: EthereumHardforks>,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Evm::Primitives>>>,
     >,
     Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes, Primitives = EthPrimitives>
         + 'static,
 {
-    async fn build_block_v1(
+    async fn build_payload_v1(
         &self,
         request: TestingBuildBlockRequestV1,
-    ) -> Result<ExecutionPayloadEnvelopeV5, Eth::Error> {
+        skip_invalid_transactions: bool,
+        use_pool_transactions: bool,
+    ) -> Result<EthBuiltPayload, Eth::Error> {
         let evm_config = self.evm_config.clone();
-        let skip_invalid_transactions = self.skip_invalid_transactions;
         let desired_gas_limit = self.desired_gas_limit;
         let gas_limit_override = self.gas_limit_override;
         self.eth_api
@@ -147,7 +165,6 @@ where
                 let mut block_transactions_rlp_length = 0usize;
 
                 // If no transactions are provided in the request, use transactions from the pool.
-                let use_pool_transactions = request.transactions.is_empty();
                 let recovered_txs = if use_pool_transactions {
                     let mut best_txs = eth_api.pool().best_transactions_with_attributes(
                         BestTransactionsAttributes::new(
@@ -242,20 +259,112 @@ where
                 let has_requests = outcome.block.requests_hash().is_some();
                 let requests = has_requests.then_some(outcome.execution_result.requests);
 
-                EthBuiltPayload::new(Arc::new(outcome.block), total_fees, requests, None)
-                    .try_into_v5()
-                    .map_err(RethError::other)
-                    .map_err(Eth::Error::from_eth_err)
+                Ok(EthBuiltPayload::new(Arc::new(outcome.block), total_fees, requests, None))
             })
             .await
+    }
+
+    async fn build_block_v1(
+        &self,
+        request: TestingBuildBlockRequestV1,
+    ) -> Result<ExecutionPayloadEnvelopeV5, Eth::Error> {
+        let use_pool_transactions = request.transactions.is_empty();
+        self.build_payload_v1(request, self.skip_invalid_transactions, use_pool_transactions)
+            .await?
+            .try_into_v5()
+            .map_err(RethError::other)
+            .map_err(Eth::Error::from_eth_err)
+    }
+
+    async fn commit_block_v1(
+        &self,
+        payload_attributes: PayloadAttributes,
+        transactions: Option<Vec<Bytes>>,
+        extra_data: Option<Bytes>,
+    ) -> Result<B256, Eth::Error> {
+        let parent = self
+            .eth_api
+            .provider()
+            .latest_header()
+            .map_err(EthApiError::from)?
+            .ok_or_else(|| EthApiError::HeaderNotFound(alloy_eips::BlockId::latest()))?;
+        let safe_block_hash = self
+            .eth_api
+            .provider()
+            .safe_header()
+            .map_err(EthApiError::from)?
+            .map(|header| header.hash())
+            .unwrap_or_else(|| parent.hash());
+        let finalized_block_hash = self
+            .eth_api
+            .provider()
+            .finalized_header()
+            .map_err(EthApiError::from)?
+            .map(|header| header.hash())
+            .unwrap_or_else(|| parent.hash());
+
+        let use_pool_transactions = transactions.is_none();
+        let payload = self
+            .build_payload_v1(
+                TestingBuildBlockRequestV1 {
+                    parent_block_hash: parent.hash(),
+                    payload_attributes,
+                    transactions: transactions.unwrap_or_default(),
+                    extra_data,
+                },
+                false,
+                use_pool_transactions,
+            )
+            .await?;
+
+        let block_hash = payload.block().hash();
+        let execution_data: Payload::ExecutionData = payload.into();
+        let status = self
+            .engine_handle
+            .new_payload(execution_data)
+            .await
+            .map_err(RethError::other)
+            .map_err(Eth::Error::from_eth_err)?;
+        if !status.is_valid() {
+            return Err(Eth::Error::from_eth_err(EthApiError::InvalidParams(format!(
+                "new payload returned non-valid status: {:?}",
+                status.status
+            ))));
+        }
+
+        let fcu = self
+            .engine_handle
+            .fork_choice_updated(
+                ForkchoiceState {
+                    head_block_hash: block_hash,
+                    safe_block_hash,
+                    finalized_block_hash,
+                },
+                None,
+            )
+            .await
+            .map_err(RethError::other)
+            .map_err(Eth::Error::from_eth_err)?;
+        if !fcu.is_valid() {
+            return Err(Eth::Error::from_eth_err(EthApiError::InvalidParams(format!(
+                "forkchoice update returned non-valid status: {:?}",
+                fcu.payload_status.status
+            ))));
+        }
+
+        Ok(block_hash)
     }
 }
 
 #[async_trait]
-impl<Eth, Evm> TestingApiServer for TestingApi<Eth, Evm>
+impl<Eth, Evm, Payload> TestingApiServer for TestingApi<Eth, Evm, Payload>
 where
+    Payload: PayloadTypes,
+    Payload::ExecutionData: From<EthBuiltPayload>,
     Eth: Call<
-        Provider: BlockReader<Header = Header> + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+        Provider: BlockReader<Header = Header>
+                      + BlockReaderIdExt<Header = Header>
+                      + ChainSpecProvider<ChainSpec: EthereumHardforks>,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Evm::Primitives>>>,
     >,
     Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes, Primitives = EthPrimitives>
@@ -268,5 +377,16 @@ where
         request: TestingBuildBlockRequestV1,
     ) -> RpcResult<ExecutionPayloadEnvelopeV5> {
         self.build_block_v1(request).await.map_err(Into::into)
+    }
+
+    /// Handles `testing_commitBlockV1` by building on the current canonical head, then submitting
+    /// the payload and advancing forkchoice through the same engine handle used by the Engine API.
+    async fn commit_block_v1(
+        &self,
+        payload_attributes: PayloadAttributes,
+        transactions: Option<Vec<Bytes>>,
+        extra_data: Option<Bytes>,
+    ) -> RpcResult<B256> {
+        self.commit_block_v1(payload_attributes, transactions, extra_data).await.map_err(Into::into)
     }
 }
