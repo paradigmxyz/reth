@@ -5518,7 +5518,7 @@ dependencies = [
 [[package]]
 name = "keccak-asm"
 version = "0.1.7"
-source = "git+https://github.com/DaniPopes/keccak-asm?branch=perf%2Fzen5-x8664-default#525fef6fb0a273e50c098ecb350c6c35bf099514"
+source = "git+https://github.com/DaniPopes/keccak-asm?branch=perf%2Fzen5-x8664-default#b94763b2d0c63500dbbc71faf387434a1184e5cf"
 dependencies = [
  "digest 0.10.7",
  "sha3-asm",
@@ -11537,7 +11537,7 @@ dependencies = [
 [[package]]
 name = "sha3-asm"
 version = "0.1.7"
-source = "git+https://github.com/DaniPopes/keccak-asm?branch=perf%2Fzen5-x8664-default#525fef6fb0a273e50c098ecb350c6c35bf099514"
+source = "git+https://github.com/DaniPopes/keccak-asm?branch=perf%2Fzen5-x8664-default#b94763b2d0c63500dbbc71faf387434a1184e5cf"
 dependencies = [
  "cc",
  "cfg-if",
