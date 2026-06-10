@@ -444,6 +444,25 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         self,
         block_hash: BlockHash,
     ) -> ProviderResult<StateProviderBox> {
+        self.into_state_provider_at_block_hash_inner(block_hash, false)
+    }
+
+    /// Like [`Self::into_state_provider_at_block_hash`], but if a historical provider is built,
+    /// keys missing from the history index resolve via plain state instead of reading as zero.
+    ///
+    /// Only sound when the caller overlays all blocks above `block_hash` (engine validation).
+    pub(crate) fn into_state_provider_at_block_hash_with_plain_state_fallback(
+        self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<StateProviderBox> {
+        self.into_state_provider_at_block_hash_inner(block_hash, true)
+    }
+
+    fn into_state_provider_at_block_hash_inner(
+        self,
+        block_hash: BlockHash,
+        plain_state_fallback: bool,
+    ) -> ProviderResult<StateProviderBox> {
         // Resolve block number and verify it's canonical before destructuring self
         let block_number =
             self.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
@@ -457,10 +476,19 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             let block_number = storage_provider
                 .block_number(anchor_hash)?
                 .ok_or(ProviderError::BlockHashNotFound(anchor_hash))?;
-            let latest_historical = storage_provider.try_into_history_at_block(block_number)?;
+            let latest_historical = if plain_state_fallback {
+                storage_provider
+                    .try_into_history_at_block_with_plain_state_fallback(block_number)?
+            } else {
+                storage_provider.try_into_history_at_block(block_number)?
+            };
             return Ok(Box::new(block_state.state_provider(latest_historical)));
         }
-        storage_provider.try_into_history_at_block(block_number)
+        if plain_state_fallback {
+            storage_provider.try_into_history_at_block_with_plain_state_fallback(block_number)
+        } else {
+            storage_provider.try_into_history_at_block(block_number)
+        }
     }
 }
 

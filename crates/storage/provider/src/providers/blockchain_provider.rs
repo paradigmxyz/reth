@@ -582,6 +582,26 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         }
     }
 
+    fn state_by_block_hash_with_plain_state_fallback(
+        &self,
+        hash: BlockHash,
+    ) -> ProviderResult<StateProviderBox> {
+        trace!(target: "providers::blockchain", ?hash, "Getting state by block hash with plain state fallback");
+        if let Ok(state) = self
+            .consistent_provider()
+            .and_then(|p| p.into_state_provider_at_block_hash_with_plain_state_fallback(hash))
+        {
+            // This could be tracked by a historical block
+            Ok(state)
+        } else if let Ok(Some(pending)) = self.pending_state_by_hash(hash) {
+            // .. or this could be the pending state
+            Ok(pending)
+        } else {
+            // if we couldn't find it anywhere, then we should return an error
+            Err(ProviderError::StateForHashNotFound(hash))
+        }
+    }
+
     /// Returns the state provider for pending state.
     ///
     /// If there's no pending block available then the latest state provider is returned:

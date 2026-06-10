@@ -115,6 +115,24 @@ pub trait TryIntoHistoricalStateProvider {
         self,
         block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox>;
+
+    /// Returns a historical [`StateProvider`] like [`Self::try_into_history_at_block`], but keys
+    /// without a history-index entry resolve via a plain state lookup instead of being treated as
+    /// never written (i.e. zero).
+    ///
+    /// This is only sound when every key whose value differs between `block_number` and the
+    /// current plain state is shadowed before this provider is consulted (e.g. the engine's
+    /// in-memory overlay covers all blocks above `block_number`). It protects block validation
+    /// against an incomplete or transiently inconsistent history index.
+    fn try_into_history_at_block_with_plain_state_fallback(
+        self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<StateProviderBox>
+    where
+        Self: Sized,
+    {
+        self.try_into_history_at_block(block_number)
+    }
 }
 
 /// Light wrapper that returns `StateProvider` implementations that correspond to the given
@@ -179,6 +197,20 @@ pub trait StateProviderFactory: BlockIdReader + Send {
     ///
     /// This will return a [StateProvider] for either a historical or pending block.
     fn state_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox>;
+
+    /// Returns _any_ [`StateProvider`] with matching block hash, like
+    /// [`Self::state_by_block_hash`], but if a historical provider is returned, keys missing from
+    /// the history index resolve via plain state instead of reading as zero.
+    ///
+    /// Intended for engine block validation, where the caller overlays all in-memory blocks above
+    /// the requested hash, making plain state a sound fallback for any key not in that overlay.
+    /// The default implementation falls back to [`Self::state_by_block_hash`].
+    fn state_by_block_hash_with_plain_state_fallback(
+        &self,
+        block: BlockHash,
+    ) -> ProviderResult<StateProviderBox> {
+        self.state_by_block_hash(block)
+    }
 
     /// Storage provider for pending state.
     ///

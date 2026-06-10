@@ -915,10 +915,16 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     }
 }
 
-impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for DatabaseProvider<TX, N> {
-    fn try_into_history_at_block(
+impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
+    /// Returns a historical state provider for the given block number.
+    ///
+    /// With `plain_state_fallback` enabled, keys without a history-index entry resolve via plain
+    /// state instead of being treated as never written (zero). See
+    /// [`TryIntoHistoricalStateProvider::try_into_history_at_block_with_plain_state_fallback`].
+    fn history_provider_at_block(
         self,
         mut block_number: BlockNumber,
+        plain_state_fallback: bool,
     ) -> ProviderResult<StateProviderBox> {
         let best_block = self.best_block_number().unwrap_or_default();
 
@@ -944,26 +950,54 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
             self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
         let changeset_cache = self.changeset_cache.clone();
 
+        // If we pruned account or storage history, we can't return state on every historical
+        // block. Instead, we should cap it at the latest prune checkpoint for corresponding prune
+        // segment.
+        let mut lowest_account_history = account_history_prune_checkpoint
+            .and_then(|checkpoint| checkpoint.block_number)
+            .map(|block_number| block_number + 1);
+        let mut lowest_storage_history = storage_history_prune_checkpoint
+            .and_then(|checkpoint| checkpoint.block_number)
+            .map(|block_number| block_number + 1);
+
+        if plain_state_fallback {
+            // Mark history below the requested block as potentially unavailable so that keys
+            // missing from the history index resolve via plain state (`MaybeInPlainState`)
+            // instead of reading as never written (zero).
+            lowest_account_history =
+                Some(lowest_account_history.map_or(block_number, |lowest| lowest.max(block_number)));
+            lowest_storage_history =
+                Some(lowest_storage_history.map_or(block_number, |lowest| lowest.max(block_number)));
+        }
+
         let mut state_provider = HistoricalStateProvider::new(self, block_number, changeset_cache);
 
-        // If we pruned account or storage history, we can't return state on every historical block.
-        // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
-        if let Some(prune_checkpoint_block_number) =
-            account_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
-        {
-            state_provider = state_provider.with_lowest_available_account_history_block_number(
-                prune_checkpoint_block_number + 1,
-            );
+        if let Some(lowest) = lowest_account_history {
+            state_provider =
+                state_provider.with_lowest_available_account_history_block_number(lowest);
         }
-        if let Some(prune_checkpoint_block_number) =
-            storage_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
-        {
-            state_provider = state_provider.with_lowest_available_storage_history_block_number(
-                prune_checkpoint_block_number + 1,
-            );
+        if let Some(lowest) = lowest_storage_history {
+            state_provider =
+                state_provider.with_lowest_available_storage_history_block_number(lowest);
         }
 
         Ok(Box::new(state_provider))
+    }
+}
+
+impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for DatabaseProvider<TX, N> {
+    fn try_into_history_at_block(
+        self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<StateProviderBox> {
+        self.history_provider_at_block(block_number, false)
+    }
+
+    fn try_into_history_at_block_with_plain_state_fallback(
+        self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<StateProviderBox> {
+        self.history_provider_at_block(block_number, true)
     }
 }
 
@@ -4618,6 +4652,55 @@ mod tests {
             Err(e) => panic!("Expected BlockNotExecuted error, got: {e:?}"),
             Ok(_) => panic!("Expected error, got Ok"),
         }
+    }
+
+    #[test]
+    fn test_history_plain_state_fallback_for_missing_index_entries() {
+        use alloy_primitives::Address;
+        use reth_primitives_traits::{Account, StorageEntry};
+        use reth_storage_api::{StateProvider, TryIntoHistoricalStateProvider};
+
+        let factory = create_test_provider_factory();
+
+        let address = Address::random();
+        let storage_key = B256::with_last_byte(1);
+        let storage_value = U256::from(42);
+        let account = Account { nonce: 7, balance: U256::ZERO, bytecode_hash: None };
+
+        // Plain state has values for the account and slot, but the history index has NO entries
+        // for them (e.g. an incomplete index, or a transiently invisible shard).
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.tx_ref().put::<tables::PlainAccountState>(address, account).unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::PlainStorageState>(
+                address,
+                StorageEntry { key: storage_key, value: storage_value },
+            )
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::StageCheckpoints>(
+                reth_stages_types::StageId::Finish.to_string(),
+                reth_stages_types::StageCheckpoint::new(10),
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        // Without the fallback, a historical provider treats the missing index entries as
+        // "never written" and the values read as empty/zero.
+        let state = factory.provider().unwrap().try_into_history_at_block(5).unwrap();
+        assert_eq!(state.basic_account(&address).unwrap(), None);
+        assert_eq!(state.storage(address, storage_key).unwrap(), None);
+
+        // With the fallback, the missing index entries resolve via plain state.
+        let state = factory
+            .provider()
+            .unwrap()
+            .try_into_history_at_block_with_plain_state_fallback(5)
+            .unwrap();
+        assert_eq!(state.basic_account(&address).unwrap(), Some(account));
+        assert_eq!(state.storage(address, storage_key).unwrap(), Some(storage_value));
     }
 
     #[test]

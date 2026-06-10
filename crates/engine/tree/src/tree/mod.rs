@@ -125,11 +125,16 @@ where
 {
     /// Creates a new state provider from this builder.
     pub fn build(&self) -> ProviderResult<StateProviderBox> {
-        let mut provider = self.provider_factory.state_by_block_hash(self.historical)?;
-        if let Some(overlay) = self.overlay.clone() {
-            provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay))
-        }
-        Ok(provider)
+        let Some(overlay) = self.overlay.clone() else {
+            return self.provider_factory.state_by_block_hash(self.historical)
+        };
+        // The overlay shadows every key that changed above `historical`, so if a concurrent
+        // persistence commit forces the base onto the historical (history-indexed) path, keys
+        // missing from the history index can safely resolve via plain state instead of reading
+        // as zero.
+        let provider =
+            self.provider_factory.state_by_block_hash_with_plain_state_fallback(self.historical)?;
+        Ok(Box::new(MemoryOverlayStateProvider::new(provider, overlay)))
     }
 }
 
