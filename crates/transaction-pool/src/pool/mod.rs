@@ -697,7 +697,6 @@ where
             // Enforce the pool size limits if at least one transaction was added successfully
             let discarded = if results.iter().any(Result::is_ok) {
                 let discarded = pool.discard_worst();
-                // size metrics are updated once per batch instead of per added transaction
                 pool.update_size_metrics();
                 discarded
             } else {
