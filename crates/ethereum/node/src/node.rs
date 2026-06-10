@@ -520,6 +520,7 @@ fn jit_runtime_config(jit: &JitArgs) -> RuntimeConfig {
 /// This is the shared setup used by both [`EthereumExecutorBuilder`] and `reth re-execute`.
 ///
 /// Returns the evm config and metrics recorder if JIT starts enabled.
+#[allow(clippy::type_complexity)]
 pub fn build_jit_evm_config<C: EthereumHardforks>(
     chain_spec: Arc<C>,
     jit: &JitArgs,
