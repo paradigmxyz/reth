@@ -68,7 +68,7 @@ impl TxnManager {
             let env = env;
             loop {
                 let msg = rx.recv();
-                tracing::debug!(target: "libmdbx::txn", ?msg, "txn-mngr received");
+                tracing::trace!(target: "libmdbx::txn", ?msg, "txn-mngr received");
                 match msg {
                     Ok(msg) => match msg {
                         TxnManagerMessage::Begin { parent, flags, sender } => {
