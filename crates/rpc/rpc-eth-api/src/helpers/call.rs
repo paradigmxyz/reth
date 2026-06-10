@@ -38,6 +38,7 @@ use reth_rpc_eth_types::{
     simulate::{self, EthSimulateError},
     EthApiError, StateCacheDb,
 };
+use reth_rpc_server_types::result::invalid_params_rpc_err;
 use reth_storage_api::{BlockIdReader, ProviderTx, StateProviderBox};
 use revm::{
     context::Block,
@@ -190,6 +191,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         .map_err(Self::Error::from_eth_err)?;
                     let map_err = |e: EthApiError| -> Self::Error {
                         match e.as_simulate_error() {
+                            Some(sim_err) if validation => Self::Error::from_eth_err(
+                                EthApiError::other(invalid_params_rpc_err(sim_err.to_string())),
+                            ),
                             Some(sim_err) => Self::Error::from_eth_err(EthApiError::other(sim_err)),
                             None => Self::Error::from_eth_err(e),
                         }
