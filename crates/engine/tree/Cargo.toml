@@ -50,6 +50,7 @@ evm2.workspace = true
 futures.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros"] }
+moka = { workspace = true, features = ["sync"] }
 
 # metrics
 metrics.workspace = true

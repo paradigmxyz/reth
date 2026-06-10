@@ -8454,6 +8454,7 @@ dependencies = [
  "indexmap 2.14.0",
  "metrics",
  "metrics-util",
+ "moka",
  "parking_lot",
  "proptest",
  "rand 0.8.6",

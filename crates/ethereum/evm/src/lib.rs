@@ -425,6 +425,29 @@ where
     where
         DB: reth_storage_api::StateProvider + Send + 'static,
     {
+        let spec = env.spec;
+        self.evm2_prewarm_evm_with_precompiles(
+            state_provider,
+            env,
+            alloc::boxed::Box::new(evm2::Precompiles::base(spec)),
+        )
+    }
+
+    fn evm2_prewarm_spec(&self, env: &EthEvmEnv) -> evm2::SpecId {
+        env.spec
+    }
+
+    fn evm2_prewarm_evm_with_precompiles<DB>(
+        &self,
+        state_provider: DB,
+        env: EthEvmEnv,
+        precompiles: alloc::boxed::Box<
+            dyn evm2::precompile::PrecompileProvider<evm2::BaseEvmTypes>,
+        >,
+    ) -> Self::PrewarmEvm<DB>
+    where
+        DB: reth_storage_api::StateProvider + Send + 'static,
+    {
         let mut version = evm2::Version::new(env.spec);
         version.chain_id = self.chain_spec.chain_id();
         version.features.remove(evm2::EvmFeatures::NONCE_CHECK);
@@ -436,7 +459,7 @@ where
             env.block,
             evm2::ethereum::ethereum_tx_registry(env.spec),
             evm2::evm::Db::new(reth_storage_api::Evm2StateProviderDatabase::new(state_provider)),
-            evm2::Precompiles::base(env.spec),
+            precompiles,
         )
     }
 
