@@ -696,7 +696,9 @@ where
 
             // Enforce the pool size limits if at least one transaction was added successfully
             let discarded = if results.iter().any(Result::is_ok) {
-                pool.discard_worst()
+                let discarded = pool.discard_worst();
+                pool.update_size_metrics();
+                discarded
             } else {
                 Default::default()
             };
