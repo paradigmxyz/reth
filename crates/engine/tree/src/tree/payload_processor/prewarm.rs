@@ -13,42 +13,31 @@
 
 use super::bal_prewarm_pool::BalPrewarmPool;
 use crate::tree::{
-    payload_processor::multiproof::StateRootMessage, CachedStateCacheMetrics, CachedStateMetrics,
-    ExecutionEnv, PayloadExecutionCache, SavedCache, StateProviderBuilder,
-};
-#[cfg(any())]
-use crate::tree::{
-    precompile_cache::{CachedPrecompile, PrecompileCacheMap},
-    CachedStateProvider,
+    payload_processor::multiproof::StateRootMessage, precompile_cache::PrecompileCacheMap,
+    CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
+    PayloadExecutionCache, SavedCache, StateProviderBuilder,
 };
 #[cfg(any())]
 use alloy_consensus::transaction::TxHashRef;
 #[cfg(any())]
 use alloy_eip7928::bal::DecodedBal;
-#[cfg(any())]
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, B256, U256};
+use alloy_primitives::{keccak256, map::B256Map, B256, U256};
 #[cfg(any())]
 use alloy_primitives::StorageKey;
 use crossbeam_channel::Sender as CrossbeamSender;
+use evm2::evm::StateChanges;
 use metrics::{Counter, Gauge, Histogram};
 #[cfg(any())]
 use rayon::prelude::*;
-use reth_evm::ConfigureEvm;
-#[cfg(any())]
-use reth_evm::{
-    database::StateProviderDatabase, execute::ExecutableTxFor, Evm, EvmFor, RecoveredTx, SpecFor,
-};
+use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, ConfigureEvm2Prewarm};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 #[cfg(any())]
 use reth_provider::AccountReader;
 use reth_provider::{BlockExecutionOutput, BlockReader, StateProviderFactory, StateReader};
-#[cfg(any())]
-use reth_tasks::pool::WorkerPool;
-use reth_tasks::Runtime;
-#[cfg(any())]
-use reth_trie_common::MultiProofTargetsV2;
+use reth_tasks::{pool::WorkerPool, Runtime};
+use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc::{self, channel, Receiver, Sender},
@@ -56,9 +45,7 @@ use std::sync::{
 };
 #[cfg(any())]
 use tokio::sync::oneshot;
-use tracing::{debug, instrument, trace, warn, Span};
-#[cfg(any())]
-use tracing::{debug_span, trace_span};
+use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 #[derive(Debug)]
@@ -84,7 +71,6 @@ where
     Evm: ConfigureEvm<Primitives = N>,
 {
     /// The executor used to spawn execution tasks.
-    #[cfg(any())]
     executor: Runtime,
     /// Shared execution cache.
     execution_cache: PayloadExecutionCache,
@@ -102,7 +88,7 @@ impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
 where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
-    Evm: ConfigureEvm<Primitives = N> + 'static,
+    Evm: ConfigureEvm2Prewarm<Primitives = N> + 'static,
 {
     /// Initializes the task with the given transactions pending execution
     pub fn new(
@@ -121,7 +107,6 @@ where
 
         (
             Self {
-                #[cfg(any())]
                 executor: _executor,
                 execution_cache,
                 ctx,
@@ -139,7 +124,6 @@ where
     /// transactions as they arrive and wait for all spawned tasks to complete before
     /// clearing per-thread state. Workers that start via work-stealing lazily initialise
     /// their EVM state on first access via [`get_or_init`](reth_tasks::pool::Worker::get_or_init).
-    #[cfg(any())]
     fn spawn_txs_prewarm<Tx>(
         &self,
         pending: mpsc::Receiver<(usize, Tx)>,
@@ -220,7 +204,6 @@ where
     ///
     /// Lazily initialises per-thread [`PrewarmEvmState`] via
     /// [`get_or_init`](reth_tasks::pool::Worker::get_or_init) on first access.
-    #[cfg(any())]
     fn transact_worker<Tx>(
         ctx: &PrewarmContext<N, P, Evm>,
         index: usize,
@@ -247,15 +230,15 @@ where
 
             let start = Instant::now();
 
-            let (tx_env, tx) = tx.into_parts();
-            let res = match evm.transact(tx_env) {
+            let (tx_env, _tx) = tx.into_parts();
+            // Prewarm workers must not commit speculative writes into the reused worker EVM:
+            // task scheduling would otherwise make later prewarm reads observe non-canonical state.
+            let res = match ctx.evm_config.evm2_prewarm_tx(evm, tx_env) {
                 Ok(res) => res,
                 Err(err) => {
                     trace!(
                         target: "engine::tree::payload_processor::prewarm",
                         %err,
-                        tx_hash=%tx.tx().tx_hash(),
-                        sender=%tx.signer(),
                         "Error when executing prewarm transaction",
                     );
                     ctx.metrics.transaction_errors.increment(1);
@@ -269,7 +252,7 @@ where
             }
 
             if index > 0 {
-                let (targets, storage_targets) = MultiProofTargetsV2::from_state(res.state);
+                let (targets, storage_targets) = multiproof_targets_from_state(&res.state_changes);
                 ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
                 if let Some(to_sparse_trie_task) = to_sparse_trie_task {
                     let _ = to_sparse_trie_task.send(StateRootMessage::PrefetchProofs(targets));
@@ -495,16 +478,14 @@ where
         name = "prewarm and caching",
         skip_all
     )]
-    pub fn run<Tx>(self, mode: PrewarmMode<Tx>, actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>) {
+    pub fn run<Tx>(self, mode: PrewarmMode<Tx>, actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>)
+    where
+        Tx: ExecutableTxFor<Evm> + Send + 'static,
+    {
         // Spawn execution tasks based on mode
         match mode {
-            PrewarmMode::Transactions(_pending) => {
-                warn!(
-                    target: "engine::tree::payload_processor::prewarm",
-                    "transaction prewarming is disabled in the evm2 execution path"
-                );
-                let _ = actions_tx
-                    .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
+            PrewarmMode::Transactions(pending) => {
+                self.spawn_txs_prewarm(pending, actions_tx, self.to_sparse_trie_task.clone());
             }
             #[cfg(any())]
             PrewarmMode::BlockAccessList(bal) => {
@@ -569,7 +550,6 @@ where
     /// The execution environment.
     pub env: ExecutionEnv<Evm>,
     /// The EVM configuration.
-    #[cfg(any())]
     pub evm_config: Evm,
     /// The saved cache.
     pub saved_cache: Option<SavedCache>,
@@ -606,18 +586,16 @@ where
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
-#[cfg(any())]
 type PrewarmEvmState<Evm> =
-    Option<EvmFor<Evm, StateProviderDatabase<reth_provider::StateProviderBox>>>;
+    Option<<Evm as ConfigureEvm2Prewarm>::PrewarmEvm<reth_provider::StateProviderBox>>;
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
-    Evm: ConfigureEvm<Primitives = N> + 'static,
+    Evm: ConfigureEvm2Prewarm<Primitives = N> + 'static,
 {
     /// Creates a per-thread EVM for prewarming.
-    #[cfg(any())]
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
         let mut state_provider = match self.provider.build() {
@@ -638,35 +616,7 @@ where
             state_provider = Box::new(CachedStateProvider::new_prewarm(state_provider, caches));
         }
 
-        let state_provider = StateProviderDatabase::new(state_provider);
-
-        let mut evm_env = self.env.evm_env.clone();
-
-        // we must disable the nonce check so that we can execute the transaction even if the nonce
-        // doesn't match what's on chain.
-        evm_env.cfg_env.disable_nonce_check = true;
-
-        // disable the balance check so that transactions from senders who were funded by earlier
-        // transactions in the block can still be prewarmed
-        evm_env.cfg_env.disable_balance_check = true;
-
-        // create a new executor and disable nonce checks in the env
-        let spec_id = *evm_env.spec_id();
-        let mut evm = self.evm_config.evm_with_env(state_provider, evm_env);
-
-        if !self.precompile_cache_disabled {
-            // Only cache pure precompiles to avoid issues with stateful precompiles
-            evm.precompiles_mut().map_cacheable_precompiles(|address, precompile| {
-                CachedPrecompile::wrap(
-                    precompile,
-                    self.precompile_cache_map.cache_for_address(*address),
-                    spec_id,
-                    None, // No metrics for prewarm
-                )
-            });
-        }
-
-        Some(evm)
+        Some(self.evm_config.evm2_prewarm_evm(state_provider, self.env.evm_env.clone()))
     }
 
     /// Returns `true` if prewarming should stop.
@@ -889,17 +839,38 @@ const fn bal_account_changes_state_root(
     !account_fields.is_empty() || !account_changes.storage_changes.is_empty()
 }
 
-/// Returns proof targets from a parked transaction prewarm result.
-#[cfg(any())]
-fn multiproof_targets_from_state<T>(_state: T) -> (MultiProofTargetsV2, usize) {
-    (MultiProofTargetsV2::default(), 0)
+/// Returns proof targets from an evm2 transaction prewarm result.
+fn multiproof_targets_from_state(state: &StateChanges) -> (MultiProofTargetsV2, usize) {
+    let mut targets = MultiProofTargetsV2 {
+        account_targets: Vec::with_capacity(state.accounts.len()),
+        storage_targets: B256Map::default(),
+    };
+
+    for address in state.accounts.keys() {
+        targets.account_targets.push(ProofV2Target::new(keccak256(address)));
+    }
+
+    let mut storage_targets = 0;
+    for (address, storage) in &state.storage {
+        let hashed_address = keccak256(address);
+        let slots = targets.storage_targets.entry(hashed_address).or_default();
+        if storage.wipe {
+            targets.account_targets.push(ProofV2Target::new(hashed_address));
+        }
+        slots.reserve(storage.slots.len());
+        for slot in storage.slots.keys() {
+            slots.push(ProofV2Target::new(keccak256(slot.to_be_bytes::<32>())));
+            storage_targets += 1;
+        }
+    }
+
+    (targets, storage_targets)
 }
 
 /// Returns [`MultiProofTargetsV2`] for withdrawal addresses.
 ///
 /// Withdrawals only modify account balances (no storage), so the targets contain
 /// only account-level entries with empty storage sets.
-#[cfg(any())]
 fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProofTargetsV2 {
     MultiProofTargetsV2 {
         account_targets: withdrawals.iter().map(|w| keccak256(w.address).into()).collect(),

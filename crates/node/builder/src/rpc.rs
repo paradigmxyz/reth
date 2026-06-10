@@ -23,7 +23,7 @@ use jsonrpsee::RpcModule;
 use parking_lot::Mutex;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
-use reth_evm::{ConfigureEvm, ConfigureEvm2BlockExecutor};
+use reth_evm::{ConfigureEvm, ConfigureEvm2BlockExecutor, ConfigureEvm2Prewarm};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
     NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
@@ -1456,6 +1456,7 @@ where
         > + ConfigureEvm2Engine<
             <<Node::Types as NodeTypes>::Payload as PayloadTypes>::ExecutionData,
         > + ConfigureEvm2BlockExecutor<Primitives = PrimitivesTy<Node::Types>>
+                 + ConfigureEvm2Prewarm<Primitives = PrimitivesTy<Node::Types>>
                  + ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
     >,
     PrimitivesTy<Node::Types>: reth_node_api::NodePrimitives<

@@ -27,7 +27,8 @@ use reth_ethereum_forks::{EthereumHardforks, Hardforks};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 #[cfg(feature = "std")]
 use reth_evm::{
-    ConfigureEngineEvm, ConfigureEvm2BlockExecutor, ConfigureEvm2Engine, ExecutableTxIterator,
+    ConfigureEngineEvm, ConfigureEvm2BlockExecutor, ConfigureEvm2Engine, ConfigureEvm2Prewarm,
+    ExecutableTxIterator,
 };
 use reth_evm::{ConfigureEvm, EvmEnvFor, NextBlockEnvAttributes};
 #[cfg(feature = "std")]
@@ -37,6 +38,8 @@ use reth_primitives_traits::{BlockBody, RecoveredBlock};
 use reth_primitives_traits::{SealedBlock, SealedHeader};
 #[cfg(feature = "std")]
 use reth_storage_errors::any::AnyError;
+#[cfg(feature = "std")]
+use reth_storage_errors::provider::ProviderError;
 
 /// Legacy Ethereum EVM type placeholder.
 pub type EthEvm<DB = (), I = (), P = ()> = PhantomData<(DB, I, P)>;
@@ -404,6 +407,90 @@ where
                     as alloc::boxed::Box<dyn core::error::Error + Send + Sync>
             })
     }
+}
+
+#[cfg(feature = "std")]
+impl<ChainSpec, EvmF> ConfigureEvm2Prewarm for EthEvmConfig<ChainSpec, EvmF>
+where
+    ChainSpec:
+        EthExecutorSpec + EthChainSpec<Header = Header> + EthereumHardforks + Hardforks + 'static,
+    EvmF: Clone + Debug + Send + Sync + Unpin + 'static,
+{
+    type PrewarmEvm<DB>
+        = evm2::Evm<evm2::BaseEvmTypes>
+    where
+        DB: reth_storage_api::StateProvider + Send + 'static;
+
+    fn evm2_prewarm_evm<DB>(&self, state_provider: DB, env: EthEvmEnv) -> Self::PrewarmEvm<DB>
+    where
+        DB: reth_storage_api::StateProvider + Send + 'static,
+    {
+        let mut version = evm2::Version::new(env.spec);
+        version.chain_id = self.chain_spec.chain_id();
+        version.features.remove(evm2::EvmFeatures::NONCE_CHECK);
+        version.features.remove(evm2::EvmFeatures::BALANCE_CHECK);
+
+        evm2::Evm::<evm2::BaseEvmTypes>::new_with_execution_config(
+            evm2::ExecutionConfig::for_spec_and_version(env.spec, version),
+            env.spec,
+            env.block,
+            evm2::ethereum::ethereum_tx_registry(env.spec),
+            evm2::evm::Db::new(reth_storage_api::Evm2StateProviderDatabase::new(state_provider)),
+            evm2::Precompiles::base(env.spec),
+        )
+    }
+
+    fn evm2_prewarm_tx<DB>(
+        &self,
+        evm: &mut Self::PrewarmEvm<DB>,
+        tx: Recovered<TransactionSigned>,
+    ) -> Result<evm2::TxResultWithState, alloc::boxed::Box<dyn core::error::Error + Send + Sync>>
+    where
+        DB: reth_storage_api::StateProvider + Send + 'static,
+    {
+        enum PrewarmResolution {
+            Outcome(evm2::TxResultWithState),
+            DatabaseError(evm2::evm::DbErrorCode),
+            HandlerError(evm2::registry::HandlerError),
+        }
+
+        let tx = evm2_recovered_tx(tx);
+        let resolution = match evm.transact(&tx) {
+            Ok(executed) => {
+                if let Some(code) = executed.result().db_error_code {
+                    let _ = executed.discard();
+                    PrewarmResolution::DatabaseError(code)
+                } else {
+                    PrewarmResolution::Outcome(executed.detach())
+                }
+            }
+            Err(err) => PrewarmResolution::HandlerError(err),
+        };
+
+        match resolution {
+            PrewarmResolution::Outcome(outcome) => Ok(outcome),
+            PrewarmResolution::DatabaseError(code) => {
+                Err(alloc::boxed::Box::new(evm2_prewarm_db_error::<DB>(evm, code)))
+            }
+            PrewarmResolution::HandlerError(err) => {
+                Err(alloc::boxed::Box::new(Evm2ExecutionError::<ProviderError>::Handler(err)))
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+fn evm2_prewarm_db_error<DB>(
+    evm: &mut evm2::Evm<evm2::BaseEvmTypes>,
+    code: evm2::evm::DbErrorCode,
+) -> Evm2ExecutionError<ProviderError>
+where
+    DB: reth_storage_api::StateProvider + Send + 'static,
+{
+    evm.database_as_mut::<evm2::evm::Db<reth_storage_api::Evm2StateProviderDatabase<DB>>>()
+        .and_then(evm2::evm::Db::take_result)
+        .map(Evm2ExecutionError::Database)
+        .unwrap_or(Evm2ExecutionError::MissingDatabaseError(code))
 }
 
 #[cfg(feature = "std")]

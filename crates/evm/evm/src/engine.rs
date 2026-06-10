@@ -92,6 +92,32 @@ pub trait ConfigureEvm2BlockExecutor: Clone + core::fmt::Debug + Send + Sync + U
     >;
 }
 
+/// Configuration for evm2-native transaction prewarming.
+pub trait ConfigureEvm2Prewarm: ConfigureEvm {
+    /// Per-thread evm2 instance used by prewarm workers.
+    type PrewarmEvm<DB>
+    where
+        DB: StateProvider + Send + 'static;
+
+    /// Creates a prewarm evm over the provided state.
+    fn evm2_prewarm_evm<DB>(
+        &self,
+        state_provider: DB,
+        env: EvmEnvFor<Self>,
+    ) -> Self::PrewarmEvm<DB>
+    where
+        DB: StateProvider + Send + 'static;
+
+    /// Executes a transaction for prewarming and returns its detached state changes.
+    fn evm2_prewarm_tx<DB>(
+        &self,
+        evm: &mut Self::PrewarmEvm<DB>,
+        tx: TxEnvFor<Self>,
+    ) -> Result<evm2::TxResultWithState, Box<dyn core::error::Error + Send + Sync>>
+    where
+        DB: StateProvider + Send + 'static;
+}
+
 /// Converts a raw transaction into an executable transaction.
 ///
 /// This trait abstracts the conversion logic (e.g., decoding, signature recovery) that is

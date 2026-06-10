@@ -1,8 +1,8 @@
 //! Helpers for testing.
 
-#[cfg(feature = "std")]
-use crate::ConfigureEvm2BlockExecutor;
 use crate::{ConfigureEvm, EvmEnvFor};
+#[cfg(feature = "std")]
+use crate::{ConfigureEvm2BlockExecutor, ConfigureEvm2Prewarm};
 #[cfg(feature = "std")]
 use alloc::boxed::Box;
 #[cfg(feature = "std")]
@@ -116,6 +116,35 @@ where
         Box<dyn core::error::Error + Send + Sync>,
     > {
         self.inner().execute_evm2_block_with_state_provider_ref(state_provider, block)
+    }
+}
+
+#[cfg(feature = "std")]
+impl<Inner> ConfigureEvm2Prewarm for NoopEvmConfig<Inner>
+where
+    Inner: ConfigureEvm2Prewarm,
+{
+    type PrewarmEvm<DB>
+        = Inner::PrewarmEvm<DB>
+    where
+        DB: StateProvider + Send + 'static;
+
+    fn evm2_prewarm_evm<DB>(&self, state_provider: DB, env: EvmEnvFor<Self>) -> Self::PrewarmEvm<DB>
+    where
+        DB: StateProvider + Send + 'static,
+    {
+        self.inner().evm2_prewarm_evm(state_provider, env)
+    }
+
+    fn evm2_prewarm_tx<DB>(
+        &self,
+        evm: &mut Self::PrewarmEvm<DB>,
+        tx: crate::TxEnvFor<Self>,
+    ) -> Result<evm2::TxResultWithState, Box<dyn core::error::Error + Send + Sync>>
+    where
+        DB: StateProvider + Send + 'static,
+    {
+        self.inner().evm2_prewarm_tx(evm, tx)
     }
 }
 
