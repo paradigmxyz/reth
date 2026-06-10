@@ -40,7 +40,7 @@ use reth_trie_sparse::{
 use std::{
     ops::Not,
     sync::{
-        atomic::{AtomicBool, AtomicUsize},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::{self, channel},
         Arc, OnceLock,
     },
@@ -463,7 +463,14 @@ where
             );
             self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
-                convert_serial(transactions.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                let prewarm_connected = AtomicBool::new(true);
+                convert_serial(
+                    transactions.into_iter(),
+                    &convert,
+                    &prewarm_tx,
+                    &execute_tx,
+                    &prewarm_connected,
+                );
             });
         } else {
             // Parallel path — recover signatures in parallel on rayon, stream results
@@ -478,10 +485,17 @@ where
                 let (transactions, convert) = transactions.into_parts();
                 let mut all: Vec<_> = transactions.into_iter().collect();
                 let rest = all.split_off(prefetch.min(all.len()));
+                let prewarm_connected = AtomicBool::new(true);
 
                 // Convert the first few transactions sequentially so execution can
                 // start immediately without waiting for rayon work-stealing.
-                convert_serial(all.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                convert_serial(
+                    all.into_iter(),
+                    &convert,
+                    &prewarm_tx,
+                    &execute_tx,
+                    &prewarm_connected,
+                );
 
                 // Convert the remaining transactions in parallel.
                 rest.into_par_iter()
@@ -494,7 +508,7 @@ where
                     .for_each_ordered_in(executor.cpu_pool(), |(idx, tx)| {
                         let tx = tx.map(|tx| {
                             let tx = WithTxEnv::new(tx);
-                            let _ = prewarm_tx.send((idx, tx.clone()));
+                            send_to_prewarm_if_connected(&prewarm_tx, &prewarm_connected, idx, &tx);
                             tx
                         });
                         let _ = execute_tx.send((idx, tx));
@@ -791,6 +805,7 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     convert: &C,
     prewarm_tx: &mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>,
     execute_tx: &ExecuteTxSender<TxEnv, Recovered, Err>,
+    prewarm_connected: &AtomicBool,
 ) where
     Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = Recovered>,
     TxEnv: Clone,
@@ -800,10 +815,24 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
         let tx = convert.convert(raw_tx);
         let tx = tx.map(|tx| WithTxEnv::new(tx));
         if let Ok(tx) = &tx {
-            let _ = prewarm_tx.send((idx, tx.clone()));
+            send_to_prewarm_if_connected(prewarm_tx, prewarm_connected, idx, tx);
         }
         let _ = execute_tx.send((idx, tx));
         trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+    }
+}
+
+#[inline]
+fn send_to_prewarm_if_connected<TxEnv, Recovered>(
+    prewarm_tx: &mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>,
+    prewarm_connected: &AtomicBool,
+    idx: usize,
+    tx: &WithTxEnv<TxEnv, Recovered>,
+) where
+    WithTxEnv<TxEnv, Recovered>: Clone,
+{
+    if prewarm_connected.load(Ordering::Relaxed) && prewarm_tx.send((idx, tx.clone())).is_err() {
+        prewarm_connected.store(false, Ordering::Relaxed);
     }
 }
 
