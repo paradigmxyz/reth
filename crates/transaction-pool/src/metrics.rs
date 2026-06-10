@@ -154,3 +154,11 @@ pub struct TxPoolValidatorMetrics {
     /// Number of in-flight validation job sends waiting for channel capacity
     pub inflight_validation_jobs: Gauge,
 }
+
+/// Transaction batcher metrics
+#[derive(Metrics)]
+#[metrics(scope = "transaction_pool")]
+pub struct BatchMetrics {
+    /// Size of the dispatched transaction insertion batches
+    pub batch_size: Histogram,
+}

@@ -12,8 +12,8 @@
 //!   Spawned insertion batches are bounded by `max_concurrent_batches`.
 
 use crate::{
-    config::BatchConfig, error::PoolError, AddedTransactionOutcome, PoolTransaction,
-    TransactionOrigin, TransactionPool,
+    config::BatchConfig, error::PoolError, metrics::BatchMetrics, AddedTransactionOutcome,
+    PoolTransaction, TransactionOrigin, TransactionPool,
 };
 use pin_project::pin_project;
 use std::{
@@ -79,6 +79,7 @@ pub struct BatchTxProcessor<Pool: TransactionPool> {
     ///
     /// Only used in batch-and-timeout mode; immediate mode spawns unbounded.
     batch_permits: PollSemaphore,
+    metrics: BatchMetrics,
 }
 
 impl<Pool> std::fmt::Debug for BatchTxProcessor<Pool>
@@ -119,6 +120,7 @@ where
             batch_deadline: None,
             flush_due: false,
             batch_permits: PollSemaphore::new(Arc::new(Semaphore::new(max_concurrent_batches))),
+            metrics: BatchMetrics::default(),
         };
 
         tracing::debug!(
@@ -162,10 +164,12 @@ where
         pool: &Pool,
         buf: &mut Vec<BatchTxRequest<Pool::Transaction>>,
         permit: Option<OwnedSemaphorePermit>,
+        metrics: &BatchMetrics,
     ) {
         if buf.is_empty() {
             return;
         }
+        metrics.batch_size.record(buf.len() as f64);
         let batch = std::mem::take(buf);
         let pool = pool.clone();
         tokio::spawn(async move {
@@ -185,7 +189,7 @@ where
         loop {
             let n =
                 ready!(this.request_rx.as_mut().poll_recv_many(cx, this.buf, *this.max_batch_size));
-            Self::spawn_batch(this.pool, this.buf, None);
+            Self::spawn_batch(this.pool, this.buf, None, this.metrics);
             if n == 0 {
                 // channel closed
                 return Poll::Ready(())
@@ -209,7 +213,7 @@ where
                             let Some(permit) = ready!(this.batch_permits.poll_acquire(cx)) else {
                                 return Poll::Ready(())
                             };
-                            Self::spawn_batch(this.pool, this.buf, Some(permit));
+                            Self::spawn_batch(this.pool, this.buf, Some(permit), this.metrics);
                         }
                         return Poll::Ready(())
                     }
@@ -239,7 +243,7 @@ where
             let Some(permit) = ready!(this.batch_permits.poll_acquire(cx)) else {
                 return Poll::Ready(())
             };
-            Self::spawn_batch(this.pool, this.buf, Some(permit));
+            Self::spawn_batch(this.pool, this.buf, Some(permit), this.metrics);
             this.batch_deadline.set(None);
             *this.flush_due = false;
         }
