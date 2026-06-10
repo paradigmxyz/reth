@@ -6,7 +6,10 @@ use crate::{
 };
 use alloc::vec::Vec;
 use alloy_consensus::constants::KECCAK_EMPTY;
-use alloy_primitives::{Address, BlockNumber, Bytes, B256, U256};
+use alloy_primitives::{
+    map::{AddressMap, AddressSet, B256Map, U256Map},
+    Address, BlockNumber, Bytes, B256, U256,
+};
 use core::{
     mem,
     ops::{Deref, DerefMut},
@@ -164,7 +167,7 @@ impl Database for BorrowedEvm2StateProviderDatabase {
 /// A borrowed [`StateProvider`] that overlays uncommitted evm2 state on top of a base provider.
 pub struct Evm2OverlayStateProvider<'a> {
     base: &'a dyn StateProvider,
-    overlay: &'a Evm2BlockState,
+    overlay: Evm2OverlayStateIndex<'a>,
 }
 
 impl core::fmt::Debug for Evm2OverlayStateProvider<'_> {
@@ -175,15 +178,15 @@ impl core::fmt::Debug for Evm2OverlayStateProvider<'_> {
 
 impl<'a> Evm2OverlayStateProvider<'a> {
     /// Creates a new overlay provider.
-    pub const fn new(base: &'a dyn StateProvider, overlay: &'a Evm2BlockState) -> Self {
-        Self { base, overlay }
+    pub fn new(base: &'a dyn StateProvider, overlay: &'a Evm2BlockState) -> Self {
+        Self { base, overlay: Evm2OverlayStateIndex::new(overlay) }
     }
 }
 
 impl AccountReader for Evm2OverlayStateProvider<'_> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        if let Some((_, account)) = self.overlay.accounts().find(|(addr, _)| addr == address) {
-            return Ok(account.current.as_ref().map(account_info_to_reth))
+        if let Some(account) = self.overlay.accounts.get(address) {
+            return Ok(account.clone())
         }
 
         self.base.basic_account(address)
@@ -192,7 +195,7 @@ impl AccountReader for Evm2OverlayStateProvider<'_> {
 
 impl BytecodeReader for Evm2OverlayStateProvider<'_> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<RethBytecode>> {
-        if let Some((_, bytecode)) = self.overlay.code().find(|(hash, _)| *hash == code_hash) {
+        if let Some(bytecode) = self.overlay.code.get(code_hash) {
             return Ok(Some(RethBytecode::new_raw(bytecode.original_bytes())))
         }
 
@@ -309,8 +312,8 @@ impl HashedPostStateProvider for Evm2OverlayStateProvider<'_> {}
 
 impl StateProvider for Evm2OverlayStateProvider<'_> {
     fn evm2_bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
-        if let Some((_, bytecode)) = self.overlay.code().find(|(hash, _)| *hash == code_hash) {
-            return Ok(Some(bytecode.clone()))
+        if let Some(bytecode) = self.overlay.code.get(code_hash) {
+            return Ok(Some((*bytecode).clone()))
         }
 
         self.base.evm2_bytecode_by_hash(code_hash)
@@ -318,17 +321,41 @@ impl StateProvider for Evm2OverlayStateProvider<'_> {
 
     fn storage(&self, account: Address, storage_key: B256) -> ProviderResult<Option<U256>> {
         let slot = U256::from_be_bytes(storage_key.0);
-        if let Some((_, storage)) =
-            self.overlay.storage().find(|(key, _)| key.address() == account && key.key() == slot)
+        if let Some(value) =
+            self.overlay.storage.get(&account).and_then(|slots| slots.get(&slot)).copied()
         {
-            return Ok(Some(storage.current))
+            return Ok(Some(value))
         }
 
-        if self.overlay.storage_wipes().any(|address| address == account) {
+        if self.overlay.storage_wipes.contains(&account) {
             return Ok(Some(U256::ZERO))
         }
 
         self.base.storage(account, storage_key)
+    }
+}
+
+struct Evm2OverlayStateIndex<'a> {
+    accounts: AddressMap<Option<Account>>,
+    code: B256Map<&'a Bytecode>,
+    storage: AddressMap<U256Map<U256>>,
+    storage_wipes: AddressSet,
+}
+
+impl<'a> Evm2OverlayStateIndex<'a> {
+    fn new(state: &'a Evm2BlockState) -> Self {
+        let accounts = state
+            .accounts()
+            .map(|(address, account)| (address, account.current.as_ref().map(account_info_to_reth)))
+            .collect();
+        let code = state.code().map(|(hash, bytecode)| (*hash, bytecode)).collect();
+        let storage_wipes = state.storage_wipes().collect();
+        let mut storage = AddressMap::<U256Map<U256>>::default();
+        for (key, slot) in state.storage() {
+            storage.entry(key.address()).or_default().insert(key.key(), slot.current);
+        }
+
+        Self { accounts, code, storage, storage_wipes }
     }
 }
 
