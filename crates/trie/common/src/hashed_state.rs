@@ -330,11 +330,13 @@ impl HashedPostState {
         let mut accounts: Vec<_> = self.accounts.into_iter().collect();
         accounts.sort_unstable_by_key(|(address, _)| *address);
 
-        let storages = self
-            .storages
-            .into_iter()
-            .map(|(hashed_address, storage)| (hashed_address, storage.into_sorted()))
-            .collect();
+        let mut storages =
+            B256Map::with_capacity_and_hasher(self.storages.len(), Default::default());
+        storages.extend(
+            self.storages
+                .into_iter()
+                .map(|(hashed_address, storage)| (hashed_address, storage.into_sorted())),
+        );
 
         HashedPostStateSorted { accounts, storages }
     }
@@ -345,11 +347,13 @@ impl HashedPostState {
         let mut accounts: Vec<_> = self.accounts.iter().map(|(&k, &v)| (k, v)).collect();
         accounts.sort_unstable_by_key(|(address, _)| *address);
 
-        let storages = self
-            .storages
-            .iter()
-            .map(|(&hashed_address, storage)| (hashed_address, storage.clone_into_sorted()))
-            .collect();
+        let mut storages =
+            B256Map::with_capacity_and_hasher(self.storages.len(), Default::default());
+        storages.extend(
+            self.storages
+                .iter()
+                .map(|(&hashed_address, storage)| (hashed_address, storage.clone_into_sorted())),
+        );
 
         HashedPostStateSorted { accounts, storages }
     }

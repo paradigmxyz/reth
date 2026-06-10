@@ -171,11 +171,13 @@ impl TrieUpdates {
         account_nodes.extend(self.removed_nodes.drain().map(|path| (path, None)));
         account_nodes.sort_unstable_by_key(|a| a.0);
 
-        let storage_tries = self
-            .storage_tries
-            .drain()
-            .map(|(hashed_address, updates)| (hashed_address, updates.into_sorted()))
-            .collect();
+        let mut storage_tries =
+            B256Map::with_capacity_and_hasher(self.storage_tries.len(), Default::default());
+        storage_tries.extend(
+            self.storage_tries
+                .drain()
+                .map(|(hashed_address, updates)| (hashed_address, updates.into_sorted())),
+        );
         TrieUpdatesSorted { account_nodes, storage_tries }
     }
 
@@ -197,11 +199,13 @@ impl TrieUpdates {
         );
         account_nodes.sort_unstable_by_key(|a| a.0);
 
-        let storage_tries = self
-            .storage_tries
-            .iter()
-            .map(|(&hashed_address, updates)| (hashed_address, updates.clone_into_sorted()))
-            .collect();
+        let mut storage_tries =
+            B256Map::with_capacity_and_hasher(self.storage_tries.len(), Default::default());
+        storage_tries.extend(
+            self.storage_tries
+                .iter()
+                .map(|(&hashed_address, updates)| (hashed_address, updates.clone_into_sorted())),
+        );
         TrieUpdatesSorted { account_nodes, storage_tries }
     }
 
