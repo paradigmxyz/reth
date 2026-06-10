@@ -1570,41 +1570,6 @@ where
             |event| this.on_network_event(event)
         );
 
-        // Advances new __pending__ transactions, transactions that were successfully inserted into
-        // pending set in pool (are valid), and propagates them (inform peers which
-        // transactions we have seen).
-        //
-        // We try to drain this to batch the transactions in a single message.
-        //
-        // We don't expect this buffer to be large, since only pending transactions are
-        // emitted here.
-        let mut new_txs = Vec::new();
-        let maybe_more_pending_txns = match this.pending_transactions.poll_recv_many(
-            cx,
-            &mut new_txs,
-            SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE,
-        ) {
-            Poll::Ready(count) => {
-                if count == SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE {
-                    // we filled the entire buffer capacity and need to try again on the next poll
-                    // immediately
-                    true
-                } else {
-                    // try once more, because mostlikely the channel is now empty and the waker is
-                    // registered if this is pending, if we filled additional hashes, we poll again
-                    // on the next iteration
-                    let limit =
-                        SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE -
-                            new_txs.len();
-                    this.pending_transactions.poll_recv_many(cx, &mut new_txs, limit).is_ready()
-                }
-            }
-            Poll::Pending => false,
-        };
-        if !new_txs.is_empty() {
-            this.on_new_pending_transactions(new_txs);
-        }
-
         // Advance incoming transaction events (stream new txns/announcements from
         // network manager and queue for import to pool/fetch txns).
         //
@@ -1669,6 +1634,45 @@ where
             this.pool_imports.poll_next_unpin(cx),
             |batch_results| this.on_batch_import_result(batch_results)
         );
+
+        // Advances new __pending__ transactions, transactions that were successfully inserted into
+        // pending set in pool (are valid), and propagates them (inform peers which
+        // transactions we have seen).
+        //
+        // This is polled after pool imports so transactions that became pending in this poll
+        // iteration are propagated immediately, instead of waiting for the task to be woken
+        // again.
+        //
+        // We try to drain this to batch the transactions in a single message.
+        //
+        // We don't expect this buffer to be large, since only pending transactions are
+        // emitted here.
+        let mut new_txs = Vec::new();
+        let maybe_more_pending_txns = match this.pending_transactions.poll_recv_many(
+            cx,
+            &mut new_txs,
+            SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE,
+        ) {
+            Poll::Ready(count) => {
+                if count == SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE {
+                    // we filled the entire buffer capacity and need to try again on the next poll
+                    // immediately
+                    true
+                } else {
+                    // try once more, because mostlikely the channel is now empty and the waker is
+                    // registered if this is pending, if we filled additional hashes, we poll again
+                    // on the next iteration
+                    let limit =
+                        SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE -
+                            new_txs.len();
+                    this.pending_transactions.poll_recv_many(cx, &mut new_txs, limit).is_ready()
+                }
+            }
+            Poll::Pending => false,
+        };
+        if !new_txs.is_empty() {
+            this.on_new_pending_transactions(new_txs);
+        }
 
         // Tries to drain hashes pending fetch cache if the tx manager currently has
         // capacity for this (fetch txns).
