@@ -58,6 +58,10 @@ pub struct ComputedTrieData {
     pub hashed_state: Arc<HashedPostStateSorted>,
     /// Sorted trie updates produced by state root computation.
     pub trie_updates: Arc<TrieUpdatesSorted>,
+    /// Number of entries in the sorted hashed post-state.
+    pub hashed_state_len: usize,
+    /// Number of entries in the sorted trie updates.
+    pub trie_updates_len: usize,
 }
 
 /// Metrics for deferred trie computation.
@@ -165,11 +169,14 @@ impl DeferredTrieData {
 
 impl ComputedTrieData {
     /// Construct sorted trie data for one block.
-    pub const fn new(
+    pub fn new(
         hashed_state: Arc<HashedPostStateSorted>,
         trie_updates: Arc<TrieUpdatesSorted>,
     ) -> Self {
-        Self { hashed_state, trie_updates }
+        let hashed_state_len = hashed_state.total_len();
+        let trie_updates_len = trie_updates.total_len();
+
+        Self { hashed_state, trie_updates, hashed_state_len, trie_updates_len }
     }
 }
 
