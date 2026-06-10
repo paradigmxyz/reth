@@ -10,8 +10,6 @@ use derive_more::derive::Deref;
 #[cfg(any())]
 use reth_trie::HashedStorage;
 use reth_trie::{updates::TrieUpdates, HashedPostState, MultiProofTargetsV2};
-#[cfg(any())]
-use revm_state::EvmState;
 use std::sync::Arc;
 #[cfg(any())]
 use tracing::trace;
@@ -21,9 +19,9 @@ use tracing::trace;
 pub enum StateRootMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargetsV2),
-    /// New state update from transaction execution with its source
+    /// New state update from transaction execution with its source.
     #[cfg(any())]
-    StateUpdate(EvmState),
+    StateUpdate(()),
     /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
     HashedStateUpdate(HashedPostState),
     /// Block Access List (EIP-7928; BAL) containing complete state changes for the block.
@@ -104,11 +102,11 @@ impl StateRootHandle {
     ///
     /// The hook must be dropped after execution completes to signal the end of state updates.
     #[cfg(any())]
-    pub fn state_hook(&self) -> impl FnMut(&EvmState) + use<> {
+    pub fn state_hook(&self) -> impl FnMut(&()) + use<> {
         let sender = StateHookSender::new(self.updates_tx.clone());
 
-        move |state: EvmState| {
-            let _ = sender.send(StateRootMessage::StateUpdate(state));
+        move |state: &()| {
+            let _ = sender.send(StateRootMessage::StateUpdate(*state));
         }
     }
 
@@ -171,38 +169,8 @@ impl Drop for StateHookSender {
     }
 }
 
-/// Converts [`EvmState`] to [`HashedPostState`] by keccak256-hashing addresses and storage slots.
+/// Converts a parked transaction state update to [`HashedPostState`].
 #[cfg(any())]
-pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
-    let mut hashed_state = HashedPostState::with_capacity(update.len());
-
-    for (address, account) in update {
-        if account.is_touched() {
-            let hashed_address = keccak256(address);
-            trace!(target: "trie::parallel::sparse", ?address, ?hashed_address, "Adding account to state update");
-
-            let destroyed = account.is_selfdestructed();
-            if account.info != account.original_info() {
-                let info = if destroyed { None } else { Some(account.info.into()) };
-                hashed_state.accounts.insert(hashed_address, info);
-            }
-
-            let mut changed_storage_iter = account
-                .storage
-                .into_iter()
-                .filter(|(_slot, value)| value.is_changed())
-                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
-                .peekable();
-
-            if destroyed {
-                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
-            } else if changed_storage_iter.peek().is_some() {
-                hashed_state
-                    .storages
-                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
-            }
-        }
-    }
-
-    hashed_state
+pub fn evm_state_to_hashed_post_state(_update: ()) -> HashedPostState {
+    HashedPostState::default()
 }
