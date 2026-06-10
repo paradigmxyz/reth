@@ -7,7 +7,11 @@ use crate::{
 use alloy_chains::Chain;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_eips::eip2718::WithEncoded;
-use alloy_evm::{block::TxResult, precompiles::PrecompilesMap};
+use alloy_evm::{
+    block::TxResult,
+    precompiles::PrecompilesMap,
+    TransactionEnvMut,
+};
 use alloy_network::{NetworkTransactionBuilder, TransactionBuilder};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimCallResult, SimulateError, SimulatedBlock},
@@ -16,7 +20,7 @@ use alloy_rpc_types_eth::{
 };
 use jsonrpsee_types::ErrorObject;
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor, ExecutorTx},
     Evm, HaltReasonFor,
 };
 use reth_primitives_traits::{
@@ -28,8 +32,9 @@ use reth_storage_api::{noop::NoopProvider, StateProvider};
 use revm::{
     context::Block,
     context_interface::result::ExecutionResult,
-    primitives::{Address, Bytes, TxKind, U256},
-    Database,
+    primitives::{Address, AddressMap, Bytes, TxKind, U256},
+    state::Account,
+    Database, DatabaseCommit,
 };
 
 /// Fallback seconds added between simulated block timestamps when neither the user nor the chain
@@ -305,7 +310,10 @@ pub fn execute_transactions<S, T>(
     EthApiError,
 >
 where
-    S: BlockBuilder<Executor: BlockExecutor<Evm: Evm<DB: Database<Error: Into<EthApiError>>>>>,
+    S: BlockBuilder<Executor: BlockExecutor>,
+    <<S::Executor as BlockExecutor>::Evm as Evm>::DB:
+        Database<Error: Into<EthApiError>> + DatabaseCommit,
+    <<S::Executor as BlockExecutor>::Evm as Evm>::Tx: TransactionEnvMut,
     T: RpcConvert<Primitives = S::Primitives>,
 {
     builder.apply_pre_execution_changes()?;
@@ -353,6 +361,8 @@ where
             }
         }
 
+        let from = call.as_ref().from().unwrap_or_default();
+
         // Resolve transaction, populate missing fields and enforce calls
         // correctness.
         let tx = resolve_transaction(
@@ -363,15 +373,36 @@ where
             builder.evm_mut().db_mut(),
             converter,
         )?;
+        let tx_nonce = tx.nonce();
+        let wrap_nonce = builder.evm().cfg_env().disable_nonce_check && tx_nonce == u64::MAX;
         // Create transaction with an empty envelope.
         // The effect for a layer-2 execution client is that it does not charge L1 cost.
         let tx = WithEncoded::new(Default::default(), tx);
 
         let mut tx_regular_gas_used = 0;
-        let gas_output = builder.execute_transaction_with_result_closure(tx, |result| {
-            tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
-            results.push(result.result().result.clone())
-        })?;
+        let gas_output = if wrap_nonce {
+            let (mut tx_env, tx) = ExecutorTx::<S::Executor>::into_parts(tx);
+            // Non-validating simulations follow geth's uint64 account nonce wraparound.
+            tx_env.set_nonce(0);
+            builder.execute_transaction_with_result_closure((tx_env, tx), |result| {
+                tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
+                results.push(result.result().result.clone())
+            })?
+        } else {
+            builder.execute_transaction_with_result_closure(tx, |result| {
+                tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
+                results.push(result.result().result.clone())
+            })?
+        };
+
+        if wrap_nonce &&
+            let Some(mut info) = builder.evm_mut().db_mut().basic(from).map_err(Into::into)?
+        {
+            info.nonce = 0;
+            let mut changes = AddressMap::default();
+            changes.insert(from, Account::from(info).with_touched_mark());
+            builder.evm_mut().db_mut().commit(changes);
+        }
 
         let gas_used = gas_output.tx_gas_used();
         if let Some(remaining_call_gas_limit) = remaining_call_gas_limit.as_mut() {
