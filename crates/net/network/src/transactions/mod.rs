@@ -1039,16 +1039,18 @@ where
         let max_num_full = self.config.propagation_mode.full_peer_count(self.peers.len());
 
         // Note: Assuming ~random~ order due to random state of the peers map hasher
-        for (peer_idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
+        let mut num_full_peers = 0;
+        for (peer_id, peer) in &mut self.peers {
             if !self.policies.propagation_policy().can_propagate(peer) {
                 // skip peers we should not propagate to
                 continue
             }
             // determine whether to send full tx objects or hashes.
-            let mut builder = if peer_idx > max_num_full {
-                PropagateTransactionsBuilder::pooled(peer.version)
-            } else {
+            let mut builder = if num_full_peers < max_num_full {
+                num_full_peers += 1;
                 PropagateTransactionsBuilder::full(peer.version)
+            } else {
+                PropagateTransactionsBuilder::pooled(peer.version)
             };
 
             if propagation_mode.is_forced() {
