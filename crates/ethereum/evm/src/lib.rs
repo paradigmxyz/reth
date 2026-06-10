@@ -100,6 +100,7 @@ pub use evm2_executor::{
     execute_evm2_block_with_borrowed_state_provider_context,
     execute_evm2_block_with_state_provider, execute_evm2_block_with_state_provider_and_withdrawals,
     execute_evm2_block_with_state_provider_context,
+    execute_evm2_block_with_state_provider_context_and_hook,
 };
 
 mod receipt;
