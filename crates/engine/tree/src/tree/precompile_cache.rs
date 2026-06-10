@@ -69,9 +69,13 @@ where
         self.0.get(input).filter(|e| e.spec == spec)
     }
 
-    /// Inserts the given key and value into the cache, returning the new cache size.
-    fn insert(&self, input: Bytes, value: CacheEntry<S>) -> usize {
+    /// Inserts the given key and value into the cache.
+    fn insert(&self, input: Bytes, value: CacheEntry<S>) {
         self.0.insert(input, value);
+    }
+
+    /// Returns the number of entries in the cache.
+    fn entry_count(&self) -> usize {
         self.0.entry_count() as usize
     }
 }
@@ -205,12 +209,14 @@ where
                 } else if output.state_gas_used != 0 {
                     error!(target: "engine::tree", precompile_id = self.precompile.precompile_id().name(), "cacheable precompile used state gas, skipping cache insertion");
                 } else {
-                    let size = self.cache.insert(
+                    self.cache.insert(
                         Bytes::copy_from_slice(calldata),
                         CacheEntry { output: output.clone(), spec: self.spec_id.clone() },
                     );
-                    self.set_precompile_cache_size_metric(size as f64);
-                    self.increment_by_one_precompile_cache_misses();
+                    if self.metrics.is_some() {
+                        self.set_precompile_cache_size_metric(self.cache.entry_count() as f64);
+                        self.increment_by_one_precompile_cache_misses();
+                    }
                 }
             }
             _ => {
