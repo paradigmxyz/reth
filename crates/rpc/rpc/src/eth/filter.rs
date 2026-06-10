@@ -1347,8 +1347,10 @@ impl<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{eth::EthApi, EthApiBuilder};
-    use alloy_network::Ethereum;
+    use crate::{
+        eth::{helpers::types::EthRpcConverter, EthApi},
+        EthApiBuilder,
+    };
     use alloy_primitives::FixedBytes;
     use rand::Rng;
     use reth_chainspec::{ChainSpec, ChainSpecProvider};
@@ -1356,9 +1358,7 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::MockEthProvider;
-    use reth_rpc_convert::RpcConverter;
     use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
-    use reth_rpc_eth_types::receipt::EthReceiptConverter;
     use reth_tasks::Runtime;
     use reth_testing_utils::generators;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
@@ -1392,7 +1392,7 @@ mod tests {
         provider: MockEthProvider,
     ) -> EthApi<
         RpcNodeCoreAdapter<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>,
-        RpcConverter<Ethereum, EthEvmConfig, EthReceiptConverter<ChainSpec>>,
+        EthRpcConverter<ChainSpec>,
     > {
         EthApiBuilder::new(
             provider.clone(),
