@@ -164,8 +164,12 @@ def is_grafana_path(path: str) -> bool:
     return path.startswith("etc/grafana/")
 
 
-def is_ci_path(path: str) -> bool:
-    return path.startswith(".github/")
+def is_passive_github_path(path: str) -> bool:
+    return (
+        path == ".github/CODEOWNERS"
+        or path == ".github/dependabot.yml"
+        or path.startswith(".github/ISSUE_TEMPLATE/")
+    )
 
 
 def is_cargo_path(path: str) -> bool:
@@ -192,6 +196,63 @@ def full_outputs(reason: str) -> dict[str, str]:
     }
 
 
+def classify_outputs(files: list[str], workspace_bump: bool) -> dict[str, str]:
+    non_behavioral_only = (
+        workspace_bump
+        or not files
+        or all(
+            is_docs_path(file) or is_grafana_path(file) or is_passive_github_path(file)
+            for file in files
+        )
+    )
+    has_cargo_change = any(is_cargo_path(file) for file in files)
+    dependency_checks = has_cargo_change and not workspace_bump
+    run_heavy_rust = not non_behavioral_only
+    run_docs_site = any(file.startswith("docs/vocs/") for file in files)
+    run_grafana = any(is_grafana_path(file) for file in files)
+    run_version_sync_check = workspace_bump
+    run_cli_docs = run_heavy_rust or any(
+        file.startswith("docs/cli/") or file.startswith("docs/vocs/docs/pages/cli/")
+        for file in files
+    )
+
+    lint_allowed_skips = []
+    if not run_heavy_rust:
+        lint_allowed_skips.extend(["clippy", "wasm", "docs", "udeps"])
+    if not dependency_checks:
+        lint_allowed_skips.extend(["deny", "no-test-deps", "feature-propagation"])
+    if not run_version_sync_check:
+        lint_allowed_skips.append("version-sync")
+    if not run_cli_docs:
+        lint_allowed_skips.append("book")
+    if not run_grafana:
+        lint_allowed_skips.append("grafana")
+
+    reason = "no-changes"
+    if workspace_bump:
+        reason = "workspace-version-bump"
+    elif run_heavy_rust:
+        reason = "behavioral-change"
+    elif files:
+        reason = "non-behavioral-paths"
+
+    return {
+        "reason": reason,
+        "workspace_version_bump": as_bool(workspace_bump),
+        "run_heavy_rust": as_bool(run_heavy_rust),
+        "run_dependency_checks": as_bool(dependency_checks),
+        "run_version_sync_check": as_bool(run_version_sync_check),
+        "run_docs_site": as_bool(run_docs_site),
+        "run_cli_docs": as_bool(run_cli_docs),
+        "run_grafana": as_bool(run_grafana),
+        "lint_allowed_skips": ",".join(lint_allowed_skips),
+        "unit_allowed_skips": "" if run_heavy_rust else "test,state,doc",
+        "integration_allowed_skips": "" if run_heavy_rust else "test",
+        "e2e_allowed_skips": "" if run_heavy_rust else "test,rocksdb",
+        "compact_allowed_skips": "" if run_heavy_rust else "compact-codec",
+    }
+
+
 def classify() -> int:
     base, head, force_full = resolve_refs()
     if force_full:
@@ -204,56 +265,8 @@ def classify() -> int:
     changes = parse_changes(base, head)
     files = [change["path"] for change in changes]
     workspace_bump = is_workspace_version_bump(base, head, changes)
-    non_behavioral_only = (
-        workspace_bump
-        or not files
-        or all(is_docs_path(file) or is_grafana_path(file) or is_ci_path(file) for file in files)
-    )
-    has_cargo_change = any(is_cargo_path(file) for file in files)
-    dependency_checks = has_cargo_change and not workspace_bump
-    run_heavy_rust = not non_behavioral_only
-    run_docs_site = any(file.startswith("docs/vocs/") for file in files)
-    run_grafana = any(is_grafana_path(file) for file in files)
-    run_version_sync_check = workspace_bump
-    run_cli_docs = run_heavy_rust
 
-    lint_allowed_skips = []
-    if not run_heavy_rust:
-        lint_allowed_skips.extend(
-            ["clippy-binaries", "clippy", "wasm", "crate-checks", "docs", "udeps", "book"]
-        )
-    if not dependency_checks:
-        lint_allowed_skips.extend(["deny", "no-test-deps", "feature-propagation"])
-    if not run_version_sync_check:
-        lint_allowed_skips.append("version-sync")
-    if not run_grafana:
-        lint_allowed_skips.append("grafana")
-
-    reason = "no-changes"
-    if workspace_bump:
-        reason = "workspace-version-bump"
-    elif run_heavy_rust:
-        reason = "behavioral-change"
-    elif files:
-        reason = "non-behavioral-paths"
-
-    set_outputs(
-        {
-            "reason": reason,
-            "workspace_version_bump": as_bool(workspace_bump),
-            "run_heavy_rust": as_bool(run_heavy_rust),
-            "run_dependency_checks": as_bool(dependency_checks),
-            "run_version_sync_check": as_bool(run_version_sync_check),
-            "run_docs_site": as_bool(run_docs_site),
-            "run_cli_docs": as_bool(run_cli_docs),
-            "run_grafana": as_bool(run_grafana),
-            "lint_allowed_skips": ",".join(lint_allowed_skips),
-            "unit_allowed_skips": "" if run_heavy_rust else "test,state,doc",
-            "integration_allowed_skips": "" if run_heavy_rust else "test",
-            "e2e_allowed_skips": "" if run_heavy_rust else "test,rocksdb",
-            "compact_allowed_skips": "" if run_heavy_rust else "compact-codec",
-        }
-    )
+    set_outputs(classify_outputs(files, workspace_bump))
     return 0
 
 
@@ -294,17 +307,93 @@ def check_version_sync() -> int:
     return 0
 
 
+def expect_classification(files: list[str], workspace_bump: bool, expected: dict[str, str]) -> None:
+    outputs = classify_outputs(files, workspace_bump)
+    for key, value in expected.items():
+        actual = outputs.get(key)
+        if actual != value:
+            raise AssertionError(
+                f"{files}: expected {key}={value}, got {actual}; outputs={outputs}"
+            )
+
+
+def self_test() -> int:
+    expect_classification(
+        ["Cargo.toml", "Cargo.lock", "docs/vocs/vocs.config.ts"],
+        True,
+        {
+            "reason": "workspace-version-bump",
+            "run_heavy_rust": FALSE,
+            "run_dependency_checks": FALSE,
+            "run_version_sync_check": TRUE,
+            "run_cli_docs": FALSE,
+        },
+    )
+    expect_classification(
+        ["crates/storage/Cargo.toml"],
+        False,
+        {
+            "reason": "behavioral-change",
+            "run_heavy_rust": TRUE,
+            "run_dependency_checks": TRUE,
+            "run_cli_docs": TRUE,
+        },
+    )
+    expect_classification(
+        ["docs/vocs/docs/pages/cli/reth.mdx"],
+        False,
+        {
+            "reason": "non-behavioral-paths",
+            "run_heavy_rust": FALSE,
+            "run_docs_site": TRUE,
+            "run_cli_docs": TRUE,
+        },
+    )
+    expect_classification(
+        [".github/workflows/lint.yml"],
+        False,
+        {
+            "reason": "behavioral-change",
+            "run_heavy_rust": TRUE,
+            "run_cli_docs": TRUE,
+        },
+    )
+    expect_classification(
+        [".github/ISSUE_TEMPLATE/bug.yml"],
+        False,
+        {
+            "reason": "non-behavioral-paths",
+            "run_heavy_rust": FALSE,
+            "run_cli_docs": FALSE,
+        },
+    )
+    expect_classification(
+        ["etc/grafana/dashboards/overview.json"],
+        False,
+        {
+            "reason": "non-behavioral-paths",
+            "run_heavy_rust": FALSE,
+            "run_grafana": TRUE,
+        },
+    )
+    print("ci-rules self-test passed")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Evaluate CI rules for PR changes")
     subcommands = parser.add_subparsers(dest="command", required=True)
     subcommands.add_parser("classify", help="classify a PR diff and emit GitHub Actions outputs")
     subcommands.add_parser("check-version-sync", help="validate workspace version metadata")
+    subcommands.add_parser("self-test", help="run classifier fixture tests")
     args = parser.parse_args()
 
     if args.command == "classify":
         return classify()
     if args.command == "check-version-sync":
         return check_version_sync()
+    if args.command == "self-test":
+        return self_test()
 
     raise RuntimeError(f"unknown command: {args.command}")
 

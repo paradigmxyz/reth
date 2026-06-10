@@ -42,8 +42,8 @@ jobs:
   test:
     name: test / ${{ matrix.network }}
     needs: changes
-    if: github.event_name != 'schedule' && needs.changes.outputs.run_heavy_rust == 'true'
-    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    if: github.event_name != 'schedule'
+    runs-on: ${{ needs.changes.outputs.run_heavy_rust == 'true' && github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     permissions:
       contents: read
     env:
@@ -53,21 +53,32 @@ jobs:
         network: ["ethereum"]
     timeout-minutes: 60
     steps:
+      - name: Skip integration test matrix
+        if: needs.changes.outputs.run_heavy_rust != 'true'
+        run: echo "Skipping integration test matrix for non-behavioral change"
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        if: needs.changes.outputs.run_heavy_rust == 'true'
         with:
           persist-credentials: false
       - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
+        if: needs.changes.outputs.run_heavy_rust == 'true'
       - uses: dtolnay/rust-toolchain@stable
+        if: needs.changes.outputs.run_heavy_rust == 'true'
       - name: Install Geth
+        if: needs.changes.outputs.run_heavy_rust == 'true'
         run: .github/scripts/install_geth.sh
       - uses: taiki-e/install-action@1f2425cdb59f8fffb99ee16a5968edf6f57a2b93 # v2.75.24
+        if: needs.changes.outputs.run_heavy_rust == 'true'
         with:
           tool: nextest
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+        if: needs.changes.outputs.run_heavy_rust == 'true'
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        if: needs.changes.outputs.run_heavy_rust == 'true'
         with:
           cache-on-failure: true
       - name: Run tests
+        if: needs.changes.outputs.run_heavy_rust == 'true'
         run: |
           cargo nextest run \
             --no-fail-fast \

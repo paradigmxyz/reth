@@ -33,11 +33,22 @@ jobs:
       - id: classify
         run: python3 .github/scripts/ci-rules.py classify
 
+  ci-rules:
+    name: ci rules
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - run: python3 .github/scripts/ci-rules.py self-test
+
   clippy-binaries:
     name: clippy binaries / ${{ matrix.type }}
     needs: changes
-    if: needs.changes.outputs.run_heavy_rust == 'true'
-    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.run_heavy_rust == 'true' && github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     permissions:
       contents: read
     timeout-minutes: 30
@@ -48,22 +59,31 @@ jobs:
             args: --workspace --lib --examples --tests --benches --locked
             features: "asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
     steps:
+      - name: Skip clippy binaries
+        if: needs.changes.outputs.run_heavy_rust != 'true'
+        run: echo "Skipping clippy binaries for non-behavioral change"
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        if: needs.changes.outputs.run_heavy_rust == 'true'
         with:
           persist-credentials: false
       - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
+        if: needs.changes.outputs.run_heavy_rust == 'true'
       - uses: dtolnay/rust-toolchain@clippy
+        if: needs.changes.outputs.run_heavy_rust == 'true'
         with:
           components: clippy
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+        if: needs.changes.outputs.run_heavy_rust == 'true'
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        if: needs.changes.outputs.run_heavy_rust == 'true'
         with:
           cache-on-failure: true
-      - if: "${{ matrix.type == 'book' }}"
+      - if: needs.changes.outputs.run_heavy_rust == 'true' && matrix.type == 'book'
         uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run clippy on binaries
+        if: needs.changes.outputs.run_heavy_rust == 'true'
         run: cargo clippy ${{ matrix.args }} --features "${{ matrix.features }}"
         env:
           RUSTFLAGS: -D warnings
@@ -149,8 +169,7 @@ jobs:
   crate-checks:
     name: crate-checks (${{ matrix.partition }}/${{ matrix.total_partitions }})
     needs: changes
-    if: needs.changes.outputs.run_heavy_rust == 'true'
-    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.run_heavy_rust == 'true' && github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     permissions:
       contents: read
     strategy:
@@ -159,19 +178,29 @@ jobs:
         total_partitions: [3]
     timeout-minutes: 60
     steps:
+      - name: Skip crate checks
+        if: needs.changes.outputs.run_heavy_rust != 'true'
+        run: echo "Skipping crate checks for non-behavioral change"
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        if: needs.changes.outputs.run_heavy_rust == 'true'
         with:
           persist-credentials: false
       - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
+        if: needs.changes.outputs.run_heavy_rust == 'true'
       - uses: dtolnay/rust-toolchain@stable
+        if: needs.changes.outputs.run_heavy_rust == 'true'
       - uses: taiki-e/install-action@1f2425cdb59f8fffb99ee16a5968edf6f57a2b93 # v2.75.24
+        if: needs.changes.outputs.run_heavy_rust == 'true'
         with:
           tool: cargo-hack
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+        if: needs.changes.outputs.run_heavy_rust == 'true'
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        if: needs.changes.outputs.run_heavy_rust == 'true'
         with:
           cache-on-failure: true
-      - run: cargo hack check --workspace --partition ${{ matrix.partition }}/${{ matrix.total_partitions }}
+      - if: needs.changes.outputs.run_heavy_rust == 'true'
+        run: cargo hack check --workspace --partition ${{ matrix.partition }}/${{ matrix.total_partitions }}
 
   msrv:
     name: MSRV
@@ -396,6 +425,7 @@ jobs:
     if: always()
     needs:
       - changes
+      - ci-rules
       - clippy-binaries
       - clippy
       - wasm
