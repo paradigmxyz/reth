@@ -716,6 +716,8 @@ TxPool:
       --txpool.batch-timeout <DURATION>
           Batch timeout for transaction pool insertions (e.g. "50ms" or "0" for immediate). When set to a non-zero duration, transactions are batched until either max-batch-size is reached or the timeout expires after the first buffered transaction. Requires txpool.max-batch-size > 1 to coalesce multiple transactions
 
+          [default: 0]
+
 Builder:
       --builder.extradata <EXTRA_DATA>
           Block extra data set by the payload builder.

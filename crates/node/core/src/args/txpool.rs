@@ -56,6 +56,8 @@ pub struct DefaultTxPoolValues {
     transactions_backup_path: Option<PathBuf>,
     disable_transactions_backup: bool,
     max_batch_size: usize,
+    /// Batch timeout for partial insertion batches. Zero keeps immediate processing.
+    batch_timeout: Duration,
 }
 
 impl DefaultTxPoolValues {
@@ -248,6 +250,12 @@ impl DefaultTxPoolValues {
         self.max_batch_size = v;
         self
     }
+
+    /// Set the default batch timeout. [`Duration::ZERO`] keeps immediate processing.
+    pub const fn with_batch_timeout(mut self, v: Duration) -> Self {
+        self.batch_timeout = v;
+        self
+    }
 }
 
 impl Default for DefaultTxPoolValues {
@@ -283,6 +291,7 @@ impl Default for DefaultTxPoolValues {
             transactions_backup_path: None,
             disable_transactions_backup: false,
             max_batch_size: 1,
+            batch_timeout: Duration::ZERO,
         }
     }
 }
@@ -417,8 +426,8 @@ pub struct TxPoolArgs {
     /// When set to a non-zero duration, transactions are batched until either max-batch-size is
     /// reached or the timeout expires after the first buffered transaction. Requires
     /// txpool.max-batch-size > 1 to coalesce multiple transactions.
-    #[arg(long = "txpool.batch-timeout", value_parser = parse_duration_from_secs_or_ms, value_name = "DURATION")]
-    pub batch_timeout: Option<Duration>,
+    #[arg(long = "txpool.batch-timeout", value_parser = parse_duration_from_secs_or_ms, value_name = "DURATION", default_value = format_duration_as_secs_or_ms(DefaultTxPoolValues::get_global().batch_timeout))]
+    pub batch_timeout: Duration,
 }
 
 impl TxPoolArgs {
@@ -472,6 +481,7 @@ impl Default for TxPoolArgs {
             transactions_backup_path,
             disable_transactions_backup,
             max_batch_size,
+            batch_timeout,
         } = DefaultTxPoolValues::get_global().clone();
         Self {
             pending_max_count,
@@ -504,7 +514,7 @@ impl Default for TxPoolArgs {
             transactions_backup_path,
             disable_transactions_backup,
             max_batch_size,
-            batch_timeout: None,
+            batch_timeout,
         }
     }
 }
@@ -556,7 +566,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
     fn batch_config(&self) -> BatchConfig {
         BatchConfig {
             max_batch_size: self.max_batch_size,
-            batch_timeout: self.batch_timeout.filter(|timeout| !timeout.is_zero()),
+            batch_timeout: (!self.batch_timeout.is_zero()).then_some(self.batch_timeout),
             max_concurrent_batches: self.additional_validation_tasks.saturating_add(3),
         }
     }
@@ -603,9 +613,9 @@ mod tests {
     }
 
     #[test]
-    fn txpool_parse_batch_timeout_optional() {
+    fn txpool_parse_batch_timeout() {
         let args = CommandParser::<TxPoolArgs>::parse_from(["reth"]).args;
-        assert_eq!(args.batch_timeout, None);
+        assert_eq!(args.batch_timeout, Duration::ZERO);
         assert_eq!(args.batch_config().batch_timeout, None);
         assert_eq!(
             args.batch_config().max_concurrent_batches,
@@ -614,13 +624,13 @@ mod tests {
 
         let args =
             CommandParser::<TxPoolArgs>::parse_from(["reth", "--txpool.batch-timeout", "0"]).args;
-        assert_eq!(args.batch_timeout, Some(Duration::ZERO));
+        assert_eq!(args.batch_timeout, Duration::ZERO);
         assert_eq!(args.batch_config().batch_timeout, None);
 
         let args =
             CommandParser::<TxPoolArgs>::parse_from(["reth", "--txpool.batch-timeout", "50ms"])
                 .args;
-        assert_eq!(args.batch_timeout, Some(Duration::from_millis(50)));
+        assert_eq!(args.batch_timeout, Duration::from_millis(50));
         assert_eq!(args.batch_config().batch_timeout, Some(Duration::from_millis(50)));
     }
 
@@ -660,7 +670,7 @@ mod tests {
             transactions_backup_path: Some(PathBuf::from("/tmp/txpool-backup")),
             disable_transactions_backup: false,
             max_batch_size: 10,
-            batch_timeout: Some(Duration::from_millis(50)),
+            batch_timeout: Duration::from_millis(50),
         };
 
         let parsed_args = CommandParser::<TxPoolArgs>::parse_from([
