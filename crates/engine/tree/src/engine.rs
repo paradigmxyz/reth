@@ -247,6 +247,16 @@ pub enum EngineApiRequest<T: PayloadTypes, N: NodePrimitives> {
     InsertExecutedBlock(BuiltPayloadExecutedBlock<N>),
 }
 
+impl<T: PayloadTypes, N: NodePrimitives> EngineApiRequest<T, N> {
+    /// Returns a static label for the request variant.
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::Beacon(msg) => msg.kind(),
+            Self::InsertExecutedBlock(_) => "insert_executed_block",
+        }
+    }
+}
+
 impl<T: PayloadTypes, N: NodePrimitives> Display for EngineApiRequest<T, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

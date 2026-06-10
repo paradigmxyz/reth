@@ -273,6 +273,17 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
     },
 }
 
+impl<Payload: PayloadTypes> BeaconEngineMessage<Payload> {
+    /// Returns a static label for the message variant.
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::NewPayload { .. } => "new_payload",
+            Self::RethNewPayload { .. } => "reth_new_payload",
+            Self::ForkchoiceUpdated { .. } => "forkchoice_updated",
+        }
+    }
+}
+
 impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

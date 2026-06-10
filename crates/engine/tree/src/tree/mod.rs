@@ -564,7 +564,12 @@ where
 
             match event {
                 LoopEvent::EngineMessage(msg) => {
-                    debug!(target: "engine::tree", %msg, "received new engine message");
+                    let msg_kind = match &msg {
+                        FromEngine::Event(_) => "event",
+                        FromEngine::Request(request) => request.kind(),
+                        FromEngine::DownloadedBlocks(_) => "downloaded_blocks",
+                    };
+                    debug!(target: "engine::tree", msg_kind, "received new engine message");
                     match self.on_engine_message(msg) {
                         Ok(ops::ControlFlow::Break(())) => return,
                         Ok(ops::ControlFlow::Continue(())) => {}
