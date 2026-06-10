@@ -97,6 +97,7 @@ alloy-genesis.workspace = true
 # misc
 url.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
+criterion.workspace = true
 
 [features]
 serde = [
@@ -139,3 +140,7 @@ test-utils = [
     "reth-evm-ethereum?/test-utils",
     "reth-tasks/test-utils",
 ]
+
+[[bench]]
+name = "tx_recovery"
+harness = false
