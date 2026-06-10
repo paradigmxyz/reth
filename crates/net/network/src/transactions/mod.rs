@@ -1,7 +1,7 @@
 //! Transactions management for the p2p network.
 
-use alloy_consensus::transaction::TxHashRef;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use alloy_consensus::transaction::{SignerRecoverable, TxHashRef};
+use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 /// Aggregation on configurable parameters for [`TransactionsManager`].
 pub mod config;
@@ -1432,21 +1432,35 @@ where
 
         let txs_len = transactions.len();
 
-        let new_txs = transactions
-            .into_par_iter()
-            .filter_map(|tx| match tx.try_into_recovered() {
-                Ok(tx) => Some(Pool::Transaction::from_pooled(tx)),
-                Err(badtx) => {
-                    trace!(target: "net::tx",
-                        peer_id=format!("{peer_id:#}"),
-                        hash=%badtx.tx_hash(),
-                        client_version=%client_version,
-                        "failed ecrecovery for transaction"
-                    );
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
+        // recovers the transaction, reusing the given buffer for the signature hash encoding
+        let recover = |buf: &mut Vec<u8>, tx: N::PooledTransaction| match tx.recover_with_buf(buf) {
+            Ok(signer) => Some(Pool::Transaction::from_pooled(tx.with_signer(signer))),
+            Err(_) => {
+                trace!(target: "net::tx",
+                    peer_id=format!("{peer_id:#}"),
+                    hash=%tx.tx_hash(),
+                    %client_version,
+                    "failed ecrecovery for transaction"
+                );
+                None
+            }
+        };
+
+        // Only dispatch to the rayon pool for larger batches, the dispatch overhead outweighs
+        // the parallel speedup for the common case of a message with a few transactions. For
+        // larger batches, bound the split granularity for the same reason: per-item work units
+        // make rayon's join/steal overhead cost more CPU than the signature recovery itself.
+        let new_txs = if txs_len < MIN_TX_COUNT_FOR_PARALLEL_RECOVERY {
+            let mut buf = Vec::new();
+            transactions.into_iter().filter_map(|tx| recover(&mut buf, tx)).collect::<Vec<_>>()
+        } else {
+            transactions
+                .into_par_iter()
+                .with_min_len(MIN_TX_COUNT_FOR_PARALLEL_RECOVERY)
+                .map_init(Vec::new, recover)
+                .filter_map(|tx| tx)
+                .collect::<Vec<_>>()
+        };
 
         has_bad_transactions |= new_txs.len() != txs_len;
 
