@@ -6,7 +6,7 @@ use alloy_evm::{
     Evm,
 };
 use alloy_primitives::Address;
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::{Receiver, Select, Sender};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
 use revm::database::State;
 use revm_state::bal::Bal as RevmBal;
@@ -79,13 +79,21 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
             let evm = evm_config.evm_with_env(&mut worker_state, evm_env);
             let mut executor = evm_config.create_executor_with_state(evm, ctx.clone());
 
+            let mut select = Select::new_biased();
+            let abort_oper = select.recv(&abort_rx);
+            let tx_oper = select.recv(&tx_rx);
+
             loop {
-                let (index, tx) = crossbeam_channel::select_biased! {
-                    recv(abort_rx) -> _ => break,
-                    recv(tx_rx) -> msg => match msg {
-                        Ok(ix_tx) => ix_tx,
-                        Err(_) => break,
-                    },
+                let oper = select.select();
+                if oper.index() == abort_oper {
+                    let _ = oper.recv(&abort_rx);
+                    break;
+                }
+                debug_assert_eq!(oper.index(), tx_oper);
+
+                let (index, tx) = match oper.recv(&tx_rx) {
+                    Ok(ix_tx) => ix_tx,
+                    Err(_) => break,
                 };
                 let tx = tx.map_err(|e| BalWorkerError::Transaction(Box::new(e)))?;
                 let signer = *tx.signer();
