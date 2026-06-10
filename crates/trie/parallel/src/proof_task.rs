@@ -644,11 +644,16 @@ where
         // Initially mark this worker as available.
         self.availability.mark_idle(self.worker_id);
 
+        #[cfg(feature = "metrics")]
         let mut total_idle_time = Duration::ZERO;
+        #[cfg(feature = "metrics")]
         let mut idle_start = Instant::now();
 
         while let Ok(job) = self.work_rx.recv() {
-            total_idle_time += idle_start.elapsed();
+            #[cfg(feature = "metrics")]
+            {
+                total_idle_time += idle_start.elapsed();
+            }
 
             // Mark worker as busy.
             self.availability.mark_busy(self.worker_id);
@@ -681,17 +686,25 @@ where
             // Mark worker as available again.
             self.availability.mark_idle(self.worker_id);
 
-            idle_start = Instant::now();
+            #[cfg(feature = "metrics")]
+            {
+                idle_start = Instant::now();
+            }
         }
 
         // Drop calculator to release mutable borrows on cursor_metrics_cache.
         drop(v2_calculator);
 
+        #[cfg(feature = "metrics")]
+        let total_idle_time_us = total_idle_time.as_micros();
+        #[cfg(not(feature = "metrics"))]
+        let total_idle_time_us = 0u128;
+
         trace!(
             target: "trie::proof_task",
             worker_id = self.worker_id,
             storage_proofs_processed,
-            total_idle_time_us = total_idle_time.as_micros(),
+            total_idle_time_us,
             "Storage worker shutting down"
         );
 
@@ -894,12 +907,18 @@ where
         // Count this worker as available only after successful initialization.
         self.availability.mark_idle(self.worker_id);
 
+        #[cfg(feature = "metrics")]
         let mut total_idle_time = Duration::ZERO;
+        #[cfg(feature = "metrics")]
         let mut idle_start = Instant::now();
+        #[cfg(feature = "metrics")]
         let mut value_encoder_stats_cache = ValueEncoderStats::default();
 
         while let Ok(job) = self.work_rx.recv() {
-            total_idle_time += idle_start.elapsed();
+            #[cfg(feature = "metrics")]
+            {
+                total_idle_time += idle_start.elapsed();
+            }
 
             // Mark worker as busy.
             self.availability.mark_busy(self.worker_id);
@@ -925,26 +944,39 @@ where
                         *input,
                         &mut account_proofs_processed,
                     );
-                    total_idle_time += value_encoder_stats.storage_wait_time;
-                    value_encoder_stats_cache.extend(&value_encoder_stats);
+                    #[cfg(feature = "metrics")]
+                    {
+                        total_idle_time += value_encoder_stats.storage_wait_time;
+                        value_encoder_stats_cache.extend(&value_encoder_stats);
+                    }
+                    #[cfg(not(feature = "metrics"))]
+                    let _ = value_encoder_stats;
                 }
             }
 
             // Mark worker as available again.
             self.availability.mark_idle(self.worker_id);
 
-            idle_start = Instant::now();
+            #[cfg(feature = "metrics")]
+            {
+                idle_start = Instant::now();
+            }
         }
 
         // Drop calculators to release mutable borrows on cursor_metrics_cache.
         drop(v2_account_calculator);
         drop(v2_storage_calculator);
 
+        #[cfg(feature = "metrics")]
+        let total_idle_time_us = total_idle_time.as_micros();
+        #[cfg(not(feature = "metrics"))]
+        let total_idle_time_us = 0u128;
+
         trace!(
             target: "trie::proof_task",
             worker_id=self.worker_id,
             account_proofs_processed,
-            total_idle_time_us = total_idle_time.as_micros(),
+            total_idle_time_us,
             "Account worker shutting down"
         );
 
