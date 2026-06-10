@@ -865,14 +865,27 @@ where
             return false
         }
 
+        if cached_branch.state_mask.count_ones() <= 1 {
+            trace!(
+                target: TRACE_TARGET,
+                ?cached_path,
+                "Skipping cached branch: branch has <=1 children and matches prefix set",
+            );
+            return true
+        }
+
         let mut num_unmatched = 0u32;
         let mut child_path = *cached_path;
+        let cached_path_len = cached_path.len();
         for nibble in 0u8..16 {
             if cached_branch.state_mask.is_bit_set(nibble) {
-                child_path.truncate(cached_path.len());
+                child_path.truncate(cached_path_len);
                 child_path.push_unchecked(nibble);
                 if !self.prefix_set.contains(&child_path) {
                     num_unmatched += 1;
+                    if num_unmatched > 1 {
+                        return false
+                    }
                 }
             }
         }
