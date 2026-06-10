@@ -18,7 +18,8 @@ use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_evm::{
     execute::{ExecutableTxFor, ExecutableTxParts, WithTxEnv},
-    ConfigureEvm, ConvertTx, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, SpecFor, TxEnvFor,
+    ConfigureEvm, ConfigureEvm2Prewarm, ConvertTx, EvmEnvFor, ExecutableTxIterator,
+    ExecutableTxTuple, SpecFor, TxEnvFor,
 };
 use reth_execution_types::Evm2BlockState;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
@@ -63,9 +64,6 @@ use preserved_sparse_trie::{PreservedSparseTrie, SharedPreservedSparseTrie};
 /// Blocks with fewer transactions than this skip prewarming, since the fixed overhead of spawning
 /// prewarm workers exceeds the execution time saved.
 pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
-
-/// Transaction prewarming is parked until it has an evm2-native implementation.
-const DISABLE_LEGACY_TRANSACTION_PREWARMING: bool = true;
 
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorTx<Evm, I> = RecoveredTx<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
@@ -117,7 +115,6 @@ where
     /// Whether state cache should be disable
     disable_state_cache: bool,
     /// Determines how to configure the evm for execution.
-    #[cfg(any())]
     evm_config: Evm,
     /// Whether precompile cache should be disabled.
     #[cfg(any())]
@@ -135,8 +132,7 @@ where
     sparse_trie_max_hot_accounts: usize,
     /// Whether sparse trie cache pruning is fully disabled.
     disable_sparse_trie_cache_pruning: bool,
-    /// Keeps the payload processor typed by its configured EVM while transaction prewarming is
-    /// parked.
+    /// Keeps the payload processor typed by its configured EVM.
     _evm: PhantomData<Evm>,
     /// Whether to disable BAL-driven parallel state root computation.
     /// Only valid when BAL parallel execution is also disabled.
@@ -196,7 +192,6 @@ where
             trie_metrics: Default::default(),
             cross_block_cache_size: config.cross_block_cache_size(),
             disable_transaction_prewarming: config.disable_prewarming(),
-            #[cfg(any())]
             evm_config: _evm_config,
             disable_state_cache: config.disable_state_cache(),
             #[cfg(any())]
@@ -318,6 +313,7 @@ where
             + Send
             + Sync
             + 'static,
+        Evm: ConfigureEvm2Prewarm<Primitives = N>,
     {
         let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
             options;
@@ -366,6 +362,7 @@ where
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        Evm: ConfigureEvm2Prewarm<Primitives = N>,
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
@@ -562,6 +559,7 @@ where
     ) -> CacheTaskHandle<N::Receipt>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        Evm: ConfigureEvm2Prewarm<Primitives = N>,
     {
         let mode = if parallel_bal_execution {
             #[cfg(any())]
@@ -585,10 +583,6 @@ where
                 );
                 PrewarmMode::Skipped
             }
-        } else if DISABLE_LEGACY_TRANSACTION_PREWARMING {
-            // Transaction prewarming needs an evm2-native implementation before it can run with
-            // the active sync execution path.
-            PrewarmMode::Skipped
         } else if self.disable_transaction_prewarming ||
             env.transaction_count < SMALL_BLOCK_TX_THRESHOLD
         {
@@ -602,7 +596,6 @@ where
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
-            #[cfg(any())]
             evm_config: self.evm_config.clone(),
             saved_cache: saved_cache.clone(),
             provider: provider_builder,

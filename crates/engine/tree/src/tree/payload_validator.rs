@@ -131,7 +131,9 @@ use reth_engine_primitives::{
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor};
+use reth_evm::{
+    execute::ExecutableTxFor, ConfigureEvm, ConfigureEvm2Prewarm, EvmEnvFor, ExecutionCtxFor,
+};
 use reth_evm_ethereum::{
     execute_evm2_block_with_state_provider_context, Evm2BlockExecutionContext, Evm2BlockSystemCalls,
 };
@@ -316,7 +318,7 @@ where
         + HashedPostStateProvider
         + Clone
         + 'static,
-    Evm: ConfigureEvm<Primitives = N> + 'static,
+    Evm: ConfigureEvm<Primitives = N> + ConfigureEvm2Prewarm<Primitives = N> + 'static,
 {
     /// Creates a new `TreePayloadValidator`.
     #[expect(clippy::too_many_arguments)]
@@ -1581,6 +1583,7 @@ where
     >
     where
         T: ExecutableTxIterator<Evm>,
+        Evm: ConfigureEvm2Prewarm<Primitives = N>,
     {
         let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
             options;
@@ -2061,7 +2064,9 @@ where
         + 'static,
     N: NodePrimitives<SignedTx = TransactionSigned, Receipt = Receipt>,
     V: PayloadValidator<Types, Block = N::Block> + Clone,
-    Evm: ConfigureEvm2Engine<Types::ExecutionData, Primitives = N> + 'static,
+    Evm: ConfigureEvm2Engine<Types::ExecutionData, Primitives = N>
+        + ConfigureEvm2Prewarm<Primitives = N>
+        + 'static,
     Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
 {
     fn validate_payload_attributes_against_header(
