@@ -25,7 +25,7 @@ use evm2::{
         HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
     },
     registry::HandlerError,
-    BaseEvmTypes, Evm, ExecutionConfig, Precompiles, SpecId, TxOutcome, Version,
+    BaseEvmTypes, Evm, ExecutionConfig, Precompiles, SpecId, TxResult, Version,
 };
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_execution_types::BlockExecutionOutput;
@@ -245,7 +245,7 @@ where
     )?;
 
     let mut output =
-        RethReceiptBuilder.build_evm2_block_output_from_block_state(results, block_state.freeze());
+        RethReceiptBuilder.build_evm2_block_output_from_block_state(results, block_state);
     output.result.requests = requests;
 
     Ok(output)
@@ -364,20 +364,20 @@ fn execute_transaction<DB>(
     evm: &mut Evm<BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     transaction: &RecoveredTxEnvelope,
-) -> Result<TxOutcome, Evm2ExecutionError<DB::Error>>
+) -> Result<TxResult, Evm2ExecutionError<DB::Error>>
 where
     DB: Database + 'static,
 {
     enum TransactionResolution {
-        Outcome(TxOutcome),
+        Outcome(TxResult),
         DatabaseError(DbErrorCode),
         HandlerError(HandlerError),
     }
 
     let resolution = match evm.transact(transaction) {
         Ok(executed) => {
-            if let Some(code) = executed.outcome().db_error_code {
-                executed.discard();
+            if let Some(code) = executed.result().db_error_code {
+                let _ = executed.discard();
                 TransactionResolution::DatabaseError(code)
             } else {
                 TransactionResolution::Outcome(executed.commit_to(block_state))
@@ -420,7 +420,7 @@ where
     };
 
     if spec_id.enables(SpecId::PRAGUE) && block_number != 0 {
-        execute_system_call::<DB>(
+        let _ = execute_system_call::<DB>(
             evm,
             block_state,
             HISTORY_STORAGE_ADDRESS,
@@ -440,7 +440,7 @@ where
                 ));
             }
         } else {
-            execute_system_call::<DB>(
+            let _ = execute_system_call::<DB>(
                 evm,
                 block_state,
                 BEACON_ROOTS_ADDRESS,
@@ -455,7 +455,7 @@ where
 fn block_requests_from_tx_results<DB>(
     spec_id: SpecId,
     context: Evm2BlockExecutionContext<'_>,
-    results: &[(TxType, TxOutcome)],
+    results: &[(TxType, TxResult)],
 ) -> Result<Requests, Evm2ExecutionError<DB::Error>>
 where
     DB: Database + 'static,
@@ -476,7 +476,7 @@ where
 
 fn parse_deposit_requests_from_tx_results<DB>(
     deposit_contract_address: Address,
-    results: &[(TxType, TxOutcome)],
+    results: &[(TxType, TxResult)],
 ) -> Result<Vec<u8>, Evm2ExecutionError<DB::Error>>
 where
     DB: Database + 'static,
@@ -540,20 +540,20 @@ fn execute_system_call<DB>(
     block_state: &mut BlockStateAccumulator,
     address: Address,
     data: Bytes,
-) -> Result<TxOutcome, Evm2ExecutionError<DB::Error>>
+) -> Result<TxResult, Evm2ExecutionError<DB::Error>>
 where
     DB: Database + 'static,
 {
     let executed = evm.system_call(address, data);
 
-    if let Some(code) = executed.outcome().db_error_code {
-        executed.discard();
+    if let Some(code) = executed.result().db_error_code {
+        let _ = executed.discard();
         return Err(map_db_error_code::<DB>(evm, code))
     }
 
-    if !executed.outcome().status {
-        let reason = format!("{:?}", executed.outcome().stop);
-        executed.discard();
+    if !executed.result().status {
+        let reason = format!("{:?}", executed.result().stop);
+        let _ = executed.discard();
         return Err(Evm2ExecutionError::SystemCallFailed { address, reason });
     }
 
@@ -612,9 +612,7 @@ where
         let mut current = original.clone().unwrap_or_else(empty_account);
 
         current.balance = current.balance.saturating_add(increment);
-        changes
-            .accounts
-            .insert(address, Tracked { original, current: Some(current), _non_exhaustive: () });
+        changes.accounts.insert(address, Tracked { original, current: Some(current) });
     }
 
     commit_state_changes(evm, block_state, &changes);
@@ -1057,7 +1055,7 @@ mod tests {
             address: MAINNET_DEPOSIT_CONTRACT_ADDRESS,
             data: deposit,
         });
-        let outcome = TxOutcome { status: true, logs: vec![log], ..Default::default() };
+        let outcome = TxResult { status: true, logs: vec![log], ..Default::default() };
 
         let requests = block_requests_from_tx_results::<TestDatabase>(
             SpecId::PRAGUE,

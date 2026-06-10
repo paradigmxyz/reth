@@ -13,7 +13,7 @@ use alloy_primitives::{
 };
 use evm2::evm::{
     AccountChangeRef, AccountInfo, AccountInfoRef, BlockStateAccumulator, StateChangeSink,
-    StorageChangeRef, Tracked,
+    StorageChange, Tracked,
 };
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
 
@@ -90,7 +90,7 @@ impl<T> ExecutionOutcome<T> {
         for state in states {
             evm2_block_state_accumulator_extend(&mut accumulator, state);
         }
-        accumulator.freeze()
+        accumulator
     }
 
     fn from_parts(
@@ -155,14 +155,11 @@ impl<T> ExecutionOutcome<T> {
                 })
                 .expect("infallible");
             for (slot, (original, current)) in storage {
-                accumulator
-                    .storage(StorageChangeRef {
-                        address,
-                        key: U256::from_be_bytes(slot.0),
-                        original,
-                        current,
-                    })
-                    .expect("infallible");
+                StateChangeSink::storage(
+                    &mut accumulator,
+                    StorageChange { address, key: U256::from_be_bytes(slot.0), original, current },
+                )
+                .expect("infallible");
             }
         }
         for (code_hash, bytecode) in contracts_init {
@@ -196,14 +193,7 @@ impl<T> ExecutionOutcome<T> {
             })
             .collect::<Vec<_>>();
 
-        Self::from_parts(
-            accumulator.freeze(),
-            Vec::new(),
-            block_reverts,
-            receipts,
-            first_block,
-            requests,
-        )
+        Self::from_state_and_reverts(accumulator, block_reverts, receipts, first_block, requests)
     }
 
     /// Creates a new `ExecutionOutcome` from a single block execution result.
@@ -496,7 +486,7 @@ impl<T> ExecutionOutcome<T> {
         let mut accumulator = BlockStateAccumulator::new();
         evm2_block_state_accumulator_extend(&mut accumulator, &self.state);
         evm2_block_state_accumulator_extend(&mut accumulator, &other_state);
-        self.state = accumulator.freeze();
+        self.state = accumulator;
         self.extend_block_states(other_block_states, other_receipts_len);
         self.block_reverts.extend(block_reverts);
         self.receipts.extend(receipts);
@@ -623,7 +613,7 @@ fn account_info_to_reth(info: &AccountInfo) -> Account {
 
 #[cfg(any(feature = "serde", feature = "serde-bincode-compat"))]
 mod serde_state {
-    // `FrozenBlockState` lives in evm2 with private fields and does not currently implement
+    // `BlockStateAccumulator` lives in evm2 with private fields and does not currently implement
     // serde. Until evm2 exposes serde derives for it upstream, this adapter is the narrow
     // boundary that serializes it through the public `StateChangeSource` stream.
     use super::*;
@@ -674,14 +664,16 @@ mod serde_state {
                     accumulator.storage_wipe(address).expect("infallible");
                 }
                 for (key, slot) in storage.slots {
-                    accumulator
-                        .storage(StorageChangeRef {
+                    StateChangeSink::storage(
+                        &mut accumulator,
+                        StorageChange {
                             address,
                             key,
                             original: slot.original,
                             current: slot.current,
-                        })
-                        .expect("infallible");
+                        },
+                    )
+                    .expect("infallible");
                 }
             }
             for (address, account) in value.accounts {
@@ -695,7 +687,7 @@ mod serde_state {
                     })
                     .expect("infallible");
             }
-            accumulator.freeze()
+            accumulator
         }
     }
 
@@ -738,7 +730,7 @@ mod serde_state {
             Ok(())
         }
 
-        fn storage(&mut self, change: StorageChangeRef) -> Result<(), Self::Error> {
+        fn storage(&mut self, change: StorageChange) -> Result<(), Self::Error> {
             self.state.storage.entry(change.address).or_default().slots.insert(
                 change.key,
                 TrackedSerde { original: change.original, current: change.current },

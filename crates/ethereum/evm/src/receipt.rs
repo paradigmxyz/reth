@@ -1,8 +1,8 @@
 use alloc::vec::Vec;
 use alloy_consensus::TxType;
 use evm2::{
-    evm::{BlockStateAccumulator, FrozenBlockState, StateChanges},
-    StateChangeSource, TxOutcome, TxResult,
+    evm::{BlockStateAccumulator, StateChangeSource, StateChanges},
+    TxResult, TxResultWithState,
 };
 use reth_ethereum_primitives::Receipt;
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
@@ -28,7 +28,7 @@ impl RethReceiptBuilder {
     pub fn build_evm2_block_output(
         &self,
         block_number: u64,
-        txs: impl IntoIterator<Item = (TxType, TxResult)>,
+        txs: impl IntoIterator<Item = (TxType, TxResultWithState)>,
     ) -> BlockExecutionOutput<Receipt> {
         self.build_evm2_block_output_with_state_changes(
             block_number,
@@ -42,7 +42,7 @@ impl RethReceiptBuilder {
     pub fn build_evm2_block_output_with_state_changes(
         &self,
         block_number: u64,
-        txs: impl IntoIterator<Item = (TxType, TxResult)>,
+        txs: impl IntoIterator<Item = (TxType, TxResultWithState)>,
         extra_state_changes: impl IntoIterator<Item = StateChanges>,
     ) -> BlockExecutionOutput<Receipt> {
         self.build_evm2_block_output_with_surrounding_state_changes(
@@ -59,7 +59,7 @@ impl RethReceiptBuilder {
         &self,
         _block_number: u64,
         pre_state_changes: impl IntoIterator<Item = StateChanges>,
-        txs: impl IntoIterator<Item = (TxType, TxResult)>,
+        txs: impl IntoIterator<Item = (TxType, TxResultWithState)>,
         post_state_changes: impl IntoIterator<Item = StateChanges>,
     ) -> BlockExecutionOutput<Receipt> {
         let mut receipts = Vec::new();
@@ -70,9 +70,14 @@ impl RethReceiptBuilder {
             append_to_block_state(&mut state, &changes);
         }
         for (tx_type, result) in txs {
-            cumulative_gas_used += result.gas_used;
-            let logs = result.logs;
-            receipts.push(Receipt { tx_type, success: result.status, cumulative_gas_used, logs });
+            cumulative_gas_used += result.result.gas_used;
+            let logs = result.result.logs;
+            receipts.push(Receipt {
+                tx_type,
+                success: result.result.status,
+                cumulative_gas_used,
+                logs,
+            });
             append_to_block_state(&mut state, &result.state_changes);
         }
         for changes in post_state_changes {
@@ -86,7 +91,7 @@ impl RethReceiptBuilder {
                 gas_used: cumulative_gas_used,
                 blob_gas_used: 0,
             },
-            state.freeze(),
+            state,
         )
     }
 
@@ -95,7 +100,7 @@ impl RethReceiptBuilder {
     pub fn build_evm2_block_output_from_state_source<S>(
         &self,
         _block_number: u64,
-        txs: impl IntoIterator<Item = (TxType, TxOutcome)>,
+        txs: impl IntoIterator<Item = (TxType, TxResult)>,
         state_source: &S,
     ) -> BlockExecutionOutput<Receipt>
     where
@@ -129,8 +134,8 @@ impl RethReceiptBuilder {
     /// accumulated evm2 block state.
     pub fn build_evm2_block_output_from_block_state(
         &self,
-        txs: impl IntoIterator<Item = (TxType, TxOutcome)>,
-        state: FrozenBlockState,
+        txs: impl IntoIterator<Item = (TxType, TxResult)>,
+        state: BlockStateAccumulator,
     ) -> BlockExecutionOutput<Receipt> {
         let mut receipts = Vec::new();
         let mut cumulative_gas_used = 0;
@@ -157,13 +162,13 @@ impl RethReceiptBuilder {
     }
 }
 
-fn block_state_from_source<S>(source: &S) -> FrozenBlockState
+fn block_state_from_source<S>(source: &S) -> BlockStateAccumulator
 where
     S: StateChangeSource,
 {
     let mut state = BlockStateAccumulator::new();
     append_to_block_state(&mut state, source);
-    state.freeze()
+    state
 }
 
 fn append_to_block_state<S>(state: &mut BlockStateAccumulator, source: &S)
@@ -205,10 +210,10 @@ mod tests {
         let address = address!("0000000000000000000000000000000000000001");
         let log =
             Log { address, data: LogData::new_unchecked(vec![B256::ZERO], Default::default()) };
-        let mut result = TxResult::default();
-        result.status = true;
-        result.gas_used = 21_000;
-        result.logs.push(log.clone());
+        let mut result = TxResultWithState::default();
+        result.result.status = true;
+        result.result.gas_used = 21_000;
+        result.result.logs.push(log.clone());
         result.state_changes.accounts.insert(
             address,
             Tracked {
@@ -220,7 +225,6 @@ mod tests {
                     code: None,
                     _non_exhaustive: (),
                 }),
-                _non_exhaustive: (),
             },
         );
 
@@ -246,13 +250,12 @@ mod tests {
                     code: None,
                     _non_exhaustive: (),
                 }),
-                _non_exhaustive: (),
             },
         );
 
         let output = RethReceiptBuilder.build_evm2_block_output_with_state_changes(
             7,
-            core::iter::empty::<(TxType, TxResult)>(),
+            core::iter::empty::<(TxType, TxResultWithState)>(),
             [extra],
         );
 
@@ -281,12 +284,11 @@ mod tests {
                     code: None,
                     _non_exhaustive: (),
                 }),
-                _non_exhaustive: (),
             },
         );
 
-        let mut tx = TxResult::default();
-        tx.status = true;
+        let mut tx = TxResultWithState::default();
+        tx.result.status = true;
         tx.state_changes.accounts.insert(
             tx_address,
             Tracked {
@@ -298,7 +300,6 @@ mod tests {
                     code: None,
                     _non_exhaustive: (),
                 }),
-                _non_exhaustive: (),
             },
         );
 
@@ -314,7 +315,6 @@ mod tests {
                     code: None,
                     _non_exhaustive: (),
                 }),
-                _non_exhaustive: (),
             },
         );
 

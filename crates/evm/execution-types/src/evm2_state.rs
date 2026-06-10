@@ -8,8 +8,8 @@ use core::{convert::Infallible, marker::PhantomData};
 use evm2::{
     bytecode::Bytecode as Evm2Bytecode,
     evm::{
-        AccountChangeRef, AccountInfo, AccountInfoRef, BlockStateAccumulator, FrozenBlockState,
-        StateChangeSink, StateChangeSource, StorageChangeRef,
+        AccountChangeRef, AccountInfo, AccountInfoRef, BlockStateAccumulator, StateChangeSink,
+        StateChangeSource, StorageChange,
     },
 };
 use reth_primitives_traits::{Account, Bytecode as RethBytecode};
@@ -123,13 +123,13 @@ where
 }
 
 /// Freezes any evm2 state-change source into an owned block state.
-pub fn evm2_block_state_from_state_source<S>(source: &S) -> FrozenBlockState
+pub fn evm2_block_state_from_state_source<S>(source: &S) -> BlockStateAccumulator
 where
     S: StateChangeSource,
 {
     let mut state = BlockStateAccumulator::new();
     evm2_block_state_accumulator_extend(&mut state, source);
-    state.freeze()
+    state
 }
 
 /// Creates an evm2 block state from Reth account, storage, and bytecode initialization data.
@@ -138,7 +138,7 @@ pub fn evm2_block_state_from_init(
         Item = (Address, (Option<Account>, Option<Account>, BTreeMap<U256, (U256, U256)>)),
     >,
     contracts: impl IntoIterator<Item = (B256, RethBytecode)>,
-) -> FrozenBlockState {
+) -> BlockStateAccumulator {
     let mut accumulator = BlockStateAccumulator::new();
     for (address, (original, current, storage)) in accounts {
         accumulator
@@ -149,9 +149,11 @@ pub fn evm2_block_state_from_init(
             })
             .expect("infallible");
         for (slot, (original, current)) in storage {
-            accumulator
-                .storage(StorageChangeRef { address, key: slot, original, current })
-                .expect("infallible");
+            StateChangeSink::storage(
+                &mut accumulator,
+                StorageChange { address, key: slot, original, current },
+            )
+            .expect("infallible");
         }
     }
     for (code_hash, bytecode) in contracts {
@@ -159,7 +161,7 @@ pub fn evm2_block_state_from_init(
             .bytecode(code_hash, &Evm2Bytecode::new_raw(bytecode.original_bytes()))
             .expect("infallible");
     }
-    accumulator.freeze()
+    accumulator
 }
 
 /// Extends an evm2 block-state accumulator with any evm2 state-change source.
@@ -201,7 +203,7 @@ where
 
 /// Returns trie-ready sorted hashed post-state for an evm2 block state.
 pub fn evm2_block_state_hashed_post_state_sorted<KH>(
-    state: &FrozenBlockState,
+    state: &BlockStateAccumulator,
 ) -> HashedPostStateSorted
 where
     KH: KeyHasher,
@@ -281,7 +283,7 @@ impl StateChangeSink for StateSizeHintSink {
         Ok(())
     }
 
-    fn storage(&mut self, _change: StorageChangeRef) -> Result<(), Self::Error> {
+    fn storage(&mut self, _change: StorageChange) -> Result<(), Self::Error> {
         self.size += 1;
         Ok(())
     }
@@ -307,7 +309,7 @@ impl StateChangeSink for BlockRevertsSink {
         Ok(())
     }
 
-    fn storage(&mut self, change: StorageChangeRef) -> Result<(), Self::Error> {
+    fn storage(&mut self, change: StorageChange) -> Result<(), Self::Error> {
         self.reverts
             .storage
             .entry(change.address)
@@ -350,7 +352,7 @@ where
         Ok(())
     }
 
-    fn storage(&mut self, change: StorageChangeRef) -> Result<(), Self::Error> {
+    fn storage(&mut self, change: StorageChange) -> Result<(), Self::Error> {
         let hashed_address = KH::hash_key(&change.address);
         let storage = self.state.storages.entry(hashed_address).or_default();
         if storage.wiped && change.current.is_zero() {
@@ -387,7 +389,7 @@ fn account_parts_to_reth(nonce: u64, balance: alloy_primitives::U256, code_hash:
 mod tests {
     use super::*;
     use alloy_primitives::{Address, U256};
-    use evm2::evm::{AccountChangeRef, AccountInfoRef, StorageChangeRef};
+    use evm2::evm::{AccountChangeRef, AccountInfoRef, StorageChange};
     use reth_trie_common::KeccakKeyHasher;
 
     #[test]
@@ -409,35 +411,40 @@ mod tests {
             })
             .unwrap();
         accumulator.storage_wipe(wiped_address).unwrap();
-        accumulator
-            .storage(StorageChangeRef {
+        StateChangeSink::storage(
+            &mut accumulator,
+            StorageChange {
                 address,
                 key: U256::from(1),
                 original: U256::ZERO,
                 current: U256::from(2),
-            })
-            .unwrap();
-        accumulator
-            .storage(StorageChangeRef {
+            },
+        )
+        .unwrap();
+        StateChangeSink::storage(
+            &mut accumulator,
+            StorageChange {
                 address: wiped_address,
                 key: U256::from(3),
                 original: U256::from(4),
                 current: U256::ZERO,
-            })
-            .unwrap();
-        accumulator
-            .storage(StorageChangeRef {
+            },
+        )
+        .unwrap();
+        StateChangeSink::storage(
+            &mut accumulator,
+            StorageChange {
                 address: wiped_address,
                 key: U256::from(5),
                 original: U256::ZERO,
                 current: U256::from(6),
-            })
-            .unwrap();
+            },
+        )
+        .unwrap();
 
-        let state = accumulator.freeze();
-        let sorted = evm2_block_state_hashed_post_state_sorted::<KeccakKeyHasher>(&state);
+        let sorted = evm2_block_state_hashed_post_state_sorted::<KeccakKeyHasher>(&accumulator);
         let streaming =
-            evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&state).into_sorted();
+            evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&accumulator).into_sorted();
 
         assert_eq!(sorted, streaming);
     }
