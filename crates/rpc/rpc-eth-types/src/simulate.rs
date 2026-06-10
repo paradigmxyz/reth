@@ -2,7 +2,7 @@
 
 use crate::{
     error::{api::FromEthApiError, FromEvmError, ToRpcError},
-    EthApiError,
+    EthApiError, RpcInvalidTransactionError,
 };
 use alloy_chains::Chain;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
@@ -27,7 +27,7 @@ use reth_primitives_traits::{
     BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock, SealedHeader,
 };
 use reth_rpc_convert::{RpcBlock, RpcConvert, RpcTxReq};
-use reth_rpc_server_types::result::rpc_err;
+use reth_rpc_server_types::result::{internal_rpc_err, rpc_err};
 use reth_storage_api::{noop::NoopProvider, StateProvider};
 use revm::{
     context::Block,
@@ -374,7 +374,13 @@ where
             converter,
         )?;
         let tx_nonce = tx.nonce();
-        let wrap_nonce = builder.evm().cfg_env().disable_nonce_check && tx_nonce == u64::MAX;
+        let disable_nonce_check = builder.evm().cfg_env().disable_nonce_check;
+        if !disable_nonce_check && tx_nonce == u64::MAX {
+            return Err(EthApiError::other(internal_rpc_err(
+                RpcInvalidTransactionError::NonceMaxValue.to_string(),
+            )))
+        }
+        let wrap_nonce = disable_nonce_check && tx_nonce == u64::MAX;
         // Create transaction with an empty envelope.
         // The effect for a layer-2 execution client is that it does not charge L1 cost.
         let tx = WithEncoded::new(Default::default(), tx);
