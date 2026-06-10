@@ -132,6 +132,26 @@ where
     {
         self.inner().execute_evm2_block_with_database(database, block)
     }
+
+    fn execute_evm2_block_with_database_and_precompile_cache<DB>(
+        &self,
+        database: DB,
+        block: &RecoveredBlock<BlockTy<<Self as ConfigureEvm2BlockExecutor>::Primitives>>,
+        precompile_cache_map: crate::evm2_precompile_cache::Evm2PrecompileCacheMap,
+    ) -> Result<
+        BlockExecutionOutput<ReceiptTy<<Self as ConfigureEvm2BlockExecutor>::Primitives>>,
+        Box<dyn core::error::Error + Send + Sync>,
+    >
+    where
+        DB: evm2::evm::Database + 'static,
+        DB::Error: Send + Sync,
+    {
+        self.inner().execute_evm2_block_with_database_and_precompile_cache(
+            database,
+            block,
+            precompile_cache_map,
+        )
+    }
 }
 
 #[cfg(feature = "std")]

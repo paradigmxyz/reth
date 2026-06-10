@@ -43,7 +43,7 @@ use crate::tree::{
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     multiproof::{StateRootComputeOutcome, StateRootHandle, StateRootMessage},
     payload_processor::PayloadProcessor,
-    precompile_cache::PrecompileCacheMap,
+    precompile_cache::{CachedPrecompileProvider, PrecompileCacheMap},
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
     PayloadHandle, StateProviderBuilder, TreeConfig, WaitForCaches,
@@ -74,7 +74,7 @@ use reth_evm::{
     execute::ExecutableTxFor, ConfigureEvm, ConfigureEvm2Prewarm, EvmEnvFor, ExecutionCtxFor,
 };
 use reth_evm_ethereum::{
-    execute_evm2_block_with_state_provider_context_and_hook, Evm2BlockExecutionContext,
+    execute_evm2_block_with_state_provider_context_precompiles_and_hook, Evm2BlockExecutionContext,
     Evm2BlockSystemCalls,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
@@ -215,6 +215,8 @@ where
     config: TreeConfig,
     /// Payload processor for state root computation.
     payload_processor: PayloadProcessor<Evm>,
+    /// Shared evm2 precompile cache for prewarming and execution.
+    precompile_cache_map: PrecompileCacheMap<evm2::SpecId>,
     /// Hook to call when invalid blocks are encountered.
     #[debug(skip)]
     invalid_block_hook: Box<dyn InvalidBlockHook<Evm::Primitives>>,
@@ -275,6 +277,7 @@ where
             consensus,
             evm_config,
             payload_processor,
+            precompile_cache_map,
             config,
             invalid_block_hook,
             metrics: EngineApiMetrics::default(),
@@ -1097,16 +1100,28 @@ where
             withdrawals: env.withdrawals.as_deref(),
             deposit_contract_address: self.evm_config.evm2_deposit_contract_address(),
         };
+        let precompiles: Box<dyn evm2::precompile::PrecompileProvider<evm2::BaseEvmTypes>> =
+            if self.config.precompile_cache_disabled() {
+                Box::new(evm2::Precompiles::base(spec_id))
+            } else {
+                Box::new(CachedPrecompileProvider::new(
+                    evm2::Precompiles::base(spec_id),
+                    self.precompile_cache_map.clone(),
+                    spec_id,
+                    None,
+                ))
+            };
 
         let output = debug_span!(target: "engine::tree", "execute_evm2_block")
             .in_scope(|| {
-                execute_evm2_block_with_state_provider_context_and_hook(
+                execute_evm2_block_with_state_provider_context_precompiles_and_hook(
                     spec_id,
                     block_env,
                     state_provider,
                     block_number,
                     transactions,
                     context,
+                    precompiles,
                     |executed| {
                         executed_tx_index.store(executed, Ordering::Relaxed);
                     },
