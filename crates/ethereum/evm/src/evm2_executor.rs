@@ -22,7 +22,7 @@ use evm2::{
     ethereum::{ethereum_tx_registry, RecoveredTxEnvelope},
     evm::{
         precompile::PrecompileProvider, AccountInfo, BlockStateAccumulator, Database, Db,
-        DbErrorCode, StateChangeSource, StateChanges, Tracked, BEACON_ROOTS_ADDRESS,
+        DbErrorCode, StateChangeSource, StateChanges, Tee, Tracked, BEACON_ROOTS_ADDRESS,
         CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
     },
     registry::HandlerError,
@@ -678,8 +678,8 @@ fn commit_state_changes<S: StateChangeSource>(
     block_state: &mut BlockStateAccumulator,
     changes: &S,
 ) {
-    evm.commit_source(changes);
-    match changes.visit(block_state) {
+    let mut sink = Tee::new(evm.overlay_db_mut(), block_state);
+    match changes.visit(&mut sink) {
         Ok(()) => {}
         Err(err) => match err {},
     }

@@ -9,7 +9,7 @@ use evm2::{
     bytecode::Bytecode as Evm2Bytecode,
     evm::{
         AccountChangeRef, AccountInfo, AccountInfoRef, BlockStateAccumulator, StateChangeSink,
-        StateChangeSource, StorageChange,
+        StateChangeSource, StorageChange, Tee,
     },
 };
 use reth_primitives_traits::{Account, Bytecode as RethBytecode};
@@ -199,6 +199,23 @@ where
         Err(err) => match err {},
     }
     sink.reverts
+}
+
+/// Extends an evm2 block-state accumulator and returns the per-block reverts in one source visit.
+pub fn evm2_block_reverts_and_accumulator_extend<S>(
+    accumulator: &mut BlockStateAccumulator,
+    source: &S,
+) -> Evm2BlockReverts
+where
+    S: StateChangeSource,
+{
+    let mut reverts = BlockRevertsSink::default();
+    let mut sink = Tee::new(&mut reverts, accumulator);
+    match source.visit(&mut sink) {
+        Ok(()) => {}
+        Err(err) => match err {},
+    }
+    reverts.reverts
 }
 
 /// Returns trie-ready sorted hashed post-state for an evm2 block state.

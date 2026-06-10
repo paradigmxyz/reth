@@ -5,6 +5,7 @@ use crate::{
 use alloc::{boxed::Box, vec::Vec};
 use alloy_consensus::transaction::{Either, Recovered};
 use alloy_primitives::Address;
+use core::convert::Infallible;
 use rayon::prelude::*;
 use reth_execution_types::BlockExecutionOutput;
 use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, RecoveredBlock, TxTy};
@@ -149,14 +150,17 @@ pub trait ConfigureEvm2Prewarm: ConfigureEvm {
     where
         DB: StateProvider + Send + 'static;
 
-    /// Executes a transaction for prewarming and returns its detached state changes.
-    fn evm2_prewarm_tx<DB>(
+    /// Executes a transaction for prewarming, streams its state changes into `sink`, and discards
+    /// them.
+    fn evm2_prewarm_tx<DB, S>(
         &self,
         evm: &mut Self::PrewarmEvm<DB>,
         tx: TxEnvFor<Self>,
-    ) -> Result<evm2::TxResultWithState, Box<dyn core::error::Error + Send + Sync>>
+        sink: &mut S,
+    ) -> Result<evm2::TxResult, Box<dyn core::error::Error + Send + Sync>>
     where
-        DB: StateProvider + Send + 'static;
+        DB: StateProvider + Send + 'static,
+        S: evm2::evm::StateChangeSink<Error = Infallible>;
 }
 
 /// Converts a raw transaction into an executable transaction.

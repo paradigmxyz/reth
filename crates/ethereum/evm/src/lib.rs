@@ -467,16 +467,18 @@ where
         )
     }
 
-    fn evm2_prewarm_tx<DB>(
+    fn evm2_prewarm_tx<DB, S>(
         &self,
         evm: &mut Self::PrewarmEvm<DB>,
         tx: Recovered<TransactionSigned>,
-    ) -> Result<evm2::TxResultWithState, alloc::boxed::Box<dyn core::error::Error + Send + Sync>>
+        sink: &mut S,
+    ) -> Result<evm2::TxResult, alloc::boxed::Box<dyn core::error::Error + Send + Sync>>
     where
         DB: reth_storage_api::StateProvider + Send + 'static,
+        S: evm2::evm::StateChangeSink<Error = Infallible>,
     {
         enum PrewarmResolution {
-            Outcome(evm2::TxResultWithState),
+            Outcome(evm2::TxResult),
             DatabaseError(evm2::evm::DbErrorCode),
             HandlerError(evm2::registry::HandlerError),
         }
@@ -488,7 +490,8 @@ where
                     let _ = executed.discard();
                     PrewarmResolution::DatabaseError(code)
                 } else {
-                    PrewarmResolution::Outcome(executed.detach())
+                    let Ok(result) = executed.discard_with(sink);
+                    PrewarmResolution::Outcome(result)
                 }
             }
             Err(err) => PrewarmResolution::HandlerError(err),

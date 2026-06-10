@@ -14,8 +14,10 @@ extern crate alloc;
 pub use evm2::{
     bytecode::Bytecode as Evm2Bytecode,
     evm::{
-        AccountInfo as Evm2AccountInfo, BlockStateAccumulator as Evm2BlockStateAccumulator,
-        BlockStateAccumulator as Evm2BlockState,
+        AccountChangeRef as Evm2AccountChangeRef, AccountInfo as Evm2AccountInfo,
+        AccountInfoRef as Evm2AccountInfoRef, BlockStateAccumulator as Evm2BlockStateAccumulator,
+        BlockStateAccumulator as Evm2BlockState, StateChangeSink as Evm2StateChangeSink,
+        StateChangeSource as Evm2StateChangeSource, StorageChange as Evm2StorageChange,
     },
 };
 

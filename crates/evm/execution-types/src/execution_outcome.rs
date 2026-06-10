@@ -1,7 +1,8 @@
 use crate::{
-    evm2_block_reverts_from_state_source, evm2_block_state_accumulator_extend,
-    evm2_state_source_hashed_post_state, BlockExecutionOutput, BlockExecutionResult,
-    Evm2BlockReverts, Evm2BlockState, Evm2RevertAccount, Evm2StorageReverts, IndexedBlockState,
+    evm2_block_reverts_and_accumulator_extend, evm2_block_reverts_from_state_source,
+    evm2_block_state_accumulator_extend, evm2_state_source_hashed_post_state, BlockExecutionOutput,
+    BlockExecutionResult, Evm2BlockReverts, Evm2BlockState, Evm2RevertAccount, Evm2StorageReverts,
+    IndexedBlockState,
 };
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
@@ -245,10 +246,12 @@ impl<T> ExecutionOutcome<T> {
         results: Vec<BlockExecutionResult<T>>,
     ) -> Self {
         let block_states = states.into_iter().collect::<Vec<_>>();
-        let mut block_reverts =
-            block_states.iter().map(evm2_block_reverts_from_state_source).collect::<Vec<_>>();
+        let mut state = BlockStateAccumulator::new();
+        let mut block_reverts = Vec::with_capacity(block_states.len());
+        for block_state in &block_states {
+            block_reverts.push(evm2_block_reverts_and_accumulator_extend(&mut state, block_state));
+        }
         Self::adjust_reverts_for_prior_wipes(&Evm2BlockState::default(), &mut block_reverts);
-        let state = Self::aggregate_block_states(&block_states);
         Self::from_blocks(first_block, state, block_states, block_reverts, results)
     }
 
