@@ -435,6 +435,7 @@ where
             db.basic(from).map_err(Into::into)?.map(|acc| acc.nonce).unwrap_or_default(),
         );
     }
+    // eth_simulateV1 validation-off mode behaves like eth_call; avoid revm's max-nonce guard.
     if disable_nonce_check && tx.as_ref().nonce() == Some(u64::MAX) {
         tx.as_mut().set_nonce(0);
     }
