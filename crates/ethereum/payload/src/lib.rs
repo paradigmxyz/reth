@@ -163,7 +163,7 @@ where
 {
     let BuildArguments { cached_reads, execution_cache, trie_handle, config, cancel, best_payload } =
         args;
-    let PayloadConfig { parent_header, attributes, payload_id } = config;
+    let PayloadConfig { parent_header, attributes, payload_id, .. } = config;
     let _ = (evm_config, execution_cache, trie_handle);
 
     if client.chain_spec().is_amsterdam_active_at_timestamp(attributes.timestamp()) {
