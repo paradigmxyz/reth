@@ -21,7 +21,7 @@ use reth_stages_api::StageError;
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
 use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
-use tracing::info;
+use tracing::{info, trace};
 
 /// Number of blocks before pushing indices from cache to [`Collector`]
 const DEFAULT_CACHE_THRESHOLD: u64 = 100_000;
@@ -259,7 +259,7 @@ where
         let new_list = BlockNumberList::decompress_owned(v)?;
 
         if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
-            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
+            trace!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
         }
 
         let address = sharded_key.key;
@@ -467,7 +467,7 @@ where
         let new_list = BlockNumberList::decompress_owned(v)?;
 
         if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
-            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
+            trace!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
         }
 
         let partial_key = (sharded_key.address, sharded_key.sharded_key.key);
