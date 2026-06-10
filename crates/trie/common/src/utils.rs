@@ -13,9 +13,20 @@ where
     K: Ord + Clone + 'a,
     V: Clone + 'a,
 {
-    slices
+    let mut slices = slices.into_iter().filter(|s| !s.is_empty());
+    let Some(first) = slices.next() else {
+        return Vec::new();
+    };
+    let Some(second) = slices.next() else {
+        return first.to_vec();
+    };
+    let Some(third) = slices.next() else {
+        return merge_two_sorted_slices(first, second);
+    };
+
+    [first, second, third]
         .into_iter()
-        .filter(|s| !s.is_empty())
+        .chain(slices)
         .enumerate()
         // Merge by reference: (priority, &K, &V) - avoids cloning all elements upfront
         .map(|(i, s)| s.iter().map(move |(k, v)| (i, k, v)))
@@ -24,6 +35,38 @@ where
         // Clone only surviving elements after dedup
         .map(|(_, k, v)| (k.clone(), v.clone()))
         .collect()
+}
+
+fn merge_two_sorted_slices<K, V>(first: &[(K, V)], second: &[(K, V)]) -> Vec<(K, V)>
+where
+    K: Ord + Clone,
+    V: Clone,
+{
+    let mut out = Vec::with_capacity(first.len() + second.len());
+    let mut a = 0;
+    let mut b = 0;
+
+    while a < first.len() && b < second.len() {
+        match first[a].0.cmp(&second[b].0) {
+            Ordering::Less => {
+                out.push(first[a].clone());
+                a += 1;
+            }
+            Ordering::Greater => {
+                out.push(second[b].clone());
+                b += 1;
+            }
+            Ordering::Equal => {
+                out.push(first[a].clone());
+                a += 1;
+                b += 1;
+            }
+        }
+    }
+
+    out.extend(first[a..].iter().cloned());
+    out.extend(second[b..].iter().cloned());
+    out
 }
 
 /// Extend a sorted vector with another sorted vector using 2 pointer merge.
@@ -176,6 +219,26 @@ mod tests {
         let slice = vec![(1, "a"), (2, "b"), (3, "c")];
         let result = kway_merge_sorted([slice.as_slice()]);
         assert_eq!(result, vec![(1, "a"), (2, "b"), (3, "c")]);
+    }
+
+    #[test]
+    fn test_kway_merge_sorted_two_slices_first_wins() {
+        let slice1 = vec![(1, "a1"), (3, "c1"), (5, "e1")];
+        let slice2 = vec![(2, "b2"), (3, "c2"), (4, "d2")];
+
+        let result = kway_merge_sorted([slice1.as_slice(), slice2.as_slice()]);
+
+        assert_eq!(result, vec![(1, "a1"), (2, "b2"), (3, "c1"), (4, "d2"), (5, "e1")]);
+    }
+
+    #[test]
+    fn test_kway_merge_sorted_two_slices_skips_empty_inputs() {
+        let empty = Vec::<(i32, &str)>::new();
+        let slice = vec![(1, "a"), (2, "b")];
+
+        let result = kway_merge_sorted([empty.as_slice(), slice.as_slice()]);
+
+        assert_eq!(result, slice);
     }
 
     #[test]
