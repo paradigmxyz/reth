@@ -26,6 +26,9 @@ pub mod cancelled;
 /// Database adapters for EVM execution.
 pub mod database;
 pub mod either;
+/// evm2 precompile cache provider.
+#[cfg(feature = "std")]
+pub mod evm2_precompile_cache;
 /// EVM environment configuration.
 pub mod execute;
 

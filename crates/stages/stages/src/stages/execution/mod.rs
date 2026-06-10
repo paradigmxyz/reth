@@ -6,7 +6,10 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_config::config::ExecutionConfig;
 use reth_consensus::FullConsensus;
 use reth_db::{static_file::HeaderMask, tables};
-use reth_evm::{metrics::ExecutorMetrics, ConfigureEvm2BlockExecutor};
+use reth_evm::{
+    evm2_precompile_cache::Evm2PrecompileCacheMap, metrics::ExecutorMetrics,
+    ConfigureEvm2BlockExecutor,
+};
 use reth_execution_types::{
     evm2_block_state_accumulator_extend, evm2_block_state_hashed_post_state_sorted,
     evm2_state_source_size_hint, Chain, Evm2BlockStateAccumulator,
@@ -99,6 +102,8 @@ where
     exex_manager_handle: ExExManagerHandle<E::Primitives>,
     /// Executor metrics.
     metrics: ExecutorMetrics,
+    /// Shared evm2 precompile cache for historical execution.
+    precompile_cache_map: Evm2PrecompileCacheMap,
 }
 
 impl<E> ExecutionStage<E>
@@ -122,6 +127,7 @@ where
             post_unwind_commit_input: None,
             exex_manager_handle,
             metrics: ExecutorMetrics::default(),
+            precompile_cache_map: Evm2PrecompileCacheMap::default(),
         }
     }
 
@@ -358,14 +364,18 @@ where
             let execute_start = Instant::now();
 
             let output = self.metrics.metered_one(&block, |input| {
-                self.evm_config.execute_evm2_block_with_database(batch_db.clone(), input).map_err(
-                    |error| StageError::Block {
+                self.evm_config
+                    .execute_evm2_block_with_database_and_precompile_cache(
+                        batch_db.clone(),
+                        input,
+                        self.precompile_cache_map.clone(),
+                    )
+                    .map_err(|error| StageError::Block {
                         block: Box::new(block.block_with_parent()),
                         error: BlockErrorKind::Execution(
                             reth_evm::execute::BlockExecutionError::msg(error),
                         ),
-                    },
-                )
+                    })
             })?;
             let result = output.result.clone();
 

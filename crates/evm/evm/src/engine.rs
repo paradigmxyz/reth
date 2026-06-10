@@ -103,6 +103,21 @@ pub trait ConfigureEvm2BlockExecutor: Clone + core::fmt::Debug + Send + Sync + U
     where
         DB: evm2::evm::Database + 'static,
         DB::Error: Send + Sync;
+
+    /// Executes a recovered block using evm2 against the provided evm2 database and precompile
+    /// cache.
+    fn execute_evm2_block_with_database_and_precompile_cache<DB>(
+        &self,
+        database: DB,
+        block: &RecoveredBlock<BlockTy<Self::Primitives>>,
+        precompile_cache_map: crate::evm2_precompile_cache::Evm2PrecompileCacheMap,
+    ) -> Result<
+        BlockExecutionOutput<ReceiptTy<Self::Primitives>>,
+        Box<dyn core::error::Error + Send + Sync>,
+    >
+    where
+        DB: evm2::evm::Database + 'static,
+        DB::Error: Send + Sync;
 }
 
 /// Configuration for evm2-native transaction prewarming.

@@ -27,6 +27,7 @@ use reth_ethereum_forks::{EthereumHardforks, Hardforks};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 #[cfg(feature = "std")]
 use reth_evm::{
+    evm2_precompile_cache::{CachedPrecompileProvider, PrecompileCacheMap},
     ConfigureEngineEvm, ConfigureEvm2BlockExecutor, ConfigureEvm2Engine, ConfigureEvm2Prewarm,
     ExecutableTxIterator,
 };
@@ -92,7 +93,8 @@ pub use evm2_convert::{
 
 mod evm2_executor;
 pub use evm2_executor::{
-    execute_evm2_block, execute_evm2_block_with_context, execute_evm2_block_with_withdrawals,
+    execute_evm2_block, execute_evm2_block_with_context,
+    execute_evm2_block_with_context_and_precompiles, execute_evm2_block_with_withdrawals,
     Evm2BlockExecutionContext, Evm2BlockSystemCalls, Evm2ExecutionError,
 };
 #[cfg(feature = "std")]
@@ -101,6 +103,7 @@ pub use evm2_executor::{
     execute_evm2_block_with_state_provider, execute_evm2_block_with_state_provider_and_withdrawals,
     execute_evm2_block_with_state_provider_context,
     execute_evm2_block_with_state_provider_context_and_hook,
+    execute_evm2_block_with_state_provider_context_precompiles_and_hook,
 };
 
 mod receipt;
@@ -650,6 +653,59 @@ where
             header.number,
             transactions,
             context,
+        )
+        .map_err(|err| {
+            alloc::boxed::Box::new(err) as alloc::boxed::Box<dyn core::error::Error + Send + Sync>
+        })
+    }
+
+    fn execute_evm2_block_with_database_and_precompile_cache<DB>(
+        &self,
+        database: DB,
+        block: &RecoveredBlock<Block>,
+        precompile_cache_map: PrecompileCacheMap<evm2::SpecId>,
+    ) -> Result<
+        reth_execution_types::BlockExecutionOutput<reth_ethereum_primitives::Receipt>,
+        alloc::boxed::Box<dyn core::error::Error + Send + Sync>,
+    >
+    where
+        DB: evm2::evm::Database + 'static,
+        DB::Error: Send + Sync,
+    {
+        let header = block.header();
+        let transactions = block
+            .senders_iter()
+            .zip(block.body().transactions())
+            .map(|(signer, tx)| Recovered::new_unchecked(tx.clone(), *signer))
+            .collect::<Vec<_>>();
+        let context = Evm2BlockExecutionContext {
+            chain_id: self.chain_spec.chain_id(),
+            system_calls: Some(Evm2BlockSystemCalls {
+                parent_hash: header.parent_hash,
+                parent_beacon_block_root: header.parent_beacon_block_root,
+            }),
+            ommers: Some(&block.body().ommers),
+            withdrawals: block.body().withdrawals().map(|withdrawals| withdrawals.as_slice()),
+            deposit_contract_address: self.chain_spec.deposit_contract_address(),
+        };
+        let spec_id = evm2_spec(self.chain_spec.as_ref(), header);
+
+        execute_evm2_block_with_context_and_precompiles(
+            spec_id,
+            evm2_block_env_with_blob_params(
+                header,
+                self.chain_spec.as_ref().blob_params_at_timestamp(header.timestamp),
+            ),
+            database,
+            header.number,
+            transactions,
+            context,
+            alloc::boxed::Box::new(CachedPrecompileProvider::new(
+                evm2::Precompiles::base(spec_id),
+                precompile_cache_map,
+                spec_id,
+                None,
+            )),
         )
         .map_err(|err| {
             alloc::boxed::Box::new(err) as alloc::boxed::Box<dyn core::error::Error + Send + Sync>
