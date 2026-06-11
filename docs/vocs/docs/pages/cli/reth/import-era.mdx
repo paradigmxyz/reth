@@ -142,6 +142,12 @@ Storage:
           The ERA1 files are read from the remote host using HTTP GET requests parsing headers
           and bodies.
 
+      --to-block <TO_BLOCK>
+          Stop the import after this block height has been reached.
+
+          The file containing the block is imported up to and including this height, then the
+          import ends. By default all available blocks are imported.
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
