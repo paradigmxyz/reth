@@ -650,9 +650,17 @@ where
             return;
         }
         let address = account_changes.address;
+        let has_storage_changes = !account_changes.storage_changes.is_empty();
+        let has_account_changes = !account_changes.balance_changes.is_empty()
+            || !account_changes.nonce_changes.is_empty()
+            || !account_changes.code_changes.is_empty();
+        if !has_storage_changes && !has_account_changes {
+            return;
+        }
+
         let mut hashed_address = None;
 
-        if !account_changes.storage_changes.is_empty() {
+        if has_storage_changes {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
             let mut storage_map = reth_trie::HashedStorage::new(false);
 
@@ -711,14 +719,6 @@ where
                 keccak256(&code_change.new_code)
             }
         });
-
-        if balance.is_none() &&
-            nonce.is_none() &&
-            code_hash.is_none() &&
-            account_changes.storage_changes.is_empty()
-        {
-            return;
-        }
 
         let account = reth_primitives_traits::Account {
             balance: balance.unwrap_or_else(|| {
