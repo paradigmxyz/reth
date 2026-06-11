@@ -115,7 +115,7 @@ pub(crate) fn evm2_block_state_and_reverts_to_plain_state_and_reverts<S>(
 where
     S: Evm2StateChangeSource,
 {
-    let (plain_state, _) = evm2_block_state_to_plain_state_and_reverts(state, is_value_known);
+    let plain_state = evm2_block_state_to_plain_state(state, is_value_known);
 
     let mut reverts = PlainStateReverts::with_capacity(block_reverts.len());
     for block_reverts in block_reverts {
@@ -154,6 +154,21 @@ where
     (plain_state, reverts)
 }
 
+pub(crate) fn evm2_block_state_to_plain_state<S>(
+    state: &S,
+    is_value_known: OriginalValuesKnown,
+) -> StateChangeset
+where
+    S: Evm2StateChangeSource,
+{
+    let mut sink = PlainStateSink::new(is_value_known);
+    match state.visit(&mut sink) {
+        Ok(()) => {}
+        Err(err) => match err {},
+    }
+    sink.finish()
+}
+
 pub(crate) fn evm2_block_state_to_plain_state_and_reverts<S>(
     state: &S,
     is_value_known: OriginalValuesKnown,
@@ -184,6 +199,74 @@ fn evm2_account_info_ref_to_reth(info: Evm2AccountInfoRef<'_>) -> Account {
         nonce: info.nonce,
         bytecode_hash: (!info.code_hash.is_zero() && info.code_hash != KECCAK_EMPTY)
             .then_some(info.code_hash),
+    }
+}
+
+struct PlainStateSink {
+    is_value_known: OriginalValuesKnown,
+    accounts: Vec<(Address, Option<Account>)>,
+    storage_by_address: BTreeMap<Address, (bool, Vec<(U256, U256)>)>,
+    contracts: Vec<(B256, Bytecode)>,
+}
+
+impl PlainStateSink {
+    fn new(is_value_known: OriginalValuesKnown) -> Self {
+        Self {
+            is_value_known,
+            accounts: Vec::new(),
+            storage_by_address: BTreeMap::new(),
+            contracts: Vec::new(),
+        }
+    }
+
+    fn finish(self) -> StateChangeset {
+        let Self { accounts, storage_by_address, contracts, .. } = self;
+
+        let storage = storage_by_address
+            .into_iter()
+            .filter_map(|(address, (wipe_storage, changed_storage))| {
+                (!changed_storage.is_empty() || wipe_storage).then(|| PlainStorageChangeset {
+                    address,
+                    wipe_storage,
+                    storage: changed_storage,
+                })
+            })
+            .collect();
+
+        StateChangeset { accounts, storage, contracts }
+    }
+}
+
+impl Evm2StateChangeSink for PlainStateSink {
+    type Error = Infallible;
+
+    fn bytecode(&mut self, code_hash: B256, bytecode: &Evm2Bytecode) -> Result<(), Self::Error> {
+        if code_hash != KECCAK_EMPTY {
+            self.contracts.push((code_hash, Bytecode::new_raw(bytecode.original_bytes())));
+        }
+        Ok(())
+    }
+
+    fn account(&mut self, change: Evm2AccountChangeRef<'_>) -> Result<(), Self::Error> {
+        if self.is_value_known.is_not_known() || change.original != change.current {
+            self.accounts.push((change.address, change.current.map(evm2_account_info_ref_to_reth)));
+        }
+        Ok(())
+    }
+
+    fn storage_wipe(&mut self, address: Address) -> Result<(), Self::Error> {
+        self.storage_by_address.entry(address).or_default().0 = true;
+        Ok(())
+    }
+
+    fn storage(&mut self, change: Evm2StorageChange) -> Result<(), Self::Error> {
+        let entry = self.storage_by_address.entry(change.address).or_default();
+        let wipe_and_not_zero = entry.0 && !change.current.is_zero();
+        let not_wiped_and_changed = !entry.0 && change.original != change.current;
+        if self.is_value_known.is_not_known() || wipe_and_not_zero || not_wiped_and_changed {
+            entry.1.push((change.key, change.current));
+        }
+        Ok(())
     }
 }
 
@@ -2647,7 +2730,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             }
             WriteStateInput::Multiple(outcome) => {
                 evm2_block_state_and_reverts_to_plain_state_and_reverts(
-                    &outcome.evm2_block_state(),
+                    outcome.evm2_block_state_ref(),
                     outcome.block_reverts(),
                     is_value_known,
                 )
@@ -4248,7 +4331,11 @@ mod tests {
 
         let (plain_state, reverts) =
             evm2_block_state_to_plain_state_and_reverts(&state, OriginalValuesKnown::Yes);
+        let plain_state_only = evm2_block_state_to_plain_state(&state, OriginalValuesKnown::Yes);
 
+        assert_eq!(plain_state_only.accounts, plain_state.accounts);
+        assert_eq!(plain_state_only.storage, plain_state.storage);
+        assert_eq!(plain_state_only.contracts, plain_state.contracts);
         assert_eq!(plain_state.accounts, vec![(address, Some(current_account))]);
         assert_eq!(
             plain_state.storage,
