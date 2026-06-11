@@ -170,6 +170,30 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     }
 }
 
+/// Pauses JIT helper execution while validating imported payloads.
+///
+/// Validation still queues JIT work and can use resident compiled code, but helper execution is
+/// paused during validation to minimize latency. Queued work resumes when validation exits, so JIT
+/// compilation is biased toward idle periods instead of competing with payload validation.
+struct JitPauseGuard<Evm: ConfigureEvm>(Evm);
+
+impl<Evm: ConfigureEvm> JitPauseGuard<Evm> {
+    fn new(evm_config: &Evm) -> Self {
+        if let Some(jit_backend) = evm_config.jit_backend() {
+            jit_backend.pause();
+        }
+        Self(evm_config.clone())
+    }
+}
+
+impl<Evm: ConfigureEvm> Drop for JitPauseGuard<Evm> {
+    fn drop(&mut self) {
+        if let Some(jit_backend) = self.0.jit_backend() {
+            jit_backend.resume();
+        }
+    }
+}
+
 /// A helper type that provides reusable payload validation logic for network-specific validators.
 ///
 /// This type satisfies [`EngineValidator`] and is responsible for executing blocks/payloads.
@@ -370,6 +394,7 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         let parent_hash = input.parent_hash();
+        let _jit_pause = JitPauseGuard::new(&self.evm_config);
 
         // Fetch parent block. This goes to memory most of the time unless the parent block is
         // beyond the in-memory buffer.
@@ -1072,7 +1097,8 @@ where
         let (spec_id, mut executor) = {
             let _span = debug_span!(target: "engine::tree", "create_evm").entered();
             let spec_id = *env.evm_env.spec_id();
-            let evm = self.evm_config.evm_with_env(&mut db, env.evm_env);
+            let evm_config = self.evm_config.clone().with_jit_support();
+            let evm = evm_config.evm_with_env(&mut db, env.evm_env);
             let ctx = self
                 .execution_ctx_for(input)
                 .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
