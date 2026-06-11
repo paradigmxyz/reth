@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use alloy_consensus::Transaction;
+use alloy_consensus::{BlockHeader, Transaction};
 use alloy_primitives::{Bytes, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::PayloadAttributes as EthPayloadAttributes;
@@ -31,8 +31,14 @@ use reth_payload_builder::{BlobSidecars, EthBuiltPayload};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadAttributes;
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
-use reth_revm::{database::StateProviderDatabase, db::State};
-use reth_storage_api::StateProviderFactory;
+use reth_revm::{
+    block_hash_cache::{
+        collect_block_hashes_from_state, extend_cached_block_hashes, warm_block_hash_cache,
+    },
+    database::StateProviderDatabase,
+    db::State,
+};
+use reth_storage_api::{BlockHashReader, StateProviderFactory};
 use reth_transaction_pool::{
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
     BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
@@ -81,7 +87,10 @@ impl<Pool, Client, EvmConfig> EthereumPayloadBuilder<Pool, Client, EvmConfig> {
 impl<Pool, Client, EvmConfig> PayloadBuilder for EthereumPayloadBuilder<Pool, Client, EvmConfig>
 where
     EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks> + Clone,
+    Client: StateProviderFactory
+        + BlockHashReader
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>
+        + Clone,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
     type Attributes = EthPayloadAttributes;
@@ -154,7 +163,8 @@ pub fn default_ethereum_payload<EvmConfig, Client, Pool, F>(
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
     EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+    Client:
+        StateProviderFactory + BlockHashReader + ChainSpecProvider<ChainSpec: EthereumHardforks>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
@@ -181,8 +191,11 @@ where
     let state = StateProviderDatabase::new(state_provider.as_ref());
     let chain_spec = client.chain_spec();
     let is_amsterdam = chain_spec.is_amsterdam_active_at_timestamp(attributes.timestamp());
+    let block_number = parent_header.number().saturating_add(1);
+    let block_hash_cache = warm_block_hash_cache(&client, block_number, &mut cached_reads)?;
     let mut db = State::builder()
         .with_database(cached_reads.as_db_mut(state))
+        .with_block_hashes(block_hash_cache)
         .with_bundle_update()
         .with_bal_builder_if(is_amsterdam)
         .build();
@@ -441,11 +454,15 @@ where
 
     // check if we have a better block
     if !is_better_payload(best_payload.as_ref(), total_fees) {
+        let block_hashes_to_sync = collect_block_hashes_from_state(builder.evm_mut().db_mut());
         // Release db
         drop(builder);
+        extend_cached_block_hashes(&mut cached_reads, block_hashes_to_sync);
         // can skip building the block
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
+
+    let block_hashes_to_sync = collect_block_hashes_from_state(builder.evm_mut().db_mut());
 
     let BlockBuilderOutcome { execution_result, block, block_access_list, .. } = if let Some(
         mut handle,
@@ -493,6 +510,8 @@ where
     let payload = EthBuiltPayload::new(Arc::new(block), total_fees, requests, block_access_list)
         // add blob sidecars from the executed txs
         .with_sidecars(blob_sidecars);
+
+    extend_cached_block_hashes(&mut cached_reads, block_hashes_to_sync);
 
     Ok(BuildOutcome::Better { payload, cached_reads })
 }
