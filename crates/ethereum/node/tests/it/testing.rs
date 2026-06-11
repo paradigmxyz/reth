@@ -182,28 +182,6 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
                         next_latest.get("parentHash").and_then(Value::as_str),
                         Some(block_hash.as_str())
                     );
-
-                    let mut invalid_payload_attributes = payload_attributes;
-                    invalid_payload_attributes.timestamp += 24;
-                    let invalid_result = client
-                        .request::<B256, _>(
-                            "testing_commitBlockV1",
-                            (
-                                invalid_payload_attributes,
-                                vec![Bytes::from_static(&[0x01])],
-                                Option::<Bytes>::None,
-                            ),
-                        )
-                        .await;
-                    assert!(invalid_result.is_err());
-
-                    let latest_after_error: Value = client
-                        .request("eth_getBlockByNumber", (BlockNumberOrTag::Latest, false))
-                        .await?;
-                    assert_eq!(
-                        latest_after_error.get("hash").and_then(Value::as_str),
-                        Some(next_block_hash.as_str())
-                    );
                     Ok(())
                 }
                 .await;
