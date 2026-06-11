@@ -11,6 +11,9 @@ pub use state::*;
 mod hashed_cursor;
 pub use hashed_cursor::*;
 
+mod trie_cursor;
+pub use trie_cursor::*;
+
 #[cfg(feature = "std")]
 mod cursor;
 #[cfg(feature = "std")]
