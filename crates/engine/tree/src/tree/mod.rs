@@ -1218,10 +1218,12 @@ where
 
         trace!(target: "engine::tree", "fcu head hash is already canonical");
 
-        // Update the safe and finalized blocks and ensure their values are valid
-        if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
-            // safe or finalized hashes are invalid
-            return Ok(Some(TreeOutcome::new(outcome)));
+        if !self.forkchoice_markers_already_current(state) {
+            // Update the safe and finalized blocks and ensure their values are valid
+            if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
+                // safe or finalized hashes are invalid
+                return Ok(Some(TreeOutcome::new(outcome)));
+            }
         }
 
         // Process payload attributes if the head is already canonical
@@ -1300,13 +1302,17 @@ where
 
         // Ensure we can apply a new chain update for the head block
         if let Some(chain_update) = self.on_new_head(state.head_block_hash)? {
+            let skip_marker_validation = chain_update.reorged_block_count() == 0
+                && self.forkchoice_markers_already_current(state);
             let tip = chain_update.tip().clone_sealed_header();
             self.on_canonical_chain_update(chain_update);
 
-            // Update the safe and finalized blocks and ensure their values are valid
-            if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
-                // safe or finalized hashes are invalid
-                return Ok(Some(TreeOutcome::new(outcome)));
+            if !skip_marker_validation {
+                // Update the safe and finalized blocks and ensure their values are valid
+                if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
+                    // safe or finalized hashes are invalid
+                    return Ok(Some(TreeOutcome::new(outcome)));
+                }
             }
 
             if let Some(attr) = attrs {
@@ -3213,6 +3219,20 @@ where
         // This ensures that the safe block is consistent with the head block, i.e. the safe
         // block is an ancestor of the head block.
         self.update_safe_block(state.safe_block_hash)
+    }
+
+    /// Returns true if the FCU does not advance the safe or finalized markers.
+    fn forkchoice_markers_already_current(&self, state: ForkchoiceState) -> bool {
+        let finalized_current = state.finalized_block_hash.is_zero()
+            || self.canonical_in_memory_state
+                .get_finalized_num_hash()
+                .is_some_and(|finalized| finalized.hash == state.finalized_block_hash);
+        let safe_current = state.safe_block_hash.is_zero()
+            || self.canonical_in_memory_state
+                .get_safe_num_hash()
+                .is_some_and(|safe| safe.hash == state.safe_block_hash);
+
+        finalized_current && safe_current
     }
 
     /// Validates the payload attributes with respect to the header and fork choice state.
