@@ -1355,9 +1355,7 @@ impl ArenaParallelSparseTrie {
             let short_key = b.short_key;
             let state_mask = b.state_mask;
             let prev_branch_masks = b.branch_masks;
-            let new_branch_masks = b.masks(arena);
-            let (children_hash_mask, children_hashes) =
-                b.children_hash_mask_and_hashes(rlp_node_buf);
+            let (new_branch_masks, new_hashes) = b.masks_and_hashes(arena);
             let was_dirty = matches!(b.state, ArenaSparseNodeState::Dirty);
 
             rlp_buf.clear();
@@ -1382,8 +1380,7 @@ impl ArenaParallelSparseTrie {
             let branch = arena[head_idx].branch_mut();
             branch.state = ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone() };
             branch.branch_masks = new_branch_masks;
-            branch.children_hash_mask = children_hash_mask;
-            branch.children_hashes = children_hashes;
+            branch.hashes = new_hashes;
 
             // Record trie updates for dirty branches only.
             // Skip the root node (empty logical path) as PST does.
@@ -1640,8 +1637,7 @@ impl ArenaParallelSparseTrie {
             state_mask,
             short_key,
             branch_masks: BranchNodeMasks::default(),
-            children_hash_mask: Default::default(),
-            children_hashes: Default::default(),
+            hashes: Default::default(),
         }));
 
         cursor.replace_head_index(arena, root, new_branch_idx);
@@ -3418,7 +3414,7 @@ mod tests {
     }
 
     #[test]
-    fn cached_branch_tracks_all_child_hashes_without_affecting_trie_update_masks() {
+    fn cached_branch_omits_hashes_when_hash_mask_is_empty() {
         let child_hash_0 = B256::with_last_byte(1);
         let child_hash_1 = B256::with_last_byte(2);
         let child_hashes = vec![RlpNode::word_rlp(&child_hash_0), RlpNode::word_rlp(&child_hash_1)];
@@ -3438,8 +3434,7 @@ mod tests {
             panic!("root should be a branch")
         };
         assert_eq!(branch.branch_masks.hash_mask, TrieMask::default());
-        assert_eq!(branch.children_hash_mask, state_mask);
-        assert_eq!(branch.children_hashes.as_ref(), &vec![child_hash_0, child_hash_1]);
+        assert!(branch.hashes.is_empty());
 
         let compact = branch.branch_node_compact();
         assert_eq!(compact.hash_mask, TrieMask::default());
@@ -3447,7 +3442,7 @@ mod tests {
     }
 
     #[test]
-    fn cached_branch_reuses_persisted_hashes_when_child_hash_mask_matches() {
+    fn cached_branch_reuses_persisted_hashes() {
         let child_hash_0 = B256::with_last_byte(1);
         let child_hash_1 = B256::with_last_byte(2);
         let child_hashes = vec![RlpNode::word_rlp(&child_hash_0), RlpNode::word_rlp(&child_hash_1)];
@@ -3472,10 +3467,9 @@ mod tests {
             panic!("root should be a branch")
         };
         assert_eq!(branch.branch_masks.hash_mask, state_mask);
-        assert_eq!(branch.children_hash_mask, state_mask);
-        assert_eq!(branch.children_hashes.as_ref(), &vec![child_hash_0, child_hash_1]);
+        assert_eq!(branch.hashes.as_ref(), &vec![child_hash_0, child_hash_1]);
         let compact = branch.branch_node_compact();
-        assert!(Arc::ptr_eq(&compact.hashes, &branch.children_hashes));
+        assert!(Arc::ptr_eq(&compact.hashes, &branch.hashes));
     }
 
     proptest! {
