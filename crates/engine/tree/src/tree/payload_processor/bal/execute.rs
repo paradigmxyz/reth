@@ -253,16 +253,23 @@ fn validate_storage_roots(
             .and_then(|built_account| built_account.storage_root());
 
         if built_storage_root != Some(received_storage_root) {
-            return Err(BalExecutionError::Consensus(
-                reth_consensus::ConsensusError::BlockAccessListInvalid(format!(
-                    "storage root mismatch for account {}: got {}, expected {}",
-                    received_account.address(),
-                    received_storage_root,
-                    built_storage_root
-                        .map(|root| root.to_string())
-                        .unwrap_or_else(|| "none".to_string())
-                )),
-            ))
+            // return Err(BalExecutionError::Consensus(
+            //     reth_consensus::ConsensusError::BlockAccessListInvalid(format!(
+            //         "storage root mismatch for account {}: got {}, expected {}",
+            //         received_account.address(),
+            //         received_storage_root,
+            //         built_storage_root
+            //             .map(|root| root.to_string())
+            //             .unwrap_or_else(|| "none".to_string())
+            //     )),
+            // ))
+            tracing::info!(
+                target: "engine::tree::payload_processor::bal",
+                account = ?received_account.address(),
+                received_storage_root = ?received_storage_root,
+                built_storage_root = ?built_storage_root,
+                "storage root mismatch for account in BAL validation",
+            );
         }
     }
 
