@@ -2,7 +2,7 @@
 
 use crate::Nibbles;
 use alloc::vec::Vec;
-use alloy_primitives::{B256, keccak256, map::B256Map};
+use alloy_primitives::{keccak256, map::B256Map, B256};
 use revm_state::EvmState;
 
 /// Target describes a proof target. For every proof target given, a proof calculator will calculate
