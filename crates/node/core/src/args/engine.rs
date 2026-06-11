@@ -8,8 +8,7 @@ use eyre::ensure;
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_engine_primitives::{
     TreeConfig, DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
-    DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD, DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
-    DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
+    DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
 };
 use std::{sync::OnceLock, time::Duration};
 
@@ -47,8 +46,6 @@ pub struct DefaultEngineValues {
     account_worker_count: Option<usize>,
     prewarming_threads: Option<usize>,
     cache_metrics_disabled: bool,
-    sparse_trie_max_hot_slots: usize,
-    sparse_trie_max_hot_accounts: usize,
     slow_block_threshold: Option<Duration>,
     disable_sparse_trie_cache_pruning: bool,
     state_root_task_timeout: Option<String>,
@@ -199,18 +196,6 @@ impl DefaultEngineValues {
         self
     }
 
-    /// Set the LFU hot-slot capacity for sparse trie pruning by default
-    pub const fn with_sparse_trie_max_hot_slots(mut self, v: usize) -> Self {
-        self.sparse_trie_max_hot_slots = v;
-        self
-    }
-
-    /// Set the LFU hot-account capacity for sparse trie pruning by default
-    pub const fn with_sparse_trie_max_hot_accounts(mut self, v: usize) -> Self {
-        self.sparse_trie_max_hot_accounts = v;
-        self
-    }
-
     /// Set the default slow block threshold.
     pub const fn with_slow_block_threshold(mut self, v: Option<Duration>) -> Self {
         self.slow_block_threshold = v;
@@ -284,8 +269,6 @@ impl Default for DefaultEngineValues {
             account_worker_count: None,
             prewarming_threads: None,
             cache_metrics_disabled: false,
-            sparse_trie_max_hot_slots: DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
-            sparse_trie_max_hot_accounts: DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout: Some("4s".to_string()),
@@ -442,14 +425,6 @@ pub struct EngineArgs {
     #[arg(long = "engine.disable-cache-metrics", default_value_t = DefaultEngineValues::get_global().cache_metrics_disabled)]
     pub cache_metrics_disabled: bool,
 
-    /// LFU hot-slot capacity: max storage slots retained across sparse trie prune cycles.
-    #[arg(long = "engine.sparse-trie-max-hot-slots", alias = "engine.sparse-trie-max-storage-tries", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_hot_slots)]
-    pub sparse_trie_max_hot_slots: usize,
-
-    /// LFU hot-account capacity: max account addresses retained across sparse trie prune cycles.
-    #[arg(long = "engine.sparse-trie-max-hot-accounts", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_hot_accounts)]
-    pub sparse_trie_max_hot_accounts: usize,
-
     /// Configure the slow block logging threshold in milliseconds.
     ///
     /// When set, blocks that take longer than this threshold to execute will be logged
@@ -576,8 +551,6 @@ impl Default for EngineArgs {
             account_worker_count,
             prewarming_threads,
             cache_metrics_disabled,
-            sparse_trie_max_hot_slots,
-            sparse_trie_max_hot_accounts,
             slow_block_threshold,
             disable_sparse_trie_cache_pruning,
             state_root_task_timeout,
@@ -613,8 +586,6 @@ impl Default for EngineArgs {
             account_worker_count,
             prewarming_threads,
             cache_metrics_disabled,
-            sparse_trie_max_hot_slots,
-            sparse_trie_max_hot_accounts,
             slow_block_threshold,
             disable_sparse_trie_cache_pruning,
             state_root_task_timeout: state_root_task_timeout
@@ -678,8 +649,6 @@ impl EngineArgs {
             )
             .with_unwind_canonical_header(self.allow_unwind_canonical_header)
             .without_cache_metrics(self.cache_metrics_disabled)
-            .with_sparse_trie_max_hot_slots(self.sparse_trie_max_hot_slots)
-            .with_sparse_trie_max_hot_accounts(self.sparse_trie_max_hot_accounts)
             .with_slow_block_threshold(self.slow_block_threshold)
             .with_disable_sparse_trie_cache_pruning(self.disable_sparse_trie_cache_pruning)
             .with_state_root_task_timeout(self.state_root_task_timeout.filter(|d| !d.is_zero()))
@@ -801,8 +770,6 @@ mod tests {
             account_worker_count: Some(8),
             prewarming_threads: Some(4),
             cache_metrics_disabled: true,
-            sparse_trie_max_hot_slots: 100,
-            sparse_trie_max_hot_accounts: 500,
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: true,
             state_root_task_timeout: Some(Duration::from_secs(2)),
@@ -849,10 +816,6 @@ mod tests {
             "--engine.prewarming-threads",
             "4",
             "--engine.disable-cache-metrics",
-            "--engine.sparse-trie-max-hot-slots",
-            "100",
-            "--engine.sparse-trie-max-hot-accounts",
-            "500",
             "--engine.disable-sparse-trie-cache-pruning",
             "--engine.state-root-task-timeout",
             "2s",

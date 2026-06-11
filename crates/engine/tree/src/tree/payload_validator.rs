@@ -87,7 +87,9 @@ use reth_provider::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
+use reth_trie::{
+    trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState, HashedPostStateSorted,
+};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::{Address, KECCAK_EMPTY};
@@ -2121,6 +2123,9 @@ pub trait EngineValidator<
         parent_state_root: B256,
         state: &EngineApiTreeState<N>,
     ) -> Option<StateRootHandle>;
+
+    /// Prunes persisted state keys from any preserved sparse trie cache.
+    fn prune_sparse_state_trie_after_persistence(&self, _persisted_state: &HashedPostStateSorted) {}
 }
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
@@ -2229,6 +2234,10 @@ where
             false,
             &self.config,
         ))
+    }
+
+    fn prune_sparse_state_trie_after_persistence(&self, persisted_state: &HashedPostStateSorted) {
+        self.payload_processor.prune_sparse_state_trie_after_persistence(persisted_state);
     }
 }
 

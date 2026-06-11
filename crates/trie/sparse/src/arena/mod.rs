@@ -4,11 +4,14 @@ mod nodes;
 
 use branch_child_idx::{BranchChildIdx, BranchChildIter};
 use cursor::{ArenaCursor, NextResult, SeekResult};
+pub use cursor::{ArenaHashedCursor, ArenaHashedCursorValue, ArenaHashedStorageCursor};
 use nodes::{
     ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
 };
 
-use crate::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates};
+use crate::{
+    LeafLookup, LeafLookupError, LeafUpdate, ParallelCompactClone, SparseTrie, SparseTrieUpdates,
+};
 use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
 use alloy_primitives::{
     keccak256,
@@ -120,6 +123,86 @@ fn compact_arena(arena: &mut NodeArena, root: &mut Index) {
     *root = new_root;
 }
 
+/// Clones all reachable nodes into a fresh arena while rewriting revealed child references.
+///
+/// Subtries are replaced with temporary placeholders and returned to the caller so they can be
+/// cloned in parallel before being reattached at their new indexes.
+fn compact_clone_arena(
+    arena: &NodeArena,
+    root: Index,
+) -> (NodeArena, Index, Vec<(Index, &ArenaSparseSubtrie)>) {
+    let mut new_arena = SlotMap::with_capacity(arena.len());
+    let mut queue = VecDeque::new();
+    let mut subtries = Vec::new();
+
+    let (root_node, root_subtrie) = clone_node_for_compact(&arena[root]);
+    let new_root = new_arena.insert(root_node);
+    if let Some(subtrie) = root_subtrie {
+        subtries.push((new_root, subtrie));
+    }
+    queue.push_back(new_root);
+
+    while let Some(new_idx) = queue.pop_front() {
+        let old_children: SmallVec<[(usize, Index); 16]> = match &new_arena[new_idx] {
+            ArenaSparseNode::Branch(b) => b
+                .children
+                .iter()
+                .enumerate()
+                .filter_map(|(i, c)| match c {
+                    ArenaSparseNodeBranchChild::Revealed(old_idx) => Some((i, *old_idx)),
+                    _ => None,
+                })
+                .collect(),
+            _ => continue,
+        };
+
+        for (child_pos, old_child_idx) in old_children {
+            let old_child = &arena[old_child_idx];
+            let (child_node, child_subtrie) = clone_node_for_compact(old_child);
+            let new_child_idx = new_arena.insert(child_node);
+            if let Some(subtrie) = child_subtrie {
+                subtries.push((new_child_idx, subtrie));
+            }
+
+            let ArenaSparseNode::Branch(b) = &mut new_arena[new_idx] else { unreachable!() };
+            b.children[child_pos] = ArenaSparseNodeBranchChild::Revealed(new_child_idx);
+
+            if matches!(old_child, ArenaSparseNode::Branch(_)) {
+                queue.push_back(new_child_idx);
+            }
+        }
+    }
+
+    (new_arena, new_root, subtries)
+}
+
+fn clone_node_for_compact(
+    node: &ArenaSparseNode,
+) -> (ArenaSparseNode, Option<&ArenaSparseSubtrie>) {
+    match node {
+        ArenaSparseNode::Subtrie(subtrie) => {
+            (ArenaSparseNode::TakenSubtrie, Some(subtrie.as_ref()))
+        }
+        _ => (node.clone(), None),
+    }
+}
+
+fn clone_buffers_for_compact(buffers: &ArenaTrieBuffers) -> ArenaTrieBuffers {
+    let mut buffers = buffers.clone();
+    buffers.cursor = Default::default();
+    buffers
+}
+
+fn arena_memory_size(arena: &NodeArena, buffers: &ArenaTrieBuffers) -> usize {
+    let slot_size = slotmap_slot_size::<ArenaSparseNode>();
+    let arena_size = arena.capacity() * slot_size;
+    let node_heap_size = arena.iter().map(|(_, node)| node.extra_heap_bytes()).sum::<usize>();
+    let buffer_size = buffers.rlp_buf.capacity() +
+        buffers.rlp_node_buf.capacity() * core::mem::size_of::<RlpNode>();
+
+    arena_size + node_heap_size + buffer_size
+}
+
 /// Reusable buffers shared by both [`ArenaSparseSubtrie`] and [`ArenaParallelSparseTrie`].
 #[derive(Debug, Default, Clone)]
 struct ArenaTrieBuffers {
@@ -197,6 +280,26 @@ impl ArenaSparseSubtrie {
     /// Accurate after prune; returns 0 before the first prune.
     const fn memory_size(&self) -> usize {
         self.cached_memory_size
+    }
+
+    /// Clones this subtrie into a compact arena.
+    fn compact_clone(&self) -> Box<Self> {
+        let (arena, root, subtries) = compact_clone_arena(&self.arena, self.root);
+        debug_assert!(subtries.is_empty(), "nested arena subtries are not expected");
+
+        let buffers = clone_buffers_for_compact(&self.buffers);
+        let cached_memory_size = arena_memory_size(&arena, &buffers);
+
+        Box::new(Self {
+            arena,
+            root,
+            path: self.path,
+            buffers,
+            required_proofs: self.required_proofs.clone(),
+            num_leaves: self.num_leaves,
+            num_dirty_leaves: self.num_dirty_leaves,
+            cached_memory_size,
+        })
     }
 
     /// Asserts that `num_leaves` and `num_dirty_leaves` match the actual counts in the arena.
@@ -640,6 +743,33 @@ impl ArenaParallelSparseTrie {
     ) -> Self {
         self.parallelism_thresholds = thresholds;
         self
+    }
+
+    /// Clones this trie into compact arenas, cloning lower subtries in parallel.
+    pub fn clone_compacted_parallel(&self) -> Self {
+        let (mut upper_arena, root, subtries) = compact_clone_arena(&self.upper_arena, self.root);
+
+        let cloned_subtries = {
+            use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+            subtries
+                .par_iter()
+                .map(|(idx, subtrie)| (*idx, subtrie.compact_clone()))
+                .collect::<Vec<_>>()
+        };
+
+        for (idx, subtrie) in cloned_subtries {
+            upper_arena[idx] = ArenaSparseNode::Subtrie(subtrie);
+        }
+
+        Self {
+            upper_arena,
+            root,
+            updates: self.updates.clone(),
+            buffers: clone_buffers_for_compact(&self.buffers),
+            parallelism_thresholds: self.parallelism_thresholds,
+            #[cfg(feature = "trie-debug")]
+            debug_recorder: self.debug_recorder.clone(),
+        }
     }
 
     /// Resets the debug recorder and records the current trie state as `SetRoot` + `RevealNodes`
@@ -2198,6 +2328,12 @@ impl Default for ArenaParallelSparseTrie {
     }
 }
 
+impl ParallelCompactClone for ArenaParallelSparseTrie {
+    fn parallel_compact_clone(&self) -> Self {
+        self.clone_compacted_parallel()
+    }
+}
+
 impl ArenaParallelSparseTrie {
     /// Hashes a subtrie at `head_idx` and collects its update actions.
     fn update_upper_subtrie(&mut self, head_idx: Index) {
@@ -3116,7 +3252,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
 #[cfg(test)]
 mod tests {
     use super::TRACE_TARGET;
-    use crate::{ArenaParallelSparseTrie, ArenaParallelismThresholds, LeafUpdate, SparseTrie};
+    use crate::{
+        ArenaParallelSparseTrie, ArenaParallelismThresholds, LeafUpdate, ParallelCompactClone,
+        SparseTrie,
+    };
     use alloy_primitives::{map::B256Map, B256, U256};
     use rand::{seq::SliceRandom, Rng, SeedableRng};
     use reth_trie::test_utils::TrieTestHarness;
@@ -3257,6 +3396,38 @@ mod tests {
             changeset.entry(key).or_insert(value);
         }
         changeset
+    }
+
+    #[test]
+    fn compacting_parallel_clone_preserves_root() {
+        let mut harness = ArenaTrieTestHarness::new(BTreeMap::new());
+        let root_node = harness.root_node();
+        let mut trie = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
+            ArenaParallelismThresholds {
+                min_dirty_leaves: 1,
+                min_revealed_nodes: 1,
+                min_updates: 1,
+                min_leaves_for_prune: 1,
+            },
+        );
+        trie.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
+
+        let changes = (0..32u8)
+            .map(|i| {
+                let mut key = [0u8; 32];
+                key[0] = i;
+                key[31] = 255 - i;
+                (B256::from(key), U256::from(u64::from(i) + 1))
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        harness.assert_changes(&mut trie, changes.clone());
+        harness.apply_changeset(changes);
+
+        let expected_root = trie.root();
+        let mut cloned = trie.parallel_compact_clone();
+
+        assert_eq!(cloned.root(), expected_root);
     }
 
     proptest! {

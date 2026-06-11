@@ -366,6 +366,13 @@ pub enum LeafLookup {
     NonExistent,
 }
 
+/// Clones a sparse trie using implementation-specific parallelism and compaction.
+#[cfg(feature = "std")]
+pub trait ParallelCompactClone: Clone + Send + Sync {
+    /// Returns a clone suitable for reuse after dropping unreachable capacity.
+    fn parallel_compact_clone(&self) -> Self;
+}
+
 #[cfg(feature = "std")]
 mod configurable_sparse_trie {
     use super::*;
@@ -497,6 +504,15 @@ mod configurable_sparse_trie {
             removed: &HashSet<Nibbles>,
         ) {
             delegate!(self, commit_updates, updated, removed)
+        }
+    }
+
+    impl ParallelCompactClone for ConfigurableSparseTrie {
+        fn parallel_compact_clone(&self) -> Self {
+            match self {
+                Self::Arena(inner) => Self::Arena(inner.parallel_compact_clone()),
+                Self::HashMap(inner) => Self::HashMap(inner.parallel_compact_clone()),
+            }
         }
     }
 }
