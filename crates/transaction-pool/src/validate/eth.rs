@@ -49,14 +49,14 @@ use std::{
 ///
 /// Receives the transaction origin and a reference to the transaction. Returns `Ok(())` if the
 /// transaction passes or `Err` to reject it.
-type StatelessValidationFn<T> =
+pub type StatelessValidationFn<T> =
     Arc<dyn Fn(TransactionOrigin, &T) -> Result<(), InvalidPoolTransactionError> + Send + Sync>;
 
 /// Additional stateful validation function signature.
 ///
 /// Receives the transaction origin, a reference to the transaction, and an account state reader.
 /// Returns `Ok(())` if the transaction passes or `Err` to reject it.
-type StatefulValidationFn<T> = Arc<
+pub type StatefulValidationFn<T> = Arc<
     dyn Fn(TransactionOrigin, &T, &dyn AccountInfoReader) -> Result<(), InvalidPoolTransactionError>
         + Send
         + Sync,
