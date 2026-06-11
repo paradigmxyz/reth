@@ -49,10 +49,13 @@ use crate::tree::{
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
+use alloy_eip7928::{
+    account_changes::AccountChanges, bal::DecodedBal, compute_block_access_list_hash,
+    BlockAccessList, BlockAccessListGasError,
+};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
-use alloy_primitives::{map::B256Set, B256};
+use alloy_primitives::{map::B256Set, B256, U256};
 use reth_tasks::LazyHandle;
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
@@ -998,7 +1001,63 @@ where
         decoded_bal: &DecodedBal,
         gas_limit: u64,
     ) -> Result<(), ConsensusError> {
-        decoded_bal.as_bal().validate_gas_limit(gas_limit).map_err(ConsensusError::from)
+        let bal = decoded_bal.as_bal();
+        if let Some(items) = Self::count_sorted_bal_items(bal.as_slice()) {
+            if items > gas_limit / alloy_eip7928::constants::ITEM_COST as u64 {
+                return Err(ConsensusError::from(BlockAccessListGasError::new(items, gas_limit)))
+            }
+            return Ok(())
+        }
+
+        bal.validate_gas_limit(gas_limit).map_err(ConsensusError::from)
+    }
+
+    fn count_sorted_bal_items(bal: &[AccountChanges]) -> Option<u64> {
+        let mut items = bal.len() as u64;
+        for account in bal {
+            items += Self::count_sorted_storage_items(account)?;
+        }
+        Some(items)
+    }
+
+    fn count_sorted_storage_items(account: &AccountChanges) -> Option<u64> {
+        if account.storage_changes.windows(2).any(|pair| pair[0].slot > pair[1].slot) ||
+            account.storage_reads.windows(2).any(|pair| pair[0] > pair[1])
+        {
+            return None
+        }
+
+        let mut changes = 0usize;
+        let mut reads = 0usize;
+        let mut items = 0u64;
+        let mut last = None::<U256>;
+
+        while changes < account.storage_changes.len() || reads < account.storage_reads.len() {
+            let next = if reads == account.storage_reads.len() ||
+                changes < account.storage_changes.len() &&
+                    account.storage_changes[changes].slot <= account.storage_reads[reads]
+            {
+                account.storage_changes[changes].slot
+            } else {
+                account.storage_reads[reads]
+            };
+
+            if last != Some(next) {
+                items += 1;
+                last = Some(next);
+            }
+
+            while changes < account.storage_changes.len() &&
+                account.storage_changes[changes].slot == next
+            {
+                changes += 1;
+            }
+            while reads < account.storage_reads.len() && account.storage_reads[reads] == next {
+                reads += 1;
+            }
+        }
+
+        Some(items)
     }
 
     /// Executes a block with the given state provider.
