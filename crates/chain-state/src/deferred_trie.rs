@@ -118,31 +118,49 @@ impl DeferredTrieData {
     ) -> ComputedTrieData {
         let _span = debug_span!(target: "engine::tree::deferred_trie", "sort_inputs").entered();
 
+        if hashed_state.is_empty() && trie_updates.is_empty() {
+            return ComputedTrieData::default();
+        }
+
+        if hashed_state.is_empty() {
+            return ComputedTrieData::new(
+                Arc::new(HashedPostStateSorted::default()),
+                Arc::new(Self::sort_trie_updates(trie_updates)),
+            );
+        }
+
+        if trie_updates.is_empty() {
+            return ComputedTrieData::new(
+                Arc::new(Self::sort_hashed_state(hashed_state)),
+                Arc::new(TrieUpdatesSorted::default()),
+            );
+        }
+
         #[cfg(feature = "rayon")]
         let (sorted_hashed_state, sorted_trie_updates) = rayon::join(
-            || match Arc::try_unwrap(hashed_state) {
-                Ok(state) => state.into_sorted(),
-                Err(arc) => arc.clone_into_sorted(),
-            },
-            || match Arc::try_unwrap(trie_updates) {
-                Ok(updates) => updates.into_sorted(),
-                Err(arc) => arc.clone_into_sorted(),
-            },
+            || Self::sort_hashed_state(hashed_state),
+            || Self::sort_trie_updates(trie_updates),
         );
 
         #[cfg(not(feature = "rayon"))]
-        let (sorted_hashed_state, sorted_trie_updates) = (
-            match Arc::try_unwrap(hashed_state) {
-                Ok(state) => state.into_sorted(),
-                Err(arc) => arc.clone_into_sorted(),
-            },
-            match Arc::try_unwrap(trie_updates) {
-                Ok(updates) => updates.into_sorted(),
-                Err(arc) => arc.clone_into_sorted(),
-            },
-        );
+        let (sorted_hashed_state, sorted_trie_updates) =
+            (Self::sort_hashed_state(hashed_state), Self::sort_trie_updates(trie_updates));
 
         ComputedTrieData::new(Arc::new(sorted_hashed_state), Arc::new(sorted_trie_updates))
+    }
+
+    fn sort_hashed_state(hashed_state: Arc<HashedPostState>) -> HashedPostStateSorted {
+        match Arc::try_unwrap(hashed_state) {
+            Ok(state) => state.into_sorted(),
+            Err(arc) => arc.clone_into_sorted(),
+        }
+    }
+
+    fn sort_trie_updates(trie_updates: Arc<TrieUpdates>) -> TrieUpdatesSorted {
+        match Arc::try_unwrap(trie_updates) {
+            Ok(updates) => updates.into_sorted(),
+            Err(arc) => arc.clone_into_sorted(),
+        }
     }
 
     /// Returns trie data, waiting for the async publishing task if it has not completed.
