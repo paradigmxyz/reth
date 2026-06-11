@@ -4242,7 +4242,7 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_primitives::{
         map::{AddressMap, B256Map},
-        U256,
+        Bytes, U256,
     };
     use reth_chain_state::ExecutedBlock;
     use reth_db_api::models::StorageSettings;
@@ -4321,6 +4321,8 @@ mod tests {
         let slot = U256::from(1);
         let original_slot = U256::from(2);
         let current_slot = U256::from(3);
+        let code_hash = B256::repeat_byte(0x42);
+        let bytecode = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]));
         let original_account = Account { balance: U256::from(4), nonce: 1, bytecode_hash: None };
         let current_account = Account { balance: U256::from(5), nonce: 2, bytecode_hash: None };
         let state = evm2_block_state_from_init(
@@ -4332,7 +4334,7 @@ mod tests {
                     BTreeMap::from([(slot, (original_slot, current_slot))]),
                 ),
             )],
-            [],
+            [(code_hash, bytecode.clone())],
         );
 
         let (plain_state, reverts) =
@@ -4351,7 +4353,7 @@ mod tests {
                 storage: vec![(slot, current_slot)],
             }]
         );
-        assert!(plain_state.contracts.is_empty());
+        assert_eq!(plain_state.contracts, vec![(code_hash, bytecode)]);
         assert_eq!(reverts.accounts, vec![vec![(address, Some(original_account))]]);
         assert_eq!(
             reverts.storage,
