@@ -4,7 +4,7 @@ use alloy_primitives::{Address, Bytes, B256};
 use alloy_rpc_types_engine::ExecutionPayloadEnvelopeV4;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use jsonrpsee_core::client::ClientT;
-use reth_chainspec::DEV;
+use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_db::test_utils::create_test_rw_db;
 use reth_ethereum_engine_primitives::EthPayloadAttributes;
 use reth_node_builder::{NodeBuilder, NodeConfig};
@@ -17,7 +17,7 @@ use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
 use reth_tasks::Runtime;
 use serde_json::Value;
-use std::str::FromStr;
+use std::{str::FromStr, sync::Arc};
 use tempfile::tempdir;
 use tokio::sync::oneshot;
 
@@ -103,8 +103,15 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
         rocksdb_path: Some(tempdir.path().join("rocksdb")),
         pprof_dumps_path: Some(tempdir.path().join("pprof")),
     };
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .amsterdam_activated()
+            .build(),
+    );
     let config = NodeConfig::test()
-        .with_chain(DEV.clone())
+        .with_chain(chain_spec)
         .with_datadir_args(datadir_args)
         .with_rpc(rpc_args);
     let db = create_test_rw_db();
@@ -122,13 +129,14 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
             let Some(client) = handles.rpc.http_client() else { return Ok(()) };
 
             let chain = ctx.config().chain.clone();
+            let timestamp = chain.genesis().timestamp + 1;
             let payload_attributes = EthPayloadAttributes {
-                timestamp: chain.genesis().timestamp + 1,
+                timestamp,
                 prev_randao: B256::ZERO,
                 suggested_fee_recipient: Address::ZERO,
                 withdrawals: Some(vec![]),
                 parent_beacon_block_root: Some(B256::ZERO),
-                slot_number: None,
+                slot_number: Some(timestamp),
             };
 
             tokio::spawn(async move {
@@ -159,6 +167,7 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
 
                     let mut next_payload_attributes = payload_attributes.clone();
                     next_payload_attributes.timestamp += 12;
+                    next_payload_attributes.slot_number = Some(next_payload_attributes.timestamp);
                     let next_block_hash: B256 = client
                         .request(
                             "testing_commitBlockV1",

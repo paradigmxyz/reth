@@ -121,10 +121,6 @@ where
         self.eth_api
             .spawn_with_state_at_block(request.parent_block_hash, move |eth_api, state| {
                 let state = state.database.0;
-                let mut db = State::builder()
-                    .with_bundle_update()
-                    .with_database(StateProviderDatabase::new(&state))
-                    .build();
                 let parent = eth_api
                     .provider()
                     .sealed_header_by_hash(request.parent_block_hash)?
@@ -133,8 +129,15 @@ where
                 })?;
 
                 let chain_spec = eth_api.provider().chain_spec();
+                let is_amsterdam = chain_spec
+                    .is_amsterdam_active_at_timestamp(request.payload_attributes.timestamp);
                 let is_osaka =
                     chain_spec.is_osaka_active_at_timestamp(request.payload_attributes.timestamp);
+                let mut db = State::builder()
+                    .with_bundle_update()
+                    .with_database(StateProviderDatabase::new(&state))
+                    .with_bal_builder_if(is_amsterdam)
+                    .build();
 
                 let withdrawals = request.payload_attributes.withdrawals.clone();
                 let withdrawals_rlp_length = withdrawals.as_ref().map(|w| w.length()).unwrap_or(0);
@@ -258,8 +261,16 @@ where
 
                 let has_requests = outcome.block.requests_hash().is_some();
                 let requests = has_requests.then_some(outcome.execution_result.requests);
+                let block_access_list = outcome
+                    .block_access_list
+                    .map(|block_access_list| alloy_rlp::encode(&block_access_list).into());
 
-                Ok(EthBuiltPayload::new(Arc::new(outcome.block), total_fees, requests, None))
+                Ok(EthBuiltPayload::new(
+                    Arc::new(outcome.block),
+                    total_fees,
+                    requests,
+                    block_access_list,
+                ))
             })
             .await
     }
