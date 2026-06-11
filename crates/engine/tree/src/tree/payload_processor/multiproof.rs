@@ -29,6 +29,12 @@ pub(crate) struct MultiProofTaskMetrics {
     pub sparse_trie_total_duration_histogram: Histogram,
     /// Time spent preparing the sparse trie for reuse after state root computation.
     pub into_trie_for_reuse_duration_histogram: Histogram,
+    /// Time spent cloning the sparse trie before payload validation.
+    pub sparse_trie_clone_duration_histogram: Histogram,
+    /// Time spent pruning the preserved sparse trie after persistence.
+    pub sparse_trie_prune_duration_histogram: Histogram,
+    /// Size of the masked hashed post state used for sparse trie persistence pruning.
+    pub sparse_trie_masked_hashed_post_state_size: Histogram,
     /// Time spent waiting for preserved sparse trie cache to become available.
     pub sparse_trie_cache_wait_duration_histogram: Histogram,
     /// Histogram for sparse trie task idle time in seconds (waiting for updates or proof

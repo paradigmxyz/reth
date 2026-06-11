@@ -8,7 +8,13 @@ extern crate alloc;
 mod state;
 pub use state::*;
 
-mod lfu;
+mod hashed_cursor;
+pub use hashed_cursor::*;
+
+#[cfg(feature = "std")]
+mod cursor;
+#[cfg(feature = "std")]
+pub use cursor::*;
 
 mod trie;
 pub use trie::*;

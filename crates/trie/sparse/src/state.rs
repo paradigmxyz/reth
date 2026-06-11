@@ -1,15 +1,17 @@
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::TrieDebugRecorder;
-use crate::{
-    lfu::BucketedLfu, traits::SparseTrie as SparseTrieTrait, ParallelSparseTrie,
-    RevealableSparseTrie,
-};
+use crate::{traits::SparseTrie as SparseTrieTrait, ParallelSparseTrie, RevealableSparseTrie};
 use alloc::vec::Vec;
-use alloy_primitives::{map::B256Map, B256};
+use alloy_primitives::{
+    map::{B256Map, B256Set},
+    B256,
+};
 use alloy_rlp::{Decodable, Encodable};
 use either::Either;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
 use reth_primitives_traits::Account;
+#[cfg(feature = "std")]
+use reth_trie_common::HashedPostStateSorted;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
     DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2, TrieAccount, EMPTY_ROOT_HASH,
@@ -23,7 +25,7 @@ use tracing::{instrument, trace};
 ///
 /// This is used to defer expensive deallocations (like proof node buffers) until after final state
 /// root is calculated
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct DeferredDrops {
     /// Each nodes reveal operation creates a new buffer, uses it, and pushes it here.
     pub proof_nodes_bufs: Vec<Vec<ProofTrieNodeV2>>,
@@ -45,13 +47,64 @@ pub struct SparseStateTrie<
     account_rlp_buf: Vec<u8>,
     /// Holds data that should be dropped after final state root is calculated.
     deferred_drops: DeferredDrops,
-    /// Global LFU tracker for hot `(address, slot)` storage entries.
-    hot_slots_lfu: BucketedLfu<HotSlotKey>,
-    /// Global LFU tracker for hot account entries.
-    hot_accounts_lfu: BucketedLfu<B256>,
+    /// Account keys revealed by currently in-memory block hashed states.
+    retained_accounts: B256Set,
+    /// Storage account keys revealed by currently in-memory block hashed states.
+    retained_storage_accounts: B256Set,
+    /// Storage slot keys revealed by currently in-memory block hashed states, grouped by account.
+    retained_storage_slots: B256Map<B256Set>,
     /// Metrics for the sparse state trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::SparseStateTrieMetrics,
+}
+
+impl<A, S> Clone for SparseStateTrie<A, S>
+where
+    A: Clone,
+    S: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            state: self.state.clone(),
+            storage: self.storage.clone(),
+            retain_updates: self.retain_updates,
+            account_rlp_buf: self.account_rlp_buf.clone(),
+            deferred_drops: self.deferred_drops.clone(),
+            retained_accounts: self.retained_accounts.clone(),
+            retained_storage_accounts: self.retained_storage_accounts.clone(),
+            retained_storage_slots: self.retained_storage_slots.clone(),
+            #[cfg(feature = "metrics")]
+            metrics: Default::default(),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<A, S> SparseStateTrie<A, S>
+where
+    A: crate::ParallelCompactClone,
+    S: crate::ParallelCompactClone,
+{
+    /// Clones account and storage tries in parallel, compacting trie arenas while cloning.
+    pub fn parallel_compact_clone(&self) -> Self {
+        let (state, storage) = rayon::join(
+            || self.state.parallel_compact_clone(),
+            || self.storage.parallel_compact_clone(),
+        );
+
+        Self {
+            state,
+            storage,
+            retain_updates: self.retain_updates,
+            account_rlp_buf: self.account_rlp_buf.clone(),
+            deferred_drops: self.deferred_drops.clone(),
+            retained_accounts: self.retained_accounts.clone(),
+            retained_storage_accounts: self.retained_storage_accounts.clone(),
+            retained_storage_slots: self.retained_storage_slots.clone(),
+            #[cfg(feature = "metrics")]
+            metrics: Default::default(),
+        }
+    }
 }
 
 impl<A, S> Default for SparseStateTrie<A, S>
@@ -66,8 +119,9 @@ where
             retain_updates: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
             deferred_drops: DeferredDrops::default(),
-            hot_slots_lfu: BucketedLfu::default(),
-            hot_accounts_lfu: BucketedLfu::default(),
+            retained_accounts: Default::default(),
+            retained_storage_accounts: Default::default(),
+            retained_storage_slots: Default::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -91,25 +145,6 @@ impl<A, S> SparseStateTrie<A, S> {
     /// Set the retention of branch node updates and deletions.
     pub const fn with_updates(mut self, retain_updates: bool) -> Self {
         self.set_updates(retain_updates);
-        self
-    }
-
-    /// Seeds the hot account/storage LFU caches with their configured capacities.
-    ///
-    /// This must happen before the first `record_*_touch` call, otherwise touches are ignored while
-    /// the LFUs still have zero capacity.
-    pub fn set_hot_cache_capacities(&mut self, max_hot_slots: usize, max_hot_accounts: usize) {
-        self.hot_slots_lfu.decay_and_evict(max_hot_slots);
-        self.hot_accounts_lfu.decay_and_evict(max_hot_accounts);
-    }
-
-    /// Seeds the hot account/storage LFU caches with their configured capacities.
-    pub fn with_hot_cache_capacities(
-        mut self,
-        max_hot_slots: usize,
-        max_hot_accounts: usize,
-    ) -> Self {
-        self.set_hot_cache_capacities(max_hot_slots, max_hot_accounts);
         self
     }
 
@@ -205,16 +240,24 @@ where
         trie.find_leaf(&path, None).is_ok()
     }
 
-    /// Records a storage slot access/update in the global LFU tracker.
+    /// Records a storage slot update that belongs to an in-memory block.
     #[inline]
     pub fn record_slot_touch(&mut self, account: B256, slot: B256) {
-        self.hot_slots_lfu.touch(HotSlotKey { address: account, slot });
+        self.retained_storage_accounts.insert(account);
+        self.retained_storage_slots.entry(account).or_default().insert(slot);
     }
 
-    /// Records an account access/update in the global LFU tracker.
+    /// Clears previously retained storage slots for an in-memory storage wipe.
+    #[inline]
+    pub fn record_storage_wipe(&mut self, account: B256) {
+        self.retained_storage_accounts.insert(account);
+        self.retained_storage_slots.remove(&account);
+    }
+
+    /// Records an account update that belongs to an in-memory block.
     #[inline]
     pub fn record_account_touch(&mut self, account: B256) {
-        self.hot_accounts_lfu.touch(account);
+        self.retained_accounts.insert(account);
     }
 
     /// Returns reference to bytes representing leaf value for the target account.
@@ -657,6 +700,9 @@ where
         self.state.clear();
         self.storage.clear();
         self.account_rlp_buf.clear();
+        self.retained_accounts.clear();
+        self.retained_storage_accounts.clear();
+        self.retained_storage_slots.clear();
     }
 
     /// Returns a heuristic for the total in-memory size of this state trie in bytes.
@@ -725,14 +771,8 @@ where
         self.storage.shrink_to(storage_nodes, storage_values);
     }
 
-    /// Prunes account/storage tries according to global LFU retention.
-    ///
-    /// - Top LFU `(address, slot)` entries are retained up to `max_hot_slots`.
-    ///
-    /// - Top LFU `(address, slot)` entries are retained in storage tries.
-    /// - Account trie retains only paths for accounts tracked by the account LFU.
-    /// - Storage tries retain only paths needed for retained slots.
-    /// - All other revealed paths are pruned to hash stubs or fully evicted.
+    /// Removes persisted state keys from the exact retained-key set, then prunes account/storage
+    /// tries to the remaining in-memory hashed state keys.
     ///
     /// # Preconditions
     ///
@@ -742,24 +782,57 @@ where
     #[cfg(feature = "std")]
     #[instrument(
         level = "debug",
-        name = "SparseStateTrie::prune",
+        name = "SparseStateTrie::prune_persisted_state",
         target = "trie::sparse",
-        skip_all,
-        fields(%max_hot_slots, %max_hot_accounts)
+        skip_all
     )]
-    pub fn prune(&mut self, max_hot_slots: usize, max_hot_accounts: usize) {
-        self.hot_slots_lfu.decay_and_evict(max_hot_slots);
-        self.hot_accounts_lfu.decay_and_evict(max_hot_accounts);
-        let retained = self.hot_slots_lfu.retained_slots_by_address();
+    pub fn prune_persisted_state(&mut self, persisted_state: &HashedPostStateSorted) {
+        let mut removed_accounts = 0usize;
+        for (address, _) in &persisted_state.accounts {
+            removed_accounts += self.retained_accounts.remove(address) as usize;
+        }
 
-        let retained_account_paths: Vec<Nibbles> =
-            self.hot_accounts_lfu.keys().map(|k| Nibbles::unpack(*k)).collect();
+        let mut removed_slots = 0usize;
+        let mut removed_storage_accounts = 0usize;
+        for (address, storage) in &persisted_state.storages {
+            let mut empty = false;
+            if let Some(retained_slots) = self.retained_storage_slots.get_mut(address) {
+                for (slot, _) in storage.storage_slots_ref() {
+                    removed_slots += retained_slots.remove(slot) as usize;
+                }
+                empty = retained_slots.is_empty();
+            }
+            if empty {
+                self.retained_storage_slots.remove(address);
+            }
+
+            if !self.retained_storage_slots.contains_key(address) {
+                removed_storage_accounts += self.retained_storage_accounts.remove(address) as usize;
+            }
+        }
+
+        let mut retained_storage_slots = B256Map::with_capacity_and_hasher(
+            self.retained_storage_slots.len(),
+            Default::default(),
+        );
+        for (address, slots) in &self.retained_storage_slots {
+            let mut retained = Vec::with_capacity(slots.len());
+            retained.extend(slots.iter().map(|slot| Nibbles::unpack(*slot)));
+            retained.sort_unstable();
+            retained_storage_slots.insert(*address, retained);
+        }
+
+        let mut retained_account_keys = self.retained_accounts.clone();
+        retained_account_keys.extend(self.retained_storage_accounts.iter().copied());
+        let mut retained_account_paths = Vec::with_capacity(retained_account_keys.len());
+        retained_account_paths
+            .extend(retained_account_keys.iter().map(|account| Nibbles::unpack(*account)));
+        retained_account_paths.sort_unstable();
 
         let retained_accounts = retained_account_paths.len();
-        let retained_storage_tries = retained.len();
+        let retained_storage_tries = retained_storage_slots.len();
         let total_storage_tries_before = self.storage.tries.len();
 
-        // Prune account and storage tries in parallel using the same LFU-selected set.
         let (account_nodes_pruned, storage_tries_evicted) = rayon::join(
             || {
                 self.state
@@ -767,17 +840,20 @@ where
                     .map(|trie| trie.prune(&retained_account_paths))
                     .unwrap_or(0)
             },
-            || self.storage.prune_by_retained_slots(retained),
+            || self.storage.prune_by_retained_slots(retained_storage_slots),
         );
 
         debug!(
             target: "trie::sparse",
+            removed_accounts,
+            removed_slots,
+            removed_storage_accounts,
             retained_accounts,
             retained_storage_tries,
             account_nodes_pruned,
             storage_tries_evicted,
             storage_tries_after = total_storage_tries_before - storage_tries_evicted,
-            "SparseStateTrie::prune completed"
+            "SparseStateTrie::prune_persisted_state completed"
         );
     }
 
@@ -798,7 +874,7 @@ where
 
 /// The fields of [`SparseStateTrie`] related to storage tries. This is kept separate from the rest
 /// of [`SparseStateTrie`] to help enforce allocation re-use.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 struct StorageTries<S = ParallelSparseTrie> {
     /// Sparse storage tries.
     tries: B256Map<RevealableSparseTrie<S>>,
@@ -810,7 +886,7 @@ struct StorageTries<S = ParallelSparseTrie> {
 
 #[cfg(feature = "std")]
 impl<S: SparseTrieTrait> StorageTries<S> {
-    /// Prunes storage tries using LFU-retained slots.
+    /// Prunes storage tries using exact retained slots.
     ///
     /// Tries without retained slots are evicted entirely. Tries with retained slots are pruned to
     /// those slots.
@@ -846,6 +922,35 @@ impl<S: SparseTrieTrait> StorageTries<S> {
         }
 
         evicted
+    }
+}
+
+#[cfg(feature = "std")]
+impl<S: crate::ParallelCompactClone> StorageTries<S> {
+    fn parallel_compact_clone(&self) -> Self {
+        use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+
+        let (default_trie, (tries, cleared_tries)) = rayon::join(
+            || self.default_trie.parallel_compact_clone(),
+            || {
+                rayon::join(
+                    || {
+                        self.tries
+                            .par_iter()
+                            .map(|(address, trie)| (*address, trie.parallel_compact_clone()))
+                            .collect::<B256Map<RevealableSparseTrie<S>>>()
+                    },
+                    || {
+                        self.cleared_tries
+                            .par_iter()
+                            .map(|trie| trie.parallel_compact_clone())
+                            .collect()
+                    },
+                )
+            },
+        );
+
+        Self { tries, cleared_tries, default_trie }
     }
 }
 
@@ -895,33 +1000,6 @@ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
     }
 }
 
-/// Key for identifying a storage slot in the global LFU cache.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct HotSlotKey {
-    address: B256,
-    slot: B256,
-}
-
-/// Slot-specific helpers for the `BucketedLfu<HotSlotKey>`.
-#[cfg(feature = "std")]
-impl BucketedLfu<HotSlotKey> {
-    /// Returns retained slots grouped by address.
-    fn retained_slots_by_address(&self) -> B256Map<Vec<Nibbles>> {
-        let mut grouped =
-            B256Map::<Vec<Nibbles>>::with_capacity_and_hasher(self.len(), Default::default());
-        for key in self.keys() {
-            grouped.entry(key.address).or_default().push(Nibbles::unpack(key.slot));
-        }
-
-        for slots in grouped.values_mut() {
-            slots.sort_unstable();
-            slots.dedup();
-        }
-
-        grouped
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -938,8 +1016,8 @@ mod tests {
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
-        BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, LeafNode, RlpNode, StorageMultiProof,
-        TrieMask, TrieNodeV2,
+        BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, HashedStorageSorted, LeafNode, RlpNode,
+        StorageMultiProof, TrieMask, TrieNodeV2,
     };
 
     /// Create a leaf key (suffix) with given nibbles padded with zeros to reach `total_len`.
@@ -948,6 +1026,27 @@ mod tests {
         let mut nibbles = Nibbles::from_nibbles(suffix);
         nibbles.extend(&Nibbles::from_nibbles_unchecked(vec![0; total_len - suffix.len()]));
         nibbles
+    }
+
+    fn two_leaf_v2_proof_nodes(leaf_value: Vec<u8>) -> Vec<ProofTrieNodeV2> {
+        let leaf_1_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value.clone()));
+        let leaf_2_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value));
+
+        let branch_node = TrieNodeV2::Branch(BranchNodeV2 {
+            key: Nibbles::default(),
+            stack: vec![
+                RlpNode::from_rlp(&alloy_rlp::encode(&leaf_1_node)),
+                RlpNode::from_rlp(&alloy_rlp::encode(&leaf_2_node)),
+            ],
+            state_mask: TrieMask::new(0b11),
+            branch_rlp_node: None,
+        });
+
+        vec![
+            ProofTrieNodeV2 { path: Nibbles::default(), node: branch_node, masks: None },
+            ProofTrieNodeV2 { path: Nibbles::from_nibbles([0x0]), node: leaf_1_node, masks: None },
+            ProofTrieNodeV2 { path: Nibbles::from_nibbles([0x1]), node: leaf_2_node, masks: None },
+        ]
     }
 
     #[test]
@@ -1076,20 +1175,87 @@ mod tests {
     }
 
     #[test]
-    fn seeded_hot_cache_capacities_preserve_first_cycle_touches() {
-        let account = b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
-        let slot = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
+    fn prune_persisted_state_prunes_to_remaining_hashed_state_keys() {
+        let removed_account = B256::ZERO;
+        let kept_account =
+            b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
+        let storage = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
+        let removed_slot = B256::ZERO;
+        let kept_slot = b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
+        let account_leaf_value = alloy_rlp::encode(TrieAccount::default());
+        let storage_leaf_value = alloy_rlp::encode_fixed_size(&U256::from(42)).to_vec();
+
         let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
+        sparse
+            .reveal_decoded_multiproof_v2(reth_trie_common::DecodedMultiProofV2 {
+                account_proofs: two_leaf_v2_proof_nodes(account_leaf_value.clone()),
+                storage_proofs: B256Map::from_iter([(
+                    storage,
+                    two_leaf_v2_proof_nodes(storage_leaf_value.clone()),
+                )]),
+                ..Default::default()
+            })
+            .unwrap();
+        sparse.root().unwrap();
+        sparse.storage_root(&storage).unwrap();
 
-        sparse.set_hot_cache_capacities(1, 1);
-        sparse.record_account_touch(account);
-        sparse.record_slot_touch(account, slot);
-        sparse.prune(1, 1);
+        sparse.record_account_touch(removed_account);
+        sparse.record_account_touch(kept_account);
+        sparse.record_slot_touch(storage, removed_slot);
+        sparse.record_slot_touch(storage, kept_slot);
 
-        assert_eq!(sparse.hot_accounts_lfu.keys().copied().collect::<Vec<_>>(), vec![account]);
+        let persisted_state = HashedPostStateSorted::new(
+            vec![(removed_account, None)],
+            B256Map::from_iter([(
+                storage,
+                HashedStorageSorted {
+                    wiped: false,
+                    storage_slots: vec![(removed_slot, U256::ZERO)],
+                },
+            )]),
+        );
+
+        sparse.prune_persisted_state(&persisted_state);
+
+        assert!(sparse.get_account_value(&removed_account).is_none());
+        assert_eq!(sparse.get_account_value(&kept_account), Some(&account_leaf_value));
+        assert!(sparse.get_storage_slot_value(&storage, &removed_slot).is_none());
+        assert_eq!(sparse.get_storage_slot_value(&storage, &kept_slot), Some(&storage_leaf_value));
+    }
+
+    #[test]
+    fn storage_wipe_tracking_prunes_masked_slots() {
+        let storage = B256::ZERO;
+        let stale_slot = B256::ZERO;
+        let retained_slot =
+            b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
+        let account_leaf_value = alloy_rlp::encode(TrieAccount::default());
+        let storage_leaf_value = alloy_rlp::encode_fixed_size(&U256::from(42)).to_vec();
+
+        let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
+        sparse
+            .reveal_decoded_multiproof_v2(reth_trie_common::DecodedMultiProofV2 {
+                account_proofs: two_leaf_v2_proof_nodes(account_leaf_value.clone()),
+                storage_proofs: B256Map::from_iter([(
+                    storage,
+                    two_leaf_v2_proof_nodes(storage_leaf_value.clone()),
+                )]),
+                ..Default::default()
+            })
+            .unwrap();
+        sparse.root().unwrap();
+        sparse.storage_root(&storage).unwrap();
+
+        sparse.record_slot_touch(storage, stale_slot);
+        sparse.record_storage_wipe(storage);
+        sparse.record_slot_touch(storage, retained_slot);
+        sparse.prune_persisted_state(&HashedPostStateSorted::default());
+
+        assert_eq!(sparse.get_account_value(&storage), Some(&account_leaf_value));
+        assert!(sparse.get_storage_slot_value(&storage, &stale_slot).is_none());
         assert_eq!(
-            sparse.hot_slots_lfu.keys().copied().collect::<Vec<_>>(),
-            vec![HotSlotKey { address: account, slot }]
+            sparse.get_storage_slot_value(&storage, &retained_slot),
+            Some(&storage_leaf_value)
         );
     }
 

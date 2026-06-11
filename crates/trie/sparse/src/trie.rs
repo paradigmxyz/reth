@@ -263,6 +263,18 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     }
 }
 
+#[cfg(feature = "std")]
+impl<T: crate::ParallelCompactClone> RevealableSparseTrie<T> {
+    /// Clones the revealed trie contents with implementation-specific compaction and parallelism.
+    pub fn parallel_compact_clone(&self) -> Self {
+        match self {
+            Self::Blind(Some(trie)) => Self::Blind(Some(Box::new(trie.parallel_compact_clone()))),
+            Self::Blind(None) => Self::Blind(None),
+            Self::Revealed(trie) => Self::Revealed(Box::new(trie.parallel_compact_clone())),
+        }
+    }
+}
+
 impl RevealableSparseTrie {
     /// Updates (or inserts) a leaf at the given key path with the specified RLP-encoded value.
     ///

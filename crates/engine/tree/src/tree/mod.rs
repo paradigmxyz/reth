@@ -2137,10 +2137,12 @@ where
 
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
         self.remove_before(self.persistence_state.last_persisted_block, finalized)?;
-        self.canonical_in_memory_state.remove_persisted_blocks(BlockNumHash {
-            number: self.persistence_state.last_persisted_block.number,
-            hash: self.persistence_state.last_persisted_block.hash,
-        });
+        let persisted_state =
+            self.canonical_in_memory_state.remove_persisted_blocks(BlockNumHash {
+                number: self.persistence_state.last_persisted_block.number,
+                hash: self.persistence_state.last_persisted_block.hash,
+            });
+        self.payload_validator.prune_sparse_state_trie_after_persistence(&persisted_state);
         Ok(())
     }
 

@@ -1,5 +1,7 @@
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::{LeafUpdateRecord, ProofTrieNodeRecord, RecordedOp, TrieDebugRecorder};
+#[cfg(feature = "std")]
+use crate::ParallelCompactClone;
 use crate::{
     lower::LowerSparseSubtrie, LeafLookup, LeafLookupError, RlpNodeStackItem, SparseNode,
     SparseNodeState, SparseNodeType, SparseTrie, SparseTrieUpdates,
@@ -131,6 +133,13 @@ pub struct ParallelSparseTrie {
     /// Debug recorder for tracking mutating operations.
     #[cfg(feature = "trie-debug")]
     debug_recorder: TrieDebugRecorder,
+}
+
+#[cfg(feature = "std")]
+impl ParallelCompactClone for ParallelSparseTrie {
+    fn parallel_compact_clone(&self) -> Self {
+        self.clone()
+    }
 }
 
 impl Default for ParallelSparseTrie {
@@ -7664,7 +7673,7 @@ mod tests {
 
         let pruned = trie.prune(&[key_keep]);
         assert!(pruned > 0, "expected some nodes to be pruned");
-        assert_eq!(root_before, trie.root(), "root hash should be preserved after LFU prune");
+        assert_eq!(root_before, trie.root(), "root hash should be preserved after prune");
 
         assert!(trie.get_leaf_value(&key_keep).is_some(), "retained key must remain revealed");
         assert!(trie.get_leaf_value(&key_drop_1).is_none(), "non-retained key should be pruned");

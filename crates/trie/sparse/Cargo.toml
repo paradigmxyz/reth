@@ -15,6 +15,7 @@ workspace = true
 # reth
 reth-primitives-traits.workspace = true
 reth-execution-errors.workspace = true
+reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
 tracing = { workspace = true, features = ["attributes"] }
 alloy-trie.workspace = true
@@ -24,6 +25,7 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
 # misc
+auto_impl.workspace = true
 either.workspace = true
 rayon = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }
@@ -64,6 +66,7 @@ std = [
     "reth-execution-errors/std",
     "reth-primitives-traits/std",
     "reth-primitives-traits/rayon",
+    "reth-storage-errors/std",
     "reth-storage-api/std",
     "reth-trie-common/std",
     "tracing/std",

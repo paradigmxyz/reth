@@ -29,6 +29,7 @@ use reth_revm::db::BundleState;
 use reth_tasks::{utils::increase_thread_priority, ForEachOrdered, Runtime};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, HashedPostState,
+    HashedPostStateSorted,
 };
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
@@ -139,14 +140,10 @@ where
     precompile_cache_disabled: bool,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
-    /// A pruned `SparseStateTrie`, kept around as a cache of already revealed trie nodes and to
-    /// re-use allocated memory. Stored with the block hash it was computed for to enable trie
+    /// A `SparseStateTrie`, kept around as a cache of already revealed trie nodes and to re-use
+    /// allocated memory. Stored with the block hash it was computed for to enable trie
     /// preservation across sequential payload validations.
     sparse_state_trie: SharedPreservedSparseTrie,
-    /// LFU hot-slot capacity: max storage slots retained across prune cycles.
-    sparse_trie_max_hot_slots: usize,
-    /// LFU hot-account capacity: max account addresses retained across prune cycles.
-    sparse_trie_max_hot_accounts: usize,
     /// Whether sparse trie cache pruning is fully disabled.
     disable_sparse_trie_cache_pruning: bool,
     /// Whether to disable BAL-driven parallel state root computation.
@@ -187,8 +184,6 @@ where
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
             sparse_state_trie: SharedPreservedSparseTrie::default(),
-            sparse_trie_max_hot_slots: config.sparse_trie_max_hot_slots(),
-            sparse_trie_max_hot_accounts: config.sparse_trie_max_hot_accounts(),
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
             cache_metrics: (!config.disable_cache_metrics())
                 .then(|| CachedStateMetrics::zeroed(CachedStateMetricsSource::Engine)),
@@ -209,6 +204,38 @@ where
             })
             .clone()
     }
+
+    /// Prunes persisted state keys from the preserved sparse trie cache.
+    pub fn prune_sparse_state_trie_after_persistence(
+        &self,
+        persisted_state: &HashedPostStateSorted,
+    ) {
+        self.trie_metrics
+            .sparse_trie_masked_hashed_post_state_size
+            .record(masked_hashed_post_state_size(persisted_state) as f64);
+
+        if self.disable_sparse_trie_cache_pruning {
+            return
+        }
+
+        let start = Instant::now();
+        self.sparse_state_trie.prune_persisted_state(
+            persisted_state,
+            SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
+            SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
+        );
+        self.trie_metrics.sparse_trie_prune_duration_histogram.record(start.elapsed());
+    }
+}
+
+fn masked_hashed_post_state_size(persisted_state: &HashedPostStateSorted) -> usize {
+    persisted_state.accounts.len() +
+        persisted_state.storages.len() +
+        persisted_state
+            .storages
+            .values()
+            .map(|storage| storage.storage_slots.len())
+            .sum::<usize>()
 }
 
 impl<Evm> WaitForCaches for PayloadProcessor<Evm>
@@ -610,8 +637,6 @@ where
     ) {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
-        let max_hot_slots = self.sparse_trie_max_hot_slots;
-        let max_hot_accounts = self.sparse_trie_max_hot_accounts;
         let disable_cache_pruning = self.disable_sparse_trie_cache_pruning;
         let executor = self.executor.clone();
 
@@ -632,7 +657,7 @@ where
                 .sparse_trie_cache_wait_duration_histogram
                 .record(start.elapsed().as_secs_f64());
 
-            let mut sparse_state_trie = preserved
+            let sparse_state_trie = preserved
                 .map(|preserved| preserved.into_trie_for(parent_state_root))
                 .unwrap_or_else(|| {
                     debug!(
@@ -647,7 +672,11 @@ where
                         .with_default_storage_trie(default_trie)
                         .with_updates(true)
                 });
-            sparse_state_trie.set_hot_cache_capacities(max_hot_slots, max_hot_accounts);
+
+            let start = Instant::now();
+            let sparse_state_trie =
+                executor.cpu_pool().install(|| sparse_state_trie.parallel_compact_clone());
+            trie_metrics.sparse_trie_clone_duration_histogram.record(start.elapsed());
 
             let mut task = SparseTrieCacheTask::new_with_trie(
                 &executor,
@@ -695,8 +724,6 @@ where
             let deferred = if let Some(result) = task_result {
                 let start = Instant::now();
                 let (trie, deferred) = task.into_trie_for_reuse(
-                    max_hot_slots,
-                    max_hot_accounts,
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                     disable_cache_pruning,

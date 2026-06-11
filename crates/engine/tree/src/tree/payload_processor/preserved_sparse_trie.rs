@@ -3,6 +3,7 @@
 use alloy_primitives::B256;
 use parking_lot::Mutex;
 use reth_primitives_traits::FastInstant as Instant;
+use reth_trie_common::HashedPostStateSorted;
 use reth_trie_sparse::{ConfigurableSparseTrie, SparseStateTrie};
 use std::sync::Arc;
 use tracing::debug;
@@ -50,6 +51,25 @@ impl SharedPreservedSparseTrie {
         }
         elapsed
     }
+
+    /// Prunes persisted state keys from the preserved trie, if one is available.
+    pub(super) fn prune_persisted_state(
+        &self,
+        persisted_state: &HashedPostStateSorted,
+        max_nodes_capacity: usize,
+        max_values_capacity: usize,
+    ) {
+        let mut guard = self.0.lock();
+        let Some(preserved) = guard.as_mut() else {
+            debug!(
+                target: "engine::tree::payload_processor",
+                "Skipping persisted sparse trie prune - no preserved trie available"
+            );
+            return
+        };
+
+        preserved.prune_persisted_state(persisted_state, max_nodes_capacity, max_values_capacity);
+    }
 }
 
 /// Guard that holds the lock on the preserved trie.
@@ -73,7 +93,7 @@ impl PreservedTrieGuard<'_> {
 pub(super) enum PreservedSparseTrie {
     /// Trie with a computed state root that can be reused for continuation payloads.
     Anchored {
-        /// The sparse state trie (pruned after root computation).
+        /// The sparse state trie.
         trie: SparseTrie,
         /// The state root this trie represents (computed from the previous block).
         /// Used to verify continuity: new payload's `parent_state_root` must match this.
@@ -134,5 +154,20 @@ impl PreservedSparseTrie {
                 trie
             }
         }
+    }
+
+    /// Prunes persisted state keys from this preserved trie.
+    fn prune_persisted_state(
+        &mut self,
+        persisted_state: &HashedPostStateSorted,
+        max_nodes_capacity: usize,
+        max_values_capacity: usize,
+    ) {
+        let trie = match self {
+            Self::Anchored { trie, .. } | Self::Cleared { trie } => trie,
+        };
+
+        trie.prune_persisted_state(persisted_state);
+        trie.shrink_to(max_nodes_capacity, max_values_capacity);
     }
 }

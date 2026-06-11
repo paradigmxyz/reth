@@ -1,9 +1,16 @@
 use super::{
     branch_child_idx::{BranchChildIdx, BranchChildIter},
-    ArenaSparseNode, ArenaSparseNodeBranchChild, ArenaSparseNodeState, Index, NodeArena,
+    ArenaParallelSparseTrie, ArenaSparseNode, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
+    Index, NodeArena,
 };
-use alloc::vec::Vec;
-use reth_trie_common::Nibbles;
+use crate::{HashedCursor, HashedStorageCursor};
+use alloc::{format, vec::Vec};
+use alloy_primitives::{B256, U256};
+use alloy_rlp::Decodable;
+use core::{cmp::Ordering, fmt::Debug, marker::PhantomData};
+use reth_primitives_traits::Account;
+use reth_storage_errors::db::DatabaseError;
+use reth_trie_common::{Nibbles, TrieAccount};
 use tracing::{instrument, trace};
 
 const TRACE_TARGET: &str = "trie::arena::cursor";
@@ -371,4 +378,378 @@ fn logical_branch_path(arena: &NodeArena, entry: &ArenaCursorStackEntry) -> Nibb
 /// Equivalent to `logical_branch_path(arena, entry).len()` but avoids constructing the path.
 fn logical_branch_path_len(arena: &NodeArena, entry: &ArenaCursorStackEntry) -> usize {
     entry.path.len() + arena[entry.index].branch_ref().short_key.len()
+}
+
+/// Hashed-state cursor backed by an arena sparse trie and an inner hashed cursor.
+///
+/// Revealed sparse-trie leaves are returned directly. Revealed sparse-trie topology also proves
+/// gaps are empty, so the inner cursor is only queried for explicit blinded child ranges.
+#[derive(Debug)]
+pub struct ArenaHashedCursor<'a, C, V> {
+    items: Vec<ArenaCursorItem<'a>>,
+    idx: usize,
+    active_blind_end: Option<Option<B256>>,
+    last_key: Option<B256>,
+    inner: C,
+    _marker: PhantomData<V>,
+}
+
+impl<'a, C, V> ArenaHashedCursor<'a, C, V>
+where
+    C: HashedCursor,
+{
+    /// Creates a new cursor for `trie`, delegating blinded ranges to `inner`.
+    pub fn new(trie: Option<&'a ArenaParallelSparseTrie>, inner: C) -> Self {
+        let mut this = Self {
+            items: Vec::new(),
+            idx: 0,
+            active_blind_end: None,
+            last_key: None,
+            inner,
+            _marker: PhantomData,
+        };
+        this.set_sparse_trie(trie);
+        this
+    }
+
+    /// Updates the sparse trie topology used by this cursor.
+    ///
+    /// `None` means the trie is completely unrevealed, so the full keyspace is delegated to the
+    /// inner cursor.
+    pub fn set_sparse_trie(&mut self, trie: Option<&'a ArenaParallelSparseTrie>) {
+        self.items.clear();
+        match trie {
+            Some(trie) => collect_trie_items(trie, &mut self.items),
+            None => self.items.push(ArenaCursorItem::Blind { start: B256::ZERO, end: None }),
+        }
+        self.items.sort_unstable_by(compare_items);
+        self.idx = 0;
+        self.active_blind_end = None;
+        self.last_key = None;
+        self.inner.reset();
+    }
+
+    /// Returns a mutable reference to the inner cursor.
+    pub const fn inner_mut(&mut self) -> &mut C {
+        &mut self.inner
+    }
+
+    fn first_item_idx(&self, key: B256) -> usize {
+        self.items
+            .iter()
+            .position(|item| item.may_contain_key_at_or_after(key))
+            .unwrap_or(self.items.len())
+    }
+}
+
+impl<C, V> ArenaHashedCursor<'_, C, V>
+where
+    C: HashedCursor<Value = V>,
+    V: ArenaHashedCursorValue,
+{
+    fn next_inner_in_active_range(&mut self) -> Result<Option<(B256, V)>, DatabaseError> {
+        let Some(end) = self.active_blind_end else { return Ok(None) };
+
+        let mut entry = self.inner.next()?;
+        while let Some((key, value)) = entry {
+            if !key_is_before_end(key, end) {
+                self.active_blind_end = None;
+                self.idx += 1;
+                return self.next_from_items(None)
+            }
+            if self.last_key.is_none_or(|last_key| key > last_key) {
+                self.last_key = Some(key);
+                return Ok(Some((key, value)))
+            }
+            entry = self.inner.next()?;
+        }
+
+        self.active_blind_end = None;
+        self.idx += 1;
+        self.next_from_items(None)
+    }
+
+    fn next_from_items(
+        &mut self,
+        seek_key: Option<B256>,
+    ) -> Result<Option<(B256, V)>, DatabaseError> {
+        while let Some(item) = self.items.get(self.idx) {
+            match *item {
+                ArenaCursorItem::Leaf { key, value } => {
+                    self.idx += 1;
+                    if seek_key.is_none_or(|seek_key| key >= seek_key) &&
+                        self.last_key.is_none_or(|last_key| key > last_key)
+                    {
+                        let value = V::decode(value)?;
+                        self.last_key = Some(key);
+                        return Ok(Some((key, value)))
+                    }
+                }
+                ArenaCursorItem::Blind { start, end } => {
+                    let inner_seek_key = seek_key.map_or(start, |seek_key| start.max(seek_key));
+                    let mut entry = self.inner.seek(inner_seek_key)?;
+                    while let Some((key, value)) = entry {
+                        if !key_is_before_end(key, end) {
+                            break
+                        }
+                        if self.last_key.is_none_or(|last_key| key > last_key) {
+                            self.active_blind_end = Some(end);
+                            self.last_key = Some(key);
+                            return Ok(Some((key, value)))
+                        }
+                        entry = self.inner.next()?;
+                    }
+
+                    self.idx += 1;
+                    self.active_blind_end = None;
+                }
+            }
+        }
+
+        Ok(None)
+    }
+}
+
+impl<C, V> HashedCursor for ArenaHashedCursor<'_, C, V>
+where
+    C: HashedCursor<Value = V>,
+    V: ArenaHashedCursorValue,
+{
+    type Value = V;
+
+    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+        self.idx = self.first_item_idx(key);
+        self.active_blind_end = None;
+        self.last_key = None;
+        self.next_from_items(Some(key))
+    }
+
+    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+        if self.active_blind_end.is_some() {
+            self.next_inner_in_active_range()
+        } else {
+            self.next_from_items(None)
+        }
+    }
+
+    fn reset(&mut self) {
+        self.idx = 0;
+        self.active_blind_end = None;
+        self.last_key = None;
+        self.inner.reset();
+    }
+}
+
+/// Hashed storage cursor backed by an arena sparse trie and an inner hashed storage cursor.
+#[derive(Debug)]
+pub struct ArenaHashedStorageCursor<'a, C> {
+    cursor: ArenaHashedCursor<'a, C, U256>,
+}
+
+impl<'a, C> ArenaHashedStorageCursor<'a, C>
+where
+    C: HashedStorageCursor<Value = U256>,
+{
+    /// Creates a new storage cursor for `trie`, delegating blinded ranges to `inner`.
+    pub fn new(trie: Option<&'a ArenaParallelSparseTrie>, inner: C) -> Self {
+        Self { cursor: ArenaHashedCursor::new(trie, inner) }
+    }
+
+    /// Updates the sparse trie topology used by this cursor.
+    pub fn set_sparse_trie(&mut self, trie: Option<&'a ArenaParallelSparseTrie>) {
+        self.cursor.set_sparse_trie(trie);
+    }
+
+    /// Sets the hashed address on the inner cursor and updates the sparse trie topology.
+    pub fn set_hashed_address_with_sparse_trie(
+        &mut self,
+        hashed_address: B256,
+        trie: Option<&'a ArenaParallelSparseTrie>,
+    ) {
+        self.cursor.inner_mut().set_hashed_address(hashed_address);
+        self.cursor.set_sparse_trie(trie);
+    }
+}
+
+impl<C> HashedCursor for ArenaHashedStorageCursor<'_, C>
+where
+    C: HashedStorageCursor<Value = U256>,
+{
+    type Value = U256;
+
+    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+        self.cursor.seek(key)
+    }
+
+    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+        self.cursor.next()
+    }
+
+    fn reset(&mut self) {
+        self.cursor.reset();
+    }
+}
+
+impl<C> HashedStorageCursor for ArenaHashedStorageCursor<'_, C>
+where
+    C: HashedStorageCursor<Value = U256>,
+{
+    fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
+        let empty = self.seek(B256::ZERO)?.is_none();
+        self.reset();
+        Ok(empty)
+    }
+
+    fn set_hashed_address(&mut self, hashed_address: B256) {
+        self.cursor.inner_mut().set_hashed_address(hashed_address);
+        self.cursor.set_sparse_trie(None);
+    }
+}
+
+/// Value decoder for sparse trie leaf values returned by [`ArenaHashedCursor`].
+pub trait ArenaHashedCursorValue: Debug {
+    /// Decodes an RLP-encoded sparse trie leaf value into the hashed cursor value.
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError>
+    where
+        Self: Sized;
+}
+
+impl ArenaHashedCursorValue for Account {
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        let mut value = value;
+        let trie_account = TrieAccount::decode(&mut value).map_err(|error| {
+            DatabaseError::Other(format!("failed to decode trie account: {error}"))
+        })?;
+        Ok(trie_account.into())
+    }
+}
+
+impl ArenaHashedCursorValue for U256 {
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        let mut value = value;
+        <U256 as Decodable>::decode(&mut value).map_err(|error| {
+            DatabaseError::Other(format!("failed to decode storage value: {error}"))
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ArenaCursorItem<'a> {
+    Leaf { key: B256, value: &'a [u8] },
+    Blind { start: B256, end: Option<B256> },
+}
+
+impl ArenaCursorItem<'_> {
+    fn start_key(&self) -> B256 {
+        match *self {
+            Self::Leaf { key, .. } => key,
+            Self::Blind { start, .. } => start,
+        }
+    }
+
+    fn may_contain_key_at_or_after(&self, key: B256) -> bool {
+        match *self {
+            Self::Leaf { key: leaf_key, .. } => leaf_key >= key,
+            Self::Blind { end, .. } => match end {
+                Some(end) => end > key,
+                None => true,
+            },
+        }
+    }
+}
+
+fn compare_items(a: &ArenaCursorItem<'_>, b: &ArenaCursorItem<'_>) -> Ordering {
+    a.start_key().cmp(&b.start_key()).then_with(|| match (a, b) {
+        (ArenaCursorItem::Leaf { .. }, ArenaCursorItem::Blind { .. }) => Ordering::Greater,
+        (ArenaCursorItem::Blind { .. }, ArenaCursorItem::Leaf { .. }) => Ordering::Less,
+        _ => Ordering::Equal,
+    })
+}
+
+fn collect_trie_items<'a>(trie: &'a ArenaParallelSparseTrie, items: &mut Vec<ArenaCursorItem<'a>>) {
+    collect_arena_items(&trie.upper_arena, trie.root, Nibbles::default(), items);
+}
+
+fn collect_arena_items<'a>(
+    arena: &'a NodeArena,
+    idx: Index,
+    path: Nibbles,
+    items: &mut Vec<ArenaCursorItem<'a>>,
+) {
+    match &arena[idx] {
+        ArenaSparseNode::EmptyRoot => {}
+        ArenaSparseNode::Leaf { value, key, .. } => {
+            let mut full_path = path;
+            full_path.extend(key);
+            debug_assert_eq!(
+                full_path.len(),
+                B256::len_bytes() * 2,
+                "leaf path must contain a full hashed key"
+            );
+            if full_path.len() == B256::len_bytes() * 2 {
+                items.push(ArenaCursorItem::Leaf {
+                    key: B256::from_slice(&full_path.pack()),
+                    value,
+                });
+            }
+        }
+        ArenaSparseNode::Branch(branch) => {
+            let mut logical_path = path;
+            logical_path.extend(&branch.short_key);
+            for (nibble, child) in branch.child_iter() {
+                let mut child_path = logical_path;
+                child_path.push_unchecked(nibble);
+                match child {
+                    ArenaSparseNodeBranchChild::Revealed(child_idx) => {
+                        collect_arena_items(arena, *child_idx, child_path, items);
+                    }
+                    ArenaSparseNodeBranchChild::Blinded(_) => {
+                        push_blind_range(child_path, items);
+                    }
+                }
+            }
+        }
+        ArenaSparseNode::Subtrie(subtrie) => {
+            collect_arena_items(&subtrie.arena, subtrie.root, subtrie.path, items);
+        }
+        ArenaSparseNode::TakenSubtrie => {
+            push_blind_range(path, items);
+        }
+    }
+}
+
+fn push_blind_range(path: Nibbles, items: &mut Vec<ArenaCursorItem<'_>>) {
+    if path.len() > B256::len_bytes() * 2 {
+        return
+    }
+
+    items.push(ArenaCursorItem::Blind { start: prefix_start(&path), end: prefix_end(&path) });
+}
+
+fn prefix_start(prefix: &Nibbles) -> B256 {
+    B256::right_padding_from(&prefix.pack())
+}
+
+fn prefix_end(prefix: &Nibbles) -> Option<B256> {
+    let mut nibbles = Vec::with_capacity(prefix.len());
+    for idx in 0..prefix.len() {
+        nibbles.push(prefix.get_unchecked(idx));
+    }
+
+    while let Some(nibble) = nibbles.pop() {
+        if nibble < 0x0f {
+            nibbles.push(nibble + 1);
+            let next_prefix = Nibbles::from_nibbles_unchecked(nibbles);
+            return Some(prefix_start(&next_prefix))
+        }
+    }
+
+    None
+}
+
+fn key_is_before_end(key: B256, end: Option<B256>) -> bool {
+    match end {
+        Some(end) => key < end,
+        None => true,
+    }
 }
