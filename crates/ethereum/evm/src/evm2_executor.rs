@@ -9,6 +9,7 @@ use alloc::{
 };
 use alloy_consensus::{constants::ETH_TO_WEI, transaction::Recovered, BlockHeader, Header, TxType};
 use alloy_eips::{
+    eip2718::Typed2718,
     eip4895::Withdrawal,
     eip6110::{DEPOSIT_REQUEST_TYPE, MAINNET_DEPOSIT_CONTRACT_ADDRESS},
     eip7002::WITHDRAWAL_REQUEST_TYPE,
@@ -246,6 +247,34 @@ fn execute_evm2_block_with_context_precompiles_and_hook<DB>(
     transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
     context: Evm2BlockExecutionContext<'_>,
     precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
+    on_transaction_executed: impl FnMut(usize),
+) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<DB::Error>>
+where
+    DB: Database + 'static,
+{
+    execute_evm2_block_with_context_precompiles_and_hook_envelopes(
+        spec_id,
+        block_env,
+        database,
+        block_number,
+        transactions.into_iter().map(evm2_recovered_tx),
+        context,
+        precompiles,
+        on_transaction_executed,
+    )
+}
+
+/// Executes a block worth of evm2-native recovered transactions with additional block-level
+/// context, invoking `on_transaction_executed` after each transaction is committed to the block
+/// state.
+pub(crate) fn execute_evm2_block_with_context_precompiles_and_hook_envelopes<DB>(
+    spec_id: SpecId,
+    block_env: BlockEnv,
+    database: DB,
+    block_number: u64,
+    transactions: impl IntoIterator<Item = RecoveredTxEnvelope>,
+    context: Evm2BlockExecutionContext<'_>,
+    precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
     mut on_transaction_executed: impl FnMut(usize),
 ) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<DB::Error>>
 where
@@ -273,8 +302,8 @@ where
     let mut results = Vec::new();
 
     for (index, transaction) in transactions.into_iter().enumerate() {
-        let tx_type = transaction.inner().tx_type();
-        let transaction = evm2_recovered_tx(transaction);
+        let tx_type =
+            TxType::try_from(transaction.ty()).expect("evm2 transaction envelope has valid type");
         let outcome = execute_transaction::<DB>(&mut evm, &mut block_state, &transaction)?;
         results.push((tx_type, outcome));
         on_transaction_executed(index + 1);
@@ -423,6 +452,36 @@ where
     DB: StateProvider + Send + 'static,
 {
     execute_evm2_block_with_context_precompiles_and_hook(
+        spec_id,
+        block_env,
+        Evm2StateProviderDatabase::new(state_provider),
+        block_number,
+        transactions,
+        context,
+        precompiles,
+        on_transaction_executed,
+    )
+}
+
+/// Executes a block worth of evm2-native recovered transactions with additional block-level context
+/// and an evm2 database adapter backed by a Reth state provider, using the provided precompile
+/// provider and invoking `on_transaction_executed` after each transaction is committed to the block
+/// state.
+#[cfg(feature = "std")]
+pub fn execute_evm2_block_with_state_provider_context_precompiles_and_hook_envelopes<DB>(
+    spec_id: SpecId,
+    block_env: BlockEnv,
+    state_provider: DB,
+    block_number: u64,
+    transactions: impl IntoIterator<Item = RecoveredTxEnvelope>,
+    context: Evm2BlockExecutionContext<'_>,
+    precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
+    on_transaction_executed: impl FnMut(usize),
+) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<ProviderError>>
+where
+    DB: StateProvider + Send + 'static,
+{
+    execute_evm2_block_with_context_precompiles_and_hook_envelopes(
         spec_id,
         block_env,
         Evm2StateProviderDatabase::new(state_provider),
