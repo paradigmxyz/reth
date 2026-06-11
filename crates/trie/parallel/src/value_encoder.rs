@@ -270,7 +270,7 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
 
         // Any remaining dispatched proofs need to have their results collected.
         // These are proofs that were pre-dispatched but not consumed during proof calculation.
-        for (hashed_address, rx) in &self.dispatched {
+        for (hashed_address, rx) in self.dispatched {
             let wait_start = Instant::now();
             let result = rx
                 .recv()
@@ -282,7 +282,7 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
                 .result?;
             stats.storage_wait_time += wait_start.elapsed();
 
-            storage_proof_results.insert(*hashed_address, result.proof);
+            storage_proof_results.insert(hashed_address, result.proof);
         }
 
         Ok((storage_proof_results, stats))
