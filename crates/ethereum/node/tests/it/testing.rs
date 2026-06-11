@@ -4,6 +4,7 @@ use alloy_primitives::{Address, Bytes, B256};
 use alloy_rpc_types_engine::ExecutionPayloadEnvelopeV4;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use jsonrpsee_core::client::ClientT;
+use reth_chainspec::DEV;
 use reth_db::test_utils::create_test_rw_db;
 use reth_ethereum_engine_primitives::EthPayloadAttributes;
 use reth_node_builder::{NodeBuilder, NodeConfig};
@@ -102,7 +103,10 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
         rocksdb_path: Some(tempdir.path().join("rocksdb")),
         pprof_dumps_path: Some(tempdir.path().join("pprof")),
     };
-    let config = NodeConfig::test().with_datadir_args(datadir_args).with_rpc(rpc_args);
+    let config = NodeConfig::test()
+        .with_chain(DEV.clone())
+        .with_datadir_args(datadir_args)
+        .with_rpc(rpc_args);
     let db = create_test_rw_db();
 
     let (tx, rx): (oneshot::Sender<eyre::Result<()>>, oneshot::Receiver<eyre::Result<()>>) =
@@ -122,8 +126,8 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
                 timestamp: chain.genesis().timestamp + 1,
                 prev_randao: B256::ZERO,
                 suggested_fee_recipient: Address::ZERO,
-                withdrawals: None,
-                parent_beacon_block_root: None,
+                withdrawals: Some(vec![]),
+                parent_beacon_block_root: Some(B256::ZERO),
                 slot_number: None,
             };
 
@@ -153,8 +157,8 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
                         .expect("block transactions")
                         .is_empty());
 
-                    let mut next_payload_attributes = payload_attributes;
-                    next_payload_attributes.timestamp += 1;
+                    let mut next_payload_attributes = payload_attributes.clone();
+                    next_payload_attributes.timestamp += 12;
                     let next_block_hash: B256 = client
                         .request(
                             "testing_commitBlockV1",
@@ -177,6 +181,28 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
                     assert_eq!(
                         next_latest.get("parentHash").and_then(Value::as_str),
                         Some(block_hash.as_str())
+                    );
+
+                    let mut invalid_payload_attributes = payload_attributes;
+                    invalid_payload_attributes.timestamp += 24;
+                    let invalid_result = client
+                        .request::<B256, _>(
+                            "testing_commitBlockV1",
+                            (
+                                invalid_payload_attributes,
+                                vec![Bytes::from_static(&[0x01])],
+                                Option::<Bytes>::None,
+                            ),
+                        )
+                        .await;
+                    assert!(invalid_result.is_err());
+
+                    let latest_after_error: Value = client
+                        .request("eth_getBlockByNumber", (BlockNumberOrTag::Latest, false))
+                        .await?;
+                    assert_eq!(
+                        latest_after_error.get("hash").and_then(Value::as_str),
+                        Some(next_block_hash.as_str())
                     );
                     Ok(())
                 }
