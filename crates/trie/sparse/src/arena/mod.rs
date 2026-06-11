@@ -4,7 +4,10 @@ mod nodes;
 
 use branch_child_idx::{BranchChildIdx, BranchChildIter};
 use cursor::{ArenaCursor, NextResult, SeekResult};
-pub use cursor::{ArenaHashedCursor, ArenaHashedCursorValue, ArenaHashedStorageCursor};
+pub use cursor::{
+    ArenaHashedCursor, ArenaHashedCursorValue, ArenaHashedStorageCursor, ArenaTrieCursor,
+    ArenaTrieStorageCursor,
+};
 use nodes::{
     ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
 };

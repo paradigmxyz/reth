@@ -1,10 +1,12 @@
 use crate::{
-    ArenaHashedCursor, ArenaHashedStorageCursor, ArenaParallelSparseTrie, HashedCursor,
-    HashedCursorFactory, HashedStorageCursor, SparseStateTrie,
+    ArenaHashedCursor, ArenaHashedStorageCursor, ArenaParallelSparseTrie, ArenaTrieCursor,
+    ArenaTrieStorageCursor, HashedCursor, HashedCursorFactory, HashedStorageCursor,
+    SparseStateTrie, TrieCursor, TrieCursorFactory, TrieStorageCursor,
 };
 use alloy_primitives::{B256, U256};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
+use reth_trie_common::{BranchNodeCompact, Nibbles};
 
 /// Hashed cursor factory backed by a [`SparseStateTrie`] and an inner cursor factory.
 #[derive(Clone, Debug)]
@@ -110,10 +112,122 @@ where
     }
 }
 
+/// Trie cursor factory backed by a [`SparseStateTrie`] and an inner trie cursor factory.
+#[derive(Clone, Debug)]
+pub struct SparseStateTrieTrieCursorFactory<'a, T> {
+    sparse_trie: &'a SparseStateTrie<ArenaParallelSparseTrie, ArenaParallelSparseTrie>,
+    inner: T,
+}
+
+impl<'a, T> SparseStateTrieTrieCursorFactory<'a, T> {
+    /// Creates a new sparse-state trie cursor factory.
+    pub const fn new(
+        sparse_trie: &'a SparseStateTrie<ArenaParallelSparseTrie, ArenaParallelSparseTrie>,
+        inner: T,
+    ) -> Self {
+        Self { sparse_trie, inner }
+    }
+
+    /// Returns the wrapped sparse state trie.
+    pub const fn sparse_trie(
+        &self,
+    ) -> &'a SparseStateTrie<ArenaParallelSparseTrie, ArenaParallelSparseTrie> {
+        self.sparse_trie
+    }
+
+    /// Returns a reference to the inner cursor factory.
+    pub const fn inner(&self) -> &T {
+        &self.inner
+    }
+}
+
+impl<'sparse, T> TrieCursorFactory for SparseStateTrieTrieCursorFactory<'sparse, T>
+where
+    T: TrieCursorFactory,
+{
+    type AccountTrieCursor<'a>
+        = ArenaTrieCursor<T::AccountTrieCursor<'a>>
+    where
+        Self: 'a;
+    type StorageTrieCursor<'a>
+        = SparseStateTrieStorageTrieCursor<'sparse, T::StorageTrieCursor<'a>>
+    where
+        Self: 'a;
+
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
+        let inner = self.inner.account_trie_cursor()?;
+        Ok(ArenaTrieCursor::new(self.sparse_trie.state_trie_ref(), inner))
+    }
+
+    fn storage_trie_cursor(
+        &self,
+        hashed_address: B256,
+    ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
+        let inner = self.inner.storage_trie_cursor(hashed_address)?;
+        Ok(SparseStateTrieStorageTrieCursor {
+            sparse_trie: self.sparse_trie,
+            cursor: ArenaTrieStorageCursor::new(
+                self.sparse_trie.storage_trie_ref(&hashed_address),
+                inner,
+            ),
+        })
+    }
+}
+
+/// Trie storage cursor for a [`SparseStateTrieTrieCursorFactory`].
+#[derive(Debug)]
+pub struct SparseStateTrieStorageTrieCursor<'a, C> {
+    sparse_trie: &'a SparseStateTrie<ArenaParallelSparseTrie, ArenaParallelSparseTrie>,
+    cursor: ArenaTrieStorageCursor<C>,
+}
+
+impl<C> TrieCursor for SparseStateTrieStorageTrieCursor<'_, C>
+where
+    C: TrieStorageCursor,
+{
+    fn seek_exact(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        self.cursor.seek_exact(key)
+    }
+
+    fn seek(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        self.cursor.seek(key)
+    }
+
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        self.cursor.next()
+    }
+
+    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+        self.cursor.current()
+    }
+
+    fn reset(&mut self) {
+        self.cursor.reset();
+    }
+}
+
+impl<C> TrieStorageCursor for SparseStateTrieStorageTrieCursor<'_, C>
+where
+    C: TrieStorageCursor,
+{
+    fn set_hashed_address(&mut self, hashed_address: B256) {
+        self.cursor.set_hashed_address_with_sparse_trie(
+            hashed_address,
+            self.sparse_trie.storage_trie_ref(&hashed_address),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::RevealableSparseTrie;
+    use crate::{LeafUpdate, RevealableSparseTrie, SparseTrie};
     use alloy_primitives::{b256, map::B256Map, U256};
     use reth_trie_common::{
         BranchNodeV2, DecodedMultiProofV2, LeafNode, Nibbles, ProofTrieNodeV2, RlpNode, TrieMask,
@@ -300,6 +414,172 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Debug, Default)]
+    struct TestTrieCursorFactory {
+        account_nodes: BTreeMap<Nibbles, BranchNodeCompact>,
+        storage_nodes: B256Map<BTreeMap<Nibbles, BranchNodeCompact>>,
+    }
+
+    impl TestTrieCursorFactory {
+        fn new(
+            account_nodes: BTreeMap<Nibbles, BranchNodeCompact>,
+            storage_nodes: B256Map<BTreeMap<Nibbles, BranchNodeCompact>>,
+        ) -> Self {
+            Self { account_nodes, storage_nodes }
+        }
+    }
+
+    impl TrieCursorFactory for TestTrieCursorFactory {
+        type AccountTrieCursor<'a>
+            = TestTrieCursor
+        where
+            Self: 'a;
+        type StorageTrieCursor<'a>
+            = TestStorageTrieCursor
+        where
+            Self: 'a;
+
+        fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
+            Ok(TestTrieCursor { nodes: self.account_nodes.clone(), current: None })
+        }
+
+        fn storage_trie_cursor(
+            &self,
+            hashed_address: B256,
+        ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
+            Ok(TestStorageTrieCursor {
+                nodes: self.storage_nodes.clone(),
+                hashed_address,
+                current: None,
+            })
+        }
+    }
+
+    #[derive(Debug)]
+    struct TestTrieCursor {
+        nodes: BTreeMap<Nibbles, BranchNodeCompact>,
+        current: Option<Nibbles>,
+    }
+
+    impl TrieCursor for TestTrieCursor {
+        fn seek_exact(
+            &mut self,
+            key: Nibbles,
+        ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            let entry = self.nodes.get(&key).cloned().map(|node| (key, node));
+            self.current = entry.as_ref().map(|(key, _)| *key);
+            Ok(entry)
+        }
+
+        fn seek(
+            &mut self,
+            key: Nibbles,
+        ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            let entry = self.nodes.range(key..).next().map(|(key, node)| (*key, node.clone()));
+            self.current = entry.as_ref().map(|(key, _)| *key);
+            Ok(entry)
+        }
+
+        fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            let entry = match self.current {
+                Some(current) => self
+                    .nodes
+                    .range((Excluded(current), Unbounded))
+                    .next()
+                    .map(|(key, node)| (*key, node.clone())),
+                None => self.nodes.iter().next().map(|(key, node)| (*key, node.clone())),
+            };
+            self.current = entry.as_ref().map(|(key, _)| *key);
+            Ok(entry)
+        }
+
+        fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+            Ok(self.current)
+        }
+
+        fn reset(&mut self) {
+            self.current = None;
+        }
+    }
+
+    #[derive(Debug)]
+    struct TestStorageTrieCursor {
+        nodes: B256Map<BTreeMap<Nibbles, BranchNodeCompact>>,
+        hashed_address: B256,
+        current: Option<Nibbles>,
+    }
+
+    impl TestStorageTrieCursor {
+        fn current_nodes(&self) -> Option<&BTreeMap<Nibbles, BranchNodeCompact>> {
+            self.nodes.get(&self.hashed_address)
+        }
+    }
+
+    impl TrieCursor for TestStorageTrieCursor {
+        fn seek_exact(
+            &mut self,
+            key: Nibbles,
+        ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            let entry = self
+                .current_nodes()
+                .and_then(|nodes| nodes.get(&key))
+                .cloned()
+                .map(|node| (key, node));
+            self.current = entry.as_ref().map(|(key, _)| *key);
+            Ok(entry)
+        }
+
+        fn seek(
+            &mut self,
+            key: Nibbles,
+        ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            let entry = self
+                .current_nodes()
+                .and_then(|nodes| nodes.range(key..).next())
+                .map(|(key, node)| (*key, node.clone()));
+            self.current = entry.as_ref().map(|(key, _)| *key);
+            Ok(entry)
+        }
+
+        fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            let entry = match self.current {
+                Some(current) => self
+                    .current_nodes()
+                    .and_then(|nodes| nodes.range((Excluded(current), Unbounded)).next())
+                    .map(|(key, node)| (*key, node.clone())),
+                None => self
+                    .current_nodes()
+                    .and_then(|nodes| nodes.iter().next())
+                    .map(|(key, node)| (*key, node.clone())),
+            };
+            self.current = entry.as_ref().map(|(key, _)| *key);
+            Ok(entry)
+        }
+
+        fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+            Ok(self.current)
+        }
+
+        fn reset(&mut self) {
+            self.current = None;
+        }
+    }
+
+    impl TrieStorageCursor for TestStorageTrieCursor {
+        fn set_hashed_address(&mut self, hashed_address: B256) {
+            self.hashed_address = hashed_address;
+            self.reset();
+        }
+    }
+
+    fn empty_branch_node() -> BranchNodeCompact {
+        BranchNodeCompact::default()
+    }
+
+    fn dirty_cursor_error(error: DatabaseError) -> bool {
+        error.to_string().contains("dirty node")
+    }
+
     #[test]
     fn blind_account_trie_delegates_to_inner_cursor() {
         let inner = TestHashedCursorFactory::new(
@@ -386,5 +666,144 @@ mod tests {
         cursor.set_hashed_address(ADDRESS_1);
         assert_eq!(cursor.seek(B256::ZERO).unwrap(), Some((KEY_0, other_storage_value)));
         assert_eq!(cursor.next().unwrap(), None);
+    }
+
+    #[test]
+    fn account_trie_cursor_returns_sparse_root_and_delegates_blinded_children() {
+        let account_0 = account(30);
+        let account_1 = account(31);
+        let inner_node = empty_branch_node();
+
+        let mut sparse =
+            SparseStateTrie::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::default();
+        sparse
+            .reveal_decoded_multiproof_v2(DecodedMultiProofV2 {
+                account_proofs: partial_two_leaf_proof(
+                    account_leaf(account_0),
+                    account_leaf(account_1),
+                ),
+                ..Default::default()
+            })
+            .unwrap();
+        sparse.root().unwrap();
+
+        let inner = TestTrieCursorFactory::new(
+            BTreeMap::from([
+                (Nibbles::from_nibbles([0x1, 0x2]), inner_node.clone()),
+                (Nibbles::from_nibbles([0x2]), empty_branch_node()),
+            ]),
+            B256Map::default(),
+        );
+        let factory = SparseStateTrieTrieCursorFactory::new(&sparse, inner);
+
+        let mut cursor = factory.account_trie_cursor().unwrap();
+        let (root_path, root_node) = cursor.seek(Nibbles::default()).unwrap().unwrap();
+        assert_eq!(root_path, Nibbles::default());
+        assert_eq!(root_node.state_mask, TrieMask::new(0b11));
+        assert_eq!(root_node.tree_mask, TrieMask::new(0b10));
+        assert_eq!(root_node.hash_mask, TrieMask::new(0b11));
+        assert_eq!(root_node.hashes.len(), 2);
+
+        assert_eq!(cursor.next().unwrap(), Some((Nibbles::from_nibbles([0x1, 0x2]), inner_node)));
+        assert_eq!(cursor.next().unwrap(), None);
+    }
+
+    #[test]
+    fn storage_trie_cursor_refreshes_sparse_topology_when_address_changes() {
+        let value_0 = U256::from(40);
+        let value_1 = U256::from(41);
+        let inner_node = empty_branch_node();
+        let other_inner_node = BranchNodeCompact::new(
+            TrieMask::new(0b1),
+            TrieMask::default(),
+            TrieMask::default(),
+            vec![],
+            None,
+        );
+
+        let mut sparse =
+            SparseStateTrie::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::default();
+        sparse.set_accounts_trie(RevealableSparseTrie::revealed_empty());
+        sparse
+            .reveal_decoded_multiproof_v2(DecodedMultiProofV2 {
+                storage_proofs: B256Map::from_iter([(
+                    ADDRESS_0,
+                    partial_two_leaf_proof(storage_leaf(value_0), storage_leaf(value_1)),
+                )]),
+                ..Default::default()
+            })
+            .unwrap();
+        sparse.storage_root(&ADDRESS_0).unwrap();
+
+        let inner = TestTrieCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([
+                (
+                    ADDRESS_0,
+                    BTreeMap::from([
+                        (Nibbles::from_nibbles([0x1, 0x2]), inner_node.clone()),
+                        (Nibbles::from_nibbles([0x2]), empty_branch_node()),
+                    ]),
+                ),
+                (
+                    ADDRESS_1,
+                    BTreeMap::from([(Nibbles::from_nibbles([0x0, 0x1]), other_inner_node.clone())]),
+                ),
+            ]),
+        );
+        let factory = SparseStateTrieTrieCursorFactory::new(&sparse, inner);
+
+        let mut cursor = factory.storage_trie_cursor(ADDRESS_0).unwrap();
+        assert_eq!(cursor.seek(Nibbles::default()).unwrap().unwrap().0, Nibbles::default());
+        assert_eq!(cursor.next().unwrap(), Some((Nibbles::from_nibbles([0x1, 0x2]), inner_node)));
+        assert_eq!(cursor.next().unwrap(), None);
+
+        cursor.set_hashed_address(ADDRESS_1);
+        assert_eq!(
+            cursor.seek(Nibbles::default()).unwrap(),
+            Some((Nibbles::from_nibbles([0x0, 0x1]), other_inner_node))
+        );
+        assert_eq!(cursor.next().unwrap(), None);
+    }
+
+    #[test]
+    fn cursors_error_when_sparse_nodes_are_dirty() {
+        let account_0 = account(50);
+        let account_1 = account(51);
+
+        let mut sparse =
+            SparseStateTrie::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::default();
+        sparse
+            .reveal_decoded_multiproof_v2(DecodedMultiProofV2 {
+                account_proofs: partial_two_leaf_proof(
+                    account_leaf(account_0),
+                    account_leaf(account_1),
+                ),
+                ..Default::default()
+            })
+            .unwrap();
+        sparse.root().unwrap();
+        let mut updates = B256Map::from_iter([(
+            KEY_0,
+            LeafUpdate::Changed(alloy_rlp::encode(account(52).into_trie_account(EMPTY_ROOT_HASH))),
+        )]);
+        sparse
+            .trie_mut()
+            .as_revealed_mut()
+            .unwrap()
+            .update_leaves(&mut updates, |_, _| panic!("leaf should already be revealed"))
+            .unwrap();
+
+        let hashed_factory = SparseStateTrieCursorFactory::new(
+            &sparse,
+            TestHashedCursorFactory::new(BTreeMap::new(), B256Map::default()),
+        );
+        let mut hashed_cursor = hashed_factory.hashed_account_cursor().unwrap();
+        assert!(dirty_cursor_error(hashed_cursor.seek(B256::ZERO).unwrap_err()));
+
+        let trie_factory =
+            SparseStateTrieTrieCursorFactory::new(&sparse, TestTrieCursorFactory::default());
+        let mut trie_cursor = trie_factory.account_trie_cursor().unwrap();
+        assert!(dirty_cursor_error(trie_cursor.seek(Nibbles::default()).unwrap_err()));
     }
 }
