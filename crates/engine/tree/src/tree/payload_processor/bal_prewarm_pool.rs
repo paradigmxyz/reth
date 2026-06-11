@@ -63,35 +63,62 @@ impl BalPrewarmPool {
         Arc::new(Self { workers, next: AtomicUsize::new(0), _handles: handles })
     }
 
-    /// Begins a block: hands every worker the provider builder and shared cache so each opens its
-    /// own read txn over the parent state. Pair with [`end_block`](Self::end_block).
-    pub(crate) fn begin_block(&self, build: Arc<BuildProviderFn>, caches: ExecutionCache) {
-        for worker in &self.workers {
+    /// Returns how many workers should participate in prewarming this block.
+    pub(crate) fn active_worker_count(
+        &self,
+        target_count: usize,
+        cpu_workers: usize,
+    ) -> usize {
+        let worker_limit = self.workers.len();
+        if target_count == 0 || worker_limit == 0 {
+            return 0
+        }
+
+        target_count
+            .min(cpu_workers.saturating_mul(BAL_PREWARM_WORKERS_PER_CPU).max(1))
+            .min(worker_limit)
+            .max(1)
+    }
+
+    /// Begins a block: hands active workers the provider builder and shared cache so each opens
+    /// its own read txn over the parent state. Pair with [`end_block`](Self::end_block).
+    pub(crate) fn begin_block(
+        &self,
+        build: Arc<BuildProviderFn>,
+        caches: ExecutionCache,
+        active_workers: usize,
+    ) {
+        self.next.store(0, Ordering::Relaxed);
+        for worker in self.workers.iter().take(active_workers.min(self.workers.len())) {
             let _ = worker
                 .send(PrewarmMsg::BeginBlock { build: build.clone(), caches: caches.clone() });
         }
     }
 
     /// Fire-and-forget: warm an account (basic account + bytecode) on some worker.
-    pub(crate) fn warm_account(&self, addr: Address) {
-        self.send_warm(PrewarmTarget::Account(addr));
+    pub(crate) fn warm_account(&self, active_workers: usize, addr: Address) {
+        self.send_warm(active_workers, PrewarmTarget::Account(addr));
     }
 
     /// Fire-and-forget: warm one storage slot on some worker.
-    pub(crate) fn warm_storage(&self, addr: Address, slot: StorageKey) {
-        self.send_warm(PrewarmTarget::Storage(addr, slot));
+    pub(crate) fn warm_storage(&self, active_workers: usize, addr: Address, slot: StorageKey) {
+        self.send_warm(active_workers, PrewarmTarget::Storage(addr, slot));
     }
 
     /// Ends the block: every worker drops its provider (and read txn) once it has drained the warm
     /// requests queued ahead of this message.
-    pub(crate) fn end_block(&self) {
-        for worker in &self.workers {
+    pub(crate) fn end_block(&self, active_workers: usize) {
+        for worker in self.workers.iter().take(active_workers.min(self.workers.len())) {
             let _ = worker.send(PrewarmMsg::EndBlock);
         }
     }
 
-    fn send_warm(&self, target: PrewarmTarget) {
-        let i = self.next.fetch_add(1, Ordering::Relaxed) % self.workers.len();
+    fn send_warm(&self, active_workers: usize, target: PrewarmTarget) {
+        let active_workers = active_workers.min(self.workers.len());
+        if active_workers == 0 {
+            return
+        }
+        let i = self.next.fetch_add(1, Ordering::Relaxed) % active_workers;
         let _ = self.workers[i].send(PrewarmMsg::Warm(target));
     }
 }
@@ -117,6 +144,9 @@ impl BalPrewarmPool {
 ///
 /// This should explain why this particular value is picked.
 pub(crate) const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
+
+/// Number of active BAL prewarm providers to keep per CPU prewarming worker.
+const BAL_PREWARM_WORKERS_PER_CPU: usize = 2;
 
 fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
     // The provider (and its MDBX read txn) held for the current block, between `BeginBlock` and

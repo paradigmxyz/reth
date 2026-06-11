@@ -412,18 +412,21 @@ where
             let caches = saved_cache.cache().clone();
             let provider_builder = ctx.provider.clone();
             let build = Arc::new(move || provider_builder.build());
+            let prefetch_targets = bal.len() + bal.total_slots();
+            let active_workers =
+                pool.active_worker_count(prefetch_targets, executor.prewarming_pool().current_num_threads());
 
-            pool.begin_block(build, caches);
+            pool.begin_block(build, caches, active_workers);
             for account in prefetch_bal.as_bal() {
-                pool.warm_account(account.address);
+                pool.warm_account(active_workers, account.address);
                 for change in &account.storage_changes {
-                    pool.warm_storage(account.address, change.slot.into());
+                    pool.warm_storage(active_workers, account.address, change.slot.into());
                 }
                 for &slot in &account.storage_reads {
-                    pool.warm_storage(account.address, slot.into());
+                    pool.warm_storage(active_workers, account.address, slot.into());
                 }
             }
-            pool.end_block();
+            pool.end_block(active_workers);
             let _ = prefetch_tx.send(());
         } else {
             let _ = prefetch_tx.send(());
