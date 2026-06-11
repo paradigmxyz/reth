@@ -14,10 +14,7 @@ use reth_fs_util as fs;
 use reth_node_core::version::version_metadata;
 use reth_provider::StaticFileProviderFactory;
 use reth_static_file_types::StaticFileSegment;
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
 /// Syncs ERA encoded blocks from a local or remote source.
@@ -93,7 +90,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
             1;
 
         if let Some(path) = self.import.path {
-            let era_type = detect_dir_era_type(&path)?;
+            let era_type = EraFileType::from_dir(&path)?.ok_or_else(|| {
+                eyre!("No ERA1 (.era1) or ERE (.ere, .erae) files found in {}", path.display())
+            })?;
 
             info!(target: "reth::cli", ?era_type, path = %path.display(), to_block = ?self.to_block, "Starting ERA import");
 
@@ -156,18 +155,4 @@ impl<C: ChainSpecParser> ImportEraCommand<C> {
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         Some(&self.env.chain)
     }
-}
-
-/// Detects the execution-layer ERA file type from the files in `dir`.
-fn detect_dir_era_type(dir: &Path) -> eyre::Result<EraFileType> {
-    for entry in fs::read_dir(dir)? {
-        if let Some(name) = entry?.file_name().to_str() &&
-            let Some(era_type @ (EraFileType::Era1 | EraFileType::Ere)) =
-                EraFileType::from_filename(name)
-        {
-            return Ok(era_type);
-        }
-    }
-
-    Err(eyre!("No ERA1 (.era1) or ERE (.ere, .erae) files found in {}", dir.display()))
 }
