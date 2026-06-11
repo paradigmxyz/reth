@@ -13,9 +13,7 @@ use evm2::{
     },
 };
 use reth_primitives_traits::{Account, Bytecode as RethBytecode};
-use reth_trie_common::{
-    HashedPostState, HashedPostStateSorted, HashedStorage, HashedStorageSorted, KeyHasher,
-};
+use reth_trie_common::{HashedPostState, HashedPostStateSorted, HashedStorageSorted, KeyHasher};
 
 /// Reverts for one block of evm2 state changes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -261,7 +259,9 @@ where
     HashedPostStateSorted::new(accounts, storages)
 }
 
-struct HashedPostStateSink<KH> {
+/// Evm2 state-change sink that builds trie-ready hashed post-state as changes stream in.
+#[derive(Debug)]
+pub struct HashedPostStateSink<KH> {
     state: HashedPostState,
     _key_hasher: PhantomData<KH>,
 }
@@ -339,7 +339,8 @@ impl StateChangeSink for BlockRevertsSink {
 }
 
 impl<KH> HashedPostStateSink<KH> {
-    fn into_hashed_post_state(self) -> HashedPostState {
+    /// Consumes the sink and returns the accumulated hashed post-state.
+    pub fn into_hashed_post_state(self) -> HashedPostState {
         self.state
     }
 }
@@ -362,10 +363,9 @@ where
     }
 
     fn storage_wipe(&mut self, address: alloy_primitives::Address) -> Result<(), Self::Error> {
-        self.state
-            .storages
-            .entry(KH::hash_key(&address))
-            .or_insert_with(|| HashedStorage { wiped: true, storage: Default::default() });
+        let storage = self.state.storages.entry(KH::hash_key(&address)).or_default();
+        storage.wiped = true;
+        storage.storage.clear();
         Ok(())
     }
 
@@ -464,5 +464,39 @@ mod tests {
             evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&accumulator).into_sorted();
 
         assert_eq!(sorted, streaming);
+    }
+
+    #[test]
+    fn hashed_post_state_sink_clears_prior_slots_on_storage_wipe() {
+        let address = Address::repeat_byte(0x03);
+        let mut sink = HashedPostStateSink::<KeccakKeyHasher>::default();
+
+        sink.storage(StorageChange {
+            address,
+            key: U256::from(1),
+            original: U256::ZERO,
+            current: U256::from(2),
+        })
+        .unwrap();
+        sink.storage_wipe(address).unwrap();
+        sink.storage(StorageChange {
+            address,
+            key: U256::from(3),
+            original: U256::ZERO,
+            current: U256::from(4),
+        })
+        .unwrap();
+
+        let hashed_state = sink.into_hashed_post_state();
+        let storage = hashed_state.storages.get(&KeccakKeyHasher::hash_key(&address)).unwrap();
+
+        assert!(storage.wiped);
+        assert_eq!(storage.storage.len(), 1);
+        assert_eq!(
+            storage
+                .storage
+                .get(&KeccakKeyHasher::hash_key(&B256::new(U256::from(3).to_be_bytes()))),
+            Some(&U256::from(4))
+        );
     }
 }

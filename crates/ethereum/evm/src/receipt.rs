@@ -6,6 +6,7 @@ use evm2::{
 };
 use reth_ethereum_primitives::Receipt;
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
+use reth_trie_common::HashedPostState;
 
 /// A builder that operates on Reth primitive types, specifically [`TransactionSigned`] and
 /// [`Receipt`].
@@ -137,6 +138,17 @@ impl RethReceiptBuilder {
         txs: impl IntoIterator<Item = (TxType, TxResult)>,
         state: BlockStateAccumulator,
     ) -> BlockExecutionOutput<Receipt> {
+        self.build_evm2_block_output_from_block_state_with_hashed_state(txs, state, None)
+    }
+
+    /// Builds a block execution output from result-only evm2 transaction outcomes, an owned
+    /// accumulated evm2 block state, and optional precomputed hashed post-state.
+    pub fn build_evm2_block_output_from_block_state_with_hashed_state(
+        &self,
+        txs: impl IntoIterator<Item = (TxType, TxResult)>,
+        state: BlockStateAccumulator,
+        hashed_state: Option<HashedPostState>,
+    ) -> BlockExecutionOutput<Receipt> {
         let mut receipts = Vec::new();
         let mut cumulative_gas_used = 0;
 
@@ -159,6 +171,7 @@ impl RethReceiptBuilder {
             },
             state,
         )
+        .with_hashed_state(hashed_state)
     }
 }
 

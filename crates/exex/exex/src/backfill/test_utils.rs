@@ -200,7 +200,7 @@ where
     let mut results = Vec::with_capacity(outputs.len());
 
     for (block, output) in outputs {
-        let BlockExecutionOutput { result, state } = output;
+        let BlockExecutionOutput { result, state, .. } = output;
         blocks.push(block);
         states.push(state.into_inner());
         results.push(result);

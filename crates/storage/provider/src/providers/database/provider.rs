@@ -3722,6 +3722,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
                     blob_gas_used: 0,
                 },
                 state: Default::default(),
+                hashed_state: None,
             }),
             ComputedTrieData::default(),
         );
@@ -5345,6 +5346,7 @@ mod tests {
                     blob_gas_used: 0,
                 },
                 state: Default::default(),
+                hashed_state: None,
             }),
             ComputedTrieData::default(),
         );
@@ -5404,6 +5406,7 @@ mod tests {
                         blob_gas_used: 0,
                     },
                     state: state.into(),
+                    hashed_state: None,
                 }),
                 ComputedTrieData { hashed_state: Arc::new(hashed_state), ..Default::default() },
             );

@@ -1950,6 +1950,7 @@ mod tests {
                                 gas_used: 0,
                                 blob_gas_used: 0,
                             },
+                            hashed_state: None,
                         }),
                         ..Default::default()
                     }
@@ -2119,6 +2120,7 @@ mod tests {
                         gas_used: 0,
                         blob_gas_used: 0,
                     },
+                    hashed_state: None,
                 }),
                 ..Default::default()
             }],
@@ -2214,6 +2216,7 @@ mod tests {
                         gas_used: 0,
                         blob_gas_used: 0,
                     },
+                    hashed_state: None,
                 }),
                 ..Default::default()
             }],

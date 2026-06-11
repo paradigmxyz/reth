@@ -771,6 +771,7 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
                     blob_gas_used: 0,
                 },
                 state: Default::default(),
+                hashed_state: None,
             }),
             trie_data: DeferredTrieData::ready(ComputedTrieData::default()),
         }

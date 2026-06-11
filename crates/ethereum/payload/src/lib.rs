@@ -35,7 +35,7 @@ use reth_transaction_pool::{
     BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
     ValidPoolTransaction,
 };
-use reth_trie_common::KeccakKeyHasher;
+use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 use std::sync::Arc;
 use tracing::{debug, trace};
 
@@ -294,10 +294,11 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let state_root =
-        state_provider.state_root_sorted(evm2_block_state_hashed_post_state_sorted::<
-            KeccakKeyHasher,
-        >(&output.state))?;
+    let hashed_state = output.hashed_state.clone().map_or_else(
+        || evm2_block_state_hashed_post_state_sorted::<KeccakKeyHasher>(&output.state),
+        HashedPostState::into_sorted,
+    );
+    let state_root = state_provider.state_root_sorted(hashed_state)?;
     let receipts_root =
         reth_ethereum_primitives::calculate_receipt_root_no_memo(&output.result.receipts);
     let logs_bloom =
