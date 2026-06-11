@@ -302,8 +302,11 @@ where
             + 'static,
     {
         // start preparing transactions immediately
+        let prewarm_transactions = !parallel_bal_execution
+            && !self.disable_transaction_prewarming
+            && env.transaction_count >= SMALL_BLOCK_TX_THRESHOLD;
         let (prewarm_rx, execution_rx) =
-            self.spawn_tx_iterator(transactions, env.transaction_count);
+            self.spawn_tx_iterator(transactions, env.transaction_count, prewarm_transactions);
 
         let span = Span::current();
 
@@ -353,8 +356,10 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
+        let prewarm_transactions = !self.disable_transaction_prewarming
+            && env.transaction_count >= SMALL_BLOCK_TX_THRESHOLD;
         let (prewarm_rx, execution_rx) =
-            self.spawn_tx_iterator(transactions, env.transaction_count);
+            self.spawn_tx_iterator(transactions, env.transaction_count, prewarm_transactions);
         let prewarm_handle =
             self.spawn_caching_with(env, prewarm_rx, provider_builder, None, false);
         PayloadHandle {
@@ -447,9 +452,11 @@ where
         &self,
         transactions: I,
         transaction_count: usize,
+        prewarm_transactions: bool,
     ) -> (IteratorPrewarmTxReceiver<Evm, I>, IteratorExecuteTxReceiver<Evm, I>) {
         let (prewarm_tx, prewarm_rx) = mpsc::sync_channel(transaction_count);
         let (execute_tx, execute_rx) = crossbeam_channel::bounded(transaction_count);
+        let prewarm_tx = prewarm_transactions.then_some(prewarm_tx);
 
         if transaction_count == 0 {
             // Empty block — nothing to do.
@@ -463,7 +470,12 @@ where
             );
             self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
-                convert_serial(transactions.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                convert_serial(
+                    transactions.into_iter(),
+                    &convert,
+                    prewarm_tx.as_ref(),
+                    &execute_tx,
+                );
             });
         } else {
             // Parallel path — recover signatures in parallel on rayon, stream results
@@ -481,7 +493,7 @@ where
 
                 // Convert the first few transactions sequentially so execution can
                 // start immediately without waiting for rayon work-stealing.
-                convert_serial(all.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                convert_serial(all.into_iter(), &convert, prewarm_tx.as_ref(), &execute_tx);
 
                 // Convert the remaining transactions in parallel.
                 rest.into_par_iter()
@@ -494,7 +506,9 @@ where
                     .for_each_ordered_in(executor.cpu_pool(), |(idx, tx)| {
                         let tx = tx.map(|tx| {
                             let tx = WithTxEnv::new(tx);
-                            let _ = prewarm_tx.send((idx, tx.clone()));
+                            if let Some(prewarm_tx) = &prewarm_tx {
+                                let _ = prewarm_tx.send((idx, tx.clone()));
+                            }
                             tx
                         });
                         let _ = execute_tx.send((idx, tx));
@@ -789,7 +803,7 @@ where
 fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     iter: impl Iterator<Item = RawTx>,
     convert: &C,
-    prewarm_tx: &mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>,
+    prewarm_tx: Option<&mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>>,
     execute_tx: &ExecuteTxSender<TxEnv, Recovered, Err>,
 ) where
     Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = Recovered>,
@@ -799,7 +813,7 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     for (idx, raw_tx) in iter.enumerate() {
         let tx = convert.convert(raw_tx);
         let tx = tx.map(|tx| WithTxEnv::new(tx));
-        if let Ok(tx) = &tx {
+        if let (Some(prewarm_tx), Ok(tx)) = (prewarm_tx, &tx) {
             let _ = prewarm_tx.send((idx, tx.clone()));
         }
         let _ = execute_tx.send((idx, tx));
