@@ -456,7 +456,8 @@ where
 
         trace!(target: "engine::tree::payload_validator", "Fetching block state provider");
         let _enter =
-            debug_span!(target: "engine::tree::payload_validator", "state_provider").entered();
+            tracing::trace_span!(target: "engine::tree::payload_validator", "state_provider")
+                .entered();
         let Some(provider_builder) =
             ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
         else {
@@ -469,7 +470,7 @@ where
         };
         drop(_enter);
 
-        let evm_env = debug_span!(target: "engine::tree::payload_validator", "evm_env")
+        let evm_env = tracing::trace_span!(target: "engine::tree::payload_validator", "evm_env")
             .in_scope(|| self.evm_env_for(&input))
             .map_err(NewPayloadError::other)?;
 
@@ -1060,16 +1061,17 @@ where
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
         let has_bal = env.decoded_bal.is_some();
-        let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
-            State::builder()
-                .with_database(StateProviderDatabase::new(state_provider))
-                .with_bundle_update()
-                .with_bal_builder_if(has_bal)
-                .build()
-        });
+        let mut db =
+            tracing::trace_span!(target: "engine::tree", "build_state_db").in_scope(|| {
+                State::builder()
+                    .with_database(StateProviderDatabase::new(state_provider))
+                    .with_bundle_update()
+                    .with_bal_builder_if(has_bal)
+                    .build()
+            });
 
         let (spec_id, mut executor) = {
-            let _span = debug_span!(target: "engine::tree", "create_evm").entered();
+            let _span = tracing::trace_span!(target: "engine::tree", "create_evm").entered();
             let spec_id = *env.evm_env.spec_id();
             let evm_config = self.evm_config.clone().with_jit_support();
             let evm = evm_config.evm_with_env(&mut db, env.evm_env);
@@ -1081,7 +1083,8 @@ where
         };
 
         if !self.config.precompile_cache_disabled() {
-            let _span = debug_span!(target: "engine::tree", "setup_precompile_cache").entered();
+            let _span =
+                tracing::trace_span!(target: "engine::tree", "setup_precompile_cache").entered();
             executor.evm_mut().precompiles_mut().map_cacheable_precompiles(
                 |address, precompile| {
                     let metrics = self
@@ -1121,13 +1124,13 @@ where
 
         // Finish execution and get the result
         let post_exec_start = Instant::now();
-        let (_evm, result) = debug_span!(target: "engine::tree", "BlockExecutor::finish")
+        let (_evm, result) = tracing::trace_span!(target: "engine::tree", "BlockExecutor::finish")
             .in_scope(|| executor.finish())
             .map(|(evm, result)| (evm.into_db(), result))?;
         self.metrics.record_post_execution(post_exec_start.elapsed());
 
         // Merge transitions into bundle state
-        debug_span!(target: "engine::tree", "merge_transitions")
+        tracing::trace_span!(target: "engine::tree", "merge_transitions")
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
 
         let built_bal = if has_bal { db.take_built_alloy_bal() } else { None };
@@ -1279,7 +1282,7 @@ where
 
         // Apply pre-execution changes (e.g., beacon root update)
         let pre_exec_start = Instant::now();
-        debug_span!(target: "engine::tree", "pre_execution")
+        tracing::trace_span!(target: "engine::tree", "pre_execution")
             .in_scope(|| executor.apply_pre_execution_changes())?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
 
@@ -1289,7 +1292,7 @@ where
         }
 
         // Execute transactions
-        let exec_span = debug_span!(target: "engine::tree", "execution").entered();
+        let exec_span = tracing::trace_span!(target: "engine::tree", "execution").entered();
         let mut transactions = transactions.into_iter();
         // Some executors may execute transactions that do not append receipts during the
         // main loop (e.g., system transactions whose receipts are added during finalization).
@@ -1641,9 +1644,11 @@ where
         trace!(target: "engine::tree::payload_validator", block=?block.num_hash(), "Validating block consensus");
 
         // Validate block post-execution rules
-        let _enter =
-            debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
-                .entered();
+        let _enter = tracing::trace_span!(
+            target: "engine::tree::payload_validator",
+            "validate_block_post_execution"
+        )
+        .entered();
         let block_access_list_hash =
             built_bal.as_ref().map(|bal| compute_block_access_list_hash(bal));
 
