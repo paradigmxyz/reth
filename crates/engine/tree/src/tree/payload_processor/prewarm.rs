@@ -663,9 +663,10 @@ where
                 }
             }
 
-            let mut hashed_state = reth_trie::HashedPostState::default();
-            hashed_state.storages.insert(hashed_address, storage_map);
-            let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
+            let _ = to_sparse_trie_task.send(StateRootMessage::HashedStorageUpdate {
+                hashed_address,
+                storage: storage_map,
+            });
         }
 
         if provider.is_none() {
@@ -739,10 +740,8 @@ where
         };
 
         let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
-        let mut hashed_state = reth_trie::HashedPostState::default();
-        hashed_state.accounts.insert(hashed_address, Some(account));
-
-        let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
+        let _ = to_sparse_trie_task
+            .send(StateRootMessage::HashedAccountUpdate { hashed_address, account: Some(account) });
     }
 }
 

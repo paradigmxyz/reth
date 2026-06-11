@@ -16,8 +16,8 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_primitives_traits::{Account, FastInstant as Instant};
 use reth_tasks::Runtime;
 use reth_trie::{
-    updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
-    TRIE_ACCOUNT_RLP_MAX_SIZE,
+    updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, HashedStorage, TrieAccount,
+    EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use reth_trie_parallel::{
@@ -204,6 +204,12 @@ where
                 }
                 StateRootMessage::HashedStateUpdate(state) => {
                     SparseTrieTaskMessage::HashedState(state)
+                }
+                StateRootMessage::HashedAccountUpdate { hashed_address, account } => {
+                    SparseTrieTaskMessage::HashedAccount { address: hashed_address, account }
+                }
+                StateRootMessage::HashedStorageUpdate { hashed_address, storage } => {
+                    SparseTrieTaskMessage::HashedStorage { address: hashed_address, storage }
                 }
             };
             if hashed_state_tx.send(msg).is_err() {
@@ -423,6 +429,12 @@ where
             SparseTrieTaskMessage::HashedState(hashed_state) => {
                 self.on_hashed_state_update(hashed_state)
             }
+            SparseTrieTaskMessage::HashedAccount { address, account } => {
+                self.on_hashed_account_update(address, account)
+            }
+            SparseTrieTaskMessage::HashedStorage { address, storage } => {
+                self.on_hashed_storage_update(address, storage)
+            }
             SparseTrieTaskMessage::FinishedStateUpdates => {
                 let _ = self
                     .final_hashed_state_tx
@@ -515,6 +527,45 @@ where
         }
 
         self.final_hashed_state.extend(hashed_state_update);
+    }
+
+    fn on_hashed_storage_update(&mut self, address: B256, storage: HashedStorage) {
+        if !storage.storage.is_empty() {
+            let new_updates = self.new_storage_updates.entry(address).or_default();
+            let mut existing_updates = self.storage_updates.get_mut(&address);
+
+            for (&slot, &value) in &storage.storage {
+                self.trie.record_slot_touch(address, slot);
+
+                let encoded = if value.is_zero() {
+                    Vec::new()
+                } else {
+                    alloy_rlp::encode_fixed_size(&value).to_vec()
+                };
+                new_updates.insert(slot, LeafUpdate::Changed(encoded));
+
+                if let Some(ref mut existing) = existing_updates {
+                    existing.remove(&slot);
+                }
+            }
+        }
+
+        self.new_account_updates.entry(address).or_insert(LeafUpdate::Touched);
+        self.pending_account_updates.entry(address).or_insert(None);
+
+        match self.final_hashed_state.storages.entry(address) {
+            Entry::Occupied(mut entry) => entry.get_mut().extend(&storage),
+            Entry::Vacant(entry) => {
+                entry.insert(storage);
+            }
+        }
+    }
+
+    fn on_hashed_account_update(&mut self, address: B256, account: Option<Account>) {
+        self.trie.record_account_touch(address);
+        self.new_account_updates.insert(address, LeafUpdate::Touched);
+        self.pending_account_updates.insert(address, Some(account));
+        self.final_hashed_state.accounts.insert(address, account);
     }
 
     fn on_proof_result(
@@ -900,6 +951,10 @@ impl PendingTargets {
 enum SparseTrieTaskMessage {
     /// A hashed state update ready to be processed.
     HashedState(HashedPostState),
+    /// A hashed account update ready to be processed.
+    HashedAccount { address: B256, account: Option<Account> },
+    /// A hashed storage update ready to be processed.
+    HashedStorage { address: B256, storage: HashedStorage },
     /// Prefetch proof targets (passed through directly).
     PrefetchProofs(MultiProofTargetsV2),
     /// Signals that all state updates have been received.

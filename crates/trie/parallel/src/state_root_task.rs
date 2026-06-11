@@ -4,6 +4,7 @@ use crate::root::ParallelStateRootError;
 use alloy_eip7928::BlockAccessList;
 use alloy_primitives::{keccak256, B256};
 use derive_more::derive::Deref;
+use reth_primitives_traits::Account;
 use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2};
 use revm_state::EvmState;
 use std::sync::Arc;
@@ -18,6 +19,20 @@ pub enum StateRootMessage {
     StateUpdate(EvmState),
     /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
     HashedStateUpdate(HashedPostState),
+    /// Pre-hashed account update from BAL conversion.
+    HashedAccountUpdate {
+        /// Keccak256 hash of the account address.
+        hashed_address: B256,
+        /// Post-state account value, or `None` if the account was destroyed.
+        account: Option<Account>,
+    },
+    /// Pre-hashed storage update from BAL conversion.
+    HashedStorageUpdate {
+        /// Keccak256 hash of the account address.
+        hashed_address: B256,
+        /// Post-state storage changes for the account.
+        storage: HashedStorage,
+    },
     /// Block Access List (EIP-7928; BAL) containing complete state changes for the block.
     ///
     /// When received, the task generates a single state update from the BAL and processes it.
