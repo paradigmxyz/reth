@@ -56,9 +56,8 @@ pub mod prewarm;
 pub mod receipt_root_task;
 pub mod sparse_trie;
 
-use preserved_sparse_trie::{
-    PreservedSparseTrie, PublishedPayloadBuilderSparseTries, SharedPreservedSparseTrie,
-};
+pub(crate) use preserved_sparse_trie::SharedPreservedSparseTrie;
+use preserved_sparse_trie::{PreservedSparseTrie, PublishedPayloadBuilderSparseTries};
 
 /// Default node capacity for shrinking the sparse trie. This is used to limit the number of trie
 /// nodes in allocated sparse tries.
@@ -497,6 +496,36 @@ where
         )
     }
 
+    /// Spawns a payload-builder state-root task backed by a private sparse-trie snapshot and
+    /// returns the preserved trie handle that will contain the computed result.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
+    pub(crate) fn spawn_payload_builder_state_root_with_updated_sparse_trie_snapshot<F>(
+        &self,
+        multiproof_provider_factory: F,
+        base_state_root: B256,
+        parent_state_root: B256,
+        base_trie_updates: &TrieUpdates,
+        halve_workers: bool,
+        config: &TreeConfig,
+    ) -> (StateRootHandle, SharedPreservedSparseTrie)
+    where
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.state_root_spawner()
+            .spawn_payload_builder_state_root_with_updated_sparse_trie_snapshot(
+                multiproof_provider_factory,
+                base_state_root,
+                parent_state_root,
+                base_trie_updates,
+                halve_workers,
+                config,
+            )
+    }
+
     /// Transaction count threshold below which sequential conversion is used.
     ///
     /// For blocks with fewer than this many transactions, the rayon parallel iterator overhead
@@ -854,6 +883,35 @@ impl StateRootSpawner {
             + Sync
             + 'static,
     {
+        self.spawn_payload_builder_state_root_with_updated_sparse_trie_snapshot(
+            multiproof_provider_factory,
+            base_state_root,
+            parent_state_root,
+            base_trie_updates,
+            halve_workers,
+            config,
+        )
+        .0
+    }
+
+    /// Spawns a payload-builder state-root task backed by a private sparse-trie snapshot and
+    /// returns the preserved trie handle that will contain the computed result.
+    pub(crate) fn spawn_payload_builder_state_root_with_updated_sparse_trie_snapshot<F>(
+        &self,
+        multiproof_provider_factory: F,
+        base_state_root: B256,
+        parent_state_root: B256,
+        base_trie_updates: &TrieUpdates,
+        halve_workers: bool,
+        config: &TreeConfig,
+    ) -> (StateRootHandle, SharedPreservedSparseTrie)
+    where
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
         let clone_start = Instant::now();
         let preserved = self.sparse_state_trie.clone_with_updates(
             base_state_root,
@@ -870,13 +928,44 @@ impl StateRootSpawner {
             "prepared private sparse-trie snapshot for payload builder"
         );
 
+        let preserved_sparse_trie = SharedPreservedSparseTrie::new(preserved);
+        let handle = self.spawn_state_root_with_preserved_sparse_trie(
+            multiproof_provider_factory,
+            parent_state_root,
+            halve_workers,
+            config,
+            PAYLOAD_BUILDER_SPARSE_TRIE_WORKER_NAME,
+            preserved_sparse_trie.clone(),
+            Some(self.payload_builder_sparse_tries.clone()),
+            ProofWorkerPoolKind::PayloadBuilder,
+        );
+
+        (handle, preserved_sparse_trie)
+    }
+
+    /// Spawns a payload-builder state-root task from an already prepared private sparse trie.
+    pub(crate) fn spawn_payload_builder_state_root_with_preserved_sparse_trie<F>(
+        &self,
+        multiproof_provider_factory: F,
+        parent_state_root: B256,
+        preserved_sparse_trie: SharedPreservedSparseTrie,
+        halve_workers: bool,
+        config: &TreeConfig,
+    ) -> StateRootHandle
+    where
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
         self.spawn_state_root_with_preserved_sparse_trie(
             multiproof_provider_factory,
             parent_state_root,
             halve_workers,
             config,
             PAYLOAD_BUILDER_SPARSE_TRIE_WORKER_NAME,
-            SharedPreservedSparseTrie::new(preserved),
+            preserved_sparse_trie,
             Some(self.payload_builder_sparse_tries.clone()),
             ProofWorkerPoolKind::PayloadBuilder,
         )

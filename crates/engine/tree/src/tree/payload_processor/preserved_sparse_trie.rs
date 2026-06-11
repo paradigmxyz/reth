@@ -21,7 +21,7 @@ pub(super) type SparseTrie = SparseStateTrie<ConfigurableSparseTrie, Configurabl
 /// This is stored in [`PayloadProcessor`](super::PayloadProcessor) and cloned to pass to
 /// [`SparseTrieCacheTask`](super::sparse_trie::SparseTrieCacheTask) for trie reuse.
 #[derive(Debug, Default, Clone)]
-pub(super) struct SharedPreservedSparseTrie(Arc<Mutex<Option<PreservedSparseTrie>>>);
+pub(crate) struct SharedPreservedSparseTrie(Arc<Mutex<Option<PreservedSparseTrie>>>);
 
 impl SharedPreservedSparseTrie {
     /// Creates a shared preserved trie handle initialized with the provided trie.
