@@ -1355,12 +1355,9 @@ impl ArenaParallelSparseTrie {
             let short_key = b.short_key;
             let state_mask = b.state_mask;
             let prev_branch_masks = b.branch_masks;
-            let (new_branch_masks, new_hashes) = b.masks_and_hashes(arena);
-            let (children_hash_mask, children_hashes) = b.children_hash_mask_and_hashes(
-                rlp_node_buf,
-                new_branch_masks.hash_mask,
-                &new_hashes,
-            );
+            let new_branch_masks = b.masks(arena);
+            let (children_hash_mask, children_hashes) =
+                b.children_hash_mask_and_hashes(rlp_node_buf);
             let was_dirty = matches!(b.state, ArenaSparseNodeState::Dirty);
 
             rlp_buf.clear();
@@ -1385,7 +1382,6 @@ impl ArenaParallelSparseTrie {
             let branch = arena[head_idx].branch_mut();
             branch.state = ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone() };
             branch.branch_masks = new_branch_masks;
-            branch.hashes = new_hashes;
             branch.children_hash_mask = children_hash_mask;
             branch.children_hashes = children_hashes;
 
@@ -1644,7 +1640,6 @@ impl ArenaParallelSparseTrie {
             state_mask,
             short_key,
             branch_masks: BranchNodeMasks::default(),
-            hashes: Default::default(),
             children_hash_mask: Default::default(),
             children_hashes: Default::default(),
         }));
@@ -3443,7 +3438,6 @@ mod tests {
             panic!("root should be a branch")
         };
         assert_eq!(branch.branch_masks.hash_mask, TrieMask::default());
-        assert!(branch.hashes.is_empty());
         assert_eq!(branch.children_hash_mask, state_mask);
         assert_eq!(branch.children_hashes.as_ref(), &vec![child_hash_0, child_hash_1]);
 
@@ -3479,8 +3473,9 @@ mod tests {
         };
         assert_eq!(branch.branch_masks.hash_mask, state_mask);
         assert_eq!(branch.children_hash_mask, state_mask);
-        assert_eq!(branch.hashes.as_ref(), &vec![child_hash_0, child_hash_1]);
-        assert!(Arc::ptr_eq(&branch.hashes, &branch.children_hashes));
+        assert_eq!(branch.children_hashes.as_ref(), &vec![child_hash_0, child_hash_1]);
+        let compact = branch.branch_node_compact();
+        assert!(Arc::ptr_eq(&compact.hashes, &branch.children_hashes));
     }
 
     proptest! {
