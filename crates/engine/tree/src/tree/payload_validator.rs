@@ -67,8 +67,9 @@ use reth_engine_primitives::{
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
-    block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
-    OnStateHook, SpecFor,
+    block::BlockExecutor,
+    execute::{fill_block_access_list_storage_roots, ExecutableTxFor},
+    ConfigureEvm, EvmEnvFor, ExecutionCtxFor, OnStateHook, SpecFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
 use reth_payload_primitives::{
@@ -1042,7 +1043,6 @@ where
                 .with_database(StateProviderDatabase::new(state_provider))
                 .with_bundle_update()
                 .with_bal_builder_if(has_bal)
-                .with_bal_storage_root_if(is_bogota_active)
                 .build()
         });
 
@@ -1107,7 +1107,11 @@ where
         debug_span!(target: "engine::tree", "merge_transitions")
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
 
-        let built_bal = if has_bal { db.take_built_alloy_bal() } else { None };
+        let mut built_bal = if has_bal { db.take_built_alloy_bal() } else { None };
+        if is_bogota_active && let Some(built_bal) = &mut built_bal {
+            fill_block_access_list_storage_roots(built_bal, &db, &*db.database)
+                .map_err(BlockExecutionError::other)?;
+        }
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
 
         let execution_duration = execution_start.elapsed();

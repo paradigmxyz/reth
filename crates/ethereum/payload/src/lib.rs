@@ -181,12 +181,10 @@ where
     let state = StateProviderDatabase::new(state_provider.as_ref());
     let chain_spec = client.chain_spec();
     let is_amsterdam = chain_spec.is_amsterdam_active_at_timestamp(attributes.timestamp());
-    let is_bogota = chain_spec.is_bogota_active_at_timestamp(attributes.timestamp());
     let mut db = State::builder()
         .with_database(cached_reads.as_db_mut(state))
         .with_bundle_update()
         .with_bal_builder_if(is_amsterdam)
-        .with_bal_storage_root_if(is_bogota)
         .build();
 
     let mut builder = evm_config

@@ -31,7 +31,8 @@ use reth_execution_errors::BlockExecutionError;
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SealedBlock, SealedHeader, TxTy,
 };
-use revm::{database::State, primitives::hardfork::SpecId};
+use revm::database::State;
+use revm_primitives::hardfork::SpecId;
 
 pub mod either;
 /// EVM environment configuration.

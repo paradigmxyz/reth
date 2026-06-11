@@ -3,7 +3,7 @@
 use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
-use alloy_eip7928::{compute_block_access_list_hash, BlockAccessList};
+use alloy_eip7928::{compute_block_access_list_hash, BlockAccessList, StorageRoot};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory, GasOutput};
 use alloy_evm::{
@@ -19,14 +19,14 @@ pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_primitives_traits::{
     Block, HeaderTy, NodePrimitives, ReceiptTy, Recovered, RecoveredBlock, SealedHeader, TxTy,
 };
-use reth_storage_api::StateProvider;
+use reth_storage_api::{StateProvider, StorageRootProvider};
 pub use reth_storage_errors::provider::ProviderError;
-use reth_trie_common::{updates::TrieUpdates, HashedPostState};
+use reth_trie_common::{updates::TrieUpdates, HashedPostState, HashedStorage, EMPTY_ROOT_HASH};
 use revm::{
     database::{states::bundle_state::BundleRetention, BundleState, State},
-    primitives::hardfork::SpecId,
     state::bal::Bal,
 };
+use revm_primitives::hardfork::SpecId;
 
 /// A type that knows how to execute a block. It is assumed to operate on a
 /// [`crate::Evm`] internally and use [`State`] as database.
@@ -472,6 +472,7 @@ where
     DB: Database + 'a,
     Builder: BlockAssembler<F, Block = N::Block>,
     N: NodePrimitives,
+    <F::EvmFactory as EvmFactory>::Spec: Into<SpecId>,
 {
     type Primitives = N;
     type Executor = Executor;
@@ -511,7 +512,12 @@ where
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);
 
-        let block_access_list = db.take_built_alloy_bal();
+        let mut block_access_list = db.take_built_alloy_bal();
+        let is_bogota_active = (*evm_env.spec_id()).into().is_enabled_in(SpecId::BOGOTA);
+        if is_bogota_active && let Some(block_access_list) = &mut block_access_list {
+            fill_block_access_list_storage_roots(block_access_list, &db, &state)
+                .map_err(BlockExecutionError::other)?;
+        }
         let block_access_list_hash =
             block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal.as_slice()));
 
@@ -562,6 +568,44 @@ where
     }
 }
 
+/// Computes EIP-8268 post-block storage roots for all state-changing BAL accounts.
+pub fn fill_block_access_list_storage_roots<DB, P>(
+    block_access_list: &mut BlockAccessList,
+    db: &State<DB>,
+    storage_root_provider: &P,
+) -> Result<(), ProviderError>
+where
+    P: StorageRootProvider + ?Sized,
+{
+    for account_changes in block_access_list {
+        if !account_changes.has_state_changes() {
+            account_changes.storage_root = None;
+            continue;
+        }
+
+        let hashed_storage = db
+            .cache
+            .accounts
+            .get(&account_changes.address)
+            .and_then(|account| {
+                account.account.as_ref().map(|plain_account| {
+                    HashedStorage::from_plain_storage(account.status, plain_account.storage.iter())
+                })
+            })
+            .unwrap_or_default();
+
+        let storage_root =
+            storage_root_provider.storage_root(account_changes.address, hashed_storage)?;
+        account_changes.storage_root = Some(if storage_root == EMPTY_ROOT_HASH {
+            StorageRoot::Empty
+        } else {
+            StorageRoot::Root(storage_root)
+        });
+    }
+
+    Ok(())
+}
+
 /// A generic block executor that uses a [`BlockExecutor`] to
 /// execute blocks.
 #[expect(missing_debug_implementations)]
@@ -598,20 +642,13 @@ where
             .executor_for_block(&mut self.db, block)
             .map_err(BlockExecutionError::other)?;
 
-        let evm_env =
-            self.strategy_factory.evm_env(block.header()).map_err(BlockExecutionError::other)?;
         let has_bal = block.header().block_access_list_hash().is_some();
-
-        let is_bogota_active =
-            Into::<SpecId>::into(*evm_env.spec_id()).is_enabled_in(SpecId::BOGOTA);
 
         if has_bal {
             executor.evm_mut().db_mut().bal_state.bal_builder = Some(Bal::new());
-            executor.evm_mut().db_mut().bal_state.storage_root_enabled = is_bogota_active;
             tracing::info!("Bal state:{:?}", executor.evm().db().bal_state);
         } else {
             executor.evm_mut().db_mut().bal_state.bal_builder = None;
-            executor.evm_mut().db_mut().bal_state.storage_root_enabled = false;
         }
 
         executor.apply_pre_execution_changes()?;

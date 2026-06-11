@@ -25,9 +25,12 @@ use alloy_evm::{
 };
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
+use reth_evm::{
+    execute::{fill_block_access_list_storage_roots, ExecutableTxFor},
+    ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor,
+};
 use reth_primitives_traits::ReceiptTy;
-use reth_provider::BlockExecutionOutput;
+use reth_provider::{BlockExecutionOutput, StorageRootProvider};
 use reth_tasks::Runtime;
 use revm::{
     bytecode::BytecodeDecodeError,
@@ -36,7 +39,7 @@ use revm::{
 };
 use revm_primitives::hardfork::SpecId;
 use revm_state::bal::Bal as RevmBal;
-use std::sync::Arc;
+use std::{ops::Deref, sync::Arc};
 
 use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
 
@@ -60,7 +63,8 @@ where
     Evm: ConfigureEvm + 'static,
     Tx: ExecutableTxFor<Evm> + Send + 'a,
     Err: core::error::Error + Send + Sync + 'static,
-    DB: Database + Send + 'a,
+    DB: Database + Deref + Send + 'a,
+    DB::Target: StorageRootProvider,
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'a,
     ReceiptTy<Evm::Primitives>: Clone,
 {
@@ -103,7 +107,8 @@ where
     Evm: ConfigureEvm + 'scope,
     Tx: ExecutableTxFor<Evm> + Send + 'scope,
     Err: core::error::Error + Send + Sync + 'static,
-    DB: Database + Send + 'scope,
+    DB: Database + Deref + Send + 'scope,
+    DB::Target: StorageRootProvider,
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'scope,
     ReceiptTy<Evm::Primitives>: Clone,
 {
@@ -118,7 +123,6 @@ where
         .with_database(make_db(false)?)
         .with_bundle_update()
         .with_bal_builder()
-        .with_bal_storage_root_if(is_bogota_active)
         .build();
 
     let (block_result, senders) = {
@@ -213,9 +217,17 @@ fn take_built_bal_and_validate<DB>(
     is_bogota_active: bool,
 ) -> Result<BlockAccessList, BalExecutionError>
 where
-    DB: Database,
+    DB: Database + Deref,
+    DB::Target: StorageRootProvider,
 {
-    let built_bal = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
+    let mut built_bal = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
+    if is_bogota_active {
+        fill_block_access_list_storage_roots(
+            &mut built_bal,
+            canonical_state,
+            &*canonical_state.database,
+        )?;
+    }
     // Validate that the built BAL matches the received BAL in terms of storage roots for accounts
     // that specify them.(eip 8268)
     if is_bogota_active {
@@ -587,10 +599,6 @@ mod tests {
             .with_database(&mut db)
             .with_bundle_update()
             .with_bal_builder()
-            .with_bal_storage_root_if(
-                Into::<SpecId>::into(*evm_config.evm_env(block.header()).unwrap().spec_id())
-                    .is_enabled_in(SpecId::BOGOTA),
-            )
             .build();
 
         {
