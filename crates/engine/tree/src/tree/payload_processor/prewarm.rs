@@ -42,6 +42,8 @@ use std::sync::{
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
+const BAL_HASHED_STATE_STREAM_MIN_LEN: usize = 64;
+
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 #[derive(Debug)]
 pub enum PrewarmMode<Tx> {
@@ -373,18 +375,22 @@ where
                 let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
 
-                stream_bal.as_bal().par_iter().for_each(|account_changes| {
-                    WorkerPool::with_worker_mut(|worker| {
-                        let provider =
-                            worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
-                        ctx.send_bal_hashed_state(
-                            &parent_span,
-                            provider,
-                            account_changes,
-                            &to_sparse_trie_task,
-                        );
+                stream_bal
+                    .as_bal()
+                    .par_iter()
+                    .with_min_len(BAL_HASHED_STATE_STREAM_MIN_LEN)
+                    .for_each(|account_changes| {
+                        WorkerPool::with_worker_mut(|worker| {
+                            let provider =
+                                worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
+                            ctx.send_bal_hashed_state(
+                                &parent_span,
+                                provider,
+                                account_changes,
+                                &to_sparse_trie_task,
+                            );
+                        });
                     });
-                });
 
                 let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
                 let _ = stream_tx.send(());
