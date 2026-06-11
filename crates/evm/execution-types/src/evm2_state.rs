@@ -413,6 +413,7 @@ mod tests {
     fn sorted_hashed_post_state_matches_streaming_conversion() {
         let address = Address::repeat_byte(0x01);
         let wiped_address = Address::repeat_byte(0x02);
+        let deleted_address = Address::repeat_byte(0x03);
 
         let mut accumulator = BlockStateAccumulator::new();
         accumulator
@@ -425,6 +426,18 @@ mod tests {
                     code_hash: B256::ZERO,
                     code: None,
                 }),
+            })
+            .unwrap();
+        accumulator
+            .account(AccountChangeRef {
+                address: deleted_address,
+                original: Some(AccountInfoRef {
+                    balance: U256::from(1),
+                    nonce: 1,
+                    code_hash: B256::ZERO,
+                    code: None,
+                }),
+                current: None,
             })
             .unwrap();
         accumulator.storage_wipe(wiped_address).unwrap();

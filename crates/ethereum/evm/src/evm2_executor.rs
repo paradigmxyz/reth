@@ -873,6 +873,14 @@ mod tests {
         evm::AccountInfo,
         interpreter::{opcode::op, Word},
     };
+    use reth_execution_types::evm2_state_source_hashed_post_state;
+
+    fn assert_hashed_state_matches_output(output: &BlockExecutionOutput<Receipt>) {
+        let hashed_state = output.hashed_state.clone().expect("evm2 execution hashes post-state");
+        let recomputed = evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&output.state);
+
+        assert_eq!(hashed_state.into_sorted(), recomputed.into_sorted());
+    }
 
     #[derive(Default)]
     struct TestDatabase {
@@ -1050,6 +1058,7 @@ mod tests {
             output.account_state(&new).unwrap().current.as_ref().unwrap().balance,
             U256::from(5_000_000_000u64)
         );
+        assert_hashed_state_matches_output(&output);
     }
 
     #[test]
@@ -1142,6 +1151,7 @@ mod tests {
             output.storage(&BEACON_ROOTS_ADDRESS, root_index).unwrap(),
             U256::from_be_bytes(parent_beacon_block_root.0)
         );
+        assert_hashed_state_matches_output(&output);
     }
 
     #[test]
@@ -1178,6 +1188,7 @@ mod tests {
             output.storage(&HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap(),
             U256::from_be_bytes(parent_hash.0)
         );
+        assert_hashed_state_matches_output(&output);
     }
 
     #[test]
@@ -1244,6 +1255,7 @@ mod tests {
             ]
         );
         assert!(output.result.receipts.is_empty());
+        assert_hashed_state_matches_output(&output);
     }
 
     #[test]
@@ -1339,6 +1351,7 @@ mod tests {
         assert!(output.result.receipts.first().unwrap().success);
         assert_eq!(output.result.requests.len(), 1);
         assert_eq!(output.result.requests[0][0], WITHDRAWAL_REQUEST_TYPE);
+        assert_hashed_state_matches_output(&output);
     }
 
     fn return_byte_code(value: u8) -> Bytecode {
