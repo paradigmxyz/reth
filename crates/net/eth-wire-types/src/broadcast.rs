@@ -444,6 +444,13 @@ pub struct NewPooledTransactionHashes66(
     pub Vec<B256>,
 );
 
+impl NewPooledTransactionHashes66 {
+    /// Returns a new instance with capacity for `capacity` hashes.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self(Vec::with_capacity(capacity))
+    }
+}
+
 impl From<Vec<B256>> for NewPooledTransactionHashes66 {
     fn from(v: Vec<B256>) -> Self {
         Self(v)
@@ -516,6 +523,15 @@ impl proptest::prelude::Arbitrary for NewPooledTransactionHashes68 {
 }
 
 impl NewPooledTransactionHashes68 {
+    /// Returns a new instance with capacity for `capacity` entries.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            types: Vec::with_capacity(capacity),
+            sizes: Vec::with_capacity(capacity),
+            hashes: Vec::with_capacity(capacity),
+        }
+    }
+
     /// Returns an iterator over tx hashes zipped with corresponding metadata.
     pub fn metadata_iter(&self) -> impl Iterator<Item = (&B256, (u8, usize))> {
         self.hashes.iter().zip(self.types.iter().copied().zip(self.sizes.iter().copied()))
@@ -685,6 +701,16 @@ impl proptest::prelude::Arbitrary for NewPooledTransactionHashes72 {
 }
 
 impl NewPooledTransactionHashes72 {
+    /// Returns a new instance with capacity for `capacity` entries and no cell mask.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            types: Vec::with_capacity(capacity),
+            sizes: Vec::with_capacity(capacity),
+            hashes: Vec::with_capacity(capacity),
+            cell_mask: None,
+        }
+    }
+
     /// Returns an iterator over tx hashes zipped with corresponding metadata.
     pub fn metadata_iter(&self) -> impl Iterator<Item = (&B256, (u8, usize))> {
         self.hashes.iter().zip(self.types.iter().copied().zip(self.sizes.iter().copied()))
