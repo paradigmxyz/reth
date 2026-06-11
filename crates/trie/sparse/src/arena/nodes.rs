@@ -3,7 +3,7 @@ use super::{
     ArenaSparseSubtrie, Index, NodeArena,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use alloy_primitives::{keccak256, B256};
+use alloy_primitives::B256;
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieNodeV2};
 use smallvec::SmallVec;
@@ -69,8 +69,6 @@ pub(super) struct ArenaSparseNodeBranch {
     pub(super) short_key: Nibbles,
     /// Tree mask and hash mask for database persistence (`TrieUpdates`).
     pub(super) branch_masks: BranchNodeMasks,
-    /// Hashes corresponding to the set bits in `branch_masks.hash_mask`, in nibble order.
-    pub(super) hashes: Arc<Vec<B256>>,
     /// Mask for every child whose RLP node is represented by a hash.
     pub(super) children_hash_mask: TrieMask,
     /// Hashes corresponding to the set bits in `children_hash_mask`, in nibble order.
@@ -85,38 +83,15 @@ impl ArenaSparseNodeBranch {
         short_key: Nibbles,
         branch_masks: BranchNodeMasks,
     ) -> Self {
-        let hashes = Self::hashes_from_blinded_children(&children, state_mask, branch_masks);
         Self {
             state: ArenaSparseNodeState::Revealed,
             children,
             state_mask,
             short_key,
             branch_masks,
-            hashes,
             children_hash_mask: TrieMask::default(),
             children_hashes: Arc::default(),
         }
-    }
-
-    /// Returns hashes for the children represented by `branch_masks.hash_mask`.
-    fn hashes_from_blinded_children(
-        children: &[ArenaSparseNodeBranchChild],
-        state_mask: TrieMask,
-        branch_masks: BranchNodeMasks,
-    ) -> Arc<Vec<B256>> {
-        BranchChildIter::new(state_mask)
-            .filter_map(|(idx, nibble)| {
-                branch_masks.hash_mask.is_bit_set(nibble).then(|| match &children[idx.get()] {
-                    ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
-                        rlp_node.as_hash().expect("hash-mask child must be a hash")
-                    }
-                    ArenaSparseNodeBranchChild::Revealed(child_idx) => {
-                        unreachable!("new blinded branch has revealed child {child_idx:?}")
-                    }
-                })
-            })
-            .collect::<Vec<_>>()
-            .into()
     }
 
     /// Unsets the bit for `nibble` in `state_mask`.
@@ -171,41 +146,36 @@ impl ArenaSparseNodeBranch {
         BranchChildIter::new(self.state_mask).map(|(idx, nibble)| (nibble, &self.children[idx]))
     }
 
-    /// Returns the branch masks and corresponding hash list based on current children.
-    pub(super) fn masks_and_hashes(&self, arena: &NodeArena) -> (BranchNodeMasks, Arc<Vec<B256>>) {
+    /// Returns the branch masks based on current children.
+    pub(super) fn masks(&self, arena: &NodeArena) -> BranchNodeMasks {
         let mut masks = BranchNodeMasks::default();
-        let mut hashes = Vec::new();
 
         for (nibble, child) in self.child_iter() {
-            let (hash_bit, tree_bit, hash) = match child {
+            let (hash_bit, tree_bit) = match child {
                 ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
                     let hash_bit = self.branch_masks.hash_mask.is_bit_set(nibble);
-                    let hash = hash_bit
-                        .then(|| rlp_node.as_hash().expect("blinded hash child must be a hash"));
-                    (hash_bit, self.branch_masks.tree_mask.is_bit_set(nibble), hash)
+                    if hash_bit {
+                        let _ = rlp_node.as_hash().expect("blinded hash child must be a hash");
+                    }
+                    (hash_bit, self.branch_masks.tree_mask.is_bit_set(nibble))
                 }
                 ArenaSparseNodeBranchChild::Revealed(child_idx) => {
                     let child = &arena[*child_idx];
                     let hash_bit = child.hash_mask_bit();
-                    (hash_bit, child.tree_mask_bit(), hash_bit.then(|| child.cached_hash()))
+                    (hash_bit, child.tree_mask_bit())
                 }
             };
 
             masks.set_child_bits(nibble, hash_bit, tree_bit);
-            if let Some(hash) = hash {
-                hashes.push(hash);
-            }
         }
 
-        (masks, hashes.into())
+        masks
     }
 
     /// Returns the mask and hashes for all children whose RLP node is represented by a hash.
     pub(super) fn children_hash_mask_and_hashes(
         &self,
         child_rlp_nodes: &[RlpNode],
-        hash_mask: TrieMask,
-        branch_hashes: &Arc<Vec<B256>>,
     ) -> (TrieMask, Arc<Vec<B256>>) {
         debug_assert_eq!(
             child_rlp_nodes.len(),
@@ -222,11 +192,7 @@ impl ArenaSparseNodeBranch {
             }
         }
 
-        if children_hash_mask == hash_mask {
-            (children_hash_mask, branch_hashes.clone())
-        } else {
-            (children_hash_mask, children_hashes.into())
-        }
+        (children_hash_mask, children_hashes.into())
     }
 
     /// Returns a [`BranchNodeCompact`] from this branch's masks and children hashes.
@@ -243,12 +209,31 @@ impl ArenaSparseNodeBranch {
             self.state_mask,
             self.branch_masks.hash_mask
         );
-        assert_eq!(self.branch_masks.hash_mask.count_ones() as usize, self.hashes.len());
+        assert!(
+            self.branch_masks.hash_mask.is_subset_of(self.children_hash_mask),
+            "children_hash_mask {:?} hash_mask: {:?}",
+            self.children_hash_mask,
+            self.branch_masks.hash_mask
+        );
+        assert_eq!(self.children_hash_mask.count_ones() as usize, self.children_hashes.len());
+
+        let hashes = if self.children_hash_mask == self.branch_masks.hash_mask {
+            self.children_hashes.clone()
+        } else {
+            let mut hashes = Vec::with_capacity(self.branch_masks.hash_mask.count_ones() as usize);
+            for (nibble, hash) in self.children_hash_mask.iter().zip(self.children_hashes.iter()) {
+                if self.branch_masks.hash_mask.is_bit_set(nibble) {
+                    hashes.push(*hash);
+                }
+            }
+            hashes.into()
+        };
+
         BranchNodeCompact {
             state_mask: self.state_mask,
             tree_mask: self.branch_masks.tree_mask,
             hash_mask: self.branch_masks.hash_mask,
-            hashes: self.hashes.clone(),
+            hashes,
             root_hash: None,
         }
     }
@@ -374,22 +359,6 @@ impl ArenaSparseNode {
     pub(super) fn tree_mask_bit(&self) -> bool {
         self.as_branch().is_some_and(|b| !b.branch_masks.is_empty())
     }
-
-    /// Returns the cached hash of this node. Panics if the node's state is not `Cached`.
-    ///
-    /// If the `RlpNode` is already a hash (>= 32 bytes encoded), returns it directly.
-    /// Otherwise keccak-hashes the RLP encoding to produce the hash. This handles the
-    /// case where a branch's RLP is small enough to be embedded rather than hashed.
-    pub(super) fn cached_hash(&self) -> B256 {
-        let rlp_node = match self {
-            Self::Branch(ArenaSparseNodeBranch { state, .. }) | Self::Leaf { state, .. } => state
-                .cached_rlp_node()
-                .expect("cached_hash called on non-Cached branch or leaf: {self:?}"),
-            Self::Subtrie(s) => return s.arena[s.root].cached_hash(),
-            _ => panic!("cached_hash called on {self:?}"),
-        };
-        rlp_node.as_hash().unwrap_or_else(|| keccak256(rlp_node.as_slice()))
-    }
 }
 
 impl ArenaSparseNode {
@@ -439,9 +408,7 @@ impl ArenaSparseNode {
                         b.children.capacity() * core::mem::size_of::<ArenaSparseNodeBranchChild>(),
                     )
                     .unwrap_or_default();
-                children_size +
-                    b.hashes.capacity() * core::mem::size_of::<B256>() +
-                    b.children_hashes.capacity() * core::mem::size_of::<B256>()
+                children_size + b.children_hashes.capacity() * core::mem::size_of::<B256>()
             }
             _ => 0,
         }
