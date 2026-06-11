@@ -415,13 +415,11 @@ where
 
             pool.begin_block(build, caches);
             for account in prefetch_bal.as_bal() {
-                pool.warm_account(account.address);
-                for change in &account.storage_changes {
-                    pool.warm_storage(account.address, change.slot.into());
-                }
-                for &slot in &account.storage_reads {
-                    pool.warm_storage(account.address, slot.into());
-                }
+                pool.warm_account_read_set(
+                    account.address,
+                    account.storage_changes.iter().map(|change| change.slot.into()),
+                    account.storage_reads.iter().copied().map(Into::into),
+                );
             }
             pool.end_block();
             let _ = prefetch_tx.send(());

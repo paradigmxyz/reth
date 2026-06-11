@@ -72,14 +72,22 @@ impl BalPrewarmPool {
         }
     }
 
-    /// Fire-and-forget: warm an account (basic account + bytecode) on some worker.
-    pub(crate) fn warm_account(&self, addr: Address) {
-        self.send_warm(PrewarmTarget::Account(addr));
-    }
+    /// Fire-and-forget: warm one BAL account and its storage read-set on the same worker.
+    pub(crate) fn warm_account_read_set(
+        &self,
+        addr: Address,
+        storage_changes: impl IntoIterator<Item = StorageKey>,
+        storage_reads: impl IntoIterator<Item = StorageKey>,
+    ) {
+        let worker = &self.workers[self.next.fetch_add(1, Ordering::Relaxed) % self.workers.len()];
 
-    /// Fire-and-forget: warm one storage slot on some worker.
-    pub(crate) fn warm_storage(&self, addr: Address, slot: StorageKey) {
-        self.send_warm(PrewarmTarget::Storage(addr, slot));
+        let _ = worker.send(PrewarmMsg::Warm(PrewarmTarget::Account(addr)));
+        for slot in storage_changes {
+            let _ = worker.send(PrewarmMsg::Warm(PrewarmTarget::Storage(addr, slot)));
+        }
+        for slot in storage_reads {
+            let _ = worker.send(PrewarmMsg::Warm(PrewarmTarget::Storage(addr, slot)));
+        }
     }
 
     /// Ends the block: every worker drops its provider (and read txn) once it has drained the warm
@@ -90,10 +98,6 @@ impl BalPrewarmPool {
         }
     }
 
-    fn send_warm(&self, target: PrewarmTarget) {
-        let i = self.next.fetch_add(1, Ordering::Relaxed) % self.workers.len();
-        let _ = self.workers[i].send(PrewarmMsg::Warm(target));
-    }
 }
 
 /// Number of warming threads.
