@@ -249,7 +249,7 @@ RETH_ARGS=(
   --log.file.directory "$OUTPUT_DIR/reth-logs"
   --engine.accept-execution-requests-hash
   --http
-  --http.api eth,net,web3,debug
+  --http.api eth,net,web3,debug,reth
   --http.port 8545
   --ws
   --ws.api all
