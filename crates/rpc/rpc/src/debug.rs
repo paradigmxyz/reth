@@ -646,8 +646,11 @@ where
                 })
             })
             .unwrap_or_default();
-        let storage_root =
-            db.database.storage_root(address, hashed_storage).map_err(Eth::Error::from_eth_err)?;
+        let storage_root = db
+            .database
+            .0
+            .storage_root(address, hashed_storage)
+            .map_err(Eth::Error::from_eth_err)?;
 
         Ok(Some(Account { balance, nonce, code_hash, storage_root }))
     }

@@ -10597,7 +10597,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "40.0.3"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#9414276e5516166f912b5494209cf1090528ee63"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#1e719f4e883958927089cc1482b006e575a1ef51"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10615,7 +10615,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "11.0.1"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#9414276e5516166f912b5494209cf1090528ee63"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#1e719f4e883958927089cc1482b006e575a1ef51"
 dependencies = [
  "bitvec",
  "phf",
@@ -10626,7 +10626,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "18.0.3"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#9414276e5516166f912b5494209cf1090528ee63"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#1e719f4e883958927089cc1482b006e575a1ef51"
 dependencies = [
  "bitvec",
  "cfg-if",
@@ -10642,7 +10642,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "19.0.3"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#9414276e5516166f912b5494209cf1090528ee63"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#1e719f4e883958927089cc1482b006e575a1ef51"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10657,7 +10657,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "15.0.2"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#9414276e5516166f912b5494209cf1090528ee63"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#1e719f4e883958927089cc1482b006e575a1ef51"
 dependencies = [
  "alloy-eips",
  "derive_more",
@@ -10671,7 +10671,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "12.1.1"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#9414276e5516166f912b5494209cf1090528ee63"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#1e719f4e883958927089cc1482b006e575a1ef51"
 dependencies = [
  "auto_impl",
  "either",
@@ -10684,7 +10684,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "20.0.3"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#9414276e5516166f912b5494209cf1090528ee63"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#1e719f4e883958927089cc1482b006e575a1ef51"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -10702,7 +10702,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "21.0.3"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#9414276e5516166f912b5494209cf1090528ee63"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#1e719f4e883958927089cc1482b006e575a1ef51"
 dependencies = [
  "auto_impl",
  "either",
@@ -10739,7 +10739,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "37.0.3"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#9414276e5516166f912b5494209cf1090528ee63"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#1e719f4e883958927089cc1482b006e575a1ef51"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -10751,7 +10751,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "36.0.3"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#9414276e5516166f912b5494209cf1090528ee63"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#1e719f4e883958927089cc1482b006e575a1ef51"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -10776,7 +10776,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "24.0.1"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#9414276e5516166f912b5494209cf1090528ee63"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#1e719f4e883958927089cc1482b006e575a1ef51"
 dependencies = [
  "alloy-primitives",
  "once_cell",
@@ -10786,7 +10786,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "12.0.1"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#9414276e5516166f912b5494209cf1090528ee63"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip8268-tracing#1e719f4e883958927089cc1482b006e575a1ef51"
 dependencies = [
  "alloy-eip7928 0.4.1",
  "alloy-trie",
