@@ -1052,16 +1052,20 @@ where
                 PropagateTransactionsBuilder::pooled(peer.version, to_propagate.len())
             };
 
+            // Transactions are optimistically marked as seen by the peer when included in the
+            // message, see `PeerMetadata::seen_transactions`.
             if propagation_mode.is_forced() {
-                builder.extend(to_propagate.iter());
+                for tx in &to_propagate {
+                    peer.seen_transactions.insert(*tx.tx_hash());
+                    builder.push(tx);
+                }
             } else {
                 // Iterate through the transactions to propagate and fill the hashes and full
                 // transaction lists, before deciding whether or not to send full transactions to
                 // the peer.
                 for tx in &to_propagate {
-                    // Only proceed if the transaction is not in the peer's list of seen
-                    // transactions
-                    if !peer.seen_transactions.contains(tx.tx_hash()) {
+                    // Only include the transaction if the peer hasn't seen it yet
+                    if peer.seen_transactions.insert(*tx.tx_hash()) {
                         builder.push(tx);
                     }
                 }
@@ -1076,15 +1080,27 @@ where
 
             // send hashes if any
             if let Some(mut new_pooled_hashes) = pooled {
-                // enforce tx soft limit per message for the (unlikely) event the number of
-                // hashes exceeds it
-                new_pooled_hashes
-                    .truncate(SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE);
+                // Unhappy path: too many hashes for a single message. This should not happen
+                // during regular propagation, which is capped at the soft limit per batch, and
+                // is only reachable via manual propagation commands with oversized batches.
+                if new_pooled_hashes.len() >
+                    SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE
+                {
+                    // hashes that exceed the limit are not sent, so they must not be tracked as
+                    // seen by the peer
+                    for hash in new_pooled_hashes
+                        .iter_hashes()
+                        .skip(SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE)
+                    {
+                        peer.seen_transactions.remove(hash);
+                    }
+                    new_pooled_hashes.truncate(
+                        SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE,
+                    );
+                }
 
                 for hash in new_pooled_hashes.iter_hashes().copied() {
                     propagated.record(hash, PropagateKind::Hash(*peer_id));
-                    // mark transaction as seen by peer
-                    peer.seen_transactions.insert(hash);
                 }
 
                 trace!(target: "net::tx", ?peer_id, num_txs=?new_pooled_hashes.len(), "Propagating tx hashes to peer");
@@ -1097,8 +1113,6 @@ where
             if let Some(new_full_transactions) = full {
                 for tx in &new_full_transactions {
                     propagated.record(*tx.tx_hash(), PropagateKind::Full(*peer_id));
-                    // mark transaction as seen by peer
-                    peer.seen_transactions.insert(*tx.tx_hash());
                 }
 
                 trace!(target: "net::tx", ?peer_id, num_txs=?new_full_transactions.len(), "Propagating full transactions to peer");
@@ -1814,13 +1828,6 @@ impl<T> PropagateTransactionsBuilder<T> {
 }
 
 impl<T: SignedTransaction> PropagateTransactionsBuilder<T> {
-    /// Appends all transactions
-    fn extend<'a>(&mut self, txs: impl IntoIterator<Item = &'a PropagateTransaction<T>>) {
-        for tx in txs {
-            self.push(tx);
-        }
-    }
-
     /// Appends a transaction to the list.
     fn push(&mut self, transaction: &PropagateTransaction<T>) {
         match self {
@@ -3124,6 +3131,38 @@ mod tests {
         // propagate again
         let propagated = tx_manager.propagate_transactions(propagate, PropagationMode::Basic);
         assert!(propagated.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_truncated_hash_announcement_not_marked_seen() {
+        reth_tracing::init_test_tracing();
+
+        let (mut tx_manager, network) = new_tx_manager().await;
+        // all peers receive hash announcements only
+        tx_manager.config.propagation_mode = TransactionPropagationMode::Max(0);
+
+        // ensure not syncing
+        network.handle().update_sync_state(SyncState::Idle);
+
+        let peer_id = PeerId::random();
+        let (peer, _rx) = new_mock_session(peer_id, EthVersion::Eth68);
+        tx_manager.peers.insert(peer_id, peer);
+
+        // one more transaction than fits into a single hashes broadcast message
+        let mut factory = MockTransactionFactory::default();
+        let txs = (0..=SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE)
+            .map(|_| PropagateTransaction::pool_tx(Arc::new(factory.create_eip1559())))
+            .collect::<Vec<_>>();
+        let last_sent = *txs[txs.len() - 2].tx_hash();
+        let truncated = *txs[txs.len() - 1].tx_hash();
+
+        let propagated = tx_manager.propagate_transactions(txs, PropagationMode::Basic);
+
+        // the truncated hash was not sent, so it must not be tracked as seen by the peer
+        assert!(propagated.get(&truncated).is_none());
+        let peer = tx_manager.peers.get(&peer_id).unwrap();
+        assert!(!peer.seen_transactions.contains(&truncated));
+        assert!(peer.seen_transactions.contains(&last_sent));
     }
 
     #[tokio::test]
