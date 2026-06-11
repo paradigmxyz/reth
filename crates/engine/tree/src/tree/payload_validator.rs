@@ -634,7 +634,7 @@ where
         let mut hashed_state_rx = handle.take_hashed_state_rx();
         let mut hashed_state: LazyHashedPostState =
             self.payload_processor.executor().spawn_blocking_named("hash-post-state", move || {
-                let _span = debug_span!(
+                let _span = tracing::trace_span!(
                     target: "engine::tree::payload_validator",
                     "hashed_post_state",
                 )
@@ -992,7 +992,7 @@ where
         self.payload_processor.executor().spawn_blocking_named(
             DEFERRED_TRIE_WORKER_NAME,
             move || {
-                let _span = debug_span!(
+                let _span = tracing::trace_span!(
                     target: "engine::tree::payload_validator",
                     parent: parent_span,
                     "changeset_provider",
@@ -1861,7 +1861,7 @@ where
         // Spawn background task to compute trie data. The task publishes the sorted result before
         // computing changesets, so trie data waiters do not block on changeset computation.
         let compute_trie_input_task = move || {
-            let _span = debug_span!(
+            let _span = tracing::trace_span!(
                 target: "engine::tree::payload_validator",
                 "compute_trie_input_task",
                 block_number
