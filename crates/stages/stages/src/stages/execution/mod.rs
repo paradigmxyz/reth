@@ -11,7 +11,7 @@ use reth_evm::{
     ConfigureEvm2BlockExecutor,
 };
 use reth_execution_types::{
-    evm2_block_state_accumulator_extend, evm2_block_state_hashed_post_state_sorted,
+    evm2_block_reverts_and_accumulator_extend, evm2_block_state_hashed_post_state_sorted,
     evm2_state_source_size_hint, Chain, Evm2BlockStateAccumulator,
 };
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
@@ -336,8 +336,10 @@ where
         let batch_start = Instant::now();
 
         let mut blocks = Vec::new();
-        let mut state = ExecutionOutcome::new_empty(start_block);
-        let mut evm2_state = Evm2BlockStateAccumulator::new();
+        let mut aggregate_state = Evm2BlockStateAccumulator::new();
+        let mut block_states = Vec::new();
+        let mut block_reverts = Vec::new();
+        let mut results = Vec::new();
         let state_provider = LatestStateProviderRef::new(provider);
         // SAFETY: The shared database is scoped to this synchronous stage execution and is dropped
         // before `state_provider`.
@@ -391,8 +393,12 @@ where
                     error,
                 )),
             })?;
-            evm2_block_state_accumulator_extend(&mut evm2_state, &output.state);
-            state.push_block(block_number, output);
+            block_reverts.push(evm2_block_reverts_and_accumulator_extend(
+                &mut aggregate_state,
+                &output.state,
+            ));
+            results.push(output.result);
+            block_states.push(output.state.into_inner());
 
             execution_duration += execute_start.elapsed();
 
@@ -423,7 +429,7 @@ where
             // Check if we should commit now
             if self.thresholds.is_end_of_batch(
                 block_number - start_block,
-                evm2_state_source_size_hint(&evm2_state) as u64,
+                evm2_state_source_size_hint(&aggregate_state) as u64,
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
@@ -433,6 +439,13 @@ where
 
         // prepare execution output for writing
         let time = Instant::now();
+        let mut state = ExecutionOutcome::from_aggregated_state(
+            start_block,
+            aggregate_state,
+            block_states,
+            block_reverts,
+            results,
+        );
         let write_preparation_duration = time.elapsed();
 
         // log the gas per second for the range we just executed
@@ -517,8 +530,9 @@ where
         provider.write_state(&state, OriginalValuesKnown::Yes, StateWriteConfig::default())?;
 
         if provider.cached_storage_settings().use_hashed_state() {
-            let hashed_state =
-                evm2_block_state_hashed_post_state_sorted::<KeccakKeyHasher>(&evm2_state);
+            let hashed_state = evm2_block_state_hashed_post_state_sorted::<KeccakKeyHasher>(
+                state.evm2_block_state_ref(),
+            );
             provider.write_hashed_state(&hashed_state)?;
         }
 
