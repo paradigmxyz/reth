@@ -211,11 +211,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         self.queued_outgoing.shrink_to(MAX_QUEUED_OUTGOING_RESPONSES);
     }
 
-    /// Returns how many responses we've currently queued up.
-    fn queued_response_count(&self) -> usize {
-        self.queued_outgoing.messages.iter().filter(|m| m.is_response()).count()
-    }
-
     /// Handle a message read from the connection.
     ///
     /// Returns an error if the message is considered to be in violation of the protocol.
@@ -789,9 +784,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 }
 
                 // we also need to check if we have multiple responses queued up
-                if this.queued_outgoing.messages.len() > MAX_QUEUED_OUTGOING_RESPONSES &&
-                    this.queued_response_count() > MAX_QUEUED_OUTGOING_RESPONSES
-                {
+                if this.queued_outgoing.response_count() > MAX_QUEUED_OUTGOING_RESPONSES {
                     // if we've queued up more responses than allowed, we don't poll for new
                     // messages and break the receive loop early
                     //
@@ -1072,6 +1065,9 @@ fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> 
 /// [`SessionManager`](super::SessionManager) can apply size-based backpressure.
 pub(crate) struct QueuedOutgoingMessages<N: NetworkPrimitives> {
     messages: VecDeque<OutgoingMessage<N>>,
+    /// Number of queued response messages, tracked separately so the session can apply
+    /// backpressure on incoming requests without scanning the whole queue.
+    queued_responses: usize,
     count: Gauge,
     /// Shared counter of buffered broadcast items for size-based backpressure.
     broadcast_items: BroadcastItemCounter,
@@ -1079,10 +1075,16 @@ pub(crate) struct QueuedOutgoingMessages<N: NetworkPrimitives> {
 
 impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
     pub(crate) const fn new(metric: Gauge, broadcast_items: BroadcastItemCounter) -> Self {
-        Self { messages: VecDeque::new(), count: metric, broadcast_items }
+        Self { messages: VecDeque::new(), queued_responses: 0, count: metric, broadcast_items }
+    }
+
+    /// Returns the number of queued response messages.
+    pub(crate) const fn response_count(&self) -> usize {
+        self.queued_responses
     }
 
     pub(crate) fn push_back(&mut self, message: OutgoingMessage<N>) {
+        self.queued_responses += message.is_response() as usize;
         self.messages.push_back(message);
         self.count.increment(1);
     }
@@ -1090,6 +1092,7 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
     pub(crate) fn pop_front(&mut self) -> Option<OutgoingMessage<N>> {
         self.messages.pop_front().inspect(|msg| {
             self.count.decrement(1);
+            self.queued_responses -= msg.is_response() as usize;
             let items = msg.broadcast_item_count();
             if items > 0 {
                 self.broadcast_items.sub(items);

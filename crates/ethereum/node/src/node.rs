@@ -343,6 +343,7 @@ where
         let testing_skip_invalid_transactions = ctx.config.rpc.testing_skip_invalid_transactions;
         let testing_gas_limit_override = ctx.config.rpc.testing_gas_limit;
         let testing_desired_gas_limit = ctx.config.builder.gas_limit_for(ctx.config.chain.chain());
+        let testing_engine_handle = ctx.beacon_engine_handle.clone();
 
         self.inner
             .launch_add_ons_with(ctx, move |container| {
@@ -361,6 +362,7 @@ where
                     container.registry.eth_api().clone(),
                     container.registry.evm_config().clone(),
                     testing_desired_gas_limit,
+                    testing_engine_handle,
                 );
                 if testing_skip_invalid_transactions {
                     testing_api = testing_api.with_skip_invalid_transactions();
