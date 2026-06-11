@@ -13,7 +13,8 @@ use alloy_primitives::{Bytes, B128, B256};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
     ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ExecutionPayloadV4,
-    ForkchoiceState, PayloadAttributes, PraguePayloadFields,
+    ForkchoiceState, PayloadAttributes, PraguePayloadFields,ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
+    ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6, PayloadId,
 };
 use http::{header::CONTENT_TYPE, HeaderValue, StatusCode};
 use http_body_util::BodyExt;
@@ -54,6 +55,7 @@ const MAX_PAYLOAD_BYTES: u64 = 64 * 1024 * 1024;
 /// Shared handle used by [`EngineSszProxyLayer`].
 pub struct EngineSszProxyHandle<ChainSpec> {
     engine: Arc<RwLock<Option<ConsensusEngineHandle<EthEngineTypes>>>>,
+    payload_store: Arc<RwLock<Option<Arc<PayloadStore<EthEngineTypes>>>>>,
     blob_store: Arc<RwLock<Option<Arc<dyn BlobStore>>>>,
     client_version: Arc<RwLock<Option<ClientVersionV1>>>,
     chain_spec: Arc<ChainSpec>,
@@ -63,6 +65,7 @@ impl<C> Clone for EngineSszProxyHandle<C> {
     fn clone(&self) -> Self {
         Self {
             engine: self.engine.clone(),
+            payload_store: self.payload_store.clone(),
             blob_store: self.blob_store.clone(),
             client_version: self.client_version.clone(),
             chain_spec: self.chain_spec.clone(),
@@ -80,6 +83,7 @@ impl<ChainSpec> EngineSszProxyHandle<ChainSpec> {
     fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self {
             engine: Default::default(),
+            payload_store: Default::default(),
             blob_store: Default::default(),
             client_version: Arc::new(RwLock::new(Some(default_client_version()))),
             chain_spec,
@@ -98,6 +102,10 @@ impl<ChainSpec> EngineSszProxyHandle<ChainSpec> {
 
     async fn engine(&self) -> Option<ConsensusEngineHandle<EthEngineTypes>> {
         self.engine.read().await.clone()
+    }
+
+    async fn payload_store(&self) -> Option<Arc<PayloadStore<EthEngineTypes>>> {
+        self.payload_store.read().await.clone()
     }
 
     /// Sets the blob store used by the proxy for handling blob requests.
@@ -203,7 +211,7 @@ where
             }
             handle_identity(handle.client_version().await)
         }
-        EngineSszEndpoint::Payloads(fork) => {
+        EngineSszEndpoint::NewPayload(fork) => {
             if method != "POST" {
                 return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
             }
@@ -215,6 +223,16 @@ where
             };
             handle_new_payload(engine, fork.payloads_version(), &body).await
         }
+        EngineSszEndpoint::GetPayload(fork, payload_id) => {
+            if method != "GET" {
+                return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
+            }
+            let Some(payload_store) = handle.payload_store().await else {
+                return text_response(STATUS_SERVICE_UNAVAILABLE, "payload store unavailable")
+            };
+            handle_get_payload(payload_store, fork.get_payload_version(), payload_id).await
+        }
+
         EngineSszEndpoint::Forkchoice(fork) => {
             if method != "POST" {
                 return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
@@ -241,20 +259,30 @@ where
 
 fn parse_engine_path(path: &str) -> Option<EngineSszEndpoint> {
     let mut segments = path.trim_start_matches('/').split('/');
-    match (segments.next(), segments.next(), segments.next(), segments.next(), segments.next()) {
-        (Some("engine"), Some("v2"), Some("capabilities"), None, None) => {
+    match (
+        segments.next(),
+        segments.next(),
+        segments.next(),
+        segments.next(),
+        segments.next(),
+        segments.next(),
+    ) {
+        (Some("engine"), Some("v2"), Some("capabilities"), None, None, None) => {
             Some(EngineSszEndpoint::Capabilities)
         }
-        (Some("engine"), Some("v2"), Some("identity"), None, None) => {
+        (Some("engine"), Some("v2"), Some("identity"), None, None, None) => {
             Some(EngineSszEndpoint::Identity)
         }
-        (Some("engine"), Some("v2"), Some(fork), Some("payloads"), None) => {
-            Some(EngineSszEndpoint::Payloads(fork.parse().ok()?))
+        (Some("engine"), Some("v2"), Some(fork), Some("payloads"), None, None) => {
+            Some(EngineSszEndpoint::NewPayload(fork.parse().ok()?))
         }
-        (Some("engine"), Some("v2"), Some(fork), Some("forkchoice"), None) => {
+        (Some("engine"), Some("v2"), Some(fork), Some("payloads"), Some(payload_id), None) => {
+            Some(EngineSszEndpoint::GetPayload(fork.parse().ok()?, parse_payload_id(payload_id)?))
+        }
+        (Some("engine"), Some("v2"), Some(fork), Some("forkchoice"), None, None) => {
             Some(EngineSszEndpoint::Forkchoice(fork.parse().ok()?))
         }
-        (Some("engine"), Some("v2"), Some("blobs"), version, None) => {
+        (Some("engine"), Some("v2"), Some("blobs"), version, None, None) => {
             Some(EngineSszEndpoint::Blobs(parse_method_version(version?)?))
         }
         _ => None,
@@ -278,7 +306,8 @@ fn parse_payload_id(value: &str) -> Option<PayloadId> {
 enum EngineSszEndpoint {
     Capabilities,
     Identity,
-    Payloads(EngineSszFork),
+    NewPayload(EngineSszFork),
+    GetPayload(EngineSszFork, PayloadId),
     Forkchoice(EngineSszFork),
     Blobs(u8),
 }
@@ -762,12 +791,12 @@ mod tests {
     #[test]
     fn parses_fork_scoped_payload_endpoint() {
         let endpoint = parse_engine_path("/engine/v2/prague/payloads").unwrap();
-        assert_eq!(endpoint, EngineSszEndpoint::Payloads(EngineSszFork::Prague));
+        assert_eq!(endpoint, EngineSszEndpoint::NewPayload(EngineSszFork::Prague));
     }
 
     #[test]
     fn parses_fork_scoped_get_payload_endpoint() {
-        let SszEngineApiRoute::GetPayload(fork, payload_id) =
+        let EngineSszEndpoint::GetPayload(fork, payload_id) =
             parse_engine_path("/engine/v2/prague/payloads/0x1234567890abcdef").unwrap()
         else {
             panic!("expected get payload route")
