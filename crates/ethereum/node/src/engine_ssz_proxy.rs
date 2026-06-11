@@ -11,18 +11,19 @@ use alloy_eips::{
 };
 use alloy_primitives::{Bytes, B128, B256};
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
+    CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayload,
+    ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
+    ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6, ExecutionPayloadSidecar,
     ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ExecutionPayloadV4,
-    ForkchoiceState, PayloadAttributes, PraguePayloadFields,ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
-    ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6, PayloadId,
+    ForkchoiceState, PayloadAttributes, PayloadId, PraguePayloadFields,
 };
-use http::{header::CONTENT_TYPE, HeaderValue, StatusCode};
 use http_body_util::BodyExt;
 use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
 use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::ConsensusEngineHandle;
-use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_ethereum_engine_primitives::{EthBuiltPayload, EthEngineTypes};
 use reth_node_core::version::{version_metadata, CLIENT_CODE};
+use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::EngineObjectValidationError;
 use reth_transaction_pool::BlobStore;
 use ssz::Decode;
@@ -227,6 +228,9 @@ where
             if method != "GET" {
                 return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
             }
+            let Some(payload_id) = parse_payload_id(&payload_id) else {
+                return text_response(STATUS_BAD_REQUEST, "invalid payload id")
+            };
             let Some(payload_store) = handle.payload_store().await else {
                 return text_response(STATUS_SERVICE_UNAVAILABLE, "payload store unavailable")
             };
@@ -277,7 +281,7 @@ fn parse_engine_path(path: &str) -> Option<EngineSszEndpoint> {
             Some(EngineSszEndpoint::NewPayload(fork.parse().ok()?))
         }
         (Some("engine"), Some("v2"), Some(fork), Some("payloads"), Some(payload_id), None) => {
-            Some(EngineSszEndpoint::GetPayload(fork.parse().ok()?, parse_payload_id(payload_id)?))
+            Some(EngineSszEndpoint::GetPayload(fork.parse().ok()?, payload_id.to_string()))
         }
         (Some("engine"), Some("v2"), Some(fork), Some("forkchoice"), None, None) => {
             Some(EngineSszEndpoint::Forkchoice(fork.parse().ok()?))
@@ -302,12 +306,12 @@ fn parse_payload_id(value: &str) -> Option<PayloadId> {
     Some(PayloadId::new(bytes))
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum EngineSszEndpoint {
     Capabilities,
     Identity,
     NewPayload(EngineSszFork),
-    GetPayload(EngineSszFork, PayloadId),
+    GetPayload(EngineSszFork, String),
     Forkchoice(EngineSszFork),
     Blobs(u8),
 }
@@ -803,7 +807,24 @@ mod tests {
         };
         assert_eq!(fork, EngineSszFork::Prague);
         assert_eq!(fork.get_payload_version(), 4);
-        assert_eq!(payload_id, PayloadId::new([0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef]));
+        assert_eq!(
+            parse_payload_id(&payload_id),
+            Some(PayloadId::new([0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef]))
+        );
+    }
+
+    #[test]
+    fn parses_get_payload_route_with_malformed_id() {
+        let endpoint = parse_engine_path("/engine/v2/prague/payloads/not-a-payload-id").unwrap();
+        assert_eq!(
+            endpoint,
+            EngineSszEndpoint::GetPayload(EngineSszFork::Prague, "not-a-payload-id".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_get_payload_endpoint_with_extra_segments() {
+        assert!(parse_engine_path("/engine/v2/prague/payloads/0x1234567890abcdef/extra").is_none());
     }
 
     #[test]
