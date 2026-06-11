@@ -1,7 +1,7 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
-    map::{AddressMap, B256Map},
+    map::{AddressMap, B256Map, B256Set},
     Address, B256, U256,
 };
 use core::{convert::Infallible, marker::PhantomData};
@@ -263,6 +263,7 @@ where
 #[derive(Debug)]
 pub struct HashedPostStateSink<KH> {
     state: HashedPostState,
+    created_accounts: B256Set,
     _key_hasher: PhantomData<KH>,
 }
 
@@ -278,7 +279,11 @@ struct BlockRevertsSink {
 
 impl<KH> Default for HashedPostStateSink<KH> {
     fn default() -> Self {
-        Self { state: HashedPostState::default(), _key_hasher: PhantomData }
+        Self {
+            state: HashedPostState::default(),
+            created_accounts: B256Set::default(),
+            _key_hasher: PhantomData,
+        }
     }
 }
 
@@ -343,6 +348,18 @@ impl<KH> HashedPostStateSink<KH> {
     pub fn into_hashed_post_state(self) -> HashedPostState {
         self.state
     }
+
+    fn drop_created_account_storage_wipe(&mut self, hashed_address: B256) {
+        let remove_storage = if let Some(storage) = self.state.storages.get_mut(&hashed_address) {
+            storage.wiped = false;
+            storage.storage.is_empty()
+        } else {
+            false
+        };
+        if remove_storage {
+            self.state.storages.remove(&hashed_address);
+        }
+    }
 }
 
 impl<KH> StateChangeSink for HashedPostStateSink<KH>
@@ -356,16 +373,46 @@ where
     }
 
     fn account(&mut self, change: AccountChangeRef<'_>) -> Result<(), Self::Error> {
-        self.state
-            .accounts
-            .insert(KH::hash_key(&change.address), change.current.map(account_info_ref_to_reth));
+        let hashed_address = KH::hash_key(&change.address);
+        let was_created = self.created_accounts.contains(&hashed_address);
+        let was_deleted_existing =
+            !was_created && self.state.accounts.get(&hashed_address).is_some_and(Option::is_none);
+
+        match change.current {
+            Some(account) => {
+                self.state.accounts.insert(hashed_address, Some(account_info_ref_to_reth(account)));
+
+                if was_created || (change.original.is_none() && !was_deleted_existing) {
+                    self.created_accounts.insert(hashed_address);
+                    self.drop_created_account_storage_wipe(hashed_address);
+                } else {
+                    self.created_accounts.remove(&hashed_address);
+                }
+            }
+            None if was_created => {
+                self.state.accounts.remove(&hashed_address);
+                self.created_accounts.remove(&hashed_address);
+                self.state.storages.remove(&hashed_address);
+            }
+            None => {
+                self.state.accounts.insert(hashed_address, None);
+                self.created_accounts.remove(&hashed_address);
+                self.state.storages.remove(&hashed_address);
+            }
+        }
+
         Ok(())
     }
 
     fn storage_wipe(&mut self, address: alloy_primitives::Address) -> Result<(), Self::Error> {
-        let storage = self.state.storages.entry(KH::hash_key(&address)).or_default();
-        storage.wiped = true;
-        storage.storage.clear();
+        let hashed_address = KH::hash_key(&address);
+        if self.created_accounts.contains(&hashed_address) {
+            self.state.storages.remove(&hashed_address);
+        } else {
+            let storage = self.state.storages.entry(hashed_address).or_default();
+            storage.wiped = true;
+            storage.storage.clear();
+        }
         Ok(())
     }
 
@@ -379,7 +426,6 @@ where
         Ok(())
     }
 }
-
 fn account_info_ref_to_reth(info: AccountInfoRef<'_>) -> Account {
     account_parts_to_reth(info.nonce, info.balance, info.code_hash)
 }
@@ -511,5 +557,167 @@ mod tests {
                 .get(&KeccakKeyHasher::hash_key(&B256::new(U256::from(3).to_be_bytes()))),
             Some(&U256::from(4))
         );
+    }
+
+    #[test]
+    fn streaming_hashed_post_state_removes_storage_for_deleted_accounts() {
+        let address = Address::repeat_byte(0x04);
+        let original =
+            AccountInfoRef { balance: U256::from(1), nonce: 1, code_hash: B256::ZERO, code: None };
+
+        let mut accumulator = BlockStateAccumulator::new();
+        let mut sink = HashedPostStateSink::<KeccakKeyHasher>::default();
+        {
+            let mut tee = Tee::new(&mut accumulator, &mut sink);
+            tee.storage_wipe(address).unwrap();
+            StateChangeSink::storage(
+                &mut tee,
+                StorageChange {
+                    address,
+                    key: U256::from(1),
+                    original: U256::from(2),
+                    current: U256::ZERO,
+                },
+            )
+            .unwrap();
+            tee.account(AccountChangeRef { address, original: Some(original), current: None })
+                .unwrap();
+        }
+
+        let recomputed =
+            evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&accumulator).into_sorted();
+        let streaming = sink.into_hashed_post_state().into_sorted();
+
+        assert_eq!(streaming, recomputed);
+    }
+
+    #[test]
+    fn streaming_hashed_post_state_drops_wipe_for_created_accounts() {
+        let address = Address::repeat_byte(0x05);
+        let current =
+            AccountInfoRef { balance: U256::from(1), nonce: 1, code_hash: B256::ZERO, code: None };
+
+        let mut accumulator = BlockStateAccumulator::new();
+        let mut sink = HashedPostStateSink::<KeccakKeyHasher>::default();
+        {
+            let mut tee = Tee::new(&mut accumulator, &mut sink);
+            tee.storage_wipe(address).unwrap();
+            StateChangeSink::storage(
+                &mut tee,
+                StorageChange {
+                    address,
+                    key: U256::from(1),
+                    original: U256::ZERO,
+                    current: U256::from(2),
+                },
+            )
+            .unwrap();
+            tee.account(AccountChangeRef { address, original: None, current: Some(current) })
+                .unwrap();
+        }
+
+        let recomputed =
+            evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&accumulator).into_sorted();
+        let streaming = sink.into_hashed_post_state().into_sorted();
+
+        assert_eq!(streaming, recomputed);
+    }
+
+    #[test]
+    fn streaming_hashed_post_state_keeps_created_account_storage_wipes_local() {
+        let address = Address::repeat_byte(0x06);
+        let current =
+            AccountInfoRef { balance: U256::from(1), nonce: 1, code_hash: B256::ZERO, code: None };
+
+        let mut accumulator = BlockStateAccumulator::new();
+        let mut sink = HashedPostStateSink::<KeccakKeyHasher>::default();
+        {
+            let mut tee = Tee::new(&mut accumulator, &mut sink);
+            tee.account(AccountChangeRef { address, original: None, current: Some(current) })
+                .unwrap();
+            StateChangeSink::storage(
+                &mut tee,
+                StorageChange {
+                    address,
+                    key: U256::from(1),
+                    original: U256::ZERO,
+                    current: U256::from(2),
+                },
+            )
+            .unwrap();
+            tee.storage_wipe(address).unwrap();
+        }
+
+        let recomputed =
+            evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&accumulator).into_sorted();
+        let streaming = sink.into_hashed_post_state().into_sorted();
+
+        assert_eq!(streaming, recomputed);
+    }
+
+    #[test]
+    fn streaming_hashed_post_state_keeps_created_marker_after_account_update() {
+        let address = Address::repeat_byte(0x07);
+        let current =
+            AccountInfoRef { balance: U256::from(1), nonce: 1, code_hash: B256::ZERO, code: None };
+        let updated =
+            AccountInfoRef { balance: U256::from(2), nonce: 1, code_hash: B256::ZERO, code: None };
+
+        let mut accumulator = BlockStateAccumulator::new();
+        let mut sink = HashedPostStateSink::<KeccakKeyHasher>::default();
+        {
+            let mut tee = Tee::new(&mut accumulator, &mut sink);
+            tee.account(AccountChangeRef { address, original: None, current: Some(current) })
+                .unwrap();
+            tee.account(AccountChangeRef {
+                address,
+                original: Some(current),
+                current: Some(updated),
+            })
+            .unwrap();
+            tee.storage_wipe(address).unwrap();
+        }
+
+        let recomputed =
+            evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&accumulator).into_sorted();
+        let streaming = sink.into_hashed_post_state().into_sorted();
+
+        assert_eq!(streaming, recomputed);
+    }
+
+    #[test]
+    fn streaming_hashed_post_state_keeps_wipe_for_existing_account_recreation() {
+        let address = Address::repeat_byte(0x08);
+        let original =
+            AccountInfoRef { balance: U256::from(1), nonce: 1, code_hash: B256::ZERO, code: None };
+        let current =
+            AccountInfoRef { balance: U256::from(2), nonce: 1, code_hash: B256::ZERO, code: None };
+
+        let mut accumulator = BlockStateAccumulator::new();
+        let mut sink = HashedPostStateSink::<KeccakKeyHasher>::default();
+        {
+            let mut tee = Tee::new(&mut accumulator, &mut sink);
+            tee.account(AccountChangeRef { address, original: Some(original), current: None })
+                .unwrap();
+            tee.storage_wipe(address).unwrap();
+            StateChangeSink::storage(
+                &mut tee,
+                StorageChange {
+                    address,
+                    key: U256::from(1),
+                    original: U256::ZERO,
+                    current: U256::from(2),
+                },
+            )
+            .unwrap();
+            tee.account(AccountChangeRef { address, original: None, current: Some(current) })
+                .unwrap();
+        }
+
+        let recomputed =
+            evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&accumulator).into_sorted();
+        let streaming = sink.into_hashed_post_state().into_sorted();
+
+        assert_eq!(streaming, recomputed);
     }
 }
