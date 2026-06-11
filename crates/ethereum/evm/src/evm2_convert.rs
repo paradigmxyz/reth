@@ -2,11 +2,16 @@
 
 use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_eips::eip7840::BlobParams;
-use alloy_primitives::{BlockNumber, BlockTimestamp, U256};
+use alloy_primitives::{Address, BlockNumber, BlockTimestamp, U256};
 use alloy_rpc_types_engine::ExecutionData;
-use evm2::{env::BlockEnv, ethereum::RecoveredTxEnvelope, SpecId};
+use evm2::{
+    env::BlockEnv,
+    ethereum::{LazyTxEip7702, RecoveredTxEnvelope},
+    SpecId,
+};
 use reth_chainspec::EthereumHardforks;
 use reth_ethereum_primitives::TransactionSigned;
+use reth_evm::execute::{ExecutableTxParts, RecoveredTx};
 
 /// Map the latest active Ethereum hardfork at `timestamp` or `block_number` to an evm2 [`SpecId`].
 pub fn evm2_spec_by_timestamp_and_block_number<C>(
@@ -115,6 +120,61 @@ fn blob_basefee(excess_blob_gas: Option<u64>, blob_params: Option<BlobParams>) -
         .unwrap_or_default()
 }
 
+/// Cached evm2 transaction environment used by engine execution and prewarming.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Evm2TxEnv(RecoveredTxEnvelope);
+
+impl Evm2TxEnv {
+    /// Returns the wrapped evm2 transaction envelope.
+    pub const fn as_envelope(&self) -> &RecoveredTxEnvelope {
+        &self.0
+    }
+
+    /// Consumes the wrapper and returns the evm2 transaction envelope.
+    pub fn into_envelope(self) -> RecoveredTxEnvelope {
+        self.0
+    }
+}
+
+impl From<Recovered<TransactionSigned>> for Evm2TxEnv {
+    fn from(value: Recovered<TransactionSigned>) -> Self {
+        Self(evm2_recovered_tx(value))
+    }
+}
+
+/// Recovered Ethereum transaction paired with its cached evm2 transaction environment.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Evm2RecoveredTx {
+    tx_env: Evm2TxEnv,
+    tx: Recovered<TransactionSigned>,
+}
+
+impl Evm2RecoveredTx {
+    /// Creates a transaction wrapper and precomputes the evm2 transaction environment.
+    pub fn new(tx: Recovered<TransactionSigned>) -> Self {
+        let tx_env = tx.clone().into();
+        Self { tx_env, tx }
+    }
+}
+
+impl RecoveredTx<TransactionSigned> for Evm2RecoveredTx {
+    fn tx(&self) -> &TransactionSigned {
+        self.tx.inner()
+    }
+
+    fn signer(&self) -> &Address {
+        self.tx.signer_ref()
+    }
+}
+
+impl ExecutableTxParts<Evm2TxEnv, TransactionSigned> for Evm2RecoveredTx {
+    type Recovered = Recovered<TransactionSigned>;
+
+    fn into_parts(self) -> (Evm2TxEnv, Self::Recovered) {
+        (self.tx_env, self.tx)
+    }
+}
+
 /// Converts an owned recovered Reth Ethereum transaction into evm2's recovered envelope.
 pub fn evm2_recovered_tx(tx: Recovered<TransactionSigned>) -> RecoveredTxEnvelope {
     let (tx, signer) = tx.into_parts();
@@ -132,9 +192,10 @@ pub fn evm2_recovered_tx(tx: Recovered<TransactionSigned>) -> RecoveredTxEnvelop
             tx.strip_signature().into(),
             signer,
         )),
-        TransactionSigned::Eip7702(tx) => {
-            RecoveredTxEnvelope::Eip7702(Recovered::new_unchecked(tx.strip_signature(), signer))
-        }
+        TransactionSigned::Eip7702(tx) => RecoveredTxEnvelope::Eip7702(Recovered::new_unchecked(
+            LazyTxEip7702::from_recovered_authorizations(tx.strip_signature()),
+            signer,
+        )),
     }
 }
 

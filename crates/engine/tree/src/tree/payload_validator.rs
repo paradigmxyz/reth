@@ -71,11 +71,12 @@ use reth_engine_primitives::{
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::{
-    execute::ExecutableTxFor, ConfigureEvm, ConfigureEvm2Prewarm, EvmEnvFor, ExecutionCtxFor,
+    execute::{ExecutableTxFor, RecoveredTx},
+    ConfigureEvm, ConfigureEvm2Prewarm, EvmEnvFor, ExecutionCtxFor,
 };
 use reth_evm_ethereum::{
-    execute_evm2_block_with_state_provider_context_precompiles_and_hook, Evm2BlockExecutionContext,
-    Evm2BlockSystemCalls,
+    execute_evm2_block_with_state_provider_context_precompiles_and_hook_envelopes,
+    Evm2BlockExecutionContext, Evm2BlockSystemCalls, Evm2TxEnv,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
 use reth_execution_types::evm2_state_source_hashed_post_state;
@@ -85,7 +86,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{
     AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives,
-    RecoveredBlock, SealedBlock, SealedHeader, SignedTransaction, SignerRecoverable,
+    RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
     providers::{OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory},
@@ -387,7 +388,7 @@ where
     ) -> InsertPayloadResult<N>
     where
         V: PayloadValidator<T, Block = N::Block> + Clone,
-        Evm: ConfigureEvm2Engine<T::ExecutionData, Primitives = N>,
+        Evm: ConfigureEvm2Engine<T::ExecutionData, Primitives = N, TxEnv = Evm2TxEnv>,
         N: NodePrimitives<SignedTx = TransactionSigned, Receipt = Receipt>,
     {
         let parent_hash = input.parent_hash();
@@ -1050,7 +1051,7 @@ where
         V: PayloadValidator<T, Block = N::Block>,
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
         T::ExecutionData: ExecutionPayload,
-        Evm: ConfigureEvm2Engine<T::ExecutionData, Primitives = N>,
+        Evm: ConfigureEvm2Engine<T::ExecutionData, Primitives = N, TxEnv = Evm2TxEnv>,
         N: NodePrimitives<SignedTx = TransactionSigned, Receipt = Receipt>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
@@ -1060,14 +1061,16 @@ where
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
         let execution_start = Instant::now();
 
+        let mut senders = Vec::with_capacity(transaction_count);
         let transactions = handle
             .iter_transactions()
             .map(|tx| {
                 let tx = tx.map_err(BlockExecutionError::other)?;
-                Ok(tx.tx().clone().with_signer(*tx.signer()))
+                let (tx_env, tx) = tx.into_parts();
+                senders.push(*tx.signer());
+                Ok(tx_env.into_envelope())
             })
             .collect::<Result<Vec<_>, BlockExecutionError>>()?;
-        let senders = transactions.iter().map(|tx| tx.signer()).collect();
 
         let spec_id = match input {
             BlockOrPayload::Payload(payload) => self
@@ -1114,7 +1117,7 @@ where
 
         let output = debug_span!(target: "engine::tree", "execute_evm2_block")
             .in_scope(|| {
-                execute_evm2_block_with_state_provider_context_precompiles_and_hook(
+                execute_evm2_block_with_state_provider_context_precompiles_and_hook_envelopes(
                     spec_id,
                     block_env,
                     state_provider,
@@ -1997,7 +2000,7 @@ where
         + 'static,
     N: NodePrimitives<SignedTx = TransactionSigned, Receipt = Receipt>,
     V: PayloadValidator<Types, Block = N::Block> + Clone,
-    Evm: ConfigureEvm2Engine<Types::ExecutionData, Primitives = N>
+    Evm: ConfigureEvm2Engine<Types::ExecutionData, Primitives = N, TxEnv = Evm2TxEnv>
         + ConfigureEvm2Prewarm<Primitives = N>
         + 'static,
     Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,

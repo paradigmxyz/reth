@@ -88,7 +88,8 @@ pub use build::EthBlockAssembler;
 mod evm2_convert;
 pub use evm2_convert::{
     evm2_block_env, evm2_block_env_with_blob_params, evm2_payload_block_env, evm2_recovered_tx,
-    evm2_recovered_tx_ref, evm2_spec, evm2_spec_by_timestamp_and_block_number,
+    evm2_recovered_tx_ref, evm2_spec, evm2_spec_by_timestamp_and_block_number, Evm2RecoveredTx,
+    Evm2TxEnv,
 };
 
 mod evm2_executor;
@@ -104,6 +105,7 @@ pub use evm2_executor::{
     execute_evm2_block_with_state_provider_context,
     execute_evm2_block_with_state_provider_context_and_hook,
     execute_evm2_block_with_state_provider_context_precompiles_and_hook,
+    execute_evm2_block_with_state_provider_context_precompiles_and_hook_envelopes,
 };
 
 mod receipt;
@@ -206,7 +208,7 @@ where
     type NextBlockEnvCtx = NextBlockEnvAttributes;
     type Spec = evm2::SpecId;
     type EvmEnv = EthEvmEnv;
-    type TxEnv = Recovered<TransactionSigned>;
+    type TxEnv = Evm2TxEnv;
     type ExecutionCtx<'a>
         = EthBlockExecutionCtx<'a>
     where
@@ -334,7 +336,7 @@ where
         let convert = |tx: Bytes| {
             let tx = TransactionSigned::decode_2718_exact(tx.as_ref()).map_err(AnyError::new)?;
             let signer = tx.try_recover().map_err(AnyError::new)?;
-            Ok::<_, AnyError>(tx.with_signer(signer))
+            Ok::<_, AnyError>(Evm2RecoveredTx::new(tx.with_signer(signer)))
         };
 
         Ok((txs, convert))
@@ -470,7 +472,7 @@ where
     fn evm2_prewarm_tx<DB, S>(
         &self,
         evm: &mut Self::PrewarmEvm<DB>,
-        tx: Recovered<TransactionSigned>,
+        tx: Evm2TxEnv,
         sink: &mut S,
     ) -> Result<evm2::TxResult, alloc::boxed::Box<dyn core::error::Error + Send + Sync>>
     where
@@ -483,8 +485,7 @@ where
             HandlerError(evm2::registry::HandlerError),
         }
 
-        let tx = evm2_recovered_tx(tx);
-        let resolution = match evm.transact(&tx) {
+        let resolution = match evm.transact(tx.as_envelope()) {
             Ok(executed) => {
                 if let Some(code) = executed.result().db_error_code {
                     let _ = executed.discard();
