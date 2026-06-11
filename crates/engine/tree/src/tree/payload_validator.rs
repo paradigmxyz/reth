@@ -1195,6 +1195,8 @@ where
             env.transaction_count,
             handle.clone_transaction_receiver(),
             receipt_tx,
+            self.config.precompile_cache_disabled(),
+            self.precompile_cache_map.clone(),
         )?;
         let execution_duration = execution_start.elapsed();
 
