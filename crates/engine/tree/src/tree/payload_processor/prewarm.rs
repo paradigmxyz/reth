@@ -21,7 +21,7 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, B256};
+use alloy_primitives::{keccak256, StorageKey, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
@@ -416,11 +416,14 @@ where
             pool.begin_block(build, caches);
             for account in prefetch_bal.as_bal() {
                 pool.warm_account(account.address);
-                for change in &account.storage_changes {
-                    pool.warm_storage(account.address, change.slot.into());
-                }
-                for &slot in &account.storage_reads {
-                    pool.warm_storage(account.address, slot.into());
+                let slot_count = account.storage_changes.len() + account.storage_reads.len();
+                if slot_count != 0 {
+                    let mut slots: Vec<StorageKey> = Vec::with_capacity(slot_count);
+                    slots.extend(
+                        account.storage_changes.iter().map(|change| StorageKey::from(change.slot)),
+                    );
+                    slots.extend(account.storage_reads.iter().map(|&slot| StorageKey::from(slot)));
+                    pool.warm_storage_slots(account.address, slots);
                 }
             }
             pool.end_block();

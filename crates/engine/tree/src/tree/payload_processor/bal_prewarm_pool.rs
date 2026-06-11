@@ -20,6 +20,7 @@ type BuildProviderFn = dyn Fn() -> ProviderResult<StateProviderBox> + Send + Syn
 enum PrewarmTarget {
     Account(Address),
     Storage(Address, StorageKey),
+    StorageSlots(Address, Vec<StorageKey>),
 }
 
 /// A message in a worker's queue. The per-block lifecycle is explicit and ordered (the queue is
@@ -80,6 +81,15 @@ impl BalPrewarmPool {
     /// Fire-and-forget: warm one storage slot on some worker.
     pub(crate) fn warm_storage(&self, addr: Address, slot: StorageKey) {
         self.send_warm(PrewarmTarget::Storage(addr, slot));
+    }
+
+    /// Fire-and-forget: warm several storage slots for one account on the same worker.
+    pub(crate) fn warm_storage_slots(&self, addr: Address, mut slots: Vec<StorageKey>) {
+        match slots.len() {
+            0 => {}
+            1 => self.warm_storage(addr, slots.pop().expect("length checked")),
+            _ => self.send_warm(PrewarmTarget::StorageSlots(addr, slots)),
+        }
     }
 
     /// Ends the block: every worker drops its provider (and read txn) once it has drained the warm
@@ -148,6 +158,11 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                     }
                     PrewarmTarget::Storage(addr, slot) => {
                         let _ = provider.storage(addr, slot);
+                    }
+                    PrewarmTarget::StorageSlots(addr, slots) => {
+                        for slot in slots {
+                            let _ = provider.storage(addr, slot);
+                        }
                     }
                 }
             }
