@@ -330,7 +330,10 @@ where
                 },
             }
 
-            if self.updates.is_empty() && self.proof_result_rx.is_empty() {
+            let updates_empty = self.updates.is_empty();
+            let proof_results_empty = self.proof_result_rx.is_empty();
+
+            if updates_empty && proof_results_empty {
                 // If we don't have any pending messages, we can spend some time on computing
                 // storage roots and promoting account updates.
                 self.dispatch_pending_targets();
@@ -353,7 +356,7 @@ where
                 if self.proof_result_rx.is_empty() {
                     self.trie.calculate_subtries();
                 }
-            } else if self.updates.is_empty() {
+            } else if updates_empty {
                 // If we don't have any pending updates, apply them to the trie,
                 t = Instant::now();
                 self.process_new_updates()?;
