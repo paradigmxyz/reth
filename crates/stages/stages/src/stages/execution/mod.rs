@@ -1,5 +1,6 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD;
 use alloy_consensus::BlockHeader;
+use alloy_eip7928::compute_block_access_list_hash;
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
@@ -358,10 +359,15 @@ where
             })?;
             let bal = executor.take_bal();
             tracing::info!("BAL after executing block {}: {:?}", block_number, bal);
+            let block_access_list_hash =
+                bal.as_ref().map(|bal| compute_block_access_list_hash(bal));
 
-            if let Err(err) =
-                self.consensus.validate_block_post_execution(&block, &result, None, None)
-            {
+            if let Err(err) = self.consensus.validate_block_post_execution(
+                &block,
+                &result,
+                None,
+                block_access_list_hash,
+            ) {
                 return Err(StageError::Block {
                     block: Box::new(block.block_with_parent()),
                     error: BlockErrorKind::Validation(err),
