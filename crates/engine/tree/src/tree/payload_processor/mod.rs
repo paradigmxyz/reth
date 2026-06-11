@@ -279,7 +279,7 @@ where
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
     #[instrument(
-        level = "debug",
+        level = "trace",
         target = "engine::tree::payload_processor",
         name = "payload processor",
         skip_all
@@ -343,7 +343,7 @@ where
     /// Spawns a task that exclusively handles cache prewarming for transaction execution.
     ///
     /// Returns a [`PayloadHandle`] to communicate with the task.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
+    #[instrument(level = "trace", target = "engine::tree::payload_processor", skip_all)]
     pub fn spawn_cache_exclusive<P, I: ExecutableTxIterator<Evm>>(
         &self,
         env: ExecutionEnv<Evm>,
@@ -378,7 +378,7 @@ where
     ///
     /// When `halve_workers` is true, the proof worker pool is halved (for small blocks where
     /// fewer transactions produce fewer state changes and most workers would be idle).
-    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
+    #[instrument(level = "trace", target = "engine::tree::payload_processor", skip_all)]
     pub fn spawn_state_root<F>(
         &self,
         multiproof_provider_factory: F,
@@ -442,7 +442,7 @@ where
     /// sequential iteration to avoid rayon overhead. For larger blocks, uses rayon parallel
     /// iteration with [`ForEachOrdered`] to convert transactions in parallel while streaming
     /// results to execution in the original transaction order.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
+    #[instrument(level = "trace", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_tx_iterator<I: ExecutableTxIterator<Evm>>(
         &self,
         transactions: I,
@@ -511,7 +511,7 @@ where
     /// `parallel_bal_execution` is true when the BAL execute path will execute this block. In
     /// that case prewarm runs in BAL mode: it streams BAL-derived sparse-trie updates and,
     /// unless `disable_bal_batch_io` is set, prefetches BAL-declared state into the shared cache.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
+    #[instrument(level = "trace", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
