@@ -45,6 +45,11 @@ jobs:
       - name: Build Vocs
         run: |
           cd docs/vocs/ && bun run build
+          test -f docs/dist/public/index.html
+          test -f docs/dist/public/overview/index.html
+          test -f docs/dist/public/sdk/index.html
+          test -f docs/dist/public/logo.png
+          test -f docs/dist/public/reth-prod.png
           echo "Vocs Build Complete"
 
       - name: Setup Pages
@@ -53,7 +58,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: "./docs/vocs/docs/dist"
+          path: "./docs/vocs/docs/dist/public"
 
   deploy:
     # Only deploy if a push to main

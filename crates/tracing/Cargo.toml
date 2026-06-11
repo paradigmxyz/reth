@@ -19,6 +19,7 @@ reth-tracing-otlp = { workspace = true, optional = true }
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "ansi", "json"], optional = true }
 tracing-appender = { workspace = true, optional = true }
+tracing-chrome = { workspace = true, optional = true }
 tracing-journald = { workspace = true, optional = true }
 tracing-logfmt = { workspace = true, optional = true }
 tracing-samply = { workspace = true, optional = true }
@@ -35,6 +36,7 @@ default = ["std", "otlp"]
 std = [
     "tracing-subscriber",
     "tracing-appender",
+    "tracing-chrome",
     "tracing-journald",
     "tracing-logfmt",
     "tracing-samply",

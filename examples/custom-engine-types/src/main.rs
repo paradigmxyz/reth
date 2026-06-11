@@ -101,6 +101,10 @@ impl PayloadAttributes for CustomPayloadAttributes {
     fn slot_number(&self) -> Option<u64> {
         self.inner.slot_number()
     }
+
+    fn target_gas_limit(&self) -> Option<u64> {
+        self.inner.target_gas_limit()
+    }
 }
 
 /// Custom engine types - uses a custom payload attributes RPC type, but uses the default
@@ -339,7 +343,7 @@ where
             cancel,
             best_payload,
         } = args;
-        let PayloadConfig { parent_header, attributes, payload_id } = config;
+        let PayloadConfig { parent_header, parent_block_info, attributes, payload_id } = config;
 
         // This reuses the default EthereumPayloadBuilder to build the payload
         // but any custom logic can be implemented here
@@ -347,7 +351,12 @@ where
             cached_reads,
             execution_cache,
             trie_handle,
-            config: PayloadConfig { parent_header, attributes: attributes.inner, payload_id },
+            config: PayloadConfig {
+                parent_header,
+                parent_block_info,
+                attributes: attributes.inner,
+                payload_id,
+            },
             cancel,
             best_payload,
         })
@@ -357,9 +366,10 @@ where
         &self,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        let PayloadConfig { parent_header, attributes, payload_id } = config;
+        let PayloadConfig { parent_header, parent_block_info, attributes, payload_id } = config;
         self.inner.build_empty_payload(PayloadConfig {
             parent_header,
+            parent_block_info,
             attributes: attributes.inner,
             payload_id,
         })

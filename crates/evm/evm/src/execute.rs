@@ -598,15 +598,17 @@ where
             .executor_for_block(&mut self.db, block)
             .map_err(BlockExecutionError::other)?;
 
-        let has_bal = block.header().block_access_list_hash().is_some();
         let evm_env =
             self.strategy_factory.evm_env(block.header()).map_err(BlockExecutionError::other)?;
+        let has_bal = block.header().block_access_list_hash().is_some();
+
         let is_bogota_active =
             Into::<SpecId>::into(*evm_env.spec_id()).is_enabled_in(SpecId::BOGOTA);
 
         if has_bal {
             executor.evm_mut().db_mut().bal_state.bal_builder = Some(Bal::new());
             executor.evm_mut().db_mut().bal_state.storage_root_enabled = is_bogota_active;
+            tracing::info!("Bal state:{:?}", executor.evm().db().bal_state);
         } else {
             executor.evm_mut().db_mut().bal_state.bal_builder = None;
             executor.evm_mut().db_mut().bal_state.storage_root_enabled = false;
