@@ -9,6 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 use crate::metrics::PayloadBuilderMetrics;
+use alloy_consensus::BlockHeader;
 use alloy_eips::merge::SLOT_DURATION;
 use alloy_primitives::{B256, U256};
 use futures_core::ready;
@@ -21,8 +22,10 @@ use reth_payload_builder::{
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
 use reth_primitives_traits::{HeaderTy, NodePrimitives, SealedHeader};
-use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
-use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
+use reth_revm::{
+    block_hash_cache::warm_block_hash_cache, cached::CachedReads, cancelled::CancelOnDrop,
+};
+use reth_storage_api::{BlockHashReader, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::Runtime;
 use reth_trie_parallel::state_root_task::PayloadStateRootHandle;
 use std::{
@@ -149,6 +152,7 @@ impl<Client, Builder> BasicPayloadJobGenerator<Client, Builder> {
 impl<Client, Builder> PayloadJobGenerator for BasicPayloadJobGenerator<Client, Builder>
 where
     Client: StateProviderFactory
+        + BlockHashReader
         + BlockReaderIdExt<Header = HeaderForPayload<Builder::BuiltPayload>>
         + Clone
         + Unpin
@@ -235,6 +239,11 @@ where
         let block = tip.hash();
         let parent_block_info =
             PayloadParentBlockInfo { transaction_count: tip.transaction_count() };
+
+        let next_block_number = tip.number().saturating_add(1);
+        if let Err(err) = warm_block_hash_cache(&self.client, next_block_number, &mut cached) {
+            warn!(target: "payload_builder", %err, "failed to pre-cache block hashes for next payload");
+        }
 
         self.pre_cached = Some(PrecachedState { block, cached });
         self.pre_cached_parent_block_info =
