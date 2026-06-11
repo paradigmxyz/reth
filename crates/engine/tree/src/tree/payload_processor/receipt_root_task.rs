@@ -7,7 +7,7 @@
 //! computed root.
 
 use alloy_eips::Encodable2718;
-use alloy_primitives::{map::HashMap, Bloom, B256};
+use alloy_primitives::{Bloom, B256};
 use crossbeam_channel::Receiver;
 use reth_primitives_traits::Receipt;
 use reth_trie_common::ordered_root::OrderedTrieRootEncodedBuilder;
@@ -67,9 +67,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
     ///
     /// * `receipts_len` - The total number of receipts expected. This is needed to correctly order
     ///   the trie keys according to RLP encoding rules.
-    pub fn run(self, receipts_len: impl Into<Option<usize>>) {
-        let receipts_len = receipts_len.into();
-
+    pub fn run(self, receipts_len: usize) {
         let _span = debug_span!(
             target: "engine::tree::payload_processor",
             "receipt_root",
@@ -81,7 +79,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
         let mut aggregated_bloom = Bloom::ZERO;
         let mut encode_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
         let mut next = 0usize;
-        let mut pending = HashMap::new();
+        let mut pending = Vec::<Option<R>>::new();
 
         let mut push = |receipt: R| {
             let receipt_with_bloom = receipt.with_bloom_ref();
@@ -98,16 +96,37 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
                 push(indexed_receipt.receipt);
                 next += 1;
 
-                while let Some(receipt) = pending.remove(&next) {
+                while let Some(receipt) = pending.get_mut(next).and_then(Option::take) {
                     push(receipt);
                     next += 1;
                 }
             } else {
-                pending.insert(indexed_receipt.index, indexed_receipt.receipt);
+                if pending.is_empty() {
+                    pending.resize_with(receipts_len, || None);
+                }
+
+                let Some(slot) = pending.get_mut(indexed_receipt.index) else {
+                    tracing::error!(
+                        target: "engine::tree::payload_processor",
+                        expected = receipts_len,
+                        received = indexed_receipt.index,
+                        "Receipt root task received out-of-bounds receipt index"
+                    );
+                    return
+                };
+
+                if slot.replace(indexed_receipt.receipt).is_some() {
+                    tracing::error!(
+                        target: "engine::tree::payload_processor",
+                        index = indexed_receipt.index,
+                        "Receipt root task received duplicate receipt index"
+                    );
+                    return
+                }
             }
         }
 
-        if receipts_len.is_some_and(|len| len != next) {
+        if receipts_len != next {
             tracing::error!(
                 target: "engine::tree::payload_processor",
                 expected = receipts_len,
@@ -117,11 +136,11 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
             return;
         }
 
-        if !pending.is_empty() {
+        if pending.iter().any(Option::is_some) {
             tracing::error!(
                 target: "engine::tree::payload_processor",
                 received = next,
-                pending = pending.len(),
+                pending = pending.iter().filter(|receipt| receipt.is_some()).count(),
                 "Receipt root task received gapped receipts"
             );
             return;
