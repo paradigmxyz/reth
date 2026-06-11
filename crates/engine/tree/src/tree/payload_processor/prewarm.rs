@@ -21,7 +21,7 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, B256};
+use alloy_primitives::{keccak256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
@@ -31,9 +31,9 @@ use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockReader, StateProviderFactory, StateReader,
 };
-use reth_revm::{database::StateProviderDatabase, state::EvmState};
+use reth_revm::{database::StateProviderDatabase};
 use reth_tasks::{pool::WorkerPool, Runtime};
-use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
+use reth_trie_common::{MultiProofTargetsV2};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc::{self, channel, Receiver, Sender},
@@ -247,7 +247,7 @@ where
             }
 
             if index > 0 {
-                let (targets, storage_targets) = multiproof_targets_from_state(res.state);
+                let (targets, storage_targets) = MultiProofTargetsV2::from_state(res.state);
                 ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
                 if let Some(to_sparse_trie_task) = to_sparse_trie_task {
                     let _ = to_sparse_trie_task.send(StateRootMessage::PrefetchProofs(targets));
@@ -744,51 +744,6 @@ where
 
         let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
     }
-}
-
-/// Returns a set of [`MultiProofTargetsV2`] and the total amount of storage targets, based on the
-/// given state.
-fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize) {
-    let mut targets = MultiProofTargetsV2::default();
-    targets.account_targets.reserve(state.len());
-    targets.storage_targets.reserve(state.len());
-    let mut storage_target_count = 0;
-    for (addr, account) in state {
-        // if the account was not touched, or if the account was selfdestructed, do not
-        // fetch proofs for it
-        //
-        // Since selfdestruct can only happen in the same transaction, we can skip
-        // prefetching proofs for selfdestructed accounts
-        //
-        // See: https://eips.ethereum.org/EIPS/eip-6780
-        if !account.is_touched() || account.is_selfdestructed() {
-            continue
-        }
-
-        let hashed_address = keccak256(addr);
-
-        if account.info != account.original_info() {
-            targets.account_targets.push(hashed_address.into());
-        }
-
-        let mut storage_slots = Vec::with_capacity(account.storage.len());
-        for (key, slot) in account.storage {
-            // do nothing if unchanged
-            if !slot.is_changed() {
-                continue
-            }
-
-            let hashed_slot = keccak256(B256::new(key.to_be_bytes()));
-            storage_slots.push(ProofV2Target::from(hashed_slot));
-        }
-
-        storage_target_count += storage_slots.len();
-        if !storage_slots.is_empty() {
-            targets.storage_targets.insert(hashed_address, storage_slots);
-        }
-    }
-
-    (targets, storage_target_count)
 }
 
 /// Returns [`MultiProofTargetsV2`] for withdrawal addresses.
