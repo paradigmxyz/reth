@@ -589,6 +589,12 @@ where
         }
         let (output, senders, receipt_root_rx, built_bal) = ensure_ok!(execution_result);
 
+        let block_access_list_hash = built_bal.map(|bal| {
+            self.payload_processor
+                .executor()
+                .spawn_blocking_named("bal-hash", move || compute_block_access_list_hash(&bal))
+        });
+
         // After executing the block we can stop prewarming transactions
         handle.stop_prewarming_execution();
 
@@ -651,7 +657,7 @@ where
                 &output,
                 &mut ctx,
                 receipt_root_bloom,
-                built_bal
+                block_access_list_hash.as_ref().map(|hash| *hash.get()),
             ),
             block
         );
@@ -1605,7 +1611,7 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
         ctx: &mut TreeCtx<'_, N>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
-        built_bal: Option<BlockAccessList>,
+        block_access_list_hash: Option<B256>,
     ) -> Result<(), InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
@@ -1618,9 +1624,6 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
-        let block_access_list_hash =
-            built_bal.as_ref().map(|bal| compute_block_access_list_hash(bal));
-
         if let Err(err) = self.consensus.validate_block_post_execution(
             block,
             output,
