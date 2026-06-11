@@ -2,7 +2,7 @@ use super::{
     branch_child_idx::{BranchChildIdx, BranchChildIter},
     ArenaSparseSubtrie, Index, NodeArena,
 };
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_primitives::{keccak256, B256};
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieNodeV2};
@@ -69,10 +69,57 @@ pub(super) struct ArenaSparseNodeBranch {
     pub(super) short_key: Nibbles,
     /// Tree mask and hash mask for database persistence (`TrieUpdates`).
     pub(super) branch_masks: BranchNodeMasks,
+    /// Hashes corresponding to the set bits in `branch_masks.hash_mask`, in nibble order.
+    pub(super) hashes: Arc<Vec<B256>>,
+    /// Mask for every child whose RLP node is represented by a hash.
+    pub(super) children_hash_mask: TrieMask,
+    /// Hashes corresponding to the set bits in `children_hash_mask`, in nibble order.
+    pub(super) children_hashes: Arc<Vec<B256>>,
 }
 
 impl ArenaSparseNodeBranch {
-    /// Unsets the bit for `nibble` in `state_mask`, `hash_mask`, and `tree_mask`.
+    /// Creates a revealed branch whose children are initialized from proof/database RLP nodes.
+    pub(super) fn from_blinded_children(
+        children: SmallVec<[ArenaSparseNodeBranchChild; 4]>,
+        state_mask: TrieMask,
+        short_key: Nibbles,
+        branch_masks: BranchNodeMasks,
+    ) -> Self {
+        let hashes = Self::hashes_from_blinded_children(&children, state_mask, branch_masks);
+        Self {
+            state: ArenaSparseNodeState::Revealed,
+            children,
+            state_mask,
+            short_key,
+            branch_masks,
+            hashes,
+            children_hash_mask: TrieMask::default(),
+            children_hashes: Arc::default(),
+        }
+    }
+
+    /// Returns hashes for the children represented by `branch_masks.hash_mask`.
+    fn hashes_from_blinded_children(
+        children: &[ArenaSparseNodeBranchChild],
+        state_mask: TrieMask,
+        branch_masks: BranchNodeMasks,
+    ) -> Arc<Vec<B256>> {
+        BranchChildIter::new(state_mask)
+            .filter_map(|(idx, nibble)| {
+                branch_masks.hash_mask.is_bit_set(nibble).then(|| match &children[idx.get()] {
+                    ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
+                        rlp_node.as_hash().expect("hash-mask child must be a hash")
+                    }
+                    ArenaSparseNodeBranchChild::Revealed(child_idx) => {
+                        unreachable!("new blinded branch has revealed child {child_idx:?}")
+                    }
+                })
+            })
+            .collect::<Vec<_>>()
+            .into()
+    }
+
+    /// Unsets the bit for `nibble` in `state_mask`.
     pub(super) const fn unset_child_bit(&mut self, nibble: u8) {
         self.state_mask.unset_bit(nibble);
     }
@@ -124,29 +171,86 @@ impl ArenaSparseNodeBranch {
         BranchChildIter::new(self.state_mask).map(|(idx, nibble)| (nibble, &self.children[idx]))
     }
 
-    /// Returns a [`BranchNodeCompact`] from this branch's masks and children hashes.
-    pub(super) fn branch_node_compact(&self, arena: &NodeArena) -> BranchNodeCompact {
+    /// Returns the branch masks and corresponding hash list based on current children.
+    pub(super) fn masks_and_hashes(&self, arena: &NodeArena) -> (BranchNodeMasks, Arc<Vec<B256>>) {
+        let mut masks = BranchNodeMasks::default();
         let mut hashes = Vec::new();
+
         for (nibble, child) in self.child_iter() {
-            if self.branch_masks.hash_mask.is_bit_set(nibble) {
-                let hash = match child {
-                    ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
-                        rlp_node.as_hash().expect("blinded child must be a hash")
-                    }
-                    ArenaSparseNodeBranchChild::Revealed(child_idx) => {
-                        arena[*child_idx].cached_hash()
-                    }
-                };
+            let (hash_bit, tree_bit, hash) = match child {
+                ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
+                    let hash_bit = self.branch_masks.hash_mask.is_bit_set(nibble);
+                    let hash = hash_bit
+                        .then(|| rlp_node.as_hash().expect("blinded hash child must be a hash"));
+                    (hash_bit, self.branch_masks.tree_mask.is_bit_set(nibble), hash)
+                }
+                ArenaSparseNodeBranchChild::Revealed(child_idx) => {
+                    let child = &arena[*child_idx];
+                    let hash_bit = child.hash_mask_bit();
+                    (hash_bit, child.tree_mask_bit(), hash_bit.then(|| child.cached_hash()))
+                }
+            };
+
+            masks.set_child_bits(nibble, hash_bit, tree_bit);
+            if let Some(hash) = hash {
                 hashes.push(hash);
             }
         }
-        BranchNodeCompact::new(
+
+        (masks, hashes.into())
+    }
+
+    /// Returns the mask and hashes for all children whose RLP node is represented by a hash.
+    pub(super) fn children_hash_mask_and_hashes(
+        &self,
+        child_rlp_nodes: &[RlpNode],
+        hash_mask: TrieMask,
+        branch_hashes: &Arc<Vec<B256>>,
+    ) -> (TrieMask, Arc<Vec<B256>>) {
+        debug_assert_eq!(
+            child_rlp_nodes.len(),
+            self.state_mask.count_bits() as usize,
+            "child RLP node count must match branch state mask"
+        );
+
+        let mut children_hash_mask = TrieMask::default();
+        let mut children_hashes = Vec::new();
+        for (nibble, rlp_node) in self.state_mask.iter().zip(child_rlp_nodes.iter()) {
+            if let Some(hash) = rlp_node.as_hash() {
+                children_hash_mask.set_bit(nibble);
+                children_hashes.push(hash);
+            }
+        }
+
+        if children_hash_mask == hash_mask {
+            (children_hash_mask, branch_hashes.clone())
+        } else {
+            (children_hash_mask, children_hashes.into())
+        }
+    }
+
+    /// Returns a [`BranchNodeCompact`] from this branch's masks and children hashes.
+    pub(super) fn branch_node_compact(&self) -> BranchNodeCompact {
+        assert!(
+            self.branch_masks.tree_mask.is_subset_of(self.state_mask),
+            "state mask: {:?} tree mask: {:?}",
             self.state_mask,
-            self.branch_masks.tree_mask,
-            self.branch_masks.hash_mask,
-            hashes,
-            None,
-        )
+            self.branch_masks.tree_mask
+        );
+        assert!(
+            self.branch_masks.hash_mask.is_subset_of(self.state_mask),
+            "state_mask {:?} hash_mask: {:?}",
+            self.state_mask,
+            self.branch_masks.hash_mask
+        );
+        assert_eq!(self.branch_masks.hash_mask.count_ones() as usize, self.hashes.len());
+        BranchNodeCompact {
+            state_mask: self.state_mask,
+            tree_mask: self.branch_masks.tree_mask,
+            hash_mask: self.branch_masks.hash_mask,
+            hashes: self.hashes.clone(),
+            root_hash: None,
+        }
     }
 }
 
@@ -305,17 +409,17 @@ impl ArenaSparseNode {
                 value: leaf.value,
             },
             TrieNodeV2::Branch(branch) => {
+                let branch_masks = masks.unwrap_or_default();
                 let children = branch.stack[..branch.state_mask.count_bits() as usize]
                     .iter()
                     .map(|rlp| ArenaSparseNodeBranchChild::Blinded(rlp.clone()))
                     .collect();
-                Self::Branch(ArenaSparseNodeBranch {
-                    state: ArenaSparseNodeState::Revealed,
+                Self::Branch(ArenaSparseNodeBranch::from_blinded_children(
                     children,
-                    state_mask: branch.state_mask,
-                    short_key: branch.key,
-                    branch_masks: masks.unwrap_or_default(),
-                })
+                    branch.state_mask,
+                    branch.key,
+                    branch_masks,
+                ))
             }
             TrieNodeV2::Extension(_) => {
                 panic!("Extension nodes should be merged into branches by TrieNodeV2")
@@ -327,8 +431,17 @@ impl ArenaSparseNode {
     pub(super) fn extra_heap_bytes(&self) -> usize {
         match self {
             Self::Leaf { value, .. } => value.capacity(),
-            Self::Branch(b) if b.children.spilled() => {
-                b.children.capacity() * core::mem::size_of::<ArenaSparseNodeBranchChild>()
+            Self::Branch(b) => {
+                let children_size = b
+                    .children
+                    .spilled()
+                    .then_some(
+                        b.children.capacity() * core::mem::size_of::<ArenaSparseNodeBranchChild>(),
+                    )
+                    .unwrap_or_default();
+                children_size +
+                    b.hashes.capacity() * core::mem::size_of::<B256>() +
+                    b.children_hashes.capacity() * core::mem::size_of::<B256>()
             }
             _ => 0,
         }
