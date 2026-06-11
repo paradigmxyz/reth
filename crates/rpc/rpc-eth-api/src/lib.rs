@@ -12,6 +12,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+pub mod anvil;
 pub mod bundle;
 pub mod core;
 pub mod ext;
@@ -21,6 +22,7 @@ pub mod node;
 pub mod pubsub;
 pub mod types;
 
+pub use anvil::AnvilEthApiServer;
 pub use bundle::{EthBundleApiServer, EthCallBundleApiServer};
 pub use core::{EthApiServer, FullEthApiServer};
 pub use ext::L2EthApiExtServer;
@@ -34,6 +36,8 @@ pub use reth_rpc_eth_types::error::{
 };
 pub use types::{EthApiTypes, FullEthApiTypes, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction};
 
+#[cfg(feature = "client")]
+pub use anvil::AnvilEthApiClient;
 #[cfg(feature = "client")]
 pub use bundle::{EthBundleApiClient, EthCallBundleApiClient};
 #[cfg(feature = "client")]

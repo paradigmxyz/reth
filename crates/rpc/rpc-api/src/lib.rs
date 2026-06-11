@@ -59,8 +59,8 @@ pub mod servers {
         web3::Web3ApiServer,
     };
     pub use reth_rpc_eth_api::{
-        self as eth, EthApiServer, EthBundleApiServer, EthCallBundleApiServer, EthConfigApiServer,
-        EthFilterApiServer, EthPubSubApiServer, L2EthApiExtServer,
+        self as eth, AnvilEthApiServer, EthApiServer, EthBundleApiServer, EthCallBundleApiServer,
+        EthConfigApiServer, EthFilterApiServer, EthPubSubApiServer, L2EthApiExtServer,
     };
 }
 
@@ -91,7 +91,7 @@ pub mod clients {
         web3::Web3ApiClient,
     };
     pub use reth_rpc_eth_api::{
-        EthApiClient, EthBundleApiClient, EthCallBundleApiClient, EthConfigApiClient,
-        EthFilterApiClient, L2EthApiExtClient,
+        AnvilEthApiClient, EthApiClient, EthBundleApiClient, EthCallBundleApiClient,
+        EthConfigApiClient, EthFilterApiClient, L2EthApiExtClient,
     };
 }
