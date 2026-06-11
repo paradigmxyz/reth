@@ -239,6 +239,19 @@ impl<T> ExecutionOutcome<T> {
         value
     }
 
+    /// Creates a new `ExecutionOutcome` from pre-aggregated evm2 state, per-block states,
+    /// per-block reverts, and execution results.
+    pub fn from_aggregated_state(
+        first_block: u64,
+        state: Evm2BlockState,
+        block_states: Vec<Evm2BlockState>,
+        mut block_reverts: Vec<Evm2BlockReverts>,
+        results: Vec<BlockExecutionResult<T>>,
+    ) -> Self {
+        Self::adjust_reverts_for_prior_wipes(&Evm2BlockState::default(), &mut block_reverts);
+        Self::from_blocks(first_block, state, block_states, block_reverts, results)
+    }
+
     /// Creates a new `ExecutionOutcome` from evm2 block states and execution results.
     pub fn from_block_states(
         first_block: u64,
@@ -294,6 +307,11 @@ impl<T> ExecutionOutcome<T> {
     /// Returns the current state changes as an evm2 frozen block state.
     pub fn evm2_block_state(&self) -> Evm2BlockState {
         self.state.inner().clone()
+    }
+
+    /// Returns the aggregate evm2 block state.
+    pub const fn evm2_block_state_ref(&self) -> &Evm2BlockState {
+        self.state.inner()
     }
 
     /// Set first block.
@@ -959,6 +977,70 @@ mod tests {
         requests: Vec<Requests>,
     ) -> ExecutionOutcome<T> {
         ExecutionOutcome::new_empty(first_block).with_receipts(receipts).with_requests(requests)
+    }
+
+    #[test]
+    fn from_aggregated_state_matches_from_block_states() {
+        let address = Address::repeat_byte(0x42);
+        let mut block1 = BlockStateAccumulator::new();
+        StateChangeSink::storage(
+            &mut block1,
+            StorageChange {
+                address,
+                key: U256::from(1),
+                original: U256::ZERO,
+                current: U256::from(2),
+            },
+        )
+        .unwrap();
+
+        let mut block2 = BlockStateAccumulator::new();
+        block2.storage_wipe(address).unwrap();
+        StateChangeSink::storage(
+            &mut block2,
+            StorageChange {
+                address,
+                key: U256::from(3),
+                original: U256::ZERO,
+                current: U256::from(4),
+            },
+        )
+        .unwrap();
+
+        let block_states = vec![block1, block2];
+        let results = vec![
+            BlockExecutionResult {
+                receipts: vec![1u8],
+                requests: Requests::default(),
+                gas_used: 1,
+                blob_gas_used: 0,
+            },
+            BlockExecutionResult {
+                receipts: vec![2u8],
+                requests: Requests::default(),
+                gas_used: 2,
+                blob_gas_used: 0,
+            },
+        ];
+        let expected =
+            ExecutionOutcome::from_block_states(10, block_states.clone(), results.clone());
+
+        let mut aggregate_state = BlockStateAccumulator::new();
+        let mut block_reverts = Vec::with_capacity(block_states.len());
+        for block_state in &block_states {
+            block_reverts
+                .push(evm2_block_reverts_and_accumulator_extend(&mut aggregate_state, block_state));
+        }
+
+        let actual = ExecutionOutcome::from_aggregated_state(
+            10,
+            aggregate_state,
+            block_states,
+            block_reverts,
+            results,
+        );
+
+        assert_eq!(actual, expected);
     }
 
     #[test]
