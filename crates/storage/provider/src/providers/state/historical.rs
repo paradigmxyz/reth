@@ -311,7 +311,7 @@ where
         let TrieInputSorted { nodes, state, prefix_sets } = input;
         let overlay_builder = OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
             .with_overlay_source(Some(OverlaySource::Immediate { trie: nodes, state }));
-        let Overlay { trie_updates, hashed_post_state } =
+        let Overlay { trie_updates, hashed_post_state, .. } =
             overlay_builder.build_overlay(self.provider)?;
 
         Ok(TrieInputSorted::new(trie_updates, hashed_post_state, prefix_sets))
