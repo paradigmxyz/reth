@@ -1,4 +1,3 @@
-use parking_lot::Mutex;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_trie::{
     updates::{TrieUpdates, TrieUpdatesSorted},
@@ -6,18 +5,47 @@ use reth_trie::{
 };
 use std::{
     fmt,
-    sync::{Arc, LazyLock},
+    sync::{Arc, LazyLock, OnceLock},
 };
 use tracing::{debug_span, instrument};
 
-/// Shared handle to asynchronously populated per-block trie data.
+/// Shared handle to asynchronously populated sorted per-block trie data.
 ///
-/// If the background task has not completed by the time trie data is needed, the caller computes
-/// the sorted data synchronously from the retained unsorted inputs and caches the result.
+/// The corresponding [`DeferredTrieDataProducer`] owns the unsorted inputs and publishes the sorted
+/// data when the background task completes. Callers wait for that result instead of computing it
+/// synchronously.
 #[derive(Clone)]
 pub struct DeferredTrieData {
-    /// Shared deferred state holding either raw inputs (pending) or computed result (ready).
-    state: Arc<Mutex<DeferredTrieDataInner>>,
+    /// Shared deferred result populated by the corresponding [`DeferredTrieDataProducer`].
+    value: Arc<OnceLock<ComputedTrieData>>,
+}
+
+/// Producer consumed by a spawned task to compute sorted trie data for a [`DeferredTrieData`]
+/// handle.
+#[must_use = "DeferredTrieDataProducer must be consumed with compute_and_publish to wake trie data waiters"]
+pub struct DeferredTrieDataProducer {
+    /// Shared result initialized exactly once by this producer.
+    value: Arc<OnceLock<ComputedTrieData>>,
+    /// Unsorted inputs consumed when the producer computes trie data.
+    inputs: PendingInputs,
+}
+
+impl fmt::Debug for DeferredTrieDataProducer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DeferredTrieDataProducer")
+            .field("inputs", &self.inputs)
+            .finish_non_exhaustive()
+    }
+}
+
+impl DeferredTrieDataProducer {
+    /// Computes sorted trie data, publishes it to waiters, and returns it to the task owner.
+    pub fn compute_and_publish(self) -> ComputedTrieData {
+        let Self { value, inputs } = self;
+        let computed = DeferredTrieData::sort(inputs.hashed_state, inputs.trie_updates);
+        let _ = value.set(computed.clone());
+        computed
+    }
 }
 
 /// Sorted trie data computed for one executed block.
@@ -38,22 +66,12 @@ pub struct ComputedTrieData {
 struct DeferredTrieMetrics {
     /// Number of times deferred trie data was ready (async task completed first).
     deferred_trie_async_ready: Counter,
-    /// Number of times deferred trie data required synchronous computation (fallback path).
-    deferred_trie_sync_fallback: Counter,
+    /// Number of times deferred trie data required waiting for the publishing task.
+    deferred_trie_task_wait: Counter,
 }
 
 static DEFERRED_TRIE_METRICS: LazyLock<DeferredTrieMetrics> =
     LazyLock::new(DeferredTrieMetrics::default);
-
-/// Internal state for deferred trie data.
-enum DeferredTrieDataInner {
-    /// Data is not yet available; raw inputs stored for fallback computation.
-    ///
-    /// Wrapped in `Option` to allow taking ownership during computation.
-    Pending(Option<PendingInputs>),
-    /// Data has been computed and is ready.
-    Ready(ComputedTrieData),
-}
 
 /// Inputs kept while a deferred trie computation is pending.
 #[derive(Clone, Debug)]
@@ -66,32 +84,31 @@ struct PendingInputs {
 
 impl fmt::Debug for DeferredTrieData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let state = self.state.lock();
-        match &*state {
-            DeferredTrieDataInner::Pending(_) => {
-                f.debug_struct("DeferredTrieData").field("state", &"pending").finish()
-            }
-            DeferredTrieDataInner::Ready(_) => {
-                f.debug_struct("DeferredTrieData").field("state", &"ready").finish()
-            }
-        }
+        f.debug_struct("DeferredTrieData")
+            .field("state", &if self.value.get().is_some() { "ready" } else { "pending" })
+            .finish()
     }
 }
 
 impl DeferredTrieData {
-    /// Create a new pending handle with fallback inputs for synchronous computation.
-    pub fn pending(hashed_state: Arc<HashedPostState>, trie_updates: Arc<TrieUpdates>) -> Self {
-        Self {
-            state: Arc::new(Mutex::new(DeferredTrieDataInner::Pending(Some(PendingInputs {
-                hashed_state,
-                trie_updates,
-            })))),
-        }
+    /// Create a new pending handle and task that will publish the computed trie data.
+    pub fn pending(
+        hashed_state: Arc<HashedPostState>,
+        trie_updates: Arc<TrieUpdates>,
+    ) -> (Self, DeferredTrieDataProducer) {
+        let value = Arc::new(OnceLock::new());
+        (
+            Self { value: Arc::clone(&value) },
+            DeferredTrieDataProducer {
+                value,
+                inputs: PendingInputs { hashed_state, trie_updates },
+            },
+        )
     }
 
     /// Create a handle that is already populated with the given [`ComputedTrieData`].
     pub fn ready(bundle: ComputedTrieData) -> Self {
-        Self { state: Arc::new(Mutex::new(DeferredTrieDataInner::Ready(bundle))) }
+        Self { value: Arc::new(OnceLock::from(bundle)) }
     }
 
     /// Sorts block execution outputs.
@@ -128,25 +145,21 @@ impl DeferredTrieData {
         ComputedTrieData::new(Arc::new(sorted_hashed_state), Arc::new(sorted_trie_updates))
     }
 
-    /// Returns trie data, computing synchronously if the async task hasn't completed.
+    /// Returns trie data, waiting for the async publishing task if it has not completed.
     #[instrument(level = "debug", target = "engine::tree::deferred_trie", skip_all)]
     pub fn wait_cloned(&self) -> ComputedTrieData {
-        let mut state = self.state.lock();
-        match &mut *state {
-            DeferredTrieDataInner::Ready(bundle) => {
+        let bundle = match self.value.get() {
+            Some(bundle) => {
                 DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
-                bundle.clone()
+                bundle
             }
-            DeferredTrieDataInner::Pending(maybe_inputs) => {
-                DEFERRED_TRIE_METRICS.deferred_trie_sync_fallback.increment(1);
-
-                let inputs = maybe_inputs.take().expect("inputs must be present in Pending state");
-                let computed = Self::sort(inputs.hashed_state, inputs.trie_updates);
-                *state = DeferredTrieDataInner::Ready(computed.clone());
-
-                computed
+            None => {
+                DEFERRED_TRIE_METRICS.deferred_trie_task_wait.increment(1);
+                self.value.wait()
             }
-        }
+        };
+
+        bundle.clone()
     }
 }
 
@@ -171,7 +184,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    fn empty_pending() -> DeferredTrieData {
+    fn empty_pending() -> (DeferredTrieData, DeferredTrieDataProducer) {
         DeferredTrieData::pending(
             Arc::new(HashedPostState::default()),
             Arc::new(TrieUpdates::default()),
@@ -190,25 +203,46 @@ mod tests {
     }
 
     #[test]
-    fn pending_computes_and_caches_result() {
-        let deferred = empty_pending();
+    fn pending_waits_for_task_and_caches_result() {
+        let (deferred, task) = empty_pending();
 
+        let published = task.compute_and_publish();
         let first = deferred.wait_cloned();
         let second = deferred.wait_cloned();
 
+        assert!(Arc::ptr_eq(&published.hashed_state, &first.hashed_state));
+        assert!(Arc::ptr_eq(&published.trie_updates, &first.trie_updates));
         assert!(Arc::ptr_eq(&first.hashed_state, &second.hashed_state));
         assert!(Arc::ptr_eq(&first.trie_updates, &second.trie_updates));
     }
 
     #[test]
-    fn concurrent_waits_share_computed_result() {
-        let deferred = empty_pending();
+    fn pending_wait_blocks_until_task_publishes() {
+        let (deferred, task) = empty_pending();
+
+        let handle = thread::spawn(move || deferred.wait_cloned());
+        thread::sleep(Duration::from_millis(20));
+        assert!(!handle.is_finished());
+
+        let published = task.compute_and_publish();
+        let result = handle.join().unwrap();
+
+        assert!(Arc::ptr_eq(&published.hashed_state, &result.hashed_state));
+        assert!(Arc::ptr_eq(&published.trie_updates, &result.trie_updates));
+    }
+
+    #[test]
+    fn concurrent_waits_share_published_result() {
+        let (deferred, task) = empty_pending();
         let deferred2 = deferred.clone();
 
         let handle = thread::spawn(move || deferred2.wait_cloned());
+        let published = task.compute_and_publish();
         let result1 = deferred.wait_cloned();
         let result2 = handle.join().unwrap();
 
+        assert!(Arc::ptr_eq(&published.hashed_state, &result1.hashed_state));
+        assert!(Arc::ptr_eq(&published.trie_updates, &result1.trie_updates));
         assert!(Arc::ptr_eq(&result1.hashed_state, &result2.hashed_state));
         assert!(Arc::ptr_eq(&result1.trie_updates, &result2.trie_updates));
     }
@@ -224,8 +258,9 @@ mod tests {
                 HashedStorage::from_iter(false, [(hashed_slot, U256::from(1))]),
             )]);
 
-        let deferred =
+        let (deferred, task) =
             DeferredTrieData::pending(Arc::new(hashed_state), Arc::new(TrieUpdates::default()));
+        let _ = task.compute_and_publish();
         let result = deferred.wait_cloned();
 
         assert_eq!(result.hashed_state.total_len(), 2);
@@ -238,11 +273,12 @@ mod tests {
         for i in 0..100 {
             accounts.insert(B256::with_last_byte(i), Some(Account::default()));
         }
-        let deferred = DeferredTrieData::pending(
+        let (deferred, task) = DeferredTrieData::pending(
             Arc::new(HashedPostState { accounts, storages: Default::default() }),
             Arc::new(TrieUpdates::default()),
         );
 
+        let _ = task.compute_and_publish();
         let _ = deferred.wait_cloned();
         let start = Instant::now();
         let _ = deferred.wait_cloned();
