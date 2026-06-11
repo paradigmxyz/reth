@@ -58,7 +58,6 @@ revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg", "memory_lim
 # misc
 eyre.workspace = true
 ethereum_ssz.workspace = true
-http.workspace = true
 http-body-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
