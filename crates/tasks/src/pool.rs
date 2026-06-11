@@ -222,31 +222,39 @@ impl WorkerPool {
     /// Use this to initialize or re-initialize per-thread state via [`Worker::init`].
     /// Only `num_threads` threads execute the closure; the rest skip it.
     pub fn broadcast(&self, num_threads: usize, f: impl Fn(&mut Worker) + Sync) {
-        if num_threads >= self.pool().current_num_threads() {
+        self.broadcast_indexed(num_threads, |_, worker| f(worker));
+    }
+
+    /// Runs a closure on `num_threads` threads in the pool, giving each closure a unique index and
+    /// mutable access to that thread's [`Worker`].
+    pub fn broadcast_indexed(&self, num_threads: usize, f: impl Fn(usize, &mut Worker) + Sync) {
+        let pool = self.pool();
+        if num_threads >= pool.current_num_threads() {
             // Fast path: run on every thread, no atomic coordination needed.
-            self.pool().broadcast(|_| {
-                WORKER.with_borrow_mut(|worker| f(worker));
+            pool.broadcast(|ctx| {
+                WORKER.with_borrow_mut(|worker| f(ctx.index(), worker));
             });
         } else {
             let remaining = AtomicUsize::new(num_threads);
-            self.pool().broadcast(|_| {
+            pool.broadcast(|_| {
                 // Atomically claim a slot; threads that can't decrement skip the closure.
                 let mut current = remaining.load(Ordering::Relaxed);
-                loop {
+                let index = loop {
                     if current == 0 {
                         return;
                     }
+                    let next = current - 1;
                     match remaining.compare_exchange_weak(
                         current,
-                        current - 1,
+                        next,
                         Ordering::Relaxed,
                         Ordering::Relaxed,
                     ) {
-                        Ok(_) => break,
+                        Ok(_) => break next,
                         Err(actual) => current = actual,
                     }
-                }
-                WORKER.with_borrow_mut(|worker| f(worker));
+                };
+                WORKER.with_borrow_mut(|worker| f(index, worker));
             });
         }
     }
