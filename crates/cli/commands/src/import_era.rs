@@ -6,6 +6,7 @@ use eyre::eyre;
 use reqwest::{Client, Url};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
+use reth_era::common::file_ops::EraFileType;
 use reth_era_downloader::{read_dir, EraClient, EraStream, EraStreamConfig};
 use reth_era_utils as era;
 use reth_etl::Collector;
@@ -13,7 +14,10 @@ use reth_fs_util as fs;
 use reth_node_core::version::version_metadata;
 use reth_provider::StaticFileProviderFactory;
 use reth_static_file_types::StaticFileSegment;
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tracing::info;
 
 /// Syncs ERA encoded blocks from a local or remote source.
@@ -24,6 +28,13 @@ pub struct ImportEraCommand<C: ChainSpecParser> {
 
     #[clap(flatten)]
     import: ImportArgs,
+
+    /// Stop the import after this block height has been reached.
+    ///
+    /// The file containing the block is imported up to and including this height, then the
+    /// import ends. By default all available blocks are imported.
+    #[arg(long, value_name = "TO_BLOCK", verbatim_doc_comment)]
+    to_block: Option<u64>,
 }
 
 #[derive(Debug, Args)]
@@ -82,18 +93,35 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
             1;
 
         if let Some(path) = self.import.path {
+            let era_type = detect_dir_era_type(&path)?;
+
+            info!(target: "reth::cli", ?era_type, path = %path.display(), to_block = ?self.to_block, "Starting ERA import");
+
             let stream = read_dir(path, next_block)?;
 
-            era::import::<era::Era1, _, _, _, _, _, _>(
-                stream,
-                &provider_factory,
-                &mut hash_collector,
-            )?;
+            match era_type {
+                EraFileType::Ere => era::import::<era::Ere, _, _, _, _, _, _>(
+                    stream,
+                    &provider_factory,
+                    &mut hash_collector,
+                    self.to_block,
+                )?,
+                _ => era::import::<era::Era1, _, _, _, _, _, _>(
+                    stream,
+                    &provider_factory,
+                    &mut hash_collector,
+                    self.to_block,
+                )?,
+            };
         } else {
             let url = match self.import.url {
                 Some(url) => url,
                 None => self.env.chain.chain().kind().try_to_url()?,
             };
+            let era_type = EraFileType::from_url(url.as_str());
+
+            info!(target: "reth::cli", ?era_type, %url, to_block = ?self.to_block, "Starting ERA import");
+
             let folder =
                 self.env.datadir.resolve_datadir(self.env.chain.chain()).data_dir().join("era");
 
@@ -103,11 +131,20 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
             let client = EraClient::new(Client::new(), url, folder);
             let stream = EraStream::new(client, config);
 
-            era::import::<era::Era1, _, _, _, _, _, _>(
-                stream,
-                &provider_factory,
-                &mut hash_collector,
-            )?;
+            match era_type {
+                EraFileType::Ere => era::import::<era::Ere, _, _, _, _, _, _>(
+                    stream,
+                    &provider_factory,
+                    &mut hash_collector,
+                    self.to_block,
+                )?,
+                _ => era::import::<era::Era1, _, _, _, _, _, _>(
+                    stream,
+                    &provider_factory,
+                    &mut hash_collector,
+                    self.to_block,
+                )?,
+            };
         }
 
         Ok(())
@@ -119,4 +156,18 @@ impl<C: ChainSpecParser> ImportEraCommand<C> {
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         Some(&self.env.chain)
     }
+}
+
+/// Detects the execution-layer ERA file type from the files in `dir`.
+fn detect_dir_era_type(dir: &Path) -> eyre::Result<EraFileType> {
+    for entry in fs::read_dir(dir)? {
+        if let Some(name) = entry?.file_name().to_str() &&
+            let Some(era_type @ (EraFileType::Era1 | EraFileType::Ere)) =
+                EraFileType::from_filename(name)
+        {
+            return Ok(era_type);
+        }
+    }
+
+    Err(eyre!("No ERA1 (.era1) or ERE (.ere, .erae) files found in {}", dir.display()))
 }
