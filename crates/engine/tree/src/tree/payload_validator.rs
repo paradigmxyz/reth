@@ -60,6 +60,7 @@ use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
 use reth_chain_state::{
     CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats,
+    StateTrieOverlayManager,
 };
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -503,6 +504,7 @@ where
             txs,
             provider_builder.clone(),
             overlay_factory,
+            ctx.state().tree_state.state_trie_overlays.clone(),
             &strategy,
             parallel_bal_execution,
         ));
@@ -1684,6 +1686,7 @@ where
         txs: T,
         provider_builder: StateProviderBuilder<N, P>,
         overlay_factory: OverlayStateProviderFactory<P, N>,
+        state_trie_overlay_manager: StateTrieOverlayManager<N>,
         strategy: &StateRootStrategy<N>,
         parallel_bal_execution: bool,
     ) -> Result<
@@ -1704,6 +1707,7 @@ where
                     txs,
                     provider_builder,
                     overlay_factory,
+                    state_trie_overlay_manager,
                     &self.config,
                     parallel_bal_execution,
                 );
@@ -2243,6 +2247,7 @@ where
         Some(self.payload_processor.spawn_state_root(
             overlay_factory,
             parent_state_root,
+            None,
             // Full proof workers — tx count unknown at FCU time (block built incrementally)
             false,
             &self.config,

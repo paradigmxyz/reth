@@ -17,12 +17,17 @@ use reth_primitives_traits::{
 #[cfg(feature = "rayon")]
 use reth_tasks::WorkerPool;
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
+use reth_trie_sparse::{ConfigurableSparseTrie, SparseStateTrie};
 use std::{
     fmt,
     sync::{Arc, OnceLock},
     time::Instant,
 };
 use tracing::{debug, trace};
+
+/// Sparse trie clone held by [`StateTrieOverlayManager`] for the latest in-memory parent.
+pub type StateTrieOverlaySparseTrie =
+    SparseStateTrie<ConfigurableSparseTrie, ConfigurableSparseTrie>;
 
 /// Manages flattened state trie overlays for in-memory blocks.
 ///
@@ -32,6 +37,7 @@ use tracing::{debug, trace};
 pub struct StateTrieOverlayManager<N: NodePrimitives = EthPrimitives> {
     blocks: Arc<DashMap<B256, ExecutedBlock<N>>>,
     overlays: Arc<DashMap<OverlayCacheKey, OverlayCacheEntry>>,
+    sparse_trie: Arc<parking_lot::Mutex<Option<AnchoredSparseTrie>>>,
     #[cfg(feature = "rayon")]
     worker_pool: Option<Arc<WorkerPool>>,
     metrics: StateTrieOverlayMetrics,
@@ -54,6 +60,7 @@ impl<N: NodePrimitives> Default for StateTrieOverlayManager<N> {
         Self {
             blocks: Default::default(),
             overlays: Default::default(),
+            sparse_trie: Default::default(),
             #[cfg(feature = "rayon")]
             worker_pool: None,
             metrics: Default::default(),
@@ -66,6 +73,7 @@ impl<N: NodePrimitives> std::fmt::Debug for StateTrieOverlayManager<N> {
         f.debug_struct("StateTrieOverlayManager")
             .field("blocks", &self.blocks.len())
             .field("overlays", &self.overlays.len())
+            .field("sparse_trie", &self.sparse_trie.lock().as_ref().map(|entry| entry.block_hash))
             .finish()
     }
 }
@@ -77,9 +85,26 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         Self {
             blocks: Default::default(),
             overlays: Default::default(),
+            sparse_trie: Default::default(),
             worker_pool: Some(worker_pool),
             metrics: Default::default(),
         }
+    }
+
+    /// Replaces the sparse trie clone held for `block_hash`.
+    pub fn replace_sparse_trie(&self, block_hash: B256, trie: StateTrieOverlaySparseTrie) {
+        *self.sparse_trie.lock() = Some(AnchoredSparseTrie { block_hash, trie: Arc::new(trie) });
+    }
+
+    /// Returns the sparse trie clone if it exactly matches `parent_hash`.
+    pub fn sparse_trie_for_parent(
+        &self,
+        parent_hash: B256,
+    ) -> Option<Arc<StateTrieOverlaySparseTrie>> {
+        let sparse_trie = self.sparse_trie.lock();
+        let anchored = sparse_trie.as_ref()?;
+        (anchored.block_hash == parent_hash && self.blocks.contains_key(&parent_hash))
+            .then(|| Arc::clone(&anchored.trie))
     }
 
     /// Inserts an executed in-memory block into the state trie overlay manager.
@@ -192,6 +217,15 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         span.record("removed_blocks", removed_blocks);
 
         if removed_blocks > 0 {
+            let mut sparse_trie = self.sparse_trie.lock();
+            if sparse_trie
+                .as_ref()
+                .is_some_and(|entry| !self.blocks.contains_key(&entry.block_hash))
+            {
+                *sparse_trie = None;
+            }
+            drop(sparse_trie);
+
             let overlays_before = self.overlays.len();
             let blocks = Arc::clone(&self.blocks);
             self.overlays.retain(|key, _| {
@@ -461,6 +495,12 @@ impl std::error::Error for StateTrieOverlayError {}
 struct OverlayCacheKey {
     anchor_hash: B256,
     tip_hash: B256,
+}
+
+#[derive(Clone, Debug)]
+struct AnchoredSparseTrie {
+    block_hash: B256,
+    trie: Arc<StateTrieOverlaySparseTrie>,
 }
 
 #[derive(Clone)]
@@ -822,6 +862,29 @@ mod tests {
 
         let (_, state) = manager.overlay_for_parent(child_hash, anchor_hash).unwrap();
         assert_eq!(state.accounts.len(), 2);
+    }
+
+    #[test]
+    fn sparse_trie_clone_is_replaced_and_removed_with_anchor_block() {
+        let manager = StateTrieOverlayManager::default();
+        let blocks = test_blocks();
+        let first_hash = blocks[0].recovered_block().hash();
+        let second_hash = blocks[1].recovered_block().hash();
+
+        manager.replace_sparse_trie(first_hash, StateTrieOverlaySparseTrie::default());
+        assert!(manager.sparse_trie_for_parent(first_hash).is_none());
+
+        manager.insert_block(blocks[0].clone());
+        manager.replace_sparse_trie(first_hash, StateTrieOverlaySparseTrie::default());
+        assert!(manager.sparse_trie_for_parent(first_hash).is_some());
+
+        manager.insert_block(blocks[1].clone());
+        manager.replace_sparse_trie(second_hash, StateTrieOverlaySparseTrie::default());
+        assert!(manager.sparse_trie_for_parent(first_hash).is_none());
+        assert!(manager.sparse_trie_for_parent(second_hash).is_some());
+
+        manager.remove_blocks([second_hash]);
+        assert!(manager.sparse_trie_for_parent(second_hash).is_none());
     }
 
     #[test]

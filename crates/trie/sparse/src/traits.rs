@@ -394,6 +394,16 @@ mod configurable_sparse_trie {
         }
     }
 
+    impl ConfigurableSparseTrie {
+        /// Returns the arena sparse trie if this wrapper uses the arena implementation.
+        pub const fn as_arena(&self) -> Option<&ArenaParallelSparseTrie> {
+            match self {
+                Self::Arena(inner) => Some(inner),
+                Self::HashMap(_) => None,
+            }
+        }
+    }
+
     macro_rules! delegate {
         ($self:ident, $method:ident $(, $arg:expr)*) => {
             match $self {

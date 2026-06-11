@@ -28,8 +28,8 @@ use reth_trie_parallel::{
 };
 use reth_trie_sparse::{
     errors::{SparseStateTrieErrorKind, SparseTrieErrorKind, SparseTrieResult},
-    ConfigurableSparseTrie, DeferredDrops, LeafUpdate, RevealableSparseTrie, SparseStateTrie,
-    SparseTrie,
+    ConfigurableSparseTrie, DeferredDrops, LeafUpdate, ParallelCompactClone, RevealableSparseTrie,
+    SparseStateTrie, SparseTrie,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
 use tracing::{debug, debug_span, error, instrument, trace_span};
@@ -237,6 +237,15 @@ where
         }
         let deferred = trie.take_deferred_drops();
         (trie, deferred)
+    }
+
+    /// Clones the computed trie for read-only reuse outside the sparse trie task.
+    pub(super) fn parallel_compact_clone(&self) -> SparseStateTrie<A, S>
+    where
+        A: ParallelCompactClone,
+        S: ParallelCompactClone,
+    {
+        self.trie.parallel_compact_clone()
     }
 
     /// Clears and shrinks the trie, discarding all state.

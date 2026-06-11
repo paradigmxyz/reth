@@ -15,6 +15,7 @@ use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender
 use multiproof::*;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
+use reth_chain_state::StateTrieOverlayManager;
 use reth_evm::{
     block::ExecutableTxParts,
     execute::{ExecutableTxFor, WithTxEnv},
@@ -317,6 +318,7 @@ where
         transactions: I,
         provider_builder: StateProviderBuilder<N, P>,
         multiproof_provider_factory: F,
+        state_trie_overlay_manager: StateTrieOverlayManager<N>,
         config: &TreeConfig,
         parallel_bal_execution: bool,
     ) -> IteratorPayloadHandle<Evm, I, N>
@@ -338,6 +340,7 @@ where
         let state_root_handle = self.spawn_state_root(
             multiproof_provider_factory,
             env.parent_state_root,
+            Some((state_trie_overlay_manager, env.hash)),
             halve_workers,
             config,
         );
@@ -410,6 +413,7 @@ where
         &self,
         multiproof_provider_factory: F,
         parent_state_root: B256,
+        sparse_trie_overlay: Option<(StateTrieOverlayManager<N>, B256)>,
         halve_workers: bool,
         config: &TreeConfig,
     ) -> StateRootHandle
@@ -436,6 +440,7 @@ where
             hashed_state_tx,
             from_multi_proof,
             parent_state_root,
+            sparse_trie_overlay,
             config.multiproof_chunk_size(),
         );
 
@@ -633,6 +638,7 @@ where
         hashed_state_tx: mpsc::Sender<HashedPostState>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
         parent_state_root: B256,
+        sparse_trie_overlay: Option<(StateTrieOverlayManager<N>, B256)>,
         chunk_size: usize,
     ) {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
@@ -673,11 +679,6 @@ where
                         .with_updates(true)
                 });
 
-            let start = Instant::now();
-            let sparse_state_trie =
-                executor.cpu_pool().install(|| sparse_state_trie.parallel_compact_clone());
-            trie_metrics.sparse_trie_clone_duration_histogram.record(start.elapsed());
-
             let mut task = SparseTrieCacheTask::new_with_trie(
                 &executor,
                 from_multi_proof,
@@ -690,6 +691,16 @@ where
             );
 
             let result = task.run();
+            let sparse_trie_overlay_clone = if result.is_ok() {
+                sparse_trie_overlay.map(|(manager, block_hash)| {
+                    let start = Instant::now();
+                    let trie = executor.cpu_pool().install(|| task.parallel_compact_clone());
+                    trie_metrics.sparse_trie_clone_duration_histogram.record(start.elapsed());
+                    (manager, block_hash, trie)
+                })
+            } else {
+                None
+            };
 
             // Acquire the guard before sending the result to prevent a race condition:
             // Without this, the next block could start after send() but before store(),
@@ -739,6 +750,9 @@ where
                     .sparse_trie_retained_storage_tries
                     .set(trie.retained_storage_tries_count() as f64);
                 guard.store(PreservedSparseTrie::anchored(trie, result.state_root));
+                if let Some((manager, block_hash, trie)) = sparse_trie_overlay_clone {
+                    manager.replace_sparse_trie(block_hash, trie);
+                }
                 deferred
             } else {
                 debug!(
@@ -1412,6 +1426,7 @@ mod tests {
                 provider_factory,
                 OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
             ),
+            StateTrieOverlayManager::default(),
             &TreeConfig::default(),
             false,
         );
