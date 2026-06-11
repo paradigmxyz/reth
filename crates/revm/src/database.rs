@@ -102,62 +102,6 @@ impl<DB> DerefMut for StateProviderDatabase<DB> {
     }
 }
 
-/// A [`DatabaseRef`] backed account info reader.
-///
-/// This adapts account and bytecode reads from revm's database interface back into Reth's storage
-/// reader traits. It is intentionally not a full [`StateProvider`] because [`DatabaseRef`] does
-/// not expose roots or proofs.
-///
-/// Note: [`DatabaseRef::code_by_hash_ref`] returns [`Bytecode`] directly, so this adapter cannot
-/// distinguish missing bytecode from the database's default bytecode and wraps whatever the
-/// database returns in `Some`.
-#[derive(Clone)]
-pub struct DatabaseStateProvider<DB>(pub DB);
-
-impl<DB> DatabaseStateProvider<DB> {
-    /// Create a new database-backed state reader.
-    pub const fn new(db: DB) -> Self {
-        Self(db)
-    }
-
-    /// Consume self and return the inner database.
-    pub fn into_inner(self) -> DB {
-        self.0
-    }
-
-    /// Returns the inner database.
-    pub const fn inner(&self) -> &DB {
-        &self.0
-    }
-}
-
-impl<DB> core::fmt::Debug for DatabaseStateProvider<DB> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("DatabaseStateProvider").finish_non_exhaustive()
-    }
-}
-
-impl<DB> AccountReader for DatabaseStateProvider<DB>
-where
-    DB: DatabaseRef<Error = ProviderError>,
-{
-    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        Ok(self.0.basic_ref(*address)?.map(Into::into))
-    }
-}
-
-impl<DB> BytecodeReader for DatabaseStateProvider<DB>
-where
-    DB: DatabaseRef<Error = ProviderError>,
-{
-    fn bytecode_by_hash(
-        &self,
-        code_hash: &B256,
-    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
-        Ok(Some(reth_primitives_traits::Bytecode(self.0.code_by_hash_ref(*code_hash)?)))
-    }
-}
-
 impl<DB: EvmStateProvider> Database for StateProviderDatabase<DB> {
     type Error = ProviderError;
 
@@ -223,6 +167,62 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
         // Get the block hash or default hash with an attempt to convert U256 block number to u64
         Ok(self.0.block_hash(number)?.unwrap_or_default())
+    }
+}
+
+/// A [`DatabaseRef`] backed account info reader.
+///
+/// This adapts account and bytecode reads from revm's database interface back into Reth's storage
+/// reader traits. It is intentionally not a full [`StateProvider`] because [`DatabaseRef`] does
+/// not expose roots or proofs.
+///
+/// Note: [`DatabaseRef::code_by_hash_ref`] returns [`Bytecode`] directly, so this adapter cannot
+/// distinguish missing bytecode from the database's default bytecode and wraps whatever the
+/// database returns in `Some`.
+#[derive(Clone)]
+pub struct DatabaseStateProvider<DB>(pub DB);
+
+impl<DB> DatabaseStateProvider<DB> {
+    /// Create a new database-backed state reader.
+    pub const fn new(db: DB) -> Self {
+        Self(db)
+    }
+
+    /// Consume self and return the inner database.
+    pub fn into_inner(self) -> DB {
+        self.0
+    }
+
+    /// Returns the inner database.
+    pub const fn inner(&self) -> &DB {
+        &self.0
+    }
+}
+
+impl<DB> core::fmt::Debug for DatabaseStateProvider<DB> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("DatabaseStateProvider").finish_non_exhaustive()
+    }
+}
+
+impl<DB> AccountReader for DatabaseStateProvider<DB>
+where
+    DB: DatabaseRef<Error = ProviderError>,
+{
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+        Ok(self.0.basic_ref(*address)?.map(Into::into))
+    }
+}
+
+impl<DB> BytecodeReader for DatabaseStateProvider<DB>
+where
+    DB: DatabaseRef<Error = ProviderError>,
+{
+    fn bytecode_by_hash(
+        &self,
+        code_hash: &B256,
+    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
+        Ok(Some(reth_primitives_traits::Bytecode(self.0.code_by_hash_ref(*code_hash)?)))
     }
 }
 
