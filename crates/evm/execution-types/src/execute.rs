@@ -4,6 +4,8 @@ use alloy_primitives::{
     map::{AddressMap, AddressSet, B256Map, U256Map},
     Address, B256, U256,
 };
+#[cfg(not(feature = "std"))]
+use core::cell::OnceCell;
 use core::ops::Deref;
 use evm2::{
     bytecode::Bytecode as Evm2Bytecode,
@@ -11,6 +13,8 @@ use evm2::{
 };
 use reth_primitives_traits::{Account, Bytecode};
 use reth_trie_common::HashedPostState;
+#[cfg(feature = "std")]
+use std::sync::OnceLock as OnceCell;
 
 /// The result of executing a block.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,9 +135,14 @@ impl<T> Default for BlockExecutionOutput<T> {
 }
 
 /// Indexed evm2 block state used by in-memory overlay providers.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct IndexedBlockState {
     inner: BlockStateAccumulator,
+    index: OnceCell<BlockStateIndex>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BlockStateIndex {
     accounts: AddressMap<Tracked<Option<AccountInfo>>>,
     storage_wipes: AddressSet,
     storage: AddressMap<U256Map<U256>>,
@@ -141,6 +150,11 @@ pub struct IndexedBlockState {
 }
 
 impl IndexedBlockState {
+    /// Creates a new lazily indexed evm2 block state.
+    pub const fn new(inner: BlockStateAccumulator) -> Self {
+        Self { inner, index: OnceCell::new() }
+    }
+
     /// Returns the underlying evm2 block state.
     pub const fn inner(&self) -> &BlockStateAccumulator {
         &self.inner
@@ -151,39 +165,62 @@ impl IndexedBlockState {
         self.inner
     }
 
+    fn index(&self) -> &BlockStateIndex {
+        self.index.get_or_init(|| BlockStateIndex::from_state(&self.inner))
+    }
+
     /// Return bytecode if known.
     pub fn bytecode(&self, code_hash: &B256) -> Option<Bytecode> {
-        self.bytecode.get(code_hash).map(|bytecode| Bytecode::new_raw(bytecode.original_bytes()))
+        self.index()
+            .bytecode
+            .get(code_hash)
+            .map(|bytecode| Bytecode::new_raw(bytecode.original_bytes()))
     }
 
     /// Return analyzed evm2 bytecode if known.
     pub fn evm2_bytecode(&self, code_hash: &B256) -> Option<Evm2Bytecode> {
-        self.bytecode.get(code_hash).cloned()
+        self.index().bytecode.get(code_hash).cloned()
     }
 
     /// Return original bytecode length if known.
     pub fn bytecode_len(&self, code_hash: &B256) -> Option<usize> {
-        self.bytecode.get(code_hash).map(|bytecode| bytecode.original_bytes().len())
+        self.index().bytecode.get(code_hash).map(|bytecode| bytecode.original_bytes().len())
     }
 
     /// Returns the state account change for the given address.
     pub fn account_state(&self, address: &Address) -> Option<&Tracked<Option<AccountInfo>>> {
-        self.accounts.get(address)
+        self.index().accounts.get(address)
     }
 
     /// Get storage if value is known.
     ///
     /// Wiped storage shadows older state with zero unless the block wrote a later value.
     pub fn storage_value(&self, address: &Address, storage_key: U256) -> Option<U256> {
-        self.storage
+        let index = self.index();
+        index
+            .storage
             .get(address)
             .and_then(|storage| storage.get(&storage_key).copied())
-            .or_else(|| self.storage_wipes.contains(address).then_some(U256::ZERO))
+            .or_else(|| index.storage_wipes.contains(address).then_some(U256::ZERO))
     }
 }
 
 impl From<BlockStateAccumulator> for IndexedBlockState {
     fn from(inner: BlockStateAccumulator) -> Self {
+        Self::new(inner)
+    }
+}
+
+impl PartialEq for IndexedBlockState {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
+impl Eq for IndexedBlockState {}
+
+impl BlockStateIndex {
+    fn from_state(inner: &BlockStateAccumulator) -> Self {
         let accounts =
             inner.accounts().map(|(address, account)| (address, account.clone())).collect();
         let storage_wipes = inner.storage_wipes().collect();
@@ -194,7 +231,7 @@ impl From<BlockStateAccumulator> for IndexedBlockState {
         let bytecode =
             inner.code().map(|(code_hash, bytecode)| (*code_hash, bytecode.clone())).collect();
 
-        Self { inner, accounts, storage_wipes, storage, bytecode }
+        Self { accounts, storage_wipes, storage, bytecode }
     }
 }
 
@@ -223,5 +260,58 @@ fn account_info_to_reth(info: &AccountInfo) -> Account {
         balance: info.balance,
         nonce: info.nonce,
         bytecode_hash: (!info.code_hash.is_zero()).then_some(info.code_hash),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::Bytes;
+    use evm2::evm::{AccountChangeRef, AccountInfoRef, StorageChange};
+
+    #[test]
+    fn indexed_block_state_builds_lookup_index_lazily() {
+        let address = Address::repeat_byte(0x42);
+        let wiped_address = Address::repeat_byte(0x43);
+        let code_hash = B256::repeat_byte(0x24);
+        let bytecode = Evm2Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]));
+        let mut state = BlockStateAccumulator::new();
+
+        state.bytecode(code_hash, &bytecode).unwrap();
+        state
+            .account(AccountChangeRef {
+                address,
+                original: None,
+                current: Some(AccountInfoRef {
+                    balance: U256::from(7),
+                    nonce: 3,
+                    code_hash,
+                    code: Some(&bytecode),
+                }),
+            })
+            .unwrap();
+        state.storage_wipe(wiped_address).unwrap();
+        StateChangeSink::storage(
+            &mut state,
+            StorageChange {
+                address,
+                key: U256::from(9),
+                original: U256::ZERO,
+                current: U256::from(10),
+            },
+        )
+        .unwrap();
+
+        let indexed = IndexedBlockState::new(state);
+        let account = indexed.account_state(&address).unwrap().current.as_ref().unwrap();
+
+        assert_eq!(account.balance, U256::from(7));
+        assert_eq!(indexed.storage_value(&wiped_address, U256::from(8)), Some(U256::ZERO));
+        assert_eq!(indexed.storage_value(&address, U256::from(9)), Some(U256::from(10)));
+        assert_eq!(indexed.bytecode_len(&code_hash), Some(2));
+        assert_eq!(
+            indexed.evm2_bytecode(&code_hash).unwrap().original_bytes(),
+            bytecode.original_bytes()
+        );
     }
 }
