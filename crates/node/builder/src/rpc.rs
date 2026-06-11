@@ -4,8 +4,8 @@ pub use jsonrpsee::{
     core::middleware::layer::Either,
     server::middleware::rpc::{RpcService, RpcServiceBuilder},
 };
-use reth_engine_tree::tree::WaitForCaches;
 pub use reth_engine_tree::tree::{BasicEngineValidator, EngineValidator};
+use reth_engine_tree::tree::{Evm2TxEnv, WaitForCaches};
 pub use reth_rpc_builder::{
     middleware::{RethAuthHttpMiddleware, RethRpcMiddleware},
     Identity, Stack,
@@ -1457,7 +1457,7 @@ where
             <<Node::Types as NodeTypes>::Payload as PayloadTypes>::ExecutionData,
         > + ConfigureEvm2BlockExecutor<Primitives = PrimitivesTy<Node::Types>>
                  + ConfigureEvm2Prewarm<Primitives = PrimitivesTy<Node::Types>>
-                 + ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
+                 + ConfigureEvm<Primitives = PrimitivesTy<Node::Types>, TxEnv = Evm2TxEnv>,
     >,
     PrimitivesTy<Node::Types>: reth_node_api::NodePrimitives<
         SignedTx = EthereumTxEnvelope<TxEip4844>,
