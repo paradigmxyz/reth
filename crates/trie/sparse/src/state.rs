@@ -913,7 +913,7 @@ impl BucketedLfu<HotSlotKey> {
             grouped.entry(key.address).or_default().push(Nibbles::unpack(key.slot));
         }
 
-        for slots in grouped.values_mut() {
+        for slots in grouped.values_mut().filter(|slots| slots.len() > 1) {
             slots.sort_unstable();
             slots.dedup();
         }
