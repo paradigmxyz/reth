@@ -10,6 +10,7 @@ use evm2::{
     evm::{AccountInfo, BlockStateAccumulator, StateChangeSink, StateChangeSource, Tracked},
 };
 use reth_primitives_traits::{Account, Bytecode};
+use reth_trie_common::HashedPostState;
 
 /// The result of executing a block.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,12 +56,29 @@ pub struct BlockExecutionOutput<T> {
     pub result: BlockExecutionResult<T>,
     /// The changed state of the block after execution.
     pub state: IndexedBlockState,
+    /// Trie-ready hashed post-state for this block, if produced during execution.
+    pub hashed_state: Option<HashedPostState>,
 }
 
 impl<T> BlockExecutionOutput<T> {
     /// Creates a new block execution output and indexes the changed state for hot overlay lookups.
     pub fn new(result: BlockExecutionResult<T>, state: BlockStateAccumulator) -> Self {
-        Self { result, state: state.into() }
+        Self { result, state: state.into(), hashed_state: None }
+    }
+
+    /// Creates a new block execution output with a precomputed hashed post-state.
+    pub fn new_with_hashed_state(
+        result: BlockExecutionResult<T>,
+        state: BlockStateAccumulator,
+        hashed_state: HashedPostState,
+    ) -> Self {
+        Self { result, state: state.into(), hashed_state: Some(hashed_state) }
+    }
+
+    /// Attaches an optional precomputed hashed post-state to the output.
+    pub fn with_hashed_state(mut self, hashed_state: Option<HashedPostState>) -> Self {
+        self.hashed_state = hashed_state;
+        self
     }
 
     /// Return bytecode if known.
@@ -107,6 +125,7 @@ impl<T> Default for BlockExecutionOutput<T> {
                 blob_gas_used: 0,
             },
             state: Default::default(),
+            hashed_state: None,
         }
     }
 }

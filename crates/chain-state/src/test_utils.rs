@@ -246,6 +246,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                         blob_gas_used: 0,
                     },
                     state: Default::default(),
+                    hashed_state: None,
                 }),
                 ComputedTrieData::default(),
             );
@@ -343,6 +344,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                     blob_gas_used: 0,
                 },
                 state: block_state.into(),
+                hashed_state: None,
             }),
             trie_data,
         );

@@ -946,6 +946,7 @@ mod tests {
                             blob_gas_used: 0,
                         },
                         state: Default::default(),
+                        hashed_state: None,
                     };
 
                     ExecutedBlock {
@@ -1755,6 +1756,7 @@ mod tests {
                                 gas_used: 0,
                                 blob_gas_used: 0,
                             },
+                            hashed_state: None,
                         }),
                         ..Default::default()
                     }

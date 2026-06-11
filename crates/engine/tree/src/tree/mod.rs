@@ -2216,6 +2216,7 @@ where
                 gas_used: block.gas_used(),
                 blob_gas_used: block.blob_gas_used().unwrap_or_default(),
             },
+            hashed_state: None,
         });
 
         Ok(ExecutedBlock::new(

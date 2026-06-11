@@ -18,6 +18,7 @@ reth-ethereum-forks.workspace = true
 reth-primitives-traits.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-evm.workspace = true
+reth-trie-common.workspace = true
 reth-storage-errors = { workspace = true, optional = true }
 reth-storage-api = { workspace = true, optional = true }
 evm2.workspace = true
@@ -80,6 +81,7 @@ std = [
     "reth-evm/std",
     "reth-primitives-traits/std",
     "reth-ethereum-primitives/std",
+    "reth-trie-common/std",
     "alloy-rpc-types-engine/std",
     "dep:reth-storage-errors",
     "reth-storage-errors/std",
@@ -93,4 +95,5 @@ test-utils = [
     "reth-ethereum-primitives/test-utils",
     "reth-evm/test-utils",
     "reth-primitives-traits/test-utils",
+    "reth-trie-common/test-utils",
 ]
