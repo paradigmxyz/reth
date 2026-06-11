@@ -50,6 +50,10 @@ jobs:
           test -f docs/dist/public/sdk/index.html
           test -f docs/dist/public/logo.png
           test -f docs/dist/public/reth-prod.png
+          test -f docs/dist/public/docs/index.html
+          test -f docs/dist/public/docs/reth/index.html
+          test -d docs/dist/public/docs/static.files
+          grep -q 'content="rustdoc"' docs/dist/public/docs/index.html
           echo "Vocs Build Complete"
 
       - name: Setup Pages
