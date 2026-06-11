@@ -60,6 +60,7 @@ std = [
     "reth-ethereum-primitives/std",
     "alloy-eip7928/std",
     "tracing/std",
+    "revm-primitives/std",
 ]
 metrics = ["std", "dep:metrics", "dep:reth-metrics"]
 test-utils = [

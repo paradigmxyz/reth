@@ -227,12 +227,11 @@ where
             canonical_state,
             &*canonical_state.database,
         )?;
-    }
-    // Validate that the built BAL matches the received BAL in terms of storage roots for accounts
-    // that specify them.(eip 8268)
-    if is_bogota_active {
+        // Validate that the built BAL matches the received BAL in terms of storage roots for
+        // accounts that specify them.(eip 8268)
         validate_storage_roots(received_bal.as_slice(), built_bal.as_slice())?;
     }
+
     if tracing::enabled!(target: "engine::tree::payload_processor::bal", tracing::Level::DEBUG) &&
         built_bal.as_slice() != received_bal.as_slice()
     {
@@ -265,23 +264,23 @@ fn validate_storage_roots(
             .and_then(|built_account| built_account.storage_root());
 
         if built_storage_root != Some(received_storage_root) {
-            // return Err(BalExecutionError::Consensus(
-            //     reth_consensus::ConsensusError::BlockAccessListInvalid(format!(
-            //         "storage root mismatch for account {}: got {}, expected {}",
-            //         received_account.address(),
-            //         received_storage_root,
-            //         built_storage_root
-            //             .map(|root| root.to_string())
-            //             .unwrap_or_else(|| "none".to_string())
-            //     )),
-            // ))
-            tracing::info!(
-                target: "engine::tree::payload_processor::bal",
-                account = ?received_account.address(),
-                received_storage_root = ?received_storage_root,
-                built_storage_root = ?built_storage_root,
-                "storage root mismatch for account in BAL validation",
-            );
+            return Err(BalExecutionError::Consensus(
+                reth_consensus::ConsensusError::BlockAccessListInvalid(format!(
+                    "storage root mismatch for account {}: got {}, expected {}",
+                    received_account.address(),
+                    received_storage_root,
+                    built_storage_root
+                        .map(|root| root.to_string())
+                        .unwrap_or_else(|| "none".to_string())
+                )),
+            ));
+            // tracing::info!(
+            //     target: "engine::tree::payload_processor::bal",
+            //     account = ?received_account.address(),
+            //     received_storage_root = ?received_storage_root,
+            //     built_storage_root = ?built_storage_root,
+            //     "storage root mismatch for account in BAL validation",
+            // );
         }
     }
 
