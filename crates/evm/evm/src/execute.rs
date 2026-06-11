@@ -601,6 +601,7 @@ where
         let evm_env =
             self.strategy_factory.evm_env(block.header()).map_err(BlockExecutionError::other)?;
         let has_bal = block.header().block_access_list_hash().is_some();
+
         let is_bogota_active =
             Into::<SpecId>::into(*evm_env.spec_id()).is_enabled_in(SpecId::BOGOTA);
 
