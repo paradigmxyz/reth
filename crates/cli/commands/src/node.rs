@@ -233,13 +233,21 @@ where
     C::ChainSpec: EthChainSpec,
     Ext: clap::Args + fmt::Debug,
 {
+    /// Loads (or generates) the p2p secret key from the datadir of the configured chain.
+    ///
+    /// This resolves the datadir for the configured chain and reads the secret key from its
+    /// default location, without starting the network.
+    pub fn p2p_secret_key(&self) -> eyre::Result<secp256k1::SecretKey> {
+        let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
+        Ok(self.network.secret_key(data_dir.p2p_secret())?)
+    }
+
     /// Derives the peer id from the configured p2p secret key without starting the network.
     ///
-    /// Resolves the datadir for the configured chain, loads (or generates) the p2p secret key
-    /// from it, and returns the corresponding [`PeerId`](reth_network_peers::PeerId).
+    /// Loads the p2p secret key via [`p2p_secret_key`](Self::p2p_secret_key) and returns the
+    /// corresponding [`PeerId`](reth_network_peers::PeerId).
     pub fn peer_id(&self) -> eyre::Result<reth_network_peers::PeerId> {
-        let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
-        let sk = self.network.secret_key(data_dir.p2p_secret())?;
+        let sk = self.p2p_secret_key()?;
         Ok(reth_network_peers::pk2id(&sk.public_key(secp256k1::SECP256K1)))
     }
 }
