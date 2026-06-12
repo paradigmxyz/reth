@@ -1574,7 +1574,7 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
 mod tests {
     use super::*;
     use alloy_eips::{eip7685::Requests, NumHash};
-    use alloy_primitives::{keccak256, Address, Bytes, Sealed, B256};
+    use alloy_primitives::{Address, Bytes, B256};
     use alloy_rpc_types_engine::{
         ClientCode, ClientVersionV1, ExecutionPayloadV2, PayloadAttributes, PayloadStatusEnum,
     };
@@ -1588,7 +1588,7 @@ mod tests {
     };
     use reth_node_ethereum::EthereumEngineValidator;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
-    use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore};
+    use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
     use reth_tasks::Runtime;
     use reth_transaction_pool::noop::NoopTransactionPool;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
@@ -1686,8 +1686,7 @@ mod tests {
         provider.add_block(block_without_bal_hash, block_without_bal);
 
         let raw_bal = Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]);
-        let sealed_bal = Sealed::new_unchecked(raw_bal.clone(), keccak256(&raw_bal));
-        bal_store.insert(NumHash::new(1, block_hash), sealed_bal).unwrap();
+        bal_store.insert(NumHash::new(1, block_hash), RawBal::new(raw_bal.clone())).unwrap();
 
         let missing_hash = B256::with_last_byte(3);
         let response = api
@@ -1742,8 +1741,7 @@ mod tests {
         provider.add_block(block_without_bal_hash, block_without_bal);
 
         let raw_bal = Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]);
-        let sealed_bal = Sealed::new_unchecked(raw_bal.clone(), keccak256(&raw_bal));
-        bal_store.insert(NumHash::new(1, block_hash), sealed_bal).unwrap();
+        bal_store.insert(NumHash::new(1, block_hash), RawBal::new(raw_bal.clone())).unwrap();
 
         let response = api.get_payload_bodies_by_range_v2(1, 3).await.unwrap();
 

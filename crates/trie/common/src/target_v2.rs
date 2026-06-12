@@ -2,7 +2,8 @@
 
 use crate::Nibbles;
 use alloc::vec::Vec;
-use alloy_primitives::{map::B256Map, B256};
+use alloy_primitives::{keccak256, map::B256Map, B256};
+use revm_state::EvmState;
 
 /// Target describes a proof target. For every proof target given, a proof calculator will calculate
 /// and return all nodes whose path is a prefix of the target's `key_nibbles`.
@@ -71,6 +72,51 @@ impl MultiProofTargetsV2 {
     /// Returns an iterator that yields chunks of the specified size.
     pub fn chunks(self, chunk_size: usize) -> impl Iterator<Item = Self> {
         ChunkedMultiProofTargetsV2::new(self, chunk_size)
+    }
+
+    /// Returns a set of [`MultiProofTargetsV2`] and the total amount of storage targets, based on
+    /// the given state.
+    pub fn from_state(state: EvmState) -> (Self, usize) {
+        let mut targets = Self::default();
+        targets.account_targets.reserve(state.len());
+        targets.storage_targets.reserve(state.len());
+        let mut storage_target_count = 0;
+        for (addr, account) in state {
+            // if the account was not touched, or if the account was selfdestructed, do not
+            // fetch proofs for it
+            //
+            // Since selfdestruct can only happen in the same transaction, we can skip
+            // prefetching proofs for selfdestructed accounts
+            //
+            // See: https://eips.ethereum.org/EIPS/eip-6780
+            if !account.is_touched() || account.is_selfdestructed() {
+                continue
+            }
+
+            let hashed_address = keccak256(addr);
+
+            if account.info != account.original_info() {
+                targets.account_targets.push(hashed_address.into());
+            }
+
+            let mut storage_slots = Vec::with_capacity(account.storage.len());
+            for (key, slot) in account.storage {
+                // do nothing if unchanged
+                if !slot.is_changed() {
+                    continue
+                }
+
+                let hashed_slot = keccak256(B256::new(key.to_be_bytes()));
+                storage_slots.push(ProofV2Target::from(hashed_slot));
+            }
+
+            storage_target_count += storage_slots.len();
+            if !storage_slots.is_empty() {
+                targets.storage_targets.insert(hashed_address, storage_slots);
+            }
+        }
+
+        (targets, storage_target_count)
     }
 }
 

@@ -1,6 +1,6 @@
 //! Helpers for `eth_blockAccessList` RPC method.
 use alloy_consensus::BlockHeader;
-use alloy_eip7928::BlockAccessList;
+use alloy_eip7928::{bal::DecodedBal, BlockAccessList};
 use alloy_primitives::Bytes;
 use alloy_rpc_types_eth::BlockId;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
@@ -35,7 +35,11 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
             if let Some(cached_bal) =
                 self.cache().get_bal(block.hash()).await.map_err(Self::Error::from_eth_err)?
             {
-                return Ok(Some(cached_bal.as_bal().clone().into_alloy_bal()))
+                let (bal, _) = DecodedBal::from_rlp_bytes(cached_bal.as_raw().clone())
+                    .map_err(RethError::other)
+                    .map_err(Self::Error::from_eth_err)?
+                    .split();
+                return Ok(Some(Vec::from(bal)))
             }
 
             self.spawn_blocking_io(move |eth_api| {

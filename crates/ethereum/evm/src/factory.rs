@@ -55,7 +55,10 @@ pub struct RethEvmFactory {
 impl Clone for RethEvmFactory {
     fn clone(&self) -> Self {
         Self {
+            #[cfg(feature = "jit")]
             inner: self.inner.clone(),
+            #[cfg(not(feature = "jit"))]
+            inner: self.inner,
             #[cfg(feature = "jit")]
             disabled: self.disabled.clone(),
             #[cfg(feature = "jit")]
