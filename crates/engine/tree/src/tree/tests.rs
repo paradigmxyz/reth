@@ -1,6 +1,5 @@
 use super::*;
 use crate::{
-    download::DownloadedBlock,
     persistence::PersistenceAction,
     tree::{
         payload_validator::{BasicEngineValidator, TreeCtx, ValidationOutcome},
@@ -45,8 +44,8 @@ use tokio::sync::oneshot;
 
 fn downloaded_blocks<B: reth_primitives_traits::Block>(
     blocks: Vec<reth_primitives_traits::SealedBlock<B>>,
-) -> Vec<DownloadedBlock<B>> {
-    blocks.into_iter().map(DownloadedBlock::without_bal).collect()
+) -> Vec<SealedBlockWithAccessList<B>> {
+    blocks.into_iter().map(SealedBlockWithAccessList::from_block).collect()
 }
 
 /// Mock engine validator for tests
@@ -462,7 +461,8 @@ impl ValidatorTestHarness {
             &mut self.harness.tree.state,
             &self.harness.tree.canonical_in_memory_state,
         );
-        let result = self.validator.validate_block(block, ctx);
+        let result =
+            self.validator.validate_block(SealedBlockWithAccessList::from_block(block), ctx);
         self.metrics.record_validation(result.is_ok());
         result
     }
@@ -673,7 +673,7 @@ fn test_disconnected_block() {
 
     let outcome = test_harness
         .tree
-        .insert_downloaded_block(DownloadedBlock::without_bal(sealed.clone()))
+        .insert_block(SealedBlockWithAccessList::from_block(sealed.clone()))
         .unwrap();
     assert_eq!(
         outcome,
@@ -1087,7 +1087,9 @@ async fn test_engine_tree_fcu_missing_head() {
     // after FCU we receive an EngineApiEvent::Download event to get the missing block.
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
-        EngineApiEvent::Download(DownloadRequest::BlockSet(actual_block_set)) => {
+        EngineApiEvent::Download(DownloadRequest::BlockSet {
+            hashes: actual_block_set, ..
+        }) => {
             let expected_block_set = B256Set::from_iter([missing_block.hash()]);
             assert_eq!(actual_block_set, expected_block_set);
         }
@@ -1132,7 +1134,7 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
 
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
-        EngineApiEvent::Download(DownloadRequest::BlockSet(hash_set)) => {
+        EngineApiEvent::Download(DownloadRequest::BlockSet { hashes: hash_set, .. }) => {
             assert_eq!(hash_set, B256Set::from_iter([main_chain_last_hash]));
         }
         _ => panic!("Unexpected event: {event:#?}"),
@@ -1141,7 +1143,7 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
     // After backfill completes with head not buffered, we also request head download
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
-        EngineApiEvent::Download(DownloadRequest::BlockSet(hash_set)) => {
+        EngineApiEvent::Download(DownloadRequest::BlockSet { hashes: hash_set, .. }) => {
             assert_eq!(hash_set, B256Set::from_iter([main_chain_last_hash]));
         }
         _ => panic!("Unexpected event: {event:#?}"),
@@ -1157,7 +1159,11 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
 
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
-        EngineApiEvent::Download(DownloadRequest::BlockRange(initial_hash, total_blocks)) => {
+        EngineApiEvent::Download(DownloadRequest::BlockRange {
+            hash: initial_hash,
+            count: total_blocks,
+            ..
+        }) => {
             assert_eq!(
                 total_blocks,
                 (main_chain.len() - backfill_finished_block_number as usize - 1) as u64
@@ -2003,7 +2009,7 @@ mod forkchoice_updated_tests {
 
         if let Some(TreeEvent::Download(download_request)) = result.event {
             match download_request {
-                DownloadRequest::BlockSet(block_set) => {
+                DownloadRequest::BlockSet { hashes: block_set, .. } => {
                     assert_eq!(block_set.len(), 1);
                 }
                 _ => panic!("Expected single block download request"),
@@ -2238,7 +2244,7 @@ fn test_on_valid_downloaded_non_head_sync_target_continues_to_head() {
     // With the fix: the engine makes safe canonical inline, then emits Download for head.
     // Without the fix: it would return MakeCanonical{safe_hash} and never download head.
     match result {
-        Some(TreeEvent::Download(DownloadRequest::BlockSet(hashes))) => {
+        Some(TreeEvent::Download(DownloadRequest::BlockSet { hashes, .. })) => {
             assert!(
                 hashes.contains(&head_hash),
                 "Expected download for head block {head_hash}, got {hashes:?}"

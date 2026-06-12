@@ -1,7 +1,8 @@
-use crate::{download::DownloadedBlock, tree::metrics::BlockBufferMetrics};
+use crate::tree::metrics::BlockBufferMetrics;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber};
 use indexmap::IndexSet;
+use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_primitives_traits::{Block, SealedBlock};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
@@ -19,7 +20,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 #[derive(Debug)]
 pub struct BlockBuffer<B: Block> {
     /// All blocks in the buffer stored by their block hash.
-    pub(crate) blocks: HashMap<BlockHash, DownloadedBlock<B>>,
+    pub(crate) blocks: HashMap<BlockHash, SealedBlockWithAccessList<B>>,
     /// Map of any parent block hash (even the ones not currently in the buffer)
     /// to the buffered children.
     /// Allows connecting buffered blocks by parent.
@@ -51,27 +52,27 @@ impl<B: Block> BlockBuffer<B> {
 
     /// Return reference to the requested block.
     pub fn block(&self, hash: &BlockHash) -> Option<&SealedBlock<B>> {
-        self.blocks.get(hash).map(DownloadedBlock::block)
+        self.blocks.get(hash).map(|block| block.block())
     }
 
     /// Return a reference to the lowest ancestor of the given block in the buffer.
     pub fn lowest_ancestor(&self, hash: &BlockHash) -> Option<&SealedBlock<B>> {
         let mut current_block = self.blocks.get(hash)?.block();
         while let Some(parent) = self.blocks.get(&current_block.parent_hash()) {
-            let parent = parent.block();
-            current_block = parent;
+            current_block = parent.block();
         }
         Some(current_block)
     }
 
     /// Insert a correct block inside the buffer.
-    pub fn insert_block(&mut self, block: impl Into<DownloadedBlock<B>>) {
+    pub fn insert_block(&mut self, block: impl Into<SealedBlockWithAccessList<B>>) {
         let block = block.into();
         let hash = block.block().hash();
 
         match self.blocks.entry(hash) {
             std::collections::hash_map::Entry::Occupied(mut entry) => {
-                if entry.get().decoded_bal().is_none() && block.decoded_bal().is_some() {
+                // a duplicate that includes access list data is preferred over one without
+                if entry.get().data().is_none() && block.data().is_some() {
                     entry.insert(block);
                 }
                 return
@@ -103,7 +104,7 @@ impl<B: Block> BlockBuffer<B> {
     pub fn remove_block_with_children(
         &mut self,
         parent_hash: &BlockHash,
-    ) -> Vec<DownloadedBlock<B>> {
+    ) -> Vec<SealedBlockWithAccessList<B>> {
         let removed = self
             .remove_block(parent_hash)
             .into_iter()
@@ -162,7 +163,7 @@ impl<B: Block> BlockBuffer<B> {
     /// This method will only remove the block if it's present inside `self.blocks`.
     /// The block might be missing from other collections, the method will only ensure that it has
     /// been removed.
-    fn remove_block(&mut self, hash: &BlockHash) -> Option<DownloadedBlock<B>> {
+    fn remove_block(&mut self, hash: &BlockHash) -> Option<SealedBlockWithAccessList<B>> {
         let block = self.blocks.remove(hash)?;
         self.remove_from_earliest_blocks(block.block().number(), hash);
         self.remove_from_parent(block.block().parent_hash(), hash);
@@ -171,7 +172,10 @@ impl<B: Block> BlockBuffer<B> {
     }
 
     /// Remove all children and their descendants for the given blocks and return them.
-    fn remove_children(&mut self, parent_hashes: Vec<BlockHash>) -> Vec<DownloadedBlock<B>> {
+    fn remove_children(
+        &mut self,
+        parent_hashes: Vec<BlockHash>,
+    ) -> Vec<SealedBlockWithAccessList<B>> {
         // remove all parent child connection and all the child children blocks that are connected
         // to the discarded parent blocks.
         let mut remove_parent_children = parent_hashes;
@@ -253,50 +257,48 @@ mod tests {
         assert_eq!(buffer.block(&block1.hash()), Some(&block1));
     }
 
+    /// Creates a sealed access list from raw bytes.
+    fn sealed_access_list() -> alloy_primitives::Sealed<alloy_primitives::Bytes> {
+        let raw = alloy_primitives::Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]);
+        let hash = alloy_primitives::keccak256(raw.as_ref());
+        alloy_primitives::Sealed::new_unchecked(raw, hash)
+    }
+
     #[test]
-    fn preserves_decoded_bal_for_buffered_blocks() {
+    fn preserves_access_list_for_buffered_blocks() {
         let mut rng = generators::rng();
 
-        let raw = alloy_primitives::Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]);
-        let decoded_bal =
-            std::sync::Arc::new(alloy_eip7928::bal::DecodedBal::from_rlp_bytes(raw).unwrap());
+        let access_list = sealed_access_list();
         let parent = rng.random();
         let block = create_block(&mut rng, 10, parent);
-        let downloaded = DownloadedBlock::new(block.clone(), Some(decoded_bal.clone()));
 
         let mut buffer = BlockBuffer::new(1);
-        buffer.insert_block(downloaded);
+        buffer
+            .insert_block(SealedBlockWithAccessList::new(block.clone(), Some(access_list.clone())));
 
         let blocks = buffer.remove_block_with_children(&parent);
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].block(), &block);
-        assert_eq!(
-            blocks[0].decoded_bal().as_ref().map(|bal| bal.hash()),
-            Some(decoded_bal.hash())
-        );
+        assert_eq!(blocks[0].data().as_ref(), Some(&access_list));
     }
 
     #[test]
-    fn updates_buffered_duplicate_with_decoded_bal() {
+    fn updates_buffered_duplicate_with_access_list() {
         let mut rng = generators::rng();
 
-        let raw = alloy_primitives::Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]);
-        let decoded_bal =
-            std::sync::Arc::new(alloy_eip7928::bal::DecodedBal::from_rlp_bytes(raw).unwrap());
+        let access_list = sealed_access_list();
         let parent = rng.random();
         let block = create_block(&mut rng, 10, parent);
 
         let mut buffer = BlockBuffer::new(1);
         buffer.insert_block(block.clone());
-        buffer.insert_block(DownloadedBlock::new(block.clone(), Some(decoded_bal.clone())));
+        buffer
+            .insert_block(SealedBlockWithAccessList::new(block.clone(), Some(access_list.clone())));
 
         let blocks = buffer.remove_block_with_children(&parent);
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].block(), &block);
-        assert_eq!(
-            blocks[0].decoded_bal().as_ref().map(|bal| bal.hash()),
-            Some(decoded_bal.hash())
-        );
+        assert_eq!(blocks[0].data().as_ref(), Some(&access_list));
     }
 
     #[test]
@@ -329,7 +331,7 @@ mod tests {
             buffer
                 .remove_block_with_children(&main_parent_hash)
                 .into_iter()
-                .map(DownloadedBlock::into_block)
+                .map(|b| b.split().0)
                 .collect::<Vec<_>>(),
             vec![block1, block2, block3]
         );
@@ -358,7 +360,7 @@ mod tests {
             buffer
                 .remove_block_with_children(&main_parent_hash)
                 .into_iter()
-                .map(|b| (b.block().hash(), b.into_block()))
+                .map(|b| (b.block().hash(), b.split().0))
                 .collect::<HashMap<_, _>>(),
             HashMap::from([
                 (block1.hash(), block1),
@@ -392,7 +394,7 @@ mod tests {
             buffer
                 .remove_block_with_children(&block1.hash())
                 .into_iter()
-                .map(|b| (b.block().hash(), b.into_block()))
+                .map(|b| (b.block().hash(), b.split().0))
                 .collect::<HashMap<_, _>>(),
             HashMap::from([
                 (block1.hash(), block1),
