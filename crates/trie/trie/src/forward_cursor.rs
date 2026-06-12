@@ -54,8 +54,11 @@ impl<K: Ord, V> ForwardInMemoryCursor<'_, K, V> {
     /// Returns the first entry from the current cursor position that's greater or equal to the
     /// provided key. This method advances the cursor forward.
     pub fn seek(&mut self, key: &K) -> Option<&(K, V)> {
-        if self.current().is_some_and(|(k, _)| k >= key) {
-            return self.current()
+        if self.idx < self.entries.len() {
+            let current = &self.entries[self.idx];
+            if &current.0 >= key {
+                return Some(current)
+            }
         }
 
         self.advance_while(|k| k < key)
@@ -64,8 +67,11 @@ impl<K: Ord, V> ForwardInMemoryCursor<'_, K, V> {
     /// Returns the first entry from the current cursor position that's greater than the provided
     /// key. This method advances the cursor forward.
     pub fn first_after(&mut self, key: &K) -> Option<&(K, V)> {
-        if self.current().is_some_and(|(k, _)| k > key) {
-            return self.current()
+        if self.idx < self.entries.len() {
+            let current = &self.entries[self.idx];
+            if &current.0 > key {
+                return Some(current)
+            }
         }
 
         self.advance_while(|k| k <= key)
@@ -79,13 +85,14 @@ impl<K: Ord, V> ForwardInMemoryCursor<'_, K, V> {
     /// Returns the first entry for which `predicate` returns `false` or `None`. The cursor will
     /// point to the returned entry.
     fn advance_while(&mut self, predicate: impl Fn(&K) -> bool) -> Option<&(K, V)> {
-        let remaining = self.entries.len().saturating_sub(self.idx);
+        let len = self.entries.len();
+        let remaining = len - self.idx;
         if remaining >= BINARY_SEARCH_THRESHOLD {
             let slice = &self.entries[self.idx..];
             let pos = slice.partition_point(|(k, _)| predicate(k));
             self.idx += pos;
         } else {
-            while self.idx < self.entries.len() && predicate(&self.entries[self.idx].0) {
+            while self.idx < len && predicate(&self.entries[self.idx].0) {
                 self.idx += 1;
             }
         }
