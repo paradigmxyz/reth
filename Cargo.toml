@@ -1,7 +1,7 @@
 [workspace.package]
-version = "2.2.0"
+version = "2.3.0"
 edition = "2024"
-rust-version = "1.93"
+rust-version = "1.95"
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
@@ -439,7 +439,8 @@ revm-state = { version = "12.0.0", default-features = false }
 revm-primitives = { version = "24.0.0", default-features = false }
 revm-interpreter = { version = "37.0.0", default-features = false }
 revm-database-interface = { version = "12.0.0", default-features = false }
-revm-inspectors = "0.40.0"
+revmc = { git = "https://github.com/paradigmxyz/revmc", branch = "main", default-features = false, features = ["llvm-prefer-static"] }
+revm-inspectors = "0.40.1"
 
 # eth
 alloy-dyn-abi = "1.6.0"

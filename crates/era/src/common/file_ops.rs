@@ -3,7 +3,7 @@
 use crate::e2s::{error::E2sError, types::Version};
 use std::{
     fs::File,
-    io::{Read, Seek, Write},
+    io::{self, Read, Seek, Write},
     path::Path,
 };
 
@@ -239,6 +239,22 @@ impl EraFileType {
         // Custom exports insert an `-<era-count>` segment between the era number and the hash.
         let era_count = if include_era_count { format!("-{era_count:05}") } else { String::new() };
         format!("{network_name}-{era_number:05}{era_count}-{hash}{}", self.extension())
+    }
+
+    /// Detects the execution-layer file type from the files in `dir`.
+    ///
+    /// Returns the type of the first `.era1` or `.ere`/`.erae` file found. Consensus-layer
+    /// `.era` files are ignored.
+    pub fn from_dir(dir: impl AsRef<Path>) -> io::Result<Option<Self>> {
+        for entry in std::fs::read_dir(dir)? {
+            if let Some(name) = entry?.file_name().to_str() &&
+                let Some(era_type @ (Self::Era1 | Self::Ere)) = Self::from_filename(name)
+            {
+                return Ok(Some(era_type));
+            }
+        }
+
+        Ok(None)
     }
 
     /// Detect file type from a URL, defaulting to `Era`.

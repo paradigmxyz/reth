@@ -93,8 +93,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
             let _permit = self.acquire_owned_blocking_io().await;
 
-            let base_block =
-                self.recovered_block(block).await?.ok_or(EthApiError::HeaderNotFound(block))?;
+            let base_block = self
+                .recovered_block(block)
+                .await?
+                .ok_or_else(|| EthApiError::other(EthSimulateError::BlockNotFound { block }))?;
             let parent = base_block.sealed_header().clone();
             let max_simulate_blocks = self.max_simulate_blocks();
 

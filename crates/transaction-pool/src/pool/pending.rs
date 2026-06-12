@@ -425,6 +425,26 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
             // we prefer removing transactions with lower ordering
             let mut worst_transactions = self.highest_nonces.values().collect::<Vec<_>>();
+
+            // Each pass removes at most one transaction per sender (its highest nonce), so only
+            // the worst few senders can be relevant in this pass. Selecting them is O(n)
+            // instead of sorting all senders. The estimate may fall short for size-based limits
+            // or skipped local senders, in which case the outer loop runs another pass.
+            let current_len = original_length - total_removed;
+            let current_size = original_size - total_size;
+            let excess_txs = current_len.saturating_sub(limit.max_txs);
+            let avg_tx_size = (current_size / current_len.max(1)).max(1);
+            let excess_size_txs = current_size.saturating_sub(limit.max_size).div_ceil(avg_tx_size);
+            // Number of worst senders to consider for removal in this pass: enough to cover the
+            // count and (estimated) size excess, widened by known local senders since those are
+            // skipped below.
+            let removal_candidates = excess_txs.max(excess_size_txs).max(1) + local_senders.len();
+
+            if removal_candidates < worst_transactions.len() {
+                // keep only the `removal_candidates` worst senders, in O(n) without a full sort
+                worst_transactions.select_nth_unstable(removal_candidates);
+                worst_transactions.truncate(removal_candidates);
+            }
             worst_transactions.sort_unstable();
 
             // loop through the highest nonces set, removing transactions until we reach the limit
