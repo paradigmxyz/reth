@@ -10,7 +10,8 @@ use alloy_rpc_types_eth::{
     state::EvmOverrides, Account, AccountInfo, BlockError, Bundle, Index, StateContext,
 };
 use alloy_rpc_types_trace::geth::{
-    BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
+    BlockTraceResult, GethDebugTracerType, GethDebugTracingCallOptions, GethDebugTracingOptions,
+    GethTrace, TraceResult,
 };
 use async_trait::async_trait;
 use futures::Stream;
@@ -229,7 +230,11 @@ where
         // block the transaction is included in
         let state_at: BlockId = block.parent_hash().into();
         let block_hash = block.hash();
-        let bal_block = block.header().block_access_list_hash().is_some().then_some(block_hash);
+        // JS tracers can read arbitrary state from the database, which the BAL-backed state
+        // treats as an error if it is not covered by the BAL, so they must replay instead.
+        let is_js_tracer = matches!(opts.tracer, Some(GethDebugTracerType::JsTracer(_)));
+        let bal_block = (!is_js_tracer && block.header().block_access_list_hash().is_some())
+            .then_some(block_hash);
 
         self.eth_api()
             .spawn_with_state_at_block_and_bal(state_at, bal_block, move |eth_api, mut db| {
