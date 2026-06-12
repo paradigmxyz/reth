@@ -7,13 +7,13 @@ use crate::{
         StateRootProgress, StorageRootProgress,
     },
     stats::TrieTracker,
-    trie_cursor::{TrieCursor, TrieCursorFactory},
+    trie_cursor::{TrieCursor, TrieCursorFactory, TrieStorageCursor},
     updates::{StorageTrieUpdates, TrieUpdates},
     walker::TrieWalker,
     HashBuilder, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use alloy_consensus::EMPTY_ROOT_HASH;
-use alloy_primitives::{keccak256, Address, B256};
+use alloy_primitives::{keccak256, Address, B256, U256};
 use alloy_rlp::{BufMut, Encodable};
 use alloy_trie::proof::AddedRemovedKeys;
 use reth_execution_errors::{StateRootError, StorageRootError};
@@ -116,8 +116,8 @@ impl<T, H> StateRoot<T, H> {
 
 impl<T, H> StateRoot<T, H>
 where
-    T: TrieCursorFactory + Clone,
-    H: HashedCursorFactory + Clone,
+    T: TrieCursorFactory,
+    H: HashedCursorFactory,
 {
     /// Walks the intermediate nodes of existing state trie (if any) and hashed entries. Feeds the
     /// nodes into the hash builder. Collects the updates in the process.
@@ -164,9 +164,10 @@ where
         let trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;
         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
 
-        // Shared storage cursor for reuse across all storage root calculations.
+        // Shared storage cursors for reuse across all storage root calculations.
         // Created lazily on first use to avoid issues with mock cursors.
         let mut hashed_storage_cursor: Option<H::StorageCursor<'_>> = None;
+        let mut storage_trie_cursor: Option<T::StorageTrieCursor<'_>> = None;
 
         // create state root context once for reuse
         let mut storage_ctx = StateRootContext::new();
@@ -199,33 +200,34 @@ where
                     "Resuming storage root calculation"
                 );
 
-                // resume the storage root calculation
                 let remaining_threshold = self.threshold.saturating_sub(
                     storage_ctx.total_updates_len(&account_node_iter, &hash_builder),
                 );
 
-                let storage_root_calculator = StorageRoot::new_hashed(
-                    self.trie_cursor_factory.clone(),
-                    self.hashed_cursor_factory.clone(),
+                if hashed_storage_cursor.is_none() {
+                    hashed_storage_cursor =
+                        Some(self.hashed_cursor_factory.hashed_storage_cursor(hashed_address)?);
+                }
+                if storage_trie_cursor.is_none() {
+                    storage_trie_cursor =
+                        Some(self.trie_cursor_factory.storage_trie_cursor(hashed_address)?);
+                }
+
+                let storage_result = StorageRoot::<T, H>::calculate_with_cursors(
                     hashed_address,
                     self.prefix_sets
                         .storage_prefix_sets
                         .get(&hashed_address)
                         .cloned()
                         .unwrap_or_default(),
+                    Some(storage_state.state),
+                    remaining_threshold,
+                    storage_trie_cursor.as_mut().expect("storage trie cursor is initialized"),
+                    hashed_storage_cursor.as_mut().expect("hashed storage cursor is initialized"),
+                    retain_updates,
                     #[cfg(feature = "metrics")]
-                    self.metrics.storage_trie.clone(),
-                )
-                .with_intermediate_state(Some(storage_state.state))
-                .with_threshold(remaining_threshold);
-
-                let cursor = hashed_storage_cursor.get_or_insert_with(|| {
-                    self.hashed_cursor_factory
-                        .hashed_storage_cursor(hashed_address)
-                        .expect("failed to create storage cursor")
-                });
-                let storage_result =
-                    storage_root_calculator.calculate_with_cursor(cursor, retain_updates)?;
+                    &self.metrics.storage_trie,
+                )?;
                 if let Some(storage_state) = storage_ctx.process_storage_root_result(
                     storage_result,
                     hashed_address,
@@ -270,27 +272,32 @@ where
                         storage_ctx.total_updates_len(&account_node_iter, &hash_builder),
                     );
 
-                    let storage_root_calculator = StorageRoot::new_hashed(
-                        self.trie_cursor_factory.clone(),
-                        self.hashed_cursor_factory.clone(),
+                    if hashed_storage_cursor.is_none() {
+                        hashed_storage_cursor =
+                            Some(self.hashed_cursor_factory.hashed_storage_cursor(hashed_address)?);
+                    }
+                    if storage_trie_cursor.is_none() {
+                        storage_trie_cursor =
+                            Some(self.trie_cursor_factory.storage_trie_cursor(hashed_address)?);
+                    }
+
+                    let storage_result = StorageRoot::<T, H>::calculate_with_cursors(
                         hashed_address,
                         self.prefix_sets
                             .storage_prefix_sets
                             .get(&hashed_address)
                             .cloned()
                             .unwrap_or_default(),
+                        None,
+                        remaining_threshold,
+                        storage_trie_cursor.as_mut().expect("storage trie cursor is initialized"),
+                        hashed_storage_cursor
+                            .as_mut()
+                            .expect("hashed storage cursor is initialized"),
+                        retain_updates,
                         #[cfg(feature = "metrics")]
-                        self.metrics.storage_trie.clone(),
-                    )
-                    .with_threshold(remaining_threshold);
-
-                    let cursor = hashed_storage_cursor.get_or_insert_with(|| {
-                        self.hashed_cursor_factory
-                            .hashed_storage_cursor(hashed_address)
-                            .expect("failed to create storage cursor")
-                    });
-                    let storage_result =
-                        storage_root_calculator.calculate_with_cursor(cursor, retain_updates)?;
+                        &self.metrics.storage_trie,
+                    )?;
                     if let Some(storage_state) = storage_ctx.process_storage_root_result(
                         storage_result,
                         hashed_address,
@@ -585,7 +592,7 @@ impl<T, H> StorageRoot<T, H> {
 impl<T, H> StorageRoot<T, H>
 where
     T: TrieCursorFactory,
-    H: HashedCursorFactory + Clone,
+    H: HashedCursorFactory,
 {
     /// Walks the intermediate nodes of existing storage trie (if any) and hashed entries. Feeds the
     /// nodes into the hash builder. Collects the updates in the process.
@@ -631,10 +638,32 @@ where
     pub fn calculate(self, retain_updates: bool) -> Result<StorageRootProgress, StorageRootError> {
         trace!(target: "trie::storage_root", "calculating storage root");
 
-        let factory_clone = self.hashed_cursor_factory.clone();
-        let mut hashed_storage_cursor = factory_clone.hashed_storage_cursor(self.hashed_address)?;
+        let Self {
+            trie_cursor_factory,
+            hashed_cursor_factory,
+            hashed_address,
+            prefix_set,
+            previous_state,
+            threshold,
+            #[cfg(feature = "metrics")]
+            metrics,
+        } = self;
 
-        self.calculate_with_cursor(&mut hashed_storage_cursor, retain_updates)
+        let mut hashed_storage_cursor =
+            hashed_cursor_factory.hashed_storage_cursor(hashed_address)?;
+        let mut storage_trie_cursor = trie_cursor_factory.storage_trie_cursor(hashed_address)?;
+
+        Self::calculate_with_cursors(
+            hashed_address,
+            prefix_set,
+            previous_state,
+            threshold,
+            &mut storage_trie_cursor,
+            &mut hashed_storage_cursor,
+            retain_updates,
+            #[cfg(feature = "metrics")]
+            &metrics,
+        )
     }
 
     /// Walks the hashed storage table entries for a given address and calculates the storage root
@@ -650,8 +679,49 @@ where
     ) -> Result<StorageRootProgress, StorageRootError> {
         trace!(target: "trie::storage_root", "calculating storage root with cursor");
 
-        // Reposition the cursor to the current hashed address
-        hashed_storage_cursor.set_hashed_address(self.hashed_address);
+        let Self {
+            trie_cursor_factory,
+            hashed_address,
+            prefix_set,
+            previous_state,
+            threshold,
+            #[cfg(feature = "metrics")]
+            metrics,
+            ..
+        } = self;
+
+        let mut storage_trie_cursor = trie_cursor_factory.storage_trie_cursor(hashed_address)?;
+
+        Self::calculate_with_cursors(
+            hashed_address,
+            prefix_set,
+            previous_state,
+            threshold,
+            &mut storage_trie_cursor,
+            hashed_storage_cursor,
+            retain_updates,
+            #[cfg(feature = "metrics")]
+            &metrics,
+        )
+    }
+
+    /// Walks the hashed storage table entries for a given address and calculates the storage root
+    /// using pre-created cursors. The cursors will be repositioned to the given hashed address.
+    fn calculate_with_cursors<TC, HC>(
+        hashed_address: B256,
+        prefix_set: PrefixSet,
+        previous_state: Option<IntermediateRootState>,
+        threshold: u64,
+        trie_cursor: &mut TC,
+        hashed_storage_cursor: &mut HC,
+        retain_updates: bool,
+        #[cfg(feature = "metrics")] metrics: &TrieRootMetrics,
+    ) -> Result<StorageRootProgress, StorageRootError>
+    where
+        TC: TrieStorageCursor,
+        HC: HashedStorageCursor<Value = U256>,
+    {
+        hashed_storage_cursor.set_hashed_address(hashed_address);
 
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty()? {
@@ -663,18 +733,18 @@ where
             ))
         }
 
+        trie_cursor.set_hashed_address(hashed_address);
+
         let mut tracker = TrieTracker::default();
         let mut trie_updates = StorageTrieUpdates::default();
 
-        let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
-
-        let (mut hash_builder, mut storage_node_iter) = match self.previous_state {
+        let (mut hash_builder, mut storage_node_iter) = match previous_state {
             Some(state) => {
                 let hash_builder = state.hash_builder.with_updates(retain_updates);
                 let walker = TrieWalker::<_>::storage_trie_from_stack(
                     trie_cursor,
                     state.walker_stack,
-                    self.prefix_set,
+                    prefix_set,
                 )
                 .with_deletions_retained(retain_updates);
                 let node_iter = TrieNodeIter::storage_trie(walker, hashed_storage_cursor)
@@ -683,7 +753,7 @@ where
             }
             None => {
                 let hash_builder = HashBuilder::default().with_updates(retain_updates);
-                let walker = TrieWalker::storage_trie(trie_cursor, self.prefix_set)
+                let walker = TrieWalker::storage_trie(trie_cursor, prefix_set)
                     .with_deletions_retained(retain_updates);
                 let node_iter = TrieNodeIter::storage_trie(walker, hashed_storage_cursor);
                 (hash_builder, node_iter)
@@ -708,7 +778,7 @@ where
                     // Check if we need to return intermediate progress
                     let total_updates_len =
                         storage_node_iter.walker.removed_keys_len() + hash_builder.updates_len();
-                    if retain_updates && total_updates_len as u64 >= self.threshold {
+                    if retain_updates && total_updates_len as u64 >= threshold {
                         let (walker_stack, walker_deleted_keys) = storage_node_iter.walker.split();
                         trie_updates.removed_nodes.extend(walker_deleted_keys);
                         let (hash_builder, hash_builder_updates) = hash_builder.split();
@@ -739,12 +809,12 @@ where
         let stats = tracker.finish();
 
         #[cfg(feature = "metrics")]
-        self.metrics.record(stats);
+        metrics.record(stats);
 
         trace!(
             target: "trie::storage_root",
             %root,
-            hashed_address = %self.hashed_address,
+            %hashed_address,
             duration = ?stats.duration(),
             branches_added = stats.branches_added(),
             leaves_added = stats.leaves_added(),
