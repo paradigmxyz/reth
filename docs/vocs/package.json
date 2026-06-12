@@ -5,12 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vocs dev",
-    "build": "bash scripts/build-cargo-docs.sh && vocs build && bun scripts/generate-redirects.ts && bun scripts/inject-cargo-docs.ts && bun scripts/fix-search-index.ts",
+    "build": "bash scripts/build-cargo-docs.sh && vocs build && bun scripts/fix-rustdocs-navigation.ts && bun scripts/generate-redirects.ts && bun scripts/inject-cargo-docs.ts && bun scripts/fix-search-index.ts",
     "preview": "vocs preview",
     "check-links": "bun scripts/check-links.ts",
     "generate-redirects": "bun scripts/generate-redirects.ts",
     "build-cargo-docs": "bash scripts/build-cargo-docs.sh",
-    "inject-cargo-docs": "bun scripts/inject-cargo-docs.ts"
+    "inject-cargo-docs": "bun scripts/inject-cargo-docs.ts",
+    "fix-rustdocs-navigation": "bun scripts/fix-rustdocs-navigation.ts"
   },
   "dependencies": {
     "mermaid": "^11",
