@@ -153,6 +153,14 @@ pub trait Executor<DB: Database>: Sized {
 
     /// Takes built [`BlockAccessList`] from executor.
     fn take_bal(&mut self) -> Option<BlockAccessList>;
+
+    /// Takes built [`BlockAccessList`] from executor and fills post-block storage roots.
+    fn take_bal_with_storage_roots<P>(
+        &mut self,
+        storage_root_provider: &P,
+    ) -> Result<Option<BlockAccessList>, ProviderError>
+    where
+        P: StorageRootProvider + ?Sized;
 }
 
 /// Input for block building. Consumed by [`BlockAssembler`].
@@ -705,6 +713,24 @@ where
     fn take_bal(&mut self) -> Option<BlockAccessList> {
         self.db.take_built_alloy_bal()
     }
+
+    fn take_bal_with_storage_roots<P>(
+        &mut self,
+        storage_root_provider: &P,
+    ) -> Result<Option<BlockAccessList>, ProviderError>
+    where
+        P: StorageRootProvider + ?Sized,
+    {
+        let mut block_access_list = self.take_bal();
+        if let Some(block_access_list) = &mut block_access_list {
+            fill_block_access_list_storage_roots(
+                block_access_list,
+                &self.db,
+                storage_root_provider,
+            )?;
+        }
+        Ok(block_access_list)
+    }
 }
 
 /// A helper trait marking a 'static type that can be converted into an [`ExecutableTxParts`] for
@@ -821,6 +847,16 @@ mod tests {
 
         fn take_bal(&mut self) -> Option<BlockAccessList> {
             None
+        }
+
+        fn take_bal_with_storage_roots<P>(
+            &mut self,
+            _storage_root_provider: &P,
+        ) -> Result<Option<BlockAccessList>, ProviderError>
+        where
+            P: StorageRootProvider + ?Sized,
+        {
+            Ok(self.take_bal())
         }
     }
 
