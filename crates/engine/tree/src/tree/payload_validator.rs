@@ -85,7 +85,7 @@ use reth_provider::{
     BlockExecutionOutput, BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
     StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StorageChangeSetReader, StorageSettingsCache,
+    StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
@@ -1190,6 +1190,16 @@ where
                 .map_err(crate::tree::payload_processor::bal::BalExecutionError::Provider)?;
             Ok(StateProviderDatabase::new(provider))
         };
+        let is_bogota_active =
+            Into::<SpecId>::into(*env.evm_env.spec_id()).is_enabled_in(SpecId::BOGOTA);
+        let storage_root_provider = if is_bogota_active {
+            Some(
+                make_state_provider(false)
+                    .map_err(crate::tree::payload_processor::bal::BalExecutionError::Provider)?,
+            )
+        } else {
+            None
+        };
         let execution_start = Instant::now();
         let ctx =
             self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
@@ -1203,6 +1213,7 @@ where
             env.transaction_count,
             handle.clone_transaction_receiver(),
             receipt_tx,
+            storage_root_provider.as_deref().map(|provider| provider as &dyn StorageRootProvider),
         )?;
         let execution_duration = execution_start.elapsed();
 

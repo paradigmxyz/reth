@@ -39,7 +39,7 @@ use revm::{
 };
 use revm_primitives::hardfork::SpecId;
 use revm_state::bal::Bal as RevmBal;
-use std::{ops::Deref, sync::Arc};
+use std::sync::Arc;
 
 use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
 
@@ -55,6 +55,7 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     transaction_count: usize,
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
+    storage_root_provider: Option<&'a dyn StorageRootProvider>,
 ) -> Result<
     (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
     BalExecutionError,
@@ -63,8 +64,7 @@ where
     Evm: ConfigureEvm + 'static,
     Tx: ExecutableTxFor<Evm> + Send + 'a,
     Err: core::error::Error + Send + Sync + 'static,
-    DB: Database + Deref + Send + 'a,
-    DB::Target: StorageRootProvider,
+    DB: Database + Send + 'a,
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'a,
     ReceiptTy<Evm::Primitives>: Clone,
 {
@@ -83,6 +83,7 @@ where
             txs,
             receipt_tx,
             worker_count,
+            storage_root_provider,
         )
     })
 }
@@ -99,6 +100,7 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
     worker_count: usize,
+    storage_root_provider: Option<&'scope dyn StorageRootProvider>,
 ) -> Result<
     (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
     BalExecutionError,
@@ -107,8 +109,7 @@ where
     Evm: ConfigureEvm + 'scope,
     Tx: ExecutableTxFor<Evm> + Send + 'scope,
     Err: core::error::Error + Send + Sync + 'static,
-    DB: Database + Deref + Send + 'scope,
-    DB::Target: StorageRootProvider,
+    DB: Database + Send + 'scope,
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'scope,
     ReceiptTy<Evm::Primitives>: Clone,
 {
@@ -178,7 +179,12 @@ where
         (block_result, senders)
     };
 
-    let built_bal = take_built_bal_and_validate(&mut canonical_state, bal, is_bogota_active)?;
+    let built_bal = take_built_bal_and_validate(
+        &mut canonical_state,
+        bal,
+        is_bogota_active,
+        storage_root_provider,
+    )?;
 
     canonical_state.merge_transitions(BundleRetention::Reverts);
     Ok((
@@ -215,18 +221,20 @@ fn take_built_bal_and_validate<DB>(
     canonical_state: &mut State<DB>,
     received_bal: &AlloyBal,
     is_bogota_active: bool,
+    storage_root_provider: Option<&dyn StorageRootProvider>,
 ) -> Result<BlockAccessList, BalExecutionError>
 where
-    DB: Database + Deref,
-    DB::Target: StorageRootProvider,
+    DB: Database,
 {
     let mut built_bal = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
     if is_bogota_active {
-        fill_block_access_list_storage_roots(
-            &mut built_bal,
-            canonical_state,
-            &*canonical_state.database,
-        )?;
+        if let Some(storage_root_provider) = storage_root_provider {
+            fill_block_access_list_storage_roots(
+                &mut built_bal,
+                canonical_state,
+                storage_root_provider,
+            )?;
+        }
         // Validate that the built BAL matches the received BAL in terms of storage roots for
         // accounts that specify them.(eip 8268)
         validate_storage_roots(received_bal.as_slice(), built_bal.as_slice())?;
@@ -274,13 +282,6 @@ fn validate_storage_roots(
                         .unwrap_or_else(|| "none".to_string())
                 )),
             ));
-            // tracing::info!(
-            //     target: "engine::tree::payload_processor::bal",
-            //     account = ?received_account.address(),
-            //     received_storage_root = ?received_storage_root,
-            //     built_storage_root = ?built_storage_root,
-            //     "storage root mismatch for account in BAL validation",
-            // );
         }
     }
 
@@ -569,6 +570,7 @@ mod tests {
             transaction_count,
             tx_stream(txs),
             receipt_tx,
+            None,
         )
         .map(|(output, _, built_bal)| (output, built_bal))
     }
@@ -1275,6 +1277,7 @@ mod tests {
             1, // transaction_count = 1 → exactly one worker spawned
             tx_rx,
             receipt_tx,
+            None,
         );
 
         assert!(

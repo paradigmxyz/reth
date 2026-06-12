@@ -523,7 +523,7 @@ where
         let mut block_access_list = db.take_built_alloy_bal();
         let is_bogota_active = (*evm_env.spec_id()).into().is_enabled_in(SpecId::BOGOTA);
         if is_bogota_active && let Some(block_access_list) = &mut block_access_list {
-            fill_block_access_list_storage_roots(block_access_list, &db, &state)
+            fill_block_access_list_storage_roots(block_access_list, db, &state)
                 .map_err(BlockExecutionError::other)?;
         }
         let block_access_list_hash =
