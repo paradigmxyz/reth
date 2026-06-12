@@ -4,7 +4,7 @@ use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use parking_lot::RwLock;
 use reth_prune_types::PruneMode;
 use reth_storage_api::{
-    BalNotification, BalNotificationStream, BalStore, GetBlockAccessListLimit, SealedBal,
+    BalNotification, BalNotificationStream, BalStore, GetBlockAccessListLimit, RawBal,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_tokio_util::EventSender;
@@ -129,9 +129,9 @@ struct BalEntry {
 }
 
 impl BalStore for InMemoryBalStore {
-    fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()> {
+    fn insert(&self, num_hash: NumHash, bal: RawBal) -> ProviderResult<()> {
         let mut inner = self.inner.write();
-        inner.insert(num_hash.hash, num_hash.number, bal.clone_inner());
+        inner.insert(num_hash.hash, num_hash.number, bal.as_raw().clone());
         if let Some(highest_block_number) = inner.highest_block_number {
             // This preserves insert-time cleanup based on the highest inserted BAL block.
             inner.prune(self.config.in_memory_retention, highest_block_number);
@@ -140,7 +140,7 @@ impl BalStore for InMemoryBalStore {
         Ok(())
     }
 
-    fn insert_many(&self, entries: Vec<(NumHash, SealedBal)>) -> ProviderResult<()> {
+    fn insert_many(&self, entries: Vec<(NumHash, RawBal)>) -> ProviderResult<()> {
         if entries.is_empty() {
             return Ok(())
         }
@@ -148,7 +148,7 @@ impl BalStore for InMemoryBalStore {
         let mut inner = self.inner.write();
         inner.entries.reserve(entries.len());
         for (num_hash, bal) in &entries {
-            inner.insert(num_hash.hash, num_hash.number, bal.clone_inner());
+            inner.insert(num_hash.hash, num_hash.number, bal.as_raw().clone());
         }
         if let Some(highest_block_number) = inner.highest_block_number {
             inner.prune(self.config.in_memory_retention, highest_block_number);
@@ -210,11 +210,11 @@ impl BalStore for InMemoryBalStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{keccak256, Sealed, B256};
+    use alloy_primitives::B256;
     use tokio_stream::StreamExt;
 
-    fn sealed_bal(bal: Bytes) -> SealedBal {
-        Sealed::new_unchecked(bal.clone(), keccak256(&bal))
+    fn raw_bal(bal: Bytes) -> RawBal {
+        RawBal::new(bal)
     }
 
     #[test]
@@ -224,7 +224,7 @@ mod tests {
         let missing = B256::random();
         let bal = Bytes::from_static(b"bal");
 
-        store.insert(NumHash::new(1, hash), sealed_bal(bal.clone())).unwrap();
+        store.insert(NumHash::new(1, hash), raw_bal(bal.clone())).unwrap();
 
         assert_eq!(store.get_by_hashes(&[hash, missing]).unwrap(), vec![Some(bal), None]);
     }
@@ -234,8 +234,8 @@ mod tests {
         let store = InMemoryBalStore::default();
         let hash0 = B256::random();
         let hash1 = B256::random();
-        let bal0 = sealed_bal(Bytes::from_static(b"bal0"));
-        let bal1 = sealed_bal(Bytes::from_static(b"bal1"));
+        let bal0 = raw_bal(Bytes::from_static(b"bal0"));
+        let bal1 = raw_bal(Bytes::from_static(b"bal1"));
 
         store
             .insert_many(vec![
@@ -246,7 +246,7 @@ mod tests {
 
         assert_eq!(
             store.get_by_hashes(&[hash0, hash1]).unwrap(),
-            vec![Some(bal0.clone_inner()), Some(Bytes::from_static(b"bal1"))]
+            vec![Some(bal0.as_raw().clone()), Some(Bytes::from_static(b"bal1"))]
         );
     }
 
@@ -267,9 +267,9 @@ mod tests {
         let bal1 = Bytes::from_static(&[0xc1, 0x02]);
         let bal2 = Bytes::from_static(&[0xc1, 0x03]);
 
-        store.insert(NumHash::new(1, hash0), sealed_bal(bal0.clone())).unwrap();
-        store.insert(NumHash::new(2, hash1), sealed_bal(bal1.clone())).unwrap();
-        store.insert(NumHash::new(3, hash2), sealed_bal(bal2)).unwrap();
+        store.insert(NumHash::new(1, hash0), raw_bal(bal0.clone())).unwrap();
+        store.insert(NumHash::new(2, hash1), raw_bal(bal1.clone())).unwrap();
+        store.insert(NumHash::new(3, hash2), raw_bal(bal2)).unwrap();
 
         let limited = store
             .get_by_hashes_with_limit(
@@ -291,17 +291,17 @@ mod tests {
         let retained_bal = Bytes::from_static(b"retained");
         let tip_bal = Bytes::from_static(b"tip");
 
-        store.insert(NumHash::new(1, old_hash), sealed_bal(old_bal)).unwrap();
+        store.insert(NumHash::new(1, old_hash), raw_bal(old_bal)).unwrap();
         store
             .insert(
                 NumHash::new(BAL_RETENTION_PERIOD_SLOTS, retained_hash),
-                sealed_bal(retained_bal.clone()),
+                raw_bal(retained_bal.clone()),
             )
             .unwrap();
         store
             .insert(
                 NumHash::new(BAL_RETENTION_PERIOD_SLOTS + 2, tip_hash),
-                sealed_bal(tip_bal.clone()),
+                raw_bal(tip_bal.clone()),
             )
             .unwrap();
 
@@ -320,8 +320,8 @@ mod tests {
         let old_bal = Bytes::from_static(b"old");
         let retained_bal = Bytes::from_static(b"retained");
 
-        store.insert(NumHash::new(7, old_hash), sealed_bal(old_bal)).unwrap();
-        store.insert(NumHash::new(8, retained_hash), sealed_bal(retained_bal.clone())).unwrap();
+        store.insert(NumHash::new(7, old_hash), raw_bal(old_bal)).unwrap();
+        store.insert(NumHash::new(8, retained_hash), raw_bal(retained_bal.clone())).unwrap();
 
         assert_eq!(store.prune(10).unwrap(), 1);
         assert_eq!(
@@ -340,9 +340,9 @@ mod tests {
         let high_bal = Bytes::from_static(b"high");
         let late_bal = Bytes::from_static(b"late");
 
-        store.insert(NumHash::new(7, old_hash), sealed_bal(Bytes::from_static(b"old"))).unwrap();
-        store.insert(NumHash::new(10, high_hash), sealed_bal(high_bal.clone())).unwrap();
-        store.insert(NumHash::new(8, late_hash), sealed_bal(late_bal.clone())).unwrap();
+        store.insert(NumHash::new(7, old_hash), raw_bal(Bytes::from_static(b"old"))).unwrap();
+        store.insert(NumHash::new(10, high_hash), raw_bal(high_bal.clone())).unwrap();
+        store.insert(NumHash::new(8, late_hash), raw_bal(late_bal.clone())).unwrap();
 
         assert_eq!(
             store.get_by_hashes(&[old_hash, high_hash, late_hash]).unwrap(),
@@ -358,11 +358,11 @@ mod tests {
         let old_bal = Bytes::from_static(b"old");
         let tip_bal = Bytes::from_static(b"tip");
 
-        store.insert(NumHash::new(1, old_hash), sealed_bal(old_bal.clone())).unwrap();
+        store.insert(NumHash::new(1, old_hash), raw_bal(old_bal.clone())).unwrap();
         store
             .insert(
                 NumHash::new(BAL_RETENTION_PERIOD_SLOTS + 1, tip_hash),
-                sealed_bal(tip_bal.clone()),
+                raw_bal(tip_bal.clone()),
             )
             .unwrap();
 
@@ -383,9 +383,9 @@ mod tests {
         let retained_bal = Bytes::from_static(b"retained");
         let tip_bal = Bytes::from_static(b"tip");
 
-        store.insert(NumHash::new(1, old_hash), sealed_bal(old_bal)).unwrap();
-        store.insert(NumHash::new(2, retained_hash), sealed_bal(retained_bal.clone())).unwrap();
-        store.insert(NumHash::new(4, tip_hash), sealed_bal(tip_bal.clone())).unwrap();
+        store.insert(NumHash::new(1, old_hash), raw_bal(old_bal)).unwrap();
+        store.insert(NumHash::new(2, retained_hash), raw_bal(retained_bal.clone())).unwrap();
+        store.insert(NumHash::new(4, tip_hash), raw_bal(tip_bal.clone())).unwrap();
 
         assert_eq!(
             store.get_by_hashes(&[old_hash, retained_hash, tip_hash]).unwrap(),
@@ -400,8 +400,8 @@ mod tests {
         let hash = B256::random();
         let bal = Bytes::from_static(b"bal");
 
-        store.insert(NumHash::new(1, hash), sealed_bal(Bytes::from_static(b"old"))).unwrap();
-        store.insert(NumHash::new(2, hash), sealed_bal(bal.clone())).unwrap();
+        store.insert(NumHash::new(1, hash), raw_bal(Bytes::from_static(b"old"))).unwrap();
+        store.insert(NumHash::new(2, hash), raw_bal(bal.clone())).unwrap();
 
         assert_eq!(store.get_by_hashes(&[hash]).unwrap(), vec![Some(bal)]);
     }
@@ -414,13 +414,13 @@ mod tests {
         let bal = Bytes::from_static(b"bal");
         let mut stream = store.bal_stream();
 
-        let sealed_bal = sealed_bal(bal);
+        let raw_bal = raw_bal(bal);
 
-        store.insert(NumHash::new(block_number, hash), sealed_bal.clone()).unwrap();
+        store.insert(NumHash::new(block_number, hash), raw_bal.clone()).unwrap();
 
         assert_eq!(
             stream.next().await.unwrap(),
-            BalNotification::new(NumHash::new(block_number, hash), sealed_bal)
+            BalNotification::new(NumHash::new(block_number, hash), raw_bal)
         );
     }
 
@@ -430,8 +430,8 @@ mod tests {
         let mut stream = store.bal_stream();
         let hash0 = B256::random();
         let hash1 = B256::random();
-        let bal0 = sealed_bal(Bytes::from_static(b"bal0"));
-        let bal1 = sealed_bal(Bytes::from_static(b"bal1"));
+        let bal0 = raw_bal(Bytes::from_static(b"bal0"));
+        let bal1 = raw_bal(Bytes::from_static(b"bal1"));
 
         store
             .insert_many(vec![
@@ -455,7 +455,7 @@ mod tests {
         let store = InMemoryBalStore::default();
 
         assert!(store
-            .insert(NumHash::new(1, B256::random()), sealed_bal(Bytes::from_static(b"bal")))
+            .insert(NumHash::new(1, B256::random()), raw_bal(Bytes::from_static(b"bal")))
             .is_ok());
     }
 
@@ -468,7 +468,7 @@ mod tests {
             store
                 .insert(
                     NumHash::new(number, B256::random()),
-                    sealed_bal(Bytes::from(vec![number as u8])),
+                    raw_bal(Bytes::from(vec![number as u8])),
                 )
                 .unwrap();
         }
@@ -489,13 +489,13 @@ mod tests {
         let bal = Bytes::from_static(b"bal");
         let mut stream = clone.bal_stream();
 
-        let sealed_bal = sealed_bal(bal);
+        let raw_bal = raw_bal(bal);
 
-        store.insert(NumHash::new(block_number, hash), sealed_bal.clone()).unwrap();
+        store.insert(NumHash::new(block_number, hash), raw_bal.clone()).unwrap();
 
         assert_eq!(
             stream.next().await.unwrap(),
-            BalNotification::new(NumHash::new(block_number, hash), sealed_bal)
+            BalNotification::new(NumHash::new(block_number, hash), raw_bal)
         );
     }
 }

@@ -265,9 +265,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-eip7928"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d93ce7e41bcd2b9ee2c1d92c223c1be4a274d387538d6d3f956b768986ce451"
+checksum = "55c4584eaf235a861172e30d0d8adfa95957186f59b93f997851df90b32da7ba"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -7968,7 +7968,7 @@ name = "reth-consensus"
 version = "2.3.0"
 dependencies = [
  "alloy-consensus",
- "alloy-eip7928 0.4.1",
+ "alloy-eip7928 0.4.3",
  "alloy-primitives",
  "auto_impl",
  "reth-execution-types",
@@ -8376,7 +8376,7 @@ name = "reth-engine-tree"
 version = "2.3.0"
 dependencies = [
  "alloy-consensus",
- "alloy-eip7928 0.4.1",
+ "alloy-eip7928 0.4.3",
  "alloy-eips",
  "alloy-evm",
  "alloy-primitives",
@@ -8595,7 +8595,7 @@ version = "2.3.0"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
- "alloy-eip7928 0.4.1",
+ "alloy-eip7928 0.4.3",
  "alloy-eips",
  "alloy-genesis",
  "alloy-hardforks 0.4.7",
@@ -8788,7 +8788,7 @@ name = "reth-evm"
 version = "2.3.0"
 dependencies = [
  "alloy-consensus",
- "alloy-eip7928 0.4.1",
+ "alloy-eip7928 0.4.3",
  "alloy-eips",
  "alloy-evm",
  "alloy-primitives",
@@ -9191,6 +9191,7 @@ name = "reth-network-p2p"
 version = "2.3.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eip7928 0.4.3",
  "alloy-eips",
  "alloy-primitives",
  "auto_impl",
@@ -9673,7 +9674,7 @@ name = "reth-provider"
 version = "2.3.0"
 dependencies = [
  "alloy-consensus",
- "alloy-eip7928 0.4.1",
+ "alloy-eip7928 0.4.3",
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
@@ -10064,7 +10065,7 @@ version = "2.3.0"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
- "alloy-eip7928 0.4.1",
+ "alloy-eip7928 0.4.3",
  "alloy-eips",
  "alloy-evm",
  "alloy-json-rpc",
@@ -10110,7 +10111,7 @@ version = "2.3.0"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
- "alloy-eip7928 0.4.1",
+ "alloy-eip7928 0.4.3",
  "alloy-eips",
  "alloy-evm",
  "alloy-network",
@@ -10361,7 +10362,7 @@ name = "reth-storage-api"
 version = "2.3.0"
 dependencies = [
  "alloy-consensus",
- "alloy-eip7928 0.4.1",
+ "alloy-eip7928 0.4.3",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -10665,7 +10666,7 @@ dependencies = [
 name = "reth-trie-parallel"
 version = "2.3.0"
 dependencies = [
- "alloy-eip7928 0.4.1",
+ "alloy-eip7928 0.4.3",
  "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
@@ -10946,7 +10947,7 @@ version = "41.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73ef2fffc28acc41e8ef7525f2b1d16288a10f80579a1b33e7e62abc9892314a"
 dependencies = [
- "alloy-eip7928 0.4.1",
+ "alloy-eip7928 0.4.3",
  "bitflags 2.11.1",
  "nonmax",
  "revm-bytecode",

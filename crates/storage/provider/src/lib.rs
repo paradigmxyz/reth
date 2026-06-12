@@ -52,8 +52,8 @@ pub use revm_database::states::OriginalValuesKnown;
 pub use reth_static_file_types as static_file;
 pub use reth_storage_api::{
     BalNotification, BalNotificationStream, BalProvider, BalStore, BalStoreHandle,
-    GetBlockAccessListLimit, HistoryWriter, MetadataProvider, MetadataWriter, NoopBalStore,
-    SealedBal, StateWriteConfig, StatsReader, StorageSettings, StorageSettingsCache,
+    GetBlockAccessListLimit, HistoryWriter, MetadataProvider, MetadataWriter, NoopBalStore, RawBal,
+    StateWriteConfig, StatsReader, StorageSettings, StorageSettingsCache,
 };
 /// Re-export provider error.
 pub use reth_storage_errors::provider::{ProviderError, ProviderResult};

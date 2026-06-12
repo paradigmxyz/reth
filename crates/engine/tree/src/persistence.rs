@@ -388,15 +388,15 @@ impl Drop for ServiceGuard {
 mod tests {
     use super::*;
     use alloy_eips::NumHash;
-    use alloy_primitives::{keccak256, BlockHash, BlockNumber, Bytes, Sealed, B256, U256};
+    use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U256};
     use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_exex_types::FinishedExExHeight;
     use reth_provider::{
         providers::{ProviderFactoryBuilder, ReadOnlyConfig},
         test_utils::{create_test_provider_factory, MockNodeTypes},
         AccountReader, BalConfig, BalNotificationStream, BalStore, BalStoreHandle,
-        ChainSpecProvider, HeaderProvider, InMemoryBalStore, ProviderError, ProviderResult,
-        SealedBal, StorageSettingsCache, TryIntoHistoricalStateProvider,
+        ChainSpecProvider, HeaderProvider, InMemoryBalStore, ProviderError, ProviderResult, RawBal,
+        StorageSettingsCache, TryIntoHistoricalStateProvider,
     };
     use reth_prune::Pruner;
     use reth_prune_types::PruneMode;
@@ -427,17 +427,9 @@ mod tests {
             BalConfig::with_in_memory_retention(PruneMode::Before(2)),
         ));
 
+        bal_store.insert(NumHash::new(1, old_hash), RawBal::new(old_bal.clone())).unwrap();
         bal_store
-            .insert(
-                NumHash::new(1, old_hash),
-                Sealed::new_unchecked(old_bal.clone(), keccak256(&old_bal)),
-            )
-            .unwrap();
-        bal_store
-            .insert(
-                NumHash::new(2, retained_hash),
-                Sealed::new_unchecked(retained_bal.clone(), keccak256(&retained_bal)),
-            )
+            .insert(NumHash::new(2, retained_hash), RawBal::new(retained_bal.clone()))
             .unwrap();
 
         let provider = create_test_provider_factory().with_bal_store(bal_store.clone());
@@ -478,7 +470,7 @@ mod tests {
     struct FailingPruneBalStore;
 
     impl BalStore for FailingPruneBalStore {
-        fn insert(&self, _num_hash: NumHash, _bal: SealedBal) -> ProviderResult<()> {
+        fn insert(&self, _num_hash: NumHash, _bal: RawBal) -> ProviderResult<()> {
             Ok(())
         }
 

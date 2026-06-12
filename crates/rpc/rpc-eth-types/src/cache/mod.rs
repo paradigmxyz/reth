@@ -1217,11 +1217,7 @@ mod tests {
     }
 
     impl BalStore for TestBalStore {
-        fn insert(
-            &self,
-            _num_hash: NumHash,
-            _bal: reth_storage_api::SealedBal,
-        ) -> ProviderResult<()> {
+        fn insert(&self, _num_hash: NumHash, _bal: reth_storage_api::RawBal) -> ProviderResult<()> {
             Ok(())
         }
 
