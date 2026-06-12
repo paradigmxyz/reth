@@ -116,7 +116,7 @@ impl BalPrewarmPool {
 /// time to finish is 312.5ms at QD=32 and 156.26ms at QD=64.
 ///
 /// This should explain why this particular value is picked.
-pub(crate) const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
+pub(crate) const DEFAULT_BAL_PREWARM_THREADS: usize = 64;
 
 fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
     // The provider (and its MDBX read txn) held for the current block, between `BeginBlock` and
