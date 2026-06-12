@@ -476,7 +476,8 @@ where
             let executor = self.executor.clone();
             self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
-                let mut all: Vec<_> = transactions.into_iter().collect();
+                let mut all = Vec::with_capacity(transaction_count);
+                all.extend(transactions.into_iter());
                 let rest = all.split_off(prefetch.min(all.len()));
 
                 // Convert the first few transactions sequentially so execution can
