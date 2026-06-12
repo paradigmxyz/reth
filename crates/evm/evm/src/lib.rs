@@ -18,7 +18,7 @@
 extern crate alloc;
 
 use crate::execute::{BasicBlockBuilder, Executor};
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 use alloy_eips::eip4895::Withdrawals;
 use alloy_evm::{
     block::{BlockExecutorFactory, BlockExecutorFor},
@@ -265,6 +265,34 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         self.block_executor_factory().evm_factory()
     }
 
+    /// Returns a config with JIT support enabled for subsequently created EVMs, if supported.
+    ///
+    /// This is one of three gates required before an EVM can execute JIT-compiled code: the binary
+    /// must be built with the `jit` feature, runtime compilation must be enabled by `--jit` or the
+    /// `reth_jit` RPC method, and this local support flag must be enabled for the config that
+    /// creates the EVM.
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn with_jit_support_enabled(self, _enabled: bool) -> Self
+    where
+        Self: Sized,
+    {
+        self
+    }
+
+    /// Returns a config with local JIT support enabled for subsequently created EVMs, if supported.
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn with_jit_support(self) -> Self
+    where
+        Self: Sized,
+    {
+        self.with_jit_support_enabled(true)
+    }
+
+    /// Returns the JIT backend, if supported.
+    fn jit_backend(&self) -> Option<&dyn JitBackend> {
+        None
+    }
+
     /// Returns a new EVM with the given database configured with the given environment settings,
     /// including the spec id and transaction environment.
     ///
@@ -459,6 +487,21 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     ) -> impl Executor<DB, Primitives = Self::Primitives, Error = BlockExecutionError> {
         BasicBlockExecutor::new(self, db)
     }
+}
+
+/// JIT backend controls exposed by an EVM configuration.
+pub trait JitBackend: Send + Sync {
+    /// Enables or disables JIT compilation.
+    fn set_enabled(&self, enabled: bool) -> Result<(), String>;
+
+    /// Pauses JIT helper execution while keeping queueing and resident compiled code available.
+    fn pause(&self);
+
+    /// Resumes background JIT work.
+    fn resume(&self);
+
+    /// Clears JIT runtime state.
+    fn clear(&self);
 }
 
 /// Represents additional attributes required to configure the next block.

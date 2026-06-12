@@ -380,14 +380,17 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                 changed_accounts.extend(new_changed_accounts.into_iter().map(|entry| entry.0));
 
                 // all transactions mined in the new chain
-                let new_mined_transactions = new_blocks.transaction_hashes_set();
+                let mined_transactions = new_blocks.transaction_hashes_vec();
+                let new_mined_transactions =
+                    mined_transactions.iter().copied().collect::<HashSet<_>>();
 
                 // update the pool then re-inject the pruned transactions
                 // find all transactions that were mined in the old chain but not in the new chain
                 let pruned_old_transactions = old_blocks
-                    .transactions_ecrecovered()
-                    .filter(|tx| !new_mined_transactions.contains(tx.tx_hash()))
-                    .filter_map(|tx| {
+                    .transactions_with_sender()
+                    .filter(|(_, tx)| !new_mined_transactions.contains(tx.tx_hash()))
+                    .filter_map(|(signer, tx)| {
+                        let tx = tx.clone().with_signer(*signer);
                         if tx.is_eip4844() {
                             // reorged blobs no longer include the blob, which is necessary for
                             // validating the transaction. Even though the transaction could have
@@ -416,7 +419,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                     pending_block_blob_fee,
                     changed_accounts,
                     // all transactions mined in the new chain need to be removed from the pool
-                    mined_transactions: new_blocks.transaction_hashes_vec(),
+                    mined_transactions,
                     update_kind: PoolUpdateKind::Reorg,
                 };
                 pool.on_canonical_state_change(update);

@@ -380,10 +380,6 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     pub fn buffer_hashes(&mut self, hashes: RequestTxHashes, fallback_peer: Option<PeerId>) {
         for hash in hashes {
             // hash could have been evicted from bounded lru map
-            if self.hashes_fetch_inflight_and_pending_fetch.peek(&hash).is_none() {
-                continue
-            }
-
             let Some(TxFetchMetadata { retries, fallback_peers, .. }) =
                 self.hashes_fetch_inflight_and_pending_fetch.get(&hash)
             else {

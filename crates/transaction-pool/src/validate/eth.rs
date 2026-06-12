@@ -49,14 +49,14 @@ use std::{
 ///
 /// Receives the transaction origin and a reference to the transaction. Returns `Ok(())` if the
 /// transaction passes or `Err` to reject it.
-type StatelessValidationFn<T> =
+pub type StatelessValidationFn<T> =
     Arc<dyn Fn(TransactionOrigin, &T) -> Result<(), InvalidPoolTransactionError> + Send + Sync>;
 
 /// Additional stateful validation function signature.
 ///
 /// Receives the transaction origin, a reference to the transaction, and an account state reader.
 /// Returns `Ok(())` if the transaction passes or `Err` to reject it.
-type StatefulValidationFn<T> = Arc<
+pub type StatefulValidationFn<T> = Arc<
     dyn Fn(TransactionOrigin, &T, &dyn AccountInfoReader) -> Result<(), InvalidPoolTransactionError>
         + Send
         + Sync,
@@ -271,6 +271,27 @@ impl<Client, Tx, Evm> EthTransactionValidator<Client, Tx, Evm> {
         self.additional_stateless_validation = Some(Arc::new(f));
     }
 
+    /// Sets the additional stateless validation check from an already shared
+    /// [`StatelessValidationFn`].
+    ///
+    /// This is useful when the same hook is shared across multiple validators, avoiding an extra
+    /// allocation compared to
+    /// [`set_additional_stateless_validation`](Self::set_additional_stateless_validation).
+    pub fn set_additional_stateless_validation_fn(&mut self, f: StatelessValidationFn<Tx>) {
+        self.additional_stateless_validation = Some(f);
+    }
+
+    /// Sets or clears the additional stateless validation check from an optional
+    /// [`StatelessValidationFn`].
+    ///
+    /// Passing `None` removes any previously configured check.
+    pub fn set_additional_stateless_validation_fn_opt(
+        &mut self,
+        f: Option<StatelessValidationFn<Tx>>,
+    ) {
+        self.additional_stateless_validation = f;
+    }
+
     /// Sets an additional stateful validation check that is applied at the end of
     /// [`validate_stateful`](Self::validate_stateful).
     ///
@@ -307,6 +328,27 @@ impl<Client, Tx, Evm> EthTransactionValidator<Client, Tx, Evm> {
             + 'static,
     {
         self.additional_stateful_validation = Some(Arc::new(f));
+    }
+
+    /// Sets the additional stateful validation check from an already shared
+    /// [`StatefulValidationFn`].
+    ///
+    /// This is useful when the same hook is shared across multiple validators, avoiding an extra
+    /// allocation compared to
+    /// [`set_additional_stateful_validation`](Self::set_additional_stateful_validation).
+    pub fn set_additional_stateful_validation_fn(&mut self, f: StatefulValidationFn<Tx>) {
+        self.additional_stateful_validation = Some(f);
+    }
+
+    /// Sets or clears the additional stateful validation check from an optional
+    /// [`StatefulValidationFn`].
+    ///
+    /// Passing `None` removes any previously configured check.
+    pub fn set_additional_stateful_validation_fn_opt(
+        &mut self,
+        f: Option<StatefulValidationFn<Tx>>,
+    ) {
+        self.additional_stateful_validation = f;
     }
 }
 

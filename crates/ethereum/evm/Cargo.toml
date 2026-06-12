@@ -28,6 +28,10 @@ alloy-evm.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
 
+metrics = { workspace = true, optional = true }
+reth-metrics = { workspace = true, optional = true }
+revmc = { workspace = true, features = ["alloy-evm"], optional = true }
+
 [dev-dependencies]
 reth-testing-utils.workspace = true
 reth-evm = { workspace = true, features = ["test-utils"] }
@@ -35,7 +39,7 @@ secp256k1.workspace = true
 alloy-genesis.workspace = true
 
 [features]
-default = ["std"]
+default = ["std", "jit"]
 std = [
     "alloy-consensus/std",
     "alloy-eips/std",
@@ -52,6 +56,12 @@ std = [
     "reth-ethereum-primitives/std",
     "alloy-rpc-types-engine/std",
     "reth-storage-errors/std",
+]
+jit = [
+    "std",
+    "dep:revmc",
+    "dep:metrics",
+    "dep:reth-metrics",
 ]
 test-utils = [
     "std",

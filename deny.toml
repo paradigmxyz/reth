@@ -104,4 +104,7 @@ allow-git = [
     "https://github.com/paradigmxyz/jsonrpsee",
     "https://github.com/DaniPopes/slotmap.git",
     "https://github.com/sigp/discv5",
+    "https://github.com/paradigmxyz/revmc",
+    "https://github.com/paradigmxyz/revmc?branch=main",
+    "https://github.com/TheDan64/inkwell",
 ]
