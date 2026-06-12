@@ -305,11 +305,21 @@ impl GasBucketMetrics {
     }
 
     /// Returns the bucket index for a given gas value.
-    pub(crate) fn bucket_index(gas_used: u64) -> usize {
-        GAS_BUCKET_THRESHOLDS
-            .iter()
-            .position(|&threshold| gas_used < threshold)
-            .unwrap_or(GAS_BUCKET_THRESHOLDS.len())
+    #[inline]
+    pub(crate) const fn bucket_index(gas_used: u64) -> usize {
+        if gas_used < GAS_BUCKET_THRESHOLDS[0] {
+            0
+        } else if gas_used < GAS_BUCKET_THRESHOLDS[1] {
+            1
+        } else if gas_used < GAS_BUCKET_THRESHOLDS[2] {
+            2
+        } else if gas_used < GAS_BUCKET_THRESHOLDS[3] {
+            3
+        } else if gas_used < GAS_BUCKET_THRESHOLDS[4] {
+            4
+        } else {
+            GAS_BUCKET_THRESHOLDS.len()
+        }
     }
 
     /// Returns a human-readable label like `<5M`, `5-10M`, … `>40M`.
@@ -578,6 +588,21 @@ mod tests {
         let snapshotter = recorder.snapshotter();
         recorder.install().unwrap();
         snapshotter
+    }
+
+    #[test]
+    fn test_gas_bucket_index_boundaries() {
+        assert_eq!(GasBucketMetrics::bucket_index(0), 0);
+        assert_eq!(GasBucketMetrics::bucket_index(GAS_BUCKET_THRESHOLDS[0] - 1), 0);
+        assert_eq!(GasBucketMetrics::bucket_index(GAS_BUCKET_THRESHOLDS[0]), 1);
+        assert_eq!(GasBucketMetrics::bucket_index(GAS_BUCKET_THRESHOLDS[1] - 1), 1);
+        assert_eq!(GasBucketMetrics::bucket_index(GAS_BUCKET_THRESHOLDS[1]), 2);
+        assert_eq!(GasBucketMetrics::bucket_index(GAS_BUCKET_THRESHOLDS[2] - 1), 2);
+        assert_eq!(GasBucketMetrics::bucket_index(GAS_BUCKET_THRESHOLDS[2]), 3);
+        assert_eq!(GasBucketMetrics::bucket_index(GAS_BUCKET_THRESHOLDS[3] - 1), 3);
+        assert_eq!(GasBucketMetrics::bucket_index(GAS_BUCKET_THRESHOLDS[3]), 4);
+        assert_eq!(GasBucketMetrics::bucket_index(GAS_BUCKET_THRESHOLDS[4] - 1), 4);
+        assert_eq!(GasBucketMetrics::bucket_index(GAS_BUCKET_THRESHOLDS[4]), 5);
     }
 
     #[test]
