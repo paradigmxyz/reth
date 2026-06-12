@@ -2237,8 +2237,6 @@ where
         Some(self.payload_processor.spawn_state_root(
             overlay_factory,
             parent_state_root,
-            // Full proof workers — tx count unknown at FCU time (block built incrementally)
-            false,
             &self.config,
         ))
     }

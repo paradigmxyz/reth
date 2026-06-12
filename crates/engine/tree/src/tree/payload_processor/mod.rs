@@ -284,13 +284,8 @@ where
 
         let span = Span::current();
 
-        let halve_workers = env.transaction_count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD;
-        let state_root_handle = self.spawn_state_root(
-            multiproof_provider_factory,
-            env.parent_state_root,
-            halve_workers,
-            config,
-        );
+        let state_root_handle =
+            self.spawn_state_root(multiproof_provider_factory, env.parent_state_root, config);
         // BAL blocks only bypass the normal execution state hook when the parallel BAL executor
         // consumes the BAL. If parallel BAL execution is disabled, or if state caching is
         // disabled so the BAL executor cannot use a shared cache, treat the BAL as absent here so
@@ -355,15 +350,11 @@ where
     ///   state root.
     ///
     /// The state hook **must** be dropped after execution to signal the end of state updates.
-    ///
-    /// When `halve_workers` is true, the proof worker pool is halved (for small blocks where
-    /// fewer transactions produce fewer state changes and most workers would be idle).
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     pub fn spawn_state_root<F>(
         &self,
         multiproof_provider_factory: F,
         parent_state_root: B256,
-        halve_workers: bool,
         config: &TreeConfig,
     ) -> StateRootHandle
     where
@@ -378,7 +369,7 @@ where
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         #[cfg(feature = "trie-debug")]
         let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
-        let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers);
+        let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx);
 
         let (state_root_tx, state_root_rx) = channel();
 
@@ -392,10 +383,6 @@ where
 
         StateRootHandle::new(parent_state_root, updates_tx, state_root_rx)
     }
-
-    /// Transaction count threshold below which proof workers are halved, since fewer transactions
-    /// produce fewer state changes and most workers would be idle overhead.
-    const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 30;
 
     /// Transaction count threshold below which sequential conversion is used.
     ///
