@@ -62,8 +62,10 @@ impl EngineApiMetrics {
 
         // Update the metrics for the number of accounts, storage slots and bytecodes
         let accounts = output.state.state.len();
-        let storage_slots =
-            output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
+        let mut storage_slots = 0;
+        for account in output.state.state.values() {
+            storage_slots += account.storage.len();
+        }
         let bytecodes = output.state.contracts.len();
 
         self.executor.accounts_updated_histogram.record(accounts as f64);
