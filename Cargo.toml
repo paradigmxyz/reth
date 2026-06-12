@@ -440,7 +440,7 @@ revm-primitives = { version = "41.0.0", default-features = false }
 revm-interpreter = { version = "41.0.0", default-features = false }
 revm-database-interface = { version = "41.0.0", default-features = false }
 revmc = { git = "https://github.com/Rimeeeeee/revmc", branch = "eip-8268", default-features = false, features = ["llvm-prefer-static"] }
-revm-inspectors = "0.41.0"
+revm-inspectors = "0.41.1"
 
 # eth
 alloy-dyn-abi = "1.6.0"
