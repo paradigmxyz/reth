@@ -11,7 +11,7 @@ use revm_database::state::bal::Bal as RevmBal;
 pub struct BalNotification {
     /// Number and hash of the block the BAL belongs to.
     pub num_hash: NumHash,
-    /// Raw BAL RLP payload with its lazily computed hash.
+    /// Raw BAL RLP payload.
     pub bal: RawBal,
 }
 
