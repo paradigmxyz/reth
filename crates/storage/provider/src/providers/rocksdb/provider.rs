@@ -8,6 +8,7 @@ use alloy_primitives::{
 use itertools::Itertools;
 use metrics::Label;
 use parking_lot::Mutex;
+use rayon::prelude::*;
 use reth_chain_state::ExecutedBlock;
 use reth_db_api::{
     database_metrics::DatabaseMetrics,
@@ -1431,7 +1432,6 @@ impl RocksDBProvider {
         blocks: &[ExecutedBlock<N>],
         ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
-        let mut batch = self.batch();
         let mut storage_history: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
 
         for (block_idx, block) in blocks.iter().enumerate() {
@@ -1453,11 +1453,23 @@ impl RocksDBProvider {
             }
         }
 
-        // Write storage history using proper shard append logic
-        for ((address, slot), indices) in storage_history {
-            batch.append_storage_history_shard(address, slot, indices)?;
-        }
-        ctx.pending_batches.lock().push(batch.into_inner());
+        let storage_history = storage_history.into_iter().collect::<Vec<_>>();
+        let chunk_size = storage_history.len().div_ceil(rayon::current_num_threads()).max(1);
+        let batches = storage_history
+            .par_chunks(chunk_size)
+            .map(|chunk| -> ProviderResult<_> {
+                let mut batch = self.batch();
+                for ((address, slot), indices) in chunk {
+                    batch.append_storage_history_shard(*address, *slot, indices.iter().copied())?;
+                }
+                Ok(batch)
+            })
+            .collect::<ProviderResult<Vec<_>>>()?;
+
+        let mut pending_batches = ctx.pending_batches.lock();
+        pending_batches.extend(
+            batches.into_iter().filter(|batch| !batch.is_empty()).map(RocksDBBatch::into_inner),
+        );
         Ok(())
     }
 }
