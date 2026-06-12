@@ -28,7 +28,7 @@ use reth_rpc_eth_api::{
     FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction, EthConfig};
-use reth_storage_api::BlockNumReader;
+use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::DatabaseCommit;
@@ -43,6 +43,8 @@ use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// Maximum number of `trace_filter` blocks replayed concurrently.
 const TRACE_FILTER_BLOCK_BUFFER_SIZE: usize = 4;
+/// Number of blocks fetched per provider range read in `trace_filter`.
+const TRACE_FILTER_FETCH_CHUNK_SIZE: usize = 16;
 
 /// `trace` API implementation.
 ///
@@ -393,89 +395,111 @@ where
             self.inner.eth_config.max_tracing_requests.clamp(1, TRACE_FILTER_BLOCK_BUFFER_SIZE);
         let mut include_reward_traces = true;
 
-        let mut replay_window = Vec::with_capacity(block_buffer_size);
-        let mut block_replays = futures::stream::iter(start..=end)
-            .map(|block_number| {
-                let this = self.clone();
-                let matcher = matcher.clone();
+        for chunk_start in (start..=end).step_by(TRACE_FILTER_FETCH_CHUNK_SIZE) {
+            let chunk_end = (chunk_start + TRACE_FILTER_FETCH_CHUNK_SIZE as u64 - 1).min(end);
+            let expected_blocks = (chunk_end - chunk_start + 1) as usize;
 
-                async move {
-                    let block_id: BlockId = block_number.into();
-                    let Some(block) = this.eth_api().recovered_block(block_id).await? else {
-                        return Err(EthApiError::HeaderNotFound(block_id).into())
-                    };
+            let blocks = self
+                .eth_api()
+                .spawn_blocking_io(move |this| {
+                    let blocks = this
+                        .provider()
+                        .recovered_block_range(chunk_start..=chunk_end)
+                        .map_err(Eth::Error::from_eth_err)?;
+
+                    if blocks.len() != expected_blocks {
+                        return Err(EthApiError::HeaderNotFound(chunk_start.into()).into())
+                    }
+
+                    Ok(blocks.into_iter().map(Arc::new).collect::<Vec<_>>())
+                })
+                .await?;
+
+            let mut replay_window = Vec::with_capacity(block_buffer_size);
+            let mut block_replays = futures::stream::iter(blocks)
+                .map(|block| {
+                    let this = self.clone();
+                    let matcher = matcher.clone();
 
                     let block_hash = block.hash();
-                    let permit = this.acquire_trace_permit().await;
-                    let traces = this
-                        .eth_api()
-                        .trace_block_until(
-                            block_hash.into(),
-                            Some(block.clone()),
-                            None,
-                            TracingInspectorConfig::default_parity(),
-                            move |tx_info, mut ctx| {
-                                // Keep the block replay permit inside the spawned replay task.
-                                let _block_replay_permit = &permit;
-                                let mut traces = ctx
-                                    .take_inspector()
-                                    .into_parity_builder()
-                                    .into_localized_transaction_traces(tx_info);
-                                traces.retain(|trace| matcher.matches(&trace.trace));
-                                Ok(Some(traces))
-                            },
+
+                    async move {
+                        let permit = this.acquire_trace_permit().await;
+                        let traces = this
+                            .eth_api()
+                            .trace_block_until(
+                                block_hash.into(),
+                                Some(block.clone()),
+                                None,
+                                TracingInspectorConfig::default_parity(),
+                                move |tx_info, mut ctx| {
+                                    // Keep the block replay permit inside the spawned replay task.
+                                    let _block_replay_permit = &permit;
+                                    let mut traces = ctx
+                                        .take_inspector()
+                                        .into_parity_builder()
+                                        .into_localized_transaction_traces(tx_info);
+                                    traces.retain(|trace| matcher.matches(&trace.trace));
+                                    Ok(Some(traces))
+                                },
+                            )
+                            .await?;
+
+                        Ok::<_, Eth::Error>((block, traces))
+                    }
+                })
+                .buffered(block_buffer_size);
+
+            while let Some(block_replay) = block_replays.next().await {
+                let (block, traces) = block_replay?;
+                let reward_traces = if include_reward_traces {
+                    if let Some(base_block_reward) =
+                        self.calculate_base_block_reward(block.header())?
+                    {
+                        self.extract_reward_traces(
+                            block.header(),
+                            block.hash(),
+                            block.body().ommers(),
+                            base_block_reward,
                         )
-                        .await?;
-
-                    Ok::<_, Eth::Error>((block, traces))
-                }
-            })
-            .buffered(block_buffer_size);
-
-        while let Some(block_replay) = block_replays.next().await {
-            let (block, traces) = block_replay?;
-            let reward_traces = if include_reward_traces {
-                if let Some(base_block_reward) = self.calculate_base_block_reward(block.header())? {
-                    self.extract_reward_traces(
-                        block.header(),
-                        block.hash(),
-                        block.body().ommers(),
-                        base_block_reward,
-                    )
-                    .into_iter()
-                    .filter(|trace| matcher.matches(&trace.trace))
-                    .collect::<Vec<_>>()
+                        .into_iter()
+                        .filter(|trace| matcher.matches(&trace.trace))
+                        .collect::<Vec<_>>()
+                    } else {
+                        // Blocks are processed in ascending order, so once a historical range
+                        // reaches post-Paris blocks, later blocks in the range have no rewards.
+                        include_reward_traces = false;
+                        Vec::new()
+                    }
                 } else {
-                    // Blocks are processed in ascending order, so once a historical range reaches
-                    // post-Paris blocks, later blocks in the range have no rewards.
-                    include_reward_traces = false;
                     Vec::new()
-                }
-            } else {
-                Vec::new()
-            };
+                };
 
-            replay_window
-                .push(TraceFilterBlockReplay { transaction_traces: traces, reward_traces });
-            if replay_window.len() == block_buffer_size {
-                let window =
-                    std::mem::replace(&mut replay_window, Vec::with_capacity(block_buffer_size));
-                append_trace_filter_replay_window(&mut all_traces, window);
+                replay_window
+                    .push(TraceFilterBlockReplay { transaction_traces: traces, reward_traces });
+                if replay_window.len() == block_buffer_size {
+                    let window = std::mem::replace(
+                        &mut replay_window,
+                        Vec::with_capacity(block_buffer_size),
+                    );
+                    append_trace_filter_replay_window(&mut all_traces, window);
+
+                    if let Some(traces) =
+                        apply_trace_filter_pagination(&mut all_traces, &mut after, count)
+                    {
+                        return Ok(traces)
+                    }
+                }
+            }
+
+            if !replay_window.is_empty() {
+                append_trace_filter_replay_window(&mut all_traces, replay_window);
 
                 if let Some(traces) =
                     apply_trace_filter_pagination(&mut all_traces, &mut after, count)
                 {
                     return Ok(traces)
                 }
-            }
-        }
-
-        if !replay_window.is_empty() {
-            append_trace_filter_replay_window(&mut all_traces, replay_window);
-
-            if let Some(traces) = apply_trace_filter_pagination(&mut all_traces, &mut after, count)
-            {
-                return Ok(traces)
             }
         }
 
