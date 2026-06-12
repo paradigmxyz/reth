@@ -329,7 +329,7 @@ where
     ///    trie before account reads finish.
     /// 2. Storage prefetch on the prewarming pool to populate the execution cache, unless BAL batch
     ///    I/O is disabled.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
+    #[instrument(level = "trace", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn run_bal_prewarm(
         &self,
         decoded_bal: Arc<DecodedBal>,
@@ -364,7 +364,7 @@ where
         if let Some(to_sparse_trie_task) = to_sparse_trie_task {
             let ctx = ctx.clone();
             executor.bal_streaming_pool().spawn(move || {
-                let branch_span = debug_span!(
+                let branch_span = trace_span!(
                     target: "engine::tree::payload_processor::prewarm",
                     parent: &stream_parent_span,
                     "bal_hashed_state_stream",
@@ -449,7 +449,7 @@ where
     /// was cancelled.
     #[instrument(
         parent = &self.parent_span,
-        level = "debug",
+        level = "trace",
         target = "engine::tree::payload_processor::prewarm",
         name = "prewarm and caching",
         skip_all
