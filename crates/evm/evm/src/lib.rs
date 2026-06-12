@@ -48,12 +48,14 @@ pub use engine::{ConfigureEngineEvm, ConvertTx, ExecutableTxIterator, Executable
 #[cfg(feature = "metrics")]
 pub mod metrics;
 pub mod noop;
+mod state_hook;
+pub use state_hook::{OnStateHook, StateHookExt};
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking executor
 pub mod test_utils;
 
 pub use alloy_evm::{
-    block::{state_changes, system_calls, OnStateHook},
+    block::{state_changes, system_calls},
     *,
 };
 
