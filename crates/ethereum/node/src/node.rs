@@ -62,6 +62,7 @@ use revm::context::TxEnv;
 use std::{marker::PhantomData, sync::Arc, time::SystemTime};
 
 pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
+#[cfg(feature = "jit")]
 pub use reth_evm_ethereum::factory::maybe_run_jit_helper;
 
 /// Type configuration for a regular Ethereum node.
