@@ -166,6 +166,8 @@ where
     bal_index_setter: Option<BalIndexSetter<DB>>,
     /// Whether the executor has selected its starting segment.
     initialized: bool,
+    /// Segment currently installed in the inner executor.
+    active_segment: usize,
 }
 
 impl<'a, DB, I, P, Spec> BbBlockExecutor<'a, DB, I, P, Spec>
@@ -207,6 +209,7 @@ where
             bal_index_bumper,
             bal_index_setter,
             initialized: false,
+            active_segment: 0,
         }
     }
 
@@ -220,15 +223,16 @@ where
     /// plan so segment boundaries don't fire — a BAL worker only runs one
     /// transaction in its segment.
     fn initialize(&mut self) -> Result<(), BlockExecutionError> {
-        if self.initialized {
+        let bal_index = self
+            .bal_index_reader
+            .map(|reader| reader(self.inner().evm().db()))
+            .filter(|bal_index| *bal_index > 0);
+
+        if self.initialized && bal_index.is_none() {
             return Ok(());
         }
 
-        let segment_idx = if let Some(bal_index) = self
-            .bal_index_reader
-            .map(|reader| reader(self.inner().evm().db()))
-            .filter(|bal_index| *bal_index > 0)
-        {
+        let segment_idx = if let Some(bal_index) = bal_index {
             let segment_idx = self.plan.segment_index_for_tx((bal_index - 1) as usize);
 
             // Renumber the worker's bal_index from the raw "tx i + 1"
@@ -245,13 +249,13 @@ where
 
             segment_idx
         } else {
-            if self.initialized {
-                return Ok(());
-            }
-
-            self.initialized = true;
             0
         };
+
+        if self.initialized && self.active_segment == segment_idx {
+            return Ok(());
+        }
+
         let segment = &self.plan.segments[segment_idx];
         let block_env = segment.evm_env.block_env.clone();
         let block_number = block_env.number.saturating_to::<u64>();
@@ -265,6 +269,8 @@ where
         inner.ctx = segment.ctx.clone();
 
         self.reseed_block_hashes_for(block_number);
+        self.initialized = true;
+        self.active_segment = segment_idx;
 
         Ok(())
     }
@@ -369,6 +375,7 @@ where
         new_inner.receipts = result.receipts;
 
         self.inner = Some(new_inner);
+        self.active_segment = seg_idx;
 
         // Reseed the block hash cache for the new segment's 256-block window
         // before applying pre-execution changes (which may use BLOCKHASH).
