@@ -213,10 +213,6 @@ mod tests {
     use alloy_primitives::B256;
     use tokio_stream::StreamExt;
 
-    fn raw_bal(bal: Bytes) -> RawBal {
-        RawBal::new(bal)
-    }
-
     #[test]
     fn insert_and_lookup_by_hash() {
         let store = InMemoryBalStore::default();
@@ -224,7 +220,7 @@ mod tests {
         let missing = B256::random();
         let bal = Bytes::from_static(b"bal");
 
-        store.insert(NumHash::new(1, hash), raw_bal(bal.clone())).unwrap();
+        store.insert(NumHash::new(1, hash), RawBal::from(bal.clone())).unwrap();
 
         assert_eq!(store.get_by_hashes(&[hash, missing]).unwrap(), vec![Some(bal), None]);
     }
@@ -234,8 +230,8 @@ mod tests {
         let store = InMemoryBalStore::default();
         let hash0 = B256::random();
         let hash1 = B256::random();
-        let bal0 = raw_bal(Bytes::from_static(b"bal0"));
-        let bal1 = raw_bal(Bytes::from_static(b"bal1"));
+        let bal0 = RawBal::from(Bytes::from_static(b"bal0"));
+        let bal1 = RawBal::from(Bytes::from_static(b"bal1"));
 
         store
             .insert_many(vec![
@@ -267,9 +263,9 @@ mod tests {
         let bal1 = Bytes::from_static(&[0xc1, 0x02]);
         let bal2 = Bytes::from_static(&[0xc1, 0x03]);
 
-        store.insert(NumHash::new(1, hash0), raw_bal(bal0.clone())).unwrap();
-        store.insert(NumHash::new(2, hash1), raw_bal(bal1.clone())).unwrap();
-        store.insert(NumHash::new(3, hash2), raw_bal(bal2)).unwrap();
+        store.insert(NumHash::new(1, hash0), RawBal::from(bal0.clone())).unwrap();
+        store.insert(NumHash::new(2, hash1), RawBal::from(bal1.clone())).unwrap();
+        store.insert(NumHash::new(3, hash2), RawBal::from(bal2)).unwrap();
 
         let limited = store
             .get_by_hashes_with_limit(
@@ -291,17 +287,17 @@ mod tests {
         let retained_bal = Bytes::from_static(b"retained");
         let tip_bal = Bytes::from_static(b"tip");
 
-        store.insert(NumHash::new(1, old_hash), raw_bal(old_bal)).unwrap();
+        store.insert(NumHash::new(1, old_hash), RawBal::from(old_bal)).unwrap();
         store
             .insert(
                 NumHash::new(BAL_RETENTION_PERIOD_SLOTS, retained_hash),
-                raw_bal(retained_bal.clone()),
+                RawBal::from(retained_bal.clone()),
             )
             .unwrap();
         store
             .insert(
                 NumHash::new(BAL_RETENTION_PERIOD_SLOTS + 2, tip_hash),
-                raw_bal(tip_bal.clone()),
+                RawBal::from(tip_bal.clone()),
             )
             .unwrap();
 
@@ -320,8 +316,8 @@ mod tests {
         let old_bal = Bytes::from_static(b"old");
         let retained_bal = Bytes::from_static(b"retained");
 
-        store.insert(NumHash::new(7, old_hash), raw_bal(old_bal)).unwrap();
-        store.insert(NumHash::new(8, retained_hash), raw_bal(retained_bal.clone())).unwrap();
+        store.insert(NumHash::new(7, old_hash), RawBal::from(old_bal)).unwrap();
+        store.insert(NumHash::new(8, retained_hash), RawBal::from(retained_bal.clone())).unwrap();
 
         assert_eq!(store.prune(10).unwrap(), 1);
         assert_eq!(
@@ -340,9 +336,9 @@ mod tests {
         let high_bal = Bytes::from_static(b"high");
         let late_bal = Bytes::from_static(b"late");
 
-        store.insert(NumHash::new(7, old_hash), raw_bal(Bytes::from_static(b"old"))).unwrap();
-        store.insert(NumHash::new(10, high_hash), raw_bal(high_bal.clone())).unwrap();
-        store.insert(NumHash::new(8, late_hash), raw_bal(late_bal.clone())).unwrap();
+        store.insert(NumHash::new(7, old_hash), RawBal::from(Bytes::from_static(b"old"))).unwrap();
+        store.insert(NumHash::new(10, high_hash), RawBal::from(high_bal.clone())).unwrap();
+        store.insert(NumHash::new(8, late_hash), RawBal::from(late_bal.clone())).unwrap();
 
         assert_eq!(
             store.get_by_hashes(&[old_hash, high_hash, late_hash]).unwrap(),
@@ -358,11 +354,11 @@ mod tests {
         let old_bal = Bytes::from_static(b"old");
         let tip_bal = Bytes::from_static(b"tip");
 
-        store.insert(NumHash::new(1, old_hash), raw_bal(old_bal.clone())).unwrap();
+        store.insert(NumHash::new(1, old_hash), RawBal::from(old_bal.clone())).unwrap();
         store
             .insert(
                 NumHash::new(BAL_RETENTION_PERIOD_SLOTS + 1, tip_hash),
-                raw_bal(tip_bal.clone()),
+                RawBal::from(tip_bal.clone()),
             )
             .unwrap();
 
@@ -383,9 +379,9 @@ mod tests {
         let retained_bal = Bytes::from_static(b"retained");
         let tip_bal = Bytes::from_static(b"tip");
 
-        store.insert(NumHash::new(1, old_hash), raw_bal(old_bal)).unwrap();
-        store.insert(NumHash::new(2, retained_hash), raw_bal(retained_bal.clone())).unwrap();
-        store.insert(NumHash::new(4, tip_hash), raw_bal(tip_bal.clone())).unwrap();
+        store.insert(NumHash::new(1, old_hash), RawBal::from(old_bal)).unwrap();
+        store.insert(NumHash::new(2, retained_hash), RawBal::from(retained_bal.clone())).unwrap();
+        store.insert(NumHash::new(4, tip_hash), RawBal::from(tip_bal.clone())).unwrap();
 
         assert_eq!(
             store.get_by_hashes(&[old_hash, retained_hash, tip_hash]).unwrap(),
@@ -400,8 +396,8 @@ mod tests {
         let hash = B256::random();
         let bal = Bytes::from_static(b"bal");
 
-        store.insert(NumHash::new(1, hash), raw_bal(Bytes::from_static(b"old"))).unwrap();
-        store.insert(NumHash::new(2, hash), raw_bal(bal.clone())).unwrap();
+        store.insert(NumHash::new(1, hash), RawBal::from(Bytes::from_static(b"old"))).unwrap();
+        store.insert(NumHash::new(2, hash), RawBal::from(bal.clone())).unwrap();
 
         assert_eq!(store.get_by_hashes(&[hash]).unwrap(), vec![Some(bal)]);
     }
@@ -414,7 +410,7 @@ mod tests {
         let bal = Bytes::from_static(b"bal");
         let mut stream = store.bal_stream();
 
-        let raw_bal = raw_bal(bal);
+        let raw_bal = RawBal::from(bal);
 
         store.insert(NumHash::new(block_number, hash), raw_bal.clone()).unwrap();
 
@@ -430,8 +426,8 @@ mod tests {
         let mut stream = store.bal_stream();
         let hash0 = B256::random();
         let hash1 = B256::random();
-        let bal0 = raw_bal(Bytes::from_static(b"bal0"));
-        let bal1 = raw_bal(Bytes::from_static(b"bal1"));
+        let bal0 = RawBal::from(Bytes::from_static(b"bal0"));
+        let bal1 = RawBal::from(Bytes::from_static(b"bal1"));
 
         store
             .insert_many(vec![
@@ -455,7 +451,7 @@ mod tests {
         let store = InMemoryBalStore::default();
 
         assert!(store
-            .insert(NumHash::new(1, B256::random()), raw_bal(Bytes::from_static(b"bal")))
+            .insert(NumHash::new(1, B256::random()), RawBal::from(Bytes::from_static(b"bal")))
             .is_ok());
     }
 
@@ -468,7 +464,7 @@ mod tests {
             store
                 .insert(
                     NumHash::new(number, B256::random()),
-                    raw_bal(Bytes::from(vec![number as u8])),
+                    RawBal::from(Bytes::from(vec![number as u8])),
                 )
                 .unwrap();
         }
@@ -489,7 +485,7 @@ mod tests {
         let bal = Bytes::from_static(b"bal");
         let mut stream = clone.bal_stream();
 
-        let raw_bal = raw_bal(bal);
+        let raw_bal = RawBal::from(bal);
 
         store.insert(NumHash::new(block_number, hash), raw_bal.clone()).unwrap();
 

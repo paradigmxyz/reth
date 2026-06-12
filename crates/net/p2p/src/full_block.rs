@@ -1214,10 +1214,6 @@ mod tests {
     const EMPTY_LIST_CODE: u8 = 0xc0;
     use tokio::time::{timeout, Duration};
 
-    fn raw_bal(access_list: Bytes) -> RawBal {
-        RawBal::new(access_list)
-    }
-
     fn sealed_header_with_access_list_hash(access_list: &Bytes) -> SealedHeader {
         let header = Header {
             block_access_list_hash: Some(keccak256(access_list.as_ref())),
@@ -1269,7 +1265,7 @@ mod tests {
         let client = FullBlockClient::test_client(client);
 
         let received = client.get_full_block_with_access_lists(header.hash()).await;
-        let expected_access_list = raw_bal(access_list);
+        let expected_access_list = RawBal::from(access_list);
 
         assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
         assert_eq!(received.data().as_ref(), Some(&expected_access_list));
@@ -1294,7 +1290,7 @@ mod tests {
             )
             .await;
 
-        let expected_access_list = raw_bal(access_list);
+        let expected_access_list = RawBal::from(access_list);
         assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
         assert_eq!(received.data().as_ref(), Some(&expected_access_list));
         assert_eq!(*requirement.lock(), Some(BalRequirement::Mandatory));
@@ -1318,7 +1314,7 @@ mod tests {
                 .await
                 .expect("access list request should complete");
 
-        let expected_access_list = raw_bal(access_list);
+        let expected_access_list = RawBal::from(access_list);
         assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
         assert_eq!(received.data().as_ref(), Some(&expected_access_list));
         assert_eq!(request_count.load(Ordering::SeqCst), 1);
@@ -1793,7 +1789,7 @@ mod tests {
                         .get(&block.block().hash())
                         .cloned()
                         .expect("access list exists");
-                    Some(raw_bal(access_list))
+                    Some(RawBal::from(access_list))
                 })
                 .collect::<Vec<_>>()
         };
@@ -1879,7 +1875,7 @@ mod tests {
                         .get(&block.block().hash())
                         .cloned()
                         .expect("access list exists");
-                    Some(raw_bal(access_list))
+                    Some(RawBal::from(access_list))
                 })
                 .collect::<Vec<_>>()
         };
@@ -1918,7 +1914,7 @@ mod tests {
                         .get(&block.block().hash())
                         .cloned()
                         .expect("access list exists");
-                    Some(raw_bal(access_list))
+                    Some(RawBal::from(access_list))
                 })
                 .collect::<Vec<_>>()
         };
@@ -2012,7 +2008,10 @@ mod tests {
 
         assert_eq!(blocks.len(), 3);
         assert_eq!(blocks[1].block().hash(), second_hash);
-        assert_eq!(range_access_lists(&blocks), vec![Some(raw_bal(first_access_list)), None, None]);
+        assert_eq!(
+            range_access_lists(&blocks),
+            vec![Some(RawBal::from(first_access_list)), None, None]
+        );
         assert_eq!(bad_messages.load(Ordering::SeqCst), 1);
     }
 
