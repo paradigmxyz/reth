@@ -1,6 +1,5 @@
 use super::{HashedCursor, HashedStorageCursor};
 use alloy_primitives::B256;
-use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_errors::db::DatabaseError;
 use std::time::Duration;
 use tracing::trace_span;
@@ -153,19 +152,13 @@ where
     type Value = C::Value;
 
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        let start = Instant::now();
         self.metrics.seek_count += 1;
-        let result = self.cursor.seek(key);
-        self.metrics.total_duration += start.elapsed();
-        result
+        self.cursor.seek(key)
     }
 
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        let start = Instant::now();
         self.metrics.next_count += 1;
-        let result = self.cursor.next();
-        self.metrics.total_duration += start.elapsed();
-        result
+        self.cursor.next()
     }
 
     fn reset(&mut self) {
@@ -178,11 +171,8 @@ where
     C: HashedStorageCursor,
 {
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
-        let start = Instant::now();
         self.metrics.is_storage_empty_count += 1;
-        let result = self.cursor.is_storage_empty();
-        self.metrics.total_duration += start.elapsed();
-        result
+        self.cursor.is_storage_empty()
     }
 
     fn set_hashed_address(&mut self, hashed_address: B256) {
