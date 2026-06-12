@@ -1364,7 +1364,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.ensure_no_queued_prune()?;
 
         // first sort the changeset by address
-        changeset.sort_by_key(|change| change.address);
+        if changeset.len() > 1 {
+            changeset.sort_by_key(|change| change.address);
+        }
 
         let mut count: u64 = 0;
 
@@ -1428,7 +1430,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.ensure_no_queued_prune()?;
 
         // sort by address + storage key
-        changeset.sort_by_key(|change| (change.address, change.key));
+        if changeset.len() > 1 {
+            changeset.sort_by_key(|change| (change.address, change.key));
+        }
 
         let mut count: u64 = 0;
         for change in changeset {
