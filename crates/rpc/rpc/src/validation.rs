@@ -1,10 +1,8 @@
 use alloy_consensus::{
     BlobTransactionValidationError, BlockHeader, EnvKzgSettings, Transaction, TxReceipt,
 };
-use alloy_eips::{
-    eip7685::RequestsOrHash,
-    eip7928::{bal::DecodedBal, compute_block_access_list_hash},
-};
+use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
+use alloy_eips::eip7685::RequestsOrHash;
 use alloy_primitives::map::AddressSet;
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
@@ -178,7 +176,9 @@ where
 
         self.consensus.validate_header_against_parent(block.sealed_header(), &parent_header)?;
         self.validate_gas_limit(registered_gas_limit, &parent_header, block.sealed_header())?;
-        if let Some(decoded_bal) = &decoded_bal {
+
+        // Ensure the submitted block access list does not exceed the block gas limit (EIP-7928)
+        if let Some(decoded_bal) = decoded_bal {
             decoded_bal
                 .as_bal()
                 .validate_gas_limit(block.gas_limit())
@@ -190,55 +190,33 @@ where
 
         let mut request_cache = self.cached_reads(parent_header_hash).await;
 
-        let (output, rebuilt_bal) = {
+        let (output, block_access_list_hash) = {
             let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
             let mut executor = self.evm_config.batch_executor(cached_db);
 
             let result = executor.execute_one(&block)?;
 
-            let rebuilt_bal = if decoded_bal.is_some() {
-                Some(executor.take_bal().ok_or_else(|| {
-                    BlockExecutionError::msg(
-                        "missing rebuilt block access list after BAL execution",
-                    )
-                })?)
-            } else {
-                None
-            };
+            // The executor rebuilds the block access list whenever the block header contains a
+            // BAL hash. Comparing the rebuilt hash against the header post execution also
+            // commits to the submitted access list, because the header's BAL hash is derived
+            // from the submitted bytes.
+            let block_access_list_hash =
+                executor.take_bal().map(|bal| compute_block_access_list_hash(&bal));
 
-            let output = {
-                let mut state = executor.into_state();
-                let mut accessed_blacklisted = None;
-                if !self.disallow.is_empty() {
-                    // Check whether the submission interacted with any blacklisted account by
-                    // scanning the `State`'s cache that records everything read
-                    // from database during execution.
-                    for account in state.cache.accounts.keys() {
-                        if self.disallow.contains(account) {
-                            accessed_blacklisted = Some(*account);
-                        }
+            let mut state = executor.into_state();
+            if !self.disallow.is_empty() {
+                // Check whether the submission interacted with any blacklisted account by
+                // scanning the `State`'s cache that records everything read from database
+                // during execution.
+                for account in state.cache.accounts.keys() {
+                    if self.disallow.contains(account) {
+                        return Err(ValidationApiError::Blacklist(*account))
                     }
                 }
+            }
 
-                if let Some(account) = accessed_blacklisted {
-                    return Err(ValidationApiError::Blacklist(account))
-                }
-
-                BlockExecutionOutput { state: state.take_bundle(), result }
-            };
-
-            (output, rebuilt_bal)
+            (BlockExecutionOutput { state: state.take_bundle(), result }, block_access_list_hash)
         };
-
-        if let Some((decoded_bal, rebuilt_bal)) = decoded_bal.as_ref().zip(rebuilt_bal.as_ref()) &&
-            rebuilt_bal.as_slice() != decoded_bal.as_bal().as_slice()
-        {
-            return Err(ConsensusError::BlockAccessListHashMismatch(
-                GotExpected::new(compute_block_access_list_hash(rebuilt_bal), decoded_bal.hash())
-                    .into(),
-            )
-            .into())
-        }
 
         // update the cached reads
         self.update_cached_reads(parent_header_hash, request_cache).await;
@@ -247,7 +225,7 @@ where
             &block,
             &output,
             None,
-            decoded_bal.as_ref().map(|decoded_bal| decoded_bal.hash()),
+            block_access_list_hash,
         )?;
 
         self.ensure_payment(&block, &output, &message)?;
@@ -770,15 +748,15 @@ impl From<ValidationApiError> for ErrorObject<'static> {
             ValidationApiError::InvalidBlockAccessList(_) |
             ValidationApiError::Blob(_) => invalid_params_rpc_err(error.to_string()),
 
-            ValidationApiError::MissingLatestBlock |
-            ValidationApiError::MissingParentBlock |
-            ValidationApiError::BlockTooOld |
-            ValidationApiError::Provider(_) => internal_rpc_err(error.to_string()),
             ValidationApiError::Consensus(
                 error @ (ConsensusError::BlockAccessListCostMoreThanGasLimit(_) |
                 ConsensusError::BlockAccessListHashMismatch(_)),
             ) => invalid_params_rpc_err(error.to_string()),
-            ValidationApiError::Consensus(_) => internal_rpc_err(error.to_string()),
+            ValidationApiError::MissingLatestBlock |
+            ValidationApiError::MissingParentBlock |
+            ValidationApiError::BlockTooOld |
+            ValidationApiError::Consensus(_) |
+            ValidationApiError::Provider(_) => internal_rpc_err(error.to_string()),
             ValidationApiError::Execution(err) => match err {
                 error @ BlockExecutionError::Validation(_) => {
                     invalid_params_rpc_err(error.to_string())
