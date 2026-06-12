@@ -1,13 +1,13 @@
 //! Helpers for block access lists.
 use alloy_consensus::BlockHeader;
-use alloy_eip7928::{BlockAccessIndex, BlockAccessList};
+use alloy_eip7928::BlockAccessList;
 use alloy_primitives::Bytes;
 use alloy_rpc_types_eth::BlockId;
 use reth_errors::RethError;
 use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm};
 use reth_revm::{database::StateProviderDatabase, State};
 use reth_rpc_eth_types::{
-    cache::db::StateProviderTraitObjWrapper, error::FromEthApiError, EthApiError, StateCacheDb,
+    cache::db::StateProviderTraitObjWrapper, error::FromEthApiError, EthApiError,
 };
 use reth_storage_api::StateProviderFactory;
 
@@ -93,16 +93,4 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
             Ok(self.get_block_access_list(block_id).await?.map(|bal| alloy_rlp::encode(bal).into()))
         }
     }
-}
-
-/// Positions `db` at the state before the transaction at `tx_index` if a BAL is attached.
-///
-/// Returns `true` if the state was positioned with BAL data.
-pub const fn position_before_transaction(db: &mut StateCacheDb, tx_index: u64) -> bool {
-    if !db.has_bal() {
-        return false
-    }
-
-    db.set_bal_index(BlockAccessIndex::from_tx_index(tx_index));
-    true
 }

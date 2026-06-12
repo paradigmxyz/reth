@@ -4,11 +4,12 @@
 use core::fmt;
 use std::sync::Arc;
 
-use super::{bal, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
+use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
 use crate::{
     helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
+use alloy_eip7928::BlockAccessIndex;
 use alloy_eips::eip2930::AccessListResult;
 use alloy_evm::overrides::{apply_block_overrides, apply_state_overrides, OverrideBlockHashes};
 use alloy_network::TransactionBuilder;
@@ -786,9 +787,13 @@ pub trait Call:
                     .map_err(Self::Error::from_eth_err)?;
                 executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
 
-                if !tx_info.index.is_some_and(|tx_index| {
-                    bal::position_before_transaction(executor.evm_mut().db_mut(), tx_index)
-                }) {
+                // position the state at the target transaction, this is a noop if no BAL is
+                // attached
+                executor.evm_mut().db_mut().set_bal_index(BlockAccessIndex::from_tx_index(
+                    tx_info.index.unwrap_or_default(),
+                ));
+
+                if !executor.evm_mut().db_mut().has_bal() {
                     // no BAL available, replay all transactions prior to the targeted transaction
                     for block_tx in block_txs {
                         if block_tx.tx_hash() == tx.tx_hash() {

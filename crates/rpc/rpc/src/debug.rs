@@ -23,11 +23,11 @@ use reth_evm::{block::BlockExecutor, execute::Executor, ConfigureEvm, EvmEnvFor}
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
 };
-use reth_revm::{db::State, witness::ExecutionWitnessRecord};
+use reth_revm::{db::State, state::bal::BlockAccessIndex, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
-    helpers::{bal, EthTransactions, TraceExt},
+    helpers::{EthTransactions, TraceExt},
     FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
@@ -237,21 +237,23 @@ where
 
                 // configure env for the target transaction
                 let (tx, tx_info) = transaction.split();
+                let tx_index = tx_info.index.unwrap_or_default();
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
-                let tx_index = match tx_info.index {
-                    Some(tx_index) if bal::position_before_transaction(&mut db, tx_index) => {
-                        tx_index as usize
-                    }
+                // position the state at the target transaction, this is a noop if no BAL is
+                // attached
+                db.set_bal_index(BlockAccessIndex::from_tx_index(tx_index));
+
+                if !db.has_bal() {
                     // no BAL available, replay all transactions prior to the targeted transaction
-                    _ => eth_api.replay_transactions_until(
+                    eth_api.replay_transactions_until(
                         &mut db,
                         evm_env.clone(),
                         block_txs,
                         *tx.tx_hash(),
-                    )?,
-                };
+                    )?;
+                }
 
                 let tx_env = eth_api.evm_config().tx_env(&tx);
 
@@ -262,7 +264,7 @@ where
                     .get_result(
                         Some(TransactionContext {
                             block_hash: Some(block_hash),
-                            tx_index: Some(tx_index),
+                            tx_index: Some(tx_index as usize),
                             tx_hash: Some(*tx.tx_hash()),
                         }),
                         &tx_env,
@@ -366,8 +368,12 @@ where
                 // 1. apply pre-execution changes
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
+                // position the state at the target transaction, this is a noop if no BAL is
+                // attached
+                db.set_bal_index(BlockAccessIndex::from_tx_index(tx_index as u64));
+
                 // 2. replay the required number of transactions
-                if !bal::position_before_transaction(&mut db, tx_index as u64) {
+                if !db.has_bal() {
                     eth_api.replay_transactions_until(
                         &mut db,
                         evm_env.clone(),
