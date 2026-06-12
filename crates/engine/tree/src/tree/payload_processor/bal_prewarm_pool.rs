@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use alloy_primitives::{Address, StorageKey};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache};
 use reth_provider::{

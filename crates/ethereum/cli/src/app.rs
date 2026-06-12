@@ -76,8 +76,8 @@ where
 
         let components = move |spec: Arc<ChainSpec>| {
             let (evm_config, _) =
-                reth_node_ethereum::node::build_evm_config(spec.clone(), &jit_args, None)
-                    .expect("failed to start revmc JIT backend");
+                reth_node_ethereum::node::build_jit_evm_config(spec.clone(), &jit_args, None)
+                    .expect("failed to build EVM config");
             (evm_config, Arc::new(EthBeaconConsensus::new(spec)))
         };
 
