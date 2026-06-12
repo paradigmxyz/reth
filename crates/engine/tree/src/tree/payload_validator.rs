@@ -73,7 +73,7 @@ use reth_evm::{
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
 use reth_payload_primitives::{
     BuiltPayload, BuiltPayloadExecutedBlock, InvalidPayloadAttributesError, NewPayloadError,
-    PayloadTypes,
+    ExecutionPayloadStats, PayloadTypes,
 };
 use reth_primitives_traits::{
     AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives,
@@ -442,9 +442,11 @@ where
             };
         }
 
+        let input_stats = input.execution_stats();
+
         // If the gas usage is suspiciously high (multiple times higher than parent's gas limit), be
         // cautious and block on pre-execution checks of the block.
-        if input.gas_used() > parent_block.gas_limit() * MAX_EXPECTED_GAS_USAGE_MULTIPLIER {
+        if input_stats.gas_used > parent_block.gas_limit() * MAX_EXPECTED_GAS_USAGE_MULTIPLIER {
             // Call `.get()` to await the pre-execution checks and exit early if they fail.
             if validated_block.get().is_err() {
                 return Err(validated_block
@@ -480,7 +482,7 @@ where
         .map(Arc::new);
 
         if let Some(decoded_bal) = decoded_bal.as_deref() {
-            ensure_ok!(Self::validate_received_bal_gas(decoded_bal, input.gas_limit()));
+            ensure_ok!(Self::validate_received_bal_gas(decoded_bal, input_stats.gas_limit));
         }
 
         let env = ExecutionEnv {
@@ -488,8 +490,8 @@ where
             hash: input.hash(),
             parent_hash: input.parent_hash(),
             parent_state_root: parent_block.state_root(),
-            transaction_count: input.transaction_count(),
-            gas_used: input.gas_used(),
+            transaction_count: input_stats.transaction_count,
+            gas_used: input_stats.gas_used,
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
             decoded_bal,
         };
@@ -1099,7 +1101,7 @@ where
             );
         }
 
-        let transaction_count = input.transaction_count();
+        let transaction_count = env.transaction_count;
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
         executor.evm_mut().db_mut().set_state_hook(
@@ -2346,6 +2348,21 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(payload) => payload.transaction_count(),
             Self::Block(block) => block.transaction_count(),
+        }
+    }
+
+    /// Returns gas and transaction-count metadata for the payload or block.
+    pub fn execution_stats(&self) -> ExecutionPayloadStats
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.execution_stats(),
+            Self::Block(block) => ExecutionPayloadStats::new(
+                block.gas_used(),
+                block.gas_limit(),
+                block.transaction_count(),
+            ),
         }
     }
 

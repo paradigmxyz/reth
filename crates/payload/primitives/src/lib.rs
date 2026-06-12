@@ -30,7 +30,7 @@ pub use traits::{
 };
 
 mod payload;
-pub use payload::{ExecutionPayload, PayloadOrAttributes};
+pub use payload::{ExecutionPayload, ExecutionPayloadStats, PayloadOrAttributes};
 
 /// Core trait that defines the associated types for working with execution payloads.
 pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static {

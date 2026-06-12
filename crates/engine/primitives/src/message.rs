@@ -16,7 +16,7 @@ use core::{
 use futures::{future::Either, FutureExt, TryFutureExt};
 use reth_errors::RethResult;
 use reth_payload_builder_primitives::PayloadBuilderError;
-use reth_payload_primitives::PayloadTypes;
+use reth_payload_primitives::{ExecutionPayloadStats, PayloadTypes};
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
@@ -226,6 +226,15 @@ impl ExecutionPayload for BigBlockData<ExecutionData> {
 
     fn transaction_count(&self) -> usize {
         self.env_switches.iter().map(|data| data.transaction_count()).sum()
+    }
+
+    fn execution_stats(&self) -> ExecutionPayloadStats {
+        self.env_switches.iter().fold(ExecutionPayloadStats::new(0, 0, 0), |mut stats, data| {
+            stats.gas_used += data.gas_used();
+            stats.gas_limit += data.gas_limit();
+            stats.transaction_count += data.transaction_count();
+            stats
+        })
     }
 
     fn slot_number(&self) -> Option<u64> {

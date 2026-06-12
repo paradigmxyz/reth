@@ -8,6 +8,24 @@ use alloy_rpc_types_engine::ExecutionData;
 use core::fmt::Debug;
 use serde::{de::DeserializeOwned, Serialize};
 
+/// Gas and transaction-count metadata derived from an execution payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExecutionPayloadStats {
+    /// Total gas consumed by all transactions in the payload.
+    pub gas_used: u64,
+    /// Total gas limit for the payload.
+    pub gas_limit: u64,
+    /// Number of transactions in the payload.
+    pub transaction_count: usize,
+}
+
+impl ExecutionPayloadStats {
+    /// Create new execution payload stats.
+    pub const fn new(gas_used: u64, gas_limit: u64, transaction_count: usize) -> Self {
+        Self { gas_used, gas_limit, transaction_count }
+    }
+}
+
 /// Represents the core data structure of an execution payload.
 ///
 /// Contains all necessary information to execute and validate a block, including
@@ -61,6 +79,12 @@ pub trait ExecutionPayload:
 
     /// Returns the number of transactions in the payload.
     fn transaction_count(&self) -> usize;
+
+    /// Returns gas and transaction-count metadata for this payload.
+    fn execution_stats(&self) -> ExecutionPayloadStats {
+        ExecutionPayloadStats::new(self.gas_used(), self.gas_limit(), self.transaction_count())
+    }
+
     /// Returns the slot number included in this payload.
     ///
     /// Returns `None` for pre-Amsterdam blocks.
