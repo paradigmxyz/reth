@@ -439,7 +439,7 @@ revm-state = { version = "41.0.0", default-features = false }
 revm-primitives = { version = "41.0.0", default-features = false }
 revm-interpreter = { version = "41.0.0", default-features = false }
 revm-database-interface = { version = "41.0.0", default-features = false }
-revmc = { git = "https://github.com/paradigmxyz/revmc", branch = "main", default-features = false, features = ["llvm-prefer-static"] }
+revmc = { git = "https://github.com/Rimeeeeee/revmc", branch = "eip-8268", default-features = false, features = ["llvm-prefer-static"] }
 revm-inspectors = "0.41.0"
 
 # eth
@@ -449,8 +449,8 @@ alloy-sol-types = { version = "1.6.0", default-features = false }
 
 alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-eip7928 = { version = "0.4.1", default-features = false, features = ["rlp"] }
-alloy-evm = { version = "0.36.0", default-features = false }
+alloy-eip7928 = { version = "0.4.3", default-features = false, features = ["rlp"] }
+alloy-evm = { version = "0.37.0", default-features = false }
 alloy-rlp = { version = "0.3.13", default-features = false, features = ["core-net"] }
 alloy-trie = { version = "0.9.4", default-features = false }
 

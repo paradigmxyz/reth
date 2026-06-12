@@ -263,8 +263,7 @@ dependencies = [
 [[package]]
 name = "alloy-eip7928"
 version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55c4584eaf235a861172e30d0d8adfa95957186f59b93f997851df90b32da7ba"
+source = "git+https://github.com/Rimeeeeee/eips?branch=eip-8268#259394784a92ed2718df70e172aeb47a10728eda"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -303,8 +302,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70634e39510c13a4f69f51a474d98030ecb1dcff54b909d2a9a020ee05e44867"
+source = "git+https://github.com/Rimeeeeee/evm?branch=eip-8268#6822cdfa2d43650b0e088a1ba93d0f5e73316bf1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -1015,7 +1013,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1026,7 +1024,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2795,16 +2793,6 @@ dependencies = [
 
 [[package]]
 name = "darling"
-version = "0.21.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cdf337090841a411e2a7f3deb9187445851f91b309c0c0a29e05f74a00a48c0"
-dependencies = [
- "darling_core 0.21.3",
- "darling_macro 0.21.3",
-]
-
-[[package]]
-name = "darling"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "25ae13da2f202d56bd7f91c25fba009e7717a1e4a1cc98a76d844b65ae912e9d"
@@ -2818,20 +2806,6 @@ name = "darling_core"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d00b9596d185e565c2207a0b01f8bd1a135483d02d9b7b0a54b11da8d53412e"
-dependencies = [
- "fnv",
- "ident_case",
- "proc-macro2",
- "quote",
- "strsim",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "darling_core"
-version = "0.21.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1247195ecd7e3c85f83c8d2a366e4210d588e802133e1e355180a9870b517ea4"
 dependencies = [
  "fnv",
  "ident_case",
@@ -2862,17 +2836,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc34b93ccb385b40dc71c6fceac4b2ad23662c7eeb248cf10d529b7e055b6ead"
 dependencies = [
  "darling_core 0.20.11",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "darling_macro"
-version = "0.21.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d38308df82d1080de0afee5d069fa14b0326a88c14f15c5ccda35b4a6c414c81"
-dependencies = [
- "darling_core 0.21.3",
  "quote",
  "syn 2.0.117",
 ]
@@ -2963,7 +2926,6 @@ version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
 dependencies = [
- "powerfmt",
  "serde_core",
 ]
 
@@ -3413,7 +3375,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4210,8 +4172,8 @@ dependencies = [
  "libc",
  "log",
  "rustversion",
- "windows-link 0.2.1",
- "windows-result 0.4.1",
+ "windows-link",
+ "windows-result",
 ]
 
 [[package]]
@@ -4780,7 +4742,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core",
 ]
 
 [[package]]
@@ -5161,7 +5123,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6225,7 +6187,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6658,9 +6620,9 @@ checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "pastey"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5a797f0e07bdf071d15742978fc3128ec6c22891c31a3a931513263904c982a"
+checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
 
 [[package]]
 name = "pbkdf2"
@@ -10721,18 +10683,17 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "41.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d51c254839fb36357d0b02d02e46ba57e683d7b017e2da33b47ae74685a9e59"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8268#5697dcfd9f6183a970820e83bbd6993b9f85fd94"
 dependencies = [
  "revm-bytecode",
  "revm-context",
  "revm-context-interface",
  "revm-database",
  "revm-database-interface",
- "revm-handler 20.0.3 (git+https://github.com/Rimeeeeee/revm?branch=eip-8268)",
- "revm-inspector 21.0.3 (git+https://github.com/Rimeeeeee/revm?branch=eip-8268)",
+ "revm-handler 41.0.0 (git+https://github.com/Rimeeeeee/revm?branch=eip-8268)",
+ "revm-inspector 41.0.0 (git+https://github.com/Rimeeeeee/revm?branch=eip-8268)",
  "revm-interpreter",
- "revm-precompile 36.0.3 (git+https://github.com/Rimeeeeee/revm?branch=eip-8268)",
+ "revm-precompile 41.0.0 (git+https://github.com/Rimeeeeee/revm?branch=eip-8268)",
  "revm-primitives",
  "revm-state",
 ]
@@ -10740,8 +10701,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "41.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e33493cf6d996e9242db4f2002caef48ec9aa8c4f3fff3b18aed10ef3942eec7"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8268#5697dcfd9f6183a970820e83bbd6993b9f85fd94"
 dependencies = [
  "bitvec",
  "paste",
@@ -10753,8 +10713,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "41.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86e48fc736d9542c082ea5305be44b6a14b53a615f0147ad57f62189fd813068"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8268#5697dcfd9f6183a970820e83bbd6993b9f85fd94"
 dependencies = [
  "bitvec",
  "cfg-if",
@@ -10770,8 +10729,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "41.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac68282a454318246817486835a446519291dd0a8167d09de14c7e96f2147696"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8268#5697dcfd9f6183a970820e83bbd6993b9f85fd94"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10786,8 +10744,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "41.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d761681a43e48408ea23f7f66ff56ff7b6128cadb8f9135d1b94787d0c0fc6b4"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8268#5697dcfd9f6183a970820e83bbd6993b9f85fd94"
 dependencies = [
  "alloy-eips",
  "derive_more",
@@ -10802,8 +10759,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "41.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b96e37d62fa60b45987b408486c84ebef4af4e7ddf1b3b96b4955a7263fd4e92"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8268#5697dcfd9f6183a970820e83bbd6993b9f85fd94"
 dependencies = [
  "auto_impl",
  "either",
@@ -10826,7 +10782,7 @@ dependencies = [
  "revm-context-interface",
  "revm-database-interface",
  "revm-interpreter",
- "revm-precompile 36.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "revm-precompile 41.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "revm-primitives",
  "revm-state",
  "serde",
@@ -10834,8 +10790,8 @@ dependencies = [
 
 [[package]]
 name = "revm-handler"
-version = "20.0.3"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8268#a38a285ae9ccde103759052b6852fd0e164b08ee"
+version = "41.0.0"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8268#5697dcfd9f6183a970820e83bbd6993b9f85fd94"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -10844,7 +10800,7 @@ dependencies = [
  "revm-context-interface",
  "revm-database-interface",
  "revm-interpreter",
- "revm-precompile 36.0.3 (git+https://github.com/Rimeeeeee/revm?branch=eip-8268)",
+ "revm-precompile 41.0.0 (git+https://github.com/Rimeeeeee/revm?branch=eip-8268)",
  "revm-primitives",
  "revm-state",
  "serde",
@@ -10860,7 +10816,7 @@ dependencies = [
  "either",
  "revm-context",
  "revm-database-interface",
- "revm-handler 20.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "revm-handler 41.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "revm-interpreter",
  "revm-primitives",
  "revm-state",
@@ -10870,14 +10826,14 @@ dependencies = [
 
 [[package]]
 name = "revm-inspector"
-version = "21.0.3"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8268#a38a285ae9ccde103759052b6852fd0e164b08ee"
+version = "41.0.0"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8268#5697dcfd9f6183a970820e83bbd6993b9f85fd94"
 dependencies = [
  "auto_impl",
  "either",
  "revm-context",
  "revm-database-interface",
- "revm-handler 20.0.3 (git+https://github.com/Rimeeeeee/revm?branch=eip-8268)",
+ "revm-handler 41.0.0 (git+https://github.com/Rimeeeeee/revm?branch=eip-8268)",
  "revm-interpreter",
  "revm-primitives",
  "revm-state",
@@ -10908,8 +10864,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "41.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa5547f653f9e4c47b4f9a9075a0b7c0faea5fa29b7873f392733a943837825d"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8268#5697dcfd9f6183a970820e83bbd6993b9f85fd94"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -10944,8 +10899,8 @@ dependencies = [
 
 [[package]]
 name = "revm-precompile"
-version = "36.0.3"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8268#a38a285ae9ccde103759052b6852fd0e164b08ee"
+version = "41.0.0"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8268#5697dcfd9f6183a970820e83bbd6993b9f85fd94"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -10970,8 +10925,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "41.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66f39151a31afe93d97f7ac894dd9dcc989368d5ccba19ce079bfc1d73b77452"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8268#5697dcfd9f6183a970820e83bbd6993b9f85fd94"
 dependencies = [
  "alloy-primitives",
  "once_cell",
@@ -10981,11 +10935,10 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "41.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73ef2fffc28acc41e8ef7525f2b1d16288a10f80579a1b33e7e62abc9892314a"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8268#5697dcfd9f6183a970820e83bbd6993b9f85fd94"
 dependencies = [
  "alloy-eip7928 0.4.3",
- "bitflags 2.11.1",
+ "bitflags",
  "nonmax",
  "revm-bytecode",
  "revm-primitives",
@@ -10995,12 +10948,12 @@ dependencies = [
 [[package]]
 name = "revmc"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#e86ab245f60e37396e7bbb66e44c877e47d58aea"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#4675ee0f4f92d009ed7aa7c0de6b79b107ac17ba"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
- "revm-handler 20.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "revm-inspector 21.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "revm-handler 41.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "revm-inspector 41.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "revm-interpreter",
  "revm-primitives",
  "revmc-backend",
@@ -11015,7 +10968,7 @@ dependencies = [
 [[package]]
 name = "revmc-backend"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#e86ab245f60e37396e7bbb66e44c877e47d58aea"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#4675ee0f4f92d009ed7aa7c0de6b79b107ac17ba"
 dependencies = [
  "eyre",
  "ruint",
@@ -11024,12 +10977,12 @@ dependencies = [
 [[package]]
 name = "revmc-build"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#e86ab245f60e37396e7bbb66e44c877e47d58aea"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#4675ee0f4f92d009ed7aa7c0de6b79b107ac17ba"
 
 [[package]]
 name = "revmc-builtins"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#e86ab245f60e37396e7bbb66e44c877e47d58aea"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#4675ee0f4f92d009ed7aa7c0de6b79b107ac17ba"
 dependencies = [
  "paste",
  "revm-bytecode",
@@ -11044,7 +10997,7 @@ dependencies = [
 [[package]]
 name = "revmc-codegen"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#e86ab245f60e37396e7bbb66e44c877e47d58aea"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#4675ee0f4f92d009ed7aa7c0de6b79b107ac17ba"
 dependencies = [
  "alloy-primitives",
  "bitflags",
@@ -11057,8 +11010,8 @@ dependencies = [
  "revm-context",
  "revm-context-interface",
  "revm-database-interface",
- "revm-handler 20.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "revm-inspector 21.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "revm-handler 41.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "revm-inspector 41.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "revm-interpreter",
  "revm-primitives",
  "revm-state",
@@ -11075,12 +11028,12 @@ dependencies = [
 [[package]]
 name = "revmc-context"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#e86ab245f60e37396e7bbb66e44c877e47d58aea"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#4675ee0f4f92d009ed7aa7c0de6b79b107ac17ba"
 dependencies = [
  "revm-context",
  "revm-context-interface",
- "revm-handler 20.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "revm-inspector 21.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "revm-handler 41.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "revm-inspector 41.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "revm-interpreter",
  "revm-primitives",
  "revm-state",
@@ -11090,7 +11043,7 @@ dependencies = [
 [[package]]
 name = "revmc-llvm"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#e86ab245f60e37396e7bbb66e44c877e47d58aea"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#4675ee0f4f92d009ed7aa7c0de6b79b107ac17ba"
 dependencies = [
  "alloy-primitives",
  "cc",
@@ -11103,7 +11056,7 @@ dependencies = [
 [[package]]
 name = "revmc-runtime"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#e86ab245f60e37396e7bbb66e44c877e47d58aea"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#4675ee0f4f92d009ed7aa7c0de6b79b107ac17ba"
 dependencies = [
  "alloy-evm",
  "alloy-primitives",
@@ -11121,8 +11074,8 @@ dependencies = [
  "revm-context-interface",
  "revm-database",
  "revm-database-interface",
- "revm-handler 20.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "revm-inspector 21.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "revm-handler 41.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "revm-inspector 41.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "revm-interpreter",
  "revm-primitives",
  "revm-state",
@@ -11342,7 +11295,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -11422,7 +11375,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 1.0.7",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -12038,7 +11991,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -12286,7 +12239,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -12485,12 +12438,11 @@ dependencies = [
 
 [[package]]
 name = "time"
-version = "0.3.47"
+version = "0.3.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "743bd48c283afc0388f9b8827b976905fb217ad9e647fae3a379a9283c4def2c"
+checksum = "fc1aa89044e7786ffb2ec017acb22cb7de5b0be46d0f21aea2b224b8561e5db2"
 dependencies = [
  "deranged",
- "itoa",
  "libc",
  "num-conv",
  "num_threads",
@@ -12502,15 +12454,15 @@ dependencies = [
 
 [[package]]
 name = "time-core"
-version = "0.1.8"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7694e1cfe791f8d31026952abf09c69ca6f6fa4e1a1229e18988f06a04a12dca"
+checksum = "9e1c906769ad99c88eaa54e728060edef082f8e358ff32030cb7c7d315e81109"
 
 [[package]]
 name = "time-macros"
-version = "0.2.27"
+version = "0.2.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e70e4c5a0e0a8a4823ad65dfe1a6930e4f4d756dcd9dd7939022b5e8c501215"
+checksum = "9d3bfe86347f0cc659f586f01e26303ccd32418f26f30c7b0309b3ca3a07d695"
 dependencies = [
  "num-conv",
  "time-core",
@@ -13557,7 +13509,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -13568,9 +13520,9 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "wincode"
-version = "0.5.4"
+version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37095eb18dd6254c66217edc61a29d83d51f8818de8a2ffe88e4584ad73fb5f9"
+checksum = "66d967db7705dc29120bb6e8ce5b5a2e27734ed5976d1c904e95bd238d1c3c5a"
 dependencies = [
  "pastey",
  "proc-macro2",
@@ -13581,11 +13533,11 @@ dependencies = [
 
 [[package]]
 name = "wincode-derive"
-version = "0.4.5"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e262d55d1261f31e2cfe49cc6385a421d14d99faa0526bbe3cc1bda0d3005c62"
+checksum = "15ab90b719560d0fda79c74550ad1c948d17b118765942838055ebaf34d67071"
 dependencies = [
- "darling 0.21.3",
+ "darling 0.23.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
