@@ -2,12 +2,14 @@
 //! methods.
 
 use core::fmt;
+use std::sync::Arc;
 
 use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
 use crate::{
     helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
+use alloy_eip7928::BlockAccessIndex;
 use alloy_eips::eip2930::AccessListResult;
 use alloy_evm::overrides::{apply_block_overrides, apply_state_overrides, OverrideBlockHashes};
 use alloy_network::TransactionBuilder;
@@ -663,6 +665,37 @@ pub trait Call:
         })
     }
 
+    /// Executes the closure with state at `at`, attaching the cached block access list of
+    /// `bal_block` if one is available.
+    ///
+    /// `bal_block` should only be `Some` for blocks whose header commits to a BAL
+    /// (`block_access_list_hash` is present).
+    fn spawn_with_state_at_block_and_bal<F, R>(
+        &self,
+        at: impl Into<BlockId>,
+        bal_block: Option<B256>,
+        f: F,
+    ) -> impl Future<Output = Result<R, Self::Error>> + Send
+    where
+        F: FnOnce(Self, StateCacheDb) -> Result<R, Self::Error> + Send + 'static,
+        R: Send + 'static,
+    {
+        let at = at.into();
+        async move {
+            let cached_bal = match bal_block {
+                Some(block_hash) => self.cache().get_bal(block_hash).await?,
+                None => None,
+            };
+            self.spawn_with_state_at_block(at, move |this, mut db| {
+                if let Some(bal) = cached_bal {
+                    db.set_bal(Some(Arc::new(bal.as_bal().clone())));
+                }
+                f(this, db)
+            })
+            .await
+        }
+    }
+
     /// Prepares the state and env for the given [`RpcTxReq`] at the given [`BlockId`] and
     /// executes the closure on a new task returning the result of the closure.
     ///
@@ -743,8 +776,9 @@ pub trait Call:
             // we need to get the state of the parent block because we're essentially replaying the
             // block the transaction is included in
             let parent_block = block.parent_hash();
+            let bal_block = block.header().block_access_list_hash().is_some().then(|| block.hash());
 
-            self.spawn_with_state_at_block(parent_block, move |this, mut db| {
+            self.spawn_with_state_at_block_and_bal(parent_block, bal_block, move |this, mut db| {
                 let block_txs = block.transactions_recovered();
 
                 let mut executor = RpcNodeCore::evm_config(&this)
@@ -753,12 +787,22 @@ pub trait Call:
                     .map_err(Self::Error::from_eth_err)?;
                 executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
 
-                // replay all transactions prior to the targeted transaction
-                for block_tx in block_txs {
-                    if block_tx.tx_hash() == tx.tx_hash() {
-                        break;
+                // position the state at the target transaction, this is a noop if no BAL is
+                // attached
+                executor.evm_mut().db_mut().set_bal_index(BlockAccessIndex::from_tx_index(
+                    tx_info.index.unwrap_or_default(),
+                ));
+
+                if !executor.evm_mut().db_mut().has_bal() {
+                    // no BAL available, replay all transactions prior to the targeted transaction
+                    for block_tx in block_txs {
+                        if block_tx.tx_hash() == tx.tx_hash() {
+                            break;
+                        }
+                        executor
+                            .execute_transaction(block_tx)
+                            .map_err(Self::Error::from_eth_err)?;
                     }
-                    executor.execute_transaction(block_tx).map_err(Self::Error::from_eth_err)?;
                 }
 
                 let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);

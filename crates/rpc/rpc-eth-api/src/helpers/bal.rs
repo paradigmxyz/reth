@@ -1,4 +1,4 @@
-//! Helpers for `eth_blockAccessList` RPC method.
+//! Helpers for block access lists.
 use alloy_consensus::BlockHeader;
 use alloy_eip7928::BlockAccessList;
 use alloy_primitives::Bytes;
@@ -55,7 +55,8 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                 executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
                 executor.evm_mut().db_mut().bump_bal_index();
 
-                // replay all transactions prior to the targeted transaction
+                // Advance the BAL index after each transaction so writes are recorded at the
+                // matching block access index.
                 for block_tx in block_txs {
                     executor.execute_transaction(block_tx).map_err(Self::Error::from_eth_err)?;
                     executor.evm_mut().db_mut().bump_bal_index();

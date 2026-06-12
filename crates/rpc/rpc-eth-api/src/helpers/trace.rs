@@ -3,6 +3,7 @@
 use super::{Call, LoadBlock, LoadState, LoadTransaction};
 use crate::{FromEthApiError, FromEvmError};
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
+use alloy_eip7928::BlockAccessIndex;
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use futures::Future;
@@ -107,8 +108,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
 
     /// Retrieves the transaction if it exists and returns its trace.
     ///
-    /// Before the transaction is traced, all previous transaction in the block are applied to the
-    /// state by executing them first.
+    /// Before the transaction is traced, the database is positioned at the state before the target
+    /// transaction.
     /// The callback `f` is invoked with the [`ResultAndState`] after the transaction was executed
     /// and the database that points to the beginning of the transaction.
     ///
@@ -137,8 +138,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
 
     /// Retrieves the transaction if it exists and returns its trace.
     ///
-    /// Before the transaction is traced, all previous transaction in the block are applied to the
-    /// state by executing them first.
+    /// Before the transaction is traced, the database is positioned at the state before the target
+    /// transaction.
     /// The callback `f` is invoked with the [`ResultAndState`] after the transaction was executed
     /// and the database that points to the beginning of the transaction.
     ///
@@ -175,14 +176,28 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             // we need to get the state of the parent block because we're essentially replaying the
             // block the transaction is included in
             let parent_block = block.parent_hash();
+            let bal_block = block.header().block_access_list_hash().is_some().then(|| block.hash());
 
-            self.spawn_with_state_at_block(parent_block, move |this, mut db| {
+            self.spawn_with_state_at_block_and_bal(parent_block, bal_block, move |this, mut db| {
                 let block_txs = block.transactions_recovered();
 
                 this.apply_pre_execution_changes(&block, &mut db)?;
 
-                // replay all transactions prior to the targeted transaction
-                this.replay_transactions_until(&mut db, evm_env.clone(), block_txs, *tx.tx_hash())?;
+                // position the state at the target transaction, this is a noop if no BAL is
+                // attached
+                db.set_bal_index(BlockAccessIndex::from_tx_index(
+                    tx_info.index.unwrap_or_default(),
+                ));
+
+                if !db.has_bal() {
+                    // no BAL available, replay all transactions prior to the targeted transaction
+                    this.replay_transactions_until(
+                        &mut db,
+                        evm_env.clone(),
+                        block_txs,
+                        *tx.tx_hash(),
+                    )?;
+                }
 
                 let tx_env = this.evm_config().tx_env(tx);
                 let res = this.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
