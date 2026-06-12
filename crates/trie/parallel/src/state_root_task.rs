@@ -2,27 +2,17 @@
 
 use crate::root::ParallelStateRootError;
 use alloy_eip7928::BlockAccessList;
-#[cfg(any())]
-use alloy_primitives::keccak256;
 use alloy_primitives::B256;
-#[cfg(any())]
 use derive_more::derive::Deref;
-#[cfg(any())]
-use reth_trie::HashedStorage;
 use reth_trie::{updates::TrieUpdates, HashedPostState, MultiProofTargetsV2};
 use std::sync::Arc;
-#[cfg(any())]
-use tracing::trace;
 
 /// Messages used internally by the multi proof task.
 #[derive(Debug)]
 pub enum StateRootMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargetsV2),
-    /// New state update from transaction execution with its source.
-    #[cfg(any())]
-    StateUpdate(()),
-    /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
+    /// Pre-hashed state update that can be applied directly without proofs.
     HashedStateUpdate(HashedPostState),
     /// Block Access List (EIP-7928; BAL) containing complete state changes for the block.
     ///
@@ -98,16 +88,11 @@ impl StateRootHandle {
         &self.updates_tx
     }
 
-    /// Returns a state hook that streams state updates to the background state root task.
+    /// Returns a sender that streams hashed state updates to the background state root task.
     ///
-    /// The hook must be dropped after execution completes to signal the end of state updates.
-    #[cfg(any())]
-    pub fn state_hook(&self) -> impl FnMut(&()) + use<> {
-        let sender = StateHookSender::new(self.updates_tx.clone());
-
-        move |state: &()| {
-            let _ = sender.send(StateRootMessage::StateUpdate(*state));
-        }
+    /// The sender must be dropped after execution completes to signal the end of state updates.
+    pub fn state_hook_sender(&self) -> StateHookSender {
+        StateHookSender::new(self.updates_tx.clone())
     }
 
     /// Awaits the state root computation result.
@@ -150,18 +135,22 @@ impl StateRootHandle {
 /// This should trigger once the block has been executed (after) the last state update has been
 /// sent. This triggers the exit condition of the multi proof task.
 #[derive(Deref, Debug)]
-#[cfg(any())]
 pub struct StateHookSender(crossbeam_channel::Sender<StateRootMessage>);
 
-#[cfg(any())]
 impl StateHookSender {
     /// Creates a new [`StateHookSender`] wrapping the given channel sender.
     pub const fn new(inner: crossbeam_channel::Sender<StateRootMessage>) -> Self {
         Self(inner)
     }
+
+    /// Sends a hashed state update to the background state root task.
+    pub fn send_hashed_state(&self, state: HashedPostState) {
+        if !state.is_empty() {
+            let _ = self.0.send(StateRootMessage::HashedStateUpdate(state));
+        }
+    }
 }
 
-#[cfg(any())]
 impl Drop for StateHookSender {
     fn drop(&mut self) {
         // Send completion signal when the sender is dropped
@@ -169,8 +158,34 @@ impl Drop for StateHookSender {
     }
 }
 
-/// Converts a parked transaction state update to [`HashedPostState`].
-#[cfg(any())]
-pub fn evm_state_to_hashed_post_state(_update: ()) -> HashedPostState {
-    HashedPostState::default()
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::U256;
+    use reth_primitives_traits::Account;
+
+    #[test]
+    fn state_hook_sender_streams_hashed_updates_and_finish() {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let sender = StateHookSender::new(tx);
+
+        sender.send_hashed_state(HashedPostState::default());
+        assert!(rx.is_empty());
+
+        let hashed_address = B256::repeat_byte(0x01);
+        let account = Account { balance: U256::from(1), nonce: 1, bytecode_hash: None };
+        let hashed_state =
+            HashedPostState::default().with_accounts([(hashed_address, Some(account))]);
+
+        sender.send_hashed_state(hashed_state.clone());
+        drop(sender);
+
+        let StateRootMessage::HashedStateUpdate(update) = rx.recv().unwrap() else {
+            panic!("expected hashed state update");
+        };
+        assert_eq!(update, hashed_state);
+
+        assert!(matches!(rx.recv().unwrap(), StateRootMessage::FinishedStateUpdates));
+        assert!(rx.try_recv().is_err());
+    }
 }

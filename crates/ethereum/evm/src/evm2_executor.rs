@@ -37,7 +37,7 @@ use reth_storage_api::{
 };
 #[cfg(feature = "std")]
 use reth_storage_errors::provider::ProviderError;
-use reth_trie_common::KeccakKeyHasher;
+use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 
 const DEPOSIT_BYTES_SIZE: usize = 48 + 32 + 8 + 96 + 8;
 
@@ -276,7 +276,37 @@ pub(crate) fn execute_evm2_block_with_context_precompiles_and_hook_envelopes<DB>
     transactions: impl IntoIterator<Item = RecoveredTxEnvelope>,
     context: Evm2BlockExecutionContext<'_>,
     precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
+    on_transaction_executed: impl FnMut(usize),
+) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<DB::Error>>
+where
+    DB: Database + 'static,
+{
+    execute_evm2_block_with_context_precompiles_and_hooks_envelopes(
+        spec_id,
+        block_env,
+        database,
+        block_number,
+        transactions,
+        context,
+        precompiles,
+        on_transaction_executed,
+        |_| {},
+    )
+}
+
+/// Executes a block worth of evm2-native recovered transactions with additional block-level
+/// context, invoking `on_transaction_executed` after each transaction is committed to the block
+/// state and `on_hashed_state_update` after each committed state update.
+pub(crate) fn execute_evm2_block_with_context_precompiles_and_hooks_envelopes<DB>(
+    spec_id: SpecId,
+    block_env: BlockEnv,
+    database: DB,
+    block_number: u64,
+    transactions: impl IntoIterator<Item = RecoveredTxEnvelope>,
+    context: Evm2BlockExecutionContext<'_>,
+    precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
     mut on_transaction_executed: impl FnMut(usize),
+    mut on_hashed_state_update: impl FnMut(HashedPostState),
 ) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<DB::Error>>
 where
     DB: Database + 'static,
@@ -298,6 +328,7 @@ where
         &mut evm,
         &mut block_state,
         &mut hashed_state,
+        &mut on_hashed_state_update,
         spec_id,
         block_number,
         context,
@@ -307,8 +338,13 @@ where
     for (index, transaction) in transactions.into_iter().enumerate() {
         let tx_type =
             TxType::try_from(transaction.ty()).expect("evm2 transaction envelope has valid type");
-        let outcome =
-            execute_transaction::<DB>(&mut evm, &mut block_state, &mut hashed_state, &transaction)?;
+        let outcome = execute_transaction::<DB>(
+            &mut evm,
+            &mut block_state,
+            &mut hashed_state,
+            &mut on_hashed_state_update,
+            &transaction,
+        )?;
         results.push((tx_type, outcome));
         on_transaction_executed(index + 1);
     }
@@ -318,6 +354,7 @@ where
         &mut evm,
         &mut block_state,
         &mut hashed_state,
+        &mut on_hashed_state_update,
         spec_id,
         context,
         &mut requests,
@@ -327,6 +364,7 @@ where
         &mut evm,
         &mut block_state,
         &mut hashed_state,
+        &mut on_hashed_state_update,
         spec_id,
         block_number,
         block_beneficiary,
@@ -502,6 +540,37 @@ where
     )
 }
 
+/// Executes a block worth of evm2-native recovered transactions with additional block-level context
+/// and an evm2 database adapter backed by a Reth state provider, using the provided precompile
+/// provider and invoking hooks after transactions and state updates are committed.
+#[cfg(feature = "std")]
+pub fn execute_evm2_block_with_state_provider_context_precompiles_and_hooks_envelopes<DB>(
+    spec_id: SpecId,
+    block_env: BlockEnv,
+    state_provider: DB,
+    block_number: u64,
+    transactions: impl IntoIterator<Item = RecoveredTxEnvelope>,
+    context: Evm2BlockExecutionContext<'_>,
+    precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
+    on_transaction_executed: impl FnMut(usize),
+    on_hashed_state_update: impl FnMut(HashedPostState),
+) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<ProviderError>>
+where
+    DB: StateProvider + Send + 'static,
+{
+    execute_evm2_block_with_context_precompiles_and_hooks_envelopes(
+        spec_id,
+        block_env,
+        Evm2StateProviderDatabase::new(state_provider),
+        block_number,
+        transactions,
+        context,
+        precompiles,
+        on_transaction_executed,
+        on_hashed_state_update,
+    )
+}
+
 /// Executes a block worth of recovered Ethereum transactions with additional block-level context
 /// and an evm2 database adapter backed by a borrowed Reth state provider.
 #[cfg(feature = "std")]
@@ -541,10 +610,21 @@ where
     evm.database_as_mut::<Db<DB>>().and_then(Db::take_result)
 }
 
+fn flush_hashed_state_update(
+    hashed_state: &mut HashedPostStateSink<KeccakKeyHasher>,
+    on_hashed_state_update: &mut impl FnMut(HashedPostState),
+) {
+    let update = hashed_state.take_hashed_post_state();
+    if !update.is_empty() {
+        on_hashed_state_update(update);
+    }
+}
+
 fn execute_transaction<DB>(
     evm: &mut Evm<BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     hashed_state: &mut HashedPostStateSink<KeccakKeyHasher>,
+    on_hashed_state_update: &mut impl FnMut(HashedPostState),
     transaction: &RecoveredTxEnvelope,
 ) -> Result<TxResult, Evm2ExecutionError<DB::Error>>
 where
@@ -562,8 +642,14 @@ where
                 let _ = executed.discard();
                 TransactionResolution::DatabaseError(code)
             } else {
-                let mut sink = Tee::new(block_state, hashed_state);
-                let Ok(outcome) = executed.commit_with(&mut sink);
+                let mut streamed_hashed_state = HashedPostStateSink::<KeccakKeyHasher>::default();
+                let outcome = {
+                    let mut block_sink = Tee::new(block_state, hashed_state);
+                    let mut sink = Tee::new(&mut block_sink, &mut streamed_hashed_state);
+                    let Ok(outcome) = executed.commit_with(&mut sink);
+                    outcome
+                };
+                flush_hashed_state_update(&mut streamed_hashed_state, on_hashed_state_update);
                 TransactionResolution::Outcome(outcome)
             }
         }
@@ -593,6 +679,7 @@ fn pre_execution_system_call_state_changes<DB>(
     evm: &mut Evm<BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     hashed_state: &mut HashedPostStateSink<KeccakKeyHasher>,
+    on_hashed_state_update: &mut impl FnMut(HashedPostState),
     spec_id: SpecId,
     block_number: u64,
     context: Evm2BlockExecutionContext<'_>,
@@ -609,6 +696,7 @@ where
             evm,
             block_state,
             hashed_state,
+            on_hashed_state_update,
             HISTORY_STORAGE_ADDRESS,
             system_calls.parent_hash.0.into(),
         )?;
@@ -630,6 +718,7 @@ where
                 evm,
                 block_state,
                 hashed_state,
+                on_hashed_state_update,
                 BEACON_ROOTS_ADDRESS,
                 parent_beacon_block_root.0.into(),
             )?;
@@ -695,6 +784,7 @@ fn post_execution_system_call_state_changes<DB>(
     evm: &mut Evm<BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     hashed_state: &mut HashedPostStateSink<KeccakKeyHasher>,
+    on_hashed_state_update: &mut impl FnMut(HashedPostState),
     spec_id: SpecId,
     context: Evm2BlockExecutionContext<'_>,
     requests: &mut Requests,
@@ -710,6 +800,7 @@ where
         evm,
         block_state,
         hashed_state,
+        on_hashed_state_update,
         WITHDRAWAL_REQUEST_ADDRESS,
         Bytes::new(),
     )?;
@@ -722,6 +813,7 @@ where
         evm,
         block_state,
         hashed_state,
+        on_hashed_state_update,
         CONSOLIDATION_REQUEST_ADDRESS,
         Bytes::new(),
     )?;
@@ -737,6 +829,7 @@ fn execute_system_call<DB>(
     evm: &mut Evm<BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     hashed_state: &mut HashedPostStateSink<KeccakKeyHasher>,
+    on_hashed_state_update: &mut impl FnMut(HashedPostState),
     address: Address,
     data: Bytes,
 ) -> Result<TxResult, Evm2ExecutionError<DB::Error>>
@@ -756,8 +849,14 @@ where
         return Err(Evm2ExecutionError::SystemCallFailed { address, reason });
     }
 
-    let mut sink = Tee::new(block_state, hashed_state);
-    let Ok(outcome) = executed.commit_with(&mut sink);
+    let mut streamed_hashed_state = HashedPostStateSink::<KeccakKeyHasher>::default();
+    let outcome = {
+        let mut block_sink = Tee::new(block_state, hashed_state);
+        let mut sink = Tee::new(&mut block_sink, &mut streamed_hashed_state);
+        let Ok(outcome) = executed.commit_with(&mut sink);
+        outcome
+    };
+    flush_hashed_state_update(&mut streamed_hashed_state, on_hashed_state_update);
     Ok(outcome)
 }
 
@@ -765,12 +864,18 @@ fn commit_state_changes<S: StateChangeSource>(
     evm: &mut Evm<BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     hashed_state: &mut HashedPostStateSink<KeccakKeyHasher>,
+    on_hashed_state_update: &mut impl FnMut(HashedPostState),
     changes: &S,
 ) {
-    let mut block_sink = Tee::new(block_state, hashed_state);
-    let mut sink = Tee::new(evm.overlay_db_mut(), &mut block_sink);
-    match changes.visit(&mut sink) {
-        Ok(()) => {}
+    let mut streamed_hashed_state = HashedPostStateSink::<KeccakKeyHasher>::default();
+    let result = {
+        let mut block_sink = Tee::new(block_state, hashed_state);
+        let mut execution_sink = Tee::new(evm.overlay_db_mut(), &mut block_sink);
+        let mut sink = Tee::new(&mut execution_sink, &mut streamed_hashed_state);
+        changes.visit(&mut sink)
+    };
+    match result {
+        Ok(()) => flush_hashed_state_update(&mut streamed_hashed_state, on_hashed_state_update),
         Err(err) => match err {},
     }
 }
@@ -779,6 +884,7 @@ fn post_block_balance_state_changes<DB>(
     evm: &mut Evm<BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     hashed_state: &mut HashedPostStateSink<KeccakKeyHasher>,
+    on_hashed_state_update: &mut impl FnMut(HashedPostState),
     spec_id: SpecId,
     block_number: u64,
     block_beneficiary: Address,
@@ -819,7 +925,7 @@ where
         changes.accounts.insert(address, Tracked { original, current: Some(current) });
     }
 
-    commit_state_changes(evm, block_state, hashed_state, &changes);
+    commit_state_changes(evm, block_state, hashed_state, on_hashed_state_update, &changes);
 
     Ok(())
 }

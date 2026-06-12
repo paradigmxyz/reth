@@ -332,8 +332,7 @@ where
 
         PayloadHandle {
             state_root_handle: Some(state_root_handle),
-            #[cfg(any())]
-            install_state_hook: !parallel_bal_execution,
+            stream_state_updates: !parallel_bal_execution,
             prewarm_handle,
             transactions: execution_rx,
             _span: span,
@@ -360,8 +359,7 @@ where
             self.spawn_caching_with(env, prewarm_rx, provider_builder, None, false);
         PayloadHandle {
             state_root_handle: None,
-            #[cfg(any())]
-            install_state_hook: false,
+            stream_state_updates: false,
             prewarm_handle,
             transactions: execution_rx,
             _span: Span::current(),
@@ -828,8 +826,7 @@ pub struct PayloadHandle<Tx, Err, R> {
     /// Handle to the background state root computation, if spawned.
     state_root_handle: Option<StateRootHandle>,
     /// Whether main execution should stream per-tx state updates into the sparse trie task.
-    #[cfg(any())]
-    install_state_hook: bool,
+    stream_state_updates: bool,
     // must include the receiver of the state root wired to the sparse trie
     prewarm_handle: CacheTaskHandle<R>,
     /// Stream of block transactions and their indices in the block.
@@ -866,18 +863,12 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
         self.state_root_handle.as_mut().expect("state_root_handle is None").take_state_root_rx()
     }
 
-    /// Returns a state hook to stream execution state updates to the sparse trie cache task.
+    /// Returns a sender to stream execution state updates to the sparse trie cache task.
     ///
     /// Returns `None` when BAL-driven hashed state streaming feeds the sparse trie task.
-    #[cfg(any())]
-    pub fn state_hook(&self) -> Option<impl OnStateHook> {
-        if self.install_state_hook {
-            self.state_root_handle.as_ref().map(|handle| {
-                let sender = StateHookSender::new(handle.updates_tx().clone());
-                move |state: &()| {
-                    let _ = sender.send(StateRootMessage::StateUpdate(*state));
-                }
-            })
+    pub fn state_hook_sender(&self) -> Option<StateHookSender> {
+        if self.stream_state_updates {
+            self.state_root_handle.as_ref().map(StateRootHandle::state_hook_sender)
         } else {
             None
         }
