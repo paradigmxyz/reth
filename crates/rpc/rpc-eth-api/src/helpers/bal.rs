@@ -1,7 +1,10 @@
 //! Helpers for `eth_blockAccessList` RPC method.
-use alloy_eip7928::{bal::DecodedBal, BlockAccessList};
+#[cfg(any())]
+use alloy_eip7928::bal::DecodedBal;
+use alloy_eip7928::BlockAccessList;
 use alloy_primitives::Bytes;
 use alloy_rpc_types_eth::BlockId;
+#[cfg(any())]
 use reth_errors::RethError;
 use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
 

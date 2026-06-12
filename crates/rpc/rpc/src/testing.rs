@@ -25,11 +25,7 @@ use reth_rpc_eth_types::EthApiError;
 
 /// Testing API handler.
 #[derive(Debug, Clone)]
-pub struct TestingApi<
-    Eth,
-    Evm,
-    Payload: PayloadTypes = reth_ethereum_engine_primitives::EthEngineTypes,
-> {
+pub struct TestingApi<Eth, Evm, Payload: PayloadTypes> {
     #[expect(dead_code)]
     eth_api: Eth,
     #[expect(dead_code)]
@@ -40,10 +36,8 @@ pub struct TestingApi<
     #[expect(dead_code)]
     engine_handle: ConsensusEngineHandle<Payload>,
     /// If true, skip invalid transactions instead of failing.
-    #[expect(dead_code)]
     skip_invalid_transactions: bool,
     /// If set, override the block gas limit in `testing_buildBlockV1`.
-    #[expect(dead_code)]
     gas_limit_override: Option<u64>,
 }
 

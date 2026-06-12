@@ -18,7 +18,7 @@ use alloy_consensus::{transaction::Recovered, Header};
 use alloy_eips::eip4895::Withdrawal;
 #[cfg(feature = "std")]
 use alloy_eips::Decodable2718;
-use alloy_primitives::{Bytes, B256, U256};
+use alloy_primitives::{Bytes, B256};
 #[cfg(feature = "std")]
 use alloy_rpc_types_engine::ExecutionData;
 use core::{convert::Infallible, fmt::Debug, marker::PhantomData};

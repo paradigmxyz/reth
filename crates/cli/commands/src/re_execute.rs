@@ -12,7 +12,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
-use reth_evm::{ConfigureEvm, ConfigureEvm2BlockExecutor};
+use reth_evm::ConfigureEvm2BlockExecutor;
 use reth_execution_types::{
     evm2_block_reverts_and_accumulator_extend, evm2_state_source_size_hint, Evm2BlockReverts,
     Evm2BlockStateAccumulator, Evm2RevertAccount,
@@ -143,7 +143,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             let cancellation = cancellation.clone();
             let next_block = Arc::clone(&next_block);
             tasks.spawn_blocking(move || {
-                let evm_config = evm_config.with_jit_support();
                 let executor_lifetime = Duration::from_secs(600);
                 let provider = provider_factory.database_provider_ro()?.disable_long_read_transaction_safety();
 

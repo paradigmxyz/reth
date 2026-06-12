@@ -557,6 +557,7 @@ where
     pub provider: StateProviderBuilder<N, P>,
     /// Dedicated blocking pool for warming the BAL read-set. `Some` only on the BAL parallel
     /// execution path; the pool is owned by the [`PayloadProcessor`](super::PayloadProcessor).
+    #[allow(dead_code)]
     pub(crate) bal_prewarm_pool: Option<Arc<BalPrewarmPool>>,
     /// The metrics for the prewarm task.
     pub metrics: PrewarmMetrics,
