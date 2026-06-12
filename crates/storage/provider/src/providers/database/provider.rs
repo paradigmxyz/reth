@@ -2246,7 +2246,11 @@ impl<TX: DbTx, N: NodeTypes> StageCheckpointReader for DatabaseProvider<TX, N> {
 
     /// Get stage checkpoint progress.
     fn get_stage_checkpoint_progress(&self, id: StageId) -> ProviderResult<Option<Vec<u8>>> {
-        Ok(self.tx.get::<tables::StageCheckpointProgresses>(id.to_string())?)
+        Ok(if let Some(encoded) = id.get_pre_encoded() {
+            self.tx.get_by_encoded_key::<tables::StageCheckpointProgresses>(encoded)?
+        } else {
+            self.tx.get::<tables::StageCheckpointProgresses>(id.to_string())?
+        })
     }
 
     fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {

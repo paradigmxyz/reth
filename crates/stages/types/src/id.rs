@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 #[cfg(feature = "std")]
-use std::{collections::HashMap, sync::OnceLock};
+use std::sync::OnceLock;
 
 /// Stage IDs for all known stages.
 ///
@@ -36,10 +36,9 @@ pub enum StageId {
 }
 
 /// One-time-allocated stage ids encoded as raw Vecs, useful for database
-/// clients to reference them for queries instead of encoding anew per query
-/// (sad heap allocation required).
+/// clients to reference them for queries instead of encoding anew per query.
 #[cfg(feature = "std")]
-static ENCODED_STAGE_IDS: OnceLock<HashMap<StageId, Vec<u8>>> = OnceLock::new();
+static ENCODED_STAGE_IDS: OnceLock<[Vec<u8>; StageId::ALL.len()]> = OnceLock::new();
 
 impl StageId {
     /// All supported Stages
@@ -115,23 +114,41 @@ impl StageId {
         matches!(self, Self::Finish)
     }
 
+    const fn pre_encoded_index(&self) -> Option<usize> {
+        match self {
+            Self::Era => Some(0),
+            Self::Headers => Some(1),
+            Self::Bodies => Some(2),
+            Self::SenderRecovery => Some(3),
+            Self::Execution => Some(4),
+            Self::PruneSenderRecovery => Some(5),
+            Self::MerkleUnwind => Some(6),
+            Self::AccountHashing => Some(7),
+            Self::StorageHashing => Some(8),
+            Self::MerkleExecute => Some(9),
+            Self::TransactionLookup => Some(10),
+            Self::IndexStorageHistory => Some(11),
+            Self::IndexAccountHistory => Some(12),
+            Self::Prune => Some(13),
+            Self::Finish => Some(14),
+            _ => None,
+        }
+    }
+
     /// Get a pre-encoded raw Vec, for example, to be used as the DB key for
     /// `tables::StageCheckpoints` and `tables::StageCheckpointProgresses`
     pub fn get_pre_encoded(&self) -> Option<&Vec<u8>> {
+        let index = self.pre_encoded_index()?;
+
         #[cfg(not(feature = "std"))]
         {
+            let _ = index;
             None
         }
         #[cfg(feature = "std")]
-        ENCODED_STAGE_IDS
-            .get_or_init(|| {
-                let mut map = HashMap::with_capacity(Self::ALL.len());
-                for stage_id in Self::ALL {
-                    map.insert(stage_id, stage_id.to_string().into_bytes());
-                }
-                map
-            })
-            .get(self)
+        {
+            Some(&ENCODED_STAGE_IDS.get_or_init(|| Self::ALL.map(|id| id.as_str().into()))[index])
+        }
     }
 }
 
@@ -162,6 +179,18 @@ mod tests {
         assert_eq!(StageId::Finish.to_string(), "Finish");
 
         assert_eq!(StageId::Other("Foo").to_string(), "Foo");
+    }
+
+    #[test]
+    fn pre_encoded_stage_id_matches_string_key() {
+        for stage_id in StageId::ALL {
+            assert_eq!(
+                stage_id.get_pre_encoded().map(Vec::as_slice),
+                Some(stage_id.as_str().as_bytes())
+            );
+        }
+
+        assert_eq!(StageId::Other("Foo").get_pre_encoded(), None);
     }
 
     #[test]
