@@ -1,16 +1,15 @@
 //! Helpers for block access lists.
 use alloy_consensus::BlockHeader;
-use alloy_eip7928::{bal::DecodedBal, BlockAccessIndex, BlockAccessList};
+use alloy_eip7928::{BlockAccessIndex, BlockAccessList};
 use alloy_primitives::Bytes;
 use alloy_rpc_types_eth::BlockId;
 use reth_errors::RethError;
 use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm};
-use reth_revm::{database::StateProviderDatabase, state::bal::Bal as RevmBal, State};
+use reth_revm::{database::StateProviderDatabase, State};
 use reth_rpc_eth_types::{
     cache::db::StateProviderTraitObjWrapper, error::FromEthApiError, EthApiError, StateCacheDb,
 };
 use reth_storage_api::StateProviderFactory;
-use std::sync::Arc;
 
 use crate::{
     helpers::{Call, LoadBlock, Trace},
@@ -96,21 +95,14 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
     }
 }
 
-/// Loads the cached block BAL into `db` when it is available.
-pub fn attach_cached_block_bal(db: &mut StateCacheDb, bal: Option<Arc<DecodedBal<RevmBal>>>) {
-    if let Some(bal) = bal {
-        db.set_bal(Some(Arc::new(bal.as_bal().clone())));
-    }
-}
-
-/// Positions `db` at the state before the transaction at `target_tx_index` if a BAL is attached.
+/// Positions `db` at the state before the transaction at `tx_index` if a BAL is attached.
 ///
 /// Returns `true` if the state was positioned with BAL data.
-pub fn position_before_transaction(db: &mut StateCacheDb, target_tx_index: u64) -> bool {
-    if db.bal_state.bal.is_none() {
+pub const fn position_before_transaction(db: &mut StateCacheDb, tx_index: u64) -> bool {
+    if !db.has_bal() {
         return false
     }
 
-    db.set_bal_index(target_tx_index + 1);
+    db.set_bal_index(BlockAccessIndex::from_tx_index(tx_index));
     true
 }

@@ -2,6 +2,7 @@
 //! methods.
 
 use core::fmt;
+use std::sync::Arc;
 
 use super::{bal, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
 use crate::{
@@ -663,11 +664,15 @@ pub trait Call:
         })
     }
 
-    /// Executes the closure with state at `at` and the BAL for `bal_block_hash`, if available.
+    /// Executes the closure with state at `at`, attaching the cached block access list of
+    /// `bal_block` if one is available.
+    ///
+    /// `bal_block` should only be `Some` for blocks whose header commits to a BAL
+    /// (`block_access_list_hash` is present).
     fn spawn_with_state_at_block_and_bal<F, R>(
         &self,
         at: impl Into<BlockId>,
-        bal_block_hash: B256,
+        bal_block: Option<B256>,
         f: F,
     ) -> impl Future<Output = Result<R, Self::Error>> + Send
     where
@@ -676,9 +681,14 @@ pub trait Call:
     {
         let at = at.into();
         async move {
-            let cached_bal = self.cache().get_bal(bal_block_hash).await?;
+            let cached_bal = match bal_block {
+                Some(block_hash) => self.cache().get_bal(block_hash).await?,
+                None => None,
+            };
             self.spawn_with_state_at_block(at, move |this, mut db| {
-                bal::attach_cached_block_bal(&mut db, cached_bal);
+                if let Some(bal) = cached_bal {
+                    db.set_bal(Some(Arc::new(bal.as_bal().clone())));
+                }
                 f(this, db)
             })
             .await
@@ -765,9 +775,9 @@ pub trait Call:
             // we need to get the state of the parent block because we're essentially replaying the
             // block the transaction is included in
             let parent_block = block.parent_hash();
-            let block_hash = block.hash();
+            let bal_block = block.header().block_access_list_hash().is_some().then(|| block.hash());
 
-            self.spawn_with_state_at_block_and_bal(parent_block, block_hash, move |this, mut db| {
+            self.spawn_with_state_at_block_and_bal(parent_block, bal_block, move |this, mut db| {
                 let block_txs = block.transactions_recovered();
 
                 let mut executor = RpcNodeCore::evm_config(&this)
@@ -776,10 +786,10 @@ pub trait Call:
                     .map_err(Self::Error::from_eth_err)?;
                 executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
 
-                if !bal::position_before_transaction(
-                    executor.evm_mut().db_mut(),
-                    tx_info.index.unwrap_or_default(),
-                ) {
+                if !tx_info.index.is_some_and(|tx_index| {
+                    bal::position_before_transaction(executor.evm_mut().db_mut(), tx_index)
+                }) {
+                    // no BAL available, replay all transactions prior to the targeted transaction
                     for block_tx in block_txs {
                         if block_tx.tx_hash() == tx.tx_hash() {
                             break;

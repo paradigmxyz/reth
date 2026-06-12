@@ -175,14 +175,18 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             // we need to get the state of the parent block because we're essentially replaying the
             // block the transaction is included in
             let parent_block = block.parent_hash();
-            let block_hash = block.hash();
+            let bal_block = block.header().block_access_list_hash().is_some().then(|| block.hash());
 
-            self.spawn_with_state_at_block_and_bal(parent_block, block_hash, move |this, mut db| {
+            self.spawn_with_state_at_block_and_bal(parent_block, bal_block, move |this, mut db| {
                 let block_txs = block.transactions_recovered();
 
                 this.apply_pre_execution_changes(&block, &mut db)?;
 
-                if !bal::position_before_transaction(&mut db, tx_info.index.unwrap_or_default()) {
+                if !tx_info
+                    .index
+                    .is_some_and(|tx_index| bal::position_before_transaction(&mut db, tx_index))
+                {
+                    // no BAL available, replay all transactions prior to the targeted transaction
                     this.replay_transactions_until(
                         &mut db,
                         evm_env.clone(),
