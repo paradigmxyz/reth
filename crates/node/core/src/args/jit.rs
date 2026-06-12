@@ -9,7 +9,7 @@ use std::time::Duration;
 #[command(next_help_heading = "JIT")]
 pub struct JitArgs {
     /// Enable JIT compilation of EVM bytecode.
-    #[arg(long = "jit", default_value_t = false, help_heading = "JIT")]
+    #[arg(id = "jit", long = "jit", default_value_t = false, help_heading = "JIT")]
     pub enabled: bool,
 
     /// Number of observed misses before a bytecode is promoted to JIT compilation.
@@ -88,5 +88,24 @@ impl Default for JitArgs {
             debug: false,
             blocking: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    /// A helper type to parse Args more easily
+    #[derive(Parser)]
+    struct CommandParser<T: Args> {
+        #[command(flatten)]
+        args: T,
+    }
+
+    #[test]
+    fn jit_args_default_sanity_test() {
+        let args = CommandParser::<JitArgs>::parse_from(["reth"]).args;
+        assert_eq!(args, JitArgs::default());
     }
 }
