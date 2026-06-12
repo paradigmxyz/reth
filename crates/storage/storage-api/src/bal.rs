@@ -1,25 +1,23 @@
 use alloc::{sync::Arc, vec::Vec};
 use alloy_eip7928::bal::DecodedBal;
+pub use alloy_eip7928::bal::RawBal;
 use alloy_eips::NumHash;
-use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealed};
+use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use reth_storage_errors::provider::ProviderResult;
 use revm_database::state::bal::Bal as RevmBal;
-
-/// Raw BAL RLP bytes sealed by the BAL hash.
-pub type SealedBal = Sealed<Bytes>;
 
 /// Notification emitted when a new BAL is inserted into the store.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BalNotification {
     /// Number and hash of the block the BAL belongs to.
     pub num_hash: NumHash,
-    /// Raw BAL RLP payload sealed by the BAL hash.
-    pub bal: SealedBal,
+    /// Raw BAL RLP payload.
+    pub bal: RawBal,
 }
 
 impl BalNotification {
     /// Creates a new [`BalNotification`].
-    pub const fn new(num_hash: NumHash, bal: SealedBal) -> Self {
+    pub const fn new(num_hash: NumHash, bal: RawBal) -> Self {
         Self { num_hash, bal }
     }
 }
@@ -46,12 +44,12 @@ pub trait BalStore: Send + Sync + 'static {
     ///
     /// Implementations may buffer inserts. Call [`Self::flush`] when pending BALs need to be made
     /// durable.
-    fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()>;
+    fn insert(&self, num_hash: NumHash, bal: RawBal) -> ProviderResult<()>;
 
     /// Insert multiple BALs.
     ///
     /// The default implementation preserves the behavior of repeated [`Self::insert`] calls.
-    fn insert_many(&self, entries: Vec<(NumHash, SealedBal)>) -> ProviderResult<()> {
+    fn insert_many(&self, entries: Vec<(NumHash, RawBal)>) -> ProviderResult<()> {
         for (num_hash, bal) in entries {
             self.insert(num_hash, bal)?;
         }
@@ -188,13 +186,13 @@ impl BalStoreHandle {
 
     /// Insert the BAL for the given block.
     #[inline]
-    pub fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()> {
+    pub fn insert(&self, num_hash: NumHash, bal: RawBal) -> ProviderResult<()> {
         self.inner.insert(num_hash, bal)
     }
 
     /// Insert multiple BALs.
     #[inline]
-    pub fn insert_many(&self, entries: Vec<(NumHash, SealedBal)>) -> ProviderResult<()> {
+    pub fn insert_many(&self, entries: Vec<(NumHash, RawBal)>) -> ProviderResult<()> {
         self.inner.insert_many(entries)
     }
 
@@ -291,11 +289,11 @@ pub trait BalProvider {
 pub struct NoopBalStore;
 
 impl BalStore for NoopBalStore {
-    fn insert(&self, _num_hash: NumHash, _bal: SealedBal) -> ProviderResult<()> {
+    fn insert(&self, _num_hash: NumHash, _bal: RawBal) -> ProviderResult<()> {
         Ok(())
     }
 
-    fn insert_many(&self, _entries: Vec<(NumHash, SealedBal)>) -> ProviderResult<()> {
+    fn insert_many(&self, _entries: Vec<(NumHash, RawBal)>) -> ProviderResult<()> {
         Ok(())
     }
 
@@ -423,7 +421,7 @@ mod tests {
     }
 
     impl BalStore for TestBalStore {
-        fn insert(&self, _num_hash: NumHash, _bal: SealedBal) -> ProviderResult<()> {
+        fn insert(&self, _num_hash: NumHash, _bal: RawBal) -> ProviderResult<()> {
             Ok(())
         }
 
