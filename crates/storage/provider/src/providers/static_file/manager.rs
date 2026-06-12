@@ -50,6 +50,7 @@ use reth_storage_api::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
+use revm_database::states::reverts::AccountInfoRevert;
 use std::{
     collections::BTreeMap,
     fmt::Debug,
@@ -520,14 +521,21 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<()> {
         for block in blocks {
             let block_number = block.recovered_block().number();
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
+            let reverts = &block.execution_outcome().state.reverts;
+            let mut changeset =
+                Vec::with_capacity(reverts.iter().map(|transition| transition.len()).sum());
 
-            let changeset: Vec<_> = reverts
-                .accounts
-                .into_iter()
-                .flatten()
-                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
-                .collect();
+            for transition in reverts.iter() {
+                for (address, revert) in transition {
+                    let info = match &revert.account {
+                        AccountInfoRevert::RevertTo(info) => Some(info.clone().into()),
+                        AccountInfoRevert::DeleteIt => None,
+                        AccountInfoRevert::DoNothing => continue,
+                    };
+                    changeset.push(AccountBeforeTx { address: *address, info });
+                }
+            }
+
             w.append_account_changeset(changeset, block_number)?;
         }
         Ok(())
@@ -541,22 +549,21 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<()> {
         for block in blocks {
             let block_number = block.recovered_block().number();
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
+            let reverts = &block.execution_outcome().state.reverts;
+            let mut changeset = Vec::new();
 
-            let changeset: Vec<_> = reverts
-                .storage
-                .into_iter()
-                .flatten()
-                .flat_map(|revert| {
-                    revert.storage_revert.into_iter().map(move |(key, revert_to_slot)| {
-                        StorageBeforeTx {
-                            address: revert.address,
+            for transition in reverts.iter() {
+                for (address, revert) in transition {
+                    for (key, revert_to_slot) in &revert.storage {
+                        changeset.push(StorageBeforeTx {
+                            address: *address,
                             key: B256::from(key.to_be_bytes()),
-                            value: revert_to_slot.to_previous_value(),
-                        }
-                    })
-                })
-                .collect();
+                            value: (*revert_to_slot).to_previous_value(),
+                        });
+                    }
+                }
+            }
+
             w.append_storage_changeset(changeset, block_number)?;
         }
         Ok(())
