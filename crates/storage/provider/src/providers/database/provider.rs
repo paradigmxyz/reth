@@ -2620,13 +2620,18 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     }
 
     fn write_state_changes(&self, mut changes: StateChangeset) -> ProviderResult<()> {
-        // sort all entries so they can be written to database in more performant way.
-        // and take smaller memory footprint.
-        changes.accounts.par_sort_by_key(|a| a.0);
-        changes.storage.par_sort_by_key(|a| a.address);
+        let use_hashed_state = self.cached_storage_settings().use_hashed_state();
+
+        // Sort contracts before writing bytecodes. Account and storage changes are only written
+        // through this path when plain-state storage is active.
         changes.contracts.par_sort_by_key(|a| a.0);
 
-        if !self.cached_storage_settings().use_hashed_state() {
+        if !use_hashed_state {
+            // sort all entries so they can be written to database in more performant way.
+            // and take smaller memory footprint.
+            changes.accounts.par_sort_by_key(|a| a.0);
+            changes.storage.par_sort_by_key(|a| a.address);
+
             // Write new account state
             tracing::trace!(len = changes.accounts.len(), "Writing new account state");
             let mut accounts_cursor = self.tx_ref().cursor_write::<tables::PlainAccountState>()?;
