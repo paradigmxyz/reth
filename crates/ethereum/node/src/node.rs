@@ -13,9 +13,9 @@ use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     eth::spec::EthExecutorSpec, ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes,
 };
+use reth_evm_ethereum::factory::RethEvmFactory;
 #[cfg(feature = "jit")]
 use reth_evm_ethereum::factory::{JitBackend, JitMode, RevmcMetrics, RuntimeConfig, RuntimeTuning};
-use reth_evm_ethereum::factory::RethEvmFactory;
 use reth_network::{primitives::BasicNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives,
@@ -53,8 +53,6 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
-#[cfg(feature = "jit")]
-use reth_tracing::tracing::warn;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, PoolPooledTx, PoolTransaction,
@@ -527,7 +525,7 @@ fn jit_runtime_config(jit: &JitArgs) -> RuntimeConfig {
 /// Returns the evm config and metrics recorder if JIT starts enabled.
 #[cfg(feature = "jit")]
 #[allow(clippy::type_complexity)]
-pub fn build_jit_evm_config<C: EthereumHardforks>(
+pub fn build_evm_config<C: EthereumHardforks>(
     chain_spec: Arc<C>,
     jit: &JitArgs,
     dump_dir: Option<std::path::PathBuf>,
@@ -550,7 +548,7 @@ pub fn build_jit_evm_config<C: EthereumHardforks>(
     let jit_mode = config.jit_mode;
     let backend = JitBackend::new(config)?;
 
-    warn!(target: "reth::cli",
+    reth_tracing::tracing::warn!(target: "reth::cli",
         hot_threshold = tuning.jit_hot_threshold,
         workers = tuning.jit_worker_count,
         mode = ?jit_mode,
@@ -572,7 +570,7 @@ pub fn build_jit_evm_config<C: EthereumHardforks>(
 /// returns a plain interpreter-backed config.
 #[cfg(not(feature = "jit"))]
 #[allow(clippy::type_complexity)]
-pub fn build_jit_evm_config<C: EthereumHardforks>(
+pub fn build_evm_config<C: EthereumHardforks>(
     chain_spec: Arc<C>,
     jit: &JitArgs,
     _dump_dir: Option<std::path::PathBuf>,
@@ -607,7 +605,7 @@ where
         let jit = &ctx.config().jit;
         let dump_dir = jit.debug.then(|| ctx.config().datadir().data_dir().join("jit"));
 
-        let (evm_config, revmc_metrics) = build_jit_evm_config(ctx.chain_spec(), jit, dump_dir)?;
+        let (evm_config, revmc_metrics) = build_evm_config(ctx.chain_spec(), jit, dump_dir)?;
 
         #[cfg(not(feature = "jit"))]
         let _ = revmc_metrics;
