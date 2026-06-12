@@ -1,8 +1,11 @@
 use crate::utils::{advance_with_random_transactions, eth_payload_attributes};
-use alloy_eips::eip7685::RequestsOrHash;
+use alloy_eips::{eip4844::BlobAndProofV1, eip7685::RequestsOrHash};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
-use alloy_rpc_types_engine::{PayloadAttributes, PayloadStatusEnum};
+use alloy_rpc_types_engine::{
+    ClientVersionV1, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
+    PayloadStatusEnum,
+};
 use jsonrpsee_core::client::ClientT;
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, MAINNET};
 use reth_e2e_test_utils::{
@@ -10,12 +13,24 @@ use reth_e2e_test_utils::{
 };
 use reth_node_api::TreeConfig;
 use reth_node_builder::{NodeBuilder, NodeHandle};
-use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::EthereumNode;
+use reth_node_core::{
+    args::RpcServerArgs,
+    node_config::NodeConfig,
+    version::{version_metadata, CLIENT_CODE},
+};
+use reth_node_ethereum::{engine_ssz_proxy::EngineSszProxyLayer, EthereumAddOns, EthereumNode};
 use reth_provider::BlockNumReader;
 use reth_rpc_api::TestingBuildBlockRequestV1;
+use reth_rpc_layer::secret_to_bearer_header;
 use reth_tasks::Runtime;
+use ssz::{Decode, Encode};
 use std::sync::Arc;
+
+const ENGINE_PRAGUE_PAYLOADS_ROUTE: &str = "/engine/v2/prague/payloads";
+const ENGINE_PRAGUE_FORKCHOICE_ROUTE: &str = "/engine/v2/prague/forkchoice";
+const ENGINE_V1_BLOBS_ROUTE: &str = "/engine/v2/blobs/v1";
+const ENGINE_CAPABILITIES_ROUTE: &str = "/engine/v2/capabilities";
+const ENGINE_IDENTITY_ROUTE: &str = "/engine/v2/identity";
 
 #[tokio::test]
 async fn can_run_eth_node() -> eyre::Result<()> {
@@ -250,6 +265,189 @@ async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
     assert_eq!(status.status, PayloadStatusEnum::Valid);
 
     node.update_forkchoice(genesis_hash, block_hash).await?;
+
+    node.wait_block(1, block_hash, false).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+    let runtime = Runtime::test();
+
+    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(genesis)
+            .prague_activated()
+            .build(),
+    );
+    let genesis_hash = chain_spec.genesis_hash();
+    let node_config =
+        NodeConfig::test().with_chain(chain_spec.clone()).with_unused_ports().with_rpc(
+            RpcServerArgs::default()
+                .with_unused_ports()
+                .with_http()
+                .with_http_api(reth_rpc_server_types::RpcModuleSelection::All),
+        );
+
+    let (ssz_layer, ssz_handle) = EngineSszProxyLayer::new(chain_spec.clone());
+    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
+        .testing_node(runtime)
+        .with_types::<EthereumNode>()
+        .with_components(EthereumNode::components())
+        .with_add_ons(EthereumAddOns::default().with_auth_http_middleware(ssz_layer))
+        .launch()
+        .await?;
+
+    ssz_handle.set_engine(node.add_ons_handle.beacon_engine_handle.clone()).await;
+    ssz_handle.set_blob_store(node.pool.blob_store().clone()).await;
+    let node = NodeTestContext::new(node, eth_payload_attributes).await?;
+
+    let wallets = Wallet::new(2).wallet_gen();
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallets[0].clone()).await;
+
+    let payload_attributes = PayloadAttributes {
+        timestamp: chain_spec.genesis().timestamp + 1,
+        prev_randao: B256::ZERO,
+        suggested_fee_recipient: Address::ZERO,
+        withdrawals: Some(vec![]),
+        parent_beacon_block_root: Some(B256::ZERO),
+        slot_number: None,
+    };
+
+    let envelope = node
+        .testing_build_block_v1(TestingBuildBlockRequestV1 {
+            parent_block_hash: genesis_hash,
+            payload_attributes,
+            transactions: vec![raw_tx],
+            extra_data: None,
+        })
+        .await?;
+
+    let payload = envelope.execution_payload;
+    let block_hash = payload.payload_inner.payload_inner.block_hash;
+    let client = reqwest::Client::new();
+    let auth_server = node.auth_server_handle();
+    let auth_url = auth_server.http_url();
+    let auth_header = secret_to_bearer_header(auth_server.jwt_secret());
+
+    let capabilities_response = client
+        .get(format!("{auth_url}{ENGINE_CAPABILITIES_ROUTE}"))
+        .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .await?;
+    assert_eq!(capabilities_response.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        capabilities_response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/json")
+    );
+
+    let capabilities: serde_json::Value = capabilities_response.json().await?;
+    assert_eq!(
+        capabilities,
+        serde_json::json!({
+            "supported_forks": ["paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"],
+            "fork_scoped_endpoints": ["payloads", "forkchoice", "bodies"],
+            "independently_versioned": {
+                "blobs": ["v1", "v2", "v3", "v4"],
+            },
+            "unscoped_endpoints": ["capabilities", "identity"],
+            "limits": {
+                "bodies.max_count": 128,
+                "blobs.max_versioned_hashes": 128,
+                "payload.max_bytes": 67108864,
+            },
+        })
+    );
+
+    let identity_response = client
+        .get(format!("{auth_url}{ENGINE_IDENTITY_ROUTE}"))
+        .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .await?;
+    assert_eq!(identity_response.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        identity_response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/json")
+    );
+
+    let identity: Vec<ClientVersionV1> = identity_response.json().await?;
+    assert_eq!(
+        identity,
+        vec![ClientVersionV1 {
+            code: CLIENT_CODE,
+            name: version_metadata().name_client.to_string(),
+            version: version_metadata().cargo_pkg_version.to_string(),
+            commit: version_metadata().vergen_git_sha.to_string(),
+        }]
+    );
+
+    let new_payload_response = client
+        .post(format!("{auth_url}{ENGINE_PRAGUE_PAYLOADS_ROUTE}"))
+        .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+        .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+        .header(reqwest::header::ACCEPT, "application/octet-stream")
+        .body((payload, B256::ZERO, envelope.execution_requests.take()).as_ssz_bytes())
+        .send()
+        .await?;
+    assert_eq!(new_payload_response.status(), reqwest::StatusCode::OK);
+
+    let status = PayloadStatus::from_ssz_bytes(&new_payload_response.bytes().await?).unwrap();
+    assert_eq!(status.status, PayloadStatusEnum::Valid);
+
+    let fcu_response = client
+        .post(format!("{auth_url}{ENGINE_PRAGUE_FORKCHOICE_ROUTE}"))
+        .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+        .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+        .header(reqwest::header::ACCEPT, "application/octet-stream")
+        .body(
+            (
+                ForkchoiceState {
+                    head_block_hash: block_hash,
+                    safe_block_hash: genesis_hash,
+                    finalized_block_hash: genesis_hash,
+                },
+                Vec::<PayloadAttributes>::new(),
+            )
+                .as_ssz_bytes(),
+        )
+        .send()
+        .await?;
+    assert_eq!(fcu_response.status(), reqwest::StatusCode::OK);
+
+    let blob_tx = TransactionTestContext::tx_with_blobs_bytes(1, wallets[1].clone()).await?;
+    let blob_tx_hash = node.rpc.inject_tx(blob_tx).await?;
+    let envelope = node.rpc.envelope_by_hash(blob_tx_hash).await?;
+    let versioned_hashes = TransactionTestContext::validate_sidecar(envelope);
+
+    let blobs_response = client
+        .post(format!("{auth_url}{ENGINE_V1_BLOBS_ROUTE}"))
+        .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+        .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+        .header(reqwest::header::ACCEPT, "application/octet-stream")
+        .body(versioned_hashes.as_ssz_bytes())
+        .send()
+        .await?;
+    assert_eq!(blobs_response.status(), reqwest::StatusCode::OK);
+
+    let blobs =
+        Vec::<Option<BlobAndProofV1>>::from_ssz_bytes(&blobs_response.bytes().await?).unwrap();
+    assert_eq!(blobs.len(), versioned_hashes.len());
+    assert!(blobs.iter().all(Option::is_some));
+
+    let fcu = ForkchoiceUpdated::from_ssz_bytes(&fcu_response.bytes().await?).unwrap();
+    assert_eq!(fcu.payload_status.status, PayloadStatusEnum::Valid);
 
     node.wait_block(1, block_hash, false).await?;
 

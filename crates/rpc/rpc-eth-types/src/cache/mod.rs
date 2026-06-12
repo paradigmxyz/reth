@@ -3,7 +3,8 @@
 use super::{EthStateCacheConfig, MultiConsumerLruCache};
 use crate::block::CachedTransaction;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
-use alloy_eips::{eip7928::bal::DecodedBal, BlockHashOrNumber};
+use alloy_eip7928::bal::DecodedBal;
+use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, TxHash, B256};
 use futures::{stream::FuturesOrdered, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
@@ -987,6 +988,7 @@ fn revm_code_write_heap_size((_, bytecode): &(B256, Bytecode)) -> usize {
 mod tests {
     use super::*;
     use alloy_consensus::{transaction::TransactionMeta, Header};
+    use alloy_eip7928::BlockAccessIndex;
     use alloy_eips::{BlockHashOrNumber, NumHash};
     use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, Signature, TxHash, TxNumber};
     use core::ops::{RangeBounds, RangeInclusive};
@@ -1115,15 +1117,19 @@ mod tests {
     #[test]
     fn cached_revm_bal_size_accounts_for_nested_allocations() {
         let mut account = RevmAccountBal::default();
-        account.account_info.nonce.writes.push((1, 1));
-        account.account_info.balance.writes.push((2, StorageValue::from(1u64)));
+        account.account_info.nonce.writes.push((BlockAccessIndex::new(1), 1));
+        account
+            .account_info
+            .balance
+            .writes
+            .push((BlockAccessIndex::new(2), StorageValue::from(1u64)));
         account.account_info.code.writes.push((
-            3,
+            BlockAccessIndex::new(3),
             (B256::repeat_byte(0xaa), Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]))),
         ));
         account.storage.storage.insert(
             StorageKey::from(1u64),
-            RevmBalWrites::new(vec![(4, StorageValue::from(2u64))]),
+            RevmBalWrites::new(vec![(BlockAccessIndex::new(4), StorageValue::from(2u64))]),
         );
 
         let mut bal = RevmBal::default();
@@ -1231,10 +1237,6 @@ mod tests {
         ) -> ProviderResult<Option<DecodedBal<RevmBal>>> {
             self.fetches.fetch_add(1, Ordering::SeqCst);
             Ok(Some(test_decoded_revm_bal()))
-        }
-
-        fn get_by_range(&self, _start: BlockNumber, _count: u64) -> ProviderResult<Vec<Bytes>> {
-            Ok(Vec::new())
         }
 
         fn bal_stream(&self) -> reth_storage_api::BalNotificationStream {

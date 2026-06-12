@@ -100,6 +100,9 @@ Database:
       --db.balstore-cache-size <BALSTORE_CACHE_SIZE>
           Number of recent blocks to keep in the in-memory BAL store cache
 
+      --db.disable-metrics
+          Disable built-in database metrics
+
 Static Files:
       --static-files.blocks-per-file.headers <BLOCKS_PER_FILE_HEADERS>
           Number of blocks per file for the headers segment
@@ -138,6 +141,12 @@ Storage:
 
           The ERA1 files are read from the remote host using HTTP GET requests parsing headers
           and bodies.
+
+      --to-block <TO_BLOCK>
+          Stop the import after this block height has been reached.
+
+          The file containing the block is imported up to and including this height, then the
+          import ends. By default all available blocks are imported.
 
 Logging:
       --log.stdout.format <FORMAT>

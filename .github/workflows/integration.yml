@@ -40,6 +40,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
+      - run: .github/scripts/install_llvm.sh ubuntu
       - uses: dtolnay/rust-toolchain@stable
       - name: Install Geth
         run: .github/scripts/install_geth.sh
@@ -54,7 +55,7 @@ jobs:
         run: |
           cargo nextest run \
             --no-fail-fast \
-            --locked --features "asm-keccak ${{ matrix.network }}" \
+            --locked --features "asm-keccak" \
             --workspace --exclude ef-tests \
             -E "kind(test) and not binary(e2e_testsuite)"
 
@@ -71,7 +72,7 @@ jobs:
           jobs: ${{ toJSON(needs) }}
 
   era-files:
-    name: era1 file integration tests once a day
+    name: era/era1/ere file integration tests once a day
     if: github.event_name == 'schedule' && github.repository == 'paradigmxyz/reth'
     runs-on: ubuntu-latest
     permissions:
@@ -81,6 +82,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
+      - run: .github/scripts/install_llvm.sh ubuntu
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@1f2425cdb59f8fffb99ee16a5968edf6f57a2b93 # v2.75.24
         with:
@@ -89,5 +91,5 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           cache-on-failure: true
-      - name: run era1 files integration tests
+      - name: run era/era1/ere files integration tests
         run: cargo nextest run --no-fail-fast --release --package reth-era --test it -- --ignored

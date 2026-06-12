@@ -94,7 +94,9 @@ Networking:
           Disable Nat discovery
 
       --discovery.addr <DISCOVERY_ADDR>
-          The UDP address to use for devp2p peer discovery version 4
+          The UDP address to use for devp2p peer discovery version 4.
+
+          If unset and `--net-if.experimental` is used, discv4 binds to the resolved interface address.
 
           [default: 0.0.0.0]
 
@@ -264,7 +266,7 @@ Networking:
       --net-if.experimental <IF_NAME>
           Name of network interface used to communicate with peers.
 
-          If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
+          If flag is set, but no value is passed, the default interface for docker `eth0` is tried. If `--discovery.addr` is left at its default, discv4 will also bind to the resolved interface address.
 
       --tx-propagation-policy <TX_PROPAGATION_POLICY>
           Transaction Propagation Policy
@@ -407,6 +409,9 @@ RPC:
 
           This is __not__ used for the authenticated engine-API RPC server, see `--authrpc.jwtsecret`.
 
+      --rpc.disable-metrics
+          Disable built-in RPC request metrics
+
       --rpc.max-request-size <RPC_MAX_REQUEST_SIZE>
           Set the maximum RPC request payload size for both HTTP and WS in megabytes
 
@@ -476,6 +481,11 @@ RPC:
           Maximum number of blocks for `eth_simulateV1` call
 
           [default: 256]
+
+      --rpc.compute-state-root-for-eth-simulate
+          Compute state roots for `eth_simulateV1` responses
+
+          [env: RETH_RPC_COMPUTE_STATE_ROOT_FOR_ETH_SIMULATE=]
 
       --rpc.eth-proof-window <RPC_ETH_PROOF_WINDOW>
           The maximum proof window for historical proof generation. This value allows for generating historical proofs up to configured number of blocks from current tip (up to `tip - window`)
@@ -572,7 +582,7 @@ Gas Price Oracle:
 
 TxPool:
       --txpool.pending-max-count <PENDING_MAX_COUNT>
-          Max number of transaction in the pending sub-pool
+          Max number of transactions in the pending sub-pool
 
           [default: 10000]
 
@@ -582,7 +592,7 @@ TxPool:
           [default: 20]
 
       --txpool.basefee-max-count <BASEFEE_MAX_COUNT>
-          Max number of transaction in the basefee sub-pool
+          Max number of transactions in the basefee sub-pool
 
           [default: 10000]
 
@@ -592,7 +602,7 @@ TxPool:
           [default: 20]
 
       --txpool.queued-max-count <QUEUED_MAX_COUNT>
-          Max number of transaction in the queued sub-pool
+          Max number of transactions in the queued sub-pool
 
           [default: 10000]
 
@@ -602,7 +612,7 @@ TxPool:
           [default: 20]
 
       --txpool.blobpool-max-count <BLOBPOOL_MAX_COUNT>
-          Max number of transaction in the blobpool
+          Max number of transactions in the blobpool
 
           [default: 10000]
 
@@ -849,6 +859,9 @@ Database:
       --db.balstore-cache-size <BALSTORE_CACHE_SIZE>
           Number of recent blocks to keep in the in-memory BAL store cache
 
+      --db.disable-metrics
+          Disable built-in database metrics
+
 Dev testnet:
       --dev
           Start the node in dev mode
@@ -969,9 +982,9 @@ Engine:
       --engine.persistence-backpressure-threshold <PERSISTENCE_BACKPRESSURE_THRESHOLD>
           Configure the maximum canonical-minus-persisted gap before engine API processing stalls.
 
-          This value must be greater than `--engine.persistence-threshold`.
+          If omitted, this defaults to the larger of the default backpressure threshold and twice `--engine.persistence-threshold`.
 
-          [default: 16]
+          This value must be greater than `--engine.persistence-threshold`.
 
       --engine.memory-block-buffer-target <MEMORY_BLOCK_BUFFER_TARGET>
           Configure the target number of blocks to keep in memory
@@ -1147,6 +1160,48 @@ Storage:
 
           [default: true]
           [possible values: true, false]
+
+JIT:
+      --jit
+          Enable JIT compilation of EVM bytecode
+
+      --jit.hot-threshold <HOT_THRESHOLD>
+          Number of observed misses before a bytecode is promoted to JIT compilation
+
+          [default: 8]
+
+      --jit.worker-count <WORKER_COUNT>
+          Number of JIT compilation worker threads
+
+      --jit.channel-capacity <CHANNEL_CAPACITY>
+          Capacity of the lookup-observed event channel. Events are silently dropped when the channel is full
+
+          [default: 4096]
+
+      --jit.max-pending-jobs <MAX_PENDING_JOBS>
+          Maximum number of pending JIT compilation jobs
+
+          [default: 2048]
+
+      --jit.max-bytecode-len <MAX_BYTECODE_LEN>
+          Maximum bytecode length eligible for JIT compilation. Contracts with bytecode larger than this are never promoted to JIT. 0 means no limit
+
+          [default: 0]
+
+      --jit.code-cache-bytes <CODE_CACHE_BYTES>
+          Maximum total resident compiled code size in bytes. When exceeded, the backend evicts least-recently-used entries. 0 means no limit
+
+          [default: 1073741824]
+
+      --jit.idle-evict-duration <IDLE_EVICT_DURATION>
+          Duration after which a compiled program with no lookup hits is evicted
+
+          [default: 1h]
+
+      --jit.debug
+          Enable compiler debug dumps.
+
+          IR, assembly, and bytecode are written to `<datadir>/jit/<spec_id>/<code_hash>/` for each compiled contract. Note that this is not ever cleaned up, and has a non negligible performance overhead.
 
 Logging:
       --log.stdout.format <FORMAT>

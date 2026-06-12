@@ -3,10 +3,8 @@
 use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
-use alloy_eips::{
-    eip2718::WithEncoded,
-    eip7928::{compute_block_access_list_hash, BlockAccessList},
-};
+use alloy_eip7928::{compute_block_access_list_hash, BlockAccessList};
+use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory, GasOutput};
 use alloy_evm::{
     block::{CommitChanges, ExecutableTxParts},
@@ -438,6 +436,14 @@ impl<Executor: BlockExecutor> ExecutorTx<Executor> for Recovered<Executor::Trans
     }
 }
 
+impl<Executor: BlockExecutor> ExecutorTx<Executor>
+    for (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>)
+{
+    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>) {
+        self
+    }
+}
+
 impl<Executor> ExecutorTx<Executor>
     for WithTxEnv<<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>>
 where
@@ -506,7 +512,7 @@ where
 
         let block_access_list = db.take_built_alloy_bal();
         let block_access_list_hash =
-            block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal));
+            block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal.as_slice()));
 
         let hashed_state = state.hashed_post_state(&db.bundle_state);
         let (state_root, trie_updates) = match state_root_precomputed {
@@ -627,16 +633,19 @@ where
     where
         H: OnStateHook + 'static,
     {
-        let result = self
+        let mut executor = self
             .strategy_factory
             .executor_for_block(&mut self.db, block)
-            .map_err(BlockExecutionError::other)?
-            .with_state_hook(Some(Box::new(state_hook)))
-            .execute_block(block.transactions_recovered())?;
+            .map_err(BlockExecutionError::other)?;
 
+        executor.evm_mut().db_mut().set_state_hook(Some(Box::new(state_hook)));
+
+        let result = executor.execute_block(block.transactions_recovered());
+
+        self.db.set_state_hook(None);
         self.db.merge_transitions(BundleRetention::Reverts);
 
-        Ok(result)
+        result
     }
 
     fn into_state(self) -> State<DB> {
@@ -664,13 +673,28 @@ impl<T, Evm: ConfigureEvm> ExecutableTxFor<Evm> for T where
 {
 }
 
-/// A container for a transaction and a transaction environment.
+/// A transaction stored together with its `TxEnv`.
+///
+/// See also [`ExecutableTxParts`] for types that can be split into a transaction environment and
+/// recovered transaction.
 #[derive(Debug)]
 pub struct WithTxEnv<TxEnv, T> {
     /// The transaction environment for EVM.
     pub tx_env: TxEnv,
     /// The recovered transaction.
     pub tx: Arc<T>,
+}
+
+impl<TxEnv, T> WithTxEnv<TxEnv, T> {
+    /// Creates a transaction/environment pair from a type that can be split with
+    /// [`ExecutableTxParts::into_parts`].
+    pub fn new<Tx, InnerTx>(tx: Tx) -> Self
+    where
+        Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = T>,
+    {
+        let (tx_env, tx) = tx.into_parts();
+        Self { tx_env, tx: Arc::new(tx) }
+    }
 }
 
 impl<TxEnv: Clone, T> Clone for WithTxEnv<TxEnv, T> {
@@ -700,16 +724,9 @@ impl<TxEnv, T: RecoveredTx<Tx>, Tx> ExecutableTxParts<TxEnv, Tx> for WithTxEnv<T
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Address;
-    use alloy_consensus::constants::KECCAK_EMPTY;
-    use alloy_evm::block::state_changes::balance_increment_state;
-    use alloy_primitives::{address, map::HashMap, U256};
     use core::marker::PhantomData;
     use reth_ethereum_primitives::EthPrimitives;
-    use revm::{
-        database::{CacheDB, EmptyDB},
-        state::AccountInfo,
-    };
+    use revm::database::{CacheDB, EmptyDB};
 
     #[derive(Clone, Debug, Default)]
     struct TestExecutorProvider;
@@ -767,102 +784,5 @@ mod tests {
         let db = CacheDB::<EmptyDB>::default();
         let executor = provider.executor(db);
         let _ = executor.execute(&Default::default());
-    }
-
-    fn setup_state_with_account(
-        addr: Address,
-        balance: u128,
-        nonce: u64,
-    ) -> State<CacheDB<EmptyDB>> {
-        let db = CacheDB::<EmptyDB>::default();
-        let mut state = State::builder().with_database(db).with_bundle_update().build();
-
-        let account_info = AccountInfo {
-            balance: U256::from(balance),
-            nonce,
-            code_hash: KECCAK_EMPTY,
-            code: None,
-            account_id: None,
-        };
-        state.insert_account(addr, account_info);
-        state
-    }
-
-    #[test]
-    fn test_balance_increment_state_zero() {
-        let addr = address!("0x1000000000000000000000000000000000000000");
-        let mut state = setup_state_with_account(addr, 100, 1);
-
-        let mut increments = HashMap::default();
-        increments.insert(addr, 0);
-
-        let result = balance_increment_state(&increments, &mut state).unwrap();
-        assert!(result.is_empty(), "Zero increments should be ignored");
-    }
-
-    #[test]
-    fn test_balance_increment_state_empty_increments_map() {
-        let mut state = State::builder()
-            .with_database(CacheDB::<EmptyDB>::default())
-            .with_bundle_update()
-            .build();
-
-        let increments = HashMap::default();
-        let result = balance_increment_state(&increments, &mut state).unwrap();
-        assert!(result.is_empty(), "Empty increments map should return empty state");
-    }
-
-    #[test]
-    fn test_balance_increment_state_multiple_valid_increments() {
-        let addr1 = address!("0x1000000000000000000000000000000000000000");
-        let addr2 = address!("0x2000000000000000000000000000000000000000");
-
-        let mut state = setup_state_with_account(addr1, 100, 1);
-
-        let account2 = AccountInfo {
-            balance: U256::from(200),
-            nonce: 1,
-            code_hash: KECCAK_EMPTY,
-            code: None,
-            account_id: None,
-        };
-        state.insert_account(addr2, account2);
-
-        let mut increments = HashMap::default();
-        increments.insert(addr1, 50);
-        increments.insert(addr2, 100);
-
-        let result = balance_increment_state(&increments, &mut state).unwrap();
-
-        assert_eq!(result.len(), 2);
-        assert_eq!(result.get(&addr1).unwrap().info.balance, U256::from(100));
-        assert_eq!(result.get(&addr2).unwrap().info.balance, U256::from(200));
-    }
-
-    #[test]
-    fn test_balance_increment_state_mixed_zero_and_nonzero_increments() {
-        let addr1 = address!("0x1000000000000000000000000000000000000000");
-        let addr2 = address!("0x2000000000000000000000000000000000000000");
-
-        let mut state = setup_state_with_account(addr1, 100, 1);
-
-        let account2 = AccountInfo {
-            balance: U256::from(200),
-            nonce: 1,
-            code_hash: KECCAK_EMPTY,
-            code: None,
-            account_id: None,
-        };
-        state.insert_account(addr2, account2);
-
-        let mut increments = HashMap::default();
-        increments.insert(addr1, 0);
-        increments.insert(addr2, 100);
-
-        let result = balance_increment_state(&increments, &mut state).unwrap();
-
-        assert_eq!(result.len(), 1, "Only non-zero increments should be included");
-        assert!(!result.contains_key(&addr1), "Zero increment account should not be included");
-        assert_eq!(result.get(&addr2).unwrap().info.balance, U256::from(200));
     }
 }
