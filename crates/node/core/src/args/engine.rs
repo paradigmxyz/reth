@@ -424,12 +424,12 @@ pub struct EngineArgs {
     pub allow_unwind_canonical_header: bool,
 
     /// Configure the number of storage proof workers in the Tokio blocking pool.
-    /// If not specified, defaults to 2x available parallelism.
+    /// If not specified, defaults to 2x available parallelism, with a minimum of 128.
     #[arg(long = "engine.storage-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().storage_worker_count.map(|v| v.to_string().into())))]
     pub storage_worker_count: Option<usize>,
 
     /// Configure the number of account proof workers in the Tokio blocking pool.
-    /// If not specified, defaults to the same count as storage workers.
+    /// If not specified, defaults to 2x available parallelism, with a minimum of 128.
     #[arg(long = "engine.account-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().account_worker_count.map(|v| v.to_string().into())))]
     pub account_worker_count: Option<usize>,
 
