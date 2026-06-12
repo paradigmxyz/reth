@@ -361,26 +361,22 @@ where
 
         // execute after the parent block, replaying `tx_index` transactions
         let state_at = block.parent_hash();
-        let bal_block = block.header().block_access_list_hash().is_some().then(|| block.hash());
 
+        // Note: this must replay instead of positioning the state with the block's BAL because
+        // the traced call is not part of the block and can access state outside the BAL, which
+        // the BAL-backed state treats as an error.
         self.eth_api()
-            .spawn_with_state_at_block_and_bal(state_at, bal_block, move |eth_api, mut db| {
+            .spawn_with_state_at_block(state_at, move |eth_api, mut db| {
                 // 1. apply pre-execution changes
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
-                // position the state at the target transaction, this is a noop if no BAL is
-                // attached
-                db.set_bal_index(BlockAccessIndex::from_tx_index(tx_index as u64));
-
                 // 2. replay the required number of transactions
-                if !db.has_bal() {
-                    eth_api.replay_transactions_until(
-                        &mut db,
-                        evm_env.clone(),
-                        block.transactions_recovered(),
-                        *block.body().transactions()[tx_index].tx_hash(),
-                    )?;
-                }
+                eth_api.replay_transactions_until(
+                    &mut db,
+                    evm_env.clone(),
+                    block.transactions_recovered(),
+                    *block.body().transactions()[tx_index].tx_hash(),
+                )?;
 
                 // 3. now execute the trace call on this state
                 let (evm_env, tx_env) =
