@@ -17,7 +17,7 @@ use reth_eth_wire_types::{
     BlockAccessLists, EthNetworkPrimitives, HeadersDirection, NetworkPrimitives,
 };
 use reth_network_peers::{PeerId, WithPeerId};
-use reth_primitives_traits::{Block, SealedBlock, SealedHeader};
+use reth_primitives_traits::{Block, SealedBlock, SealedBlockWith, SealedHeader};
 use std::{
     cmp::Reverse,
     collections::{HashMap, VecDeque},
@@ -30,63 +30,8 @@ use std::{
 };
 use tracing::{debug, trace};
 
-/// A sealed block with associated data.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SealedBlockWith<B: Block, T = Option<Sealed<Bytes>>> {
-    block: SealedBlock<B>,
-    data: T,
-}
-
-/// Raw block access-list RLP bytes sealed by `header.block_access_list_hash`.
-pub type SealedBlockAccessList = Sealed<Bytes>;
-
 /// A sealed block with optional validated block access-list data.
-pub type SealedBlockWithAccessList<B> = SealedBlockWith<B, Option<SealedBlockAccessList>>;
-
-impl<B: Block, T> SealedBlockWith<B, T> {
-    /// Creates a sealed block with associated data.
-    pub const fn new(block: SealedBlock<B>, data: T) -> Self {
-        Self { block, data }
-    }
-
-    /// Returns the sealed block.
-    pub const fn block(&self) -> &SealedBlock<B> {
-        &self.block
-    }
-
-    /// Returns the associated data.
-    pub const fn data(&self) -> &T {
-        &self.data
-    }
-
-    /// Consumes the wrapper and returns its parts.
-    pub fn into_parts(self) -> (SealedBlock<B>, T) {
-        (self.block, self.data)
-    }
-}
-
-impl<B: Block> SealedBlockWithAccessList<B> {
-    /// Creates a full block response without block access-list data.
-    pub const fn from_block(block: SealedBlock<B>) -> Self {
-        Self::new(block, None)
-    }
-
-    /// Returns the optional raw block access-list data, sealed by its hash.
-    pub const fn access_list(&self) -> Option<&SealedBlockAccessList> {
-        self.data.as_ref()
-    }
-
-    /// Returns the optional raw block access-list data, sealed by its hash.
-    pub const fn access_lists(&self) -> Option<&SealedBlockAccessList> {
-        self.data.as_ref()
-    }
-}
-
-impl<B: Block> From<SealedBlock<B>> for SealedBlockWith<B> {
-    fn from(block: SealedBlock<B>) -> Self {
-        Self::new(block, None)
-    }
-}
+pub type SealedBlockWithAccessList<B> = SealedBlockWith<B, Option<Sealed<Bytes>>>;
 
 /// A Client that can fetch full blocks from the network.
 #[derive(Debug, Clone)]
@@ -1283,7 +1228,7 @@ mod tests {
     fn range_access_lists<B: Block>(
         blocks: &[SealedBlockWithAccessList<B>],
     ) -> Vec<Option<Sealed<Bytes>>> {
-        blocks.iter().map(|block| block.access_list().cloned()).collect()
+        blocks.iter().map(|block| block.data().clone()).collect()
     }
 
     #[tokio::test]
@@ -1326,7 +1271,7 @@ mod tests {
         let expected_access_list = sealed_access_list(access_list);
 
         assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
-        assert_eq!(received.access_list(), Some(&expected_access_list));
+        assert_eq!(received.data().as_ref(), Some(&expected_access_list));
         assert_eq!(request_count.load(Ordering::SeqCst), 1);
     }
 
@@ -1350,7 +1295,7 @@ mod tests {
 
         let expected_access_list = sealed_access_list(access_list);
         assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
-        assert_eq!(received.access_list(), Some(&expected_access_list));
+        assert_eq!(received.data().as_ref(), Some(&expected_access_list));
         assert_eq!(*requirement.lock(), Some(BalRequirement::Mandatory));
     }
 
@@ -1374,7 +1319,7 @@ mod tests {
 
         let expected_access_list = sealed_access_list(access_list);
         assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
-        assert_eq!(received.access_list(), Some(&expected_access_list));
+        assert_eq!(received.data().as_ref(), Some(&expected_access_list));
         assert_eq!(request_count.load(Ordering::SeqCst), 1);
     }
 
@@ -1396,7 +1341,7 @@ mod tests {
                 .expect("block request should complete without access lists");
 
         assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
-        assert!(received.access_list().is_none());
+        assert!(received.data().is_none());
         assert_eq!(bad_messages.load(Ordering::SeqCst), 1);
     }
 
@@ -1417,7 +1362,7 @@ mod tests {
                 .expect("block request should complete without access lists");
 
         assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
-        assert!(received.access_list().is_none());
+        assert!(received.data().is_none());
         assert_eq!(bad_messages.load(Ordering::SeqCst), 0);
     }
 
@@ -1439,7 +1384,7 @@ mod tests {
                 .expect("block request should complete without access lists");
 
         assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
-        assert!(received.access_list().is_none());
+        assert!(received.data().is_none());
         assert_eq!(bad_messages.load(Ordering::SeqCst), 1);
     }
 
@@ -1463,7 +1408,7 @@ mod tests {
                 .expect("block request should complete without access lists");
 
         assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
-        assert!(received.access_list().is_none());
+        assert!(received.data().is_none());
         assert_eq!(request_count.load(Ordering::SeqCst), 1);
         assert_eq!(bad_messages.load(Ordering::SeqCst), 0);
     }
@@ -1488,7 +1433,7 @@ mod tests {
                 .expect("block request should complete without access lists");
 
         assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
-        assert!(received.access_list().is_none());
+        assert!(received.data().is_none());
         assert_eq!(request_count.load(Ordering::SeqCst), 1);
         assert_eq!(
             *requirement.lock(),
