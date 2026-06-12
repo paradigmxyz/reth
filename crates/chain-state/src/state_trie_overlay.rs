@@ -140,54 +140,12 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
             }
         }
 
-        // Snapshot matching parent overlays before spawning so DashMap iteration guards are
-        // dropped.
-        let cached_parent_overlays = self
-            .overlays
-            .iter()
-            .filter_map(|entry| {
-                let key = *entry.key();
-                (key.tip_hash == parent_hash && entry.value().is_ready()).then_some(key.anchor_hash)
-            })
-            .collect::<Vec<_>>();
-
         debug!(
             target: "chain_state::state_trie_overlay",
             %hash,
             %parent_hash,
             "inserted block into state trie overlay manager"
         );
-        if cached_parent_overlays.is_empty() {
-            return
-        }
-
-        #[cfg(feature = "rayon")]
-        let Some(worker_pool) = self.worker_pool.clone() else {
-            return
-        };
-
-        #[cfg(not(feature = "rayon"))]
-        let _ = cached_parent_overlays;
-
-        #[cfg(feature = "rayon")]
-        {
-            let parent_span = span;
-            for anchor_hash in cached_parent_overlays {
-                let manager = <Self as Clone>::clone(self);
-                let parent_span = parent_span.clone();
-                worker_pool.spawn(move || {
-                    let _span = tracing::trace_span!(
-                        target: "chain_state::state_trie_overlay",
-                        parent: parent_span,
-                        "precompute_state_trie_overlay",
-                        tip_hash = %hash,
-                        anchor_hash = %anchor_hash,
-                    )
-                    .entered();
-                    let _ = manager.precompute_overlay(hash, anchor_hash);
-                });
-            }
-        }
     }
 
     /// Removes blocks from the live block graph and prunes cached overlays that can no longer be
@@ -267,16 +225,6 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         Ok((Arc::clone(&input.nodes), Arc::clone(&input.state)))
     }
 
-    #[cfg(feature = "rayon")]
-    fn precompute_overlay(
-        &self,
-        tip_hash: B256,
-        anchor_hash: B256,
-    ) -> Result<(), StateTrieOverlayError> {
-        let _ = self.get_overlay_inner(tip_hash, anchor_hash, OverlayLookupMode::Precompute)?;
-        Ok(())
-    }
-
     #[tracing::instrument(
         level = "trace",
         target = "chain_state::state_trie_overlay",
@@ -294,16 +242,14 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         tip_hash: B256,
         anchor_hash: B256,
     ) -> Result<Arc<TrieInputSorted>, StateTrieOverlayError> {
-        self.get_overlay_inner(tip_hash, anchor_hash, OverlayLookupMode::Required)
-            .map(|input| input.expect("required overlay lookups always return an overlay"))
+        self.get_overlay_inner(tip_hash, anchor_hash)
     }
 
     fn get_overlay_inner(
         &self,
         tip_hash: B256,
         anchor_hash: B256,
-        mode: OverlayLookupMode,
-    ) -> Result<Option<Arc<TrieInputSorted>>, StateTrieOverlayError> {
+    ) -> Result<Arc<TrieInputSorted>, StateTrieOverlayError> {
         let key = OverlayCacheKey { anchor_hash, tip_hash };
         let span = tracing::Span::current();
 
@@ -312,16 +258,12 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
                 OverlayCacheEntry::Ready(input) => {
                     self.metrics.overlay_cache_reuses.increment(1);
                     span.record("cache_reused", true);
-                    Some(input)
+                    input
                 }
                 OverlayCacheEntry::Computing(waiter) => {
                     span.record("cache_reused", true);
-                    if mode == OverlayLookupMode::Precompute {
-                        None
-                    } else {
-                        self.metrics.overlay_cache_reuses.increment(1);
-                        Some(waiter.wait())
-                    }
+                    self.metrics.overlay_cache_reuses.increment(1);
+                    waiter.wait()
                 }
             })
         }
@@ -364,7 +306,6 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
             Ready(Arc<TrieInputSorted>),
             Wait(Arc<OverlayWaiter>),
             Compute(Arc<OverlayWaiter>),
-            Skip,
         }
 
         let action = match self.overlays.entry(key) {
@@ -376,12 +317,8 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
                 }
                 OverlayCacheEntry::Computing(waiter) => {
                     span.record("cache_reused", true);
-                    if mode == OverlayLookupMode::Precompute {
-                        CacheAction::Skip
-                    } else {
-                        self.metrics.overlay_cache_reuses.increment(1);
-                        CacheAction::Wait(waiter)
-                    }
+                    self.metrics.overlay_cache_reuses.increment(1);
+                    CacheAction::Wait(waiter)
                 }
             },
             Entry::Vacant(entry) => {
@@ -393,9 +330,8 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         };
 
         match action {
-            CacheAction::Ready(input) => Ok(Some(input)),
-            CacheAction::Wait(waiter) => Ok(Some(waiter.wait())),
-            CacheAction::Skip => Ok(None),
+            CacheAction::Ready(input) => Ok(input),
+            CacheAction::Wait(waiter) => Ok(waiter.wait()),
             CacheAction::Compute(waiter) => {
                 let input = self.compute_overlay(compute_input, anchor_hash, span);
                 waiter.finish(Arc::clone(&input));
@@ -412,7 +348,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
                     }
                 }
 
-                Ok(Some(input))
+                Ok(input)
             }
         }
     }
@@ -510,22 +446,12 @@ enum OverlayCacheEntry {
 }
 
 impl OverlayCacheEntry {
-    const fn is_ready(&self) -> bool {
-        matches!(self, Self::Ready(_))
-    }
-
     fn ready(&self) -> Option<Arc<TrieInputSorted>> {
         match self {
             Self::Ready(input) => Some(Arc::clone(input)),
             Self::Computing(_) => None,
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum OverlayLookupMode {
-    Required,
-    Precompute,
 }
 
 struct OverlayWaiter {
@@ -676,8 +602,6 @@ mod tests {
     use alloy_primitives::U256;
     use reth_primitives_traits::Account;
     use reth_trie::{updates::TrieUpdatesSorted, HashedPostState, HashedStorage};
-    #[cfg(feature = "rayon")]
-    use std::time::Instant;
     use std::{
         sync::{mpsc, Arc},
         thread,
@@ -814,31 +738,9 @@ mod tests {
         assert!(state.is_empty());
     }
 
-    #[cfg(feature = "rayon")]
     #[test]
-    fn precompute_skips_in_progress_overlay() {
-        let manager = StateTrieOverlayManager::<EthPrimitives>::new(Arc::new(WorkerPool::new(
-            1,
-            "test-ovly",
-        )));
-        let key = OverlayCacheKey {
-            anchor_hash: B256::with_last_byte(1),
-            tip_hash: B256::with_last_byte(2),
-        };
-        manager.overlays.insert(key, OverlayCacheEntry::Computing(Arc::new(OverlayWaiter::new())));
-
-        let (tx, rx) = mpsc::channel();
-        thread::spawn(move || {
-            tx.send(manager.precompute_overlay(key.tip_hash, key.anchor_hash)).unwrap();
-        });
-
-        rx.recv_timeout(Duration::from_secs(1)).unwrap().unwrap();
-    }
-
-    #[cfg(feature = "rayon")]
-    #[test]
-    fn insert_block_prepares_child_overlay_from_cached_parent() {
-        let manager = StateTrieOverlayManager::new(Arc::new(WorkerPool::new(2, "test-ovly")));
+    fn insert_block_does_not_prepare_child_overlay_from_cached_parent() {
+        let manager = StateTrieOverlayManager::default();
         let blocks = test_blocks();
 
         manager.insert_block(blocks[0].clone());
@@ -851,14 +753,7 @@ mod tests {
         manager.insert_block(blocks[1].clone());
 
         let child_key = OverlayCacheKey { anchor_hash, tip_hash: child_hash };
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while !manager.overlays.contains_key(&child_key) {
-            assert!(
-                Instant::now() < deadline,
-                "timed out waiting for optimistically prepared child overlay"
-            );
-            thread::sleep(Duration::from_millis(10));
-        }
+        assert!(!manager.overlays.contains_key(&child_key));
 
         let (_, state) = manager.overlay_for_parent(child_hash, anchor_hash).unwrap();
         assert_eq!(state.accounts.len(), 2);
