@@ -427,7 +427,7 @@ mod tests {
             BalConfig::with_in_memory_retention(PruneMode::Before(2)),
         ));
 
-        bal_store.insert(NumHash::new(1, old_hash), RawBal::new(old_bal.clone())).unwrap();
+        bal_store.insert(NumHash::new(1, old_hash), RawBal::new(old_bal)).unwrap();
         bal_store
             .insert(NumHash::new(2, retained_hash), RawBal::new(retained_bal.clone()))
             .unwrap();
