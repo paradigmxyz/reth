@@ -159,18 +159,13 @@ impl ProofWorkerHandle {
     /// # Parameters
     /// - `runtime`: The centralized runtime used to spawn blocking worker tasks
     /// - `task_ctx`: Shared context with database view and prefix sets
-    /// - `halve_workers`: Whether to halve the worker pool size (for small blocks)
     #[instrument(
         name = "ProofWorkerHandle::new",
         level = "debug",
         target = "trie::proof_task",
         skip_all
     )]
-    pub fn new<Factory>(
-        runtime: &Runtime,
-        task_ctx: ProofTaskCtx<Factory>,
-        halve_workers: bool,
-    ) -> Self
+    pub fn new<Factory>(runtime: &Runtime, task_ctx: ProofTaskCtx<Factory>) -> Self
     where
         Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
             + Clone
@@ -183,11 +178,8 @@ impl ProofWorkerHandle {
 
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
 
-        let divisor = if halve_workers { 2 } else { 1 };
-        let storage_worker_count =
-            runtime.proof_storage_worker_pool().current_num_threads() / divisor;
-        let account_worker_count =
-            runtime.proof_account_worker_pool().current_num_threads() / divisor;
+        let storage_worker_count = runtime.proof_storage_worker_pool().current_num_threads();
+        let account_worker_count = runtime.proof_account_worker_pool().current_num_threads();
 
         let storage_availability = Arc::new(AvailabilitySheet::new(storage_worker_count));
         let account_availability = Arc::new(AvailabilitySheet::new(account_worker_count));
@@ -196,7 +188,6 @@ impl ProofWorkerHandle {
             target: "trie::proof_task",
             storage_worker_count,
             account_worker_count,
-            halve_workers,
             "Spawning proof worker pools"
         );
 
@@ -1180,7 +1171,7 @@ mod tests {
         let ctx = test_ctx(factory);
 
         let runtime = reth_tasks::Runtime::test();
-        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false);
+        let proof_handle = ProofWorkerHandle::new(&runtime, ctx);
 
         // Verify handle can be cloned
         let _cloned_handle = proof_handle.clone();
