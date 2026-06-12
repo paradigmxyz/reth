@@ -3139,12 +3139,20 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         // Track the number of inserted entries.
         let mut num_entries = 0;
 
-        reth_trie_db::with_adapter!(self, |A| {
-            Self::write_account_trie_updates::<A>(self.tx_ref(), trie_updates, &mut num_entries)?;
-        });
+        if !trie_updates.account_nodes_ref().is_empty() {
+            reth_trie_db::with_adapter!(self, |A| {
+                Self::write_account_trie_updates::<A>(
+                    self.tx_ref(),
+                    trie_updates,
+                    &mut num_entries,
+                )?;
+            });
+        }
 
-        num_entries +=
-            self.write_storage_trie_updates_sorted(trie_updates.storage_tries_ref().iter())?;
+        if !trie_updates.storage_tries_ref().is_empty() {
+            num_entries +=
+                self.write_storage_trie_updates_sorted(trie_updates.storage_tries_ref().iter())?;
+        }
 
         Ok(num_entries)
     }
