@@ -16,6 +16,7 @@ use alloy_rpc_types_trace::{
     tracerequest::TraceCallRequest,
 };
 use async_trait::async_trait;
+use futures::StreamExt;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_evm::ConfigureEvm;
@@ -27,7 +28,7 @@ use reth_rpc_eth_api::{
     FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction, EthConfig};
-use reth_storage_api::{BlockNumReader, BlockReader};
+use reth_storage_api::BlockNumReader;
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::DatabaseCommit;
@@ -39,6 +40,9 @@ use revm_inspectors::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
+
+/// Maximum number of `trace_filter` blocks replayed concurrently.
+const TRACE_FILTER_BLOCK_BUFFER_SIZE: usize = 4;
 
 /// `trace` API implementation.
 ///
@@ -374,7 +378,7 @@ where
             .into())
         }
 
-        // ensure that the range is not too large, since we need to fetch all blocks in the range
+        // ensure that the range is not too large, since every block in the range may be replayed
         let distance = end.saturating_sub(start);
         if distance > self.inner.eth_config.max_trace_filter_blocks {
             return Err(EthApiError::InvalidParams(format!(
@@ -385,72 +389,75 @@ where
         }
 
         let mut all_traces = Vec::new();
-        let mut block_traces = Vec::with_capacity(self.inner.eth_config.max_tracing_requests);
-        for chunk_start in (start..=end).step_by(self.inner.eth_config.max_tracing_requests) {
-            let chunk_end = std::cmp::min(
-                chunk_start + self.inner.eth_config.max_tracing_requests as u64 - 1,
-                end,
-            );
+        let block_buffer_size =
+            self.inner.eth_config.max_tracing_requests.clamp(1, TRACE_FILTER_BLOCK_BUFFER_SIZE);
+        let mut include_reward_traces = true;
 
-            // fetch all blocks in that chunk
-            let blocks = self
-                .eth_api()
-                .spawn_blocking_io(move |this| {
-                    Ok(this
-                        .provider()
-                        .recovered_block_range(chunk_start..=chunk_end)
-                        .map_err(Eth::Error::from_eth_err)?
-                        .into_iter()
-                        .map(Arc::new)
-                        .collect::<Vec<_>>())
-                })
-                .await?;
-
-            // trace all blocks
-            for block in &blocks {
+        let mut block_replays = futures::stream::iter(start..=end)
+            .map(|block_number| {
+                let this = self.clone();
                 let matcher = matcher.clone();
-                let traces = self.eth_api().trace_block_until(
-                    block.hash().into(),
-                    Some(block.clone()),
-                    None,
-                    TracingInspectorConfig::default_parity(),
-                    move |tx_info, mut ctx| {
-                        let mut traces = ctx
-                            .take_inspector()
-                            .into_parity_builder()
-                            .into_localized_transaction_traces(tx_info);
-                        traces.retain(|trace| matcher.matches(&trace.trace));
-                        Ok(Some(traces))
-                    },
-                );
-                block_traces.push(traces);
-            }
 
-            #[expect(clippy::iter_with_drain)]
-            let block_traces = futures::future::try_join_all(block_traces.drain(..)).await?;
-            all_traces.extend(block_traces.into_iter().flatten().flat_map(|traces| {
-                traces.into_iter().flatten().flat_map(|traces| traces.into_iter())
-            }));
+                async move {
+                    let block_id: BlockId = block_number.into();
+                    let Some(block) = this.eth_api().recovered_block(block_id).await? else {
+                        return Err(EthApiError::HeaderNotFound(block_id).into())
+                    };
 
-            // add reward traces for all blocks
-            for block in &blocks {
-                if let Some(base_block_reward) = self.calculate_base_block_reward(block.header())? {
-                    all_traces.extend(
-                        self.extract_reward_traces(
-                            block.header(),
-                            block.hash(),
-                            block.body().ommers(),
-                            base_block_reward,
+                    let block_hash = block.hash();
+                    let permit = this.acquire_trace_permit().await;
+                    let traces = this
+                        .eth_api()
+                        .trace_block_until(
+                            block_hash.into(),
+                            Some(block.clone()),
+                            None,
+                            TracingInspectorConfig::default_parity(),
+                            move |tx_info, mut ctx| {
+                                // Keep the block replay permit inside the spawned replay task.
+                                let _block_replay_permit = &permit;
+                                let mut traces = ctx
+                                    .take_inspector()
+                                    .into_parity_builder()
+                                    .into_localized_transaction_traces(tx_info);
+                                traces.retain(|trace| matcher.matches(&trace.trace));
+                                Ok(Some(traces))
+                            },
                         )
-                        .into_iter()
-                        .filter(|trace| matcher.matches(&trace.trace)),
-                    );
-                } else {
-                    // no block reward, means we're past the Paris hardfork and don't expect any
-                    // rewards because the blocks in ascending order
-                    break
+                        .await?;
+
+                    Ok::<_, Eth::Error>((block, traces))
                 }
+            })
+            .buffered(block_buffer_size);
+
+        while let Some(block_replay) = block_replays.next().await {
+            let (block, traces) = block_replay?;
+            let reward_traces = if include_reward_traces {
+                if let Some(base_block_reward) = self.calculate_base_block_reward(block.header())? {
+                    self.extract_reward_traces(
+                        block.header(),
+                        block.hash(),
+                        block.body().ommers(),
+                        base_block_reward,
+                    )
+                    .into_iter()
+                    .filter(|trace| matcher.matches(&trace.trace))
+                    .collect::<Vec<_>>()
+                } else {
+                    // Blocks are processed in ascending order, so once a historical range reaches
+                    // post-Paris blocks, later blocks in the range have no rewards.
+                    include_reward_traces = false;
+                    Vec::new()
+                }
+            } else {
+                Vec::new()
+            };
+
+            if let Some(traces) = traces {
+                all_traces.extend(traces.into_iter().flatten().flatten());
             }
+            all_traces.extend(reward_traces);
 
             // Skips the first `after` number of matching traces.
             if let Some(cutoff) = after.map(|a| a as usize) &&
@@ -720,7 +727,6 @@ where
     /// # Limitations
     /// This currently requires block filter fields, since reth does not have address indices yet.
     async fn trace_filter(&self, filter: TraceFilter) -> RpcResult<Vec<LocalizedTransactionTrace>> {
-        let _permit = self.inner.blocking_task_guard.clone().acquire_many_owned(2).await;
         Ok(Self::trace_filter(self, filter).await.map_err(Into::into)?)
     }
 
