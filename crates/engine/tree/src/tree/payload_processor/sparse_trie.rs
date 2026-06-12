@@ -468,6 +468,17 @@ where
         skip_all
     )]
     fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
+        for (&address, &account) in &hashed_state_update.accounts {
+            self.trie.record_account_touch(address);
+
+            // Track account as touched.
+            self.new_account_updates.insert(address, LeafUpdate::Touched);
+
+            // Track account in `pending_account_updates` so that once storage root is computed,
+            // it will be updated in the accounts trie.
+            self.pending_account_updates.insert(address, Some(account));
+        }
+
         for (&address, storage) in &hashed_state_update.storages {
             if !storage.storage.is_empty() {
                 // Look up outer maps once per address instead of once per slot.
@@ -498,20 +509,6 @@ where
             // Make sure account is tracked in `pending_account_updates` so that once storage root
             // is computed, it will be updated in the accounts trie.
             self.pending_account_updates.entry(address).or_insert(None);
-        }
-
-        for (&address, &account) in &hashed_state_update.accounts {
-            self.trie.record_account_touch(address);
-
-            // Track account as touched.
-            //
-            // This might overwrite an existing update, which is fine, because storage root from it
-            // is already tracked in the trie and can be easily fetched again.
-            self.new_account_updates.insert(address, LeafUpdate::Touched);
-
-            // Track account in `pending_account_updates` so that once storage root is computed,
-            // it will be updated in the accounts trie.
-            self.pending_account_updates.insert(address, Some(account));
         }
 
         self.final_hashed_state.extend(hashed_state_update);
