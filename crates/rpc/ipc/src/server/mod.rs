@@ -9,7 +9,10 @@ use interprocess::local_socket::{
     GenericFilePath, ListenerOptions, ToFsName,
 };
 use jsonrpsee::{
-    core::{middleware::layer::RpcLoggerLayer, JsonRawValue, TEN_MB_SIZE_BYTES},
+    core::{
+        middleware::layer::{Either as RpcEither, RpcLoggerLayer},
+        JsonRawValue, TEN_MB_SIZE_BYTES,
+    },
     server::{
         middleware::rpc::RpcServiceT, stop_channel, ConnectionGuard, ConnectionPermit, IdProvider,
         RandomIntegerIdProvider, ServerHandle, StopHandle,
@@ -316,11 +319,11 @@ impl<L> RpcServiceBuilder<L> {
     pub fn option_layer<T>(
         self,
         layer: Option<T>,
-    ) -> RpcServiceBuilder<Stack<Either<T, Identity>, L>> {
+    ) -> RpcServiceBuilder<Stack<RpcEither<T, Identity>, L>> {
         let layer = if let Some(layer) = layer {
-            Either::Left(layer)
+            RpcEither::Left(layer)
         } else {
-            Either::Right(Identity::new())
+            RpcEither::Right(Identity::new())
         };
         self.layer(layer)
     }

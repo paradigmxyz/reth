@@ -28,7 +28,6 @@ use alloy_consensus::constants::{
 use alloy_eips::{
     eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE},
     eip4844::BLOB_TX_MIN_BLOB_GASPRICE,
-    Typed2718,
 };
 #[cfg(test)]
 use alloy_primitives::Address;
@@ -710,6 +709,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Update sub-pools size metrics.
     pub(crate) fn update_size_metrics(&self) {
+        self.all_transactions.update_size_metrics();
         let stats = self.size();
         self.metrics.pending_pool_transactions.set(stats.pending as f64);
         self.metrics.pending_pool_size_bytes.set(stats.pending_size as f64);
@@ -724,30 +724,13 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Updates transaction type metrics for the entire pool.
     pub(crate) fn update_transaction_type_metrics(&self) {
-        let mut legacy_count = 0;
-        let mut eip2930_count = 0;
-        let mut eip1559_count = 0;
-        let mut eip4844_count = 0;
-        let mut eip7702_count = 0;
-        let mut other_count = 0;
-
-        for tx in self.all_transactions.transactions_iter() {
-            match tx.transaction.ty() {
-                LEGACY_TX_TYPE_ID => legacy_count += 1,
-                EIP2930_TX_TYPE_ID => eip2930_count += 1,
-                EIP1559_TX_TYPE_ID => eip1559_count += 1,
-                EIP4844_TX_TYPE_ID => eip4844_count += 1,
-                EIP7702_TX_TYPE_ID => eip7702_count += 1,
-                _ => other_count += 1,
-            }
-        }
-
-        self.metrics.total_legacy_transactions.set(legacy_count as f64);
-        self.metrics.total_eip2930_transactions.set(eip2930_count as f64);
-        self.metrics.total_eip1559_transactions.set(eip1559_count as f64);
-        self.metrics.total_eip4844_transactions.set(eip4844_count as f64);
-        self.metrics.total_eip7702_transactions.set(eip7702_count as f64);
-        self.metrics.total_other_transactions.set(other_count as f64);
+        let counts = &self.all_transactions.tx_type_counts;
+        self.metrics.total_legacy_transactions.set(counts.legacy as f64);
+        self.metrics.total_eip2930_transactions.set(counts.eip2930 as f64);
+        self.metrics.total_eip1559_transactions.set(counts.eip1559 as f64);
+        self.metrics.total_eip4844_transactions.set(counts.eip4844 as f64);
+        self.metrics.total_eip7702_transactions.set(counts.eip7702 as f64);
+        self.metrics.total_other_transactions.set(counts.other as f64);
     }
 
     pub(crate) fn add_transaction(
@@ -827,9 +810,6 @@ impl<T: TransactionOrdering> TxPool<T> {
                         queued_reason,
                     }
                 };
-
-                // Update size metrics after adding and potentially moving transactions.
-                self.update_size_metrics();
 
                 Ok(res)
             }
@@ -1416,6 +1396,9 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     local_transactions_config: LocalTransactionConfig,
     /// All accounts with a pooled authorization
     auths: FxHashMap<SenderId, B256Set>,
+    /// Number of transactions in the pool by transaction type, tracked incrementally so metrics
+    /// updates don't require iterating the entire pool.
+    tx_type_counts: TxTypeCounts,
     /// All Transactions metrics
     metrics: AllTransactionsMetrics,
 }
@@ -1754,6 +1737,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let tx = self.by_hash.remove(tx_hash)?;
         let internal = self.txs.remove(&tx.transaction_id)?;
         self.remove_auths(&internal);
+        self.tx_type_counts.dec(internal.transaction.transaction.ty());
         // decrement the counter for the sender.
         self.tx_decr(tx.sender_id());
         Some((tx, internal.subpool))
@@ -1769,6 +1753,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let internal = self.txs.remove(tx_id)?;
         let tx = self.by_hash.remove(internal.transaction.hash())?;
         self.remove_auths(&internal);
+        self.tx_type_counts.dec(internal.transaction.transaction.ty());
         // decrement the counter for the sender.
         self.tx_decr(tx.sender_id());
         Some((tx, internal.subpool))
@@ -1815,6 +1800,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
         // decrement the counter for the sender.
         self.tx_decr(internal.transaction.sender_id());
+        self.tx_type_counts.dec(internal.transaction.transaction.ty());
 
         let result =
             self.by_hash.remove(internal.transaction.hash()).map(|tx| (tx, internal.subpool));
@@ -2060,6 +2046,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             Entry::Vacant(entry) => {
                 // Insert the transaction in both maps
                 self.by_hash.insert(*pool_tx.transaction.hash(), pool_tx.transaction.clone());
+                self.tx_type_counts.inc(pool_tx.transaction.transaction.ty());
                 entry.insert(pool_tx);
             }
             Entry::Occupied(mut entry) => {
@@ -2076,7 +2063,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 }
                 let new_hash = *pool_tx.transaction.hash();
                 let new_transaction = pool_tx.transaction.clone();
+                self.tx_type_counts.inc(pool_tx.transaction.transaction.ty());
                 let replaced = entry.insert(pool_tx);
+                self.tx_type_counts.dec(replaced.transaction.transaction.ty());
                 self.by_hash.remove(replaced.transaction.hash());
                 self.by_hash.insert(new_hash, new_transaction);
 
@@ -2166,8 +2155,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
             self.tx_inc(inserted_tx_id.sender);
         }
 
-        self.update_size_metrics();
-
         Ok(InsertOk { transaction, move_to: state.into(), state, replaced_tx, updates })
     }
 
@@ -2215,8 +2202,47 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
             price_bumps: Default::default(),
             local_transactions_config: Default::default(),
             auths: Default::default(),
+            tx_type_counts: Default::default(),
             metrics: Default::default(),
         }
+    }
+}
+
+/// Number of transactions in the pool grouped by transaction type.
+///
+/// Maintained incrementally on insert/remove so that metrics updates don't require iterating
+/// all transactions.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct TxTypeCounts {
+    legacy: u64,
+    eip2930: u64,
+    eip1559: u64,
+    eip4844: u64,
+    eip7702: u64,
+    other: u64,
+}
+
+impl TxTypeCounts {
+    /// Returns a mutable reference to the counter for the given transaction type.
+    const fn counter_mut(&mut self, tx_type: u8) -> &mut u64 {
+        match tx_type {
+            LEGACY_TX_TYPE_ID => &mut self.legacy,
+            EIP2930_TX_TYPE_ID => &mut self.eip2930,
+            EIP1559_TX_TYPE_ID => &mut self.eip1559,
+            EIP4844_TX_TYPE_ID => &mut self.eip4844,
+            EIP7702_TX_TYPE_ID => &mut self.eip7702,
+            _ => &mut self.other,
+        }
+    }
+
+    /// Increments the counter for the given transaction type.
+    const fn inc(&mut self, tx_type: u8) {
+        *self.counter_mut(tx_type) += 1;
+    }
+
+    /// Decrements the counter for the given transaction type.
+    const fn dec(&mut self, tx_type: u8) {
+        *self.counter_mut(tx_type) -= 1;
     }
 }
 

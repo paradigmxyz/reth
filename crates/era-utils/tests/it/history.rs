@@ -3,7 +3,7 @@ use reqwest::{Client, Url};
 use reth_db_common::init::init_genesis;
 use reth_era::era1::types::execution::MAX_BLOCKS_PER_ERA1;
 use reth_era_downloader::{EraClient, EraStream, EraStreamConfig};
-use reth_era_utils::{export, import, ExportConfig};
+use reth_era_utils::{export, import, Era1, ExportConfig};
 use reth_etl::Collector;
 use reth_fs_util as fs;
 use reth_provider::{test_utils::create_test_provider_factory, BlockNumReader, BlockReader};
@@ -38,7 +38,8 @@ async fn test_history_imports_from_fresh_state_successfully() {
     let mut hash_collector = Collector::new(4096, folder);
 
     let expected_block_number = 8191;
-    let actual_block_number = import(stream, &pf, &mut hash_collector).unwrap();
+    let actual_block_number =
+        import::<Era1, _, _, _, _, _, _>(stream, &pf, &mut hash_collector, None).unwrap();
 
     assert_eq!(actual_block_number, expected_block_number);
 }
@@ -67,7 +68,8 @@ async fn test_roundtrip_export_after_import() {
     let mut hash_collector = Collector::new(4096, folder);
 
     // Import blocks from one era1 file into database
-    let last_imported_block_height = import(stream, &pf, &mut hash_collector).unwrap();
+    let last_imported_block_height =
+        import::<Era1, _, _, _, _, _, _>(stream, &pf, &mut hash_collector, None).unwrap();
 
     assert_eq!(last_imported_block_height, 8191);
     let provider_ref = pf.provider_rw().unwrap().0;

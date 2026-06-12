@@ -73,6 +73,7 @@ use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm_database::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };
+use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
@@ -595,8 +596,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             .map(|(n, _)| n + 1)
             .unwrap_or_default();
 
-        let tx_nums: Vec<TxNumber> = {
-            let mut nums = Vec::with_capacity(blocks.len());
+        let tx_nums: SmallVec<[TxNumber; 4]> = {
+            let mut nums = SmallVec::with_capacity(blocks.len());
             let mut current = first_tx_num;
             for block in &blocks {
                 nums.push(current);
@@ -1098,6 +1099,10 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         BF: FnOnce(H, BodyTy<N>, Vec<Address>) -> ProviderResult<Option<B>>,
     {
         let Some(block_number) = self.convert_hash_or_number(id)? else { return Ok(None) };
+        let earliest_available = self.static_file_provider.earliest_history_height();
+        if block_number < earliest_available {
+            return Err(ProviderError::BlockExpired { requested: block_number, earliest_available })
+        }
         let Some(header) = header_by_number(block_number)? else { return Ok(None) };
 
         // Get the block body

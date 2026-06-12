@@ -11,10 +11,8 @@ use reth_db_api::{
 use reth_era::{
     common::{decode::DecodeCompressedRlp, file_ops::StreamReader},
     e2s::error::E2sError,
-    era1::{
-        file::{BlockTupleIterator, Era1Reader},
-        types::execution::BlockTuple,
-    },
+    era1::{file::Era1Reader, types::execution::BlockTuple},
+    ere::file::EreReader,
 };
 use reth_era_downloader::EraMeta;
 use reth_etl::Collector;
@@ -31,26 +29,80 @@ use reth_storage_api::{
     errors::ProviderResult, DBProvider, DatabaseProviderFactory, NodePrimitivesProvider,
     StageCheckpointWriter,
 };
-use std::{
-    collections::Bound,
-    error::Error,
-    fmt::{Display, Formatter},
-    io::{Read, Seek},
-    iter::Map,
-    ops::RangeBounds,
-    sync::mpsc,
-};
+use std::{collections::Bound, error::Error, ops::RangeBounds, sync::mpsc};
 use tracing::info;
 
-/// Imports blocks from `downloader` using `provider`.
+/// Reads execution `(header, body)` pairs out of an ERA file.
+///
+/// Per-format seam of the import pipeline.
+pub trait EraBlockReader<BH, BB> {
+    /// Opens the ERA file at `meta` and iterates its execution blocks.
+    fn blocks<M: EraMeta + ?Sized>(
+        meta: &M,
+    ) -> eyre::Result<impl Iterator<Item = eyre::Result<(BH, BB)>>>;
+}
+
+/// [`EraBlockReader`] for `.era1` files.
+#[derive(Debug)]
+pub struct Era1;
+
+impl<BH, BB> EraBlockReader<BH, BB> for Era1
+where
+    BH: FullBlockHeader + Value,
+    BB: FullBlockBody<OmmerHeader = BH>,
+{
+    fn blocks<M: EraMeta + ?Sized>(
+        meta: &M,
+    ) -> eyre::Result<impl Iterator<Item = eyre::Result<(BH, BB)>>> {
+        let reader: Era1Reader<std::fs::File> = open(meta)?;
+        Ok(reader.iter().map(decode::<BH, BB, E2sError>))
+    }
+}
+
+/// [`EraBlockReader`] for `.ere`/`.erae` files.
+#[derive(Debug)]
+pub struct Ere;
+
+impl<BH, BB> EraBlockReader<BH, BB> for Ere
+where
+    BH: FullBlockHeader + Value,
+    BB: FullBlockBody<OmmerHeader = BH>,
+{
+    fn blocks<M: EraMeta + ?Sized>(
+        meta: &M,
+    ) -> eyre::Result<impl Iterator<Item = eyre::Result<(BH, BB)>>> {
+        let reader: EreReader<std::fs::File> = open(meta)?;
+        Ok(reader.iter().map(|block| {
+            let block = block?;
+            let header: BH = block.header.decode()?;
+            let body: BB = block.body.decode()?;
+            Ok((header, body))
+        }))
+    }
+}
+
+/// Opens the ERA file at `meta` with the format's [`StreamReader`].
+pub fn open<Reader>(meta: &(impl EraMeta + ?Sized)) -> eyre::Result<Reader>
+where
+    Reader: StreamReader<std::fs::File>,
+{
+    Ok(Reader::new(fs::open(meta.path())?))
+}
+
+/// Imports blocks from `downloader`, decoding each file with the [`EraBlockReader`] `S`.
+///
+/// When `to_block` is set, the import stops after reaching that block height; otherwise it
+/// continues until the source has no more files.
 ///
 /// Returns current block height.
-pub fn import<Downloader, Era, PF, B, BB, BH>(
+pub fn import<S, Downloader, Era, PF, B, BB, BH>(
     mut downloader: Downloader,
     provider_factory: &PF,
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
+    to_block: Option<BlockNumber>,
 ) -> eyre::Result<BlockNumber>
 where
+    S: EraBlockReader<BH, BB>,
     B: Block<Header = BH, Body = BB>,
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<
@@ -84,21 +136,30 @@ where
         .get_highest_static_file_block(StaticFileSegment::Headers)
         .unwrap_or_default();
 
+    let end = to_block.map_or(Bound::Unbounded, Bound::Included);
+
     while let Some(meta) = rx.recv()? {
+        let meta = meta?;
         let from = height;
         let provider = provider_factory.database_provider_rw()?;
 
-        height = process(
-            &meta?,
+        height = process::<S, _, _, _, _>(
+            &meta,
             &mut static_file_provider.latest_writer(StaticFileSegment::Headers)?,
             &provider,
             hash_collector,
-            height..,
+            (Bound::Included(height), end),
         )?;
 
         save_stage_checkpoints(&provider, from, height, height, height)?;
 
         provider.commit()?;
+
+        info!(target: "era::history::import", first = from, last = height, file = %meta.path().display(), "Imported ERA file");
+
+        if to_block.is_some_and(|to| height >= to) {
+            break;
+        }
     }
 
     let provider = provider_factory.database_provider_rw()?;
@@ -140,96 +201,35 @@ where
     Ok(())
 }
 
-/// Extracts block headers and bodies from `meta` and appends them using `writer` and `provider`.
-///
-/// Collects hash to height using `hash_collector`.
-///
-/// Skips all blocks below the [`start_bound`] of `block_numbers` and stops when reaching past the
-/// [`end_bound`] or the end of the file.
-///
-/// Returns last block height.
-///
-/// [`start_bound`]: RangeBounds::start_bound
-/// [`end_bound`]: RangeBounds::end_bound
-pub fn process<Era, P, B, BB, BH>(
-    meta: &Era,
+/// Reads `meta` with the [`EraBlockReader`] `S`, appends its blocks within `block_numbers`, and
+/// marks `meta` processed if the file was fully consumed. Returns last block height.
+pub fn process<S, P, B, BB, BH>(
+    meta: &(impl EraMeta + ?Sized),
     writer: &mut StaticFileProviderRWRefMut<'_, <P as NodePrimitivesProvider>::Primitives>,
     provider: &P,
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
     block_numbers: impl RangeBounds<BlockNumber>,
 ) -> eyre::Result<BlockNumber>
 where
+    S: EraBlockReader<BH, BB>,
     B: Block<Header = BH, Body = BB>,
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<
         Transaction = <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
         OmmerHeader = BH,
     >,
-    Era: EraMeta + ?Sized,
     P: DBProvider<Tx: DbTxMut> + NodePrimitivesProvider + BlockWriter<Block = B>,
     <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
 {
-    let reader = open(meta)?;
-    let iter = reader.iter().map(decode as fn(_) -> _);
-    let iter = ProcessIter { iter, era: meta };
+    let iter = S::blocks(meta)?
+        .map(Some)
+        .chain(std::iter::once_with(|| match meta.mark_as_processed() {
+            Ok(()) => None,
+            Err(error) => Some(Err(error)),
+        }))
+        .flatten();
 
     process_iter(iter, writer, provider, hash_collector, block_numbers)
-}
-
-type ProcessInnerIter<R, BH, BB> =
-    Map<BlockTupleIterator<R>, fn(Result<BlockTuple, E2sError>) -> eyre::Result<(BH, BB)>>;
-
-/// An iterator that wraps era file extraction. After the final item [`EraMeta::mark_as_processed`]
-/// is called to ensure proper cleanup.
-#[derive(Debug)]
-pub struct ProcessIter<'a, Era: ?Sized, R: Read, BH, BB>
-where
-    BH: FullBlockHeader + Value,
-    BB: FullBlockBody<OmmerHeader = BH>,
-{
-    iter: ProcessInnerIter<R, BH, BB>,
-    era: &'a Era,
-}
-
-impl<'a, Era: EraMeta + ?Sized, R: Read, BH, BB> Display for ProcessIter<'a, Era, R, BH, BB>
-where
-    BH: FullBlockHeader + Value,
-    BB: FullBlockBody<OmmerHeader = BH>,
-{
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Display::fmt(&self.era.path().to_string_lossy(), f)
-    }
-}
-
-impl<'a, Era, R, BH, BB> Iterator for ProcessIter<'a, Era, R, BH, BB>
-where
-    R: Read + Seek,
-    Era: EraMeta + ?Sized,
-    BH: FullBlockHeader + Value,
-    BB: FullBlockBody<OmmerHeader = BH>,
-{
-    type Item = eyre::Result<(BH, BB)>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.iter.next() {
-            Some(item) => Some(item),
-            None => match self.era.mark_as_processed() {
-                Ok(..) => None,
-                Err(e) => Some(Err(e)),
-            },
-        }
-    }
-}
-
-/// Opens the era file described by `meta`.
-pub fn open<Era>(meta: &Era) -> eyre::Result<Era1Reader<std::fs::File>>
-where
-    Era: EraMeta + ?Sized,
-{
-    let file = fs::open(meta.path())?;
-    let reader = Era1Reader::new(file);
-
-    Ok(reader)
 }
 
 /// Extracts a pair of [`FullBlockHeader`] and [`FullBlockBody`] from [`BlockTuple`].
@@ -314,19 +314,12 @@ where
 }
 
 /// Dumps the contents of `hash_collector` into [`tables::HeaderNumbers`].
-pub fn build_index<P, B, BB, BH>(
+pub fn build_index<P>(
     provider: &P,
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
 ) -> eyre::Result<()>
 where
-    B: Block<Header = BH, Body = BB>,
-    BH: FullBlockHeader + Value,
-    BB: FullBlockBody<
-        Transaction = <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
-        OmmerHeader = BH,
-    >,
-    P: DBProvider<Tx: DbTxMut> + NodePrimitivesProvider + BlockWriter<Block = B>,
-    <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
+    P: DBProvider<Tx: DbTxMut>,
 {
     let total_headers = hash_collector.len();
     info!(target: "era::history::import", total = total_headers, "Writing headers hash index");
@@ -393,4 +386,92 @@ where
     }
 
     Ok(total_difficulty)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::Header;
+    use reth_db_common::init::init_genesis;
+    use reth_ethereum_primitives::{Block, BlockBody};
+    use reth_provider::{
+        test_utils::create_test_provider_factory, DatabaseProviderFactory,
+        StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+    };
+    use std::{cell::Cell, path::Path};
+    use tempfile::tempdir;
+
+    struct TestEra;
+
+    impl EraBlockReader<Header, BlockBody> for TestEra {
+        fn blocks<M: EraMeta + ?Sized>(
+            _meta: &M,
+        ) -> eyre::Result<impl Iterator<Item = eyre::Result<(Header, BlockBody)>>> {
+            Ok([1, 2]
+                .into_iter()
+                .map(|number| Ok((Header { number, ..Default::default() }, BlockBody::default()))))
+        }
+    }
+
+    #[derive(Debug)]
+    struct TestMeta {
+        marked: Cell<bool>,
+    }
+
+    impl EraMeta for TestMeta {
+        fn mark_as_processed(&self) -> eyre::Result<()> {
+            self.marked.set(true);
+            Ok(())
+        }
+
+        fn path(&self) -> &Path {
+            Path::new("test.era1")
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn import_stops_at_to_block() {
+        let pf = create_test_provider_factory();
+        init_genesis(&pf).unwrap();
+
+        let folder = tempdir().unwrap();
+        let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+
+        // Each file yields blocks 1 and 2; without `to_block` the import would reach 2.
+        let stream = futures_util::stream::iter(vec![
+            Ok(TestMeta { marked: Cell::new(false) }),
+            Ok(TestMeta { marked: Cell::new(false) }),
+        ]);
+
+        let height =
+            import::<TestEra, _, _, _, Block, _, _>(stream, &pf, &mut hash_collector, Some(1))
+                .unwrap();
+
+        assert_eq!(height, 1);
+    }
+
+    #[test]
+    fn process_does_not_mark_partially_consumed_file_processed() {
+        let pf = create_test_provider_factory();
+        init_genesis(&pf).unwrap();
+
+        let static_file_provider = pf.static_file_provider();
+        let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+        let provider = pf.database_provider_rw().unwrap();
+        let folder = tempdir().unwrap();
+        let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+        let meta = TestMeta { marked: Cell::new(false) };
+
+        let height = process::<TestEra, _, Block, _, _>(
+            &meta,
+            &mut writer,
+            &provider,
+            &mut hash_collector,
+            0..=1,
+        )
+        .unwrap();
+
+        assert_eq!(height, 1);
+        assert!(!meta.marked.get());
+    }
 }

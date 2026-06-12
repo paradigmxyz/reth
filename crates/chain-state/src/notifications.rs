@@ -1,6 +1,6 @@
 //! Canonical chain state notification trait and types.
 
-use alloy_eips::{eip2718::Encodable2718, BlockNumHash};
+use alloy_eips::BlockNumHash;
 use derive_more::{Deref, DerefMut};
 use reth_execution_types::{BlockReceipts, Chain};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
@@ -157,10 +157,7 @@ impl<N: NodePrimitives> CanonStateNotification<N> {
     ///
     /// The boolean in the tuple (2nd element) denotes whether the receipt was from the reverted
     /// chain segment.
-    pub fn block_receipts(&self) -> Vec<(BlockReceipts<N::Receipt>, bool)>
-    where
-        N::SignedTx: Encodable2718,
-    {
+    pub fn block_receipts(&self) -> Vec<(BlockReceipts<N::Receipt>, bool)> {
         let mut receipts = Vec::new();
 
         // get old receipts

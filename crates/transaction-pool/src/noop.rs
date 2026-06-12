@@ -4,7 +4,7 @@
 //! to be generic over it.
 
 use crate::{
-    blobstore::BlobStoreError,
+    blobstore::{BlobStore, BlobStoreError, NoopBlobStore},
     error::{InvalidPoolTransactionError, PoolError},
     pool::TransactionListenerKind,
     traits::{BestTransactionsAttributes, GetPooledTransactionLimit, NewBlobSidecar},
@@ -257,6 +257,12 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
     {
     }
 
+    fn retain_contains<A>(&self, _announcement: &mut A)
+    where
+        A: HandleMempoolData,
+    {
+    }
+
     fn get(&self, _tx_hash: &TxHash) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
         None
     }
@@ -387,6 +393,10 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         _indices_bitarray: B128,
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError> {
         Ok(vec![None; versioned_hashes.len()])
+    }
+
+    fn blob_store(&self) -> Box<dyn BlobStore> {
+        Box::new(NoopBlobStore)
     }
 }
 

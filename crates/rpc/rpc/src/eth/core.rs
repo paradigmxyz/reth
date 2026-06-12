@@ -236,6 +236,8 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     gas_cap: u64,
     /// Maximum number of blocks for `eth_simulateV1`.
     max_simulate_blocks: u64,
+    /// Whether to compute state roots for `eth_simulateV1`.
+    compute_state_root_for_eth_simulate: bool,
     /// The maximum number of blocks into the past for generating state proofs.
     eth_proof_window: u64,
     /// The block number at which the node started
@@ -300,6 +302,7 @@ where
         gas_oracle: GasPriceOracle<N::Provider>,
         gas_cap: impl Into<GasCap>,
         max_simulate_blocks: u64,
+        compute_state_root_for_eth_simulate: bool,
         eth_proof_window: u64,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
@@ -341,6 +344,7 @@ where
             gas_oracle,
             gas_cap: gas_cap.into().into(),
             max_simulate_blocks,
+            compute_state_root_for_eth_simulate,
             eth_proof_window,
             starting_block,
             task_spawner,
@@ -435,6 +439,12 @@ where
     #[inline]
     pub const fn max_simulate_blocks(&self) -> u64 {
         self.max_simulate_blocks
+    }
+
+    /// Returns whether state roots are computed for `eth_simulateV1`.
+    #[inline]
+    pub const fn compute_state_root_for_eth_simulate(&self) -> bool {
+        self.compute_state_root_for_eth_simulate
     }
 
     /// Returns a handle to the gas oracle.
@@ -576,7 +586,7 @@ mod tests {
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
-        StageCheckpointReader,
+        PruneCheckpointReader, StageCheckpointReader,
     };
     use reth_rpc_eth_api::{node::RpcNodeCoreAdapter, EthApiServer};
     use reth_storage_api::{BalProvider, BlockReader, BlockReaderIdExt, StateProviderFactory};
@@ -599,6 +609,7 @@ mod tests {
             + StateProviderFactory
             + CanonStateSubscriptions<Primitives = reth_ethereum_primitives::EthPrimitives>
             + StageCheckpointReader
+            + PruneCheckpointReader
             + BalProvider
             + Unpin
             + Clone

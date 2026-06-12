@@ -10,6 +10,7 @@
 //   BENCH_BASELINE_ARGS    – Extra CLI args for the baseline reth node
 //   BENCH_FEATURE_ARGS     – Extra CLI args for the feature reth node
 //   BENCH_SAMPLY           – 'true' if samply profiling was enabled
+//   BENCH_TRACING_CHROME   – 'true' if Chrome trace recording was enabled
 //
 // Usage from actions/github-script:
 //   const notify = require('./.github/scripts/bench-slack-notify.js');
@@ -18,7 +19,16 @@
 
 const fs = require('fs');
 const path = require('path');
-const { fmtChange, fmtMs, verdict, loadSamplyUrls, blocksLabel, metricRows } = require('./bench-utils');
+const {
+  fmtChange,
+  fmtMs,
+  verdict,
+  isWin,
+  loadSamplyUrls,
+  loadTracingChromeUrls,
+  blocksLabel,
+  metricRows,
+} = require('./bench-utils');
 
 const SLACK_API = 'https://slack.com/api/chat.postMessage';
 
@@ -62,6 +72,26 @@ function cell(text) {
   return { type: 'raw_text', text: s || ' ' };
 }
 
+function profileLinks(samplyUrls, prefix) {
+  return Object.entries(samplyUrls)
+    .filter(([run]) => run.startsWith(`${prefix}-`))
+    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+    .map(([run, url]) => {
+      const index = run.slice(prefix.length + 1);
+      return `<${url}|Samply ${index}>`;
+    });
+}
+
+function chromeTraceLinks(tracingChromeUrls, prefix) {
+  return Object.entries(tracingChromeUrls)
+    .filter(([run]) => run.startsWith(`${prefix}-`))
+    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+    .map(([run, url]) => {
+      const index = run.slice(prefix.length + 1);
+      return `<${url}|Chrome ${index}>`;
+    });
+}
+
 // Slack shortcodes for verdict (Block Kit header doesn't support unicode emoji)
 const SLACK_VERDICT = {
   '⚠️': ':warning:',
@@ -70,7 +100,43 @@ const SLACK_VERDICT = {
   '⚪': ':white_circle:',
 };
 
-function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, repo, samplyUrls }) {
+function benchConfigLine() {
+  const parts = [];
+  const add = (label, value, defaultValue = '') => {
+    if (value && value !== defaultValue) {
+      parts.push(`\`${label}=${value}\``);
+    }
+  };
+
+  add('blocks', process.env.BENCH_BLOCKS);
+  add('warmup', process.env.BENCH_WARMUP_BLOCKS);
+  add('big-blocks', process.env.BENCH_BIG_BLOCKS, 'false');
+  add('big-blocks-target-gas', process.env.BENCH_BIG_BLOCKS_TARGET_GAS);
+  add('bal', process.env.BENCH_BAL, 'false');
+  add('samply', process.env.BENCH_SAMPLY, 'false');
+  add('tracing-chrome', process.env.BENCH_TRACING_CHROME, 'false');
+  add('slack', process.env.BENCH_SLACK, 'always');
+  add('cores', process.env.BENCH_CORES, '0');
+  add('run-pairs', process.env.BENCH_RUN_PAIRS);
+  add('run-order', process.env.BENCH_RUN_ORDER);
+  add('otlp', process.env.BENCH_OTLP, 'true');
+  add('wait-time', process.env.BENCH_WAIT_TIME);
+  add('baseline-args', process.env.BENCH_BASELINE_ARGS);
+  add('feature-args', process.env.BENCH_FEATURE_ARGS);
+
+  return parts.length ? `*Workflow:* ${parts.join(' ')}` : '';
+}
+
+function buildSuccessBlocks({
+  summary,
+  prNumber,
+  actor,
+  actorSlackId,
+  jobUrl,
+  repo,
+  samplyUrls,
+  tracingChromeUrls,
+}) {
   const { emoji, label } = verdict(summary.changes);
   const headerEmoji = SLACK_VERDICT[emoji] || emoji;
 
@@ -87,18 +153,19 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
 
   // Baseline/feature lines with samply profile links
   let baselineLine = `*Baseline:* ${baselineLink}`;
-  const bl1 = samplyUrls['baseline-1'];
-  const bl2 = samplyUrls['baseline-2'];
-  if (bl1) baselineLine += ` | <${bl1}|Samply 1>`;
-  if (bl2) baselineLine += ` | <${bl2}|Samply 2>`;
+  const baselineProfiles = profileLinks(samplyUrls, 'baseline');
+  if (baselineProfiles.length) baselineLine += ` | ${baselineProfiles.join(' | ')}`;
+  const baselineTraces = chromeTraceLinks(tracingChromeUrls, 'baseline');
+  if (baselineTraces.length) baselineLine += ` | ${baselineTraces.join(' | ')}`;
 
   let featureLine = `*Feature:* ${featureLink}`;
-  const fl1 = samplyUrls['feature-1'];
-  const fl2 = samplyUrls['feature-2'];
-  if (fl1) featureLine += ` | <${fl1}|Samply 1>`;
-  if (fl2) featureLine += ` | <${fl2}|Samply 2>`;
+  const featureProfiles = profileLinks(samplyUrls, 'feature');
+  if (featureProfiles.length) featureLine += ` | ${featureProfiles.join(' | ')}`;
+  const featureTraces = chromeTraceLinks(tracingChromeUrls, 'feature');
+  if (featureTraces.length) featureLine += ` | ${featureTraces.join(' | ')}`;
 
   const countsLine = blocksLabel(summary).map(p => `*${p.key}:* ${p.value}`).join(' | ');
+  const configLine = benchConfigLine();
 
   const baselineArgs = process.env.BENCH_BASELINE_ARGS || '';
   const featureArgs = process.env.BENCH_FEATURE_ARGS || '';
@@ -106,7 +173,9 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
   if (baselineArgs) argsLines.push(`*Baseline Args:* \`${baselineArgs}\``);
   if (featureArgs) argsLines.push(`*Feature Args:* \`${featureArgs}\``);
 
-  const sectionText = [metaParts.join(' | '), '', baselineLine, featureLine, ...argsLines, countsLine].join('\n');
+  const sectionText = [metaParts.join(' | '), configLine, '', baselineLine, featureLine, ...argsLines, countsLine]
+    .filter(line => line !== '')
+    .join('\n');
 
   // Action buttons
   const diffUrl = `https://github.com/${repo}/compare/${summary.baseline.ref}...${summary.feature.ref}`;
@@ -170,6 +239,7 @@ function buildFailureBlocks({ prNumber, actor, actorSlackId, jobUrl, repo, faile
     `by ${actorMention}`,
     `failed while *${failedStep}*`,
   ].filter(Boolean);
+  const configLine = benchConfigLine();
 
   const buttons = [
     {
@@ -187,7 +257,7 @@ function buildFailureBlocks({ prNumber, actor, actorSlackId, jobUrl, repo, faile
     },
     {
       type: 'section',
-      text: { type: 'mrkdwn', text: parts.join(' | ') },
+      text: { type: 'mrkdwn', text: [parts.join(' | '), configLine].filter(Boolean).join('\n') },
     },
     {
       type: 'actions',
@@ -218,33 +288,41 @@ async function success({ core, context }) {
     `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
   const samplyUrls = loadSamplyUrls(process.env.BENCH_WORK_DIR);
+  const tracingChromeUrls = loadTracingChromeUrls(process.env.BENCH_WORK_DIR);
 
   const slackUsers = loadSlackUsers(process.env.GITHUB_WORKSPACE || '.');
   const actorSlackId = slackUsers[actor];
 
-  const blocks = buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, repo, samplyUrls });
+  const blocks = buildSuccessBlocks({
+    summary,
+    prNumber,
+    actor,
+    actorSlackId,
+    jobUrl,
+    repo,
+    samplyUrls,
+    tracingChromeUrls,
+  });
   const text = `Bench: ${summary.baseline.name} vs ${summary.feature.name}`;
 
   const slackMode = process.env.BENCH_SLACK || 'always';
 
-  // Post to public channel if any metric shows significant improvement or regression
+  // Post to public channel only when the overall verdict is a win.
   const channel = process.env.SLACK_BENCH_CHANNEL;
   let postedToChannel = false;
   if (channel) {
-    const changes = summary.changes || {};
-    const hasImprovement = Object.values(changes).some(c => c.sig === 'good');
-    if (hasImprovement) {
+    if (isWin(summary.changes)) {
       await postToSlack(token, channel, blocks, text, core);
       postedToChannel = true;
     } else {
-      core.info('No significant improvement, skipping public channel notification');
+      core.info('No unambiguous improvement, skipping public channel notification');
     }
   }
 
-  // In on-win mode, only notify on improvement — skip DM fallback entirely
+  // In on-win mode, only notify on unambiguous improvement. Mixed results are not wins.
   if (slackMode === 'on-win') {
     if (!postedToChannel) {
-      core.info('on-win mode: no improvement detected, skipping all notifications');
+      core.info('on-win mode: no unambiguous improvement detected, skipping all notifications');
     }
     return;
   }
@@ -290,4 +368,4 @@ async function failure({ core, context, failedStep }) {
   // Only DM for failures, don't post to public channel
 }
 
-module.exports = { success, failure };
+module.exports = { success, failure, benchConfigLine, buildSuccessBlocks, buildFailureBlocks };
