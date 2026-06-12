@@ -428,6 +428,13 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
         .send()
         .await?;
     assert_eq!(get_payload_response.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        get_payload_response
+            .headers()
+            .get(reqwest::header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store")
+    );
     ExecutionPayloadEnvelopeV4::from_ssz_bytes(&get_payload_response.bytes().await?).unwrap();
 
     let new_payload_response = client

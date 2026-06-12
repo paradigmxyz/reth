@@ -41,6 +41,8 @@ const OCTET_STREAM: &str = "application/octet-stream";
 const APPLICATION_JSON: &str = "application/json";
 const TEXT_PLAIN: &str = "text/plain";
 const CONTENT_TYPE: &str = "content-type";
+const CACHE_CONTROL: &str = "cache-control";
+const NO_STORE: &str = "no-store";
 
 const STATUS_OK: u16 = 200;
 const STATUS_BAD_REQUEST: u16 = 400;
@@ -228,13 +230,16 @@ where
             if method != "GET" {
                 return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
             }
-            let Some(payload_id) = parse_payload_id(&payload_id) else {
-                return text_response(STATUS_BAD_REQUEST, "invalid payload id")
+            let response = if let Some(payload_id) = parse_payload_id(&payload_id) {
+                if let Some(payload_store) = handle.payload_store().await {
+                    handle_get_payload(payload_store, fork.get_payload_version(), payload_id).await
+                } else {
+                    text_response(STATUS_SERVICE_UNAVAILABLE, "payload store unavailable")
+                }
+            } else {
+                text_response(STATUS_BAD_REQUEST, "invalid payload id")
             };
-            let Some(payload_store) = handle.payload_store().await else {
-                return text_response(STATUS_SERVICE_UNAVAILABLE, "payload store unavailable")
-            };
-            handle_get_payload(payload_store, fork.get_payload_version(), payload_id).await
+            no_store_response(response)
         }
 
         EngineSszEndpoint::Forkchoice(fork) => {
@@ -767,6 +772,11 @@ fn no_content_response() -> HttpResponse {
     HttpResponse::builder().status(204).body(HttpBody::empty()).expect("valid response")
 }
 
+fn no_store_response(mut response: HttpResponse) -> HttpResponse {
+    response.headers_mut().insert(CACHE_CONTROL, NO_STORE.parse().expect("valid header value"));
+    response
+}
+
 fn text_response(status: u16, body: impl Into<String>) -> HttpResponse {
     HttpResponse::builder()
         .status(status)
@@ -820,6 +830,12 @@ mod tests {
             endpoint,
             EngineSszEndpoint::GetPayload(EngineSszFork::Prague, "not-a-payload-id".to_string())
         );
+    }
+
+    #[test]
+    fn adds_no_store_header() {
+        let response = no_store_response(text_response(STATUS_NOT_FOUND, "unknown payload"));
+        assert_eq!(response.headers().get(CACHE_CONTROL).unwrap(), NO_STORE);
     }
 
     #[test]
