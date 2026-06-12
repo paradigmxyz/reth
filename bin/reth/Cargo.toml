@@ -88,9 +88,15 @@ default = [
     "otlp-logs",
     "reth-revm/portable",
     "js-tracer",
+    "jit",
     "keccak-cache-global",
     "asm-keccak",
     "min-trace-logs",
+]
+
+jit = [
+    "reth-ethereum-cli/jit",
+    "reth-node-ethereum/jit",
 ]
 
 otlp = [
