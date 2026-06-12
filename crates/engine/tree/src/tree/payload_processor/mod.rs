@@ -307,7 +307,8 @@ where
 
         let span = Span::current();
 
-        let halve_workers = env.transaction_count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD;
+        let halve_workers = env.transaction_count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD ||
+            env.gas_used <= Self::SMALL_BLOCK_PROOF_WORKER_GAS_THRESHOLD;
         let state_root_handle = self.spawn_state_root(
             multiproof_provider_factory,
             env.parent_state_root,
@@ -418,6 +419,10 @@ where
     /// Transaction count threshold below which proof workers are halved, since fewer transactions
     /// produce fewer state changes and most workers would be idle overhead.
     const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 30;
+
+    /// Gas threshold below which proof workers are halved, since lower-gas blocks tend to produce
+    /// smaller state update sets even when transaction count is moderate.
+    const SMALL_BLOCK_PROOF_WORKER_GAS_THRESHOLD: u64 = 30_000_000;
 
     /// Transaction count threshold below which sequential conversion is used.
     ///
