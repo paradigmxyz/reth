@@ -106,6 +106,7 @@ pub use evm2_executor::{
     execute_evm2_block_with_state_provider_context_and_hook,
     execute_evm2_block_with_state_provider_context_precompiles_and_hook,
     execute_evm2_block_with_state_provider_context_precompiles_and_hook_envelopes,
+    execute_evm2_block_with_state_provider_context_precompiles_and_hooks_envelopes,
 };
 
 mod receipt;

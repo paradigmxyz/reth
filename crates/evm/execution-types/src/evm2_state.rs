@@ -349,6 +349,11 @@ impl<KH> HashedPostStateSink<KH> {
         self.state
     }
 
+    /// Takes the accumulated hashed post-state while leaving lifecycle markers intact.
+    pub fn take_hashed_post_state(&mut self) -> HashedPostState {
+        core::mem::take(&mut self.state)
+    }
+
     fn drop_created_account_storage_wipe(&mut self, hashed_address: B256) {
         let remove_storage = if let Some(storage) = self.state.storages.get_mut(&hashed_address) {
             storage.wiped = false;
