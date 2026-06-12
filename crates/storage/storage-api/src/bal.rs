@@ -92,11 +92,12 @@ pub trait BalStore: Send + Sync + 'static {
     fn revm_bal_by_hash(
         &self,
         block_hash: BlockHash,
-    ) -> ProviderResult<Option<DecodedBal<RevmBal>>> {
+    ) -> ProviderResult<Option<DecodedBal<Arc<RevmBal>>>> {
         self.get_decoded_by_hash(block_hash)?
             .map(|decoded| {
                 decoded.try_map(|bal| {
                     RevmBal::try_from(Vec::from(bal))
+                        .map(Arc::new)
                         .map_err(reth_storage_errors::provider::ProviderError::other)
                 })
             })
@@ -232,7 +233,7 @@ impl BalStoreHandle {
     pub fn revm_bal_by_hash(
         &self,
         block_hash: BlockHash,
-    ) -> ProviderResult<Option<DecodedBal<RevmBal>>> {
+    ) -> ProviderResult<Option<DecodedBal<Arc<RevmBal>>>> {
         self.inner.revm_bal_by_hash(block_hash)
     }
 
