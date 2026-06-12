@@ -284,6 +284,24 @@ impl RocksDBBuilder {
         cf_options
     }
 
+    /// Creates optimized column family options for history index tables.
+    ///
+    /// `AccountsHistory` and `StoragesHistory` store hash-heavy keys and `BlockNumberList` values
+    /// that are already compressed by Roaring. Extra RocksDB LZ4/Zstd work adds compaction CPU on
+    /// the persistence path with little additional compression benefit.
+    fn history_column_family_options(cache: &Cache) -> Options {
+        let table_options = Self::default_table_options(cache);
+
+        let mut cf_options = Options::default();
+        cf_options.set_block_based_table_factory(&table_options);
+        cf_options.set_level_compaction_dynamic_level_bytes(true);
+        cf_options.set_compression_type(DBCompressionType::None);
+        cf_options.set_bottommost_compression_type(DBCompressionType::None);
+        cf_options.set_write_buffer_size(DEFAULT_WRITE_BUFFER_SIZE);
+
+        cf_options
+    }
+
     /// Adds a column family for a specific table type.
     pub fn with_table<T: Table>(mut self) -> Self {
         self.column_families.push(T::NAME.to_string());
@@ -351,6 +369,10 @@ impl RocksDBBuilder {
             .map(|name| {
                 let cf_options = if name == tables::TransactionHashNumbers::NAME {
                     Self::tx_hash_numbers_column_family_options(&self.block_cache)
+                } else if name == tables::AccountsHistory::NAME
+                    || name == tables::StoragesHistory::NAME
+                {
+                    Self::history_column_family_options(&self.block_cache)
                 } else {
                     Self::default_column_family_options(&self.block_cache)
                 };
