@@ -439,7 +439,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     }
 
     /// Writes headers for all blocks to the static file segment.
-    #[instrument(level = "debug", target = "providers::static_file", skip_all)]
+    #[instrument(level = "trace", target = "providers::static_file", skip_all)]
     fn write_headers(
         w: &mut StaticFileProviderRWRefMut<'_, N>,
         blocks: &[ExecutedBlock<N>],
@@ -452,7 +452,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     }
 
     /// Writes transactions for all blocks to the static file segment.
-    #[instrument(level = "debug", target = "providers::static_file", skip_all)]
+    #[instrument(level = "trace", target = "providers::static_file", skip_all)]
     fn write_transactions(
         w: &mut StaticFileProviderRWRefMut<'_, N>,
         blocks: &[ExecutedBlock<N>],
@@ -469,7 +469,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     }
 
     /// Writes transaction senders for all blocks to the static file segment.
-    #[instrument(level = "debug", target = "providers::static_file", skip_all)]
+    #[instrument(level = "trace", target = "providers::static_file", skip_all)]
     fn write_transaction_senders(
         w: &mut StaticFileProviderRWRefMut<'_, N>,
         blocks: &[ExecutedBlock<N>],
@@ -486,7 +486,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     }
 
     /// Writes receipts for all blocks to the static file segment.
-    #[instrument(level = "debug", target = "providers::static_file", skip_all)]
+    #[instrument(level = "trace", target = "providers::static_file", skip_all)]
     fn write_receipts(
         w: &mut StaticFileProviderRWRefMut<'_, N>,
         blocks: &[ExecutedBlock<N>],
@@ -513,7 +513,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     }
 
     /// Writes account changesets for all blocks to the static file segment.
-    #[instrument(level = "debug", target = "providers::static_file", skip_all)]
+    #[instrument(level = "trace", target = "providers::static_file", skip_all)]
     fn write_account_changesets(
         w: &mut StaticFileProviderRWRefMut<'_, N>,
         blocks: &[ExecutedBlock<N>],
@@ -534,7 +534,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     }
 
     /// Writes storage changesets for all blocks to the static file segment.
-    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    #[instrument(level = "trace", target = "providers::db", skip_all)]
     fn write_storage_changesets(
         w: &mut StaticFileProviderRWRefMut<'_, N>,
         blocks: &[ExecutedBlock<N>],
@@ -566,7 +566,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ///
     /// The closure receives a mutable reference to the segment writer. After the closure completes,
     /// `sync_all()` is called to flush writes to disk.
-    #[instrument(level = "debug", target = "providers::static_file", skip_all, fields(?segment))]
+    #[instrument(level = "trace", target = "providers::static_file", skip_all, fields(?segment))]
     fn write_segment<F>(
         &self,
         segment: StaticFileSegment,
@@ -585,7 +585,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ///
     /// This spawns tasks on the storage thread pool for each segment type and each task calls
     /// `sync_all()` on its writer when done.
-    #[instrument(level = "debug", target = "providers::static_file", skip_all)]
+    #[instrument(level = "trace", target = "providers::static_file", skip_all)]
     pub fn write_blocks_data(
         &self,
         blocks: &[ExecutedBlock<N>],
