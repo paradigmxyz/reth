@@ -537,8 +537,7 @@ where
 
         let Overlay { trie_updates, hashed_post_state } = self.get_overlay(&provider)?;
 
-        let is_v2 =
-            *self.storage_is_v2.get_or_init(|| provider.cached_storage_settings().is_v2());
+        let is_v2 = *self.storage_is_v2.get_or_init(|| provider.cached_storage_settings().is_v2());
         self.overlay_builder.metrics.database_provider_ro_duration.record(overall_start.elapsed());
         Ok(OverlayStateProvider::new(provider, trie_updates, hashed_post_state, is_v2))
     }
