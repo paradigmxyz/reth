@@ -328,13 +328,11 @@ impl ProofWorkerHandle {
         input: StorageProofInput,
         proof_result_sender: CrossbeamSender<StorageProofResultMessage>,
     ) -> Result<(), ProviderError> {
-        let hashed_address = input.hashed_address;
         self.storage_work_tx
             .send(StorageWorkerJob::StorageProof { input, proof_result_sender })
             .map_err(|err| {
                 let StorageWorkerJob::StorageProof { proof_result_sender, .. } = err.0;
                 let _ = proof_result_sender.send(StorageProofResultMessage {
-                    hashed_address,
                     result: Err(
                         DatabaseError::Other("storage workers unavailable".to_string()).into()
                     ),
@@ -526,12 +524,9 @@ impl StorageProofResult {
     }
 }
 
-/// Message containing a completed storage proof result with metadata.
+/// Message containing a completed storage proof result.
 #[derive(Debug)]
 pub struct StorageProofResultMessage {
-    /// The hashed address this storage proof belongs to
-    #[allow(dead_code)]
-    pub(crate) hashed_address: B256,
     /// The storage proof calculation result
     pub(crate) result: Result<StorageProofResult, StateProofError>,
 }
@@ -735,7 +730,7 @@ where
 
         let root = result.as_ref().ok().and_then(|result| result.root());
 
-        if proof_result_sender.send(StorageProofResultMessage { hashed_address, result }).is_err() {
+        if proof_result_sender.send(StorageProofResultMessage { result }).is_err() {
             trace!(
                 target: "trie::proof_task",
                 worker_id = self.worker_id,
