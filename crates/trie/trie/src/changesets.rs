@@ -55,33 +55,40 @@ where
     Factory: TrieCursorFactory,
 {
     // Compute account trie changesets
-    let account_nodes = compute_account_changesets(factory, trie_updates)?;
+    let account_nodes = if trie_updates.account_nodes_ref().is_empty() {
+        Vec::new()
+    } else {
+        compute_account_changesets(factory, trie_updates)?
+    };
 
     // Compute storage trie changesets
     let mut storage_tries = B256Map::default();
+    let storage_updates = trie_updates.storage_tries_ref();
 
-    // Create storage cursor once and reuse it for all addresses
-    let mut storage_cursor = factory.storage_trie_cursor(B256::default())?;
+    if !storage_updates.is_empty() {
+        // Create storage cursor once and reuse it for all addresses
+        let mut storage_cursor = factory.storage_trie_cursor(B256::default())?;
 
-    for (hashed_address, storage_updates) in trie_updates.storage_tries_ref() {
-        storage_cursor.set_hashed_address(*hashed_address);
+        for (hashed_address, storage_updates) in storage_updates {
+            storage_cursor.set_hashed_address(*hashed_address);
 
-        let storage_changesets = if storage_updates.is_deleted() {
-            // Handle wiped storage
-            compute_wiped_storage_changesets(&mut storage_cursor, storage_updates)?
-        } else {
-            // Handle normal storage updates
-            compute_storage_changesets(&mut storage_cursor, storage_updates)?
-        };
+            let storage_changesets = if storage_updates.is_deleted() {
+                // Handle wiped storage
+                compute_wiped_storage_changesets(&mut storage_cursor, storage_updates)?
+            } else {
+                // Handle normal storage updates
+                compute_storage_changesets(&mut storage_cursor, storage_updates)?
+            };
 
-        if !storage_changesets.is_empty() {
-            storage_tries.insert(
-                *hashed_address,
-                StorageTrieUpdatesSorted {
-                    is_deleted: storage_updates.is_deleted(),
-                    storage_nodes: storage_changesets,
-                },
-            );
+            if !storage_changesets.is_empty() {
+                storage_tries.insert(
+                    *hashed_address,
+                    StorageTrieUpdatesSorted {
+                        is_deleted: storage_updates.is_deleted(),
+                        storage_nodes: storage_changesets,
+                    },
+                );
+            }
         }
     }
 
