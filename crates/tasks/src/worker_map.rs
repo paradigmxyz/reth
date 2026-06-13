@@ -49,7 +49,7 @@ impl WorkerThread {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        self.pending.fetch_add(1, Ordering::AcqRel);
+        self.pending.fetch_add(1, Ordering::Relaxed);
 
         let (result_tx, result_rx) = oneshot::channel();
         let pending = self.pending.clone();
@@ -60,7 +60,7 @@ impl WorkerThread {
         });
 
         if self.tx.send(task).is_err() {
-            self.pending.fetch_sub(1, Ordering::AcqRel);
+            self.pending.fetch_sub(1, Ordering::Relaxed);
         }
 
         result_rx
@@ -72,7 +72,7 @@ impl WorkerThread {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        self.pending.compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire).ok()?;
+        self.pending.compare_exchange(0, 1, Ordering::Relaxed, Ordering::Relaxed).ok()?;
 
         let (result_tx, result_rx) = oneshot::channel();
         let pending = self.pending.clone();
@@ -83,7 +83,7 @@ impl WorkerThread {
         });
 
         if self.tx.send(task).is_err() {
-            self.pending.fetch_sub(1, Ordering::AcqRel);
+            self.pending.fetch_sub(1, Ordering::Relaxed);
             return None
         }
 
@@ -96,7 +96,7 @@ struct DecrementPendingOnDrop(Arc<AtomicUsize>);
 
 impl Drop for DecrementPendingOnDrop {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::AcqRel);
+        self.0.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
@@ -130,6 +130,10 @@ impl WorkerMap {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
+        if let Some(worker) = self.workers.get(name) {
+            return worker.spawn(f)
+        }
+
         let worker = self.workers.entry(name).or_insert_with(|| WorkerThread::new(name));
         worker.spawn(f)
     }
@@ -146,6 +150,10 @@ impl WorkerMap {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
+        if let Some(worker) = self.workers.get(name) {
+            return worker.try_spawn(f)
+        }
+
         let worker = self.workers.entry(name).or_insert_with(|| WorkerThread::new(name));
         worker.try_spawn(f)
     }
