@@ -113,6 +113,15 @@ where
     Ok(())
 }
 
+/// Flushes one pending run of history indices into the collection cache.
+fn flush_history_run<K>(cache: &mut HashMap<K, Vec<u64>>, key: &mut Option<K>, indices: &mut Vec<u64>)
+where
+    K: Eq + Hash,
+{
+    let Some(key) = key.take() else { return };
+    cache.entry(key).or_default().append(indices);
+}
+
 /// Collects account history indices using a provider that implements `ChangeSetReader`.
 pub(crate) fn collect_account_history_indices<Provider>(
     provider: &Provider,
@@ -198,10 +207,20 @@ where
 
     let mut flush_counter = 0;
     let mut current_block_number = u64::MAX;
+    let mut current_storage_key = None;
+    let mut current_storage_indices = Vec::new();
 
     for changeset_result in walker {
         let (BlockNumberAddress((block_number, address)), storage) = changeset_result?;
-        cache.entry(AddressStorageKey((address, storage.key))).or_default().push(block_number);
+        let key = AddressStorageKey((address, storage.key));
+
+        if current_storage_key == Some(key) {
+            current_storage_indices.push(block_number);
+        } else {
+            flush_history_run(&mut cache, &mut current_storage_key, &mut current_storage_indices);
+            current_storage_key = Some(key);
+            current_storage_indices.push(block_number);
+        }
 
         if block_number != current_block_number {
             current_block_number = block_number;
@@ -209,6 +228,7 @@ where
         }
 
         if flush_counter > DEFAULT_CACHE_THRESHOLD {
+            flush_history_run(&mut cache, &mut current_storage_key, &mut current_storage_indices);
             info!(
                 target: "sync::stages::index_history",
                 processed_blocks = current_block_number.saturating_sub(start_block) + 1,
@@ -220,6 +240,7 @@ where
         }
     }
 
+    flush_history_run(&mut cache, &mut current_storage_key, &mut current_storage_indices);
     collect_indices(cache.into_iter(), insert_fn)?;
 
     Ok(collector)
