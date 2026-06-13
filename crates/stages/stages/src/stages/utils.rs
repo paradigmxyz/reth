@@ -78,7 +78,7 @@ where
     let mut current_block_number = u64::MAX;
     for (idx, entry) in changeset_cursor.walk_range(range)?.enumerate() {
         let (block_number, key) = partial_key_factory(entry?);
-        cache.entry(key).or_default().push(block_number);
+        cache.entry(key).or_insert_with(|| Vec::with_capacity(1)).push(block_number);
 
         if idx > 0 && idx.is_multiple_of(interval) && total_changesets > 1000 {
             info!(target: "sync::stages::index_history", progress = %format!("{:.4}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
@@ -146,7 +146,7 @@ where
 
     for changeset_result in walker {
         let (block_number, AccountBeforeTx { address, .. }) = changeset_result?;
-        cache.entry(address).or_default().push(block_number);
+        cache.entry(address).or_insert_with(|| Vec::with_capacity(1)).push(block_number);
 
         if block_number != current_block_number {
             current_block_number = block_number;
@@ -201,7 +201,10 @@ where
 
     for changeset_result in walker {
         let (BlockNumberAddress((block_number, address)), storage) = changeset_result?;
-        cache.entry(AddressStorageKey((address, storage.key))).or_default().push(block_number);
+        cache
+            .entry(AddressStorageKey((address, storage.key)))
+            .or_insert_with(|| Vec::with_capacity(1))
+            .push(block_number);
 
         if block_number != current_block_number {
             current_block_number = block_number;
