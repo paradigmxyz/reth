@@ -77,6 +77,18 @@ where
         Ok(true)
     }
 
+    /// Handler for `admin_banPeer`
+    fn ban_peer(&self, record: AnyNode) -> RpcResult<bool> {
+        self.network.ban_peer(record.peer_id());
+        Ok(true)
+    }
+
+    /// Handler for `admin_unbanPeer`
+    fn unban_peer(&self, record: AnyNode) -> RpcResult<bool> {
+        self.network.unban_peer(record.peer_id());
+        Ok(true)
+    }
+
     /// Handler for `admin_peers`
     async fn peers(&self) -> RpcResult<Vec<PeerInfo>> {
         let peers = self.network.get_all_peers().await.to_rpc_result()?;
