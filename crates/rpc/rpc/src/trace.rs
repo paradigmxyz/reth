@@ -415,7 +415,6 @@ where
                 })
                 .await?;
 
-            let mut replay_window = Vec::with_capacity(block_buffer_size);
             let mut block_replays = futures::stream::iter(blocks)
                 .map(|block| {
                     let this = self.clone();
@@ -475,25 +474,10 @@ where
                     Vec::new()
                 };
 
-                replay_window
-                    .push(TraceFilterBlockReplay { transaction_traces: traces, reward_traces });
-                if replay_window.len() == block_buffer_size {
-                    let window = std::mem::replace(
-                        &mut replay_window,
-                        Vec::with_capacity(block_buffer_size),
-                    );
-                    append_trace_filter_replay_window(&mut all_traces, window);
-
-                    if let Some(traces) =
-                        apply_trace_filter_pagination(&mut all_traces, &mut after, count)
-                    {
-                        return Ok(traces)
-                    }
+                if let Some(traces) = traces {
+                    all_traces.extend(traces.into_iter().flatten().flatten());
                 }
-            }
-
-            if !replay_window.is_empty() {
-                append_trace_filter_replay_window(&mut all_traces, replay_window);
+                all_traces.extend(reward_traces);
 
                 if let Some(traces) =
                     apply_trace_filter_pagination(&mut all_traces, &mut after, count)
@@ -665,29 +649,6 @@ where
             transactions,
         }))
     }
-}
-
-struct TraceFilterBlockReplay {
-    transaction_traces: Option<Vec<Option<Vec<LocalizedTransactionTrace>>>>,
-    reward_traces: Vec<LocalizedTransactionTrace>,
-}
-
-fn append_trace_filter_replay_window(
-    all_traces: &mut Vec<LocalizedTransactionTrace>,
-    replay_window: impl IntoIterator<Item = TraceFilterBlockReplay>,
-) {
-    let mut reward_traces = Vec::new();
-
-    for TraceFilterBlockReplay { transaction_traces, reward_traces: block_reward_traces } in
-        replay_window
-    {
-        if let Some(transaction_traces) = transaction_traces {
-            all_traces.extend(transaction_traces.into_iter().flatten().flatten());
-        }
-        reward_traces.extend(block_reward_traces);
-    }
-
-    all_traces.extend(reward_traces);
 }
 
 fn apply_trace_filter_pagination(
@@ -962,28 +923,15 @@ mod tests {
     }
 
     #[test]
-    fn trace_filter_paginates_after_window_transaction_traces_before_rewards() {
-        let mut all_traces = Vec::new();
-        append_trace_filter_replay_window(
-            &mut all_traces,
-            [
-                TraceFilterBlockReplay {
-                    transaction_traces: Some(vec![Some(vec![localized_transaction_trace(1, 0)])]),
-                    reward_traces: vec![localized_reward_trace(1)],
-                },
-                TraceFilterBlockReplay {
-                    transaction_traces: Some(vec![Some(vec![localized_transaction_trace(2, 0)])]),
-                    reward_traces: vec![localized_reward_trace(2)],
-                },
-            ],
-        );
+    fn trace_filter_paginates_after_per_block_reward_order() {
+        let mut all_traces = vec![
+            localized_transaction_trace(1, 0),
+            localized_reward_trace(1),
+            localized_transaction_trace(2, 0),
+            localized_reward_trace(2),
+        ];
 
-        assert_eq!(
-            trace_order(&all_traces),
-            vec![(1, Some(0), false), (2, Some(0), false), (1, None, true), (2, None, true)]
-        );
-
-        let mut after = Some(2);
+        let mut after = Some(1);
         let paginated =
             apply_trace_filter_pagination(&mut all_traces, &mut after, Some(1)).unwrap();
 
