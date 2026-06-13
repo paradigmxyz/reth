@@ -531,24 +531,25 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         last_block: BlockNumber,
     ) -> ProviderResult<StaticFileWriteCtx> {
         let tip = self.last_block_number()?.max(last_block);
+        let write_receipts =
+            save_mode.with_state() && EitherWriter::receipts_destination(self).is_static_file();
         Ok(StaticFileWriteCtx {
-            write_senders: EitherWriterDestination::senders(self).is_static_file() &&
-                self.prune_modes.sender_recovery.is_none_or(|m| !m.is_full()),
-            write_receipts: save_mode.with_state() &&
-                EitherWriter::receipts_destination(self).is_static_file(),
-            write_account_changesets: save_mode.with_state() &&
-                EitherWriterDestination::account_changesets(self).is_static_file(),
-            write_storage_changesets: save_mode.with_state() &&
-                EitherWriterDestination::storage_changesets(self).is_static_file(),
+            write_senders: EitherWriterDestination::senders(self).is_static_file()
+                && self.prune_modes.sender_recovery.is_none_or(|m| !m.is_full()),
+            write_receipts,
+            write_account_changesets: save_mode.with_state()
+                && EitherWriterDestination::account_changesets(self).is_static_file(),
+            write_storage_changesets: save_mode.with_state()
+                && EitherWriterDestination::storage_changesets(self).is_static_file(),
             tip,
             receipts_prune_mode: self.prune_modes.receipts,
             // Receipts are prunable if no receipts exist in SF yet and within pruning distance
-            receipts_prunable: self
-                .static_file_provider
-                .get_highest_static_file_tx(StaticFileSegment::Receipts)
-                .is_none() &&
-                PruneMode::Distance(self.minimum_pruning_distance)
-                    .should_prune(first_block, tip),
+            receipts_prunable: write_receipts
+                && self
+                    .static_file_provider
+                    .get_highest_static_file_tx(StaticFileSegment::Receipts)
+                    .is_none()
+                && PruneMode::Distance(self.minimum_pruning_distance).should_prune(first_block, tip),
         })
     }
 
