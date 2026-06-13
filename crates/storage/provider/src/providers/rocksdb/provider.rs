@@ -1298,7 +1298,7 @@ impl RocksDBProvider {
     /// This handles transaction hash numbers, account history, and storage history based on
     /// the provided storage settings. Each operation runs in parallel with its own batch,
     /// pushing to `ctx.pending_batches` for later commit.
-    #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(num_blocks = blocks.len(), first_block = ctx.first_block_number))]
+    #[instrument(level = "trace", target = "providers::rocksdb", skip_all, fields(num_blocks = blocks.len(), first_block = ctx.first_block_number))]
     pub(crate) fn write_blocks_data<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
@@ -1371,7 +1371,7 @@ impl RocksDBProvider {
     }
 
     /// Writes transaction hash to number mappings for the given blocks.
-    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
+    #[instrument(level = "trace", target = "providers::rocksdb", skip_all)]
     fn write_tx_hash_numbers<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
@@ -1392,7 +1392,7 @@ impl RocksDBProvider {
     /// Writes account history indices for the given blocks.
     ///
     /// Derives history indices from reverts (same source as changesets) to ensure consistency.
-    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
+    #[instrument(level = "trace", target = "providers::rocksdb", skip_all)]
     fn write_account_history<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
@@ -1425,7 +1425,7 @@ impl RocksDBProvider {
     /// Writes storage history indices for the given blocks.
     ///
     /// Derives history indices from reverts (same source as changesets) to ensure consistency.
-    #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
+    #[instrument(level = "trace", target = "providers::rocksdb", skip_all)]
     fn write_storage_history<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
