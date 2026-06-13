@@ -304,16 +304,18 @@ where
     ) -> Self::DeferredEncoder {
         // If the proof job has already been dispatched for this account then it's not necessary to
         // dispatch another.
-        if let Some(rx) = self.dispatched.remove(&hashed_address) {
-            self.stats.borrow_mut().dispatched_count += 1;
-            return AsyncAccountDeferredValueEncoder::Dispatched {
-                hashed_address,
-                account,
-                proof_result_rx: Some(Ok(rx)),
-                storage_proof_results: self.storage_proof_results.clone(),
-                stats: self.stats.clone(),
-                storage_calculator: self.storage_calculator.clone(),
-                cached_storage_roots: self.cached_storage_roots.clone(),
+        if !self.dispatched.is_empty() {
+            if let Some(rx) = self.dispatched.remove(&hashed_address) {
+                self.stats.borrow_mut().dispatched_count += 1;
+                return AsyncAccountDeferredValueEncoder::Dispatched {
+                    hashed_address,
+                    account,
+                    proof_result_rx: Some(Ok(rx)),
+                    storage_proof_results: self.storage_proof_results.clone(),
+                    stats: self.stats.clone(),
+                    storage_calculator: self.storage_calculator.clone(),
+                    cached_storage_roots: self.cached_storage_roots.clone(),
+                }
             }
         }
 
