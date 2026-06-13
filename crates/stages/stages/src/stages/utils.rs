@@ -20,7 +20,11 @@ use reth_provider::{
 use reth_stages_api::StageError;
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
-use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    hash::Hash,
+    ops::RangeBounds,
+};
 use tracing::info;
 
 /// Number of blocks before pushing indices from cache to [`Collector`]
@@ -201,7 +205,12 @@ where
 
     for changeset_result in walker {
         let (BlockNumberAddress((block_number, address)), storage) = changeset_result?;
-        cache.entry(AddressStorageKey((address, storage.key))).or_default().push(block_number);
+        match cache.entry(AddressStorageKey((address, storage.key))) {
+            Entry::Occupied(mut entry) => entry.get_mut().push(block_number),
+            Entry::Vacant(entry) => {
+                entry.insert(vec![block_number]);
+            }
+        }
 
         if block_number != current_block_number {
             current_block_number = block_number;
