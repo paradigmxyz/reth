@@ -240,21 +240,24 @@ where
                     return;
                 }
             };
-            ctx.metrics.execution_duration.record(start.elapsed());
+            let execution_elapsed = start.elapsed();
+            ctx.metrics.execution_duration.record(execution_elapsed);
 
             if ctx.should_stop() {
                 return;
             }
 
+            let mut total_elapsed = execution_elapsed;
             if index > 0 {
                 let (targets, storage_targets) = MultiProofTargetsV2::from_state(res.state);
                 ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
                 if let Some(to_sparse_trie_task) = to_sparse_trie_task {
                     let _ = to_sparse_trie_task.send(StateRootMessage::PrefetchProofs(targets));
                 }
+                total_elapsed = start.elapsed();
             }
 
-            ctx.metrics.total_runtime.record(start.elapsed());
+            ctx.metrics.total_runtime.record(total_elapsed);
         });
     }
 
