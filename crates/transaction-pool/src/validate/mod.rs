@@ -10,15 +10,21 @@ use alloy_eips::{eip7594::BlobTransactionSidecarVariant, eip7702::SignedAuthoriz
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
 use reth_primitives_traits::{Block, Recovered, SealedBlock};
+use reth_storage_api::{
+    errors::provider::ProviderError, AccountReader, BytecodeReader, StateProviderBox,
+};
 use std::{fmt, fmt::Debug, future::Future, time::Instant};
 
 mod constants;
 mod eth;
+mod noop_reader;
 mod task;
 
 pub use eth::*;
 
 pub use task::{TransactionValidationTaskExecutor, ValidationTask};
+
+pub(crate) use noop_reader::NOOP_ACCOUNT_READER;
 
 /// Validation constants.
 pub use constants::{DEFAULT_MAX_TX_INPUT_BYTES, TX_SLOT_BYTE_SIZE};
@@ -166,6 +172,66 @@ impl<T: PoolTransaction> ValidTransaction<T> {
     }
 }
 
+// Two-phase batch validation: run stateless checks first, then stateful checks against a
+// shared provider. Results are stored by input index so the returned vec matches batch order.
+type StatelessBatchResults<T> = Vec<Option<TransactionValidationOutcome<T>>>;
+type StatelessBatchPending<T> = Vec<(usize, TransactionOrigin, T)>;
+
+/// Performs validations not requiring chain state access.
+///
+/// Must not access the database or any chain state.
+fn validate_stateless_batch<T: PoolTransaction, V: TransactionValidator<Transaction = T>>(
+    validator: &V,
+    transactions: Vec<(TransactionOrigin, T)>,
+) -> (StatelessBatchResults<T>, StatelessBatchPending<T>) {
+    let len = transactions.len();
+    let mut results: StatelessBatchResults<T> = (0..len).map(|_| None).collect();
+    let mut pending = Vec::new();
+
+    for (index, (origin, transaction)) in transactions.into_iter().enumerate() {
+        match validator.validate_stateless(origin, &transaction) {
+            Ok(()) => pending.push((index, origin, transaction)),
+            Err(err) => {
+                results[index] = Some(TransactionValidationOutcome::Invalid(transaction, err))
+            }
+        }
+    }
+
+    (results, pending)
+}
+
+/// Completes batch validation using a shared state provider for transactions that passed
+/// stateless checks.
+fn validate_stateful_batch<T: PoolTransaction, V: TransactionValidator<Transaction = T>, S>(
+    validator: &V,
+    mut results: StatelessBatchResults<T>,
+    pending: StatelessBatchPending<T>,
+    state: &S,
+) -> Vec<TransactionValidationOutcome<T>>
+where
+    S: AccountReader + BytecodeReader + ?Sized,
+{
+    for (index, origin, transaction) in pending {
+        results[index] = Some(validator.validate_stateful(origin, transaction, state));
+    }
+
+    results.into_iter().map(|result| result.expect("batch result filled")).collect()
+}
+
+/// Maps state-fetch failures to error outcomes for all pending transactions.
+fn state_fetch_error_outcomes<T: PoolTransaction>(
+    mut results: StatelessBatchResults<T>,
+    pending: StatelessBatchPending<T>,
+    err: ProviderError,
+) -> Vec<TransactionValidationOutcome<T>> {
+    for (index, _, transaction) in pending {
+        results[index] =
+            Some(TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err.clone())));
+    }
+
+    results.into_iter().map(|result| result.expect("batch result filled")).collect()
+}
+
 /// Provides support for validating transaction at any given state of the chain
 pub trait TransactionValidator: Debug + Send + Sync {
     /// The transaction type to validate.
@@ -173,6 +239,51 @@ pub trait TransactionValidator: Debug + Send + Sync {
 
     /// The block type used for new head block notifications.
     type Block: Block;
+
+    /// Performs validations not requiring chain state.
+    ///
+    /// Must not access the database or any chain state.
+    fn validate_stateless(
+        &self,
+        origin: TransactionOrigin,
+        transaction: &Self::Transaction,
+    ) -> Result<(), InvalidPoolTransactionError>;
+
+    /// Validates a transaction against the given chain state.
+    ///
+    /// The transaction must have already passed [`Self::validate_stateless`].
+    ///
+    /// Uses [`AccountReader`] + [`BytecodeReader`] instead of
+    /// [`AccountInfoReader`](reth_storage_api::AccountInfoReader) so callers can pass a
+    /// [`StateProviderBox`] directly.
+    fn validate_stateful<S>(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+        state: &S,
+    ) -> TransactionValidationOutcome<Self::Transaction>
+    where
+        S: AccountReader + BytecodeReader + ?Sized;
+
+    /// Validates a batch of transactions using a shared state provider.
+    ///
+    /// The provider must be supplied by the caller; this method does not fetch state.
+    fn validate_transactions_with_state<S>(
+        &self,
+        transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction)>,
+        state: &S,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>>
+    where
+        S: AccountReader + BytecodeReader + ?Sized,
+    {
+        transactions
+            .into_iter()
+            .map(|(origin, transaction)| match self.validate_stateless(origin, &transaction) {
+                Ok(()) => self.validate_stateful(origin, transaction, state),
+                Err(err) => TransactionValidationOutcome::Invalid(transaction, err),
+            })
+            .collect()
+    }
 
     /// Validates the transaction and returns a [`TransactionValidationOutcome`] describing the
     /// validity of the given transaction.
@@ -198,6 +309,9 @@ pub trait TransactionValidator: Debug + Send + Sync {
     /// example nonce or balance changes. Hence, any validation checks must be applied in this
     /// function.
     ///
+    /// Validators backed by chain state should implement [`TransactionValidatorWithState`] to
+    /// obtain optimized batch validation.
+    ///
     /// See [`TransactionValidationTaskExecutor`] for a reference implementation.
     fn validate_transaction(
         &self,
@@ -208,6 +322,10 @@ pub trait TransactionValidator: Debug + Send + Sync {
     /// Validates a batch of transactions.
     ///
     /// Must return all outcomes for the given transactions in the same order.
+    ///
+    /// The default implementation validates each transaction independently, which may fetch
+    /// chain state multiple times. Validators with a state provider should override this and
+    /// use [`TransactionValidatorWithState::validate_transactions_sync`].
     ///
     /// See also [`Self::validate_transaction`].
     fn validate_transactions(
@@ -239,6 +357,57 @@ pub trait TransactionValidator: Debug + Send + Sync {
     fn on_new_head_block(&self, _new_tip_block: &SealedBlock<Self::Block>) {}
 }
 
+/// Validators that can read latest chain state (production nodes).
+///
+/// Async methods on [`TransactionValidator`] should delegate to the sync helpers here so batch
+/// validation fetches state at most once.
+pub trait TransactionValidatorWithState: TransactionValidator + Sized {
+    /// Returns a state provider for the latest chain state.
+    fn latest_state(&self) -> Result<StateProviderBox, ProviderError>;
+
+    /// Validates a single transaction synchronously.
+    fn validate_transaction_sync(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> TransactionValidationOutcome<Self::Transaction> {
+        match self.validate_stateless(origin, &transaction) {
+            Err(err) => TransactionValidationOutcome::Invalid(transaction, err),
+            Ok(()) => match self.latest_state() {
+                Ok(state) => self.validate_stateful(origin, transaction, state.as_ref()),
+                Err(err) => TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err)),
+            },
+        }
+    }
+
+    /// Validates a batch of transactions synchronously, reusing a single state provider.
+    fn validate_transactions_sync(
+        &self,
+        transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction)>,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        let transactions: Vec<_> = transactions.into_iter().collect();
+        let (results, pending) = validate_stateless_batch(self, transactions);
+
+        if pending.is_empty() {
+            return results.into_iter().map(|result| result.expect("batch result filled")).collect();
+        }
+
+        match self.latest_state() {
+            Ok(state) => validate_stateful_batch(self, results, pending, state.as_ref()),
+            Err(err) => state_fetch_error_outcomes(results, pending, err),
+        }
+    }
+
+    /// Validates a batch of transactions with the same origin synchronously.
+    fn validate_transactions_with_origin_sync(
+        &self,
+        origin: TransactionOrigin,
+        transactions: impl IntoIterator<Item = Self::Transaction>,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        self.validate_transactions_sync(transactions.into_iter().map(move |tx| (origin, tx)))
+    }
+}
+
 impl<A, B> TransactionValidator for Either<A, B>
 where
     A: TransactionValidator,
@@ -246,6 +415,32 @@ where
 {
     type Transaction = A::Transaction;
     type Block = A::Block;
+
+    fn validate_stateless(
+        &self,
+        origin: TransactionOrigin,
+        transaction: &Self::Transaction,
+    ) -> Result<(), InvalidPoolTransactionError> {
+        match self {
+            Self::Left(v) => v.validate_stateless(origin, transaction),
+            Self::Right(v) => v.validate_stateless(origin, transaction),
+        }
+    }
+
+    fn validate_stateful<S>(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+        state: &S,
+    ) -> TransactionValidationOutcome<Self::Transaction>
+    where
+        S: AccountReader + BytecodeReader + ?Sized,
+    {
+        match self {
+            Self::Left(v) => v.validate_stateful(origin, transaction, state),
+            Self::Right(v) => v.validate_stateful(origin, transaction, state),
+        }
+    }
 
     async fn validate_transaction(
         &self,

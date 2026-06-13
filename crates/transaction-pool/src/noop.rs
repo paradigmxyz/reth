@@ -413,11 +413,26 @@ impl<T: EthPoolTransaction> TransactionValidator for MockTransactionValidator<T>
     type Transaction = T;
     type Block = reth_ethereum_primitives::Block;
 
-    async fn validate_transaction(
+    fn validate_stateless(
+        &self,
+        _origin: TransactionOrigin,
+        _transaction: &Self::Transaction,
+    ) -> Result<(), InvalidPoolTransactionError> {
+        if self.return_invalid {
+            return Err(InvalidPoolTransactionError::Underpriced);
+        }
+        Ok(())
+    }
+
+    fn validate_stateful<S>(
         &self,
         origin: TransactionOrigin,
         mut transaction: Self::Transaction,
-    ) -> TransactionValidationOutcome<Self::Transaction> {
+        _state: &S,
+    ) -> TransactionValidationOutcome<Self::Transaction>
+    where
+        S: reth_storage_api::AccountReader + reth_storage_api::BytecodeReader + ?Sized,
+    {
         if self.return_invalid {
             return TransactionValidationOutcome::Invalid(
                 transaction,
@@ -439,6 +454,27 @@ impl<T: EthPoolTransaction> TransactionValidator for MockTransactionValidator<T>
             },
             authorities: None,
         }
+    }
+
+    async fn validate_transaction(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> TransactionValidationOutcome<Self::Transaction> {
+        match self.validate_stateless(origin, &transaction) {
+            Err(err) => TransactionValidationOutcome::Invalid(transaction, err),
+            Ok(()) => {
+                self.validate_stateful(origin, transaction, &crate::validate::NOOP_ACCOUNT_READER)
+            }
+        }
+    }
+
+    async fn validate_transactions(
+        &self,
+        transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction), IntoIter: Send>
+            + Send,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        self.validate_transactions_with_state(transactions, &crate::validate::NOOP_ACCOUNT_READER)
     }
 }
 
