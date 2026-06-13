@@ -63,18 +63,6 @@ impl<'a> BbEvmPlan<'a> {
         Self { segments, next_segment: 1, tx_counter: 0, block_hashes_to_seed }
     }
 
-    /// Returns the 256 block hashes relevant to a segment with the given block
-    /// number. BLOCKHASH can look back 256 blocks, so we select entries in
-    /// `[block_number - 256, block_number)`.
-    pub(crate) fn hashes_for_block(&self, block_number: u64) -> Vec<(u64, B256)> {
-        let min = block_number.saturating_sub(256);
-        self.block_hashes_to_seed
-            .iter()
-            .copied()
-            .filter(|(n, _)| *n >= min && *n < block_number)
-            .collect()
-    }
-
     /// Returns the segment that contains the transaction at `tx_index`.
     pub(crate) fn segment_index_for_tx(&self, tx_index: usize) -> usize {
         self.segments.partition_point(|segment| segment.start_tx <= tx_index).saturating_sub(1)
@@ -164,6 +152,8 @@ where
     /// [`Self::initialize`] to renumber a worker's incoming `bal_index` into
     /// the boundary-padded space.
     bal_index_setter: Option<BalIndexSetter<DB>>,
+    /// Scratch space for the 256-block BLOCKHASH window seeded at segment boundaries.
+    block_hash_window: Vec<(u64, B256)>,
     /// Whether the executor has selected its starting segment.
     initialized: bool,
 }
@@ -206,6 +196,7 @@ where
             bal_index_reader,
             bal_index_bumper,
             bal_index_setter,
+            block_hash_window: Vec::new(),
             initialized: false,
         }
     }
@@ -281,8 +272,23 @@ where
 
     fn reseed_block_hashes_for(&mut self, block_number: u64) {
         let Some(seeder) = self.block_hash_seeder else { return };
-        let hashes = self.plan.hashes_for_block(block_number);
-        seeder(self.inner_mut().evm_mut().db_mut(), &hashes);
+        if self.plan.block_hashes_to_seed.is_empty() {
+            return;
+        }
+
+        let min = block_number.saturating_sub(256);
+        self.block_hash_window.clear();
+        self.block_hash_window.extend(
+            self.plan
+                .block_hashes_to_seed
+                .iter()
+                .copied()
+                .filter(|(n, _)| *n >= min && *n < block_number),
+        );
+
+        let hashes = &self.block_hash_window;
+        let inner = self.inner.as_mut().expect("inner executor must exist");
+        seeder(inner.evm_mut().db_mut(), hashes);
     }
 
     fn apply_segment_boundary(&mut self) -> Result<(), BlockExecutionError> {
