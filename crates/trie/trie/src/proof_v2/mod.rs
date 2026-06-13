@@ -132,13 +132,12 @@ where
     ///
     /// The returned Vec will have a length of zero.
     fn take_rlp_nodes_buf(&mut self) -> Vec<RlpNode> {
-        self.rlp_nodes_bufs
-            .pop()
-            .map(|mut buf| {
-                buf.clear();
-                buf
-            })
-            .unwrap_or_else(|| Vec::with_capacity(16))
+        if let Some(mut buf) = self.rlp_nodes_bufs.pop() {
+            buf.clear();
+            buf
+        } else {
+            Vec::with_capacity(16)
+        }
     }
 
     // Returns zero if `branch_stack` is empty, one otherwise.
@@ -342,8 +341,11 @@ where
             return Some(Nibbles::new());
         };
 
-        (!branch.state_mask.is_empty())
-            .then(|| self.child_path_at(Self::highest_set_nibble(branch.state_mask)))
+        if branch.state_mask.is_empty() {
+            None
+        } else {
+            Some(self.child_path_at(Self::highest_set_nibble(branch.state_mask)))
+        }
     }
 
     /// Calls [`Self::commit_child`] on the last child of `child_stack`, replacing it with a
