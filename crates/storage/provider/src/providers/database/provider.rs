@@ -615,6 +615,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let rocksdb_provider = self.rocksdb_provider.clone();
         let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
         let rocksdb_enabled = rocksdb_ctx.storage_settings.storage_v2;
+        let write_mdbx_senders =
+            self.prune_modes.sender_recovery.is_none_or(|m| !m.is_full()) && !sf_ctx.write_senders;
 
         let mut sf_result = None;
         let mut rocksdb_result = None;
@@ -690,7 +692,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 let recovered_block = block.recovered_block();
 
                 let start = Instant::now();
-                self.insert_block_mdbx_only(recovered_block, tx_nums[i])?;
+                self.insert_block_mdbx_only(recovered_block, tx_nums[i], write_mdbx_senders)?;
                 timings.insert_block += start.elapsed();
 
                 if save_mode.with_state() {
@@ -782,10 +784,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         &self,
         block: &RecoveredBlock<BlockTy<N>>,
         first_tx_num: TxNumber,
+        write_senders: bool,
     ) -> ProviderResult<StoredBlockBodyIndices> {
-        if self.prune_modes.sender_recovery.is_none_or(|m| !m.is_full()) &&
-            EitherWriterDestination::senders(self).is_database()
-        {
+        if write_senders {
             let start = Instant::now();
             let tx_nums_iter = std::iter::successors(Some(first_tx_num), |n| Some(n + 1));
             let mut cursor = self.tx.cursor_write::<tables::TransactionSenders>()?;
