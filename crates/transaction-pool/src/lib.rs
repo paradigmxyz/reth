@@ -299,7 +299,7 @@ pub use crate::{
     validate::{
         EthTransactionValidator, StatefulValidationFn, StatelessValidationFn,
         TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
-        ValidPoolTransaction,
+        TransactionValidatorWithState, ValidPoolTransaction,
     },
 };
 use crate::{identifier::TransactionId, pool::PoolInner};
