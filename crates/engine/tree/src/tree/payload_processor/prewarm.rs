@@ -336,7 +336,8 @@ where
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
     ) {
         let bal = decoded_bal.as_bal();
-        if bal.is_empty() {
+        let bal_accounts = bal.len();
+        if bal_accounts == 0 {
             if let Some(to_sparse_trie_task) = self.to_sparse_trie_task.as_ref() {
                 let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
             }
@@ -347,7 +348,7 @@ where
 
         trace!(
             target: "engine::tree::payload_processor::prewarm",
-            accounts = bal.len(),
+            accounts = bal_accounts,
             "Starting BAL prewarm"
         );
 
@@ -368,7 +369,7 @@ where
                     target: "engine::tree::payload_processor::prewarm",
                     parent: &stream_parent_span,
                     "bal_hashed_state_stream",
-                    bal_accounts = stream_bal.as_bal().len(),
+                    bal_accounts,
                 );
                 let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
