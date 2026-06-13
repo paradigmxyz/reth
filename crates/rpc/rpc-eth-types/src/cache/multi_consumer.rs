@@ -76,6 +76,16 @@ where
             .inspect(|removed| self.metrics.queued_consumers_count.decrement(removed.len() as f64))
     }
 
+    /// Removes a cached value without affecting queued consumers for the same key.
+    pub fn evict(&mut self, key: &K) -> Option<V>
+    where
+        V: InMemorySize,
+    {
+        self.cache
+            .remove(key)
+            .inspect(|value| self.memory_usage = self.memory_usage.saturating_sub(value.size()))
+    }
+
     /// Returns a reference to the value for a given key and promotes that element to be the most
     /// recently used.
     pub fn get(&mut self, key: &K) -> Option<&mut V> {

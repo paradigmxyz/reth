@@ -73,6 +73,10 @@ type HeaderLruCache<H, L> = MultiConsumerLruCache<B256, H, L, HeaderResponseSend
 
 type BalLruCache<L> = MultiConsumerLruCache<B256, CachedRevmBal, L, BalResponseSender>;
 
+fn receipts_match_block<B: Block, R>(block: &RecoveredBlock<B>, receipts: &[R]) -> bool {
+    block.body().transaction_count() == receipts.len()
+}
+
 /// Provides async access to cached eth data
 ///
 /// This is the frontend for the async caching service which manages cached data on a different
@@ -177,9 +181,41 @@ impl<N: NodePrimitives> EthStateCache<N> {
         let block = self.get_recovered_block(block_hash);
         let receipts = self.get_receipts(block_hash);
 
-        let (block, receipts) = futures::try_join!(block, receipts)?;
+        let (block, receipts) = futures::join!(block, receipts);
 
-        Ok(block.zip(receipts))
+        let Some(block) = block? else { return Ok(None) };
+        let Some(receipts) =
+            self.matching_receipts_or_retry(block_hash, block.as_ref(), receipts).await?
+        else {
+            return Ok(None)
+        };
+
+        Ok(Some((block, receipts)))
+    }
+
+    async fn matching_receipts_or_retry(
+        &self,
+        block_hash: B256,
+        block: &RecoveredBlock<N::Block>,
+        receipts: ProviderResult<Option<Arc<Vec<N::Receipt>>>>,
+    ) -> ProviderResult<Option<Arc<Vec<N::Receipt>>>> {
+        let receipts = match receipts {
+            Ok(Some(receipts)) if receipts_match_block(block, receipts.as_ref()) => {
+                return Ok(Some(receipts))
+            }
+            Ok(Some(_)) | Err(ProviderError::InvalidStorageOutput) => {
+                self.get_receipts(block_hash).await?
+            }
+            Ok(None) => return Ok(None),
+            Err(err) => return Err(err),
+        };
+
+        let Some(receipts) = receipts else { return Ok(None) };
+        if receipts_match_block(block, receipts.as_ref()) {
+            Ok(Some(receipts))
+        } else {
+            Err(ProviderError::InvalidStorageOutput)
+        }
     }
 
     /// Retrieves receipts and blocks from cache if block is in the cache, otherwise only receipts.
@@ -195,7 +231,13 @@ impl<N: NodePrimitives> EthStateCache<N> {
         let (receipts, block) = futures::join!(receipts, rx);
 
         let block = block.map_err(|_| CacheServiceUnavailable)?;
-        Ok(receipts?.map(|r| (r, block)))
+        let receipts = if let Some(block) = block.as_ref() {
+            self.matching_receipts_or_retry(block_hash, block.as_ref(), receipts).await?
+        } else {
+            receipts?
+        };
+
+        Ok(receipts.map(|r| (r, block)))
     }
 
     /// Retrieves both block and receipts from cache if available.
@@ -390,6 +432,13 @@ where
 
         // cache good block
         if let Ok(Some(block)) = res {
+            if self
+                .receipts_cache
+                .get(&block_hash)
+                .is_some_and(|receipts| !receipts_match_block(block.as_ref(), receipts.as_ref()))
+            {
+                self.receipts_cache.evict(&block_hash);
+            }
             self.full_block_cache.insert(block_hash, block);
         }
     }
@@ -399,6 +448,15 @@ where
         block_hash: B256,
         res: ProviderResult<Option<Arc<Vec<Provider::Receipt>>>>,
     ) {
+        let mismatched = match &res {
+            Ok(Some(receipts)) => self
+                .full_block_cache
+                .get(&block_hash)
+                .is_some_and(|block| !receipts_match_block(block.as_ref(), receipts.as_ref())),
+            _ => false,
+        };
+        let res = if mismatched { Err(ProviderError::InvalidStorageOutput) } else { res };
+
         if let Some(queued) = self.receipts_cache.remove(&block_hash) {
             // send the response to queued senders
             for tx in queued {
@@ -514,6 +572,15 @@ where
                         CacheAction::GetCachedBlockAndReceipts { block_hash, response_tx } => {
                             let block = this.full_block_cache.get(&block_hash).cloned();
                             let receipts = this.receipts_cache.get(&block_hash).cloned();
+                            let receipts = match (&block, receipts) {
+                                (Some(block), Some(receipts))
+                                    if !receipts_match_block(block.as_ref(), receipts.as_ref()) =>
+                                {
+                                    this.receipts_cache.evict(&block_hash);
+                                    None
+                                }
+                                (_, receipts) => receipts,
+                            };
                             let _ = response_tx.send((block, receipts));
                         }
                         CacheAction::GetBlockWithSenders { block_hash, response_tx } => {
@@ -547,8 +614,14 @@ where
                         CacheAction::GetReceipts { block_hash, response_tx } => {
                             // check if block is cached
                             if let Some(receipts) = this.receipts_cache.get(&block_hash).cloned() {
-                                let _ = response_tx.send(Ok(Some(receipts)));
-                                continue
+                                if this.full_block_cache.get(&block_hash).is_some_and(|block| {
+                                    !receipts_match_block(block.as_ref(), receipts.as_ref())
+                                }) {
+                                    this.receipts_cache.evict(&block_hash);
+                                } else {
+                                    let _ = response_tx.send(Ok(Some(receipts)));
+                                    continue
+                                }
                             }
 
                             // block is not in the cache, request it if this is the first consumer
@@ -712,12 +785,21 @@ where
                             let _ = response_tx.send(blocks);
                         }
                         CacheAction::GetTransactionByHash { tx_hash, response_tx } => {
-                            let result =
-                                this.tx_hash_index.get(&tx_hash).and_then(|(block_hash, idx)| {
-                                    let block = this.full_block_cache.get(block_hash).cloned()?;
-                                    let receipts = this.receipts_cache.get(block_hash).cloned();
-                                    Some(CachedTransaction::new(block, *idx, receipts))
-                                });
+                            let result = this.tx_hash_index.get(&tx_hash).copied().and_then(
+                                |(block_hash, idx)| {
+                                    let block = this.full_block_cache.get(&block_hash).cloned()?;
+                                    let receipts = this.receipts_cache.get(&block_hash).cloned();
+                                    let receipts = receipts.and_then(|receipts| {
+                                        if receipts_match_block(block.as_ref(), receipts.as_ref()) {
+                                            Some(receipts)
+                                        } else {
+                                            this.receipts_cache.evict(&block_hash);
+                                            None
+                                        }
+                                    });
+                                    Some(CachedTransaction::new(block, idx, receipts))
+                                },
+                            );
                             let _ = response_tx.send(result);
                         }
                     };
@@ -1004,11 +1086,35 @@ mod tests {
         BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider, ReceiptProvider,
         TransactionVariant, TransactionsProvider,
     };
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::{
+        collections::VecDeque,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Mutex,
+        },
+    };
 
     fn test_service() -> EthStateCacheService<NoopProvider, Runtime> {
         let (_cache, service) = EthStateCache::<EthPrimitives>::create(
             NoopProvider::default(),
+            Runtime::test(),
+            EthStateCacheConfig {
+                max_blocks: 4,
+                max_receipts: 4,
+                max_headers: 4,
+                max_bals: 4,
+                max_concurrent_db_requests: 1,
+                max_cached_tx_hashes: 16,
+            },
+        );
+        service
+    }
+
+    fn test_service_with_provider(
+        provider: TestBalProvider,
+    ) -> EthStateCacheService<TestBalProvider, Runtime> {
+        let (_cache, service) = EthStateCache::<EthPrimitives>::create(
+            provider,
             Runtime::test(),
             EthStateCacheConfig {
                 max_blocks: 4,
@@ -1027,19 +1133,31 @@ mod tests {
     }
 
     fn test_block() -> RecoveredBlock<Block> {
+        test_block_with_transaction_count(1)
+    }
+
+    fn test_block_with_transaction_count(transaction_count: usize) -> RecoveredBlock<Block> {
         RecoveredBlock::new_unhashed(
             Block {
                 header: Header { number: 1, ..Default::default() },
                 body: BlockBody {
-                    transactions: vec![TransactionSigned::new_unhashed(
-                        Transaction::Legacy(Default::default()),
-                        Signature::test_signature(),
-                    )],
+                    transactions: (0..transaction_count)
+                        .map(|_| {
+                            TransactionSigned::new_unhashed(
+                                Transaction::Legacy(Default::default()),
+                                Signature::test_signature(),
+                            )
+                        })
+                        .collect(),
                     ..Default::default()
                 },
             },
-            vec![Address::ZERO],
+            vec![Address::ZERO; transaction_count],
         )
+    }
+
+    fn test_receipt(cumulative_gas_used: u64) -> Receipt {
+        Receipt { tx_type: Default::default(), success: true, cumulative_gas_used, logs: vec![] }
     }
 
     #[test]
@@ -1085,6 +1203,19 @@ mod tests {
         service.remove_block_transactions(&block);
 
         assert!(service.tx_hash_index.get(&tx_hash).is_none());
+    }
+
+    #[test]
+    fn on_new_block_evicts_cached_receipts_with_wrong_len() {
+        let block = test_block();
+        let block_hash = block.hash();
+        let mut service = test_service_with_provider(TestBalProvider::default());
+
+        assert!(service.receipts_cache.insert(block_hash, Arc::new(vec![])));
+
+        service.on_new_block(block_hash, Ok(Some(Arc::new(block))));
+
+        assert!(service.receipts_cache.get(&block_hash).is_none());
     }
 
     #[test]
@@ -1194,14 +1325,254 @@ mod tests {
         assert_eq!(fetches.load(Ordering::SeqCst), 1);
     }
 
+    #[tokio::test]
+    async fn get_block_and_receipts_retries_empty_receipts_for_non_empty_block() {
+        let block = test_block();
+        let block_hash = block.hash();
+        let provider = TestBalProvider::with_block_and_receipts(
+            block,
+            vec![vec![], vec![test_receipt(21_000)]],
+        );
+        let fetches = provider.receipt_fetches.clone();
+        let cache = test_cache(provider);
+
+        let (_, receipts) = cache
+            .get_block_and_receipts(block_hash)
+            .await
+            .expect("cache request succeeds")
+            .expect("block and receipts are found");
+
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(fetches.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn get_block_and_receipts_accepts_empty_receipts_for_empty_block() {
+        let block = test_block_with_transaction_count(0);
+        let block_hash = block.hash();
+        let provider = TestBalProvider::with_block_and_receipts(block, vec![vec![]]);
+        let fetches = provider.receipt_fetches.clone();
+        let cache = test_cache(provider);
+
+        let (_, receipts) = cache
+            .get_block_and_receipts(block_hash)
+            .await
+            .expect("cache request succeeds")
+            .expect("block and receipts are found");
+
+        assert!(receipts.is_empty());
+        assert_eq!(fetches.load(Ordering::SeqCst), 1);
+
+        let (_, receipts) = cache
+            .get_block_and_receipts(block_hash)
+            .await
+            .expect("cached request succeeds")
+            .expect("cached block and receipts are found");
+
+        assert!(receipts.is_empty());
+        assert_eq!(fetches.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn get_block_and_receipts_does_not_cache_short_receipts_for_non_empty_block() {
+        let block = test_block_with_transaction_count(2);
+        let block_hash = block.hash();
+        let provider = TestBalProvider::with_block_and_receipts(
+            block,
+            vec![
+                vec![test_receipt(21_000)],
+                vec![test_receipt(21_000)],
+                vec![test_receipt(21_000), test_receipt(42_000)],
+            ],
+        );
+        let fetches = provider.receipt_fetches.clone();
+        let cache = test_cache(provider);
+
+        assert!(cache.get_block_and_receipts(block_hash).await.is_err());
+        assert_eq!(fetches.load(Ordering::SeqCst), 2);
+
+        let (_, receipts) = cache
+            .get_block_and_receipts(block_hash)
+            .await
+            .expect("cache request succeeds after provider heals")
+            .expect("block and receipts are found");
+
+        assert_eq!(receipts.len(), 2);
+        assert_eq!(fetches.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn get_receipts_rejects_short_receipts_when_block_is_cached() {
+        let block = test_block_with_transaction_count(2);
+        let block_hash = block.hash();
+        let provider = TestBalProvider::with_block_and_receipts(
+            block.clone(),
+            vec![vec![test_receipt(21_000)]],
+        );
+        let fetches = provider.receipt_fetches.clone();
+        let cache = test_cache_with_seed(provider, move |service| {
+            service.full_block_cache.insert(block_hash, Arc::new(block));
+        });
+
+        let err = cache.get_receipts(block_hash).await.expect_err("short receipts are rejected");
+
+        assert!(matches!(err, ProviderError::InvalidStorageOutput));
+        assert_eq!(fetches.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn concurrent_get_block_and_receipts_requests_share_retry_after_empty_receipts() {
+        let block = test_block();
+        let block_hash = block.hash();
+        let provider = TestBalProvider::with_block_and_receipts(
+            block,
+            vec![vec![], vec![test_receipt(21_000)]],
+        );
+        let fetches = provider.receipt_fetches.clone();
+        let cache = test_cache(provider);
+
+        let (first, second) = tokio::join!(
+            cache.get_block_and_receipts(block_hash),
+            cache.get_block_and_receipts(block_hash)
+        );
+
+        let (_, receipts) =
+            first.expect("cache request succeeds").expect("block and receipts are found");
+        assert_eq!(receipts.len(), 1);
+
+        let (_, receipts) =
+            second.expect("cache request succeeds").expect("block and receipts are found");
+        assert_eq!(receipts.len(), 1);
+
+        assert_eq!(fetches.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn get_receipts_and_maybe_block_retries_short_receipts_for_cached_block() {
+        let block = test_block_with_transaction_count(2);
+        let block_hash = block.hash();
+        let provider = TestBalProvider::with_block_and_receipts(
+            block.clone(),
+            vec![vec![test_receipt(21_000)], vec![test_receipt(21_000), test_receipt(42_000)]],
+        );
+        let fetches = provider.receipt_fetches.clone();
+        let cache = test_cache_with_seed(provider, move |service| {
+            service.full_block_cache.insert(block_hash, Arc::new(block));
+        });
+
+        let (receipts, maybe_block) = cache
+            .get_receipts_and_maybe_block(block_hash)
+            .await
+            .expect("cache request succeeds")
+            .expect("receipts are found");
+
+        assert!(maybe_block.is_some());
+        assert_eq!(receipts.len(), 2);
+        assert_eq!(fetches.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn maybe_cached_block_and_receipts_omits_stale_mismatched_receipts() {
+        let block = test_block();
+        let block_hash = block.hash();
+        let cache = test_cache_with_seed(TestBalProvider::default(), move |service| {
+            service.full_block_cache.insert(block_hash, Arc::new(block));
+            service.receipts_cache.insert(block_hash, Arc::new(vec![]));
+        });
+
+        let (maybe_block, maybe_receipts) = cache
+            .maybe_cached_block_and_receipts(block_hash)
+            .await
+            .expect("cache request succeeds");
+
+        assert!(maybe_block.is_some());
+        assert!(maybe_receipts.is_none());
+    }
+
+    #[tokio::test]
+    async fn get_transaction_by_hash_omits_stale_mismatched_receipts() {
+        let block = test_block();
+        let block_hash = block.hash();
+        let tx_hash = *block.body().transactions().next().expect("test transaction").tx_hash();
+        let cache = test_cache_with_seed(TestBalProvider::default(), move |service| {
+            service.index_block_transactions(&block);
+            service.full_block_cache.insert(block_hash, Arc::new(block));
+            service.receipts_cache.insert(block_hash, Arc::new(vec![]));
+        });
+
+        let cached = cache.get_transaction_by_hash(tx_hash).await.expect("cached transaction");
+
+        assert_eq!(cached.tx_index, 0);
+        assert!(cached.receipts.is_none());
+    }
+
+    fn test_cache(provider: TestBalProvider) -> EthStateCache<EthPrimitives> {
+        EthStateCache::<EthPrimitives>::spawn_with(
+            provider,
+            EthStateCacheConfig {
+                max_blocks: 4,
+                max_receipts: 4,
+                max_headers: 0,
+                max_bals: 0,
+                max_concurrent_db_requests: 1,
+                max_cached_tx_hashes: 0,
+            },
+            Runtime::test(),
+        )
+    }
+
+    fn test_cache_with_seed(
+        provider: TestBalProvider,
+        seed: impl FnOnce(&mut EthStateCacheService<TestBalProvider, Runtime>),
+    ) -> EthStateCache<EthPrimitives> {
+        let runtime = Runtime::test();
+        let (cache, mut service) = EthStateCache::<EthPrimitives>::create(
+            provider,
+            runtime.clone(),
+            EthStateCacheConfig {
+                max_blocks: 4,
+                max_receipts: 4,
+                max_headers: 0,
+                max_bals: 0,
+                max_concurrent_db_requests: 1,
+                max_cached_tx_hashes: 16,
+            },
+        );
+        seed(&mut service);
+        runtime.spawn_critical_task("eth state cache", service);
+        cache
+    }
+
     #[derive(Clone, Debug, Default)]
     struct TestBalProvider {
         bal_store: BalStoreHandle,
+        block: Option<RecoveredBlock<Block>>,
+        receipts: Arc<Mutex<VecDeque<Vec<Receipt>>>>,
+        receipt_fetches: Arc<AtomicUsize>,
     }
 
     impl TestBalProvider {
         fn new(fetches: Arc<AtomicUsize>) -> Self {
-            Self { bal_store: BalStoreHandle::new(TestBalStore { fetches }) }
+            Self { bal_store: BalStoreHandle::new(TestBalStore { fetches }), ..Default::default() }
+        }
+
+        fn with_block_and_receipts(
+            block: RecoveredBlock<Block>,
+            receipts: Vec<Vec<Receipt>>,
+        ) -> Self {
+            Self {
+                block: Some(block),
+                receipts: Arc::new(Mutex::new(receipts.into())),
+                ..Default::default()
+            }
+        }
+
+        fn block_matches(&self, block_id: BlockHashOrNumber) -> bool {
+            let Some(block) = self.block.as_ref() else { return false };
+            match block_id {
+                BlockHashOrNumber::Hash(hash) => hash == block.hash(),
+                BlockHashOrNumber::Number(number) => number == block.number(),
+            }
         }
     }
 
@@ -1243,8 +1614,12 @@ mod tests {
     }
 
     impl BlockHashReader for TestBalProvider {
-        fn block_hash(&self, _number: BlockNumber) -> ProviderResult<Option<B256>> {
-            Ok(None)
+        fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
+            Ok(self
+                .block
+                .as_ref()
+                .filter(|block| block.number() == number)
+                .map(|block| block.hash()))
         }
 
         fn canonical_hashes_range(
@@ -1269,8 +1644,8 @@ mod tests {
             Ok(0)
         }
 
-        fn block_number(&self, _hash: B256) -> ProviderResult<Option<BlockNumber>> {
-            Ok(None)
+        fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
+            Ok(self.block.as_ref().filter(|block| block.hash() == hash).map(|block| block.number()))
         }
     }
 
@@ -1396,9 +1771,14 @@ mod tests {
 
         fn receipts_by_block(
             &self,
-            _block: BlockHashOrNumber,
+            block: BlockHashOrNumber,
         ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
-            Ok(None)
+            self.receipt_fetches.fetch_add(1, Ordering::SeqCst);
+            if !self.block_matches(block) {
+                return Ok(None)
+            }
+
+            Ok(self.receipts.lock().expect("receipts lock").pop_front())
         }
 
         fn receipts_by_tx_range(
@@ -1451,10 +1831,10 @@ mod tests {
 
         fn sealed_block_with_senders(
             &self,
-            _id: BlockHashOrNumber,
+            id: BlockHashOrNumber,
             _transaction_kind: TransactionVariant,
         ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-            Ok(None)
+            Ok(self.block_matches(id).then(|| self.block.clone()).flatten())
         }
 
         fn block_range(
