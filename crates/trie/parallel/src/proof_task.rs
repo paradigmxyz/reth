@@ -430,7 +430,7 @@ where
         TC: TrieStorageCursor,
         HC: HashedStorageCursor<Value = U256>,
     {
-        let StorageProofInput { hashed_address, mut targets } = input;
+        let StorageProofInput { hashed_address, mut targets, .. } = input;
 
         let span = debug_span!(
             target: "trie::proof_task",
@@ -718,6 +718,7 @@ where
         HC: HashedStorageCursor<Value = U256>,
     {
         let hashed_address = input.hashed_address;
+        let cache_root = input.cache_root;
         let proof_start = Instant::now();
 
         trace!(
@@ -745,7 +746,9 @@ where
             );
         }
 
-        if let Some(root) = root {
+        if cache_root &&
+            let Some(root) = root
+        {
             self.cached_storage_roots.insert(hashed_address, root);
         }
 
@@ -1094,7 +1097,8 @@ fn dispatch_v2_storage_proofs(
     for (hashed_address, targets) in sorted_storage_targets {
         // Create channel for receiving StorageProofResultMessage
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
-        let input = StorageProofInput::new(hashed_address, targets);
+        let input = StorageProofInput::new(hashed_address, targets)
+            .with_cache_root(account_target_addresses.contains(&hashed_address));
 
         storage_work_tx
             .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
@@ -1117,12 +1121,20 @@ pub struct StorageProofInput {
     pub hashed_address: B256,
     /// The set of proof targets
     pub targets: Vec<ProofV2Target>,
+    /// Whether to publish the computed storage root to the shared root cache.
+    pub cache_root: bool,
 }
 
 impl StorageProofInput {
     /// Creates a new [`StorageProofInput`] with the given hashed address and target slots.
     pub const fn new(hashed_address: B256, targets: Vec<ProofV2Target>) -> Self {
-        Self { hashed_address, targets }
+        Self { hashed_address, targets, cache_root: true }
+    }
+
+    /// Sets whether the computed root should be cached for account proof encoding.
+    pub const fn with_cache_root(mut self, cache_root: bool) -> Self {
+        self.cache_root = cache_root;
+        self
     }
 }
 
