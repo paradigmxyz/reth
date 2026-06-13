@@ -649,6 +649,12 @@ where
         if self.disable_bal_parallel_state_root {
             return;
         }
+        let has_account_change = !account_changes.balance_changes.is_empty()
+            || !account_changes.nonce_changes.is_empty()
+            || !account_changes.code_changes.is_empty();
+        if !has_account_change && account_changes.storage_changes.is_empty() {
+            return;
+        }
         let address = account_changes.address;
         let mut hashed_address = None;
 
@@ -711,14 +717,6 @@ where
                 keccak256(&code_change.new_code)
             }
         });
-
-        if balance.is_none() &&
-            nonce.is_none() &&
-            code_hash.is_none() &&
-            account_changes.storage_changes.is_empty()
-        {
-            return;
-        }
 
         let account = reth_primitives_traits::Account {
             balance: balance.unwrap_or_else(|| {
