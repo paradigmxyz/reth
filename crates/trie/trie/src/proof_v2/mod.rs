@@ -89,6 +89,8 @@ pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
     rlp_encode_buf: Vec<u8>,
     /// Prefix set for tracking changed keys.
     prefix_set: PrefixSet,
+    /// Whether `prefix_set` can invalidate cached branches.
+    prefix_set_active: bool,
 }
 
 impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
@@ -105,6 +107,7 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
             rlp_nodes_bufs: Vec::<_>::with_capacity(8),
             rlp_encode_buf: Vec::<_>::with_capacity(RLP_ENCODE_BUF_SIZE),
             prefix_set: PrefixSet::default(),
+            prefix_set_active: false,
         }
     }
 
@@ -116,6 +119,7 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
     /// where all but one child of a branch is deleted and the remaining child is required to be
     /// unrevealed in order to collapse the branch.
     pub fn with_prefix_set(mut self, prefix_set: PrefixSet) -> Self {
+        self.prefix_set_active = !prefix_set.is_empty();
         self.prefix_set = prefix_set;
         self
     }
@@ -861,7 +865,7 @@ where
         cached_path: &Nibbles,
         cached_branch: &BranchNodeCompact,
     ) -> bool {
-        if !self.prefix_set.contains(cached_path) {
+        if !self.prefix_set_active || !self.prefix_set.contains(cached_path) {
             return false
         }
 
@@ -1092,7 +1096,7 @@ where
             // indicate children that need recalculation from leaves (e.g. new keys inserted
             // under this branch). Skip nibbles already set in `curr_state_mask` since those
             // children have already been constructed.
-            if self.prefix_set.contains(&self.branch_path) {
+            if self.prefix_set_active && self.prefix_set.contains(&self.branch_path) {
                 let branch_path_len = self.branch_path.len();
                 let mut child_path = self.branch_path;
                 for nibble in 0u8..16 {
@@ -1176,7 +1180,8 @@ where
             // any dirty leaves between that path and this child, it indicates there may be leaves
             // which would split that extension node. In that case we return the range to process
             // the leaves.
-            if uncalculated_lower_bound_ref < &child_path &&
+            if self.prefix_set_active &&
+                uncalculated_lower_bound_ref < &child_path &&
                 self.prefix_set.contains_range(uncalculated_lower_bound_ref..&child_path)
             {
                 self.cached_branch_stack.push((cached_path, cached_branch));
@@ -1193,7 +1198,7 @@ where
             // If the child's path is in the prefix set then the cached hash is stale and must
             // not be used.
             if cached_branch.hash_mask.is_bit_set(child_nibble) &&
-                !self.prefix_set.contains(&child_path)
+                (!self.prefix_set_active || !self.prefix_set.contains(&child_path))
             {
                 // Commit the last child. We do this here for two reasons:
                 // - `commit_last_child` will check if the last child needs to be retained. We need
@@ -1261,7 +1266,7 @@ where
                 // there are dirty leaves which would split the cached branch's extension node (if
                 // there is one). In that case we return the range those leaves would potentially be
                 // in to calculate them.
-                if self.prefix_set.contains(&child_path) {
+                if self.prefix_set_active && self.prefix_set.contains(&child_path) {
                     let gap_upper = Some(*next_cached_path);
                     self.cached_branch_stack.push(trie_cursor_state.take());
                     return Ok(Some((*uncalculated_lower_bound_ref, gap_upper)));
