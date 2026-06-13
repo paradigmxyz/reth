@@ -363,14 +363,27 @@ where
 {
     /// Indexes all transactions in a block by transaction hash.
     fn index_block_transactions(&mut self, block: &RecoveredBlock<Provider::Block>) {
+        if self.tx_hash_index.limiter().max_length() == 0 {
+            return;
+        }
+
+        let transactions = block.body().transactions();
+        if transactions.is_empty() {
+            return;
+        }
+
         let block_hash = block.hash();
-        for (tx_idx, tx) in block.body().transactions().iter().enumerate() {
+        for (tx_idx, tx) in transactions.iter().enumerate() {
             self.tx_hash_index.insert(*tx.tx_hash(), (block_hash, tx_idx));
         }
     }
 
     /// Removes transaction index entries for a reorged block.
     fn remove_block_transactions(&mut self, block: &RecoveredBlock<Provider::Block>) {
+        if self.tx_hash_index.limiter().max_length() == 0 {
+            return;
+        }
+
         for tx in block.body().transactions() {
             self.tx_hash_index.remove(tx.tx_hash());
         }
