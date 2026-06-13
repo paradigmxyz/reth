@@ -328,7 +328,9 @@ impl HashedPostState {
     /// Converts hashed post state into [`HashedPostStateSorted`].
     pub fn into_sorted(self) -> HashedPostStateSorted {
         let mut accounts: Vec<_> = self.accounts.into_iter().collect();
-        accounts.sort_unstable_by_key(|(address, _)| *address);
+        if accounts.len() > 1 {
+            accounts.sort_unstable_by_key(|(address, _)| *address);
+        }
 
         let storages = self
             .storages
@@ -343,7 +345,9 @@ impl HashedPostState {
     /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
     pub fn clone_into_sorted(&self) -> HashedPostStateSorted {
         let mut accounts: Vec<_> = self.accounts.iter().map(|(&k, &v)| (k, v)).collect();
-        accounts.sort_unstable_by_key(|(address, _)| *address);
+        if accounts.len() > 1 {
+            accounts.sort_unstable_by_key(|(address, _)| *address);
+        }
 
         let storages = self
             .storages
@@ -498,7 +502,9 @@ impl HashedStorage {
     /// Converts hashed storage into [`HashedStorageSorted`].
     pub fn into_sorted(self) -> HashedStorageSorted {
         let mut storage_slots: Vec<_> = self.storage.into_iter().collect();
-        storage_slots.sort_unstable_by_key(|(key, _)| *key);
+        if storage_slots.len() > 1 {
+            storage_slots.sort_unstable_by_key(|(key, _)| *key);
+        }
 
         HashedStorageSorted { storage_slots, wiped: self.wiped }
     }
@@ -507,7 +513,9 @@ impl HashedStorage {
     /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
     pub fn clone_into_sorted(&self) -> HashedStorageSorted {
         let mut storage_slots: Vec<_> = self.storage.iter().map(|(&k, &v)| (k, v)).collect();
-        storage_slots.sort_unstable_by_key(|(key, _)| *key);
+        if storage_slots.len() > 1 {
+            storage_slots.sort_unstable_by_key(|(key, _)| *key);
+        }
 
         HashedStorageSorted { storage_slots, wiped: self.wiped }
     }
