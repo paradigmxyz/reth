@@ -101,7 +101,7 @@ use std::{
     },
     time::Duration,
 };
-use tracing::{debug, debug_span, error, info, instrument, trace, warn, Level, Span};
+use tracing::{debug, debug_span, error, info, instrument, trace, trace_span, warn, Level, Span};
 
 pub use crate::tree::types::ValidationOutcome;
 
@@ -1861,7 +1861,7 @@ where
         // Spawn background task to compute trie data. The task publishes the sorted result before
         // computing changesets, so trie data waiters do not block on changeset computation.
         let compute_trie_input_task = move || {
-            let _span = debug_span!(
+            let _span = trace_span!(
                 target: "engine::tree::payload_validator",
                 "compute_trie_input_task",
                 block_number
