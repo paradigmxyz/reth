@@ -19,8 +19,7 @@ impl ProofV2Target {
     /// Returns a new [`ProofV2Target`] which matches all trie nodes whose path is a prefix of this
     /// key.
     pub fn new(key: B256) -> Self {
-        // SAFETY: key is a B256 and so is exactly 32-bytes.
-        let key_nibbles = unsafe { Nibbles::unpack_unchecked(key.as_slice()) };
+        let key_nibbles = Nibbles::unpack_array(key.as_ref());
         Self { key_nibbles, min_len: 0 }
     }
 
