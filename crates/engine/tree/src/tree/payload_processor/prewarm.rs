@@ -21,7 +21,7 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::keccak256;
+use alloy_primitives::{keccak256, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
@@ -751,8 +751,15 @@ where
 /// Withdrawals only modify account balances (no storage), so the targets contain
 /// only account-level entries with empty storage sets.
 fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProofTargetsV2 {
+    let mut account_targets =
+        withdrawals.iter().map(|withdrawal| keccak256(withdrawal.address)).collect::<Vec<B256>>();
+    if account_targets.len() > 1 {
+        account_targets.sort_unstable();
+        account_targets.dedup();
+    }
+
     MultiProofTargetsV2 {
-        account_targets: withdrawals.iter().map(|w| keccak256(w.address).into()).collect(),
+        account_targets: account_targets.into_iter().map(Into::into).collect(),
         ..Default::default()
     }
 }
