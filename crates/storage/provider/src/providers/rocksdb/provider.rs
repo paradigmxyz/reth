@@ -830,14 +830,14 @@ impl RocksDBProvider {
         table: &'static str,
         f: impl FnOnce(&Self) -> R,
     ) -> R {
-        let start = self.0.metrics().map(|_| Instant::now());
-        let res = f(self);
-
-        if let (Some(start), Some(metrics)) = (start, self.0.metrics()) {
+        if let Some(metrics) = self.0.metrics() {
+            let start = Instant::now();
+            let res = f(self);
             metrics.record_operation(operation, table, start.elapsed());
+            res
+        } else {
+            f(self)
         }
-
-        res
     }
 
     /// Gets a value from the specified table.
