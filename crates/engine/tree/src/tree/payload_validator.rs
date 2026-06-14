@@ -1275,19 +1275,51 @@ where
         DB: revm::Database + 'a,
         Err: core::error::Error + Send + Sync + 'static,
     {
-        let mut senders = Vec::with_capacity(transaction_count);
-
         // Apply pre-execution changes (e.g., beacon root update)
         let pre_exec_start = Instant::now();
         debug_span!(target: "engine::tree", "pre_execution")
             .in_scope(|| executor.apply_pre_execution_changes())?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
 
-        // Bump BAL index after pre-execution changes (EIP-7928: index 0 is pre-execution)
         if has_bal {
+            self.execute_transactions_inner::<true, _, _, _, _, _>(
+                executor,
+                transaction_count,
+                transactions,
+                receipt_tx,
+                executed_tx_index,
+            )
+        } else {
+            self.execute_transactions_inner::<false, _, _, _, _, _>(
+                executor,
+                transaction_count,
+                transactions,
+                receipt_tx,
+                executed_tx_index,
+            )
+        }
+    }
+
+    fn execute_transactions_inner<'a, const HAS_BAL: bool, E, Tx, InnerTx, Err, DB>(
+        &self,
+        mut executor: E,
+        transaction_count: usize,
+        transactions: impl Iterator<Item = Result<Tx, Err>>,
+        receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
+        executed_tx_index: &AtomicUsize,
+    ) -> Result<(E, Vec<Address>), BlockExecutionError>
+    where
+        E: BlockExecutor<Receipt = N::Receipt, Evm: alloy_evm::Evm<DB = &'a mut State<DB>>>,
+        Tx: alloy_evm::block::ExecutableTx<E> + alloy_evm::RecoveredTx<InnerTx>,
+        InnerTx: TxHashRef,
+        DB: revm::Database + 'a,
+        Err: core::error::Error + Send + Sync + 'static,
+    {
+        if HAS_BAL {
             executor.evm_mut().db_mut().bump_bal_index();
         }
 
+        let mut senders = Vec::with_capacity(transaction_count);
         // Execute transactions
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
         let mut transactions = transactions.into_iter();
@@ -1337,7 +1369,7 @@ where
                 }
             }
             // Bump BAL index after each transaction (EIP-7928)
-            if has_bal {
+            if HAS_BAL {
                 executor.evm_mut().db_mut().bump_bal_index();
             }
         }
