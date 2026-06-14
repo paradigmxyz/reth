@@ -273,12 +273,12 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         let key = OverlayCacheKey { anchor_hash, tip_hash };
         let span = tracing::Span::current();
 
-        if let Some(entry) = self.overlays.get(&key).map(|entry| entry.value().clone()) {
-            return Ok(match entry {
+        if let Some(entry) = self.overlays.get(&key) {
+            return Ok(match entry.value() {
                 OverlayCacheEntry::Ready(input) => {
                     self.metrics.overlay_cache_reuses.increment(1);
                     span.record("cache_reused", true);
-                    Some(input)
+                    Some(Arc::clone(input))
                 }
                 OverlayCacheEntry::Computing(waiter) => {
                     span.record("cache_reused", true);
@@ -334,11 +334,11 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         }
 
         let action = match self.overlays.entry(key) {
-            Entry::Occupied(entry) => match entry.get().clone() {
+            Entry::Occupied(entry) => match entry.get() {
                 OverlayCacheEntry::Ready(input) => {
                     self.metrics.overlay_cache_reuses.increment(1);
                     span.record("cache_reused", true);
-                    CacheAction::Ready(input)
+                    CacheAction::Ready(Arc::clone(input))
                 }
                 OverlayCacheEntry::Computing(waiter) => {
                     span.record("cache_reused", true);
@@ -346,7 +346,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
                         CacheAction::Skip
                     } else {
                         self.metrics.overlay_cache_reuses.increment(1);
-                        CacheAction::Wait(waiter)
+                        CacheAction::Wait(Arc::clone(waiter))
                     }
                 }
             },
