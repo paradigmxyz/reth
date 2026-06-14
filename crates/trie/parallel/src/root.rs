@@ -17,7 +17,11 @@ use reth_trie::{
     walker::TrieWalker,
     HashBuilder, Nibbles, StorageRoot, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use std::{collections::HashMap, sync::mpsc};
+use std::{
+    cmp::Reverse,
+    collections::HashMap,
+    sync::{mpsc, Arc},
+};
 use thiserror::Error;
 use tracing::*;
 
@@ -34,7 +38,7 @@ use tracing::*;
 #[derive(Debug)]
 pub struct ParallelStateRoot<Factory> {
     /// Factory for creating state providers.
-    factory: Factory,
+    factory: Arc<Factory>,
     // Prefix sets indicating which portions of the trie need to be recomputed.
     prefix_sets: TriePrefixSets,
     /// The runtime handle for spawning blocking tasks.
@@ -48,7 +52,7 @@ impl<Factory> ParallelStateRoot<Factory> {
     /// Create new parallel state root calculator.
     pub fn new(factory: Factory, prefix_sets: TriePrefixSets, runtime: Runtime) -> Self {
         Self {
-            factory,
+            factory: Arc::new(factory),
             prefix_sets,
             runtime,
             #[cfg(feature = "metrics")]
@@ -60,8 +64,8 @@ impl<Factory> ParallelStateRoot<Factory> {
 impl<Factory> ParallelStateRoot<Factory>
 where
     Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-        + Clone
         + Send
+        + Sync
         + 'static,
 {
     /// Calculate incremental state root in parallel.
@@ -98,10 +102,11 @@ where
 
         let handle = self.runtime.handle().clone();
 
-        for (hashed_address, prefix_set) in
-            storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
+        for (hashed_address, prefix_set) in storage_root_targets
+            .into_iter()
+            .sorted_unstable_by_key(|(address, prefix_set)| (Reverse(prefix_set.len()), *address))
         {
-            let factory = self.factory.clone();
+            let factory = Arc::clone(&self.factory);
             #[cfg(feature = "metrics")]
             let metrics = self.metrics.storage_trie.clone();
 
