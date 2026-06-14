@@ -1006,7 +1006,7 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     pub gas_used: u64,
     /// Withdrawals included in the block.
     /// Used to generate prefetch targets for withdrawal addresses.
-    pub withdrawals: Option<Vec<Withdrawal>>,
+    pub withdrawals: Option<Arc<[Withdrawal]>>,
     /// Optional decoded BAL for the block.
     /// Used to validate and optimize execution.
     pub decoded_bal: Option<Arc<DecodedBal>>,
