@@ -880,7 +880,15 @@ impl PendingTargets {
 
     /// Takes the pending targets, replacing with empty defaults.
     fn take(&mut self) -> (MultiProofTargetsV2, usize) {
-        (std::mem::take(&mut self.targets), std::mem::take(&mut self.len))
+        let replacement = MultiProofTargetsV2 {
+            account_targets: Vec::with_capacity(self.targets.account_targets.capacity()),
+            storage_targets: B256Map::with_capacity_and_hasher(
+                self.targets.storage_targets.capacity(),
+                Default::default(),
+            ),
+        };
+
+        (std::mem::replace(&mut self.targets, replacement), std::mem::take(&mut self.len))
     }
 
     /// Adds a target to the account targets.
