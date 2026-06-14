@@ -145,6 +145,8 @@ where
     AdminApiClient::remove_peer(client, node.into()).await.unwrap();
     AdminApiClient::add_trusted_peer(client, node.into()).await.unwrap();
     AdminApiClient::remove_trusted_peer(client, node.into()).await.unwrap();
+    AdminApiClient::ban_peer(client, node.into()).await.unwrap();
+    AdminApiClient::unban_peer(client, node.into()).await.unwrap();
     AdminApiClient::node_info(client).await.unwrap();
 }
 
