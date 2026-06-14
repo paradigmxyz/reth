@@ -787,10 +787,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             EitherWriterDestination::senders(self).is_database()
         {
             let start = Instant::now();
-            let tx_nums_iter = std::iter::successors(Some(first_tx_num), |n| Some(n + 1));
+            let mut tx_num = first_tx_num;
             let mut cursor = self.tx.cursor_write::<tables::TransactionSenders>()?;
-            for (tx_num, sender) in tx_nums_iter.zip(block.senders_iter().copied()) {
+            for sender in block.senders_iter().copied() {
                 cursor.append(tx_num, &sender)?;
+                tx_num += 1;
             }
             self.metrics
                 .record_duration(metrics::Action::InsertTransactionSenders, start.elapsed());
