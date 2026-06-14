@@ -280,6 +280,7 @@ impl RocksDBBuilder {
         // varint-encoded u64 (a few bytes). Compression wastes CPU cycles for zero space savings.
         cf_options.set_compression_type(DBCompressionType::None);
         cf_options.set_bottommost_compression_type(DBCompressionType::None);
+        cf_options.set_write_buffer_size(DEFAULT_WRITE_BUFFER_SIZE);
 
         cf_options
     }
