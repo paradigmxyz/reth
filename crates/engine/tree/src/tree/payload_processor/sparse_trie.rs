@@ -296,8 +296,9 @@ where
                         .sparse_trie_channel_wait_duration_histogram
                         .record(wake.duration_since(t));
 
-                    self.on_message(update);
-                    self.pending_updates += 1;
+                    if self.on_message(update) {
+                        self.pending_updates += 1;
+                    }
                 }
                 recv(self.proof_result_rx) -> message => {
                     let phase_end = Instant::now();
@@ -417,11 +418,16 @@ where
     }
 
     /// Processes a [`SparseTrieTaskMessage`] from the hashing task.
-    fn on_message(&mut self, message: SparseTrieTaskMessage) {
+    fn on_message(&mut self, message: SparseTrieTaskMessage) -> bool {
         match message {
-            SparseTrieTaskMessage::PrefetchProofs(targets) => self.on_prewarm_targets(targets),
+            SparseTrieTaskMessage::PrefetchProofs(targets) => {
+                let has_targets = !targets.is_empty();
+                self.on_prewarm_targets(targets);
+                has_targets
+            }
             SparseTrieTaskMessage::HashedState(hashed_state) => {
-                self.on_hashed_state_update(hashed_state)
+                self.on_hashed_state_update(hashed_state);
+                true
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
                 let _ = self
@@ -429,7 +435,8 @@ where
                     .take()
                     .unwrap()
                     .send(core::mem::take(&mut self.final_hashed_state));
-                self.finished_state_updates = true
+                self.finished_state_updates = true;
+                false
             }
         }
     }
