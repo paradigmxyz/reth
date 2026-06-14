@@ -178,16 +178,13 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     ) -> ProviderResult<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>)> {
         match &self.overlay_source {
             Some(OverlaySource::Managed { manager, state }) => {
-                let (trie, mut overlay_state) = if anchor_hash == self.parent_hash {
-                    (
-                        Arc::new(TrieUpdatesSorted::default()),
-                        Arc::new(HashedPostStateSorted::default()),
-                    )
-                } else {
-                    manager
-                        .overlay_for_parent(self.parent_hash, anchor_hash)
-                        .map_err(ProviderError::other)?
-                };
+                if anchor_hash == self.parent_hash {
+                    return Ok((Arc::new(TrieUpdatesSorted::default()), Arc::clone(state)))
+                }
+
+                let (trie, mut overlay_state) = manager
+                    .overlay_for_parent(self.parent_hash, anchor_hash)
+                    .map_err(ProviderError::other)?;
 
                 if overlay_state.is_empty() {
                     overlay_state = Arc::clone(state);
@@ -663,12 +660,18 @@ mod tests {
     #[test]
     fn managed_overlay_skips_manager_for_persisted_parent() {
         let parent_hash = B256::with_last_byte(1);
+        let state = Arc::new(
+            HashedPostState::default()
+                .with_accounts([(B256::with_last_byte(2), Some(Account::default()))])
+                .into_sorted(),
+        );
         let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
-            .with_state_trie_overlay_manager(StateTrieOverlayManager::default());
+            .with_state_trie_overlay_manager(StateTrieOverlayManager::default())
+            .with_hashed_state_overlay(Some(Arc::clone(&state)));
 
-        let (trie, state) = builder.resolve_overlays(parent_hash).unwrap();
+        let (trie, resolved_state) = builder.resolve_overlays(parent_hash).unwrap();
         assert!(trie.is_empty());
-        assert!(state.is_empty());
+        assert!(Arc::ptr_eq(&resolved_state, &state));
     }
 
     #[test]
