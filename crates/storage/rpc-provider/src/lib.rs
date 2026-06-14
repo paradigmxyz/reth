@@ -1759,6 +1759,13 @@ where
     ) -> ProviderResult<Vec<(BlockNumber, reth_db_api::models::AccountBeforeTx)>> {
         Err(ProviderError::UnsupportedProvider)
     }
+
+    fn count_account_changesets_in_range(
+        &self,
+        _range: impl std::ops::RangeBounds<BlockNumber>,
+    ) -> ProviderResult<u64> {
+        Err(ProviderError::UnsupportedProvider)
+    }
 }
 
 impl<P, Node, N> StateProviderFactory for RpcBlockchainStateProvider<P, Node, N>
