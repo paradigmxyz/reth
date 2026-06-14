@@ -223,6 +223,45 @@ impl MerkleStage {
         );
         Ok(use_rebuild)
     }
+
+    /// Returns the last block (inclusive) of the next incremental chunk starting at `from_block`.
+    fn incremental_chunk_end<Provider>(
+        from_block: BlockNumber,
+        to_block: BlockNumber,
+        provider: &Provider,
+        incremental_block_cap: u64,
+        incremental_change_threshold: u64,
+    ) -> Result<BlockNumber, StageError>
+    where
+        Provider: ChangeSetReader + StorageChangeSetReader,
+    {
+        let mut entries_in_chunk = 0u64;
+        let mut chunk_end = from_block;
+
+        for block in from_block..=to_block {
+            if block != from_block &&
+                (entries_in_chunk >= incremental_change_threshold ||
+                    block.saturating_sub(from_block) >= incremental_block_cap)
+            {
+                break;
+            }
+            entries_in_chunk += count_state_changes_in_range(provider, block..=block)?;
+            chunk_end = block;
+        }
+
+        debug!(
+            target: "sync::stages::merkle::exec",
+            from_block,
+            chunk_end,
+            to_block,
+            entries_in_chunk,
+            incremental_block_cap,
+            incremental_change_threshold,
+            "Incremental chunk boundary"
+        );
+
+        Ok(chunk_end)
+    }
 }
 
 impl<Provider> Stage<Provider> for MerkleStage
@@ -253,7 +292,7 @@ where
             rebuild_block_cap,
             incremental_threshold,
             rebuild_change_threshold,
-            _incremental_change_threshold,
+            incremental_change_threshold,
         ) = match self {
             Self::Unwind => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
@@ -403,48 +442,48 @@ where
                 }
             }
         } else {
-            debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie in chunks");
-            let mut final_root = None;
-            for start_block in range.step_by(incremental_threshold as usize) {
-                let chunk_to = std::cmp::min(start_block + incremental_threshold - 1, to_block);
-                let chunk_range = start_block..=chunk_to;
-                debug!(
-                    target: "sync::stages::merkle::exec",
-                    current = ?current_block_number,
-                    target = ?to_block,
-                    incremental_threshold,
-                    chunk_range = ?chunk_range,
-                    "Processing chunk"
-                );
-                let (root, updates) = reth_trie_db::with_adapter!(provider, |A| {
-                    DbStateRoot::<_, A>::incremental_root_with_updates(provider, chunk_range)
-                })
-                .map_err(|e| {
-                    error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
-                    StageError::Fatal(Box::new(e))
-                })?;
-                provider.write_trie_updates(updates)?;
-                final_root = Some(root);
-            }
-
-            // if we had no final root, we must have not looped above, which should not be possible
-            let final_root = final_root.ok_or(StageError::Fatal(
-                "Incremental merkle hashing did not produce a final root".into(),
-            ))?;
+            let chunk_end = Self::incremental_chunk_end(
+                from_block,
+                to_block,
+                provider,
+                incremental_threshold,
+                incremental_change_threshold,
+            )?;
+            let chunk_range = from_block..=chunk_end;
+            debug!(
+                target: "sync::stages::merkle::exec",
+                current = ?current_block_number,
+                target = ?to_block,
+                incremental_threshold,
+                incremental_change_threshold,
+                chunk_range = ?chunk_range,
+                "Processing incremental chunk"
+            );
+            let (root, updates) = reth_trie_db::with_adapter!(provider, |A| {
+                DbStateRoot::<_, A>::incremental_root_with_updates(provider, chunk_range)
+            })
+            .map_err(|e| {
+                error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
+                StageError::Fatal(Box::new(e))
+            })?;
+            provider.write_trie_updates(updates)?;
 
             let total_hashed_entries = (provider.count_entries::<tables::HashedAccounts>()? +
                 provider.count_entries::<tables::HashedStorages>()?)
                 as u64;
 
-            let entities_checkpoint = EntitiesCheckpoint {
-                // This is fine because `range` doesn't have an upper bound, so in this `else`
-                // branch we're just hashing all remaining accounts and storage slots we have in the
-                // database.
-                processed: total_hashed_entries,
-                total: total_hashed_entries,
-            };
-            // Save the checkpoint
-            (final_root, entities_checkpoint)
+            let entities_checkpoint =
+                EntitiesCheckpoint { processed: total_hashed_entries, total: total_hashed_entries };
+
+            if chunk_end < to_block {
+                return Ok(ExecOutput {
+                    checkpoint: StageCheckpoint::new(chunk_end)
+                        .with_entities_stage_checkpoint(entities_checkpoint),
+                    done: false,
+                });
+            }
+
+            (root, entities_checkpoint)
         };
 
         // Reset the checkpoint
@@ -666,10 +705,22 @@ mod tests {
         };
 
         runner.seed_execution(input).expect("failed to seed execution");
-        let rx = runner.execute(input);
+
+        let mut current_input = input;
+        let result = loop {
+            let rx = runner.execute(current_input);
+            let result = rx.await.unwrap();
+            match &result {
+                Ok(ExecOutput { done: true, .. }) => break result,
+                Ok(ExecOutput { done: false, checkpoint }) => {
+                    current_input =
+                        ExecInput { target: Some(previous_stage), checkpoint: Some(*checkpoint) };
+                }
+                Err(_) => break result,
+            }
+        };
 
         // Assert the successful result
-        let result = rx.await.unwrap();
         assert_matches!(
             result,
             Ok(ExecOutput {
