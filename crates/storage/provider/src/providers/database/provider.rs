@@ -1598,6 +1598,26 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
                 .collect()
         }
     }
+
+    fn count_storage_changesets_in_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<u64> {
+        if self.cached_storage_settings().storage_v2 {
+            self.static_file_provider.count_storage_changesets_in_range(range)
+        } else {
+            let mut count = 0u64;
+            for entry in self
+                .tx
+                .cursor_dup_read::<tables::StorageChangeSets>()?
+                .walk_range(BlockNumberAddressRange::from(range))?
+            {
+                entry?;
+                count += 1;
+            }
+            Ok(count)
+        }
+    }
 }
 
 impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
@@ -1651,6 +1671,24 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
                 .walk_range(to_range(range))?
                 .map(|r| r.map_err(Into::into))
                 .collect()
+        }
+    }
+
+    fn count_account_changesets_in_range(
+        &self,
+        range: impl core::ops::RangeBounds<BlockNumber>,
+    ) -> ProviderResult<u64> {
+        if self.cached_storage_settings().storage_v2 {
+            self.static_file_provider.count_account_changesets_in_range(range)
+        } else {
+            let mut count = 0u64;
+            for entry in
+                self.tx.cursor_read::<tables::AccountChangeSets>()?.walk_range(to_range(range))?
+            {
+                entry?;
+                count += 1;
+            }
+            Ok(count)
         }
     }
 }
@@ -3950,7 +3988,7 @@ mod tests {
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
     use reth_primitives_traits::SealedBlock;
-    use reth_storage_api::MetadataWriter;
+    use reth_storage_api::{ChangeSetReader, MetadataWriter, StorageChangeSetReader};
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
         HashedPostState, KeccakKeyHasher, Nibbles, StoredNibbles, StoredNibblesSubKey,
@@ -5466,5 +5504,52 @@ mod tests {
         assert!(all_blocks.contains(&3), "block 3 should remain");
         assert!(!all_blocks.contains(&7), "block 7 should be unwound");
         assert!(!all_blocks.contains(&10), "block 10 should be unwound");
+    }
+
+    #[test]
+    fn count_changesets_in_range_mdbx_matches_walk() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v1());
+        let provider_rw = factory.provider_rw().unwrap();
+
+        for block in 1..=3 {
+            for i in 0..5 {
+                let address = Address::repeat_byte(i);
+                provider_rw
+                    .tx
+                    .cursor_dup_write::<tables::AccountChangeSets>()
+                    .unwrap()
+                    .append_dup(block, AccountBeforeTx { address, info: None })
+                    .unwrap();
+            }
+        }
+
+        let slot_key = B256::random();
+        for block in 1..=3 {
+            provider_rw
+                .tx
+                .cursor_dup_write::<tables::StorageChangeSets>()
+                .unwrap()
+                .append_dup(
+                    BlockNumberAddress((block, Address::repeat_byte(block as u8))),
+                    StorageEntry { key: slot_key, value: U256::from(1) },
+                )
+                .unwrap();
+        }
+
+        let account_count = provider_rw.count_account_changesets_in_range(1..=3).unwrap();
+        assert_eq!(account_count, 15);
+        assert_eq!(
+            account_count as usize,
+            provider_rw.account_changesets_range(1..=3).unwrap().len()
+        );
+
+        let storage_count = provider_rw.count_storage_changesets_in_range(1..=3).unwrap();
+        assert_eq!(storage_count, 3);
+        assert_eq!(
+            storage_count as usize,
+            provider_rw.storage_changesets_range(1..=3).unwrap().len()
+        );
+        assert_eq!(account_count + storage_count, 18);
     }
 }

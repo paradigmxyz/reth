@@ -1025,6 +1025,13 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> ChangeSetReader for MockEthProvi
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
         Ok(Vec::default())
     }
+
+    fn count_account_changesets_in_range(
+        &self,
+        _range: impl core::ops::RangeBounds<BlockNumber>,
+    ) -> ProviderResult<u64> {
+        Ok(0)
+    }
 }
 
 impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageChangeSetReader
@@ -1051,6 +1058,13 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageChangeSetReader
         _range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
         Ok(Vec::default())
+    }
+
+    fn count_storage_changesets_in_range(
+        &self,
+        _range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<u64> {
+        Ok(0)
     }
 }
 

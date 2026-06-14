@@ -731,6 +731,13 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for BlockchainProvider<N> {
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
         self.consistent_provider()?.storage_changesets_range(range)
     }
+
+    fn count_storage_changesets_in_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<u64> {
+        self.consistent_provider()?.count_storage_changesets_in_range(range)
+    }
 }
 
 impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider<N> {
@@ -754,6 +761,13 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider<N> {
         range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
         self.consistent_provider()?.account_changesets_range(range)
+    }
+
+    fn count_account_changesets_in_range(
+        &self,
+        range: impl core::ops::RangeBounds<BlockNumber>,
+    ) -> ProviderResult<u64> {
+        self.consistent_provider()?.count_account_changesets_in_range(range)
     }
 }
 
