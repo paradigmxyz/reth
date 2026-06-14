@@ -608,6 +608,31 @@ mod tests {
 
     stage_test_suite_ext!(MerkleTestRunner, merkle);
 
+    async fn execute_until_done(
+        runner: &MerkleTestRunner,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError> {
+        let mut current_input = input;
+        loop {
+            let rx = runner.execute(current_input);
+            match rx.await.unwrap() {
+                Ok(output) if output.done => return Ok(output),
+                Ok(output) => {
+                    current_input =
+                        ExecInput { target: input.target, checkpoint: Some(output.checkpoint) };
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
+    async fn execute_once(
+        runner: &MerkleTestRunner,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError> {
+        runner.execute(input).await.unwrap()
+    }
+
     /// Execute from genesis so as to merkelize whole state
     #[tokio::test]
     async fn execute_clean_merkle() {
@@ -692,12 +717,9 @@ mod tests {
     #[tokio::test]
     async fn execute_chunked_merkle() {
         let (previous_stage, stage_progress) = (200, 100);
-        let clean_threshold = 100;
-        let incremental_threshold = 10;
 
         // Set up the runner
-        let mut runner =
-            MerkleTestRunner { db: TestStageDB::default(), clean_threshold, incremental_threshold };
+        let mut runner = MerkleTestRunner::new(100, 10, u64::MAX, u64::MAX);
 
         let input = ExecInput {
             target: Some(previous_stage),
@@ -706,24 +728,10 @@ mod tests {
 
         runner.seed_execution(input).expect("failed to seed execution");
 
-        let mut current_input = input;
-        let result = loop {
-            let rx = runner.execute(current_input);
-            let result = rx.await.unwrap();
-            match &result {
-                Ok(ExecOutput { done: true, .. }) => break result,
-                Ok(ExecOutput { done: false, checkpoint }) => {
-                    current_input =
-                        ExecInput { target: Some(previous_stage), checkpoint: Some(*checkpoint) };
-                }
-                Err(_) => break result,
-            }
-        };
-
-        // Assert the successful result
+        let result = execute_until_done(&runner, input).await.unwrap();
         assert_matches!(
             result,
-            Ok(ExecOutput {
+            ExecOutput {
                 checkpoint: StageCheckpoint {
                     block_number,
                     stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
@@ -732,7 +740,7 @@ mod tests {
                     }))
                 },
                 done: true
-            }) if block_number == previous_stage && processed == total &&
+            } if block_number == previous_stage && processed == total &&
                 total == (
                     runner.db.count_entries::<tables::HashedAccounts>().unwrap() +
                     runner.db.count_entries::<tables::HashedStorages>().unwrap()
@@ -763,19 +771,151 @@ mod tests {
         );
     }
 
+    /// Many blocks with a low changeset count should use incremental updates, not rebuild.
+    #[tokio::test]
+    async fn incremental_not_rebuild_when_change_count_below_threshold() {
+        let (target, progress) = (400, 100);
+        let mut runner = MerkleTestRunner::new(100_000, 10_000, 1_000_000, u64::MAX);
+
+        let input =
+            ExecInput { target: Some(target), checkpoint: Some(StageCheckpoint::new(progress)) };
+        runner.seed_execution(input).expect("failed to seed execution");
+
+        let provider = runner.db.factory.provider().unwrap();
+        let change_count =
+            count_state_changes_in_range(&provider, (progress + 1)..=target).unwrap();
+        assert!(change_count < 1_000_000);
+        assert!(!MerkleStage::should_rebuild_trie(
+            progress + 1,
+            target,
+            &provider,
+            runner.rebuild_threshold,
+            runner.rebuild_change_threshold,
+        )
+        .unwrap());
+
+        let result = execute_until_done(&runner, input).await.unwrap();
+        assert!(result.done);
+        assert_eq!(result.checkpoint.block_number, target);
+    }
+
+    /// Fails under block-only chunking: heavy changes in a small block gap must checkpoint
+    /// mid-range when `incremental_change_threshold` is exceeded.
+    #[tokio::test]
+    async fn incremental_chunks_when_change_threshold_exceeded() {
+        let (target, progress) = (130, 100);
+        let input =
+            ExecInput { target: Some(target), checkpoint: Some(StageCheckpoint::new(progress)) };
+
+        let mut change_based = MerkleTestRunner::new(100_000, 10_000, u64::MAX, 10);
+        change_based.seed_execution(input).expect("failed to seed execution");
+
+        let first = execute_once(&change_based, input).await.unwrap();
+        assert!(!first.done, "change-based chunking should checkpoint mid-range");
+        assert!(
+            first.checkpoint.block_number < target,
+            "first chunk should not reach target block"
+        );
+
+        let mut block_only = MerkleTestRunner::new(100_000, 10_000, u64::MAX, u64::MAX);
+        block_only.seed_execution(input).expect("failed to seed execution");
+
+        let block_only_first = execute_once(&block_only, input).await.unwrap();
+        assert!(
+            block_only_first.done,
+            "block-only logic would finish the full range in one incremental chunk"
+        );
+        assert_eq!(block_only_first.checkpoint.block_number, target);
+    }
+
+    /// Fails under block-only rebuild logic: high changeset volume below the block cap must
+    /// select the rebuild path.
+    #[tokio::test]
+    async fn rebuild_when_change_threshold_exceeded_below_block_cap() {
+        let (target, progress) = (150, 100);
+        let input =
+            ExecInput { target: Some(target), checkpoint: Some(StageCheckpoint::new(progress)) };
+
+        let mut runner = MerkleTestRunner::new(100_000, 10_000, 80, u64::MAX);
+        runner.seed_execution(input).expect("failed to seed execution");
+
+        let provider = runner.db.factory.provider().unwrap();
+        let change_count =
+            count_state_changes_in_range(&provider, (progress + 1)..=target).unwrap();
+        assert!(change_count > 80, "test setup must exceed rebuild change threshold");
+
+        assert!(MerkleStage::should_rebuild_trie(
+            progress + 1,
+            target,
+            &provider,
+            runner.rebuild_threshold,
+            runner.rebuild_change_threshold,
+        )
+        .unwrap());
+
+        assert!(!MerkleStage::should_rebuild_trie(
+            progress + 1,
+            target,
+            &provider,
+            runner.rebuild_threshold,
+            u64::MAX,
+        )
+        .unwrap());
+    }
+
+    #[tokio::test]
+    async fn incremental_chunk_end_respects_change_threshold() {
+        let (target, progress) = (130, 100);
+        let input =
+            ExecInput { target: Some(target), checkpoint: Some(StageCheckpoint::new(progress)) };
+
+        let mut runner = MerkleTestRunner::new(100_000, 10_000, u64::MAX, 10);
+        runner.seed_execution(input).expect("failed to seed execution");
+
+        let provider = runner.db.factory.provider().unwrap();
+        let chunk_end = MerkleStage::incremental_chunk_end(
+            progress + 1,
+            target,
+            &provider,
+            runner.incremental_threshold,
+            runner.incremental_change_threshold,
+        )
+        .unwrap();
+
+        assert!(chunk_end < target);
+        assert!(chunk_end >= progress + 1);
+    }
+
     struct MerkleTestRunner {
         db: TestStageDB,
-        clean_threshold: u64,
+        rebuild_threshold: u64,
         incremental_threshold: u64,
+        rebuild_change_threshold: u64,
+        incremental_change_threshold: u64,
+        num_accounts: usize,
+    }
+
+    impl MerkleTestRunner {
+        fn new(
+            rebuild_threshold: u64,
+            incremental_threshold: u64,
+            rebuild_change_threshold: u64,
+            incremental_change_threshold: u64,
+        ) -> Self {
+            Self {
+                db: TestStageDB::default(),
+                rebuild_threshold,
+                incremental_threshold,
+                rebuild_change_threshold,
+                incremental_change_threshold,
+                num_accounts: 31,
+            }
+        }
     }
 
     impl Default for MerkleTestRunner {
         fn default() -> Self {
-            Self {
-                db: TestStageDB::default(),
-                clean_threshold: 10000,
-                incremental_threshold: 10000,
-            }
+            Self::new(10_000, 10_000, u64::MAX, u64::MAX)
         }
     }
 
@@ -788,9 +928,9 @@ mod tests {
 
         fn stage(&self) -> Self::S {
             Self::S::Both {
-                rebuild_change_threshold: u64::MAX,
-                incremental_change_threshold: u64::MAX,
-                rebuild_threshold: self.clean_threshold,
+                rebuild_change_threshold: self.rebuild_change_threshold,
+                incremental_change_threshold: self.incremental_change_threshold,
+                rebuild_threshold: self.rebuild_threshold,
                 incremental_threshold: self.incremental_threshold,
             }
         }
@@ -819,10 +959,11 @@ mod tests {
                 self.db.insert_blocks(preblocks.iter(), StorageKind::Static)?;
             }
 
-            let num_of_accounts = 31;
-            let accounts = random_contract_account_range(&mut rng, &mut (0..num_of_accounts))
-                .into_iter()
-                .collect::<BTreeMap<_, _>>();
+            let num_of_accounts = self.num_accounts;
+            let accounts =
+                random_contract_account_range(&mut rng, &mut (0..num_of_accounts as u64))
+                    .into_iter()
+                    .collect::<BTreeMap<_, _>>();
 
             self.db.insert_accounts_and_storages(
                 accounts.iter().map(|(addr, acc)| (*addr, (*acc, std::iter::empty()))),
