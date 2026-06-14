@@ -79,18 +79,25 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
 
         let mut builder = OrderedTrieRootEncodedBuilder::new();
         let mut aggregated_bloom = Bloom::ZERO;
-        let mut encode_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
+        let mut encode_buf = None;
         let mut next = 0usize;
         let mut pending = HashMap::new();
 
         let mut push = |receipt: R| {
             let receipt_with_bloom = receipt.with_bloom_ref();
 
-            encode_buf.clear();
-            receipt_with_bloom.encode_2718(&mut encode_buf);
-
             aggregated_bloom |= *receipt_with_bloom.bloom_ref();
-            builder.push_next(&encode_buf);
+            if builder.is_empty() {
+                let mut first_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
+                receipt_with_bloom.encode_2718(&mut first_buf);
+                builder.push_next_owned(first_buf);
+            } else {
+                let encode_buf = encode_buf
+                    .get_or_insert_with(|| Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY));
+                encode_buf.clear();
+                receipt_with_bloom.encode_2718(encode_buf);
+                builder.push_next(encode_buf);
+            }
         };
 
         for indexed_receipt in self.receipt_rx {

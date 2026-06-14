@@ -101,6 +101,33 @@ impl OrderedTrieRootEncodedBuilder {
         }
     }
 
+    /// Pushes the next pre-encoded item, moving the buffer if it needs to be retained.
+    ///
+    /// This is equivalent to [`Self::push_next`], but avoids copying index `0`, which is the only
+    /// item the builder may need to buffer until the stream is finalized or index `128` arrives.
+    #[inline]
+    pub fn push_next_owned(&mut self, bytes: Vec<u8>) {
+        let index = self.len;
+        self.len += 1;
+
+        match index {
+            0 => {
+                self.zero = Some(bytes);
+            }
+            1..=0x7f => {
+                self.add_leaf(index, &bytes);
+            }
+            ZERO_KEY_FLUSH_INDEX => {
+                self.flush_zero();
+                self.add_leaf(index, &bytes);
+            }
+            _ => {
+                debug_assert!(self.zero.is_none(), "index 0 must be flushed before indices > 128");
+                self.add_leaf(index, &bytes);
+            }
+        }
+    }
+
     /// Returns the number of items pushed so far.
     #[inline]
     pub const fn pushed_count(&self) -> usize {
@@ -163,6 +190,18 @@ mod tests {
         builder.finalize()
     }
 
+    fn root_with_owned_zero(items: &[Vec<u8>]) -> B256 {
+        let mut builder = OrderedTrieRootEncodedBuilder::new();
+        for (index, item) in items.iter().enumerate() {
+            if index == 0 {
+                builder.push_next_owned(item.clone());
+            } else {
+                builder.push_next(item);
+            }
+        }
+        builder.finalize()
+    }
+
     #[test]
     fn test_ordered_encoded_builder_equivalence() {
         for len in [0, 1, 2, 3, 10, 127, 128, 129, 130, 200] {
@@ -213,6 +252,11 @@ mod tests {
             let expected = ordered_trie_root_encoded(&items);
 
             assert_eq!(root_with_push_next(&items), expected, "push_next mismatch for len={len}");
+            assert_eq!(
+                root_with_owned_zero(&items),
+                expected,
+                "push_next_owned mismatch for len={len}"
+            );
         }
     }
 
