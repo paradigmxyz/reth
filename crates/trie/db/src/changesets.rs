@@ -129,11 +129,12 @@ where
         DatabaseHashedCursorFactory<&'a TX>,
     >;
 
-    let cumulative_trie_updates_prev =
+    let cumulative_trie_updates_prev = Arc::new(
         DbStateRoot::<_, A>::overlay_root_from_nodes_with_updates(provider.tx_ref(), input_prev)
             .map_err(ProviderError::other)?
             .1
-            .into_sorted();
+            .into_sorted(),
+    );
 
     // Step 3: Create prefix sets from individual revert (only paths changed by this block)
     let prefix_sets = individual_state_revert.construct_prefix_sets();
@@ -141,7 +142,7 @@ where
     // Step 4: Calculate trie updates for block
     // Use cumulative trie updates for block-1 as the node overlay and cumulative state for block
     let input = TrieInputSorted::new(
-        Arc::new(cumulative_trie_updates_prev.clone()),
+        Arc::clone(&cumulative_trie_updates_prev),
         Arc::new(cumulative_state_revert),
         prefix_sets,
     );
@@ -156,7 +157,7 @@ where
     // Create an overlay cursor factory that has the trie state from after block-1
     let db_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
     let overlay_factory =
-        InMemoryTrieCursorFactory::new(db_cursor_factory, &cumulative_trie_updates_prev);
+        InMemoryTrieCursorFactory::new(db_cursor_factory, cumulative_trie_updates_prev.as_ref());
 
     let changesets =
         compute_trie_changesets(&overlay_factory, &trie_updates).map_err(ProviderError::other)?;
