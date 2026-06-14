@@ -1,5 +1,5 @@
 use crate::proof_v2::DeferredValueEncoder;
-use alloy_rlp::Encodable;
+use alloy_rlp::{bytes::buf::UninitSlice, BufMut, Encodable};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
     BranchNodeMasks, BranchNodeV2, LeafNode, LeafNodeRef, Nibbles, ProofTrieNodeV2, RlpNode,
@@ -45,18 +45,17 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
                 // Determine the required buffer size for the encoded leaf
                 let leaf_enc_len = LeafNodeRef::new(&short_key, buf).length();
 
-                // We want to re-use buf for the encoding of the leaf node as well. To do this we
-                // will keep appending to it, leaving the already encoded value in-place. First we
-                // must ensure the buffer is big enough, then we'll split.
-                buf.resize(value_enc_len + leaf_enc_len, 0);
-
-                // SAFETY we have just resized the above to be greater than `value_enc_len`, so it
-                // must be in-bounds.
-                let (value_buf, mut leaf_buf) =
-                    unsafe { buf.split_at_mut_unchecked(value_enc_len) };
-
-                // Encode the leaf into the right side of the split buffer, and return the RlpNode.
+                // Encode the leaf directly into the spare capacity after the already encoded
+                // value. The RLP encoder initializes the bytes before advancing the writer.
+                let mut leaf_buf = VecSpareBuf::new(buf, leaf_enc_len);
+                let value_buf = &buf[..value_enc_len];
                 LeafNodeRef::new(&short_key, value_buf).encode(&mut leaf_buf);
+                let written = leaf_buf.written();
+                debug_assert_eq!(written, leaf_enc_len);
+
+                // SAFETY: `VecSpareBuf` reserved `leaf_enc_len` bytes and its `BufMut`
+                // implementation only advances after those bytes have been initialized.
+                unsafe { buf.set_len(value_enc_len + written) };
                 Ok((RlpNode::from_rlp(&buf[value_enc_len..]), None))
             }
             Self::Branch { node: branch_node, .. } => {
@@ -138,6 +137,50 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
     }
 }
 
+/// A `BufMut` writer over the spare capacity at the end of a `Vec<u8>`.
+struct VecSpareBuf {
+    ptr: *mut u8,
+    written: usize,
+    cap: usize,
+}
+
+impl VecSpareBuf {
+    fn new(buf: &mut Vec<u8>, cap: usize) -> Self {
+        buf.reserve(cap);
+        Self { ptr: unsafe { buf.as_mut_ptr().add(buf.len()) }, written: 0, cap }
+    }
+
+    const fn written(&self) -> usize {
+        self.written
+    }
+}
+
+// SAFETY: `chunk_mut` returns the unwritten tail of the reserved spare capacity and
+// `advance_mut` never advances beyond it. Callers that use `BufMut` are responsible for
+// initializing bytes before advancing, which is the contract relied on by `Vec<u8>`'s own impl.
+unsafe impl BufMut for VecSpareBuf {
+    #[inline]
+    fn remaining_mut(&self) -> usize {
+        self.cap - self.written
+    }
+
+    #[inline]
+    fn chunk_mut(&mut self) -> &mut UninitSlice {
+        unsafe {
+            UninitSlice::from_raw_parts_mut(
+                self.ptr.add(self.written),
+                self.cap - self.written,
+            )
+        }
+    }
+
+    #[inline]
+    unsafe fn advance_mut(&mut self, cnt: usize) {
+        assert!(cnt <= self.remaining_mut());
+        self.written += cnt;
+    }
+}
+
 /// A single branch in the trie which is under construction. The actual child nodes of the branch
 /// will be tracked as [`ProofTrieBranchChild`]s on a stack.
 #[derive(Debug)]
@@ -165,6 +208,41 @@ pub(crate) fn trim_nibbles_prefix(n: &Nibbles, len: usize) -> Nibbles {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Clone)]
+    struct RawValue(Vec<u8>);
+
+    impl DeferredValueEncoder for RawValue {
+        fn encode(self, buf: &mut Vec<u8>) -> Result<(), StateProofError> {
+            buf.extend_from_slice(&self.0);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn leaf_into_rlp_matches_initialized_split_encoding() {
+        let short_key = Nibbles::from_nibbles([1, 2, 3, 4, 5]);
+        let value = vec![0xc8, 0x83, b'f', b'o', b'o', 0x83, b'b', b'a', b'r'];
+
+        let mut expected_buf = value.clone();
+        let value_enc_len = expected_buf.len();
+        let leaf_enc_len = LeafNodeRef::new(&short_key, &expected_buf).length();
+        expected_buf.resize(value_enc_len + leaf_enc_len, 0);
+        let (value_buf, mut leaf_buf) =
+            unsafe { expected_buf.split_at_mut_unchecked(value_enc_len) };
+        LeafNodeRef::new(&short_key, value_buf).encode(&mut leaf_buf);
+        let expected = RlpNode::from_rlp(&expected_buf[value_enc_len..]);
+
+        let mut buf = Vec::with_capacity(value.len() + leaf_enc_len);
+        let (actual, freed) =
+            ProofTrieBranchChild::Leaf { short_key, value: RawValue(value) }
+                .into_rlp(&mut buf)
+                .unwrap();
+
+        assert_eq!(actual, expected);
+        assert!(freed.is_none());
+        assert_eq!(buf.len(), value_enc_len + leaf_enc_len);
+    }
 
     #[test]
     fn test_trim_nibbles_prefix_basic() {
