@@ -45,7 +45,7 @@ type Inner = alloy_evm::EthEvmFactory;
 pub struct RethEvmFactory {
     inner: Inner,
     #[cfg(feature = "jit")]
-    disabled: JitBackend,
+    disabled_inner: JitEvmFactory,
     #[cfg(feature = "jit")]
     metrics: RevmcMetrics,
     #[cfg(feature = "jit")]
@@ -60,7 +60,7 @@ impl Clone for RethEvmFactory {
             #[cfg(not(feature = "jit"))]
             inner: self.inner,
             #[cfg(feature = "jit")]
-            disabled: self.disabled.clone(),
+            disabled_inner: self.disabled_inner.clone(),
             #[cfg(feature = "jit")]
             metrics: self.metrics.clone(),
             #[cfg(feature = "jit")]
@@ -94,7 +94,7 @@ impl RethEvmFactory {
     pub fn new_with_metrics(backend: JitBackend, metrics: RevmcMetrics) -> Self {
         Self {
             inner: JitEvmFactory::new(backend),
-            disabled: JitBackend::disabled(),
+            disabled_inner: JitEvmFactory::new(JitBackend::disabled()),
             metrics,
             jit_support: false,
         }
@@ -185,7 +185,7 @@ impl EvmFactory for RethEvmFactory {
             if self.jit_support {
                 self.inner.create_evm(db, input)
             } else {
-                JitEvmFactory::new(self.disabled.clone()).create_evm(db, input)
+                self.disabled_inner.create_evm(db, input)
             }
         }
         #[cfg(not(feature = "jit"))]
@@ -205,8 +205,7 @@ impl EvmFactory for RethEvmFactory {
             if self.jit_support {
                 self.inner.create_evm_with_inspector(db, input, inspector)
             } else {
-                JitEvmFactory::new(self.disabled.clone())
-                    .create_evm_with_inspector(db, input, inspector)
+                self.disabled_inner.create_evm_with_inspector(db, input, inspector)
             }
         }
         #[cfg(not(feature = "jit"))]
