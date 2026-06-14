@@ -97,7 +97,10 @@ impl InMemoryBalStoreInner {
             self.hashes_by_number.remove(&block_number);
         }
 
-        self.hashes_by_number.entry(block_number).or_default().push(block_hash);
+        self.hashes_by_number
+            .entry(block_number)
+            .or_insert_with(|| Vec::with_capacity(1))
+            .push(block_hash);
         self.highest_block_number = Some(
             self.highest_block_number.map_or(block_number, |highest| highest.max(block_number)),
         );
@@ -136,6 +139,8 @@ impl BalStore for InMemoryBalStore {
             // This preserves insert-time cleanup based on the highest inserted BAL block.
             inner.prune(self.config.in_memory_retention, highest_block_number);
         }
+        drop(inner);
+
         self.notifications.notify(BalNotification::new(num_hash, bal));
         Ok(())
     }
