@@ -1556,7 +1556,7 @@ where
                             return Ok(ops::ControlFlow::Continue(()))
                         }
 
-                        debug!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
+                        trace!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
                         let now = Instant::now();
 
                         let block = match self
@@ -1575,7 +1575,7 @@ where
                         if self.state.tree_state.canonical_block_hash() ==
                             block.recovered_block().parent_hash()
                         {
-                            debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
+                            trace!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
                             self.canonical_in_memory_state.set_pending_block(block.clone());
                         }
 
@@ -2923,7 +2923,7 @@ where
     {
         let block_insert_start = Instant::now();
         let block_num_hash = block_id.block;
-        debug!(target: "engine::tree", block=?block_num_hash, parent = ?block_id.parent, "Inserting new block into tree");
+        trace!(target: "engine::tree", block=?block_num_hash, parent = ?block_id.parent, "Inserting new block into tree");
 
         // Check if block already exists - first in memory, then DB only if it could be persisted
         if self.state.tree_state.contains_hash(&block_num_hash.hash) {
@@ -3007,7 +3007,7 @@ where
         // if the parent is the canonical head, we can insert the block as the pending block
         if self.state.tree_state.canonical_block_hash() == executed.recovered_block().parent_hash()
         {
-            debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
+            trace!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
             self.canonical_in_memory_state.set_pending_block(executed.clone());
         }
 
@@ -3027,7 +3027,7 @@ where
             .engine
             .block_insert_total_duration
             .record(block_insert_start.elapsed().as_secs_f64());
-        debug!(target: "engine::tree", block=?block_num_hash, "Finished inserting block");
+        trace!(target: "engine::tree", block=?block_num_hash, "Finished inserting block");
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid))
     }
 

@@ -126,7 +126,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
             })
             .collect::<Vec<_>>();
 
-        debug!(
+        trace!(
             target: "chain_state::state_trie_overlay",
             %hash,
             %parent_hash,
