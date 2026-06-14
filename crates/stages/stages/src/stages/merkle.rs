@@ -15,6 +15,7 @@ use reth_stages_api::{
     BlockErrorKind, EntitiesCheckpoint, ExecInput, ExecOutput, MerkleCheckpoint, Stage,
     StageCheckpoint, StageError, StageId, StorageRootMerkleCheckpoint, UnwindInput, UnwindOutput,
 };
+use reth_storage_api::count_state_changes_in_range;
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress, StoredSubNode};
 use reth_trie_db::DatabaseStateRoot;
 
@@ -54,6 +55,12 @@ pub const MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD: u64 = 100_000;
 /// number.
 pub const MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD: u64 = 7_000;
 
+/// The default maximum account + storage changeset rows before forcing a full trie rebuild.
+pub const MERKLE_STAGE_DEFAULT_REBUILD_CHANGE_THRESHOLD: u64 = 100_000_000;
+
+/// The default maximum account + storage changeset rows per incremental chunk.
+pub const MERKLE_STAGE_DEFAULT_INCREMENTAL_CHANGE_THRESHOLD: u64 = 10_000_000;
+
 /// The merkle hashing stage uses input from
 /// [`AccountHashingStage`][crate::stages::AccountHashingStage] and
 /// [`StorageHashingStage`][crate::stages::StorageHashingStage] to calculate intermediate hashes
@@ -81,12 +88,13 @@ pub enum MerkleStage {
     Execution {
         // TODO: make struct for holding incremental settings, for code reuse between `Execution`
         // variant and `Both`
-        /// The threshold (in number of blocks) for switching from incremental trie building
-        /// of changes to whole rebuild.
+        /// Maximum account + storage changeset rows in the sync range before a full trie rebuild.
+        rebuild_change_threshold: u64,
+        /// Maximum account + storage changeset rows per incremental chunk.
+        incremental_change_threshold: u64,
+        /// Maximum block gap before forcing a full trie rebuild (safety cap).
         rebuild_threshold: u64,
-        /// The threshold (in number of blocks) to run the stage in incremental mode. The
-        /// incremental mode will calculate the state root by calculating the new state root for
-        /// some number of blocks, repeating until we reach the desired block number.
+        /// Maximum blocks per incremental chunk (safety cap).
         incremental_threshold: u64,
     },
     /// The unwind portion of the merkle stage.
@@ -94,12 +102,13 @@ pub enum MerkleStage {
     /// Able to execute and unwind. Used for tests
     #[cfg(any(test, feature = "test-utils"))]
     Both {
-        /// The threshold (in number of blocks) for switching from incremental trie building
-        /// of changes to whole rebuild.
+        /// Maximum account + storage changeset rows in the sync range before a full trie rebuild.
+        rebuild_change_threshold: u64,
+        /// Maximum account + storage changeset rows per incremental chunk.
+        incremental_change_threshold: u64,
+        /// Maximum block gap before forcing a full trie rebuild (safety cap).
         rebuild_threshold: u64,
-        /// The threshold (in number of blocks) to run the stage in incremental mode. The
-        /// incremental mode will calculate the state root by calculating the new state root for
-        /// some number of blocks, repeating until we reach the desired block number.
+        /// Maximum blocks per incremental chunk (safety cap).
         incremental_threshold: u64,
     },
 }
@@ -108,6 +117,8 @@ impl MerkleStage {
     /// Stage default for the [`MerkleStage::Execution`].
     pub const fn default_execution() -> Self {
         Self::Execution {
+            rebuild_change_threshold: MERKLE_STAGE_DEFAULT_REBUILD_CHANGE_THRESHOLD,
+            incremental_change_threshold: MERKLE_STAGE_DEFAULT_INCREMENTAL_CHANGE_THRESHOLD,
             rebuild_threshold: MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
             incremental_threshold: MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD,
         }
@@ -119,8 +130,18 @@ impl MerkleStage {
     }
 
     /// Create new instance of [`MerkleStage::Execution`].
-    pub const fn new_execution(rebuild_threshold: u64, incremental_threshold: u64) -> Self {
-        Self::Execution { rebuild_threshold, incremental_threshold }
+    pub const fn new_execution(
+        rebuild_threshold: u64,
+        incremental_threshold: u64,
+        rebuild_change_threshold: u64,
+        incremental_change_threshold: u64,
+    ) -> Self {
+        Self::Execution {
+            rebuild_change_threshold,
+            incremental_change_threshold,
+            rebuild_threshold,
+            incremental_threshold,
+        }
     }
 
     /// Gets the hashing progress
@@ -156,6 +177,52 @@ impl MerkleStage {
         }
         Ok(provider.save_stage_checkpoint_progress(StageId::MerkleExecute, buf)?)
     }
+
+    /// Returns whether the execution path should perform a full trie rebuild instead of
+    /// incremental updates for the given block range.
+    fn should_rebuild_trie<Provider>(
+        from_block: BlockNumber,
+        to_block: BlockNumber,
+        provider: &Provider,
+        rebuild_block_cap: u64,
+        rebuild_change_threshold: u64,
+    ) -> Result<bool, StageError>
+    where
+        Provider: ChangeSetReader + StorageChangeSetReader,
+    {
+        if from_block == 1 {
+            debug!(
+                target: "sync::stages::merkle::exec",
+                from_block,
+                to_block,
+                "Using full rebuild (genesis)"
+            );
+            return Ok(true);
+        }
+
+        let block_gap = to_block - from_block;
+        if block_gap > rebuild_block_cap {
+            debug!(
+                target: "sync::stages::merkle::exec",
+                block_gap,
+                rebuild_block_cap,
+                "Using full rebuild (block gap exceeds cap)"
+            );
+            return Ok(true);
+        }
+
+        let change_count = count_state_changes_in_range(provider, from_block..=to_block)?;
+        let use_rebuild = change_count > rebuild_change_threshold;
+        debug!(
+            target: "sync::stages::merkle::exec",
+            block_gap,
+            change_count,
+            rebuild_change_threshold,
+            use_rebuild,
+            "Merkle rebuild decision"
+        );
+        Ok(use_rebuild)
+    }
 }
 
 impl<Provider> Stage<Provider> for MerkleStage
@@ -182,18 +249,39 @@ where
 
     /// Execute the stage.
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
-        let (threshold, incremental_threshold) = match self {
+        let (
+            rebuild_block_cap,
+            incremental_threshold,
+            rebuild_change_threshold,
+            _incremental_change_threshold,
+        ) = match self {
             Self::Unwind => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
                 return Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
             }
-            Self::Execution { rebuild_threshold, incremental_threshold } => {
-                (*rebuild_threshold, *incremental_threshold)
-            }
+            Self::Execution {
+                rebuild_threshold,
+                incremental_threshold,
+                rebuild_change_threshold,
+                incremental_change_threshold,
+            } => (
+                *rebuild_threshold,
+                *incremental_threshold,
+                *rebuild_change_threshold,
+                *incremental_change_threshold,
+            ),
             #[cfg(any(test, feature = "test-utils"))]
-            Self::Both { rebuild_threshold, incremental_threshold } => {
-                (*rebuild_threshold, *incremental_threshold)
-            }
+            Self::Both {
+                rebuild_threshold,
+                incremental_threshold,
+                rebuild_change_threshold,
+                incremental_change_threshold,
+            } => (
+                *rebuild_threshold,
+                *incremental_threshold,
+                *rebuild_change_threshold,
+                *incremental_change_threshold,
+            ),
         };
 
         let range = input.next_block_range();
@@ -207,7 +295,13 @@ where
 
         let (trie_root, entities_checkpoint) = if range.is_empty() {
             (target_block_root, input.checkpoint().entities_stage_checkpoint().unwrap_or_default())
-        } else if to_block - from_block > threshold || from_block == 1 {
+        } else if Self::should_rebuild_trie(
+            from_block,
+            to_block,
+            provider,
+            rebuild_block_cap,
+            rebuild_change_threshold,
+        )? {
             let mut checkpoint = self.get_execution_checkpoint(provider)?;
 
             // if there are more blocks than threshold it is faster to rebuild the trie
@@ -643,6 +737,8 @@ mod tests {
 
         fn stage(&self) -> Self::S {
             Self::S::Both {
+                rebuild_change_threshold: u64::MAX,
+                incremental_change_threshold: u64::MAX,
                 rebuild_threshold: self.clean_threshold,
                 incremental_threshold: self.incremental_threshold,
             }
