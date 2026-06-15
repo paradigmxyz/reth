@@ -159,6 +159,10 @@ where
 
     fn disconnect_peer_with_reason(&self, _peer: PeerId, _reason: DisconnectReason) {}
 
+    fn ban_peer(&self, _peer: PeerId) {}
+
+    fn unban_peer(&self, _peer: PeerId) {}
+
     fn connect_peer_kind(
         &self,
         _peer: PeerId,
