@@ -380,6 +380,17 @@ impl<N: NetworkPrimitives> Peers for NetworkHandle<N> {
         self.send_message(NetworkHandleMessage::DisconnectPeer(peer, Some(reason)))
     }
 
+    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to ban the given peer and
+    /// disconnect an active non-trusted session if one exists.
+    fn ban_peer(&self, peer: PeerId) {
+        self.send_message(NetworkHandleMessage::BanPeer(peer))
+    }
+
+    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to unban the given peer.
+    fn unban_peer(&self, peer: PeerId) {
+        self.send_message(NetworkHandleMessage::UnbanPeer(peer))
+    }
+
     /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to connect to the given
     /// peer.
     ///
@@ -544,6 +555,10 @@ pub(crate) enum NetworkHandleMessage<N: NetworkPrimitives = EthNetworkPrimitives
     RemovePeer(PeerId, PeerKind),
     /// Disconnects a connection to a peer if it exists, optionally providing a disconnect reason.
     DisconnectPeer(PeerId, Option<DisconnectReason>),
+    /// Bans a peer and disconnects an active non-trusted session if one exists.
+    BanPeer(PeerId),
+    /// Unbans a peer.
+    UnbanPeer(PeerId),
     /// Broadcasts an event to announce a new block to all nodes.
     AnnounceBlock(N::NewBlockPayload, B256),
     /// Sends a list of transactions to the given peer.

@@ -66,6 +66,11 @@ on:
         required: false
         default: "false"
         type: boolean
+      tracing_chrome:
+        description: "Enable Chrome trace recording"
+        required: false
+        default: "false"
+        type: boolean
       cores:
         description: "Limit reth to N CPU cores (0 = all available)"
         required: false
@@ -90,6 +95,11 @@ on:
         description: "Export OTLP traces and logs"
         required: false
         default: "true"
+        type: boolean
+      metrics:
+        description: "Upload txgen metrics to VictoriaMetrics"
+        required: false
+        default: "false"
         type: boolean
 
 env:
@@ -121,7 +131,9 @@ jobs:
       baseline-name: ${{ steps.args.outputs.baseline-name }}
       feature-name: ${{ steps.args.outputs.feature-name }}
       samply: ${{ steps.args.outputs.samply }}
+      tracing-chrome: ${{ steps.args.outputs.tracing-chrome }}
       slack: ${{ steps.args.outputs.slack }}
+      metrics: ${{ steps.args.outputs.metrics }}
       cores: ${{ steps.args.outputs.cores }}
       big-blocks: ${{ steps.args.outputs.big-blocks }}
       big-blocks-target-gas: ${{ steps.args.outputs.big-blocks-target-gas }}
@@ -145,7 +157,9 @@ jobs:
           github-token: ${{ secrets.DEREK_BENCH_ACK_TOKEN }}
           script: |
             const org = 'paradigmxyz';
+            const allowedUsers = new Set(['rkrasiuk']);
             const checkMembership = async (username) => {
+              if (allowedUsers.has(username)) return true;
               try {
                 const { status } = await github.rest.orgs.checkMembershipForUser({ org, username });
                 return status === 204 || status === 302;
@@ -178,8 +192,8 @@ jobs:
           script: |
             const validBalModes = new Set(['false', 'true', 'feature', 'baseline']);
             const validSlackModes = new Set(['always', 'on-win', 'on-error', 'never']);
-            const usage = '`@decofe bench [blocks=N] [big-blocks[=true|false|100M|2G]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [slack=always|on-win|on-error|never] [cores=N] [run-pairs=N] [otlp=true|false] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]`';
-            let pr, actor, blocks, warmup, baseline, feature, samply, cores, bigBlocks, bal;
+            const usage = '`@decofe bench [blocks=N] [big-blocks[=true|false|100M|2G]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [tracing-chrome] [slack=always|on-win|on-error|never] [cores=N] [run-pairs=N] [otlp=true|false] [metrics[=true|false]] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]`';
+            let pr, actor, blocks, warmup, baseline, feature, samply, tracingChrome, cores, bigBlocks, bal;
             let bigBlocksTargetGas = '';
             let explicitBlocks = false;
             let explicitWarmup = false;
@@ -212,6 +226,7 @@ jobs:
               baseline = '${{ github.event.inputs.baseline }}';
               feature = '${{ github.event.inputs.feature }}';
               samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
+              tracingChrome = '${{ github.event.inputs.tracing_chrome }}' === 'true' ? 'true' : 'false';
               var slack = '${{ github.event.inputs.slack }}' || 'never';
               cores = '${{ github.event.inputs.cores }}' || '0';
               const parsedBigBlocks = parseBigBlocks('${{ github.event.inputs.big_blocks }}');
@@ -225,6 +240,7 @@ jobs:
               var runPairs = '${{ github.event.inputs.run_pairs }}' || '';
               explicitRunPairs = runPairs !== '';
               var otlp = '${{ github.event.inputs.otlp }}' === 'false' ? 'false' : 'true';
+              var metrics = '${{ github.event.inputs.metrics }}' === 'true' ? 'true' : 'false';
               var waitTime = '${{ github.event.inputs.wait_time }}' || '';
               var baselineNodeArgs = '${{ github.event.inputs.baseline_args }}' || '';
               var featureNodeArgs = '${{ github.event.inputs.feature_args }}' || '';
@@ -249,11 +265,11 @@ jobs:
               const body = context.payload.comment.body.trim();
               const intArgs = new Set(['warmup', 'cores', 'blocks', 'run-pairs']);
               const refArgs = new Set(['baseline', 'feature']);
-              const boolArgs = new Set(['samply', 'otlp']);
+              const boolArgs = new Set(['samply', 'tracing-chrome', 'otlp', 'metrics']);
               const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes]]);
               const durationArgs = new Set(['wait-time']);
               const stringArgs = new Set(['baseline-args', 'feature-args']);
-              const defaults = { blocks: '', warmup: '', baseline: '', feature: '', samply: 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', 'run-pairs': '', otlp: 'true', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
+              const defaults = { blocks: '', warmup: '', baseline: '', feature: '', samply: 'false', 'tracing-chrome': 'false', slack: 'always', 'big-blocks': 'false', bal: 'false', cores: '0', 'run-pairs': '', otlp: 'true', metrics: 'false', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -345,6 +361,7 @@ jobs:
               baseline = defaults.baseline;
               feature = defaults.feature;
               samply = defaults.samply;
+              tracingChrome = defaults['tracing-chrome'];
               var slack = defaults.slack;
               cores = defaults.cores;
               const parsedBigBlocks = parseBigBlocks(defaults['big-blocks']);
@@ -353,6 +370,7 @@ jobs:
               bal = defaults.bal;
               var runPairs = defaults['run-pairs'];
               var otlp = defaults.otlp;
+              var metrics = defaults.metrics;
               var waitTime = defaults['wait-time'];
               var baselineNodeArgs = defaults['baseline-args'];
               var featureNodeArgs = defaults['feature-args'];
@@ -420,6 +438,7 @@ jobs:
             core.setOutput('baseline-name', baselineName);
             core.setOutput('feature-name', featureName);
             core.setOutput('samply', samply);
+            core.setOutput('tracing-chrome', tracingChrome);
             core.setOutput('slack', slack);
             core.setOutput('cores', cores);
             core.setOutput('big-blocks', bigBlocks);
@@ -431,6 +450,7 @@ jobs:
             core.setOutput('run-pairs', runPairs);
             core.setOutput('run-order', runOrder);
             core.setOutput('otlp', otlp);
+            core.setOutput('metrics', metrics);
             core.setOutput('node-bin', nodeBin);
 
       - name: Acknowledge request
@@ -489,10 +509,12 @@ jobs:
             const baseline = '${{ steps.args.outputs.baseline-name }}';
             const feature = '${{ steps.args.outputs.feature-name }}';
             const samply = '${{ steps.args.outputs.samply }}' === 'true';
+            const tracingChrome = '${{ steps.args.outputs.tracing-chrome }}' === 'true';
             const slack = '${{ steps.args.outputs.slack }}' || 'always';
             const bigBlocks = '${{ steps.args.outputs.big-blocks }}' === 'true';
             const bal = '${{ steps.args.outputs.bal }}' || 'false';
             const samplyNote = samply ? ', samply: `enabled`' : '';
+            const tracingChromeNote = tracingChrome ? ', tracing-chrome: `enabled`' : '';
             const slackNote = slack !== 'always' ? `, slack: \`${slack}\`` : '';
             const balNote = bal !== 'false' ? `, BAL: \`${bal}\`` : '';
             const cores = '${{ steps.args.outputs.cores }}';
@@ -509,7 +531,7 @@ jobs:
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${slackNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${tracingChromeNote}${slackNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
 
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -534,10 +556,12 @@ jobs:
             const baseline = '${{ steps.args.outputs.baseline-name }}';
             const feature = '${{ steps.args.outputs.feature-name }}';
             const samply = '${{ steps.args.outputs.samply }}' === 'true';
+            const tracingChrome = '${{ steps.args.outputs.tracing-chrome }}' === 'true';
             const slack = '${{ steps.args.outputs.slack }}' || 'always';
             const bigBlocks = '${{ steps.args.outputs.big-blocks }}' === 'true';
             const bal = '${{ steps.args.outputs.bal }}' || 'false';
             const samplyNote = samply ? ', samply: `enabled`' : '';
+            const tracingChromeNote = tracingChrome ? ', tracing-chrome: `enabled`' : '';
             const slackNote = slack !== 'always' ? `, slack: \`${slack}\`` : '';
             const balNote = bal !== 'false' ? `, BAL: \`${bal}\`` : '';
             const cores = '${{ steps.args.outputs.cores }}';
@@ -554,7 +578,7 @@ jobs:
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${slackNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${tracingChromeNote}${slackNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
@@ -624,6 +648,7 @@ jobs:
       BENCH_BLOCKS: ${{ needs.bench-ack.outputs.blocks }}
       BENCH_WARMUP_BLOCKS: ${{ needs.bench-ack.outputs.warmup }}
       BENCH_SAMPLY: ${{ needs.bench-ack.outputs.samply }}
+      BENCH_TRACING_CHROME: ${{ needs.bench-ack.outputs.tracing-chrome }}
       BENCH_CORES: ${{ needs.bench-ack.outputs.cores }}
       BENCH_BIG_BLOCKS: ${{ needs.bench-ack.outputs.big-blocks }}
       BENCH_BIG_BLOCKS_TARGET_GAS: ${{ needs.bench-ack.outputs.big-blocks-target-gas }}
@@ -634,6 +659,7 @@ jobs:
       BENCH_RUN_PAIRS: ${{ needs.bench-ack.outputs.run-pairs }}
       BENCH_RUN_ORDER: ${{ needs.bench-ack.outputs.run-order }}
       BENCH_OTLP: ${{ needs.bench-ack.outputs.otlp }}
+      BENCH_METRICS: ${{ needs.bench-ack.outputs.metrics }}
       BENCH_COMMENT_ID: ${{ needs.bench-ack.outputs.comment-id }}
       BENCH_SLACK: ${{ needs.bench-ack.outputs.slack }}
       BENCH_NODE_BIN: ${{ needs.bench-ack.outputs.node-bin }}
@@ -643,7 +669,7 @@ jobs:
       BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS: "200"
       BENCH_OTLP_TRACES_ENDPOINT: ${{ needs.bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_TRACES_ENDPOINT || '' }}
       BENCH_OTLP_LOGS_ENDPOINT: ${{ needs.bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_LOGS_ENDPOINT || '' }}
-      BENCH_VICTORIAMETRICS_URL: ${{ secrets.BENCH_VICTORIAMETRICS_URL }}
+      BENCH_VICTORIAMETRICS_URL: ${{ needs.bench-ack.outputs.metrics == 'true' && secrets.BENCH_VICTORIAMETRICS_URL || '' }}
     steps:
       - name: Clean up previous bench-work
         run: sudo rm -rf "$BENCH_WORK_DIR" 2>/dev/null || true
@@ -697,10 +723,12 @@ jobs:
             const baseline = '${{ needs.bench-ack.outputs.baseline-name }}';
             const feature = '${{ needs.bench-ack.outputs.feature-name }}';
             const samply = process.env.BENCH_SAMPLY === 'true';
+            const tracingChrome = process.env.BENCH_TRACING_CHROME === 'true';
             const slack = process.env.BENCH_SLACK || 'always';
             const bigBlocks = process.env.BENCH_BIG_BLOCKS === 'true';
             const bal = process.env.BENCH_BAL || 'false';
             const samplyNote = samply ? ', samply: `enabled`' : '';
+            const tracingChromeNote = tracingChrome ? ', tracing-chrome: `enabled`' : '';
             const slackNote = slack !== 'always' ? `, slack: \`${slack}\`` : '';
             const balNote = bal !== 'false' ? `, BAL: \`${bal}\`` : '';
             const cores = process.env.BENCH_CORES || '0';
@@ -717,7 +745,7 @@ jobs:
             const featureArgsVal = process.env.BENCH_FEATURE_ARGS || '';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`;
-            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${slackNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`);
+            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${tracingChromeNote}${slackNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`);
 
             const { buildBody } = require('./.github/scripts/bench-update-status.js');
             await github.rest.issues.updateComment({
@@ -727,6 +755,7 @@ jobs:
               body: buildBody('Building binaries...'),
             });
 
+      - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
         continue-on-error: true
@@ -772,6 +801,9 @@ jobs:
             chmod +x "$HOME/.local/bin/mc"
           fi
 
+          # llvm
+          .github/scripts/install_llvm.sh ubuntu
+
           # uv (Python package manager)
           if ! command -v uv &>/dev/null; then
             curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$HOME/.local/bin" sh
@@ -806,7 +838,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           missing=()
-          for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv jq; do
+          for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv pzstd jq llvm-config; do
             command -v "$cmd" &>/dev/null || missing+=("$cmd")
           done
           if [ ${#missing[@]} -gt 0 ]; then
@@ -1040,9 +1072,11 @@ jobs:
             cores="$BENCH_CORES"
             run-pairs="$BENCH_RUN_PAIRS"
             otlp="$BENCH_OTLP"
+            metrics="$BENCH_METRICS"
             slack="$BENCH_SLACK"
           )
           [ "$BENCH_SAMPLY" = "true" ] && derek_cmd+=(samply)
+          [ "$BENCH_TRACING_CHROME" = "true" ] && derek_cmd+=(tracing-chrome)
           [ -n "$BENCH_WAIT_TIME" ] && derek_cmd+=(wait-time="$BENCH_WAIT_TIME")
           [ -n "$BENCH_BASELINE_ARGS" ] && derek_cmd+=(baseline-args="$BENCH_BASELINE_ARGS")
           [ -n "$BENCH_FEATURE_ARGS" ] && derek_cmd+=(feature-args="$BENCH_FEATURE_ARGS")
@@ -1372,7 +1406,7 @@ jobs:
             SUMMARY_ARGS="$SUMMARY_ARGS --benchmark-id $BENCH_ID"
           fi
           GRAFANA_URL='${{ steps.metrics.outputs.grafana-url }}'
-          if [ -n "$GRAFANA_URL" ]; then
+          if [ "${BENCH_METRICS:-false}" = "true" ] && [ -n "$GRAFANA_URL" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --grafana-url $GRAFANA_URL"
           fi
           LOGS_URL='${{ steps.metrics.outputs.logs-url }}'
@@ -1422,7 +1456,7 @@ jobs:
           name: bench-results
           path: ${{ env.BENCH_WORK_DIR }}
 
-      - name: Push charts
+      - name: Push benchmark artifacts
         id: push-charts
         if: success()
         env:
@@ -1434,7 +1468,8 @@ jobs:
           CHARTS_REPO="https://x-access-token:${DEREK_TOKEN}@github.com/decofe/reth-bench-charts.git"
 
           TMP_DIR=$(mktemp -d)
-          if git clone --depth 1 "${CHARTS_REPO}" "${TMP_DIR}" 2>/dev/null; then
+          if git clone --depth 1 --filter=blob:none --sparse "${CHARTS_REPO}" "${TMP_DIR}" 2>/dev/null; then
+            git -C "${TMP_DIR}" sparse-checkout set --no-cone "${CHART_DIR}"
             true
           else
             git init "${TMP_DIR}"
@@ -1444,30 +1479,69 @@ jobs:
 
           mkdir -p "${TMP_DIR}/${CHART_DIR}"
           cp "$BENCH_WORK_DIR"/charts/*.png "${TMP_DIR}/${CHART_DIR}/"
+          if [ "${BENCH_TRACING_CHROME:-false}" = "true" ]; then
+            TRACE_DIR="${CHART_DIR}/tracing-chrome"
+            mkdir -p "${TMP_DIR}/${TRACE_DIR}"
+            mapfile -t RUN_DIRS < <(find "$BENCH_WORK_DIR" -mindepth 1 -maxdepth 1 -type d \( -name 'baseline-*' -o -name 'feature-*' \) -printf '%f\n' | sort -V)
+            for run_dir in "${RUN_DIRS[@]}"; do
+              TRACE="$BENCH_WORK_DIR/$run_dir/tracing-chrome-profile.json"
+              if [ ! -f "$TRACE" ]; then continue; fi
+
+              TRACE_SIZE=$(du -h "$TRACE" | cut -f1)
+              echo "Adding $run_dir Chrome trace (${TRACE_SIZE}) to benchmark artifacts..."
+              gzip -c "$TRACE" > "${TMP_DIR}/${TRACE_DIR}/${run_dir}.json.gz"
+            done
+          fi
           git -C "${TMP_DIR}" add "${CHART_DIR}"
           if git -C "${TMP_DIR}" diff --cached --quiet; then
-            echo "Charts for ${CHART_DIR} are already present, skipping push"
-            echo "sha=$(git -C "${TMP_DIR}" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-            rm -rf "${TMP_DIR}"
-            exit 0
+            echo "Artifacts for ${CHART_DIR} are already present, skipping push"
+            PUSH_SHA="$(git -C "${TMP_DIR}" rev-parse HEAD)"
+          else
+            git -C "${TMP_DIR}" commit -m "bench artifacts for PR #${PR_NUMBER} run ${RUN_ID}"
+
+            for attempt in 1 2 3 4 5; do
+              if git -C "${TMP_DIR}" push origin HEAD:main; then
+                break
+              fi
+              if [ "$attempt" -eq 5 ]; then
+                echo "::error::Failed to push benchmark artifacts after ${attempt} attempts"
+                rm -rf "${TMP_DIR}"
+                exit 1
+              fi
+              sleep "$attempt"
+              git -C "${TMP_DIR}" fetch origin main
+              git -C "${TMP_DIR}" rebase origin/main
+            done
+
+            PUSH_SHA="$(git -C "${TMP_DIR}" rev-parse HEAD)"
           fi
-          git -C "${TMP_DIR}" commit -m "bench charts for PR #${PR_NUMBER} run ${RUN_ID}"
 
-          for attempt in 1 2 3 4 5; do
-            if git -C "${TMP_DIR}" push origin HEAD:main; then
-              break
-            fi
-            if [ "$attempt" -eq 5 ]; then
-              echo "::error::Failed to push charts after ${attempt} attempts"
-              rm -rf "${TMP_DIR}"
-              exit 1
-            fi
-            sleep "$attempt"
-            git -C "${TMP_DIR}" fetch origin main
-            git -C "${TMP_DIR}" rebase origin/main
-          done
+          if [ "${BENCH_TRACING_CHROME:-false}" = "true" ]; then
+            RAW_BASE="https://raw.githubusercontent.com/decofe/reth-bench-charts/${PUSH_SHA}/${CHART_DIR}/tracing-chrome"
+            mapfile -t RUN_DIRS < <(find "$BENCH_WORK_DIR" -mindepth 1 -maxdepth 1 -type d \( -name 'baseline-*' -o -name 'feature-*' \) -printf '%f\n' | sort -V)
+            for run_dir in "${RUN_DIRS[@]}"; do
+              if [ ! -f "${TMP_DIR}/${CHART_DIR}/tracing-chrome/${run_dir}.json.gz" ]; then continue; fi
 
-          echo "sha=$(git -C "${TMP_DIR}" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+              RAW_URL="${RAW_BASE}/${run_dir}.json.gz"
+              PERFETTO_URL="$(python3 - "$RAW_URL" "${run_dir}.json.gz" <<'PY'
+          import sys
+          from urllib.parse import quote
+
+          raw_url, file_name = sys.argv[1:3]
+          print(
+              "https://ui.perfetto.dev/#!/?url="
+              + quote(raw_url, safe="")
+              + "&fileName="
+              + quote(file_name, safe="")
+          )
+          PY
+          )"
+              echo "$PERFETTO_URL" > "$BENCH_WORK_DIR/$run_dir/tracing-chrome-profile-url.txt"
+              echo "Perfetto URL for $run_dir: $PERFETTO_URL"
+            done
+          fi
+
+          echo "sha=${PUSH_SHA}" >> "$GITHUB_OUTPUT"
           rm -rf "${TMP_DIR}"
 
       - name: Compare & comment
@@ -1515,6 +1589,18 @@ jobs:
               }
               if (links.length > 0) {
                 comment += `\n\n### Samply Profiles\n\n${links.join('\n')}\n`;
+              }
+            }
+
+            if (process.env.BENCH_TRACING_CHROME === 'true') {
+              const { loadTracingChromeUrls } = require('./.github/scripts/bench-utils');
+              const tracingChromeUrls = loadTracingChromeUrls(process.env.BENCH_WORK_DIR);
+              const links = [];
+              for (const [run, url] of Object.entries(tracingChromeUrls)) {
+                links.push(`- **${run}**: [Perfetto](${url})`);
+              }
+              if (links.length > 0) {
+                comment += `\n\n### Chrome Traces\n\n${links.join('\n')}\n`;
               }
             }
 

@@ -98,8 +98,8 @@ impl StateRootHandle {
     pub fn state_hook(&self) -> impl alloy_evm::block::OnStateHook {
         let sender = StateHookSender::new(self.updates_tx.clone());
 
-        move |state: &EvmState| {
-            let _ = sender.send(StateRootMessage::StateUpdate(state.clone()));
+        move |state: EvmState| {
+            let _ = sender.send(StateRootMessage::StateUpdate(state));
         }
     }
 

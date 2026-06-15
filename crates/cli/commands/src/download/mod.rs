@@ -114,7 +114,6 @@ use source::{
 use std::{
     borrow::Cow,
     collections::BTreeMap,
-    ffi::OsStr,
     path::{Path, PathBuf},
     sync::{Arc, OnceLock},
 };
@@ -125,7 +124,7 @@ const RETH_SNAPSHOTS_BASE_URL: &str = "https://snapshots-r2.reth.rs";
 const RETH_SNAPSHOTS_API_URL: &str = "https://snapshots.reth.rs/api/snapshots";
 const RETH_SNAPSHOTS_SOURCE: &str = "https://snapshots.reth.rs (default)";
 const SNAPSHOT_API_PATH: &str = "/api/snapshots";
-const FORCE_PRESERVED_DATADIR_FILES: &[&str] = &["discovery-secret", "known-peers.json"];
+const FORCE_REMOVED_DATADIR_PATHS: &[&str] = &["db", "rocksdb", "static_files", "reth.toml"];
 
 /// Maximum number of simultaneous HTTP downloads across the entire snapshot job.
 const MAX_CONCURRENT_DOWNLOADS: usize = 8;
@@ -421,7 +420,7 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, short = 'y')]
     non_interactive: bool,
 
-    /// Overwrite existing snapshot data while preserving discovery-secret and known-peers.json.
+    /// Overwrite existing snapshot data by removing db, rocksdb, static_files, and reth.toml.
     #[arg(long, conflicts_with = "list")]
     force: bool,
 
@@ -863,26 +862,23 @@ fn selection_from_prune_mode(mode: Option<PruneMode>, snapshot_block: u64) -> Co
     }
 }
 
-/// Removes existing snapshot data while preserving files listed in
-/// [`FORCE_PRESERVED_DATADIR_FILES`].
+/// Removes existing snapshot data that is managed by `reth download`.
 fn clear_existing_datadir(target_dir: &Path) -> Result<()> {
     if !target_dir.try_exists()? {
         return Ok(());
     }
 
-    info!(target: "reth::cli", dir = ?target_dir, "Clearing existing data directory");
-    for entry in fs::read_dir(target_dir)? {
-        let entry = entry?;
-        let file_name = entry.file_name();
-        if FORCE_PRESERVED_DATADIR_FILES.iter().any(|preserved| file_name == OsStr::new(preserved))
-        {
+    info!(target: "reth::cli", dir = ?target_dir, "Clearing existing snapshot data");
+    for entry in FORCE_REMOVED_DATADIR_PATHS {
+        let path = target_dir.join(entry);
+        if !path.try_exists()? {
             continue;
         }
 
-        let path = entry.path();
-        if entry.file_type()?.is_dir() {
+        let metadata = fs::metadata(&path)?;
+        if metadata.is_dir() {
             fs::remove_dir_all(&path)?;
-        } else {
+        } else if metadata.is_file() {
             fs::remove_file(&path)?;
         }
     }

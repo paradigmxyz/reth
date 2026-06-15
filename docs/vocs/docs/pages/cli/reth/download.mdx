@@ -100,6 +100,9 @@ Database:
       --db.balstore-cache-size <BALSTORE_CACHE_SIZE>
           Number of recent blocks to keep in the in-memory BAL store cache
 
+      --db.disable-metrics
+          Disable built-in database metrics
+
 Static Files:
       --static-files.blocks-per-file.headers <BLOCKS_PER_FILE_HEADERS>
           Number of blocks per file for the headers segment
@@ -203,7 +206,7 @@ Storage:
           Skip interactive component selection. Downloads the minimal set (state + headers + transactions + changesets) unless explicit --with-* flags narrow it
 
       --force
-          Overwrite existing snapshot data while preserving discovery-secret and known-peers.json
+          Overwrite existing snapshot data by removing db, rocksdb, static_files, and reth.toml
 
       --resumable [<RESUMABLE>]
           Enable resumable two-phase downloads (download to disk first, then extract).

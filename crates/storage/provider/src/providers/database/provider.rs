@@ -1099,6 +1099,10 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         BF: FnOnce(H, BodyTy<N>, Vec<Address>) -> ProviderResult<Option<B>>,
     {
         let Some(block_number) = self.convert_hash_or_number(id)? else { return Ok(None) };
+        let earliest_available = self.static_file_provider.earliest_history_height();
+        if block_number < earliest_available {
+            return Err(ProviderError::BlockExpired { requested: block_number, earliest_available })
+        }
         let Some(header) = header_by_number(block_number)? else { return Ok(None) };
 
         // Get the block body

@@ -297,8 +297,9 @@ pub use crate::{
     },
     traits::*,
     validate::{
-        EthTransactionValidator, TransactionValidationOutcome, TransactionValidationTaskExecutor,
-        TransactionValidator, ValidPoolTransaction,
+        EthTransactionValidator, StatefulValidationFn, StatelessValidationFn,
+        TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
+        ValidPoolTransaction,
     },
 };
 use crate::{identifier::TransactionId, pool::PoolInner};
@@ -862,6 +863,20 @@ where
 
     fn cleanup_blobs(&self) {
         self.pool.cleanup_blobs()
+    }
+}
+
+impl<V, T, S> ValidatingPool for Pool<V, T, S>
+where
+    V: TransactionValidator,
+    <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
+    S: BlobStore + Clone,
+{
+    type Validator = V;
+
+    fn validator(&self) -> &Self::Validator {
+        self.inner().validator()
     }
 }
 

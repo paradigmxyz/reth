@@ -42,12 +42,13 @@ use std::{
     sync::{
         atomic::{AtomicBool, AtomicUsize},
         mpsc::{self, channel},
-        Arc,
+        Arc, OnceLock,
     },
 };
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
 pub mod bal;
+pub(crate) mod bal_prewarm_pool;
 pub mod multiproof;
 mod preserved_sparse_trie;
 pub mod prewarm;
@@ -153,6 +154,9 @@ where
     disable_bal_parallel_state_root: bool,
     /// Whether BAL state prefetching during prewarm is disabled.
     disable_bal_batch_io: bool,
+    /// Dedicated blocking pool for warming the BAL read-set, created lazily on the first BAL block
+    /// (see [`Self::bal_prewarm_pool`]). Its threads exit when the processor is dropped.
+    bal_prewarm_pool: OnceLock<Arc<bal_prewarm_pool::BalPrewarmPool>>,
 }
 
 impl<N, Evm> PayloadProcessor<Evm>
@@ -192,7 +196,18 @@ where
                 .then(CachedStateCacheMetrics::default),
             disable_bal_parallel_state_root: config.disable_bal_parallel_state_root(),
             disable_bal_batch_io: config.disable_bal_batch_io(),
+            bal_prewarm_pool: OnceLock::new(),
         }
+    }
+
+    /// Returns the dedicated BAL read-set prewarm pool, spawning its blocking worker threads on
+    /// first use (only the BAL parallel execution path calls this).
+    fn bal_prewarm_pool(&self) -> Arc<bal_prewarm_pool::BalPrewarmPool> {
+        self.bal_prewarm_pool
+            .get_or_init(|| {
+                bal_prewarm_pool::BalPrewarmPool::new(bal_prewarm_pool::DEFAULT_BAL_PREWARM_THREADS)
+            })
+            .clone()
     }
 }
 
@@ -528,6 +543,7 @@ where
             evm_config: self.evm_config.clone(),
             saved_cache: saved_cache.clone(),
             provider: provider_builder,
+            bal_prewarm_pool: parallel_bal_execution.then(|| self.bal_prewarm_pool()),
             metrics: PrewarmMetrics::default(),
             cache_metrics: self.cache_metrics.clone(),
             cache_state_metrics: self.cache_state_metrics.clone(),
@@ -1376,7 +1392,7 @@ mod tests {
         let mut state_hook = handle.state_hook().expect("state hook is None");
 
         for update in state_updates {
-            state_hook.on_state(&update);
+            state_hook.on_state(update);
         }
         drop(state_hook);
 
