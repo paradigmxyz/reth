@@ -2711,10 +2711,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
                     db_entry.key == entry.key
                 {
-                    hashed_storage_cursor.delete_current()?;
-                }
-
-                if !entry.value.is_zero() {
+                    if entry.value.is_zero() {
+                        hashed_storage_cursor.delete_current()?;
+                    } else {
+                        hashed_storage_cursor.put_current(*hashed_address, &entry)?;
+                    }
+                } else if !entry.value.is_zero() {
                     hashed_storage_cursor.upsert(*hashed_address, &entry)?;
                 }
             }

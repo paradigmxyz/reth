@@ -1347,6 +1347,37 @@ mod tests {
     }
 
     #[test]
+    fn db_cursor_put_current_replaces_dupsort_value() {
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+
+        let key = Address::random();
+        let slot = B256::with_last_byte(1);
+        let other_slot = B256::with_last_byte(2);
+        let initial = StorageEntry { key: slot, value: U256::from(1) };
+        let replacement = StorageEntry { key: slot, value: U256::from(2) };
+        let other = StorageEntry { key: other_slot, value: U256::from(3) };
+
+        let mut cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
+        cursor.upsert(key, &initial).expect(ERROR_UPSERT);
+        cursor.upsert(key, &other).expect(ERROR_UPSERT);
+        assert_eq!(cursor.seek_by_key_subkey(key, slot).unwrap(), Some(initial));
+        cursor.put_current(key, &replacement).expect(ERROR_UPSERT);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let tx = db.tx().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
+        let values = cursor
+            .walk_dup(Some(key), None)
+            .unwrap()
+            .map(|res| res.map(|(_, value)| value))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(values, vec![replacement, other]);
+    }
+
+    #[test]
     fn db_cursor_dupsort_append() {
         let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
 
