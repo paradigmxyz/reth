@@ -599,6 +599,7 @@ where
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
         let execute_block_start = Instant::now();
+        let decoded_bal_for_validation = env.decoded_bal.clone();
         let execution_result = if parallel_bal_execution {
             self.execute_block_bal(env, &input, &handle, &make_state_provider)
         } else {
@@ -676,7 +677,8 @@ where
                 &output,
                 &mut ctx,
                 receipt_root_bloom,
-                built_bal
+                decoded_bal_for_validation.as_deref(),
+                built_bal,
             ),
             block
         );
@@ -1631,6 +1633,7 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
         ctx: &mut TreeCtx<'_, N>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
+        decoded_bal: Option<&DecodedBal>,
         built_bal: Option<BlockAccessList>,
     ) -> Result<(), InsertBlockErrorKind>
     where
@@ -1644,8 +1647,21 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
-        let block_access_list_hash =
-            built_bal.as_ref().map(|bal| compute_block_access_list_hash(bal));
+        let block_access_list_hash = built_bal.as_ref().map(|bal| {
+            if let (Some(decoded_bal), Some(header_bal_hash)) =
+                (decoded_bal, block.header().block_access_list_hash())
+            {
+                let received_bal = decoded_bal.as_bal();
+                if bal.as_slice() == received_bal.as_slice() {
+                    let received_hash = decoded_bal.hash();
+                    if received_hash == header_bal_hash {
+                        return received_hash
+                    }
+                }
+            }
+
+            compute_block_access_list_hash(bal)
+        });
 
         if let Err(err) = self.consensus.validate_block_post_execution(
             block,
