@@ -935,7 +935,10 @@ where
             trie_output,
             changeset_provider,
         );
+        #[cfg(any())]
         let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
+        #[cfg(not(any()))]
+        let raw_bal = None;
         Ok(ValidationOutput::new(executed_block, timing_stats).with_raw_bal(raw_bal))
     }
 

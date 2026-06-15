@@ -8046,6 +8046,7 @@ name = "reth-engine-tree"
 version = "2.3.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eip7928 0.4.3",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
