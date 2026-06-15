@@ -50,7 +50,7 @@ use crate::tree::{
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
-use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
+use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, BlockNumHash, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{map::B256Set, B256};
 use reth_tasks::LazyHandle;
@@ -464,6 +464,7 @@ where
         let env = ExecutionEnv {
             evm_env,
             hash: input.hash(),
+            parent: parent_block.num_hash(),
             parent_hash: input.parent_hash(),
             parent_state_root: parent_block.state_root(),
             transaction_count: input.transaction_count(),
@@ -491,6 +492,7 @@ where
             parent_hash,
             ctx.state(),
             self.changeset_cache.clone(),
+            provider_builder.historical_hash(),
         );
         let overlay_factory =
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
@@ -1793,9 +1795,20 @@ where
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
         changeset_cache: ChangesetCache,
+        db_tip_hash: B256,
     ) -> OverlayBuilder<N> {
         OverlayBuilder::new(parent_hash, changeset_cache)
+            .with_db_tip_hash(db_tip_hash)
             .with_state_trie_overlay_manager(state.tree_state.state_trie_overlays.clone())
+    }
+
+    /// Returns the persisted historical hash that should anchor overlay calculation for a parent.
+    fn overlay_db_tip_for_parent(parent_hash: B256, state: &EngineApiTreeState<N>) -> B256 {
+        state
+            .tree_state
+            .blocks_by_hash(parent_hash)
+            .map(|(historical, _)| historical)
+            .unwrap_or(parent_hash)
     }
 
     /// Spawns a background task to compute and sort trie data for the executed block.
@@ -2129,7 +2142,12 @@ pub trait EngineValidator<
     ) -> Option<StateRootHandle>;
 
     /// Prunes persisted state keys from any preserved sparse trie cache.
-    fn prune_sparse_state_trie_after_persistence(&self, _persisted_state: &HashedPostStateSorted) {}
+    fn prune_sparse_state_trie_after_persistence(
+        &self,
+        _persisted_block: BlockNumHash,
+        _persisted_state: &HashedPostStateSorted,
+    ) {
+    }
 }
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
@@ -2203,6 +2221,7 @@ where
                 block.recovered_block.parent_hash(),
                 state,
                 self.changeset_cache.clone(),
+                Self::overlay_db_tip_for_parent(block.recovered_block.parent_hash(), state),
             ),
         );
         let changeset_provider = overlay_factory.database_provider_ro()?;
@@ -2226,13 +2245,31 @@ where
         parent_state_root: B256,
         state: &EngineApiTreeState<N>,
     ) -> Option<StateRootHandle> {
+        let parent = state
+            .tree_state
+            .executed_block_by_hash(parent_hash)
+            .map(|block| block.recovered_block().num_hash())
+            .or_else(|| {
+                self.provider
+                    .block_number(parent_hash)
+                    .ok()
+                    .flatten()
+                    .map(|number| BlockNumHash { number, hash: parent_hash })
+            })?;
+
         let overlay_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
-            Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone()),
+            Self::overlay_builder_for_parent(
+                parent_hash,
+                state,
+                self.changeset_cache.clone(),
+                Self::overlay_db_tip_for_parent(parent_hash, state),
+            ),
         );
 
         Some(self.payload_processor.spawn_state_root(
             overlay_factory,
+            parent,
             parent_state_root,
             None,
             // Full proof workers — tx count unknown at FCU time (block built incrementally)
@@ -2241,8 +2278,13 @@ where
         ))
     }
 
-    fn prune_sparse_state_trie_after_persistence(&self, persisted_state: &HashedPostStateSorted) {
-        self.payload_processor.prune_sparse_state_trie_after_persistence(persisted_state);
+    fn prune_sparse_state_trie_after_persistence(
+        &self,
+        persisted_block: BlockNumHash,
+        persisted_state: &HashedPostStateSorted,
+    ) {
+        self.payload_processor
+            .prune_sparse_state_trie_after_persistence(persisted_block, persisted_state);
     }
 }
 

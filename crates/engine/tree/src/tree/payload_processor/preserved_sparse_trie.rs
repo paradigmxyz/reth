@@ -1,5 +1,6 @@
 //! Preserved sparse trie for reuse across payload validations.
 
+use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use parking_lot::Mutex;
 use reth_primitives_traits::FastInstant as Instant;
@@ -55,6 +56,7 @@ impl SharedPreservedSparseTrie {
     /// Prunes persisted state keys from the preserved trie, if one is available.
     pub(super) fn prune_persisted_state(
         &self,
+        persisted_block: BlockNumHash,
         persisted_state: &HashedPostStateSorted,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
@@ -68,7 +70,12 @@ impl SharedPreservedSparseTrie {
             return
         };
 
-        preserved.prune_persisted_state(persisted_state, max_nodes_capacity, max_values_capacity);
+        preserved.prune_persisted_state(
+            persisted_block,
+            persisted_state,
+            max_nodes_capacity,
+            max_values_capacity,
+        );
     }
 }
 
@@ -98,6 +105,8 @@ pub(super) enum PreservedSparseTrie {
         /// The state root this trie represents (computed from the previous block).
         /// Used to verify continuity: new payload's `parent_state_root` must match this.
         state_root: B256,
+        /// The block that blinded children in the sparse trie fall back to.
+        base_block: BlockNumHash,
     },
     /// Cleared trie with preserved allocations, ready for fresh use.
     Cleared {
@@ -111,8 +120,12 @@ impl PreservedSparseTrie {
     ///
     /// The `state_root` is the computed state root from the trie, which becomes the
     /// anchor for determining if subsequent payloads can reuse this trie.
-    pub(super) const fn anchored(trie: SparseTrie, state_root: B256) -> Self {
-        Self::Anchored { trie, state_root }
+    pub(super) const fn anchored(
+        trie: SparseTrie,
+        state_root: B256,
+        base_block: BlockNumHash,
+    ) -> Self {
+        Self::Anchored { trie, state_root, base_block }
     }
 
     /// Creates a cleared preserved trie (allocations preserved, data cleared).
@@ -125,17 +138,22 @@ impl PreservedSparseTrie {
     /// If the preserved trie is anchored and the parent state root matches, the pruned
     /// trie structure is reused directly. Otherwise, the trie is cleared but allocations
     /// are preserved to reduce memory overhead.
-    pub(super) fn into_trie_for(self, parent_state_root: B256) -> SparseTrie {
+    pub(super) fn into_trie_for(
+        self,
+        parent: BlockNumHash,
+        parent_state_root: B256,
+    ) -> (SparseTrie, BlockNumHash) {
         match self {
-            Self::Anchored { trie, state_root } if state_root == parent_state_root => {
+            Self::Anchored { trie, state_root, base_block } if state_root == parent_state_root => {
                 debug!(
                     target: "engine::tree::payload_processor",
                     %state_root,
+                    ?base_block,
                     "Reusing anchored sparse trie for continuation payload"
                 );
-                trie
+                (trie, base_block)
             }
-            Self::Anchored { mut trie, state_root } => {
+            Self::Anchored { mut trie, state_root, .. } => {
                 debug!(
                     target: "engine::tree::payload_processor",
                     anchor_root = %state_root,
@@ -143,15 +161,16 @@ impl PreservedSparseTrie {
                     "Clearing anchored sparse trie - parent state root mismatch"
                 );
                 trie.clear();
-                trie
+                (trie, parent)
             }
             Self::Cleared { trie } => {
                 debug!(
                     target: "engine::tree::payload_processor",
+                    ?parent,
                     %parent_state_root,
                     "Using cleared sparse trie with preserved allocations"
                 );
-                trie
+                (trie, parent)
             }
         }
     }
@@ -159,6 +178,7 @@ impl PreservedSparseTrie {
     /// Prunes persisted state keys from this preserved trie.
     fn prune_persisted_state(
         &mut self,
+        persisted_block: BlockNumHash,
         persisted_state: &HashedPostStateSorted,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
@@ -169,5 +189,23 @@ impl PreservedSparseTrie {
 
         trie.prune_persisted_state(persisted_state);
         trie.shrink_to(max_nodes_capacity, max_values_capacity);
+        if let Self::Anchored { base_block, .. } = self {
+            if persisted_block.number > base_block.number {
+                debug!(
+                    target: "engine::tree::payload_processor",
+                    ?base_block,
+                    ?persisted_block,
+                    "Advancing sparse trie fallback base after persistence"
+                );
+                *base_block = persisted_block;
+            } else {
+                debug!(
+                    target: "engine::tree::payload_processor",
+                    ?base_block,
+                    ?persisted_block,
+                    "Keeping sparse trie fallback base after persistence"
+                );
+            }
+        }
     }
 }

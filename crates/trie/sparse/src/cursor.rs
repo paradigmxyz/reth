@@ -60,13 +60,14 @@ where
         hashed_address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
         let inner = self.inner.hashed_storage_cursor(hashed_address)?;
-        Ok(SparseStateTrieStorageCursor {
-            sparse_trie: self.sparse_trie,
-            cursor: ArenaHashedStorageCursor::new(
-                self.sparse_trie.storage_trie_ref(&hashed_address),
-                inner,
-            ),
-        })
+        let cursor = match self.sparse_trie.storage_trie_ref(&hashed_address) {
+            Some(trie) => ArenaHashedStorageCursor::new(Some(trie), inner),
+            None if self.sparse_trie.is_retained_storage_account(&hashed_address) => {
+                ArenaHashedStorageCursor::new_empty(inner)
+            }
+            None => ArenaHashedStorageCursor::new(None, inner),
+        };
+        Ok(SparseStateTrieStorageCursor { sparse_trie: self.sparse_trie, cursor })
     }
 }
 
@@ -105,10 +106,14 @@ where
     }
 
     fn set_hashed_address(&mut self, hashed_address: B256) {
-        self.cursor.set_hashed_address_with_sparse_trie(
-            hashed_address,
-            self.sparse_trie.storage_trie_ref(&hashed_address),
-        );
+        self.cursor.inner_mut().set_hashed_address(hashed_address);
+        match self.sparse_trie.storage_trie_ref(&hashed_address) {
+            Some(trie) => self.cursor.set_sparse_trie(Some(trie)),
+            None if self.sparse_trie.is_retained_storage_account(&hashed_address) => {
+                self.cursor.set_empty_sparse_trie();
+            }
+            None => self.cursor.set_sparse_trie(None),
+        }
     }
 }
 
@@ -164,13 +169,14 @@ where
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         let inner = self.inner.storage_trie_cursor(hashed_address)?;
-        Ok(SparseStateTrieStorageTrieCursor {
-            sparse_trie: self.sparse_trie,
-            cursor: ArenaTrieStorageCursor::new(
-                self.sparse_trie.storage_trie_ref(&hashed_address),
-                inner,
-            ),
-        })
+        let cursor = match self.sparse_trie.storage_trie_ref(&hashed_address) {
+            Some(trie) => ArenaTrieStorageCursor::new(Some(trie), inner),
+            None if self.sparse_trie.is_retained_storage_account(&hashed_address) => {
+                ArenaTrieStorageCursor::new_empty(inner)
+            }
+            None => ArenaTrieStorageCursor::new(None, inner),
+        };
+        Ok(SparseStateTrieStorageTrieCursor { sparse_trie: self.sparse_trie, cursor })
     }
 }
 
@@ -217,10 +223,14 @@ where
     C: TrieStorageCursor,
 {
     fn set_hashed_address(&mut self, hashed_address: B256) {
-        self.cursor.set_hashed_address_with_sparse_trie(
-            hashed_address,
-            self.sparse_trie.storage_trie_ref(&hashed_address),
-        );
+        self.cursor.inner_mut().set_hashed_address(hashed_address);
+        match self.sparse_trie.storage_trie_ref(&hashed_address) {
+            Some(trie) => self.cursor.set_sparse_trie(Some(trie)),
+            None if self.sparse_trie.is_retained_storage_account(&hashed_address) => {
+                self.cursor.set_empty_sparse_trie();
+            }
+            None => self.cursor.set_sparse_trie(None),
+        }
     }
 }
 
@@ -669,6 +679,33 @@ mod tests {
     }
 
     #[test]
+    fn retained_empty_storage_hashed_cursor_masks_inner_storage() {
+        let stale_value = U256::from(24);
+        let other_storage_value = U256::from(25);
+
+        let mut sparse =
+            SparseStateTrie::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::default();
+        sparse.record_storage_wipe(ADDRESS_0);
+
+        let inner = TestHashedCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([
+                (ADDRESS_0, BTreeMap::from([(KEY_0, stale_value)])),
+                (ADDRESS_1, BTreeMap::from([(KEY_0, other_storage_value)])),
+            ]),
+        );
+        let factory = SparseStateTrieCursorFactory::new(&sparse, inner);
+
+        let mut cursor = factory.hashed_storage_cursor(ADDRESS_0).unwrap();
+        assert_eq!(cursor.seek(B256::ZERO).unwrap(), None);
+        assert!(cursor.is_storage_empty().unwrap());
+
+        cursor.set_hashed_address(ADDRESS_1);
+        assert_eq!(cursor.seek(B256::ZERO).unwrap(), Some((KEY_0, other_storage_value)));
+        assert_eq!(cursor.next().unwrap(), None);
+    }
+
+    #[test]
     fn account_trie_cursor_returns_sparse_root_and_delegates_blinded_children() {
         let account_0 = account(30);
         let account_1 = account(31);
@@ -762,6 +799,51 @@ mod tests {
         assert_eq!(
             cursor.seek(Nibbles::default()).unwrap(),
             Some((Nibbles::from_nibbles([0x0, 0x1]), other_inner_node))
+        );
+        assert_eq!(cursor.next().unwrap(), None);
+    }
+
+    #[test]
+    fn retained_empty_storage_trie_cursor_masks_inner_storage() {
+        let stale_node = BranchNodeCompact::new(
+            TrieMask::new(0b1),
+            TrieMask::default(),
+            TrieMask::default(),
+            vec![],
+            None,
+        );
+        let other_inner_node = BranchNodeCompact::new(
+            TrieMask::new(0b10),
+            TrieMask::default(),
+            TrieMask::default(),
+            vec![],
+            None,
+        );
+
+        let mut sparse =
+            SparseStateTrie::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::default();
+        sparse.record_storage_wipe(ADDRESS_0);
+
+        let inner = TestTrieCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([
+                (ADDRESS_0, BTreeMap::from([(Nibbles::from_nibbles([0x0]), stale_node)])),
+                (
+                    ADDRESS_1,
+                    BTreeMap::from([(Nibbles::from_nibbles([0x1]), other_inner_node.clone())]),
+                ),
+            ]),
+        );
+        let factory = SparseStateTrieTrieCursorFactory::new(&sparse, inner);
+
+        let mut cursor = factory.storage_trie_cursor(ADDRESS_0).unwrap();
+        assert_eq!(cursor.seek(Nibbles::default()).unwrap(), None);
+        assert_eq!(cursor.next().unwrap(), None);
+
+        cursor.set_hashed_address(ADDRESS_1);
+        assert_eq!(
+            cursor.seek(Nibbles::default()).unwrap(),
+            Some((Nibbles::from_nibbles([0x1]), other_inner_node))
         );
         assert_eq!(cursor.next().unwrap(), None);
     }

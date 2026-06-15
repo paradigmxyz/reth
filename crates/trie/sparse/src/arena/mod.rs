@@ -41,6 +41,10 @@ type Index = DefaultKey;
 type NodeArena = SlotMap<Index, ArenaSparseNode>;
 
 const TRACE_TARGET: &str = "trie::arena";
+#[cfg(feature = "trie-debug")]
+const FOCUS_TRACE_TARGET: &str = "trie::arena::focus";
+#[cfg(feature = "trie-debug")]
+const FOCUS_PATH_PREFIX: [u8; 6] = [0x8, 0xc, 0xd, 0xf, 0x8, 0xa];
 
 /// The maximum path length (in nibbles) for nodes that live in the upper trie. Nodes at this
 /// depth or deeper belong to lower subtries.
@@ -204,6 +208,21 @@ fn arena_memory_size(arena: &NodeArena, buffers: &ArenaTrieBuffers) -> usize {
         buffers.rlp_node_buf.capacity() * core::mem::size_of::<RlpNode>();
 
     arena_size + node_heap_size + buffer_size
+}
+
+#[cfg(feature = "trie-debug")]
+fn has_focus_prefix(path: &Nibbles) -> bool {
+    path.len() >= FOCUS_PATH_PREFIX.len() &&
+        FOCUS_PATH_PREFIX
+            .iter()
+            .enumerate()
+            .all(|(idx, nibble)| path.get_unchecked(idx) == *nibble)
+}
+
+#[cfg(feature = "trie-debug")]
+fn overlaps_focus_prefix(path: &Nibbles) -> bool {
+    let overlap = path.len().min(FOCUS_PATH_PREFIX.len());
+    (0..overlap).all(|idx| path.get_unchecked(idx) == FOCUS_PATH_PREFIX[idx])
 }
 
 /// Reusable buffers shared by both [`ArenaSparseSubtrie`] and [`ArenaParallelSparseTrie`].
@@ -397,6 +416,19 @@ impl ArenaSparseSubtrie {
                 child_prefix.extend(child_short_key);
 
                 if has_prefix(retained_leaves, &child_prefix) {
+                    #[cfg(feature = "trie-debug")]
+                    if has_focus_prefix(&child_prefix) ||
+                        has_focus_prefix(&branch_logical_path) ||
+                        overlaps_focus_prefix(&child_prefix)
+                    {
+                        tracing::debug!(
+                            target: FOCUS_TRACE_TARGET,
+                            ?child_path,
+                            ?child_prefix,
+                            retained = true,
+                            "subtrie prune child"
+                        );
+                    }
                     // Retained — move child to new arena.
                     let child_node = self.arena.remove(old_child_idx).expect("child exists");
                     let new_child_idx = new_arena.insert(child_node);
@@ -406,6 +438,19 @@ impl ArenaSparseSubtrie {
                     b.children[child_pos] = ArenaSparseNodeBranchChild::Revealed(new_child_idx);
                     queue.push_back((new_child_idx, child_path));
                 } else {
+                    #[cfg(feature = "trie-debug")]
+                    if has_focus_prefix(&child_prefix) ||
+                        has_focus_prefix(&branch_logical_path) ||
+                        overlaps_focus_prefix(&child_prefix)
+                    {
+                        tracing::debug!(
+                            target: FOCUS_TRACE_TARGET,
+                            ?child_path,
+                            ?child_prefix,
+                            retained = false,
+                            "subtrie prune child"
+                        );
+                    }
                     // Not retained — blind the child slot in the new arena.
                     let rlp_node = self.arena[old_child_idx]
                         .state_ref()
@@ -471,6 +516,18 @@ impl ArenaSparseSubtrie {
 
         for (idx, &(key, ref full_path, ref update)) in sorted_updates.iter().enumerate() {
             let find_result = self.buffers.cursor.seek(&mut self.arena, full_path);
+            #[cfg(feature = "trie-debug")]
+            if has_focus_prefix(full_path) {
+                tracing::debug!(
+                    target: FOCUS_TRACE_TARGET,
+                    subtrie = ?self.path,
+                    ?key,
+                    ?full_path,
+                    ?update,
+                    ?find_result,
+                    "subtrie update leaf"
+                );
+            }
 
             // If the path hits a blinded node, request a proof regardless of update type.
             if matches!(find_result, SeekResult::Blinded) {
@@ -1358,8 +1415,30 @@ impl ArenaParallelSparseTrie {
             let short_key = b.short_key;
             let state_mask = b.state_mask;
             let prev_branch_masks = b.branch_masks;
+            #[cfg(feature = "trie-debug")]
+            let prev_hashes = b.hashes.clone();
             let (new_branch_masks, new_hashes) = b.masks_and_hashes(arena);
             let was_dirty = matches!(b.state, ArenaSparseNodeState::Dirty);
+            #[cfg(feature = "trie-debug")]
+            {
+                let mut logical_path = head_path;
+                logical_path.extend(&short_key);
+                if has_focus_prefix(&logical_path) || overlaps_focus_prefix(&logical_path) {
+                    tracing::debug!(
+                        target: FOCUS_TRACE_TARGET,
+                        ?head_path,
+                        ?logical_path,
+                        ?short_key,
+                        ?state_mask,
+                        ?prev_branch_masks,
+                        prev_hashes = ?prev_hashes,
+                        ?new_branch_masks,
+                        new_hashes = ?new_hashes,
+                        was_dirty,
+                        "encoding focused branch"
+                    );
+                }
+            }
 
             rlp_buf.clear();
             let rlp_node = BranchNodeRef::new(rlp_node_buf, state_mask).rlp(rlp_buf);
@@ -3414,6 +3493,49 @@ mod tests {
         let mut cloned = trie.parallel_compact_clone();
 
         assert_eq!(cloned.root(), expected_root);
+    }
+
+    #[test]
+    fn prune_then_update_matches_serial_root() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(0x5eed);
+        let base = (0..768u16)
+            .map(|i| {
+                let mut key = [0u8; 32];
+                key[0] = (i >> 8) as u8;
+                key[1] = i as u8;
+                key[31] = i.wrapping_mul(37) as u8;
+                (B256::from(key), U256::from(u64::from(i) + 1))
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        let mut harness = ArenaTrieTestHarness::new(base.clone());
+        let root_node = harness.root_node();
+        let mut trie = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
+            ArenaParallelismThresholds {
+                min_dirty_leaves: 1,
+                min_revealed_nodes: 1,
+                min_updates: 1,
+                min_leaves_for_prune: 1,
+            },
+        );
+        trie.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
+
+        let block1 = build_changeset(&base, BTreeMap::new(), 0.35, 0.1, &mut rng);
+        harness.assert_changes(&mut trie, block1.clone());
+        harness.apply_changeset(block1);
+
+        let block2 = build_changeset(harness.storage(), BTreeMap::new(), 0.35, 0.1, &mut rng);
+        harness.assert_changes(&mut trie, block2.clone());
+        harness.apply_changeset(block2.clone());
+        let root_after_block2 = trie.root();
+
+        let mut retained = block2.keys().map(|key| Nibbles::unpack(*key)).collect::<Vec<_>>();
+        retained.sort_unstable();
+        trie.prune(&retained);
+        assert_eq!(trie.root(), root_after_block2, "prune must preserve the trie root");
+
+        let block3 = build_changeset(harness.storage(), BTreeMap::new(), 0.35, 0.1, &mut rng);
+        harness.assert_changes(&mut trie, block3);
     }
 
     #[test]

@@ -302,7 +302,7 @@ where
                         .sparse_trie_channel_wait_duration_histogram
                         .record(wake.duration_since(t));
 
-                    self.on_message(update);
+                    self.on_message(update)?;
                     self.pending_updates += 1;
                 }
                 recv(self.proof_result_rx) -> message => {
@@ -423,11 +423,11 @@ where
     }
 
     /// Processes a [`SparseTrieTaskMessage`] from the hashing task.
-    fn on_message(&mut self, message: SparseTrieTaskMessage) {
+    fn on_message(&mut self, message: SparseTrieTaskMessage) -> Result<(), ParallelStateRootError> {
         match message {
             SparseTrieTaskMessage::PrefetchProofs(targets) => self.on_prewarm_targets(targets),
             SparseTrieTaskMessage::HashedState(hashed_state) => {
-                self.on_hashed_state_update(hashed_state)
+                self.on_hashed_state_update(hashed_state)?
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
                 let _ = self
@@ -438,6 +438,7 @@ where
                 self.finished_state_updates = true
             }
         }
+        Ok(())
     }
 
     #[instrument(
@@ -473,10 +474,19 @@ where
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
-    fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
+    fn on_hashed_state_update(
+        &mut self,
+        hashed_state_update: HashedPostState,
+    ) -> Result<(), ParallelStateRootError> {
         for (&address, storage) in &hashed_state_update.storages {
             if storage.wiped {
                 self.trie.record_storage_wipe(address);
+                self.trie.wipe_storage(address).map_err(|err| {
+                    ParallelStateRootError::Other(format!(
+                        "could not wipe sparse storage trie: {err:?}"
+                    ))
+                })?;
+                self.new_storage_updates.entry(address).or_default();
             }
 
             if !storage.storage.is_empty() {
@@ -525,6 +535,7 @@ where
         }
 
         self.final_hashed_state.extend(hashed_state_update);
+        Ok(())
     }
 
     fn on_proof_result(

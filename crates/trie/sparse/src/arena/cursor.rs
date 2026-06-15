@@ -414,6 +414,13 @@ where
         this
     }
 
+    /// Creates a new cursor over a revealed-empty sparse trie.
+    pub fn new_empty(inner: C) -> Self {
+        let mut this = Self::new(None, inner);
+        this.set_empty_sparse_trie();
+        this
+    }
+
     /// Updates the sparse trie topology used by this cursor.
     ///
     /// `None` means the trie is completely unrevealed, so the full keyspace is delegated to the
@@ -428,6 +435,16 @@ where
             }
         };
         self.items.sort_unstable_by(compare_items);
+        self.idx = 0;
+        self.active_blind_end = None;
+        self.last_key = None;
+        self.inner.reset();
+    }
+
+    /// Updates this cursor to use a revealed-empty sparse trie.
+    pub fn set_empty_sparse_trie(&mut self) {
+        self.items.clear();
+        self.topology_error = None;
         self.idx = 0;
         self.active_blind_end = None;
         self.last_key = None;
@@ -569,9 +586,24 @@ where
         Self { cursor: ArenaHashedCursor::new(trie, inner) }
     }
 
+    /// Creates a new storage cursor over a revealed-empty sparse trie.
+    pub fn new_empty(inner: C) -> Self {
+        Self { cursor: ArenaHashedCursor::new_empty(inner) }
+    }
+
     /// Updates the sparse trie topology used by this cursor.
     pub fn set_sparse_trie(&mut self, trie: Option<&'a ArenaParallelSparseTrie>) {
         self.cursor.set_sparse_trie(trie);
+    }
+
+    /// Updates this cursor to use a revealed-empty sparse trie.
+    pub fn set_empty_sparse_trie(&mut self) {
+        self.cursor.set_empty_sparse_trie();
+    }
+
+    /// Returns a mutable reference to the inner cursor.
+    pub const fn inner_mut(&mut self) -> &mut C {
+        self.cursor.inner_mut()
     }
 
     /// Sets the hashed address on the inner cursor and updates the sparse trie topology.
@@ -652,6 +684,13 @@ where
         this
     }
 
+    /// Creates a new cursor over a revealed-empty sparse trie.
+    pub fn new_empty(inner: C) -> Self {
+        let mut this = Self::new(None, inner);
+        this.set_empty_sparse_trie();
+        this
+    }
+
     /// Updates the sparse trie topology used by this cursor.
     ///
     /// `None` means the trie is completely unrevealed, so the full keyspace is delegated to the
@@ -667,6 +706,16 @@ where
             }
         };
         self.items.sort_unstable_by(compare_trie_items);
+        self.idx = 0;
+        self.active_blind_end = None;
+        self.last_key = None;
+        self.inner.reset();
+    }
+
+    /// Updates this cursor to use a revealed-empty sparse trie.
+    pub fn set_empty_sparse_trie(&mut self) {
+        self.items.clear();
+        self.topology_error = None;
         self.idx = 0;
         self.active_blind_end = None;
         self.last_key = None;
@@ -851,9 +900,24 @@ where
         Self { cursor: ArenaTrieCursor::new(trie, inner) }
     }
 
+    /// Creates a new storage trie cursor over a revealed-empty sparse trie.
+    pub fn new_empty(inner: C) -> Self {
+        Self { cursor: ArenaTrieCursor::new_empty(inner) }
+    }
+
     /// Updates the sparse trie topology used by this cursor.
     pub fn set_sparse_trie(&mut self, trie: Option<&ArenaParallelSparseTrie>) {
         self.cursor.set_sparse_trie(trie);
+    }
+
+    /// Updates this cursor to use a revealed-empty sparse trie.
+    pub fn set_empty_sparse_trie(&mut self) {
+        self.cursor.set_empty_sparse_trie();
+    }
+
+    /// Returns a mutable reference to the inner cursor.
+    pub const fn inner_mut(&mut self) -> &mut C {
+        self.cursor.inner_mut()
     }
 
     /// Sets the hashed address on the inner cursor and updates the sparse trie topology.
