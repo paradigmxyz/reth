@@ -9,7 +9,7 @@ use crate::tree::{
     WaitForCaches,
 };
 use alloy_eip7928::bal::DecodedBal;
-use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
+use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, BlockNumHash};
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use multiproof::*;
@@ -209,6 +209,7 @@ where
     /// Prunes persisted state keys from the preserved sparse trie cache.
     pub fn prune_sparse_state_trie_after_persistence(
         &self,
+        persisted_block: BlockNumHash,
         persisted_state: &HashedPostStateSorted,
     ) {
         self.trie_metrics
@@ -221,6 +222,7 @@ where
 
         let start = Instant::now();
         self.sparse_state_trie.prune_persisted_state(
+            persisted_block,
             persisted_state,
             SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
             SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
@@ -339,6 +341,7 @@ where
         let halve_workers = env.transaction_count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD;
         let state_root_handle = self.spawn_state_root(
             multiproof_provider_factory,
+            env.parent,
             env.parent_state_root,
             Some((state_trie_overlay_manager, env.hash)),
             halve_workers,
@@ -412,6 +415,7 @@ where
     pub fn spawn_state_root<F>(
         &self,
         multiproof_provider_factory: F,
+        parent: BlockNumHash,
         parent_state_root: B256,
         sparse_trie_overlay: Option<(StateTrieOverlayManager<N>, B256)>,
         halve_workers: bool,
@@ -439,6 +443,7 @@ where
             state_root_tx,
             hashed_state_tx,
             from_multi_proof,
+            parent,
             parent_state_root,
             sparse_trie_overlay,
             config.multiproof_chunk_size(),
@@ -637,6 +642,7 @@ where
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
         hashed_state_tx: mpsc::Sender<HashedPostState>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
+        parent: BlockNumHash,
         parent_state_root: B256,
         sparse_trie_overlay: Option<(StateTrieOverlayManager<N>, B256)>,
         chunk_size: usize,
@@ -663,20 +669,22 @@ where
                 .sparse_trie_cache_wait_duration_histogram
                 .record(start.elapsed().as_secs_f64());
 
-            let sparse_state_trie = preserved
-                .map(|preserved| preserved.into_trie_for(parent_state_root))
+            let (sparse_state_trie, base_block) = preserved
+                .map(|preserved| preserved.into_trie_for(parent, parent_state_root))
                 .unwrap_or_else(|| {
                     debug!(
                         target: "engine::tree::payload_processor",
+                        ?parent,
                         "Creating new sparse trie - no preserved trie available"
                     );
                     let default_trie = RevealableSparseTrie::blind_from(
                         ConfigurableSparseTrie::Arena(ArenaParallelSparseTrie::default()),
                     );
-                    SparseStateTrie::default()
+                    let trie = SparseStateTrie::default()
                         .with_accounts_trie(default_trie.clone())
                         .with_default_storage_trie(default_trie)
-                        .with_updates(true)
+                        .with_updates(true);
+                    (trie, parent)
                 });
 
             let mut task = SparseTrieCacheTask::new_with_trie(
@@ -711,21 +719,13 @@ where
 
             let task_result = result.as_ref().ok().cloned();
             // Send state root computation result - next block may start but will block on take()
-            if state_root_tx.send(result).is_err() {
-                // Receiver dropped - payload was likely invalid or cancelled.
-                // Clear the trie instead of preserving potentially invalid state.
+            let receiver_dropped = state_root_tx.send(result).is_err();
+            if receiver_dropped {
                 debug!(
                     target: "engine::tree::payload_processor",
-                    "State root receiver dropped, clearing trie"
+                    success = task_result.is_some(),
+                    "State root receiver dropped before sparse trie result was delivered"
                 );
-                let (trie, deferred) = task.into_cleared_trie(
-                    SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
-                    SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
-                );
-                guard.store(PreservedSparseTrie::cleared(trie));
-                drop(guard);
-                executor.spawn_drop(deferred);
-                return;
             }
 
             // Only preserve the trie as anchored if computation succeeded.
@@ -749,9 +749,9 @@ where
                 trie_metrics
                     .sparse_trie_retained_storage_tries
                     .set(trie.retained_storage_tries_count() as f64);
-                guard.store(PreservedSparseTrie::anchored(trie, result.state_root));
+                guard.store(PreservedSparseTrie::anchored(trie, result.state_root, base_block));
                 if let Some((manager, block_hash, trie)) = sparse_trie_overlay_clone {
-                    manager.replace_sparse_trie(block_hash, trie);
+                    manager.replace_sparse_trie(block_hash, base_block.hash, trie);
                 }
                 deferred
             } else {
@@ -1032,6 +1032,8 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     pub evm_env: EvmEnvFor<Evm>,
     /// Hash of the block being executed.
     pub hash: B256,
+    /// Parent block of the block being executed.
+    pub parent: BlockNumHash,
     /// Hash of the parent block.
     pub parent_hash: B256,
     /// State root of the parent block.
@@ -1063,6 +1065,7 @@ where
         Self {
             evm_env: Default::default(),
             hash: Default::default(),
+            parent: Default::default(),
             parent_hash: Default::default(),
             parent_state_root: Default::default(),
             transaction_count: 0,

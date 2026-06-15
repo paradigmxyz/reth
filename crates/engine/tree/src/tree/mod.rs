@@ -117,6 +117,11 @@ impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
     ) -> Self {
         Self { provider_factory, historical, overlay }
     }
+
+    /// Returns the historical block hash this state provider is anchored to.
+    pub const fn historical_hash(&self) -> B256 {
+        self.historical
+    }
 }
 
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P>
@@ -2137,12 +2142,14 @@ where
 
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
         self.remove_before(self.persistence_state.last_persisted_block, finalized)?;
+        let persisted_block = BlockNumHash {
+            number: self.persistence_state.last_persisted_block.number,
+            hash: self.persistence_state.last_persisted_block.hash,
+        };
         let persisted_state =
-            self.canonical_in_memory_state.remove_persisted_blocks(BlockNumHash {
-                number: self.persistence_state.last_persisted_block.number,
-                hash: self.persistence_state.last_persisted_block.hash,
-            });
-        self.payload_validator.prune_sparse_state_trie_after_persistence(&persisted_state);
+            self.canonical_in_memory_state.remove_persisted_blocks(persisted_block);
+        self.payload_validator
+            .prune_sparse_state_trie_after_persistence(persisted_block, &persisted_state);
         Ok(())
     }
 

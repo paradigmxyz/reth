@@ -14,8 +14,8 @@ use reth_primitives_traits::Account;
 use reth_trie_common::HashedPostStateSorted;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
-    DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2, TrieAccount, EMPTY_ROOT_HASH,
-    TRIE_ACCOUNT_RLP_MAX_SIZE,
+    DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2, TrieAccount, TrieNodeV2,
+    EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 #[cfg(feature = "std")]
 use tracing::debug;
@@ -280,6 +280,15 @@ where
         self.storage.tries.get(address).and_then(|e| e.as_revealed_ref())
     }
 
+    /// Returns `true` if storage for `address` is covered by currently retained in-memory state.
+    ///
+    /// This can be true even when no storage trie is retained, for example after an in-memory
+    /// storage wipe with no remaining slot updates. In that case callers should treat the storage
+    /// trie as revealed-empty instead of falling back to the database.
+    pub fn is_retained_storage_account(&self, address: &B256) -> bool {
+        self.retained_storage_accounts.contains(address)
+    }
+
     /// Returns mutable reference to storage sparse trie if it was revealed.
     pub fn storage_trie_mut(&mut self, address: &B256) -> Option<&mut S> {
         self.storage.tries.get_mut(address).and_then(|e| e.as_revealed_mut())
@@ -420,9 +429,12 @@ where
 
     /// Wipe the storage trie at the provided address.
     pub fn wipe_storage(&mut self, address: B256) -> SparseStateTrieResult<()> {
-        if let Some(trie) = self.storage.tries.get_mut(&address) {
-            trie.wipe()?;
+        let retain_updates = self.retain_updates;
+        let trie = self.storage.get_or_create_trie_mut(address);
+        if trie.is_blind() {
+            trie.reveal_root(TrieNodeV2::EmptyRoot, None, retain_updates)?;
         }
+        trie.wipe()?;
         Ok(())
     }
 
@@ -795,6 +807,7 @@ where
         let mut removed_slots = 0usize;
         let mut removed_storage_accounts = 0usize;
         for (address, storage) in &persisted_state.storages {
+            let had_retained_slots = self.retained_storage_slots.contains_key(address);
             let mut empty = false;
             if let Some(retained_slots) = self.retained_storage_slots.get_mut(address) {
                 for (slot, _) in storage.storage_slots_ref() {
@@ -806,7 +819,9 @@ where
                 self.retained_storage_slots.remove(address);
             }
 
-            if !self.retained_storage_slots.contains_key(address) {
+            if (had_retained_slots && !self.retained_storage_slots.contains_key(address)) ||
+                (!had_retained_slots && storage.wiped)
+            {
                 removed_storage_accounts += self.retained_storage_accounts.remove(address) as usize;
             }
         }
@@ -1256,6 +1271,61 @@ mod tests {
         assert_eq!(
             sparse.get_storage_slot_value(&storage, &retained_slot),
             Some(&storage_leaf_value)
+        );
+    }
+
+    #[test]
+    fn retained_storage_wipe_survives_pruning_older_storage_touch() {
+        let storage = B256::ZERO;
+        let stale_slot = B256::ZERO;
+        let account_leaf_value = alloy_rlp::encode(TrieAccount::default());
+        let storage_leaf_value = alloy_rlp::encode_fixed_size(&U256::from(42)).to_vec();
+
+        let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
+        sparse
+            .reveal_decoded_multiproof_v2(reth_trie_common::DecodedMultiProofV2 {
+                account_proofs: two_leaf_v2_proof_nodes(account_leaf_value.clone()),
+                storage_proofs: B256Map::from_iter([(
+                    storage,
+                    two_leaf_v2_proof_nodes(storage_leaf_value),
+                )]),
+                ..Default::default()
+            })
+            .unwrap();
+        sparse.root().unwrap();
+        sparse.storage_root(&storage).unwrap();
+
+        sparse.record_slot_touch(storage, stale_slot);
+        sparse.record_storage_wipe(storage);
+
+        let persisted_state = HashedPostStateSorted::new(
+            Vec::new(),
+            B256Map::from_iter([(
+                storage,
+                HashedStorageSorted {
+                    wiped: false,
+                    storage_slots: vec![(stale_slot, U256::from(42))],
+                },
+            )]),
+        );
+        sparse.prune_persisted_state(&persisted_state);
+
+        assert!(sparse.is_retained_storage_account(&storage));
+        assert_eq!(sparse.get_account_value(&storage), Some(&account_leaf_value));
+        assert!(sparse.storage_trie_ref(&storage).is_none());
+    }
+
+    #[test]
+    fn wipe_storage_reveals_missing_storage_as_empty() {
+        let storage = B256::ZERO;
+        let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default().with_updates(true);
+
+        sparse.wipe_storage(storage).unwrap();
+
+        assert_eq!(sparse.storage_root(&storage), Some(EMPTY_ROOT_HASH));
+        assert_eq!(
+            sparse.storage_trie_updates().get(&storage),
+            Some(&StorageTrieUpdates { is_deleted: true, ..Default::default() })
         );
     }
 
