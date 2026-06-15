@@ -96,7 +96,7 @@ mod evm2_executor;
 pub use evm2_executor::{
     execute_evm2_block, execute_evm2_block_with_context,
     execute_evm2_block_with_context_and_precompiles, execute_evm2_block_with_withdrawals,
-    Evm2BlockExecutionContext, Evm2BlockSystemCalls, Evm2ExecutionError,
+    Evm2BlockExecutionContext, Evm2BlockSystemCalls, Evm2ExecutionError, Evm2HashedStateMode,
 };
 #[cfg(feature = "std")]
 pub use evm2_executor::{
@@ -107,6 +107,7 @@ pub use evm2_executor::{
     execute_evm2_block_with_state_provider_context_precompiles_and_hook,
     execute_evm2_block_with_state_provider_context_precompiles_and_hook_envelopes,
     execute_evm2_block_with_state_provider_context_precompiles_and_hooks_envelopes,
+    execute_evm2_block_with_state_provider_context_precompiles_and_hooks_envelopes_with_hashed_state_mode,
 };
 
 mod receipt;

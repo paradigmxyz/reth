@@ -75,8 +75,8 @@ use reth_evm::{
     ConfigureEvm, ConfigureEvm2Prewarm, EvmEnvFor, ExecutionCtxFor,
 };
 use reth_evm_ethereum::{
-    execute_evm2_block_with_state_provider_context_precompiles_and_hooks_envelopes,
-    Evm2BlockExecutionContext, Evm2BlockSystemCalls, Evm2TxEnv,
+    execute_evm2_block_with_state_provider_context_precompiles_and_hooks_envelopes_with_hashed_state_mode,
+    Evm2BlockExecutionContext, Evm2BlockSystemCalls, Evm2HashedStateMode, Evm2TxEnv,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
 use reth_execution_types::evm2_state_source_hashed_post_state;
@@ -1124,6 +1124,11 @@ where
 
         let state_hook_sender = handle.state_hook_sender();
         let streamed_state_updates = state_hook_sender.is_some();
+        let hashed_state_mode = if streamed_state_updates {
+            Evm2HashedStateMode::StreamOnly
+        } else {
+            Evm2HashedStateMode::OutputOnly
+        };
         let output = debug_span!(target: "engine::tree", "execute_evm2_block")
             .in_scope(|| {
                 let mut on_hashed_state_update = |hashed_state| {
@@ -1131,7 +1136,7 @@ where
                         sender.send_hashed_state(hashed_state);
                     }
                 };
-                execute_evm2_block_with_state_provider_context_precompiles_and_hooks_envelopes(
+                execute_evm2_block_with_state_provider_context_precompiles_and_hooks_envelopes_with_hashed_state_mode(
                     spec_id,
                     block_env,
                     state_provider,
@@ -1143,6 +1148,7 @@ where
                         executed_tx_index.store(executed, Ordering::Relaxed);
                     },
                     &mut on_hashed_state_update,
+                    hashed_state_mode,
                 )
             })
             .map_err(BlockExecutionError::other)?;
