@@ -216,6 +216,12 @@ pub trait Peers: PeersInfo {
     /// Disconnect an existing connection to the given peer using the provided reason
     fn disconnect_peer_with_reason(&self, peer: PeerId, reason: DisconnectReason);
 
+    /// Bans the given peer and disconnects an active non-trusted session if one exists.
+    fn ban_peer(&self, peer: PeerId);
+
+    /// Unbans the given peer.
+    fn unban_peer(&self, peer: PeerId);
+
     /// Connect to the given peer. NOTE: if the maximum number of outbound sessions is reached,
     /// this won't do anything. See `reth_network::SessionManager::dial_outbound`.
     fn connect_peer(&self, peer: PeerId, tcp_addr: SocketAddr) {
