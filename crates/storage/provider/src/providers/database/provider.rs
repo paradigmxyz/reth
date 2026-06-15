@@ -2683,7 +2683,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         Ok(())
     }
 
-    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    #[instrument(level = "trace", target = "providers::db", skip_all)]
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
         // Write hashed account updates.
         let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
