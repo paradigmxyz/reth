@@ -184,6 +184,13 @@ async fn partial_stateless_exex<
                     let target_accounts = targets.len();
                     let target_slots: usize = targets.values().map(|slots| slots.len()).sum();
 
+                    // Calculate total bytes of missed bytecodes
+                    let missed_bytecode_bytes: usize = miss.missed_codes
+                        .iter()
+                        .filter_map(|code_hash| accessed.codes.get(code_hash))
+                        .map(|bytes| bytes.len())
+                        .sum();
+
                     // Get state provider for the parent block (proof against pre-execution state)
                     // We use tip_block - 1 because the witness proves state BEFORE this block
                     let witness_result = if tip_block > 0 {
@@ -194,7 +201,7 @@ async fn partial_stateless_exex<
                                 match state_provider.multiproof(TrieInput::default(), targets) {
                                     Ok(proof) => {
                                         let elapsed_ms = start.elapsed().as_millis() as u64;
-                                        let mut result = measure_multiproof_size(&proof);
+                                        let mut result = measure_multiproof_size(&proof, missed_bytecode_bytes);
                                         result.computation_time_ms = Some(elapsed_ms);
                                         result.target_accounts = target_accounts;
                                         result.target_storage_slots = target_slots;
@@ -235,6 +242,8 @@ async fn partial_stateless_exex<
                             account_proof = format_bytes(witness.account_proof_bytes),
                             storage_proof_bytes = witness.storage_proof_bytes,
                             storage_proof = format_bytes(witness.storage_proof_bytes),
+                            bytecode_bytes = witness.bytecode_bytes,
+                            bytecode_size = format_bytes(witness.bytecode_bytes),
                             account_proof_nodes = witness.account_proof_nodes,
                             storage_proof_nodes = witness.storage_proof_nodes,
                             target_accounts = witness.target_accounts,

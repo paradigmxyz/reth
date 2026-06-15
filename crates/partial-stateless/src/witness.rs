@@ -10,12 +10,14 @@ use reth_trie_common::{MultiProof, MultiProofTargets};
 /// Result of witness computation for a single block.
 #[derive(Debug, Clone)]
 pub struct WitnessResult {
-    /// Total size of witness in bytes (account trie nodes + storage trie nodes).
+    /// Total size of witness in bytes (account trie nodes + storage trie nodes + bytecode bytes).
     pub total_size_bytes: usize,
     /// Size of account proof nodes in bytes.
     pub account_proof_bytes: usize,
     /// Size of storage proof nodes in bytes.
     pub storage_proof_bytes: usize,
+    /// Size of missed contract bytecodes in bytes.
+    pub bytecode_bytes: usize,
     /// Number of account proof trie nodes.
     pub account_proof_nodes: usize,
     /// Number of storage proof trie nodes (across all accounts).
@@ -51,10 +53,11 @@ pub fn miss_to_proof_targets(miss: &MissResult) -> MultiProofTargets {
     targets
 }
 
-/// Measure the total byte size of a `MultiProof`.
+/// Measure the total byte size of a `MultiProof`, adding the size of any missed bytecodes.
 ///
-/// This counts the raw bytes of all trie nodes in the proof (account + storage subtrees).
-pub fn measure_multiproof_size(proof: &MultiProof) -> WitnessResult {
+/// This counts the raw bytes of all trie nodes in the proof (account + storage subtrees)
+/// and sums them with the provided bytecode bytes.
+pub fn measure_multiproof_size(proof: &MultiProof, missed_bytecode_bytes: usize) -> WitnessResult {
     // Account proof size
     let mut account_proof_bytes = 0usize;
     let mut account_proof_nodes = 0usize;
@@ -73,7 +76,7 @@ pub fn measure_multiproof_size(proof: &MultiProof) -> WitnessResult {
         }
     }
 
-    let total_size_bytes = account_proof_bytes + storage_proof_bytes;
+    let total_size_bytes = account_proof_bytes + storage_proof_bytes + missed_bytecode_bytes;
 
     // Count targets
     let target_accounts = proof.storages.len().max(
@@ -95,6 +98,7 @@ pub fn measure_multiproof_size(proof: &MultiProof) -> WitnessResult {
         total_size_bytes,
         account_proof_bytes,
         storage_proof_bytes,
+        bytecode_bytes: missed_bytecode_bytes,
         account_proof_nodes,
         storage_proof_nodes,
         target_accounts,
