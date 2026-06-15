@@ -8,6 +8,18 @@ use alloy_trie::proof::AddedRemovedKeys;
 use reth_storage_errors::db::DatabaseError;
 use tracing::{instrument, trace};
 
+#[cfg(test)]
+use crate::trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory};
+
+#[cfg(test)]
+use alloy_primitives::map::B256Map;
+
+#[cfg(test)]
+use alloy_trie::TrieMask;
+
+#[cfg(test)]
+use std::collections::BTreeMap;
+
 #[cfg(feature = "metrics")]
 use crate::metrics::WalkerMetrics;
 
@@ -26,6 +38,9 @@ pub struct TrieWalker<C, K = AddedRemovedKeys> {
     pub can_skip_current_node: bool,
     /// A `PrefixSet` representing the changes to be applied to the trie.
     pub changes: PrefixSet,
+    /// When enabled, all children of a branch become unskippable if the branch path itself
+    /// matches the prefix set, even if a given child path does not.
+    walk_all_changed_branch_children: bool,
     /// The retained trie node keys that need to be removed.
     removed_keys: Option<HashSet<Nibbles>>,
     /// Provided when it's necessary not to skip certain nodes during proof generation.
@@ -76,6 +91,7 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
             changes,
             stack,
             can_skip_current_node: false,
+            walk_all_changed_branch_children: false,
             removed_keys: None,
             added_removed_keys: None,
             #[cfg(feature = "metrics")]
@@ -101,11 +117,18 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
             stack: self.stack,
             can_skip_current_node: self.can_skip_current_node,
             changes: self.changes,
+            walk_all_changed_branch_children: self.walk_all_changed_branch_children,
             removed_keys: self.removed_keys,
             added_removed_keys,
             #[cfg(feature = "metrics")]
             metrics: self.metrics,
         }
+    }
+
+    /// Configures the walker to treat every child of a matching branch path as unskippable.
+    pub const fn with_walk_all_changed_branch_children(mut self, enabled: bool) -> Self {
+        self.walk_all_changed_branch_children = enabled;
+        self
     }
 
     /// Split the walker into stack and trie updates.
@@ -188,7 +211,14 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
                 "Checked for only non-removed child",
             );
 
+            let branch_path_matches_prefix_set = self
+                .walk_all_changed_branch_children
+                .then(|| node.position().is_child())
+                .unwrap_or(false) &&
+                self.changes.contains(&node.key);
+
             !self.changes.contains(node.full_key()) &&
+                !branch_path_matches_prefix_set &&
                 node.hash_flag() &&
                 !key_is_only_nonremoved_child
         });
@@ -233,6 +263,7 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
             changes,
             stack: vec![CursorSubNode::default()],
             can_skip_current_node: false,
+            walk_all_changed_branch_children: false,
             removed_keys: None,
             added_removed_keys: Default::default(),
             #[cfg(feature = "metrics")]
@@ -385,5 +416,85 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
         self.move_to_next_sibling(false)?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::prefix_set::PrefixSetMut;
+    use alloy_primitives::B256;
+
+    fn branch_node(state_mask: u16, tree_mask: u16, hash_mask: u16) -> BranchNodeCompact {
+        let hash_count = hash_mask.count_ones() as usize;
+        BranchNodeCompact::new(
+            TrieMask::new(state_mask),
+            TrieMask::new(tree_mask),
+            TrieMask::new(hash_mask),
+            vec![B256::ZERO; hash_count],
+            None,
+        )
+    }
+
+    fn root_branch_node(state_mask: u16, tree_mask: u16, hash_mask: u16) -> BranchNodeCompact {
+        let hash_count = hash_mask.count_ones() as usize;
+        BranchNodeCompact::new(
+            TrieMask::new(state_mask),
+            TrieMask::new(tree_mask),
+            TrieMask::new(hash_mask),
+            vec![B256::ZERO; hash_count],
+            Some(B256::ZERO),
+        )
+    }
+
+    fn walker_for_matching_branch_children_test(
+        walk_all_changed_branch_children: bool,
+    ) -> TrieWalker<crate::trie_cursor::mock::MockTrieCursor> {
+        let trie_nodes = BTreeMap::from([
+            (Nibbles::default(), root_branch_node(1 << 2, 1 << 2, 1 << 2)),
+            (
+                Nibbles::from_nibbles([0x2]),
+                branch_node((1 << 3) | (1 << 4), 0, (1 << 3) | (1 << 4)),
+            ),
+        ]);
+        let factory = MockTrieCursorFactory::new(trie_nodes, B256Map::default());
+
+        let mut prefix_set = PrefixSetMut::default();
+        prefix_set.insert(Nibbles::from_nibbles([0x2, 0x3, 0x1]));
+
+        TrieWalker::state_trie(factory.account_trie_cursor().unwrap(), prefix_set.freeze())
+            .with_walk_all_changed_branch_children(walk_all_changed_branch_children)
+    }
+
+    #[test]
+    fn branch_siblings_remain_skippable_by_default() {
+        let mut walker = walker_for_matching_branch_children_test(false);
+
+        assert_eq!(walker.key().copied(), Some(Nibbles::default()));
+        assert!(!walker.can_skip_current_node);
+
+        walker.advance().unwrap();
+        assert_eq!(walker.key().copied(), Some(Nibbles::from_nibbles([0x2])));
+        assert!(!walker.can_skip_current_node);
+
+        walker.advance().unwrap();
+        assert_eq!(walker.key().copied(), Some(Nibbles::from_nibbles([0x2, 0x3])));
+        assert_eq!(walker.stack.last().unwrap().position(), SubNodePosition::Child(0x3));
+        assert!(!walker.can_skip_current_node);
+
+        walker.advance().unwrap();
+        assert_eq!(walker.key().copied(), Some(Nibbles::from_nibbles([0x2, 0x4])));
+        assert!(walker.can_skip_current_node);
+    }
+
+    #[test]
+    fn matching_branch_path_can_make_all_children_unskippable() {
+        let mut walker = walker_for_matching_branch_children_test(true);
+
+        walker.advance().unwrap();
+        walker.advance().unwrap();
+        walker.advance().unwrap();
+        assert_eq!(walker.key().copied(), Some(Nibbles::from_nibbles([0x2, 0x4])));
+        assert!(!walker.can_skip_current_node);
     }
 }

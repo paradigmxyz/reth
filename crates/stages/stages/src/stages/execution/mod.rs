@@ -1017,7 +1017,8 @@ mod tests {
                             processed,
                             total
                         }
-                    }))
+                    })),
+                    ..
                 },
                 done: true
             } if processed == total && total == block.gas_used);
@@ -1172,7 +1173,8 @@ mod tests {
                             processed: 0,
                             total
                         }
-                    }))
+                    })),
+                    ..
                 }
             } if total == block.gas_used);
 

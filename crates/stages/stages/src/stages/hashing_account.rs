@@ -397,6 +397,7 @@ mod tests {
                         },
                         ..
                     })),
+                    ..
                 },
                 done: true,
             }) if block_number == previous_stage &&

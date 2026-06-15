@@ -37,6 +37,9 @@ auto_impl.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 
+[dev-dependencies]
+alloy-primitives = { workspace = true, features = ["getrandom"] }
+
 [features]
 default = ["std"]
 trie-debug = []

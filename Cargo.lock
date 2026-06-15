@@ -3731,8 +3731,14 @@ name = "example-db-access"
 version = "0.0.0"
 dependencies = [
  "alloy-primitives",
+ "clap",
  "eyre",
+ "reth-chainspec",
+ "reth-db-api",
  "reth-ethereum",
+ "reth-storage-api",
+ "reth-trie",
+ "reth-trie-db",
 ]
 
 [[package]]
@@ -9736,7 +9742,6 @@ dependencies = [
  "revm-database-interface",
  "revm-state",
  "rocksdb",
- "smallvec",
  "strum 0.27.2",
  "tempfile",
  "tokio",

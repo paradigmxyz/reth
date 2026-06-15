@@ -22,7 +22,6 @@
 
 use crate::persistence::PersistenceResult;
 use alloy_eips::BlockNumHash;
-use alloy_primitives::B256;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
 use reth_primitives_traits::FastInstant as Instant;
 use tracing::trace;
@@ -30,10 +29,12 @@ use tracing::trace;
 /// The state of the persistence task.
 #[derive(Debug)]
 pub struct PersistenceState {
-    /// Hash and number of the last block persisted.
+    /// Hash and number of the highest block whose non-state/trie outputs are persisted.
     ///
-    /// This tracks the chain height that is persisted on disk
+    /// This tracks the highest canonical block with durable block/static-file/plain-state data.
     pub(crate) last_persisted_block: BlockNumHash,
+    /// Hash and number of the highest block whose state/trie outputs are persisted.
+    pub(crate) last_state_trie_persisted_block: BlockNumHash,
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistence task in progress.
     pub(crate) rx:
@@ -76,13 +77,18 @@ impl PersistenceState {
     /// Sets state for a finished persistence task.
     pub(crate) fn finish(
         &mut self,
-        last_persisted_block_hash: B256,
-        last_persisted_block_number: u64,
+        last_persisted_block: BlockNumHash,
+        last_state_trie_persisted_block: BlockNumHash,
     ) {
-        trace!(target: "engine::tree", block= %last_persisted_block_number, hash=%last_persisted_block_hash, "updating persistence state");
+        trace!(
+            target: "engine::tree",
+            last_persisted_block = %last_persisted_block.number,
+            last_state_trie_persisted_block = %last_state_trie_persisted_block.number,
+            "updating persistence state"
+        );
         self.rx = None;
-        self.last_persisted_block =
-            BlockNumHash::new(last_persisted_block_number, last_persisted_block_hash);
+        self.last_persisted_block = last_persisted_block;
+        self.last_state_trie_persisted_block = last_state_trie_persisted_block;
     }
 }
 

@@ -402,7 +402,11 @@ where
             info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         } else {
             let (block_root, updates) = reth_trie_db::with_adapter!(provider, |A| {
-                DbStateRoot::<_, A>::incremental_root_with_updates(provider, range)
+                DbStateRoot::<_, A>::incremental_root_calculator(provider, range).and_then(
+                    |calculator| {
+                        calculator.with_walk_all_changed_branch_children(true).root_with_updates()
+                    },
+                )
             })
             .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
@@ -502,7 +506,8 @@ mod tests {
                     stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
                         processed,
                         total
-                    }))
+                    })),
+                    ..
                 },
                 done: true
             }) if block_number == previous_stage && processed == total &&
@@ -542,7 +547,8 @@ mod tests {
                     stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
                         processed,
                         total
-                    }))
+                    })),
+                    ..
                 },
                 done: true
             }) if block_number == previous_stage && processed == total &&
@@ -584,7 +590,8 @@ mod tests {
                     stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
                         processed,
                         total
-                    }))
+                    })),
+                    ..
                 },
                 done: true
             }) if block_number == previous_stage && processed == total &&

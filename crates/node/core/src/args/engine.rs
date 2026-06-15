@@ -1,14 +1,12 @@
 //! clap [Args](clap::Args) for engine purposes
 
-use clap::{
-    builder::{RangedU64ValueParser, Resettable},
-    Args,
-};
+use clap::{builder::Resettable, Args};
 use eyre::ensure;
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_engine_primitives::{
-    TreeConfig, DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
-    DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD, DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
+    default_persistence_backpressure_threshold, TreeConfig,
+    DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
+    DEFAULT_NUM_STATE_MASKING_BLOCKS, DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
     DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
 };
 use std::{sync::OnceLock, time::Duration};
@@ -27,7 +25,8 @@ static ENGINE_DEFAULTS: OnceLock<DefaultEngineValues> = OnceLock::new();
 #[derive(Debug, Clone)]
 pub struct DefaultEngineValues {
     persistence_threshold: u64,
-    persistence_backpressure_threshold: u64,
+    persistence_backpressure_threshold: Option<u64>,
+    num_state_masking_blocks: u64,
     memory_block_buffer_target: u64,
     invalid_header_hit_eviction_threshold: u8,
     legacy_state_root_task_enabled: bool,
@@ -76,9 +75,26 @@ impl DefaultEngineValues {
         self
     }
 
+    /// Get the default persistence backpressure threshold.
+    pub const fn persistence_backpressure_threshold(&self) -> u64 {
+        match self.persistence_backpressure_threshold {
+            Some(v) => v,
+            None => default_persistence_backpressure_threshold(
+                self.persistence_threshold,
+                self.memory_block_buffer_target,
+            ),
+        }
+    }
+
     /// Set the default persistence backpressure threshold
     pub const fn with_persistence_backpressure_threshold(mut self, v: u64) -> Self {
-        self.persistence_backpressure_threshold = v;
+        self.persistence_backpressure_threshold = Some(v);
+        self
+    }
+
+    /// Set the default number of state masking blocks.
+    pub const fn with_num_state_masking_blocks(mut self, v: u64) -> Self {
+        self.num_state_masking_blocks = v;
         self
     }
 
@@ -264,7 +280,8 @@ impl Default for DefaultEngineValues {
     fn default() -> Self {
         Self {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
-            persistence_backpressure_threshold: DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+            persistence_backpressure_threshold: None,
+            num_state_masking_blocks: DEFAULT_NUM_STATE_MASKING_BLOCKS,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
             invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
             legacy_state_root_task_enabled: false,
@@ -288,7 +305,7 @@ impl Default for DefaultEngineValues {
             sparse_trie_max_hot_accounts: DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: false,
-            state_root_task_timeout: Some("4s".to_string()),
+            state_root_task_timeout: Some("1s".to_string()),
             share_execution_cache_with_payload_builder: false,
             share_sparse_trie_with_payload_builder: false,
             suppress_persistence_during_build: false,
@@ -296,12 +313,6 @@ impl Default for DefaultEngineValues {
             bal_parallel_state_root_disabled: false,
         }
     }
-}
-
-fn default_persistence_backpressure_threshold(persistence_threshold: u64) -> u64 {
-    DefaultEngineValues::get_global()
-        .persistence_backpressure_threshold
-        .max(persistence_threshold.saturating_mul(2))
 }
 
 /// Parameters for configuring the engine driver.
@@ -319,12 +330,14 @@ pub struct EngineArgs {
 
     /// Configure the maximum canonical-minus-persisted gap before engine API processing stalls.
     ///
-    /// If omitted, this defaults to the larger of the default backpressure threshold and twice
-    /// `--engine.persistence-threshold`.
-    ///
     /// This value must be greater than `--engine.persistence-threshold`.
     #[arg(long = "engine.persistence-backpressure-threshold")]
     pub persistence_backpressure_threshold: Option<u64>,
+
+    /// Configure how many of the blocks being persisted should only mask state/trie writes instead
+    /// of durably persisting their state/trie updates in the current cycle.
+    #[arg(long = "engine.num-state-masking-blocks", default_value_t = DefaultEngineValues::get_global().num_state_masking_blocks)]
+    pub num_state_masking_blocks: u64,
 
     /// Configure the target number of blocks to keep in memory.
     #[arg(long = "engine.memory-block-buffer-target", default_value_t = DefaultEngineValues::get_global().memory_block_buffer_target)]
@@ -386,7 +399,7 @@ pub struct EngineArgs {
     pub accept_execution_requests_hash: bool,
 
     /// Multiproof task chunk size for proof targets.
-    #[arg(long = "engine.multiproof-chunk-size", default_value_t = DefaultEngineValues::get_global().multiproof_chunk_size, value_parser = RangedU64ValueParser::<usize>::new().range(1..))]
+    #[arg(long = "engine.multiproof-chunk-size", default_value_t = DefaultEngineValues::get_global().multiproof_chunk_size)]
     pub multiproof_chunk_size: usize,
 
     /// Configure the number of reserved CPU cores for non-reth processes
@@ -471,14 +484,14 @@ pub struct EngineArgs {
     /// If the state root task takes longer than this, a sequential computation starts in
     /// parallel and whichever finishes first is used.
     ///
-    /// --engine.state-root-task-timeout 4s
+    /// --engine.state-root-task-timeout 1s
     /// --engine.state-root-task-timeout 400ms
     ///
     /// Set to 0s to disable.
     #[arg(
         long = "engine.state-root-task-timeout",
         value_parser = humantime::parse_duration,
-        default_value = DefaultEngineValues::get_global().state_root_task_timeout.as_deref().unwrap_or("4s"),
+        default_value = DefaultEngineValues::get_global().state_root_task_timeout.as_deref().unwrap_or("1s"),
     )]
     pub state_root_task_timeout: Option<Duration>,
 
@@ -523,17 +536,18 @@ pub struct EngineArgs {
     )]
     pub suppress_persistence_during_build: bool,
 
-    /// Disable BAL (Block Access List, EIP-7928) based parallel execution.
+    /// Disable BAL (Block Access List, EIP-7928) based parallel execution. When set, falls back
+    /// to transaction-based prewarming even when a BAL is available.
     #[arg(long = "engine.disable-bal-parallel-execution", default_value_t = DefaultEngineValues::get_global().bal_parallel_execution_disabled)]
     pub bal_parallel_execution_disabled: bool,
 
-    /// Disable BAL-driven parallel state root computation. This is only valid together with
-    /// `--engine.disable-bal-parallel-execution`.
+    /// Disable BAL-driven parallel state root computation. When set, the BAL hashed post state
+    /// is not sent to the multiproof task for early parallel state root computation.
     #[arg(long = "engine.disable-bal-parallel-state-root", default_value_t = DefaultEngineValues::get_global().bal_parallel_state_root_disabled)]
     pub bal_parallel_state_root_disabled: bool,
 
-    /// Disable BAL (Block Access List) storage prefetch IO during prewarming. When set, BAL
-    /// storage slots are not read into the execution cache.
+    /// Disable BAL (Block Access List) batched IO during prewarming. When set, falls back
+    /// to individual per-slot storage reads instead of batched cursor reads.
     #[arg(long = "engine.disable-bal-batch-io", default_value_t = false)]
     pub disable_bal_batch_io: bool,
 
@@ -556,6 +570,7 @@ impl Default for EngineArgs {
     fn default() -> Self {
         let DefaultEngineValues {
             persistence_threshold,
+            num_state_masking_blocks,
             persistence_backpressure_threshold: _,
             memory_block_buffer_target,
             invalid_header_hit_eviction_threshold,
@@ -590,6 +605,7 @@ impl Default for EngineArgs {
         Self {
             persistence_threshold,
             persistence_backpressure_threshold: None,
+            num_state_masking_blocks,
             memory_block_buffer_target,
             invalid_header_hit_eviction_threshold,
             legacy_state_root_task_enabled,
@@ -636,7 +652,10 @@ impl EngineArgs {
     /// Returns the effective persistence backpressure threshold.
     pub fn persistence_backpressure_threshold(&self) -> u64 {
         self.persistence_backpressure_threshold.unwrap_or_else(|| {
-            default_persistence_backpressure_threshold(self.persistence_threshold)
+            default_persistence_backpressure_threshold(
+                self.persistence_threshold,
+                self.memory_block_buffer_target,
+            )
         })
     }
 
@@ -650,8 +669,11 @@ impl EngineArgs {
             self.persistence_threshold
         );
         ensure!(
-            self.bal_parallel_execution_disabled || !self.bal_parallel_state_root_disabled,
-            "--engine.disable-bal-parallel-state-root requires --engine.disable-bal-parallel-execution because BAL parallel execution depends on BAL prewarm state-root updates"
+            self.num_state_masking_blocks + self.memory_block_buffer_target < self.persistence_threshold,
+            "--engine.num-state-masking-blocks ({}) + --engine.memory-block-buffer-target ({}) must be less than --engine.persistence-threshold ({})",
+            self.num_state_masking_blocks,
+            self.memory_block_buffer_target,
+            self.persistence_threshold,
         );
         Ok(())
     }
@@ -661,6 +683,7 @@ impl EngineArgs {
         let config = TreeConfig::default()
             .with_persistence_backpressure_threshold(self.persistence_backpressure_threshold())
             .with_persistence_threshold(self.persistence_threshold)
+            .with_num_state_masking_blocks(self.num_state_masking_blocks)
             .with_memory_block_buffer_target(self.memory_block_buffer_target)
             .with_invalid_header_hit_eviction_threshold(self.invalid_header_hit_eviction_threshold)
             .with_legacy_state_root(self.legacy_state_root_task_enabled)
@@ -773,11 +796,48 @@ mod tests {
     }
 
     #[test]
+    fn default_engine_values_derive_backpressure_threshold() {
+        let defaults = DefaultEngineValues::default()
+            .with_persistence_threshold(10)
+            .with_memory_block_buffer_target(3);
+
+        assert_eq!(defaults.persistence_backpressure_threshold(), 26);
+    }
+
+    #[test]
+    fn explicit_backpressure_default_override_is_preserved() {
+        let defaults = DefaultEngineValues::default()
+            .with_persistence_backpressure_threshold(99)
+            .with_persistence_threshold(10)
+            .with_memory_block_buffer_target(3);
+
+        assert_eq!(defaults.persistence_backpressure_threshold(), 99);
+    }
+
+    #[test]
+    fn engine_args_default_thresholds_match_expected_defaults() {
+        let args = EngineArgs::default();
+
+        assert_eq!(args.persistence_threshold, DEFAULT_PERSISTENCE_THRESHOLD);
+        assert_eq!(args.num_state_masking_blocks, DEFAULT_NUM_STATE_MASKING_BLOCKS);
+        assert_eq!(args.memory_block_buffer_target, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET);
+        assert_eq!(args.persistence_backpressure_threshold, None);
+        assert_eq!(
+            args.persistence_backpressure_threshold(),
+            default_persistence_backpressure_threshold(
+                args.persistence_threshold,
+                args.memory_block_buffer_target,
+            )
+        );
+    }
+
+    #[test]
     #[allow(deprecated)]
     fn engine_args() {
         let args = EngineArgs {
             persistence_threshold: 100,
             persistence_backpressure_threshold: Some(101),
+            num_state_masking_blocks: 25,
             memory_block_buffer_target: 50,
             invalid_header_hit_eviction_threshold: 7,
             legacy_state_root_task_enabled: true,
@@ -822,6 +882,8 @@ mod tests {
             "100",
             "--engine.persistence-backpressure-threshold",
             "101",
+            "--engine.num-state-masking-blocks",
+            "25",
             "--engine.memory-block-buffer-target",
             "50",
             "--engine.invalid-header-cache-hit-eviction-threshold",
@@ -866,6 +928,21 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_num_state_masking_blocks() {
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.persistence-threshold",
+            "8",
+            "--engine.num-state-masking-blocks",
+            "7",
+        ])
+        .args;
+
+        assert_eq!(args.num_state_masking_blocks, 7);
+        assert_eq!(args.tree_config().num_state_masking_blocks(), 7);
+    }
+
+    #[test]
     fn validate_rejects_invalid_backpressure_threshold() {
         let args = EngineArgs {
             persistence_threshold: 4,
@@ -879,27 +956,18 @@ mod tests {
     }
 
     #[test]
-    fn parse_rejects_zero_multiproof_chunk_size() {
-        let result = CommandParser::<EngineArgs>::try_parse_from([
-            "reth",
-            "--engine.multiproof-chunk-size",
-            "0",
-        ]);
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn validate_rejects_bal_parallel_execution_without_bal_parallel_state_root() {
+    fn validate_rejects_state_masking_window_at_or_above_threshold() {
         let args = EngineArgs {
-            bal_parallel_execution_disabled: false,
-            bal_parallel_state_root_disabled: true,
+            persistence_threshold: 4,
+            num_state_masking_blocks: 2,
+            memory_block_buffer_target: 2,
             ..EngineArgs::default()
         };
 
         let err = args.validate().unwrap_err().to_string();
-        assert!(err.contains("engine.disable-bal-parallel-state-root"));
-        assert!(err.contains("engine.disable-bal-parallel-execution"));
+        assert!(err.contains("engine.num-state-masking-blocks"));
+        assert!(err.contains("engine.memory-block-buffer-target"));
+        assert!(err.contains("engine.persistence-threshold"));
     }
 
     #[test]

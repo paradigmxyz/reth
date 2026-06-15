@@ -317,6 +317,19 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// This will update the links between blocks and remove all blocks that are [..
     /// `persisted_height`].
     pub fn remove_persisted_blocks(&self, persisted_num_hash: BlockNumHash) {
+        self.remove_persisted_blocks_until(persisted_num_hash, persisted_num_hash.number);
+    }
+
+    /// Removes blocks from the in-memory state through `remove_until` while still reporting the
+    /// provided block as the persisted tip.
+    ///
+    /// This is used when block bodies/plain state have been persisted further than trie data, so a
+    /// suffix still needs to remain in memory for trie-backed operations.
+    pub fn remove_persisted_blocks_until(
+        &self,
+        persisted_num_hash: BlockNumHash,
+        remove_until: BlockNumber,
+    ) {
         self.set_persisted(persisted_num_hash);
         // if the persisted hash is not in the canonical in memory state, do nothing, because it
         // means canonical blocks were not actually persisted.
@@ -334,16 +347,15 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             let mut numbers = self.inner.in_memory_state.numbers.write();
             let mut blocks = self.inner.in_memory_state.blocks.write();
 
-            let BlockNumHash { number: persisted_height, hash: _ } = persisted_num_hash;
+            let remove_until = remove_until.min(persisted_num_hash.number);
 
             // clear all numbers
             numbers.clear();
 
-            // drain all blocks and only keep the ones that are not persisted (below the persisted
-            // height)
+            // Drain all blocks and keep only the suffix that still has to stay in memory.
             let mut old_blocks = blocks
                 .drain()
-                .filter(|(_, b)| b.block_ref().recovered_block().number() > persisted_height)
+                .filter(|(_, b)| b.block_ref().recovered_block().number() > remove_until)
                 .map(|(_, b)| b.block.clone())
                 .collect::<Vec<_>>();
 

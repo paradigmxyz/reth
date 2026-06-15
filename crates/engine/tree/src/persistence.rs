@@ -1,16 +1,16 @@
 use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
 use crossbeam_channel::Sender as CrossbeamSender;
-use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
-    providers::ProviderNodeTypes, BalProvider, BlockExecutionWriter, BlockHashReader,
+    providers::ProviderNodeTypes, BlockExecutionWriter, BlockHashReader,
     ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode,
+    SaveBlocksPlan, StageCheckpointReader,
 };
 use reth_prune::{PrunerError, PrunerWithFactory};
-use reth_stages_api::{MetricEvent, MetricEventsSender};
+use reth_stages_api::{MetricEvent, MetricEventsSender, StageId};
 use reth_tasks::spawn_os_thread;
 use std::{
     sync::{
@@ -21,13 +21,18 @@ use std::{
     time::Duration,
 };
 use thiserror::Error;
-use tracing::{debug, error, instrument, warn};
+use tracing::{debug, error, instrument};
 
 /// Unified result of any persistence operation.
 #[derive(Debug)]
 pub struct PersistenceResult {
-    /// The last block that was persisted, if any.
+    /// The highest block whose non-state/trie outputs are persisted, if any.
     pub last_block: Option<BlockNumHash>,
+    /// The highest block whose state/trie data is fully persisted, if known.
+    ///
+    /// When this lags behind [`Self::last_block`], callers must retain the suffix
+    /// above it in memory so trie-backed operations can still unwind from that point.
+    pub last_state_trie_block: Option<u64>,
     /// The commit duration, only available for save-blocks operations.
     pub commit_duration: Option<Duration>,
 }
@@ -96,14 +101,14 @@ where
         while let Ok(action) = self.incoming.recv() {
             match action {
                 PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
-                    let last_block = self.on_remove_blocks_above(new_tip_num)?;
+                    let result = self.on_remove_blocks_above(new_tip_num)?;
                     // send new sync metrics based on removed blocks
                     let _ =
                         self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
-                    let _ = sender.send(PersistenceResult { last_block, commit_duration: None });
+                    let _ = sender.send(result);
                 }
-                PersistenceAction::SaveBlocks(blocks, sender) => {
-                    let result = self.on_save_blocks(blocks)?;
+                PersistenceAction::SaveBlocks(plan, sender) => {
+                    let result = self.on_save_blocks(plan)?;
                     let result_number = result.last_block.map(|b| b.number);
 
                     let _ = sender.send(result);
@@ -113,7 +118,6 @@ where
                         let _ = self
                             .sync_metrics_tx
                             .send(MetricEvent::SyncHeight { height: block_number });
-                        self.maybe_run_pruner(block_number)?;
                     }
                 }
                 PersistenceAction::SaveFinalizedBlock(finalized_block) => {
@@ -131,28 +135,41 @@ where
     fn on_remove_blocks_above(
         &self,
         new_tip_num: u64,
-    ) -> Result<Option<BlockNumHash>, PersistenceError> {
+    ) -> Result<PersistenceResult, PersistenceError> {
         debug!(target: "engine::persistence", ?new_tip_num, "Removing blocks");
         let start_time = Instant::now();
         let provider_rw = self.provider.database_provider_rw()?;
 
         let new_tip_hash = provider_rw.block_hash(new_tip_num)?;
+
         provider_rw.remove_block_and_execution_above(new_tip_num)?;
+        let last_state_trie_block =
+            provider_rw.get_stage_checkpoint(StageId::Finish)?.map(|checkpoint| {
+                checkpoint
+                    .finish_stage_checkpoint()
+                    .and_then(|finish| finish.partial_state_trie)
+                    .unwrap_or(checkpoint.block_number)
+            });
         provider_rw.commit()?;
 
         debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
         self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
-        Ok(new_tip_hash.map(|hash| BlockNumHash { hash, number: new_tip_num }))
+        Ok(PersistenceResult {
+            last_block: new_tip_hash.map(|hash| BlockNumHash { hash, number: new_tip_num }),
+            last_state_trie_block,
+            commit_duration: None,
+        })
     }
 
-    #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(block_count = blocks.len()))]
+    #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(block_count = plan.blocks.len()))]
     fn on_save_blocks(
         &mut self,
-        blocks: Vec<ExecutedBlock<N::Primitives>>,
+        plan: SaveBlocksPlan<N::Primitives>,
     ) -> Result<PersistenceResult, PersistenceError> {
-        let first_block = blocks.first().map(|b| b.recovered_block.num_hash());
-        let last_block = blocks.last().map(|b| b.recovered_block.num_hash());
-        let block_count = blocks.len();
+        let first_block = plan.blocks.first().map(|block| block.recovered_block().num_hash());
+        let last_block = plan.last_block();
+        let block_count = plan.blocks.len();
+        let mut last_state_trie_block = None;
 
         let pending_finalized = self.pending_finalized_block.take();
         let pending_safe = self.pending_safe_block.take();
@@ -161,59 +178,55 @@ where
 
         let start_time = Instant::now();
 
-        if let Some(last) = last_block {
+        if let Some(last_block) = last_block {
             let provider_rw = self.provider.database_provider_rw()?;
-            provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
+            provider_rw.save_blocks(&plan, SaveBlocksMode::Full)?;
+            last_state_trie_block = provider_rw
+                .get_stage_checkpoint(StageId::Finish)?
+                .and_then(|checkpoint| {
+                    checkpoint
+                        .finish_stage_checkpoint()
+                        .and_then(|finish| finish.partial_state_trie)
+                })
+                .or(Some(last_block.number));
 
             if let Some(finalized) = pending_finalized {
-                provider_rw.save_finalized_block_number(finalized.min(last.number))?;
-                if finalized > last.number {
+                provider_rw.save_finalized_block_number(finalized.min(last_block.number))?;
+                if finalized > last_block.number {
                     self.pending_finalized_block = Some(finalized);
                 }
             }
             if let Some(safe) = pending_safe {
-                provider_rw.save_safe_block_number(safe.min(last.number))?;
-                if safe > last.number {
+                provider_rw.save_safe_block_number(safe.min(last_block.number))?;
+                if safe > last_block.number {
                     self.pending_safe_block = Some(safe);
                 }
             }
 
             provider_rw.commit()?;
-            let _ = self.provider.bal_store().flush().inspect_err(|err| {
-                warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
-            });
             debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
+
+            // Run the pruner in a separate provider so it reads committed RocksDB state
+            // that includes the history entries written by save_blocks above.
+            //
+            // The pruner reads the indices from rocksdb, filters it, and writes to indices, so it
+            // must be able to read anything written by save_blocks.
+            if self.pruner.is_pruning_needed(last_block.number) {
+                debug!(target: "engine::persistence", block_num=?last_block.number, "Running pruner");
+                let prune_start = Instant::now();
+                let provider_rw = self.provider.database_provider_rw()?;
+                let _ = self.pruner.run_with_provider(&provider_rw, last_block.number)?;
+                provider_rw.commit()?;
+                debug!(target: "engine::persistence", tip=?last_block.number, "Finished pruning after saving blocks");
+                self.metrics.prune_before_duration_seconds.record(prune_start.elapsed());
+            }
         }
 
         let elapsed = start_time.elapsed();
         self.metrics.save_blocks_batch_size.record(block_count as f64);
         self.metrics.save_blocks_duration_seconds.record(elapsed);
 
-        Ok(PersistenceResult { last_block, commit_duration: Some(elapsed) })
-    }
-
-    fn maybe_run_pruner(&mut self, block_number: u64) -> Result<(), PersistenceError> {
-        // The durable save is already committed at this point, so pruning can happen after we
-        // acknowledge the save without extending the synchronous persistence wait.
-        if self.pruner.is_pruning_needed(block_number) {
-            debug!(target: "engine::persistence", block_num=?block_number, "Running pruner");
-            let prune_start = Instant::now();
-            let provider_rw = self.provider.database_provider_rw()?;
-            let _ = self.pruner.run_with_provider(&provider_rw, block_number)?;
-            provider_rw.commit()?;
-            let pruned_bals = self
-                .provider
-                .bal_store()
-                .prune(block_number)
-                .inspect_err(|err| {
-                    warn!(target: "engine::persistence", tip=?block_number, ?err, "Failed to prune BAL store");
-                })
-                .unwrap_or_default();
-            debug!(target: "engine::persistence", tip=?block_number, pruned_bals, "Finished pruning after saving blocks");
-            self.metrics.prune_before_duration_seconds.record(prune_start.elapsed());
-        }
-
-        Ok(())
+        Ok(PersistenceResult { last_block, last_state_trie_block, commit_duration: Some(elapsed) })
     }
 }
 
@@ -235,9 +248,10 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
     /// The section of tree state that should be persisted. These blocks are expected in order of
     /// increasing block number.
     ///
-    /// First, header, transaction, and receipt-related data should be written to static files.
-    /// Then the execution history-related data will be written to the database.
-    SaveBlocks(Vec<ExecutedBlock<N>>, CrossbeamSender<PersistenceResult>),
+    /// First, header, transaction, and receipt-related data should be written to static files for
+    /// the deferred trie region. Then the execution history-related data will be written to the
+    /// database, while trie catchup is persisted for the prefix.
+    SaveBlocks(SaveBlocksPlan<N>, CrossbeamSender<PersistenceResult>),
 
     /// Removes block data above the given block number from the database.
     ///
@@ -321,10 +335,10 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     /// If there are no blocks to persist, then `None` is sent in the sender.
     pub fn save_blocks(
         &self,
-        blocks: Vec<ExecutedBlock<T>>,
+        plan: SaveBlocksPlan<T>,
         tx: CrossbeamSender<PersistenceResult>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
-        self.send_action(PersistenceAction::SaveBlocks(blocks, tx))
+        self.send_action(PersistenceAction::SaveBlocks(plan, tx))
     }
 
     /// Queues the finalized block number to be persisted on disk.
@@ -387,24 +401,28 @@ impl Drop for ServiceGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::NumHash;
-    use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U256};
-    use reth_chain_state::test_utils::TestBlockBuilder;
+    use alloy_primitives::{B256, U256};
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_exex_types::FinishedExExHeight;
     use reth_provider::{
         providers::{ProviderFactoryBuilder, ReadOnlyConfig},
         test_utils::{create_test_provider_factory, MockNodeTypes},
-        AccountReader, BalConfig, BalNotificationStream, BalStore, BalStoreHandle,
-        ChainSpecProvider, HeaderProvider, InMemoryBalStore, ProviderError, ProviderResult, RawBal,
-        StorageSettingsCache, TryIntoHistoricalStateProvider,
+        AccountReader, ChainSpecProvider, HeaderProvider, SaveBlocksPlanStep, StorageSettingsCache,
+        TryIntoHistoricalStateProvider,
     };
     use reth_prune::Pruner;
-    use reth_prune_types::PruneMode;
     use tokio::sync::mpsc::unbounded_channel;
 
     fn default_persistence_handle() -> PersistenceHandle<EthPrimitives> {
         let provider = create_test_provider_factory();
 
+        persistence_handle(provider)
+    }
+
+    fn persistence_handle<N>(provider: ProviderFactory<N>) -> PersistenceHandle<EthPrimitives>
+    where
+        N: ProviderNodeTypes<Primitives = EthPrimitives>,
+    {
         let (_finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
 
@@ -415,76 +433,16 @@ mod tests {
         PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx)
     }
 
-    #[test]
-    fn test_pruner_prunes_bal_store() {
-        reth_tracing::init_test_tracing();
-
-        let old_hash = B256::random();
-        let retained_hash = B256::random();
-        let old_bal = Bytes::from_static(b"old");
-        let retained_bal = Bytes::from_static(b"retained");
-        let bal_store = BalStoreHandle::new(InMemoryBalStore::new(
-            BalConfig::with_in_memory_retention(PruneMode::Before(2)),
-        ));
-
-        bal_store.insert(NumHash::new(1, old_hash), RawBal::new(old_bal)).unwrap();
-        bal_store
-            .insert(NumHash::new(2, retained_hash), RawBal::new(retained_bal.clone()))
-            .unwrap();
-
-        let provider = create_test_provider_factory().with_bal_store(bal_store.clone());
-        let (_finished_exex_height_tx, finished_exex_height_rx) =
-            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
-        let pruner =
-            Pruner::new_with_factory(provider.clone(), vec![], 0, 0, None, finished_exex_height_rx);
-        let (_db_service_tx, db_service_rx) = std::sync::mpsc::channel();
-        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
-        let mut service = PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx);
-
-        service.maybe_run_pruner(2).unwrap();
-
-        assert_eq!(
-            bal_store.get_by_hashes(&[old_hash, retained_hash]).unwrap(),
-            vec![None, Some(retained_bal)]
-        );
-    }
-
-    #[test]
-    fn test_pruner_ignores_bal_store_prune_error() {
-        reth_tracing::init_test_tracing();
-
-        let provider = create_test_provider_factory()
-            .with_bal_store(BalStoreHandle::new(FailingPruneBalStore));
-        let (_finished_exex_height_tx, finished_exex_height_rx) =
-            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
-        let pruner =
-            Pruner::new_with_factory(provider.clone(), vec![], 0, 0, None, finished_exex_height_rx);
-        let (_db_service_tx, db_service_rx) = std::sync::mpsc::channel();
-        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
-        let mut service = PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx);
-
-        service.maybe_run_pruner(2).unwrap();
-    }
-
-    #[derive(Debug)]
-    struct FailingPruneBalStore;
-
-    impl BalStore for FailingPruneBalStore {
-        fn insert(&self, _num_hash: NumHash, _bal: RawBal) -> ProviderResult<()> {
-            Ok(())
-        }
-
-        fn prune(&self, _tip: BlockNumber) -> ProviderResult<usize> {
-            Err(ProviderError::other(std::io::Error::other("BAL store prune failed")))
-        }
-
-        fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
-            Ok(vec![None; block_hashes.len()])
-        }
-
-        fn bal_stream(&self) -> BalNotificationStream {
-            BalStoreHandle::noop().bal_stream()
-        }
+    fn full_save_plan(blocks: Vec<ExecutedBlock<EthPrimitives>>) -> SaveBlocksPlan<EthPrimitives> {
+        let full_range = 0..blocks.len();
+        SaveBlocksPlan::new(
+            blocks,
+            vec![SaveBlocksPlanStep::new(
+                full_range.clone(),
+                Some(full_range.end..full_range.end),
+                true,
+            )],
+        )
     }
 
     #[test]
@@ -492,13 +450,14 @@ mod tests {
         reth_tracing::init_test_tracing();
         let handle = default_persistence_handle();
 
-        let blocks = vec![];
+        let blocks = full_save_plan(vec![]);
         let (tx, rx) = crossbeam_channel::bounded(1);
 
         handle.save_blocks(blocks, tx).unwrap();
 
         let result = rx.recv().unwrap();
         assert!(result.last_block.is_none());
+        assert!(result.last_state_trie_block.is_none());
     }
 
     #[test]
@@ -511,14 +470,16 @@ mod tests {
             test_block_builder.get_executed_block_with_number(block_number, B256::random());
         let block_hash = executed.recovered_block().hash();
 
-        let blocks = vec![executed];
+        let blocks = full_save_plan(vec![executed]);
         let (tx, rx) = crossbeam_channel::bounded(1);
 
         handle.save_blocks(blocks, tx).unwrap();
 
         let result = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("test timed out");
 
-        assert_eq!(block_hash, result.last_block.unwrap().hash);
+        let last_block = result.last_block.unwrap();
+        assert_eq!(block_hash, last_block.hash);
+        assert_eq!(result.last_state_trie_block, Some(last_block.number));
     }
 
     #[test]
@@ -531,9 +492,11 @@ mod tests {
         let last_hash = blocks.last().unwrap().recovered_block().hash();
         let (tx, rx) = crossbeam_channel::bounded(1);
 
-        handle.save_blocks(blocks, tx).unwrap();
+        handle.save_blocks(full_save_plan(blocks), tx).unwrap();
         let result = rx.recv().unwrap();
-        assert_eq!(last_hash, result.last_block.unwrap().hash);
+        let last_block = result.last_block.unwrap();
+        assert_eq!(last_hash, last_block.hash);
+        assert_eq!(result.last_state_trie_block, Some(last_block.number));
     }
 
     #[test]
@@ -548,10 +511,12 @@ mod tests {
             let last_hash = blocks.last().unwrap().recovered_block().hash();
             let (tx, rx) = crossbeam_channel::bounded(1);
 
-            handle.save_blocks(blocks, tx).unwrap();
+            handle.save_blocks(full_save_plan(blocks), tx).unwrap();
 
             let result = rx.recv().unwrap();
-            assert_eq!(last_hash, result.last_block.unwrap().hash);
+            let last_block = result.last_block.unwrap();
+            assert_eq!(last_hash, last_block.hash);
+            assert_eq!(result.last_state_trie_block, Some(last_block.number));
         }
     }
 
@@ -643,7 +608,7 @@ mod tests {
 
         {
             let provider_rw = provider_factory.database_provider_rw().unwrap();
-            provider_rw.save_blocks(blocks_a, SaveBlocksMode::Full).unwrap();
+            provider_rw.save_blocks(&full_save_plan(blocks_a), SaveBlocksMode::Full).unwrap();
             provider_rw.commit().unwrap();
         }
 
@@ -700,7 +665,12 @@ mod tests {
             provider_rw.commit().unwrap();
 
             let provider_rw = pf.database_provider_rw().unwrap();
-            provider_rw.save_blocks(vec![block_b2], SaveBlocksMode::Full).unwrap();
+            provider_rw
+                .save_blocks(
+                    &full_save_plan(std::slice::from_ref(&block_b2).to_vec()),
+                    SaveBlocksMode::Full,
+                )
+                .unwrap();
             provider_rw.commit().unwrap();
         });
 
