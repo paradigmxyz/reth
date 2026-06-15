@@ -65,8 +65,8 @@ impl<S> PrecompileCache<S>
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
-    fn get(&self, input: &[u8], spec: S) -> Option<CacheEntry<S>> {
-        self.0.get(input).filter(|e| e.spec == spec)
+    fn get(&self, input: &[u8], spec: &S) -> Option<CacheEntry<S>> {
+        self.0.get(input).filter(|e| &e.spec == spec)
     }
 
     /// Inserts the given key and value into the cache, returning the new cache size.
@@ -180,7 +180,7 @@ where
     }
 
     fn call(&self, input: PrecompileInput<'_>) -> PrecompileResult {
-        if let Some(entry) = &self.cache.get(input.data, self.spec_id.clone()) &&
+        if let Some(entry) = &self.cache.get(input.data, &self.spec_id) &&
             input.gas >= entry.gas_used()
         {
             self.increment_by_one_precompile_cache_hits();
@@ -289,7 +289,7 @@ mod tests {
         let expected = CacheEntry { output, spec: SpecId::PRAGUE };
         cache.cache.insert(input.into(), expected.clone());
 
-        let actual = cache.cache.get(input, SpecId::PRAGUE).unwrap();
+        let actual = cache.cache.get(input, &SpecId::PRAGUE).unwrap();
 
         assert_eq!(actual, expected);
     }
