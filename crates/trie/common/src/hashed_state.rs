@@ -643,6 +643,12 @@ impl HashedPostStateSorted {
             // Small k: extend loop, oldest-to-newest so newer overrides older.
             let mut iter = items.iter().rev();
             let mut acc = iter.next().expect("k > 0").as_ref().clone();
+            let account_updates =
+                items.iter().map(|item| item.as_ref().accounts.len()).sum::<usize>();
+            let storage_updates =
+                items.iter().map(|item| item.as_ref().storages.len()).sum::<usize>();
+            acc.accounts.reserve(account_updates.saturating_sub(acc.accounts.len()));
+            acc.storages.reserve(storage_updates.saturating_sub(acc.storages.len()));
             for next in iter {
                 acc.extend_ref_and_sort(next.as_ref());
             }
@@ -658,7 +664,9 @@ impl HashedPostStateSorted {
             slices: Vec<&'a [(B256, U256)]>,
         }
 
-        let mut acc: B256Map<StorageAcc<'_>> = B256Map::default();
+        let storage_updates = items.iter().map(|item| item.as_ref().storages.len()).sum();
+        let mut acc: B256Map<StorageAcc<'_>> =
+            B256Map::with_capacity_and_hasher(storage_updates, Default::default());
 
         for item in items {
             for (addr, storage) in &item.as_ref().storages {
