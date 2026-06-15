@@ -3814,27 +3814,11 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> StatsReader for DatabaseProvid
 
 impl<TX: DbTx + 'static, N: NodeTypes> ChainStateBlockReader for DatabaseProvider<TX, N> {
     fn last_finalized_block_number(&self) -> ProviderResult<Option<BlockNumber>> {
-        let mut finalized_blocks = self
-            .tx
-            .cursor_read::<tables::ChainState>()?
-            .walk(Some(tables::ChainStateKey::LastFinalizedBlock))?
-            .take(1)
-            .collect::<Result<BTreeMap<tables::ChainStateKey, BlockNumber>, _>>()?;
-
-        let last_finalized_block_number = finalized_blocks.pop_first().map(|pair| pair.1);
-        Ok(last_finalized_block_number)
+        Ok(self.tx.get::<tables::ChainState>(tables::ChainStateKey::LastFinalizedBlock)?)
     }
 
     fn last_safe_block_number(&self) -> ProviderResult<Option<BlockNumber>> {
-        let mut finalized_blocks = self
-            .tx
-            .cursor_read::<tables::ChainState>()?
-            .walk(Some(tables::ChainStateKey::LastSafeBlock))?
-            .take(1)
-            .collect::<Result<BTreeMap<tables::ChainStateKey, BlockNumber>, _>>()?;
-
-        let last_finalized_block_number = finalized_blocks.pop_first().map(|pair| pair.1);
-        Ok(last_finalized_block_number)
+        Ok(self.tx.get::<tables::ChainState>(tables::ChainStateKey::LastSafeBlock)?)
     }
 }
 
