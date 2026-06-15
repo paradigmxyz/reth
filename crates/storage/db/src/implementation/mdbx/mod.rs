@@ -687,7 +687,7 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_primitives::{address, Address, B256, U256};
     use reth_db_api::{
-        cursor::{DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
+        cursor::{DbCursorRW, DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
         models::{AccountBeforeTx, IntegerList, ShardedKey},
         table::{Encode, Table},
     };
@@ -1344,6 +1344,23 @@ mod tests {
         dup_cursor.upsert(key, &entry2).expect(ERROR_UPSERT);
         assert_eq!(dup_cursor.seek_by_key_subkey(key, subkey).unwrap(), Some(entry1));
         assert_eq!(dup_cursor.next_dup_val().unwrap(), Some(entry2));
+
+        let replace_key = Address::random();
+        let replace_subkey = B256::random();
+        let original = StorageEntry { key: replace_subkey, value: U256::from(3) };
+        dup_cursor.upsert(replace_key, &original).expect(ERROR_UPSERT);
+        assert_eq!(
+            dup_cursor.seek_by_key_subkey(replace_key, replace_subkey).unwrap(),
+            Some(original)
+        );
+
+        let replacement = StorageEntry { key: replace_subkey, value: U256::from(4) };
+        dup_cursor.put_current(replace_key, &replacement).expect(ERROR_UPSERT);
+        assert_eq!(
+            dup_cursor.seek_by_key_subkey(replace_key, replace_subkey).unwrap(),
+            Some(replacement)
+        );
+        assert_eq!(dup_cursor.next_dup_val().unwrap(), None);
     }
 
     #[test]

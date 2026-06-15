@@ -384,6 +384,16 @@ impl<T: Table> DbCursorRW<T> for CursorMock {
         Ok(())
     }
 
+    /// Replaces the value at the current cursor position.
+    /// **Mock behavior**: Always succeeds without modifying any data.
+    fn put_current(
+        &mut self,
+        _key: <T as Table>::Key,
+        _value: &<T as Table>::Value,
+    ) -> Result<(), DatabaseError> {
+        Ok(())
+    }
+
     /// Deletes the entry at the current cursor position.
     /// **Mock behavior**: Always succeeds without modifying any data.
     fn delete_current(&mut self) -> Result<(), DatabaseError> {

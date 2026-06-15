@@ -121,6 +121,12 @@ pub trait DbCursorRW<T: Table> {
     /// [`DbCursorRW::insert`].
     fn append(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError>;
 
+    /// Replace the value at the current cursor position.
+    ///
+    /// For `DupSort` tables, callers must ensure the current item has the same key/subkey as the
+    /// replacement so the duplicate sort order is preserved.
+    fn put_current(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError>;
+
     /// Delete current value that cursor points to
     fn delete_current(&mut self) -> Result<(), DatabaseError>;
 }
