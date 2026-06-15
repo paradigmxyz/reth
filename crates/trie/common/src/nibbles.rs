@@ -99,12 +99,13 @@ impl StoredNibblesSubKey {
     /// The first 64 bytes contain the nibble values (right-padded with zeros),
     /// and the 65th byte stores the actual nibble count.
     pub fn to_compact_array(&self) -> [u8; 65] {
-        assert!(self.0.len() <= 64);
+        let nibble_len = self.0.len();
+        assert!(nibble_len <= 64);
         let mut buf = [0u8; 65];
         for (i, nibble) in self.0.iter().enumerate() {
             buf[i] = nibble;
         }
-        buf[64] = self.0.len() as u8;
+        buf[64] = nibble_len as u8;
         buf
     }
 }
@@ -115,7 +116,8 @@ impl reth_codecs::Compact for StoredNibblesSubKey {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        assert!(self.0.len() <= 64);
+        let nibble_len = self.0.len();
+        assert!(nibble_len <= 64);
 
         let bytes = self.0.iter().collect::<arrayvec::ArrayVec<u8, 64>>();
         buf.put_slice(&bytes);
@@ -124,7 +126,7 @@ impl reth_codecs::Compact for StoredNibblesSubKey {
         static ZERO: &[u8; 64] = &[0; 64];
         buf.put_slice(&ZERO[bytes.len()..]);
 
-        buf.put_u8(bytes.len() as u8);
+        buf.put_u8(nibble_len as u8);
         64 + 1
     }
 
@@ -181,10 +183,11 @@ impl PackedStoredNibbles {
     /// The first 32 bytes contain the packed nibbles (2 per byte, right-padded with zeros),
     /// and the 33rd byte stores the actual nibble count.
     pub fn to_compact_array(&self) -> [u8; 33] {
-        assert!(self.0.len() <= 64);
+        let nibble_len = self.0.len();
+        assert!(nibble_len <= 64);
         let mut buf = [0u8; 33];
         self.0.pack_to(&mut buf[..32]);
-        buf[32] = self.0.len() as u8;
+        buf[32] = nibble_len as u8;
         buf
     }
 }
@@ -195,12 +198,13 @@ impl reth_codecs::Compact for PackedStoredNibbles {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        assert!(self.0.len() <= 64);
+        let nibble_len = self.0.len();
+        assert!(nibble_len <= 64);
 
         let mut packed = [0u8; 32];
         self.0.pack_to(&mut packed);
         buf.put_slice(&packed);
-        buf.put_u8(self.0.len() as u8);
+        buf.put_u8(nibble_len as u8);
         33
     }
 
@@ -265,10 +269,11 @@ impl PackedStoredNibblesSubKey {
     /// The first 32 bytes contain the packed nibbles (2 per byte, right-padded with zeros),
     /// and the 33rd byte stores the actual nibble count.
     pub fn to_compact_array(&self) -> [u8; 33] {
-        assert!(self.0.len() <= 64);
+        let nibble_len = self.0.len();
+        assert!(nibble_len <= 64);
         let mut buf = [0u8; 33];
         self.0.pack_to(&mut buf[..32]);
-        buf[32] = self.0.len() as u8;
+        buf[32] = nibble_len as u8;
         buf
     }
 }
@@ -279,12 +284,13 @@ impl reth_codecs::Compact for PackedStoredNibblesSubKey {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        assert!(self.0.len() <= 64);
+        let nibble_len = self.0.len();
+        assert!(nibble_len <= 64);
 
         let mut packed = [0u8; 32];
         self.0.pack_to(&mut packed);
         buf.put_slice(&packed);
-        buf.put_u8(self.0.len() as u8);
+        buf.put_u8(nibble_len as u8);
         33
     }
 
