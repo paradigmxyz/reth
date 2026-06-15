@@ -677,6 +677,7 @@ where
             prefix_set,
             previous_state,
             threshold,
+            walk_all_changed_branch_children,
             #[cfg(feature = "metrics")]
             metrics,
         } = self;
@@ -692,6 +693,7 @@ where
                 previous_state,
                 threshold,
                 retain_updates,
+                walk_all_changed_branch_children,
             },
             &mut storage_trie_cursor,
             &mut hashed_storage_cursor,
