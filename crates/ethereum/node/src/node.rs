@@ -13,9 +13,9 @@ use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     eth::spec::EthExecutorSpec, ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes,
 };
-use reth_evm_ethereum::factory::{
-    JitBackend, JitMode, RethEvmFactory, RevmcMetrics, RuntimeConfig, RuntimeTuning,
-};
+use reth_evm_ethereum::factory::RethEvmFactory;
+#[cfg(feature = "jit")]
+use reth_evm_ethereum::factory::{JitBackend, JitMode, RevmcMetrics, RuntimeConfig, RuntimeTuning};
 use reth_network::{primitives::BasicNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives,
@@ -53,7 +53,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
-use reth_tracing::tracing::{debug, info, warn};
+use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, PoolPooledTx, PoolTransaction,
     TransactionPool, TransactionValidationTaskExecutor,
@@ -62,6 +62,7 @@ use revm::context::TxEnv;
 use std::{marker::PhantomData, sync::Arc, time::SystemTime};
 
 pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
+#[cfg(feature = "jit")]
 pub use reth_evm_ethereum::factory::maybe_run_jit_helper;
 
 /// Type configuration for a regular Ethereum node.
@@ -474,6 +475,7 @@ impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
 }
 
 /// Builds a [`RuntimeConfig`] from CLI [`JitArgs`].
+#[cfg(feature = "jit")]
 fn jit_runtime_config(jit: &JitArgs) -> RuntimeConfig {
     let default_tuning = RuntimeTuning::default();
     let tuning = RuntimeTuning {
@@ -522,8 +524,9 @@ fn jit_runtime_config(jit: &JitArgs) -> RuntimeConfig {
 /// This is the shared setup used by both [`EthereumExecutorBuilder`] and `reth re-execute`.
 ///
 /// Returns the evm config and metrics recorder if JIT starts enabled.
+#[cfg(feature = "jit")]
 #[allow(clippy::type_complexity)]
-pub fn build_jit_evm_config<C: EthereumHardforks>(
+pub fn build_evm_config<C: EthereumHardforks>(
     chain_spec: Arc<C>,
     jit: &JitArgs,
     dump_dir: Option<std::path::PathBuf>,
@@ -546,7 +549,7 @@ pub fn build_jit_evm_config<C: EthereumHardforks>(
     let jit_mode = config.jit_mode;
     let backend = JitBackend::new(config)?;
 
-    warn!(target: "reth::cli",
+    reth_tracing::tracing::warn!(target: "reth::cli",
         hot_threshold = tuning.jit_hot_threshold,
         workers = tuning.jit_worker_count,
         mode = ?jit_mode,
@@ -558,6 +561,28 @@ pub fn build_jit_evm_config<C: EthereumHardforks>(
     let evm_config = EthEvmConfig::new_with_evm_factory(chain_spec, factory);
 
     Ok((evm_config, Some(revmc_metrics)))
+}
+
+/// Builds an [`EthEvmConfig`] from CLI [`JitArgs`].
+///
+/// This is the shared setup used by both [`EthereumExecutorBuilder`] and `reth re-execute`.
+///
+/// Compiled without the `jit` feature: errors if JIT was requested via [`JitArgs`] and otherwise
+/// returns a plain interpreter-backed config.
+#[cfg(not(feature = "jit"))]
+#[allow(clippy::type_complexity)]
+pub fn build_evm_config<C: EthereumHardforks>(
+    chain_spec: Arc<C>,
+    jit: &JitArgs,
+    _dump_dir: Option<std::path::PathBuf>,
+) -> eyre::Result<(EthEvmConfig<C, RethEvmFactory>, Option<()>)> {
+    if jit.enabled {
+        eyre::bail!(
+            "JIT compilation was requested but this binary was compiled without the `jit` feature"
+        );
+    }
+    let factory = RethEvmFactory::default();
+    Ok((EthEvmConfig::new_with_evm_factory(chain_spec, factory), None))
 }
 
 /// A regular ethereum evm and executor builder.
@@ -581,8 +606,12 @@ where
         let jit = &ctx.config().jit;
         let dump_dir = jit.debug.then(|| ctx.config().datadir().data_dir().join("jit"));
 
-        let (evm_config, revmc_metrics) = build_jit_evm_config(ctx.chain_spec(), jit, dump_dir)?;
+        let (evm_config, revmc_metrics) = build_evm_config(ctx.chain_spec(), jit, dump_dir)?;
 
+        #[cfg(not(feature = "jit"))]
+        let _ = revmc_metrics;
+
+        #[cfg(feature = "jit")]
         if let Some(revmc_metrics) = revmc_metrics {
             let metrics_backend = evm_config.executor_factory.evm_factory().backend().clone();
             ctx.task_executor().spawn_with_graceful_shutdown_signal(|shutdown| async move {

@@ -12,7 +12,7 @@ use reth_era::{
     common::{decode::DecodeCompressedRlp, file_ops::StreamReader},
     e2s::error::E2sError,
     era1::{file::Era1Reader, types::execution::BlockTuple},
-    ere::file::EreReader,
+    ere::{file::EreReader, types::execution::BlockTuple as EreBlockTuple},
 };
 use reth_era_downloader::EraMeta;
 use reth_etl::Collector;
@@ -59,10 +59,6 @@ where
     }
 }
 
-/// [`EraBlockReader`] for `.ere`/`.erae` files.
-#[derive(Debug)]
-pub struct Ere;
-
 impl<BH, BB> EraBlockReader<BH, BB> for Ere
 where
     BH: FullBlockHeader + Value,
@@ -72,12 +68,27 @@ where
         meta: &M,
     ) -> eyre::Result<impl Iterator<Item = eyre::Result<(BH, BB)>>> {
         let reader: EreReader<std::fs::File> = open(meta)?;
-        Ok(reader.iter().map(|block| {
-            let block = block?;
-            let header: BH = block.header.decode()?;
-            let body: BB = block.body.decode()?;
-            Ok((header, body))
-        }))
+        Ok(reader.iter().map(Self::decode))
+    }
+}
+
+/// [`EraBlockReader`] for `.ere`/`.erae` files.
+#[derive(Debug)]
+pub struct Ere;
+
+impl Ere {
+    /// Extracts a pair of [`FullBlockHeader`] and [`FullBlockBody`] from an ERE block tuple, whose
+    /// header and body are RLP-compressed.
+    pub fn decode<BH, BB, E>(block: Result<EreBlockTuple, E>) -> eyre::Result<(BH, BB)>
+    where
+        BH: FullBlockHeader + Value,
+        BB: FullBlockBody<OmmerHeader = BH>,
+        E: From<E2sError> + Error + Send + Sync + 'static,
+    {
+        let block = block?;
+        let header: BH = block.header.decode()?;
+        let body: BB = block.body.decode()?;
+        Ok((header, body))
     }
 }
 

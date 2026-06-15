@@ -325,8 +325,8 @@ reth-cli = { path = "crates/cli/cli" }
 reth-cli-commands = { path = "crates/cli/commands" }
 reth-cli-runner = { path = "crates/cli/runner" }
 reth-cli-util = { path = "crates/cli/util" }
-reth-codecs = { version = "0.4.1", default-features = false }
-reth-codecs-derive = "0.4.1"
+reth-codecs = { version = "0.5.0", default-features = false }
+reth-codecs-derive = "0.5.0"
 reth-config = { path = "crates/config", default-features = false }
 reth-consensus = { path = "crates/consensus/consensus", default-features = false }
 reth-consensus-common = { path = "crates/consensus/common", default-features = false }
@@ -394,7 +394,7 @@ reth-payload-builder-primitives = { path = "crates/payload/builder-primitives" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
 reth-payload-validator = { path = "crates/payload/validator" }
 reth-payload-util = { path = "crates/payload/util" }
-reth-primitives-traits = { version = "0.4.1", default-features = false }
+reth-primitives-traits = { version = "0.5.0", default-features = false }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }
 reth-prune-types = { path = "crates/prune/types", default-features = false }
@@ -410,7 +410,7 @@ reth-rpc-eth-types = { path = "crates/rpc/rpc-eth-types", default-features = fal
 reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
 reth-rpc-server-types = { path = "crates/rpc/rpc-server-types" }
 reth-rpc-convert = { path = "crates/rpc/rpc-convert" }
-reth-rpc-traits = { version = "0.4.1", default-features = false }
+reth-rpc-traits = { version = "0.5.0", default-features = false }
 reth-stages = { path = "crates/stages/stages" }
 reth-stages-api = { path = "crates/stages/api" }
 reth-stages-types = { path = "crates/stages/types", default-features = false }
@@ -429,18 +429,18 @@ reth-trie-common = { path = "crates/trie/common", default-features = false }
 reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
-reth-zstd-compressors = { version = "0.4.1", default-features = false }
+reth-zstd-compressors = { version = "0.5.0", default-features = false }
 
 # revm
-revm = { version = "40.0.3", default-features = false }
-revm-bytecode = { version = "11.0.0", default-features = false }
-revm-database = { version = "15.0.0", default-features = false }
-revm-state = { version = "12.0.0", default-features = false }
-revm-primitives = { version = "24.0.0", default-features = false }
-revm-interpreter = { version = "37.0.0", default-features = false }
-revm-database-interface = { version = "12.0.0", default-features = false }
+revm = { version = "41.0.0", default-features = false }
+revm-bytecode = { version = "41.0.0", default-features = false }
+revm-database = { version = "41.0.0", default-features = false }
+revm-state = { version = "41.0.0", default-features = false }
+revm-primitives = { version = "41.0.0", default-features = false }
+revm-interpreter = { version = "41.0.0", default-features = false }
+revm-database-interface = { version = "41.0.0", default-features = false }
 revmc = { git = "https://github.com/paradigmxyz/revmc", branch = "main", default-features = false, features = ["llvm-prefer-static"] }
-revm-inspectors = "0.40.1"
+revm-inspectors = "0.41.0"
 
 # eth
 alloy-dyn-abi = "1.6.0"
@@ -449,8 +449,8 @@ alloy-sol-types = { version = "1.6.0", default-features = false }
 
 alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-eip7928 = { version = "0.4.0", default-features = false, features = ["rlp"] }
-alloy-evm = { version = "0.36.0", default-features = false }
+alloy-eip7928 = { version = "0.4.3", default-features = false, features = ["rlp"] }
+alloy-evm = { version = "0.37.0", default-features = false }
 alloy-rlp = { version = "0.3.13", default-features = false, features = ["core-net"] }
 alloy-trie = { version = "0.9.4", default-features = false }
 
@@ -614,12 +614,12 @@ toml = "0.9"
 rocksdb = { version = "0.24" }
 
 # otlp obs
-opentelemetry_sdk = "0.31"
-opentelemetry = "0.31"
-opentelemetry-otlp = "0.31"
-opentelemetry-semantic-conventions = "0.31"
-opentelemetry-appender-tracing = "0.31"
-tracing-opentelemetry = "0.32"
+opentelemetry_sdk = "0.32"
+opentelemetry = "0.32"
+opentelemetry-otlp = "0.32"
+opentelemetry-semantic-conventions = "0.32"
+opentelemetry-appender-tracing = "0.32"
+tracing-opentelemetry = "0.33"
 
 # misc-testing
 arbitrary = "1.3"
