@@ -4,7 +4,11 @@ use futures_util::{Stream, StreamExt};
 use reqwest::{Client, Url};
 use reth_config::config::EtlConfig;
 use reth_db_api::{table::Value, transaction::DbTxMut};
-use reth_era::{common::file_ops::StreamReader, era1::file::Era1Reader};
+use reth_era::{
+    common::file_ops::{EraFileType, StreamReader},
+    era1::file::Era1Reader,
+    ere::file::EreReader,
+};
 use reth_era_downloader::{read_dir, EraClient, EraMeta, EraStream, EraStreamConfig};
 use reth_era_utils as era;
 use reth_etl::Collector;
@@ -85,10 +89,23 @@ impl EraImportSource {
     {
         Ok(Box::new(Box::pin(stream.map(|meta| {
             meta.and_then(|meta| {
+                // ERE files may be published as `.ere` or `.erae`; all other execution history
+                // files are decoded as era1.
                 let file = reth_fs_util::open(meta.path())?;
-                let reader = Era1Reader::new(file);
-                let iter = reader.iter();
-                let iter = iter.map(era::decode);
+                let iter = match meta
+                    .path()
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .and_then(EraFileType::from_filename)
+                {
+                    Some(EraFileType::Ere) => {
+                        Box::new(EreReader::new(file).iter().map(era::Ere::decode))
+                            as Item<Header, Body>
+                    }
+                    _ => Box::new(Era1Reader::new(file).iter().map(era::decode))
+                        as Item<Header, Body>,
+                };
+
                 let iter = iter.chain(
                     iter::once_with(move || match meta.mark_as_processed() {
                         Ok(..) => None,
