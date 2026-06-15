@@ -9712,6 +9712,7 @@ version = "2.3.0"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
+ "alloy-eip7928 0.4.3",
  "alloy-eips",
  "alloy-evm",
  "alloy-genesis",
