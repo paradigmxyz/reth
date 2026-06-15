@@ -616,4 +616,18 @@ mod tests {
 
         assert!(found_metrics, "Expected to find sync.execution metrics");
     }
+
+    #[test]
+    fn test_record_payload_validation_metrics() {
+        let snapshotter = setup_test_recorder();
+        let metrics = EngineApiMetrics::default();
+
+        metrics.block_validation.record_payload_validation(0.042);
+
+        let snapshot = snapshotter.snapshot().into_vec();
+        let found_metrics =
+            snapshot.iter().any(|(key, _, _, _)| key.key().name().contains("payload_validation"));
+
+        assert!(found_metrics, "Expected to find payload_validation metrics");
+    }
 }
