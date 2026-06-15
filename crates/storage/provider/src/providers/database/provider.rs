@@ -777,7 +777,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     /// Writes MDBX-only data for a block (indices, lookups, and senders if configured for MDBX).
     ///
     /// SF data (headers, transactions, senders if SF, receipts if SF) must be written separately.
-    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    #[instrument(level = "trace", target = "providers::db", skip_all)]
     fn insert_block_mdbx_only(
         &self,
         block: &RecoveredBlock<BlockTy<N>>,
