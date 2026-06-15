@@ -370,6 +370,11 @@ where
             return Ok(())
         }
 
+        if targets.is_none() {
+            trace!(target: TRACE_TARGET, "No proof targets, leaving last child uncommitted");
+            return Ok(())
+        }
+
         let Some(child_path) = self.last_child_path() else { return Ok(()) };
         let child =
             self.child_stack.pop().expect("child_stack can't be empty if there's a child path");
