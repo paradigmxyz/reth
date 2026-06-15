@@ -288,7 +288,7 @@ impl Default for DefaultEngineValues {
             sparse_trie_max_hot_accounts: DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: false,
-            state_root_task_timeout: Some("4s".to_string()),
+            state_root_task_timeout: Some("250ms".to_string()),
             share_execution_cache_with_payload_builder: false,
             share_sparse_trie_with_payload_builder: false,
             suppress_persistence_during_build: false,
@@ -478,7 +478,7 @@ pub struct EngineArgs {
     #[arg(
         long = "engine.state-root-task-timeout",
         value_parser = humantime::parse_duration,
-        default_value = DefaultEngineValues::get_global().state_root_task_timeout.as_deref().unwrap_or("4s"),
+        default_value = DefaultEngineValues::get_global().state_root_task_timeout.as_deref().unwrap_or("250ms"),
     )]
     pub state_root_task_timeout: Option<Duration>,
 
