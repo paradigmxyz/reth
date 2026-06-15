@@ -5,9 +5,9 @@ use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
-    providers::ProviderNodeTypes, BalProvider, BlockExecutionWriter, BlockHashReader,
+    providers::ProviderNodeTypes, BlockExecutionWriter, BlockHashReader,
     ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode,
-    SaveBlocksPlan, SaveBlocksPlanStep, StageCheckpointReader,
+    SaveBlocksPlan, StageCheckpointReader,
 };
 use reth_prune::{PrunerError, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender, StageId};

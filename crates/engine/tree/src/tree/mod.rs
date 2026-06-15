@@ -14,7 +14,7 @@ use alloy_rpc_types_engine::{
 use error::{InsertBlockError, InsertBlockFatalError, InsertBlockValidationError};
 use reth_chain_state::{
     CanonicalInMemoryState, ComputedTrieData, ExecutedBlock, ExecutionTimingStats,
-    MemoryOverlayStateProvider, NewCanonicalChain,
+    MemoryOverlayStateProvider, NewCanonicalChain, StateTrieOverlayManager,
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
@@ -36,7 +36,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
+use reth_tasks::{spawn_os_thread, utils::increase_thread_priority, WorkerPool};
 use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
@@ -61,6 +61,7 @@ pub mod precompile_cache;
 #[cfg(test)]
 mod tests;
 mod trie_updates;
+pub mod types;
 
 use crate::{persistence::PersistenceResult, tree::error::AdvancePersistenceError};
 pub use block_buffer::BlockBuffer;
@@ -71,9 +72,10 @@ pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 pub use reth_execution_cache::{
-    CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider, ExecutionCache,
-    PayloadExecutionCache, SavedCache,
+    CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider,
+    ExecutionCache, PayloadExecutionCache, SavedCache,
 };
+pub use types::{ValidationOutcome, ValidationOutput};
 
 pub mod state;
 
@@ -154,6 +156,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
         invalid_header_hit_eviction_threshold: u8,
         canonical_block: BlockNumHash,
         engine_kind: EngineApiKind,
+        state_trie_overlay_worker_pool: Arc<WorkerPool>,
     ) -> Self {
         Self {
             invalid_headers: InvalidHeaderCache::new(
@@ -161,7 +164,11 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
                 invalid_header_hit_eviction_threshold,
             ),
             buffer: BlockBuffer::new(block_buffer_limit),
-            tree_state: TreeState::new(canonical_block, engine_kind),
+            tree_state: TreeState::new(
+                canonical_block,
+                engine_kind,
+                StateTrieOverlayManager::new(state_trie_overlay_worker_pool),
+            ),
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
         }
     }
@@ -444,6 +451,7 @@ where
             config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
             kind,
+            runtime.state_trie_overlay_worker_pool(),
         );
 
         let task = Self::new(
@@ -1504,19 +1512,7 @@ where
         );
         self.changeset_cache.evict(eviction_threshold);
 
-        // Invalidate cached overlay since the anchor has changed
-        self.state.tree_state.invalidate_cached_overlay();
-
         self.on_new_persisted_block(last_state_trie_persisted_block)?;
-
-        // Re-prepare overlay for the current canonical head with the new anchor.
-        // Spawn a background task to trigger computation so it's ready when the next payload
-        // arrives.
-        if let Some(prepared) = self.state.tree_state.prepare_canonical_overlay() {
-            self.runtime.spawn_blocking_named("prepare-overlay", move || {
-                let _ = prepared.overlay.get(prepared.anchor_hash);
-            });
-        }
 
         self.purge_timing_stats(last_block_number, commit_duration);
 
@@ -1577,15 +1573,31 @@ where
             },
             FromEngine::Request(request) => {
                 match request {
-                    EngineApiRequest::InsertExecutedBlock(block) => {
-                        let block_num_hash = block.recovered_block().num_hash();
+                    EngineApiRequest::InsertExecutedBlock(payload) => {
+                        let block_num_hash = payload.recovered_block.num_hash();
                         if block_num_hash.number <= self.state.tree_state.canonical_block_number() {
                             // outdated block that can be skipped
                             return Ok(ops::ControlFlow::Continue(()))
                         }
 
+                        if self.state.tree_state.contains_hash(&block_num_hash.hash) {
+                            // block already known to the tree (e.g. delivered via newPayload first)
+                            return Ok(ops::ControlFlow::Continue(()))
+                        }
+
                         debug!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
                         let now = Instant::now();
+
+                        let block = match self
+                            .payload_validator
+                            .on_inserted_executed_block(payload, &self.state)
+                        {
+                            Ok(block) => block,
+                            Err(err) => {
+                                warn!(target: "engine::tree", %err, block=?block_num_hash, "Failed to insert already executed block");
+                                return Ok(ops::ControlFlow::Continue(()))
+                            }
+                        };
 
                         // if the parent is the canonical head, we can insert the block as the
                         // pending block
@@ -1597,7 +1609,6 @@ where
                         }
 
                         self.state.tree_state.insert_executed(block.clone());
-                        self.payload_validator.on_inserted_executed_block(block.clone());
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         self.emit_event(EngineApiEvent::BeaconConsensus(
                             ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
@@ -2209,9 +2220,7 @@ where
 
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
         let sorted_trie_updates = Arc::new(trie_updates);
-        // Skip building trie input and anchor for DB-loaded blocks.
-        let trie_data =
-            ComputedTrieData::without_trie_input(sorted_hashed_state, sorted_trie_updates);
+        let trie_data = ComputedTrieData::new(sorted_hashed_state, sorted_trie_updates);
 
         let execution_output = Arc::new(BlockExecutionOutput {
             state: execution_output.bundle,
@@ -2372,7 +2381,10 @@ where
 
         // insert the head block into the invalid header cache
         self.state.invalid_headers.insert_with_invalid_ancestor(head.hash(), invalid);
-        self.emit_event(ConsensusEngineEvent::InvalidBlock(Box::new(head)));
+        self.emit_event(ConsensusEngineEvent::InvalidBlock {
+            block: Box::new(head),
+            error: PayloadValidationError::LinksToRejectedPayload.to_string(),
+        });
 
         Ok(status)
     }
@@ -2946,8 +2958,7 @@ where
             &mut V,
             Input,
             TreeCtx<'_, N>,
-        )
-            -> Result<(ExecutedBlock<N>, Option<Box<ExecutionTimingStats>>), Err>,
+        ) -> Result<ValidationOutput<N>, Err>,
         convert_to_block: impl FnOnce(&mut Self, Input) -> Result<SealedBlock<N::Block>, Err>,
     ) -> Result<InsertPayloadOk, Err>
     where
@@ -3017,7 +3028,8 @@ where
 
         let start = Instant::now();
 
-        let (executed, timing_stats) = execute(&mut self.payload_validator, input, ctx)?;
+        let ValidationOutput { executed_block: executed, execution_timing_stats: timing_stats, .. } =
+            execute(&mut self.payload_validator, input, ctx)?;
 
         // Emit slow block event immediately after execution so it appears even when
         // persistence hasn't completed yet (e.g. blocks arriving faster than persistence).
@@ -3105,9 +3117,10 @@ where
         } else {
             self.state.invalid_headers.insert(block.block_with_parent());
         }
-        self.emit_event(EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::InvalidBlock(
-            Box::new(block),
-        )));
+        self.emit_event(EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::InvalidBlock {
+            block: Box::new(block),
+            error: validation_err.to_string(),
+        }));
 
         Ok(PayloadStatus::new(
             PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },

@@ -315,12 +315,6 @@ impl Default for DefaultEngineValues {
     }
 }
 
-fn default_persistence_backpressure_threshold(persistence_threshold: u64) -> u64 {
-    DefaultEngineValues::get_global()
-        .persistence_backpressure_threshold
-        .max(persistence_threshold.saturating_mul(2))
-}
-
 /// Parameters for configuring the engine driver.
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
 #[command(next_help_heading = "Engine")]
@@ -658,7 +652,10 @@ impl EngineArgs {
     /// Returns the effective persistence backpressure threshold.
     pub fn persistence_backpressure_threshold(&self) -> u64 {
         self.persistence_backpressure_threshold.unwrap_or_else(|| {
-            default_persistence_backpressure_threshold(self.persistence_threshold)
+            default_persistence_backpressure_threshold(
+                self.persistence_threshold,
+                self.memory_block_buffer_target,
+            )
         })
     }
 
