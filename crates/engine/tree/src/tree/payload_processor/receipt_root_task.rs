@@ -77,6 +77,11 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
         )
         .entered();
 
+        if receipts_len == Some(0) {
+            let _ = self.result_tx.send((reth_trie_common::EMPTY_ROOT_HASH, Bloom::ZERO));
+            return;
+        }
+
         let mut builder = OrderedTrieRootEncodedBuilder::new();
         let mut aggregated_bloom = Bloom::ZERO;
         let mut encode_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
