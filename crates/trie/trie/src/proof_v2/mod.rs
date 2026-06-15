@@ -336,6 +336,7 @@ where
 
     /// Returns the path of the child on top of the `child_stack`, or the root path if the stack is
     /// empty. Returns None if the current branch has not yet pushed a child (empty `state_mask`).
+    #[inline]
     fn last_child_path(&self) -> Option<Nibbles> {
         // If there is no branch under construction then the top child must be the root child.
         let Some(branch) = self.branch_stack.last() else {
@@ -361,6 +362,7 @@ where
         skip_all,
         fields(child_path = ?self.last_child_path()),
     )]
+    #[inline]
     fn commit_last_child<'a>(
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
@@ -425,6 +427,7 @@ where
     ///
     /// Returns the nibble of the branch's `state_mask` which should be set for the new child, and
     /// short key that the next child should use.
+    #[inline]
     fn push_new_branch(&mut self, new_child_path: Nibbles) -> (u8, Nibbles) {
         // First determine the new child's shortkey relative to the current branch. If there is no
         // current branch then the short key is the full path.
@@ -503,6 +506,7 @@ where
     ///
     /// This method panics if `branch_stack` is empty.
     #[instrument(target = TRACE_TARGET, level = "trace", skip_all)]
+    #[inline]
     fn pop_branch<'a>(
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
@@ -978,6 +982,7 @@ where
     // to `next_path`, if any, has been computed. Any branches which were under-construction
     // previously, and which do not share a prefix with `next_path`, can be assumed to be completed;
     // they will not have any further keys added to them.
+    #[inline]
     fn commit_branches<'a>(
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
@@ -1008,6 +1013,7 @@ where
     /// Once returned the `branch_stack` will be in the correct state to start calculating leaves
     /// for the given range, if any.
     #[instrument(target = TRACE_TARGET, level = "trace", skip_all)]
+    #[inline]
     fn next_uncached_key_range<'a>(
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
