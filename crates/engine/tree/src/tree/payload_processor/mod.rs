@@ -8,7 +8,7 @@ use crate::tree::{
     ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
     WaitForCaches,
 };
-use alloy_eip7928::bal::DecodedBal;
+use alloy_eip7928::{bal::DecodedBal, StorageRoot};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
@@ -30,6 +30,7 @@ use reth_tasks::{utils::increase_thread_priority, ForEachOrdered, Runtime};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, HashedPostState,
 };
+use reth_trie_common::EMPTY_ROOT_HASH;
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
@@ -83,6 +84,15 @@ pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 /// Blocks with fewer transactions than this skip prewarming, since the fixed overhead of spawning
 /// prewarm workers exceeds the execution time saved.
 pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
+
+/// Converts a BAL storage root into the trie root used for state-root computation.
+pub(crate) const fn bal_storage_root_to_b256(storage_root: Option<StorageRoot>) -> Option<B256> {
+    match storage_root {
+        Some(StorageRoot::Empty) => Some(EMPTY_ROOT_HASH),
+        Some(StorageRoot::Root(root)) => Some(root),
+        None => None,
+    }
+}
 
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorTx<Evm, I> = RecoveredTx<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
@@ -1035,7 +1045,10 @@ where
 #[cfg(test)]
 mod tests {
     use crate::tree::{
-        payload_processor::{evm_state_to_hashed_post_state, ExecutionEnv, PayloadProcessor},
+        payload_processor::{
+            bal_storage_root_to_b256, evm_state_to_hashed_post_state, ExecutionEnv,
+            PayloadProcessor,
+        },
         precompile_cache::PrecompileCacheMap,
         ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
     };
@@ -1064,6 +1077,21 @@ mod tests {
     fn make_saved_cache(hash: B256) -> SavedCache {
         let execution_cache = ExecutionCache::new(1_000);
         SavedCache::new(hash, execution_cache)
+    }
+
+    #[test]
+    fn bal_storage_root_to_b256_maps_optional_empty_and_root() {
+        let root = B256::from([0x42; 32]);
+
+        assert_eq!(
+            bal_storage_root_to_b256(Some(alloy_eip7928::StorageRoot::Empty)),
+            Some(reth_trie_common::EMPTY_ROOT_HASH)
+        );
+        assert_eq!(
+            bal_storage_root_to_b256(Some(alloy_eip7928::StorageRoot::Root(root))),
+            Some(root)
+        );
+        assert_eq!(bal_storage_root_to_b256(None), None);
     }
 
     #[test]

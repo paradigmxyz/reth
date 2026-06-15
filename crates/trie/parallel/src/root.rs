@@ -1,7 +1,7 @@
 #[cfg(feature = "metrics")]
 use crate::metrics::ParallelStateRootMetrics;
 use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets};
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256Map, B256};
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
 use reth_execution_errors::{SparseTrieError, StateProofError, StorageRootError};
@@ -39,6 +39,8 @@ pub struct ParallelStateRoot<Factory> {
     prefix_sets: TriePrefixSets,
     /// The runtime handle for spawning blocking tasks.
     runtime: Runtime,
+    /// Storage roots that were already computed by execution.
+    precomputed_storage_roots: B256Map<B256>,
     /// Parallel state root metrics.
     #[cfg(feature = "metrics")]
     metrics: ParallelStateRootMetrics,
@@ -51,9 +53,16 @@ impl<Factory> ParallelStateRoot<Factory> {
             factory,
             prefix_sets,
             runtime,
+            precomputed_storage_roots: B256Map::default(),
             #[cfg(feature = "metrics")]
             metrics: ParallelStateRootMetrics::default(),
         }
+    }
+
+    /// Use storage roots that were already computed by execution.
+    pub fn with_precomputed_storage_roots(mut self, roots: B256Map<B256>) -> Self {
+        self.precomputed_storage_roots = roots;
+        self
     }
 }
 
@@ -94,13 +103,28 @@ where
         // Pre-calculate storage roots in parallel for accounts which were changed.
         tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
         debug!(target: "trie::parallel_state_root", len = storage_root_targets.len(), "pre-calculating storage roots");
+        enum PendingStorageRoot {
+            Precomputed(B256),
+            Receiver(
+                mpsc::Receiver<Result<reth_trie::StorageRootProgress, ParallelStateRootError>>,
+            ),
+        }
+
         let mut storage_roots = HashMap::with_capacity(storage_root_targets.len());
+        let mut precomputed_storage_roots = self.precomputed_storage_roots;
 
         let handle = self.runtime.handle().clone();
 
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
+            if prefix_set.is_empty() &&
+                let Some(root) = precomputed_storage_roots.remove(&hashed_address)
+            {
+                storage_roots.insert(hashed_address, PendingStorageRoot::Precomputed(root));
+                continue
+            }
+
             let factory = self.factory.clone();
             #[cfg(feature = "metrics")]
             let metrics = self.metrics.storage_trie.clone();
@@ -123,7 +147,7 @@ where
                 })();
                 let _ = tx.send(result);
             }));
-            storage_roots.insert(hashed_address, rx);
+            storage_roots.insert(hashed_address, PendingStorageRoot::Receiver(rx));
         }
 
         trace!(target: "trie::parallel_state_root", "calculating state root");
@@ -150,7 +174,10 @@ where
                 }
                 TrieElement::Leaf(hashed_address, account) => {
                     let storage_root_result = match storage_roots.remove(&hashed_address) {
-                        Some(rx) => rx.recv().map_err(|_| {
+                        Some(PendingStorageRoot::Precomputed(root)) => {
+                            reth_trie::StorageRootProgress::Complete(root, 0, Default::default())
+                        }
+                        Some(PendingStorageRoot::Receiver(rx)) => rx.recv().map_err(|_| {
                             ParallelStateRootError::StorageRoot(StorageRootError::Database(
                                 DatabaseError::Other(format!(
                                     "channel closed for {hashed_address}"

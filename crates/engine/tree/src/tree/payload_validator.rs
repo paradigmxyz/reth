@@ -42,7 +42,7 @@ use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     multiproof::{StateRootComputeOutcome, StateRootHandle},
-    payload_processor::PayloadProcessor,
+    payload_processor::{bal_storage_root_to_b256, PayloadProcessor},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
@@ -52,7 +52,11 @@ use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
-use alloy_primitives::{map::B256Set, B256};
+use alloy_primitives::{
+    keccak256,
+    map::{B256Map, B256Set},
+    B256,
+};
 use reth_tasks::LazyHandle;
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
@@ -599,6 +603,8 @@ where
         // Execute the block and handle any execution errors.
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
+        let is_bogota_active =
+            Into::<SpecId>::into(*env.evm_env.spec_id()).is_enabled_in(SpecId::BOGOTA);
         let execute_block_start = Instant::now();
         let execution_result = if parallel_bal_execution {
             self.execute_block_bal(env, &input, &handle, &make_state_provider)
@@ -677,7 +683,7 @@ where
                 &output,
                 &mut ctx,
                 receipt_root_bloom,
-                built_bal
+                built_bal.clone()
             ),
             block
         );
@@ -796,6 +802,7 @@ where
                     provider_factory,
                     overlay_builder,
                     &hashed_state,
+                    built_bal.as_ref().filter(|_| is_bogota_active),
                 ) {
                     Ok(result) => {
                         let elapsed = root_time.elapsed();
@@ -1382,6 +1389,7 @@ where
         provider_factory: P,
         overlay_builder: OverlayBuilder<N>,
         hashed_state: &LazyHashedPostState,
+        built_bal: Option<&BlockAccessList>,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let hashed_state = hashed_state.get();
         // The `hashed_state` argument will be taken into account as part of the overlay, but we
@@ -1392,7 +1400,19 @@ where
             overlay_builder.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted());
         let overlay_factory = OverlayStateProviderFactory::new(provider_factory, overlay_builder);
         ParallelStateRoot::new(overlay_factory, prefix_sets, self.runtime.clone())
+            .with_precomputed_storage_roots(Self::bal_storage_roots(built_bal))
             .incremental_root_with_updates()
+    }
+
+    fn bal_storage_roots(built_bal: Option<&BlockAccessList>) -> B256Map<B256> {
+        built_bal
+            .into_iter()
+            .flat_map(|bal| bal.iter())
+            .filter_map(|account| {
+                bal_storage_root_to_b256(account.storage_root_value())
+                    .map(|storage_root| (keccak256(account.address()), storage_root))
+            })
+            .collect()
     }
 
     /// Compute state root for the given hashed post state in serial.
