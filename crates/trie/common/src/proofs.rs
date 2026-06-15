@@ -1431,13 +1431,12 @@ mod tests {
         let slot = B256::with_last_byte(1);
         let nibbles = Nibbles::unpack(keccak256(slot));
         let value = U256::from(999);
-        let leaf =
-            alloy_trie::nodes::LeafNode::new(nibbles.clone(), encode_fixed_size(&value).to_vec());
+        let leaf = alloy_trie::nodes::LeafNode::new(nibbles, encode_fixed_size(&value).to_vec());
         let mut encoded = vec![];
         alloy_rlp::Encodable::encode(&leaf, &mut encoded);
 
         let mut subtree = ProofNodes::default();
-        subtree.insert(nibbles.clone(), encoded.into());
+        subtree.insert(nibbles, encoded.into());
 
         let multiproof = StorageMultiProof {
             root: B256::with_last_byte(0xFF),
