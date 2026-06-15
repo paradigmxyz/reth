@@ -614,12 +614,12 @@ toml = "0.9"
 rocksdb = { version = "0.24" }
 
 # otlp obs
-opentelemetry_sdk = "0.31"
-opentelemetry = "0.31"
-opentelemetry-otlp = "0.31"
-opentelemetry-semantic-conventions = "0.31"
-opentelemetry-appender-tracing = "0.31"
-tracing-opentelemetry = "0.32"
+opentelemetry_sdk = "0.32"
+opentelemetry = "0.32"
+opentelemetry-otlp = "0.32"
+opentelemetry-semantic-conventions = "0.32"
+opentelemetry-appender-tracing = "0.32"
+tracing-opentelemetry = "0.33"
 
 # misc-testing
 arbitrary = "1.3"

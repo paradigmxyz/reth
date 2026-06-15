@@ -39,7 +39,7 @@ secp256k1.workspace = true
 alloy-genesis.workspace = true
 
 [features]
-default = ["std", "jit"]
+default = ["std"]
 std = [
     "alloy-consensus/std",
     "alloy-eips/std",
