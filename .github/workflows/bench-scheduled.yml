@@ -889,6 +889,7 @@ jobs:
             const { emoji, label } = verdict(changes);
             const headerEmoji = SLACK_VERDICT[emoji] || emoji;
             const commitUrl = `https://github.com/${repo}/commit`;
+            const repoLink = `<https://github.com/${repo}|Reth>`;
             const baselineLink = `<${commitUrl}/${summary.baseline.ref}|${summary.baseline.name}>`;
             const featureLink = `<${commitUrl}/${summary.feature.ref}|${summary.feature.name}>`;
             const diffUrl = `https://github.com/${repo}/compare/${summary.baseline.ref}...${summary.feature.ref}`;
@@ -899,6 +900,7 @@ jobs:
             const modeLabel = mode === 'release' ? 'Release Regression' : mode === 'hourly' ? 'Hourly Regression' : 'Nightly Regression';
             const sectionText = [
               `*${modeLabel}*`,
+              `*Repo:* ${repoLink}`,
               '',
               `*Baseline:* ${baselineLink}`,
               `*Feature:* ${featureLink}`,
