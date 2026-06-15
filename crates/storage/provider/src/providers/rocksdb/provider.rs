@@ -113,7 +113,7 @@ const DEFAULT_CACHE_SIZE: usize = 128 << 20;
 const DEFAULT_BLOCK_SIZE: usize = 16 * 1024;
 
 /// Default max background jobs for `RocksDB` compaction and flushing.
-const DEFAULT_MAX_BACKGROUND_JOBS: i32 = 6;
+const DEFAULT_MAX_BACKGROUND_JOBS: i32 = 12;
 
 /// Default max open file descriptors for `RocksDB`.
 ///
