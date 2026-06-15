@@ -584,6 +584,7 @@ where
         skip_all
     )]
     fn process_leaf_updates(&mut self, new: bool) -> SparseTrieResult<()> {
+        let target_reserve_limit = self.chunk_size;
         let storage_updates =
             if new { &mut self.new_storage_updates } else { &mut self.storage_updates };
 
@@ -597,7 +598,7 @@ where
 
             let trie = self.trie.get_or_create_storage_trie_mut(*address);
             let fetched = self.fetched_storage_targets.entry(*address).or_default();
-            let mut targets = Vec::new();
+            let mut targets = Vec::with_capacity(updates.len().min(target_reserve_limit));
 
             let updates_len_before = updates.len();
             trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
