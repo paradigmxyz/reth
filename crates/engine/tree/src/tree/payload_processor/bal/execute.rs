@@ -34,7 +34,7 @@ use revm::{
     context::{result::ResultAndState, Block},
     database::{states::bundle_state::BundleRetention, State},
 };
-use revm_state::bal::Bal as RevmBal;
+use revm_state::bal::{AccountBal, Bal as RevmBal};
 use std::sync::Arc;
 
 use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
@@ -194,13 +194,16 @@ fn convert_alloy_to_revm_bal(bal: &AlloyBal) -> Result<Arc<RevmBal>, BalExecutio
     // is triggered then the execution is reverted, and as such no actual code change event takes
     // place. Therefore, if we do observe such a bytecode in a BAL then that means the BAL is
     // invalid as no legal execution should've led to this bytecode deployment.
-    let alloy_bal: Vec<_> = Vec::<_>::from(bal.clone());
-    let received_bal_revm = RevmBal::try_from(alloy_bal).map_err(|e| {
-        let e: BytecodeDecodeError = e;
-        BalExecutionError::Consensus(reth_consensus::ConsensusError::BlockAccessListInvalid(
-            format!("{e:?}"),
-        ))
-    })?;
+    let received_bal_revm = bal
+        .iter()
+        .map(AccountBal::clone_from_alloy)
+        .collect::<Result<RevmBal, BytecodeDecodeError>>()
+        .map_err(|e| {
+            let e: BytecodeDecodeError = e;
+            BalExecutionError::Consensus(reth_consensus::ConsensusError::BlockAccessListInvalid(
+                format!("{e:?}"),
+            ))
+        })?;
     Ok(Arc::new(received_bal_revm))
 }
 
