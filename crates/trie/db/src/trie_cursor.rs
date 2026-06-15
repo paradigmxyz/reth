@@ -282,7 +282,8 @@ where
         updates: &StorageTrieUpdatesSorted,
     ) -> Result<usize, DatabaseError> {
         // The storage trie for this account has to be deleted.
-        if updates.is_deleted() && self.cursor.seek_exact(self.hashed_address)?.is_some() {
+        let deleted = updates.is_deleted();
+        if deleted && self.cursor.seek_exact(self.hashed_address)?.is_some() {
             self.cursor.delete_current_duplicates()?;
         }
 
@@ -292,7 +293,8 @@ where
             num_entries += 1;
             let nibbles = A::StorageSubKey::from(*nibbles);
             // Delete the old entry if it exists.
-            if self
+            if !deleted &&
+                self
                 .cursor
                 .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
                 .as_ref()
