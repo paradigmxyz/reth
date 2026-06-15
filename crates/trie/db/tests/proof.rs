@@ -2,7 +2,6 @@
 
 use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{address, b256, keccak256, Address, Bytes, B256, U256};
-use alloy_rlp::EMPTY_STRING_CODE;
 use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET};
 use reth_primitives_traits::Account;
 use reth_provider::test_utils::{create_test_provider_factory, insert_genesis};
@@ -121,13 +120,38 @@ fn testspec_empty_storage_proof() {
         assert_eq!(slots.len(), account_proof.storage_proofs.len());
         for (idx, slot) in slots.into_iter().enumerate() {
             let proof = account_proof.storage_proofs.get(idx).unwrap();
-            assert_eq!(
-                proof,
-                &StorageProof::new(slot).with_proof(vec![Bytes::from([EMPTY_STRING_CODE])])
-            );
+            // Empty storage trie yields an empty proof array (geth compat, EIP-1186),
+            // not the `["0x80"]` sentinel node.
+            assert_eq!(proof, &StorageProof::new(slot));
             assert_eq!(proof.verify(account_proof.storage_root), Ok(()));
         }
         assert_eq!(account_proof.verify(root), Ok(()));
+    });
+}
+
+#[test]
+fn empty_state_trie_account_proof() {
+    // Empty database => empty account (state) trie, root == EMPTY_ROOT_HASH.
+    // Unlike the storage trie, account proof generation has no `empty()` sentinel,
+    // so this checks what reth actually returns for an absent account in an empty
+    // state trie (geth returns an empty proof array per EIP-1186).
+    let factory = create_test_provider_factory();
+
+    let target = address!("0x1ed9b1dd266b607ee278726d324b855a093394a6");
+
+    let provider = factory.provider().unwrap();
+    reth_trie_db::with_adapter!(provider, |A| {
+        let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref());
+        let account_proof = proof.account_proof(target, &[]).unwrap();
+        assert_eq!(account_proof.info, None, "absent account should have no info");
+        assert_eq!(account_proof.storage_root, EMPTY_ROOT_HASH);
+        assert_eq!(
+            account_proof.proof,
+            Vec::<Bytes>::new(),
+            "empty account trie must yield empty proof, got {:?}",
+            account_proof.proof
+        );
+        assert_eq!(account_proof.verify(EMPTY_ROOT_HASH), Ok(()));
     });
 }
 

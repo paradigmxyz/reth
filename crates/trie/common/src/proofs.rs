@@ -236,6 +236,14 @@ impl MultiProof {
             .map(|(_, node)| node)
             .collect::<Vec<_>>();
 
+        // An empty account trie is represented by a single empty-root sentinel node (`0x80`).
+        // Geth returns an empty proof array in this case (EIP-1186), so normalize it away.
+        let proof = if proof.len() == 1 && proof[0].as_ref() == [EMPTY_STRING_CODE] {
+            Vec::new()
+        } else {
+            proof
+        };
+
         // Inspect the last node in the proof. If it's a leaf node with matching suffix,
         // then the node contains the encoded trie account.
         let info = 'info: {
@@ -365,6 +373,11 @@ impl DecodedMultiProof {
             .into_iter()
             .map(|(_, node)| node)
             .collect::<Vec<_>>();
+
+        // An empty account trie is represented by a single empty-root sentinel node (`0x80`).
+        // Geth returns an empty proof array in this case (EIP-1186), so normalize it away.
+        let proof =
+            if proof.len() == 1 && proof[0] == TrieNode::EmptyRoot { Vec::new() } else { proof };
 
         // Inspect the last node in the proof. If it's a leaf node with matching suffix,
         // then the node contains the encoded trie account.
@@ -1418,10 +1431,8 @@ mod tests {
         let slot = B256::with_last_byte(1);
         let nibbles = Nibbles::unpack(keccak256(slot));
         let value = U256::from(999);
-        let leaf = alloy_trie::nodes::LeafNode::new(
-            nibbles.clone(),
-            encode_fixed_size(&value).to_vec(),
-        );
+        let leaf =
+            alloy_trie::nodes::LeafNode::new(nibbles.clone(), encode_fixed_size(&value).to_vec());
         let mut encoded = vec![];
         alloy_rlp::Encodable::encode(&leaf, &mut encoded);
 
@@ -1437,5 +1448,38 @@ mod tests {
         let proof = multiproof.storage_proof(slot).unwrap();
         assert!(!proof.proof.is_empty(), "non-empty trie must return non-empty proof");
         assert_eq!(proof.value, value);
+    }
+
+    #[test]
+    fn test_empty_account_trie_returns_empty_proof() {
+        // Empty account (state) trie is represented by a single `0x80` sentinel node.
+        let account_subtree =
+            ProofNodes::from_iter([(Nibbles::default(), Bytes::from([EMPTY_STRING_CODE]))]);
+        let multiproof = MultiProof { account_subtree, ..Default::default() };
+
+        let proof = multiproof.account_proof(Address::ZERO, &[]).unwrap();
+        assert_eq!(proof.info, None);
+        assert_eq!(proof.storage_root, EMPTY_ROOT_HASH);
+        assert!(
+            proof.proof.is_empty(),
+            "empty account trie must return empty proof vec, got {:?}",
+            proof.proof
+        );
+    }
+
+    #[test]
+    fn test_decoded_empty_account_trie_returns_empty_proof() {
+        let account_subtree =
+            DecodedProofNodes::from_iter([(Nibbles::default(), TrieNode::EmptyRoot)]);
+        let multiproof = DecodedMultiProof { account_subtree, ..Default::default() };
+
+        let proof = multiproof.account_proof(Address::ZERO, &[]).unwrap();
+        assert_eq!(proof.info, None);
+        assert_eq!(proof.storage_root, EMPTY_ROOT_HASH);
+        assert!(
+            proof.proof.is_empty(),
+            "decoded empty account trie must return empty proof vec, got {:?}",
+            proof.proof
+        );
     }
 }
