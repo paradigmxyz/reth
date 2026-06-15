@@ -701,3 +701,34 @@ vergen-git2 = "9.1.0"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+alloy-consensus = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-consensus-any = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-contract = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-eips = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-genesis = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-json-rpc = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-network = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-network-primitives = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-provider = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-pubsub = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-rpc-client = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-rpc-types = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-rpc-types-admin = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-rpc-types-anvil = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-rpc-types-any = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-rpc-types-beacon = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-rpc-types-debug = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-rpc-types-engine = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-rpc-types-eth = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-rpc-types-mev = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-rpc-types-trace = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-rpc-types-txpool = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-serde = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-signer = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-signer-local = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-transport = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-transport-http = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-transport-ipc = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }
+alloy-transport-ws = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/engine-api-v2-ssz-types" }

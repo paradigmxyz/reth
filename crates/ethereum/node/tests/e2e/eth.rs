@@ -1,10 +1,13 @@
 use crate::utils::{advance_with_random_transactions, eth_payload_attributes};
-use alloy_eips::{eip4844::BlobAndProofV1, eip7685::RequestsOrHash};
+use alloy_eips::eip7685::RequestsOrHash;
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::{
-    ClientVersionV1, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
-    PayloadStatusEnum,
+    ssz_engine_types::{
+        BlobsV1Request, BlobsV1Response, ExecutionPayloadEnvelopePrague, ForkchoiceUpdatePrague,
+        ForkchoiceUpdateResponse, Optional, PayloadStatus as SszPayloadStatus,
+    },
+    ClientVersionV1, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
 };
 use jsonrpsee_core::client::ClientT;
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, MAINNET};
@@ -237,6 +240,7 @@ async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
         slot_number: None,
+        target_gas_limit: None,
     };
 
     let request = TestingBuildBlockRequestV1 {
@@ -316,6 +320,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
         slot_number: None,
+        target_gas_limit: None,
     };
 
     let envelope = node
@@ -398,28 +403,33 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
         .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
         .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
         .header(reqwest::header::ACCEPT, "application/octet-stream")
-        .body((payload, B256::ZERO, envelope.execution_requests.take()).as_ssz_bytes())
+        .body(
+            ExecutionPayloadEnvelopePrague {
+                payload,
+                parent_beacon_block_root: B256::ZERO,
+                execution_requests: envelope.execution_requests,
+            }
+            .as_ssz_bytes(),
+        )
         .send()
         .await?;
     assert_eq!(new_payload_response.status(), reqwest::StatusCode::OK);
 
-    let status = PayloadStatus::from_ssz_bytes(&new_payload_response.bytes().await?).unwrap();
+    let status = SszPayloadStatus::from_ssz_bytes(&new_payload_response.bytes().await?).unwrap();
     assert_eq!(status.status, PayloadStatusEnum::Valid);
 
+    let forkchoice_state = ForkchoiceState {
+        head_block_hash: block_hash,
+        safe_block_hash: genesis_hash,
+        finalized_block_hash: genesis_hash,
+    };
     let fcu_response = client
         .post(format!("{auth_url}{ENGINE_PRAGUE_FORKCHOICE_ROUTE}"))
         .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
         .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
         .header(reqwest::header::ACCEPT, "application/octet-stream")
         .body(
-            (
-                ForkchoiceState {
-                    head_block_hash: block_hash,
-                    safe_block_hash: genesis_hash,
-                    finalized_block_hash: genesis_hash,
-                },
-                Vec::<PayloadAttributes>::new(),
-            )
+            ForkchoiceUpdatePrague { forkchoice_state, payload_attributes: Optional::none() }
                 .as_ssz_bytes(),
         )
         .send()
@@ -436,17 +446,19 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
         .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
         .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
         .header(reqwest::header::ACCEPT, "application/octet-stream")
-        .body(versioned_hashes.as_ssz_bytes())
+        .body(
+            BlobsV1Request { versioned_hashes: versioned_hashes.clone().try_into()? }
+                .as_ssz_bytes(),
+        )
         .send()
         .await?;
     assert_eq!(blobs_response.status(), reqwest::StatusCode::OK);
 
-    let blobs =
-        Vec::<Option<BlobAndProofV1>>::from_ssz_bytes(&blobs_response.bytes().await?).unwrap();
-    assert_eq!(blobs.len(), versioned_hashes.len());
-    assert!(blobs.iter().all(Option::is_some));
+    let blobs = BlobsV1Response::from_ssz_bytes(&blobs_response.bytes().await?).unwrap();
+    assert_eq!(blobs.entries.len(), versioned_hashes.len());
+    assert!(blobs.entries.iter().all(|entry| entry.available));
 
-    let fcu = ForkchoiceUpdated::from_ssz_bytes(&fcu_response.bytes().await?).unwrap();
+    let fcu = ForkchoiceUpdateResponse::from_ssz_bytes(&fcu_response.bytes().await?).unwrap();
     assert_eq!(fcu.payload_status.status, PayloadStatusEnum::Valid);
 
     node.wait_block(1, block_hash, false).await?;
