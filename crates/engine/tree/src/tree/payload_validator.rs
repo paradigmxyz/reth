@@ -495,7 +495,7 @@ where
             transaction_count: input.transaction_count(),
             gas_used: input.gas_used(),
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
-            decoded_bal,
+            decoded_bal: decoded_bal.as_ref().map(Arc::clone),
         };
 
         // Plan the strategy used for state root computation.
@@ -947,7 +947,8 @@ where
             trie_output,
             changeset_provider,
         );
-        Ok(ValidationOutput::new(executed_block, timing_stats))
+        let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
+        Ok(ValidationOutput::new(executed_block, timing_stats).with_raw_bal(raw_bal))
     }
 
     /// Spawns a background task to convert a [`BlockOrPayload`] into a [`SealedBlock`] and perform

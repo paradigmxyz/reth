@@ -29,7 +29,7 @@ use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
+    BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
     DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StageCheckpointReader,
     StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
     StorageSettingsCache, TransactionVariant,
@@ -366,6 +366,7 @@ where
         + StateProviderFactory
         + StateReader<Receipt = N::Receipt>
         + HashedPostStateProvider
+        + BalProvider
         + Clone
         + 'static,
     P::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
@@ -2995,8 +2996,23 @@ where
 
         let start = Instant::now();
 
-        let ValidationOutput { executed_block: executed, execution_timing_stats: timing_stats } =
-            execute(&mut self.payload_validator, input, ctx)?;
+        let ValidationOutput {
+            executed_block: executed,
+            execution_timing_stats: timing_stats,
+            raw_bal,
+        } = execute(&mut self.payload_validator, input, ctx)?;
+
+        if let Some(raw_bal) = raw_bal {
+            let num_hash = executed.recovered_block().num_hash();
+            if let Err(err) = self.provider.bal_store().insert(num_hash, raw_bal) {
+                warn!(
+                    target: "engine::tree",
+                    ?num_hash,
+                    %err,
+                    "Failed to store validated block access list"
+                );
+            }
+        }
 
         // Emit slow block event immediately after execution so it appears even when
         // persistence hasn't completed yet (e.g. blocks arriving faster than persistence).
