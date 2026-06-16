@@ -4,7 +4,9 @@ use core::ops::{Deref, DerefMut};
 use reth_primitives_traits::Account;
 use reth_storage_api::{AccountReader, BlockHashReader, BytecodeReader, StateProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
+use revm::{
+    bytecode::Bytecode, primitives::KECCAK_EMPTY, state::AccountInfo, Database, DatabaseRef,
+};
 
 /// A helper trait responsible for providing state necessary for EVM execution.
 ///
@@ -151,6 +153,10 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     ///
     /// Returns `Ok` with the bytecode if found, or the default bytecode otherwise.
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        if code_hash == KECCAK_EMPTY {
+            return Ok(Bytecode::default());
+        }
+
         Ok(self.bytecode_by_hash(&code_hash)?.unwrap_or_default().0)
     }
 
@@ -167,5 +173,55 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
         // Get the block hash or default hash with an attempt to convert U256 block number to u64
         Ok(self.0.block_hash(number)?.unwrap_or_default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    #[derive(Clone, Default)]
+    struct CountingEvmStateProvider {
+        reads: Arc<AtomicUsize>,
+    }
+
+    impl EvmStateProvider for CountingEvmStateProvider {
+        fn basic_account(&self, _address: &Address) -> ProviderResult<Option<Account>> {
+            Ok(None)
+        }
+
+        fn block_hash(&self, _number: BlockNumber) -> ProviderResult<Option<B256>> {
+            Ok(None)
+        }
+
+        fn bytecode_by_hash(
+            &self,
+            _code_hash: &B256,
+        ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
+            self.reads.fetch_add(1, Ordering::Relaxed);
+            Ok(None)
+        }
+
+        fn storage(
+            &self,
+            _account: Address,
+            _storage_key: StorageKey,
+        ) -> ProviderResult<Option<StorageValue>> {
+            Ok(None)
+        }
+    }
+
+    #[test]
+    fn state_provider_database_skips_empty_code_hash_reads() {
+        let reads = Arc::new(AtomicUsize::new(0));
+        let db = StateProviderDatabase::new(CountingEvmStateProvider { reads: Arc::clone(&reads) });
+
+        let _code = db.code_by_hash_ref(KECCAK_EMPTY).unwrap();
+
+        assert_eq!(reads.load(Ordering::Relaxed), 0);
     }
 }

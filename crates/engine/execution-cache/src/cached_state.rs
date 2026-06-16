@@ -1,7 +1,7 @@
 //! Execution cache implementation for block processing.
 use alloy_primitives::{
     map::{DefaultHashBuilder, FbBuildHasher},
-    Address, StorageKey, StorageValue, B256,
+    Address, StorageKey, StorageValue, B256, KECCAK256_EMPTY,
 };
 use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
 use metrics::{Counter, Gauge, Histogram};
@@ -507,6 +507,10 @@ impl<S: StateProvider, const PREWARM: bool> StateProvider for CachedStateProvide
 
 impl<S: BytecodeReader, const PREWARM: bool> BytecodeReader for CachedStateProvider<S, PREWARM> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
+        if *code_hash == KECCAK256_EMPTY {
+            return Ok(None);
+        }
+
         if PREWARM {
             match self.caches.get_or_try_insert_code_with(*code_hash, || {
                 self.state_provider.bytecode_by_hash(code_hash)
@@ -1005,6 +1009,35 @@ mod tests {
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_revm::db::{AccountStatus, BundleAccount};
     use revm_state::AccountInfo;
+
+    #[derive(Clone, Default)]
+    struct CountingBytecodeReader {
+        reads: Arc<AtomicUsize>,
+    }
+
+    impl BytecodeReader for CountingBytecodeReader {
+        fn bytecode_by_hash(&self, _code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
+            self.reads.fetch_add(1, Ordering::Relaxed);
+            Ok(None)
+        }
+    }
+
+    #[test]
+    fn test_empty_code_hash_skips_provider_and_cache() {
+        let reads = Arc::new(AtomicUsize::new(0));
+        let caches = ExecutionCache::new(1000);
+        let state_provider = CachedStateProvider::new_prewarm(
+            CountingBytecodeReader { reads: Arc::clone(&reads) },
+            caches.clone(),
+            CachedStateMetrics::zeroed(CachedStateMetricsSource::Test),
+        );
+
+        let code = state_provider.bytecode_by_hash(&KECCAK256_EMPTY).unwrap();
+
+        assert!(code.is_none());
+        assert_eq!(reads.load(Ordering::Relaxed), 0);
+        assert!(caches.0.code_cache.get(&KECCAK256_EMPTY).is_none());
+    }
 
     #[test]
     fn test_empty_storage_cached_state_provider() {
