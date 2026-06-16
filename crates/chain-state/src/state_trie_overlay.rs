@@ -117,7 +117,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
 
         // Snapshot matching parent overlays before spawning so DashMap iteration guards are
         // dropped.
-        let cached_parent_overlays = self
+        let mut cached_parent_overlays = self
             .overlays
             .iter()
             .filter_map(|entry| {
@@ -125,6 +125,12 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
                 (key.tip_hash == parent_hash && entry.value().is_ready()).then_some(key.anchor_hash)
             })
             .collect::<Vec<_>>();
+
+        // Seed the direct parent anchor so the first overlay in an in-memory chain is prepared
+        // before the next payload needs it. Child inserts will then extend this cached overlay.
+        if !cached_parent_overlays.contains(&parent_hash) {
+            cached_parent_overlays.push(parent_hash);
+        }
 
         debug!(
             target: "chain_state::state_trie_overlay",
@@ -793,6 +799,30 @@ mod tests {
         });
 
         rx.recv_timeout(Duration::from_secs(1)).unwrap().unwrap();
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn insert_block_prepares_direct_parent_overlay() {
+        let manager = StateTrieOverlayManager::new(Arc::new(WorkerPool::new(2, "test-ovly")));
+        let blocks = test_blocks();
+
+        let anchor_hash = blocks[0].recovered_block().parent_hash();
+        let block_hash = blocks[0].recovered_block().hash();
+        manager.insert_block(blocks[0].clone());
+
+        let key = OverlayCacheKey { anchor_hash, tip_hash: block_hash };
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !manager.overlays.contains_key(&key) {
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for direct parent overlay precompute"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let (_, state) = manager.overlay_for_parent(block_hash, anchor_hash).unwrap();
+        assert_eq!(state.accounts.len(), 1);
     }
 
     #[cfg(feature = "rayon")]
