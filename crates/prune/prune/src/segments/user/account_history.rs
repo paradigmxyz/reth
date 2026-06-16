@@ -118,10 +118,9 @@ impl AccountHistory {
         // for that key.
         //
         // The size of this map is limited by `prune_delete_limit * blocks_since_last_run /
-        // ACCOUNT_HISTORY_TABLES_TO_PRUNE`, and with current default it's usually `3500 * 5
-        // / 2`, so 8750 entries. Each entry is `160 bit + 64 bit`, so the total
-        // size should be up to ~0.25MB + some hashmap overhead. `blocks_since_last_run` is
-        // additionally limited by the `max_reorg_depth`, so no OOM is expected here.
+        // ACCOUNT_HISTORY_TABLES_TO_PRUNE`. Each entry is `160 bit + 64 bit`; the
+        // `blocks_since_last_run` value is additionally limited by the `max_reorg_depth`, so no
+        // OOM is expected here.
         let mut highest_deleted_accounts = FxHashMap::default();
         let mut last_changeset_pruned_block = None;
         let mut pruned_changesets = 0;
@@ -192,10 +191,9 @@ impl AccountHistory {
         // for that key.
         //
         // The size of this map is limited by `prune_delete_limit * blocks_since_last_run /
-        // ACCOUNT_HISTORY_TABLES_TO_PRUNE`, and with the current defaults it's usually `3500 * 5 /
-        // 2`, so 8750 entries. Each entry is `160 bit + 64 bit`, so the total size should be up to
-        // ~0.25MB + some hashmap overhead. `blocks_since_last_run` is additionally limited by the
-        // `max_reorg_depth`, so no OOM is expected here.
+        // ACCOUNT_HISTORY_TABLES_TO_PRUNE`. Each entry is `160 bit + 64 bit`; the
+        // `blocks_since_last_run` value is additionally limited by the `max_reorg_depth`, so no
+        // OOM is expected here.
         let mut last_changeset_pruned_block = None;
         let mut highest_deleted_accounts = FxHashMap::default();
         let (pruned_changesets, done) =

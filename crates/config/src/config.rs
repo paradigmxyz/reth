@@ -12,8 +12,8 @@ use url::Url;
 #[cfg(feature = "serde")]
 const EXTENSION: &str = "toml";
 
-/// The default prune block interval
-pub const DEFAULT_BLOCK_INTERVAL: usize = 5;
+/// The default prune block interval.
+pub const DEFAULT_BLOCK_INTERVAL: usize = 64;
 
 /// Configuration for the reth node.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
