@@ -666,44 +666,6 @@ where
             let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
         }
 
-        if provider.is_none() {
-            let _span = debug_span!(
-                target: "engine::tree::payload_processor::prewarm",
-                parent: parent_span,
-                "bal_hashed_state_provider_init",
-                has_saved_cache = !self.disable_bal_batch_io && self.saved_cache.is_some(),
-            )
-            .entered();
-
-            let inner = match self.provider.build() {
-                Ok(p) => p,
-                Err(err) => {
-                    warn!(
-                        target: "engine::tree::payload_processor::prewarm",
-                        ?err,
-                        "Failed to build provider for BAL account reads"
-                    );
-                    return;
-                }
-            };
-            let boxed: Box<dyn AccountReader> = match (self.disable_bal_batch_io, &self.saved_cache)
-            {
-                (false, Some(saved)) => {
-                    let caches = saved.cache().clone();
-                    Box::new(CachedStateProvider::new_prewarm(
-                        inner,
-                        caches,
-                        self.cache_metrics.clone().unwrap_or_default(),
-                    ))
-                }
-                _ => Box::new(inner),
-            };
-            *provider = Some(boxed);
-        }
-        let account_reader = provider.as_ref().expect("provider just initialized");
-
-        let existing_account = account_reader.basic_account(&address).ok().flatten();
-
         let balance = account_changes.balance_changes.last().map(|change| change.post_balance);
         let nonce = account_changes.nonce_changes.last().map(|change| change.new_nonce);
         let code_hash = account_changes.code_changes.last().map(|code_change| {
@@ -721,6 +683,53 @@ where
         {
             return;
         }
+
+        let complete_account_fields = balance.is_some() && nonce.is_some() && code_hash.is_some();
+        let existing_account = if complete_account_fields {
+            None
+        } else {
+            if provider.is_none() {
+                let _span = debug_span!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    parent: parent_span,
+                    "bal_hashed_state_provider_init",
+                    has_saved_cache = !self.disable_bal_batch_io && self.saved_cache.is_some(),
+                )
+                .entered();
+
+                let inner = match self.provider.build() {
+                    Ok(p) => p,
+                    Err(err) => {
+                        warn!(
+                            target: "engine::tree::payload_processor::prewarm",
+                            ?err,
+                            "Failed to build provider for BAL account reads"
+                        );
+                        return;
+                    }
+                };
+                let boxed: Box<dyn AccountReader> =
+                    match (self.disable_bal_batch_io, &self.saved_cache) {
+                        (false, Some(saved)) => {
+                            let caches = saved.cache().clone();
+                            Box::new(CachedStateProvider::new_prewarm(
+                                inner,
+                                caches,
+                                self.cache_metrics.clone().unwrap_or_default(),
+                            ))
+                        }
+                        _ => Box::new(inner),
+                    };
+                *provider = Some(boxed);
+            }
+
+            provider
+                .as_ref()
+                .expect("provider just initialized")
+                .basic_account(&address)
+                .ok()
+                .flatten()
+        };
 
         let account = reth_primitives_traits::Account {
             balance: balance.unwrap_or_else(|| {
