@@ -132,7 +132,7 @@ pub trait EraBlockWriter {
 /// Each ERA format defines its own accumulator and header-record types in [`reth_era`], yet both
 /// build the accumulator from the same `(block_hash, total_difficulty)` pairs. This trait is the
 /// seam that keeps [`accumulator`] format-agnostic.
-pub trait ChunkAccumulator: Sized {
+pub(crate) trait ChunkAccumulator: Sized {
     /// Builds the accumulator from the chunk's `(block_hash, total_difficulty)` header records.
     fn from_pairs(records: &[(B256, U256)]) -> Result<Self>;
 }
