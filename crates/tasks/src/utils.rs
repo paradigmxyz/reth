@@ -34,6 +34,26 @@ pub fn increase_thread_priority() {
     }
 }
 
+/// Resets the current thread's priority back to normal (nice 0 on unix).
+///
+/// Named worker threads (see [`crate::Runtime::spawn_blocking_named`]) are created lazily on first
+/// use, so the OS thread is spawned by whichever thread happens to submit the first task. On Linux
+/// a new thread inherits the creating thread's nice value, so if that first caller is a thread that
+/// raised its own priority via [`increase_thread_priority`] (e.g. the engine thread), the
+/// long-lived, reused worker would silently keep running at that elevated priority. Calling this at
+/// the start of the worker neutralizes any inherited bump. Lowering priority back to normal never
+/// requires `CAP_SYS_NICE`, so this cannot fail for that reason.
+pub fn reset_thread_priority() {
+    let thread_name = std::thread::current().name().unwrap_or("unnamed").to_string();
+    // Crossplatform value 48/99 maps to nice 0 on unix (the system default).
+    let normal = ThreadPriority::Crossplatform(
+        ThreadPriorityValue::try_from(48u8).expect("48 is within the valid 0..100 range"),
+    );
+    if let Err(err) = normal.set_for_current() {
+        tracing::debug!(%thread_name, ?err, "failed to reset thread priority to normal");
+    }
+}
+
 /// Deprioritizes known background threads spawned by third-party libraries (`OpenTelemetry`,
 /// `tracing-appender`, `reqwest`) by scanning `/proc/<pid>/task/` for matching thread names and
 /// setting `SCHED_IDLE` scheduling policy + maximum niceness on them.

@@ -34,6 +34,10 @@ impl WorkerThread {
         let handle = thread::Builder::new()
             .name(name.to_string())
             .spawn(move || {
+                // The worker is created lazily by whichever thread submits the first task. On
+                // Linux a new thread inherits the creator's nice value, so reset to normal here to
+                // avoid permanently inheriting an elevated priority (e.g. from the engine thread).
+                crate::utils::reset_thread_priority();
                 while let Some(task) = rx.blocking_recv() {
                     let _ = std::panic::catch_unwind(AssertUnwindSafe(task));
                 }
