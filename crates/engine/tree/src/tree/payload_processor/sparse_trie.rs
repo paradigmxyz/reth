@@ -471,14 +471,11 @@ where
         &mut self,
         hashed_state_update: HashedPostState,
     ) -> Result<(), ParallelStateRootError> {
-        let mut invalidate_account_target_cache = false;
-
         for (&address, storage) in &hashed_state_update.storages {
             if storage.wiped || !storage.storage.is_empty() {
                 // Prewarm touches can populate proof-target caches before real writes arrive.
                 // Re-evaluate proof coverage for changed storage from the current sparse topology.
                 self.fetched_storage_targets.remove(&address);
-                invalidate_account_target_cache = true;
             }
 
             if storage.wiped {
@@ -523,7 +520,6 @@ where
         }
 
         for (&address, &account) in &hashed_state_update.accounts {
-            invalidate_account_target_cache = true;
             self.trie.record_account_touch(address);
 
             // Track account as touched.
@@ -535,10 +531,6 @@ where
             // Track account in `pending_account_updates` so that once storage root is computed,
             // it will be updated in the accounts trie.
             self.pending_account_updates.insert(address, Some(account));
-        }
-
-        if invalidate_account_target_cache {
-            self.fetched_account_targets.clear();
         }
 
         self.final_hashed_state.extend(hashed_state_update);

@@ -357,30 +357,22 @@ impl ArenaSparseNode {
 }
 
 impl ArenaSparseNode {
-    /// Converts a [`ProofTrieNodeV2`] into an [`ArenaSparseNode`] whose path starts at
-    /// `node_path_offset`.
+    /// Converts a [`ProofTrieNodeV2`] into an [`ArenaSparseNode`].
     ///
     /// # Panics
     ///
     /// Panics if the node is an `Extension`, which should have been merged into a branch
     /// by [`TrieNodeV2`].
-    pub(super) fn from_proof_node(proof_node: ProofTrieNodeV2, node_path_offset: usize) -> Self {
-        let ProofTrieNodeV2 { path, node, masks } = proof_node;
-        debug_assert!(node_path_offset <= path.len());
-        let path_suffix = path.slice(node_path_offset..);
-
+    pub(super) fn from_proof_node(proof_node: ProofTrieNodeV2, _node_path_offset: usize) -> Self {
+        let ProofTrieNodeV2 { node, masks, .. } = proof_node;
         match node {
             TrieNodeV2::EmptyRoot => Self::EmptyRoot,
-            TrieNodeV2::Leaf(leaf) => {
-                let mut key = path_suffix;
-                key.extend(&leaf.key);
-
-                Self::Leaf { state: ArenaSparseNodeState::Revealed, key, value: leaf.value }
-            }
+            TrieNodeV2::Leaf(leaf) => Self::Leaf {
+                state: ArenaSparseNodeState::Revealed,
+                key: leaf.key,
+                value: leaf.value,
+            },
             TrieNodeV2::Branch(branch) => {
-                let mut short_key = path_suffix;
-                short_key.extend(&branch.key);
-
                 let branch_masks = masks.unwrap_or_default();
                 let children = branch.stack[..branch.state_mask.count_bits() as usize]
                     .iter()
@@ -389,7 +381,7 @@ impl ArenaSparseNode {
                 Self::Branch(ArenaSparseNodeBranch::from_blinded_children(
                     children,
                     branch.state_mask,
-                    short_key,
+                    branch.key,
                     branch_masks,
                 ))
             }
