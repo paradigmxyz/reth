@@ -800,7 +800,22 @@ jobs:
           fi
 
           # llvm
-          .github/scripts/install_llvm.sh ubuntu
+          if [ -x .github/scripts/install_llvm.sh ]; then
+            .github/scripts/install_llvm.sh ubuntu
+          else
+            sudo apt-get install -y --no-install-recommends \
+              lsb-release wget gnupg ca-certificates software-properties-common
+            llvm_sh="$(mktemp)"
+            wget -qO "$llvm_sh" https://apt.llvm.org/llvm.sh
+            chmod +x "$llvm_sh"
+            sudo "$llvm_sh" 22 all
+            rm -f "$llvm_sh"
+            for bin in clang llvm-config lld ld.lld FileCheck; do
+              if command -v "$bin-22" &>/dev/null; then
+                sudo ln -fs "$(command -v "$bin-22")" "/usr/bin/$bin"
+              fi
+            done
+          fi
 
           # uv (Python package manager)
           if ! command -v uv &>/dev/null; then
