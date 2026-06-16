@@ -798,14 +798,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
         let block_number = block.number();
         let tx_count = block.body().transaction_count() as u64;
+        let body_indices = StoredBlockBodyIndices { first_tx_num, tx_count };
 
         let start = Instant::now();
         self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
         self.metrics.record_duration(metrics::Action::InsertHeaderNumbers, start.elapsed());
 
-        self.write_block_body_indices(block_number, block.body(), first_tx_num, tx_count)?;
+        self.write_block_body_indices(block_number, block.body(), &body_indices)?;
 
-        Ok(StoredBlockBodyIndices { first_tx_num, tx_count })
+        Ok(body_indices)
     }
 
     /// Writes MDBX block body indices (`BlockBodyIndices`, `TransactionBlocks`,
@@ -814,22 +815,21 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         &self,
         block_number: BlockNumber,
         body: &BodyTy<N>,
-        first_tx_num: TxNumber,
-        tx_count: u64,
+        body_indices: &StoredBlockBodyIndices,
     ) -> ProviderResult<()> {
         // MDBX: BlockBodyIndices
         let start = Instant::now();
         self.tx
             .cursor_write::<tables::BlockBodyIndices>()?
-            .append(block_number, &StoredBlockBodyIndices { first_tx_num, tx_count })?;
+            .append(block_number, body_indices)?;
         self.metrics.record_duration(metrics::Action::InsertBlockBodyIndices, start.elapsed());
 
         // MDBX: TransactionBlocks (last tx -> block mapping)
-        if tx_count > 0 {
+        if body_indices.tx_count > 0 {
             let start = Instant::now();
             self.tx
                 .cursor_write::<tables::TransactionBlocks>()?
-                .append(first_tx_num + tx_count - 1, &block_number)?;
+                .append(body_indices.first_tx_num + body_indices.tx_count - 1, &block_number)?;
             self.metrics.record_duration(metrics::Action::InsertTransactionBlocks, start.elapsed());
         }
 
