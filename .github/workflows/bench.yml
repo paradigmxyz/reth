@@ -157,9 +157,7 @@ jobs:
           github-token: ${{ secrets.DEREK_BENCH_ACK_TOKEN }}
           script: |
             const org = 'paradigmxyz';
-            const allowedUsers = new Set(['rkrasiuk']);
             const checkMembership = async (username) => {
-              if (allowedUsers.has(username)) return true;
               try {
                 const { status } = await github.rest.orgs.checkMembershipForUser({ org, username });
                 return status === 204 || status === 302;
