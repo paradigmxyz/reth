@@ -109,7 +109,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ExportEraC
             EraFileType::Ere => era::export::<era::Ere, _>(&provider, &export_config)?,
             // Consensus-layer `.era` files cannot be produced from the execution database.
             EraFileType::Era => {
-                eyre::bail!("consensus-layer .era files are not supported for export")
+                eyre::bail!("consensus-layer .era files are not yet supported for export")
             }
         };
 

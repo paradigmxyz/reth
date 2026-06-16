@@ -2044,6 +2044,7 @@ mod tests {
             withdrawals: Some(vec![]),
             parent_beacon_block_root: None,
             slot_number: None,
+            target_gas_limit: None,
         };
         let custody_columns = B128::from(0b1010u128);
 
@@ -2099,6 +2100,7 @@ mod tests {
             // Invalid for V3/Cancun, but should be ignored if forkchoice is SYNCING.
             parent_beacon_block_root: None,
             slot_number: None,
+            target_gas_limit: None,
         };
 
         let api_task = tokio::spawn(async move {
@@ -2147,6 +2149,7 @@ mod tests {
             withdrawals: Some(vec![]),
             parent_beacon_block_root: None,
             slot_number: None,
+            target_gas_limit: None,
         };
 
         let api_task = tokio::spawn(async move {

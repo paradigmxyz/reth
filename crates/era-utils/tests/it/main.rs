@@ -56,7 +56,7 @@ struct FileMeta {
 }
 
 impl FileMeta {
-    fn new(path: PathBuf) -> Self {
+    const fn new(path: PathBuf) -> Self {
         Self { path }
     }
 }
