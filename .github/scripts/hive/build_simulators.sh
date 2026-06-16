@@ -5,8 +5,8 @@ fixture_variant="${1:-osaka}"
 
 case "${fixture_variant}" in
     amsterdam)
-        eels_fixtures="https://github.com/ethereum/execution-spec-tests/releases/download/bal@v7.1.1/fixtures_bal.tar.gz"
-        eels_branch="devnets/bal/7"
+        eels_fixtures="https://github.com/Rimeeeeee/execution-specs/releases/download/v2.0.0/fixtures-eip8268-ams.tar.gz"
+        eels_branch="eip-8268-on-devnet7"
         ;;
     osaka)
         eels_fixtures="https://github.com/ethereum/execution-spec-tests/releases/download/v5.3.0/fixtures_develop.tar.gz"
