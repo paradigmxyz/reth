@@ -458,6 +458,8 @@ where
     where
         Tx: ExecutableTxFor<Evm> + Send + 'static,
     {
+        let save_cache_after_execution = !matches!(&mode, PrewarmMode::BlockAccessList(_));
+
         // Spawn execution tasks based on mode
         match mode {
             PrewarmMode::Transactions(pending) => {
@@ -510,7 +512,18 @@ where
 
         // save caches and finish using the shared ExecutionOutcome
         if let Some(Some((execution_outcome, valid_block_rx))) = final_execution_outcome {
-            self.save_cache(execution_outcome, valid_block_rx);
+            if save_cache_after_execution {
+                self.save_cache(execution_outcome, valid_block_rx);
+            } else {
+                self.ctx.metrics.cache_saving_duration.set(0.0);
+                debug!(
+                    target: "engine::caching",
+                    parent_hash = ?self.ctx.env.hash,
+                    "Skipped execution cache save for BAL block"
+                );
+                drop(execution_outcome);
+                drop(valid_block_rx);
+            }
         }
     }
 }
