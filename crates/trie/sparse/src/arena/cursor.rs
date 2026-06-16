@@ -11,7 +11,7 @@ use core::{cmp::Ordering, fmt::Debug, marker::PhantomData};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{BranchNodeCompact, Nibbles, RlpNode, TrieAccount, TrieMask};
-use tracing::{instrument, trace};
+use tracing::{debug, instrument, trace};
 
 const TRACE_TARGET: &str = "trie::arena::cursor";
 
@@ -516,12 +516,40 @@ where
                 }
                 ArenaCursorItem::Blind { start, end } => {
                     let inner_seek_key = seek_key.map_or(start, |seek_key| start.max(seek_key));
+                    if watch_key_overlaps(start, end) || seek_key.is_some_and(watch_key_matches) {
+                        debug!(
+                            target: TRACE_TARGET,
+                            ?start,
+                            ?end,
+                            ?seek_key,
+                            ?inner_seek_key,
+                            "Sparse hashed cursor seeking inner watched blind range"
+                        );
+                    }
                     let mut entry = self.inner.seek(inner_seek_key)?;
                     while let Some((key, value)) = entry {
                         if !key_is_before_end(key, end) {
+                            if watch_key_overlaps(start, end) {
+                                debug!(
+                                    target: TRACE_TARGET,
+                                    ?start,
+                                    ?end,
+                                    ?key,
+                                    "Sparse hashed cursor inner entry exited watched blind range"
+                                );
+                            }
                             break
                         }
                         if self.last_key.is_none_or(|last_key| key > last_key) {
+                            if watch_key_matches(key) || watch_key_overlaps(start, end) {
+                                debug!(
+                                    target: TRACE_TARGET,
+                                    ?start,
+                                    ?end,
+                                    ?key,
+                                    "Sparse hashed cursor returning watched inner entry"
+                                );
+                            }
                             self.active_blind_end = Some(end);
                             self.last_key = Some(key);
                             return Ok(Some((key, value)))
@@ -575,6 +603,7 @@ where
 #[derive(Debug)]
 pub struct ArenaHashedStorageCursor<'a, C> {
     cursor: ArenaHashedCursor<'a, C, U256>,
+    can_retarget_without_sparse_lookup: bool,
 }
 
 impl<'a, C> ArenaHashedStorageCursor<'a, C>
@@ -583,22 +612,30 @@ where
 {
     /// Creates a new storage cursor for `trie`, delegating blinded ranges to `inner`.
     pub fn new(trie: Option<&'a ArenaParallelSparseTrie>, inner: C) -> Self {
-        Self { cursor: ArenaHashedCursor::new(trie, inner) }
+        Self {
+            cursor: ArenaHashedCursor::new(trie, inner),
+            can_retarget_without_sparse_lookup: trie.is_none(),
+        }
     }
 
     /// Creates a new storage cursor over a revealed-empty sparse trie.
     pub fn new_empty(inner: C) -> Self {
-        Self { cursor: ArenaHashedCursor::new_empty(inner) }
+        Self {
+            cursor: ArenaHashedCursor::new_empty(inner),
+            can_retarget_without_sparse_lookup: false,
+        }
     }
 
     /// Updates the sparse trie topology used by this cursor.
     pub fn set_sparse_trie(&mut self, trie: Option<&'a ArenaParallelSparseTrie>) {
         self.cursor.set_sparse_trie(trie);
+        self.can_retarget_without_sparse_lookup = trie.is_none();
     }
 
     /// Updates this cursor to use a revealed-empty sparse trie.
     pub fn set_empty_sparse_trie(&mut self) {
         self.cursor.set_empty_sparse_trie();
+        self.can_retarget_without_sparse_lookup = false;
     }
 
     /// Returns a mutable reference to the inner cursor.
@@ -613,7 +650,7 @@ where
         trie: Option<&'a ArenaParallelSparseTrie>,
     ) {
         self.cursor.inner_mut().set_hashed_address(hashed_address);
-        self.cursor.set_sparse_trie(trie);
+        self.set_sparse_trie(trie);
     }
 }
 
@@ -647,6 +684,10 @@ where
     }
 
     fn set_hashed_address(&mut self, hashed_address: B256) {
+        assert!(
+            self.can_retarget_without_sparse_lookup,
+            "ArenaHashedStorageCursor::set_hashed_address cannot retarget revealed sparse topology; use set_hashed_address_with_sparse_trie",
+        );
         self.cursor.inner_mut().set_hashed_address(hashed_address);
         self.cursor.set_sparse_trie(None);
     }
@@ -782,12 +823,42 @@ where
                 }
                 ArenaTrieCursorItem::Blind { start, end } => {
                     let inner_seek_key = seek_key.map_or(*start, |seek_key| (*start).max(seek_key));
+                    if watch_path_overlaps(start) ||
+                        seek_key.as_ref().is_some_and(watch_path_overlaps)
+                    {
+                        debug!(
+                            target: TRACE_TARGET,
+                            ?start,
+                            ?end,
+                            ?seek_key,
+                            ?inner_seek_key,
+                            "Sparse trie cursor seeking inner watched blind range"
+                        );
+                    }
                     let mut entry = self.inner.seek(inner_seek_key)?;
                     while let Some((key, node)) = entry {
                         if !trie_key_is_before_end(&key, end.as_ref()) {
+                            if watch_path_overlaps(start) {
+                                debug!(
+                                    target: TRACE_TARGET,
+                                    ?start,
+                                    ?end,
+                                    ?key,
+                                    "Sparse trie cursor inner entry exited watched blind range"
+                                );
+                            }
                             break
                         }
                         if self.last_key.as_ref().is_none_or(|last_key| &key > last_key) {
+                            if watch_path_overlaps(&key) || watch_path_overlaps(start) {
+                                debug!(
+                                    target: TRACE_TARGET,
+                                    ?start,
+                                    ?end,
+                                    ?key,
+                                    "Sparse trie cursor returning watched inner entry"
+                                );
+                            }
                             self.active_blind_end = Some(*end);
                             self.last_key = Some(key);
                             return Ok(Some((key, node)))
@@ -889,6 +960,7 @@ where
 #[derive(Debug)]
 pub struct ArenaTrieStorageCursor<C> {
     cursor: ArenaTrieCursor<C>,
+    can_retarget_without_sparse_lookup: bool,
 }
 
 impl<C> ArenaTrieStorageCursor<C>
@@ -897,22 +969,30 @@ where
 {
     /// Creates a new storage cursor for `trie`, delegating blinded ranges to `inner`.
     pub fn new(trie: Option<&ArenaParallelSparseTrie>, inner: C) -> Self {
-        Self { cursor: ArenaTrieCursor::new(trie, inner) }
+        Self {
+            cursor: ArenaTrieCursor::new(trie, inner),
+            can_retarget_without_sparse_lookup: trie.is_none(),
+        }
     }
 
     /// Creates a new storage trie cursor over a revealed-empty sparse trie.
     pub fn new_empty(inner: C) -> Self {
-        Self { cursor: ArenaTrieCursor::new_empty(inner) }
+        Self {
+            cursor: ArenaTrieCursor::new_empty(inner),
+            can_retarget_without_sparse_lookup: false,
+        }
     }
 
     /// Updates the sparse trie topology used by this cursor.
     pub fn set_sparse_trie(&mut self, trie: Option<&ArenaParallelSparseTrie>) {
         self.cursor.set_sparse_trie(trie);
+        self.can_retarget_without_sparse_lookup = trie.is_none();
     }
 
     /// Updates this cursor to use a revealed-empty sparse trie.
     pub fn set_empty_sparse_trie(&mut self) {
         self.cursor.set_empty_sparse_trie();
+        self.can_retarget_without_sparse_lookup = false;
     }
 
     /// Returns a mutable reference to the inner cursor.
@@ -927,7 +1007,7 @@ where
         trie: Option<&ArenaParallelSparseTrie>,
     ) {
         self.cursor.inner_mut().set_hashed_address(hashed_address);
-        self.cursor.set_sparse_trie(trie);
+        self.set_sparse_trie(trie);
     }
 }
 
@@ -967,6 +1047,10 @@ where
     C: TrieStorageCursor,
 {
     fn set_hashed_address(&mut self, hashed_address: B256) {
+        assert!(
+            self.can_retarget_without_sparse_lookup,
+            "ArenaTrieStorageCursor::set_hashed_address cannot retarget revealed sparse topology; use set_hashed_address_with_sparse_trie",
+        );
         self.cursor.inner_mut().set_hashed_address(hashed_address);
         self.cursor.set_sparse_trie(None);
     }
@@ -1257,11 +1341,38 @@ fn push_blind_range(path: Nibbles, items: &mut Vec<ArenaCursorItem<'_>>) {
         return
     }
 
+    if watch_path_overlaps(&path) {
+        debug!(target: TRACE_TARGET, ?path, "Sparse hashed cursor collected watched blind range");
+    }
     items.push(ArenaCursorItem::Blind { start: prefix_start(&path), end: prefix_end(&path) });
 }
 
 fn push_trie_blind_range(path: Nibbles, items: &mut Vec<ArenaTrieCursorItem>) {
+    if watch_path_overlaps(&path) {
+        debug!(target: TRACE_TARGET, ?path, "Sparse trie cursor collected watched blind range");
+    }
     items.push(ArenaTrieCursorItem::Blind { start: path, end: next_prefix(&path) });
+}
+
+fn watch_path_overlaps(path: &Nibbles) -> bool {
+    let watch_prefix = Nibbles::from_nibbles_unchecked([0x07, 0x0c, 0x05, 0x0a, 0x05, 0x04]);
+    path.starts_with(&watch_prefix) || watch_prefix.starts_with(path)
+}
+
+fn watch_key_matches(key: B256) -> bool {
+    let watch_prefix =
+        prefix_start(&Nibbles::from_nibbles_unchecked([0x07, 0x0c, 0x05, 0x0a, 0x05, 0x04]));
+    let watch_end =
+        prefix_end(&Nibbles::from_nibbles_unchecked([0x07, 0x0c, 0x05, 0x0a, 0x05, 0x04]));
+    key >= watch_prefix && key_is_before_end(key, watch_end)
+}
+
+fn watch_key_overlaps(start: B256, end: Option<B256>) -> bool {
+    let watch_prefix =
+        prefix_start(&Nibbles::from_nibbles_unchecked([0x07, 0x0c, 0x05, 0x0a, 0x05, 0x04]));
+    let watch_end =
+        prefix_end(&Nibbles::from_nibbles_unchecked([0x07, 0x0c, 0x05, 0x0a, 0x05, 0x04]));
+    key_is_before_end(start, watch_end) && end.is_none_or(|end| end > watch_prefix)
 }
 
 fn prefix_start(prefix: &Nibbles) -> B256 {
