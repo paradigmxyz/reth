@@ -430,6 +430,13 @@ where
     {
         let (updates_tx, from_multi_proof) = crossbeam_channel::unbounded();
 
+        if sparse_trie_overlay.is_some() {
+            let wait_duration = self.sparse_state_trie.wait_for_availability();
+            self.trie_metrics
+                .sparse_trie_cache_wait_duration_histogram
+                .record(wait_duration.as_secs_f64());
+        }
+
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         #[cfg(feature = "trie-debug")]
         let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
