@@ -34,10 +34,13 @@ use reth_provider::{
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
-use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering},
-    mpsc::{self, channel, Receiver, Sender},
-    Arc,
+use std::{
+    collections::HashSet,
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc::{self, channel, Receiver, Sender},
+        Arc,
+    },
 };
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
@@ -801,11 +804,18 @@ where
 
         let start = Instant::now();
 
+        let mut warmed_slots =
+            HashSet::with_capacity(account.storage_changes.len() + account.storage_reads.len());
+
         for slot in &account.storage_changes {
-            let _ = state_provider.storage(account.address, StorageKey::from(slot.slot));
+            if warmed_slots.insert(slot.slot) {
+                let _ = state_provider.storage(account.address, StorageKey::from(slot.slot));
+            }
         }
         for &slot in &account.storage_reads {
-            let _ = state_provider.storage(account.address, StorageKey::from(slot));
+            if warmed_slots.insert(slot) {
+                let _ = state_provider.storage(account.address, StorageKey::from(slot));
+            }
         }
 
         self.metrics.bal_slot_iteration_duration.record(start.elapsed().as_secs_f64());
