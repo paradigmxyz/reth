@@ -31,6 +31,7 @@ use rocksdb::{
     OptimisticTransactionOptions, Options, SnapshotWithThreadMode, Transaction,
     WriteBatchWithTransaction, WriteBufferManager, WriteOptions, DB,
 };
+use smallvec::SmallVec;
 use std::{
     collections::BTreeMap,
     fmt,
@@ -1400,7 +1401,7 @@ impl RocksDBProvider {
         ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
         let mut batch = self.batch();
-        let mut account_history: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
+        let mut account_history: BTreeMap<Address, SmallVec<[u64; 1]>> = BTreeMap::new();
 
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
@@ -1417,7 +1418,7 @@ impl RocksDBProvider {
 
         // Write account history using proper shard append logic
         for (address, indices) in account_history {
-            batch.append_account_history_shard(address, indices)?;
+            batch.append_account_history_shard_indices(address, indices)?;
         }
         ctx.pending_batches.lock().push(batch.into_inner());
         Ok(())
@@ -1902,15 +1903,29 @@ impl<'a> RocksDBBatch<'a> {
         indices: impl IntoIterator<Item = u64>,
     ) -> ProviderResult<()> {
         let indices: Vec<u64> = indices.into_iter().collect();
+        self.append_account_history_shard_indices(address, indices)
+    }
 
-        if indices.is_empty() {
+    /// Appends a sorted account-history block list without forcing callers that already buffered
+    /// the list to materialize another container shape first.
+    fn append_account_history_shard_indices<I>(
+        &mut self,
+        address: Address,
+        indices: I,
+    ) -> ProviderResult<()>
+    where
+        I: IntoIterator<Item = u64> + AsRef<[u64]>,
+    {
+        let indices_ref = indices.as_ref();
+
+        if indices_ref.is_empty() {
             return Ok(());
         }
 
         debug_assert!(
-            indices.windows(2).all(|w| w[0] < w[1]),
+            indices_ref.windows(2).all(|w| w[0] < w[1]),
             "indices must be strictly increasing: {:?}",
-            indices
+            indices_ref
         );
 
         let last_key = ShardedKey::new(address, u64::MAX);
