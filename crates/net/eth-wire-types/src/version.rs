@@ -28,10 +28,26 @@ pub enum EthVersion {
     /// The `eth` protocol version 69.
     Eth69 = 69,
     /// The `eth` protocol version 70.
+    ///
+    /// Introduced by [EIP-7975], which changes `GetReceipts` and `Receipts` to support
+    /// paginated block receipt retrieval.
+    ///
+    /// [EIP-7975]: https://eips.ethereum.org/EIPS/eip-7975
     Eth70 = 70,
     /// The `eth` protocol version 71.
+    ///
+    /// Introduced by [EIP-8159], which adds `GetBlockAccessLists` and `BlockAccessLists`
+    /// messages for peer-to-peer exchange of block-level access lists.
+    ///
+    /// [EIP-8159]: https://eips.ethereum.org/EIPS/eip-8159
     Eth71 = 71,
     /// The `eth` protocol version 72.
+    ///
+    /// Introduced by [EIP-8070], which adds sparse blobpool support with cell-level
+    /// custody sampling and extends pooled transaction announcements for partial blob
+    /// availability.
+    ///
+    /// [EIP-8070]: https://eips.ethereum.org/EIPS/eip-8070
     Eth72 = 72,
 }
 
@@ -88,7 +104,7 @@ impl EthVersion {
     }
 }
 
-/// RLP encodes `EthVersion` as a single byte (66-71).
+/// RLP encodes `EthVersion` as a single byte (66-72).
 impl Encodable for EthVersion {
     fn encode(&self, out: &mut dyn BufMut) {
         (*self as u8).encode(out)
@@ -100,7 +116,7 @@ impl Encodable for EthVersion {
 }
 
 /// RLP decodes a single byte into `EthVersion`.
-/// Returns error if byte is not a valid version (66-71).
+/// Returns error if byte is not a valid version (66-72).
 impl Decodable for EthVersion {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let version = u8::decode(buf)?;
