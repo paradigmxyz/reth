@@ -1,13 +1,12 @@
 //! Preserved sparse trie for reuse across payload validations.
 
-use super::multiproof::MultiProofTaskMetrics;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use parking_lot::Mutex;
 use reth_primitives_traits::FastInstant as Instant;
 use reth_trie_common::HashedPostStateSorted;
 use reth_trie_sparse::{ConfigurableSparseTrie, SparseStateTrie};
-use std::{borrow::Cow, sync::Arc};
+use std::sync::Arc;
 use tracing::debug;
 
 /// Type alias for the sparse trie type used in preservation.
@@ -18,14 +17,12 @@ pub(super) type SparseTrie = SparseStateTrie<ConfigurableSparseTrie, Configurabl
 /// This is stored in [`PayloadProcessor`](super::PayloadProcessor) and cloned to pass to
 /// [`SparseTrieCacheTask`](super::sparse_trie::SparseTrieCacheTask) for trie reuse.
 #[derive(Debug, Default, Clone)]
-pub(super) struct SharedPreservedSparseTrie(Arc<Mutex<PreservedSparseTrieState>>);
+pub(super) struct SharedPreservedSparseTrie(Arc<Mutex<Option<PreservedSparseTrie>>>);
 
 impl SharedPreservedSparseTrie {
     /// Takes the preserved trie if present, leaving `None` in its place.
     pub(super) fn take(&self) -> Option<PreservedSparseTrie> {
-        let mut state = self.0.lock();
-        state.in_flight += 1;
-        state.trie.take()
+        self.0.lock().take()
     }
 
     /// Acquires a guard that blocks `take()` until dropped.
@@ -64,15 +61,8 @@ impl SharedPreservedSparseTrie {
         max_nodes_capacity: usize,
         max_values_capacity: usize,
     ) -> Option<std::time::Duration> {
-        let mut state = self.0.lock();
-        if state.in_flight > 0 {
-            state.pending_prunes.push(PendingSparseTriePrune {
-                persisted_block,
-                persisted_state: Arc::new(persisted_state.clone()),
-            });
-        }
-
-        let Some(preserved) = state.trie.as_mut() else {
+        let mut guard = self.0.lock();
+        let Some(preserved) = guard.as_mut() else {
             debug!(
                 target: "engine::tree::payload_processor",
                 "Skipping persisted sparse trie prune - no preserved trie available"
@@ -91,85 +81,14 @@ impl SharedPreservedSparseTrie {
     }
 }
 
-#[derive(Debug, Default)]
-struct PreservedSparseTrieState {
-    trie: Option<PreservedSparseTrie>,
-    in_flight: usize,
-    pending_prunes: Vec<PendingSparseTriePrune>,
-}
-
-#[derive(Debug, Clone)]
-struct PendingSparseTriePrune {
-    persisted_block: BlockNumHash,
-    persisted_state: Arc<HashedPostStateSorted>,
-}
-
 /// Guard that holds the lock on the preserved trie.
 /// While held, `take()` will block. Call `store()` to save the trie before dropping.
-pub(super) struct PreservedTrieGuard<'a>(parking_lot::MutexGuard<'a, PreservedSparseTrieState>);
+pub(super) struct PreservedTrieGuard<'a>(parking_lot::MutexGuard<'a, Option<PreservedSparseTrie>>);
 
 impl PreservedTrieGuard<'_> {
-    /// Applies pending persistence prunes to a trie before it is stored.
-    pub(super) fn apply_pending_prunes(
-        &mut self,
-        trie: &mut PreservedSparseTrie,
-        accepted_state: Option<&HashedPostStateSorted>,
-        max_nodes_capacity: usize,
-        max_values_capacity: usize,
-        metrics: &MultiProofTaskMetrics,
-    ) {
-        for pending in &self.0.pending_prunes {
-            let persisted_state = match accepted_state {
-                Some(accepted_state) => Cow::Owned(HashedPostStateSorted::disjointed_merge_batch(
-                    vec![pending.persisted_state.as_ref()],
-                    vec![accepted_state],
-                )),
-                None => Cow::Borrowed(pending.persisted_state.as_ref()),
-            };
-            let start = Instant::now();
-            trie.prune_persisted_state(
-                pending.persisted_block,
-                persisted_state.as_ref(),
-                max_nodes_capacity,
-                max_values_capacity,
-            );
-            metrics.sparse_trie_prune_duration_histogram.record(start.elapsed());
-        }
-    }
-
     /// Stores a preserved trie for later reuse.
-    pub(super) fn store(
-        &mut self,
-        mut trie: PreservedSparseTrie,
-        max_nodes_capacity: usize,
-        max_values_capacity: usize,
-        metrics: &MultiProofTaskMetrics,
-    ) {
-        self.apply_pending_prunes(
-            &mut trie,
-            None,
-            max_nodes_capacity,
-            max_values_capacity,
-            metrics,
-        );
-        self.store_pruned(trie);
-    }
-
-    /// Stores a trie that already had all pending prunes applied.
-    pub(super) fn store_pruned(&mut self, trie: PreservedSparseTrie) {
-        self.0.trie.replace(trie);
-        self.0.in_flight = self.0.in_flight.saturating_sub(1);
-        if self.0.in_flight == 0 {
-            self.0.pending_prunes.clear();
-        }
-    }
-
-    /// Marks an in-flight sparse trie task as discarded without replacing the preserved trie.
-    pub(super) fn discard_in_flight(&mut self) {
-        self.0.in_flight = self.0.in_flight.saturating_sub(1);
-        if self.0.in_flight == 0 {
-            self.0.pending_prunes.clear();
-        }
+    pub(super) fn store(&mut self, trie: PreservedSparseTrie) {
+        self.0.replace(trie);
     }
 }
 
