@@ -238,16 +238,27 @@ where
             // point the target for 0xabc2 will not match the branch due to its prefix, but any of
             // the other targets would, so we need to check those as well.
             if lower.key_nibbles.starts_with(path) {
-                return !check_min_len ||
-                    (path.len() >= lower.min_len as usize ||
-                        targets
-                            .skip_iter()
-                            .take_while(|target| target.key_nibbles.starts_with(path))
-                            .any(|target| path.len() >= target.min_len as usize) ||
-                        targets
-                            .rev_iter()
-                            .take_while(|target| target.key_nibbles.starts_with(path))
-                            .any(|target| path.len() >= target.min_len as usize))
+                if !check_min_len {
+                    return true
+                }
+
+                let path_len = path.len();
+                if path_len >= lower.min_len as usize {
+                    return true
+                }
+
+                if targets.len() == 1 {
+                    return false
+                }
+
+                return targets
+                    .skip_iter()
+                    .take_while(|target| target.key_nibbles.starts_with(path))
+                    .any(|target| path_len >= target.min_len as usize)
+                    || targets
+                        .rev_iter()
+                        .take_while(|target| target.key_nibbles.starts_with(path))
+                        .any(|target| path_len >= target.min_len as usize)
             }
 
             // If the path isn't in the current range then iterate forward until it is (or until
@@ -1704,6 +1715,11 @@ impl<'a> TargetsCursor<'a> {
     /// Returns the current and next [`ProofV2Target`] that the cursor is pointed at.
     fn current(&self) -> (&'a ProofV2Target, Option<&'a ProofV2Target>) {
         (&self.targets[self.i], self.targets.get(self.i + 1))
+    }
+
+    /// Returns the total number of targets in this cursor.
+    const fn len(&self) -> usize {
+        self.targets.len()
     }
 
     /// Iterates the cursor forward.
