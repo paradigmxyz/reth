@@ -361,6 +361,7 @@ where
         let stream_bal = Arc::clone(&decoded_bal);
         let (prefetch_tx, prefetch_rx) = oneshot::channel();
         let (stream_tx, stream_rx) = oneshot::channel();
+        let metrics = ctx.metrics.clone();
 
         if let Some(to_sparse_trie_task) = to_sparse_trie_task {
             let stream_ctx = ctx.clone();
@@ -400,7 +401,16 @@ where
         }
 
         if ctx.saved_cache.is_some() && !ctx.disable_bal_batch_io {
+            let prefetch_storage_slots = prefetch_bal
+                .as_bal()
+                .iter()
+                .map(|account| account.storage_changes.len() + account.storage_reads.len())
+                .sum::<usize>();
+            metrics.bal_prefetch_accounts.record(prefetch_bal.as_bal().len() as f64);
+            metrics.bal_prefetch_storage_slots.record(prefetch_storage_slots as f64);
+            let prefetch_metrics = metrics.clone();
             executor.prewarming_pool().spawn(move || {
+                let prefetch_start = Instant::now();
                 let branch_span = debug_span!(
                     target: "engine::tree::payload_processor::prewarm",
                     parent: &prefetch_parent_span,
@@ -426,15 +436,21 @@ where
                     },
                 );
 
+                prefetch_metrics
+                    .bal_prefetch_total_duration
+                    .record(prefetch_start.elapsed().as_secs_f64());
                 let _ = prefetch_tx.send(());
             });
         } else {
+            metrics.bal_prefetch_skipped.increment(1);
             let _ = prefetch_tx.send(());
         }
 
+        let prefetch_wait_start = Instant::now();
         prefetch_rx
             .blocking_recv()
             .expect("BAL prefetch task dropped without signaling completion");
+        metrics.bal_prefetch_wait_duration.record(prefetch_wait_start.elapsed().as_secs_f64());
         stream_rx
             .blocking_recv()
             .expect("BAL hashed-state streaming task dropped without signaling completion");
@@ -910,4 +926,14 @@ pub struct PrewarmMetrics {
     pub(crate) transaction_errors: Counter,
     /// A histogram of BAL slot iteration duration during prefetching
     pub(crate) bal_slot_iteration_duration: Histogram,
+    /// A histogram of BAL accounts considered for storage prefetching
+    pub(crate) bal_prefetch_accounts: Histogram,
+    /// A histogram of BAL storage slots considered for storage prefetching
+    pub(crate) bal_prefetch_storage_slots: Histogram,
+    /// A histogram of total BAL storage prefetch task duration
+    pub(crate) bal_prefetch_total_duration: Histogram,
+    /// A histogram of time spent waiting for BAL storage prefetch completion
+    pub(crate) bal_prefetch_wait_duration: Histogram,
+    /// Counter for BAL storage prefetches skipped by configuration or missing cache
+    pub(crate) bal_prefetch_skipped: Counter,
 }
