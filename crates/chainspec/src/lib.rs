@@ -35,28 +35,6 @@ pub use spec::{
     DepositContract, EthExecutorSpec, ForkBaseFeeParams, DEV, HOLESKY, HOODI, MAINNET, SEPOLIA,
 };
 
-/// Parameters for EVM execution limits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EvmLimitParams {
-    /// Maximum bytecode size for deployed contracts.
-    pub max_code_size: usize,
-    /// Maximum initcode size for CREATE transactions.
-    pub max_initcode_size: usize,
-    /// Transaction gas limit cap.
-    pub tx_gas_limit_cap: Option<u64>,
-}
-
-impl EvmLimitParams {
-    /// Returns the Osaka EVM limit params.
-    pub const fn osaka() -> Self {
-        Self {
-            max_code_size: 0x6000,
-            max_initcode_size: 0xc000,
-            tx_gas_limit_cap: Some(16_777_216),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
