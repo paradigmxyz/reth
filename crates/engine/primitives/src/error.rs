@@ -1,5 +1,7 @@
 use alloc::boxed::Box;
 use alloy_rpc_types_engine::ForkchoiceUpdateError;
+use reth_errors::ConsensusError;
+use reth_storage_api::errors::ProviderError;
 
 /// Represents all error cases when handling a new payload.
 ///
@@ -44,4 +46,20 @@ impl BeaconForkChoiceUpdateError {
     pub fn internal<E: core::error::Error + Send + Sync + 'static>(e: E) -> Self {
         Self::Internal(Box::new(e))
     }
+}
+
+/// Error returned by
+/// [`PayloadValidator::validate_block_post_execution_with_hashed_state`](crate::PayloadValidator::validate_block_post_execution_with_hashed_state).
+///
+/// Distinguishes a block that violates a post-execution consensus rule from an internal failure to
+/// load the state needed to run the check, so the engine does not mark a block invalid over a
+/// transient provider error.
+#[derive(Debug, thiserror::Error)]
+pub enum PostExecutionValidationError {
+    /// The block violates a post-execution consensus rule.
+    #[error(transparent)]
+    Consensus(#[from] ConsensusError),
+    /// Loading the state required to validate the block failed.
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
 }

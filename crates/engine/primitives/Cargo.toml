@@ -21,6 +21,7 @@ reth-ethereum-primitives.workspace = true
 reth-chain-state.workspace = true
 reth-errors.workspace = true
 reth-trie-common.workspace = true
+reth-storage-api.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
@@ -47,6 +48,7 @@ std = [
     "reth-ethereum-primitives/std",
     "reth-primitives-traits/std",
     "reth-trie-common/std",
+    "reth-storage-api/std",
     "alloy-primitives/std",
     "alloy-consensus/std",
     "alloy-rpc-types-engine/std",

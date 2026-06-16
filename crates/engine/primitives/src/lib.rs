@@ -12,12 +12,12 @@
 extern crate alloc;
 
 use alloy_consensus::BlockHeader;
-use reth_errors::ConsensusError;
 use reth_payload_primitives::{
     EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
     NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock};
+use reth_storage_api::{StateProviderBox, errors::ProviderResult};
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -213,11 +213,19 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     }
 
     /// Verifies payload post-execution w.r.t. hashed state updates.
+    ///
+    /// `parent_state` lazily builds the overlay-aware provider for the block's parent that the
+    /// engine used for execution — resolving even a not-yet-canonical in-memory parent. It is only
+    /// built if the implementation needs it (the L1 default does not).
     fn validate_block_post_execution_with_hashed_state<'a>(
         &self,
         _state_updates: &dyn FnOnce() -> &'a HashedPostState,
         _block: &RecoveredBlock<Self::Block>,
-    ) -> Result<(), ConsensusError> {
+        _parent_state: impl FnOnce() -> ProviderResult<StateProviderBox>,
+    ) -> Result<(), PostExecutionValidationError>
+    where
+        Self: Sized,
+    {
         // method not used by l1
         Ok(())
     }
