@@ -166,17 +166,6 @@ impl ArenaCursor {
         }
     }
 
-    /// Marks every branch above the stack head as dirty.
-    ///
-    /// This is used when a descendant subtrie is known to need hashing, but the mutation path that
-    /// dirtied the subtrie may not have passed through this cursor. Marking the ancestors ensures
-    /// the upper trie recomputes child hashes after the subtrie is rehashed.
-    pub(super) fn mark_ancestors_dirty(&self, arena: &mut NodeArena) {
-        for entry in self.stack.iter().rev().skip(1) {
-            *arena[entry.index].state_mut() = ArenaSparseNodeState::Dirty;
-        }
-    }
-
     /// Returns the logical path of the branch at the top of the stack.
     /// The logical path is `entry.path + branch.short_key`.
     pub(super) fn head_logical_branch_path(&self, arena: &NodeArena) -> Nibbles {
