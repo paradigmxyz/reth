@@ -3,7 +3,8 @@
 use alloy_primitives::bytes::Bytes;
 use futures_util::{stream, Stream, TryStreamExt};
 use reqwest::{Client, IntoUrl};
-use reth_era_downloader::HttpClient;
+use reth_era_downloader::{EraMeta, HttpClient};
+use std::path::{Path, PathBuf};
 use tokio_util::either::Either;
 
 // Url where the ERA1 files are hosted
@@ -45,5 +46,27 @@ impl HttpClient for ClientWithFakeIndex {
                 Ok(Either::Right(stream))
             }
         }
+    }
+}
+
+/// Minimal [`EraMeta`] over a local file, used to feed exported files back into the importer.
+#[derive(Debug)]
+struct FileMeta {
+    path: PathBuf,
+}
+
+impl FileMeta {
+    fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+}
+
+impl EraMeta for FileMeta {
+    fn mark_as_processed(&self) -> eyre::Result<()> {
+        Ok(())
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
     }
 }

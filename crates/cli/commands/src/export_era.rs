@@ -1,17 +1,14 @@
-//! Command exporting block data to convert them to ERA1 files.
+//! Command that exports block history from the database into ERA files.
 
 use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use clap::{Args, Parser};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
-use reth_era::era1::types::execution::MAX_BLOCKS_PER_ERA1;
-use reth_era_utils as era1;
+use reth_era::{common::file_ops::EraFileType, era1::types::execution::MAX_BLOCKS_PER_ERA1};
+use reth_era_utils as era;
 use reth_provider::DatabaseProviderFactory;
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
-
-// Default folder name for era1 export files
-const ERA1_EXPORT_FOLDER_NAME: &str = "era1-export";
 
 #[derive(Debug, Parser)]
 pub struct ExportEraCommand<C: ChainSpecParser> {
@@ -24,6 +21,9 @@ pub struct ExportEraCommand<C: ChainSpecParser> {
 
 #[derive(Debug, Args)]
 pub struct ExportArgs {
+    /// The ERA file format to export: `era1` writes `.era1` files, `ere` writes `.ere` files.
+    #[arg(long, value_parser = parse_export_file_type, default_value = "era1", verbatim_doc_comment)]
+    file_type: EraFileType,
     /// Optional first block number to export from the db.
     /// It is by default 0.
     #[arg(long, value_name = "first-block-number", verbatim_doc_comment)]
@@ -36,10 +36,22 @@ pub struct ExportArgs {
     /// Must be less than or equal to 8192.
     #[arg(long, value_name = "max-blocks-per-file", verbatim_doc_comment)]
     max_blocks_per_file: Option<u64>,
-    /// The directory path where to export era1 files.
+    /// The directory path where to export the ERA files.
     /// The block data are read from the database.
-    #[arg(long, value_name = "EXPORT_ERA1_PATH", verbatim_doc_comment)]
+    #[arg(long, value_name = "EXPORT_PATH", verbatim_doc_comment)]
     path: Option<PathBuf>,
+}
+
+/// Parses the `--file-type` value, accepting only the exportable execution-layer formats.
+///
+/// Consensus-layer `.era` files cannot be produced from the execution database, so
+/// [`EraFileType::Era`] is rejected.
+fn parse_export_file_type(value: &str) -> Result<EraFileType, String> {
+    match value {
+        "era1" => Ok(EraFileType::Era1),
+        "ere" => Ok(EraFileType::Ere),
+        other => Err(format!("invalid --file-type '{other}', expected 'era1' or 'ere'")),
+    }
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ExportEraCommand<C> {
@@ -50,7 +62,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ExportEraC
     {
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO, runtime)?;
 
-        // Either specified path or default to `<data-dir>/<chain>/era1-export/`
+        let file_type = self.export.file_type;
+        // `.era1` / `.ere` -> `era1` / `ere`, used for log lines and the default directory name.
+        let format = file_type.extension().trim_start_matches('.');
+
+        // Either the specified path or default to `<data-dir>/<chain>/<format>-export/`.
         let data_dir = match &self.export.path {
             Some(path) => path.clone(),
             None => self
@@ -58,10 +74,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ExportEraC
                 .datadir
                 .resolve_datadir(self.env.chain.chain())
                 .data_dir()
-                .join(ERA1_EXPORT_FOLDER_NAME),
+                .join(format!("{format}-export")),
         };
 
-        let export_config = era1::ExportConfig {
+        let export_config = era::ExportConfig {
             network: self.env.chain.chain().to_string(),
             first_block_number: self.export.first_block_number.unwrap_or(0),
             last_block_number: self
@@ -79,20 +95,27 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ExportEraC
 
         info!(
             target: "reth::cli",
-            "Starting ERA1 block export: blocks {}-{} to {}",
+            "Starting {format} block export: blocks {}-{} to {}",
             export_config.first_block_number,
             export_config.last_block_number,
             export_config.dir.display()
         );
 
-        // Only read access is needed for the database provider
+        // Only read access is needed for the database provider.
         let provider = provider_factory.database_provider_ro()?;
 
-        let exported_files = era1::export::<era1::Era1, _>(&provider, &export_config)?;
+        let exported_files = match file_type {
+            EraFileType::Era1 => era::export::<era::Era1, _>(&provider, &export_config)?,
+            EraFileType::Ere => era::export::<era::Ere, _>(&provider, &export_config)?,
+            // Consensus-layer `.era` files cannot be produced from the execution database.
+            EraFileType::Era => {
+                eyre::bail!("consensus-layer .era files are not supported for export")
+            }
+        };
 
         info!(
             target: "reth::cli",
-            "Successfully exported {} ERA1 files to {}",
+            "Successfully exported {} {format} files to {}",
             exported_files.len(),
             export_config.dir.display()
         );

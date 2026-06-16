@@ -131,6 +131,11 @@ Storage:
           [default: true]
           [possible values: true, false]
 
+      --file-type <FILE_TYPE>
+          The ERA file format to export: `era1` writes `.era1` files, `ere` writes `.ere` files.
+
+          [default: era1]
+
       --first-block-number <first-block-number>
           Optional first block number to export from the db.
           It is by default 0.
@@ -143,8 +148,8 @@ Storage:
           The maximum number of blocks per file, it can help you to decrease the size of the files.
           Must be less than or equal to 8192.
 
-      --path <EXPORT_ERA1_PATH>
-          The directory path where to export era1 files.
+      --path <EXPORT_PATH>
+          The directory path where to export the ERA files.
           The block data are read from the database.
 
 Logging:
