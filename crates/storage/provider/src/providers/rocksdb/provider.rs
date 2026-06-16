@@ -31,6 +31,7 @@ use rocksdb::{
     OptimisticTransactionOptions, Options, SnapshotWithThreadMode, Transaction,
     WriteBatchWithTransaction, WriteBufferManager, WriteOptions, DB,
 };
+use smallvec::SmallVec;
 use std::{
     collections::BTreeMap,
     fmt,
@@ -1477,9 +1478,9 @@ impl RocksDBProvider {
         address: Address,
         storage_key: B256,
         indices: Vec<u64>,
-    ) -> ProviderResult<Vec<(StorageShardedKey, BlockNumberList)>> {
+    ) -> ProviderResult<SmallVec<[(StorageShardedKey, BlockNumberList); 1]>> {
         if indices.is_empty() {
-            return Ok(Vec::new());
+            return Ok(SmallVec::new());
         }
 
         debug_assert!(
@@ -1495,12 +1496,14 @@ impl RocksDBProvider {
         last_shard.append(indices).map_err(ProviderError::other)?;
 
         if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
-            return Ok(vec![(last_key, last_shard)]);
+            let mut shards = SmallVec::new();
+            shards.push((last_key, last_shard));
+            return Ok(shards);
         }
 
         let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
         let mut chunks_peekable = chunks.into_iter().peekable();
-        let mut shards = Vec::new();
+        let mut shards = SmallVec::new();
 
         while let Some(chunk) = chunks_peekable.next() {
             let shard = BlockNumberList::new_pre_sorted(chunk);
