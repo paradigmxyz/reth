@@ -3204,6 +3204,48 @@ where
         Ok(())
     }
 
+    /// Updates the tracked safe and finalized blocks when they point to the same canonical block.
+    fn update_safe_and_finalized_block(
+        &self,
+        block_hash: B256,
+    ) -> Result<(), OnForkChoiceUpdated> {
+        if block_hash.is_zero() {
+            return Ok(())
+        }
+
+        match self.find_canonical_header(block_hash) {
+            Ok(None) => {
+                debug!(target: "engine::tree", "Safe and finalized block not found in canonical chain");
+                return Err(OnForkChoiceUpdated::invalid_state())
+            }
+            Ok(Some(marker)) => {
+                let num_hash = marker.num_hash();
+                let block_number = marker.number();
+
+                if Some(num_hash) != self.canonical_in_memory_state.get_finalized_num_hash() {
+                    // we're also persisting the finalized block on disk so we can reload it on
+                    // restart this is required by optimism which queries the finalized block: <https://github.com/ethereum-optimism/optimism/blob/c383eb880f307caa3ca41010ec10f30f08396b2e/op-node/rollup/sync/start.go#L65-L65>
+                    let _ = self.persistence.save_finalized_block_number(block_number);
+                    self.canonical_in_memory_state.set_finalized(marker.clone());
+                    self.metrics.tree.finalized_block_height.set(block_number as f64);
+                }
+
+                if Some(num_hash) != self.canonical_in_memory_state.get_safe_num_hash() {
+                    // we're also persisting the safe block on disk so we can reload it on
+                    // restart this is required by optimism which queries the safe block: <https://github.com/ethereum-optimism/optimism/blob/c383eb880f307caa3ca41010ec10f30f08396b2e/op-node/rollup/sync/start.go#L65-L65>
+                    let _ = self.persistence.save_safe_block_number(block_number);
+                    self.canonical_in_memory_state.set_safe(marker.clone());
+                    self.metrics.tree.safe_block_height.set(block_number as f64);
+                }
+            }
+            Err(err) => {
+                error!(target: "engine::tree", %err, "Failed to fetch safe and finalized block header");
+            }
+        }
+
+        Ok(())
+    }
+
     /// Ensures that the given forkchoice state is consistent, assuming the head block has been
     /// made canonical.
     ///
@@ -3216,6 +3258,10 @@ where
         &self,
         state: ForkchoiceState,
     ) -> Result<(), OnForkChoiceUpdated> {
+        if state.finalized_block_hash == state.safe_block_hash {
+            return self.update_safe_and_finalized_block(state.finalized_block_hash)
+        }
+
         // Ensure that the finalized block, if not zero, is known and in the canonical chain
         // after the head block is canonicalized.
         //
