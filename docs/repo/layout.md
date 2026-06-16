@@ -173,7 +173,6 @@ Crates related to building and validating payloads (blocks).
 These crates define primitive types or algorithms.
 
 - [`primitives`](../../crates/primitives): Commonly used types in Reth.
-- [`primitives-traits`](../../crates/primitives-traits/): Common abstracted types in reth.
 - [`trie`](../../crates/trie): An implementation of a Merkle Patricia Trie used for various roots (e.g. the state root) in Ethereum.
 
 ### Ethereum-Specific Crates
