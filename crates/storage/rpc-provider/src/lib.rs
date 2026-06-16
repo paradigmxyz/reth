@@ -25,7 +25,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TransactionMeta, BlockHeader};
-use alloy_eips::{BlockHashOrNumber, BlockNumberOrTag};
+use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
 use alloy_network::{primitives::HeaderResponse, BlockResponse};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, TxHash, TxNumber, B256, U256};
 use alloy_provider::{ext::DebugApi, network::Network, Provider};
@@ -350,27 +350,51 @@ where
             }
             BlockId::Number(number_or_tag) => match number_or_tag {
                 alloy_rpc_types::BlockNumberOrTag::Number(num) => Ok(Some(num)),
-                alloy_rpc_types::BlockNumberOrTag::Latest => self.block_on_async(async {
-                    self.provider.get_block_number().await.map(Some).map_err(ProviderError::other)
+                // Genesis is always block 0; no RPC call needed.
+                alloy_rpc_types::BlockNumberOrTag::Earliest => Ok(Some(0)),
+                tag => self.block_on_async(async {
+                    let block = self
+                        .provider
+                        .get_block(BlockId::Number(tag))
+                        .await
+                        .map_err(ProviderError::other)?;
+                    Ok(block.map(|b| b.header().number()))
                 }),
-                _ => Ok(None),
             },
         }
     }
 
-    fn pending_block_num_hash(&self) -> Result<Option<alloy_eips::BlockNumHash>, ProviderError> {
-        // RPC doesn't provide pending block number and hash together
-        Err(ProviderError::UnsupportedProvider)
+    fn pending_block_num_hash(&self) -> Result<Option<BlockNumHash>, ProviderError> {
+        self.block_on_async(async {
+            let block = self
+                .provider
+                .get_block(BlockId::Number(BlockNumberOrTag::Pending))
+                .await
+                .map_err(ProviderError::other)?;
+            Ok(block.map(|b| BlockNumHash::new(b.header().number(), b.header().hash())))
+        })
     }
 
-    fn safe_block_num_hash(&self) -> Result<Option<alloy_eips::BlockNumHash>, ProviderError> {
-        // RPC doesn't provide safe block number and hash
-        Err(ProviderError::UnsupportedProvider)
+    fn safe_block_num_hash(&self) -> Result<Option<BlockNumHash>, ProviderError> {
+        self.block_on_async(async {
+            let block = self
+                .provider
+                .get_block(BlockId::Number(BlockNumberOrTag::Safe))
+                .await
+                .map_err(ProviderError::other)?;
+            Ok(block.map(|b| BlockNumHash::new(b.header().number(), b.header().hash())))
+        })
     }
 
-    fn finalized_block_num_hash(&self) -> Result<Option<alloy_eips::BlockNumHash>, ProviderError> {
-        // RPC doesn't provide finalized block number and hash
-        Err(ProviderError::UnsupportedProvider)
+    fn finalized_block_num_hash(&self) -> Result<Option<BlockNumHash>, ProviderError> {
+        self.block_on_async(async {
+            let block = self
+                .provider
+                .get_block(BlockId::Number(BlockNumberOrTag::Finalized))
+                .await
+                .map_err(ProviderError::other)?;
+            Ok(block.map(|b| BlockNumHash::new(b.header().number(), b.header().hash())))
+        })
     }
 }
 
