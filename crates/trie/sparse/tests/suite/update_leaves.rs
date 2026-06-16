@@ -1540,3 +1540,44 @@ pub(super) fn test_subtrie_emptied_by_deletes_with_touched<T: SparseTrie>(new_tr
     let actual_root = trie.root();
     assert_eq!(actual_root, expected_harness.original_root(), "post-delete root mismatch");
 }
+
+/// Regression: touched-only subtrie updates must not be classified as removals.
+///
+/// `Iterator::all` returns true for an empty iterator, so filtering out all
+/// `Touched` updates before checking for removals incorrectly marked touched-only
+/// batches as possible subtrie-emptying deletes.
+pub(super) fn test_subtrie_touched_only_updates_preserve_root<T: SparseTrie>(new_trie: fn() -> T) {
+    let mut key_ab1 = B256::ZERO;
+    key_ab1[0] = 0xAB;
+    key_ab1[31] = 0x11;
+    let mut key_ab2 = B256::ZERO;
+    key_ab2[0] = 0xAB;
+    key_ab2[31] = 0x22;
+    let mut key_ac1 = B256::ZERO;
+    key_ac1[0] = 0xAC;
+    key_ac1[31] = 0x44;
+    let mut key_cd1 = B256::ZERO;
+    key_cd1[0] = 0xCD;
+    key_cd1[31] = 0x01;
+
+    let value = U256::from(1u64);
+    let base_storage: BTreeMap<B256, U256> =
+        [(key_ab1, value), (key_ab2, value), (key_ac1, value), (key_cd1, value)]
+            .into_iter()
+            .collect();
+
+    let harness = SuiteTestHarness::new(base_storage);
+    let all_keys = vec![key_ab1, key_ab2, key_ac1, key_cd1];
+    let mut trie: T = harness.init_trie_with_targets(&all_keys, false, new_trie);
+
+    let original_root = trie.root();
+    assert_eq!(original_root, harness.original_root(), "initial root mismatch");
+
+    let mut leaf_updates: B256Map<LeafUpdate> =
+        [(key_ab1, LeafUpdate::Touched), (key_ab2, LeafUpdate::Touched)].into_iter().collect();
+
+    harness.reveal_and_update(&mut trie, &mut leaf_updates);
+
+    assert!(leaf_updates.is_empty(), "touched updates should be drained");
+    assert_eq!(trie.root(), original_root, "touched-only updates must not change the root");
+}
