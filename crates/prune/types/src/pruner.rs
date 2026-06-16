@@ -32,6 +32,10 @@ impl PrunerOutput {
         deleted_entries: usize,
         elapsed: Duration,
     ) {
+        if !tracing::enabled!(target: "pruner", tracing::Level::DEBUG) {
+            return;
+        }
+
         let message = match self.progress {
             PruneProgress::HasMoreData(_) => "Pruner interrupted, has more data",
             PruneProgress::Finished => "Pruner finished",
