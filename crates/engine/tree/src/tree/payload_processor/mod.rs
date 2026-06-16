@@ -726,7 +726,7 @@ where
             let deferred = match (receiver_dropped, task_result) {
                 (false, Some(result)) => {
                     let start = Instant::now();
-                    let (trie, deferred, accepted_state) = task.into_trie_for_reuse(
+                    let (trie, deferred, _accepted_state) = task.into_trie_for_reuse(
                         SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                         SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                         disable_cache_pruning,
@@ -736,15 +736,7 @@ where
                         .into_trie_for_reuse_duration_histogram
                         .record(start.elapsed().as_secs_f64());
 
-                    let mut preserved =
-                        PreservedSparseTrie::anchored(trie, result.state_root, base_block);
-                    guard.apply_pending_prunes(
-                        &mut preserved,
-                        accepted_state.as_ref(),
-                        SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
-                        SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
-                        &trie_metrics,
-                    );
+                    let preserved = PreservedSparseTrie::anchored(trie, result.state_root, base_block);
                     trie_metrics
                         .sparse_trie_retained_memory_bytes
                         .set(preserved.trie().memory_size() as f64);
@@ -765,7 +757,7 @@ where
                             Some((manager, block_hash, base_block.hash, trie))
                         });
 
-                    guard.store_pruned(preserved);
+                    guard.store(preserved);
                     if let Some((manager, block_hash, base_hash, trie)) = sparse_trie_overlay_clone
                     {
                         manager.replace_sparse_trie(block_hash, base_hash, trie);
@@ -781,12 +773,7 @@ where
                         SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                         SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                     );
-                    guard.store(
-                        PreservedSparseTrie::cleared(trie),
-                        SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
-                        SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
-                        &trie_metrics,
-                    );
+                    guard.store(PreservedSparseTrie::cleared(trie));
                     deferred
                 }
                 (true, _) => {
@@ -798,7 +785,6 @@ where
                         SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                         SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                     );
-                    guard.discard_in_flight();
                     drop(trie);
                     deferred
                 }
