@@ -1432,6 +1432,8 @@ impl RocksDBProvider {
         blocks: &[ExecutedBlock<N>],
         ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
+        const PARALLEL_STORAGE_HISTORY_SHARD_THRESHOLD: usize = 1024;
+
         let mut storage_history: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
 
         for (block_idx, block) in blocks.iter().enumerate() {
@@ -1453,19 +1455,29 @@ impl RocksDBProvider {
             }
         }
 
-        let shard_puts = storage_history
-            .into_par_iter()
-            .map(|((address, slot), indices)| {
-                self.storage_history_shards_to_put(address, slot, indices)
-            })
-            .collect::<ProviderResult<Vec<_>>>()?;
-
         let mut batch = self.batch();
-        for shards in shard_puts {
-            for (key, shard) in shards {
-                batch.put::<tables::StoragesHistory>(key, &shard)?;
+
+        if storage_history.len() < PARALLEL_STORAGE_HISTORY_SHARD_THRESHOLD {
+            for ((address, slot), indices) in storage_history {
+                for (key, shard) in self.storage_history_shards_to_put(address, slot, indices)? {
+                    batch.put::<tables::StoragesHistory>(key, &shard)?;
+                }
+            }
+        } else {
+            let shard_puts = storage_history
+                .into_par_iter()
+                .map(|((address, slot), indices)| {
+                    self.storage_history_shards_to_put(address, slot, indices)
+                })
+                .collect::<ProviderResult<Vec<_>>>()?;
+
+            for shards in shard_puts {
+                for (key, shard) in shards {
+                    batch.put::<tables::StoragesHistory>(key, &shard)?;
+                }
             }
         }
+
         ctx.pending_batches.lock().push(batch.into_inner());
         Ok(())
     }
