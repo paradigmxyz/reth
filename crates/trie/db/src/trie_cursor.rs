@@ -292,12 +292,14 @@ where
             num_entries += 1;
             let nibbles = A::StorageSubKey::from(*nibbles);
             // Delete the old entry if it exists.
-            if self
+            if let Some(existing) = self
                 .cursor
                 .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
-                .as_ref()
-                .is_some_and(|e| *e.nibbles() == nibbles)
+                .filter(|e| *e.nibbles() == nibbles)
             {
+                if maybe_updated.as_ref().is_some_and(|node| existing.node() == node) {
+                    continue;
+                }
                 self.cursor.delete_current()?;
             }
 

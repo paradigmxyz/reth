@@ -2711,6 +2711,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
                     db_entry.key == entry.key
                 {
+                    if !entry.value.is_zero() && db_entry.value == entry.value {
+                        continue;
+                    }
                     hashed_storage_cursor.delete_current()?;
                 }
 
