@@ -3,8 +3,11 @@ use alloy_consensus::BlockHeader;
 use alloy_eip7928::{bal::DecodedBal, BlockAccessList};
 use alloy_primitives::Bytes;
 use alloy_rpc_types_eth::BlockId;
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_errors::RethError;
-use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm};
+use reth_evm::{
+    block::BlockExecutor, execute::fill_block_access_list_storage_roots, ConfigureEvm, Evm,
+};
 use reth_revm::{database::StateProviderDatabase, State};
 use reth_rpc_eth_types::{
     cache::db::StateProviderTraitObjWrapper, error::FromEthApiError, EthApiError,
@@ -40,6 +43,10 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
             }
 
             self.spawn_blocking_io(move |eth_api| {
+                let is_bogota_active = eth_api
+                    .provider()
+                    .chain_spec()
+                    .is_bogota_active_at_timestamp(block.timestamp());
                 let state = eth_api
                     .provider()
                     .state_by_block_id(block.parent_hash().into())
@@ -69,7 +76,11 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                     .apply_post_execution_changes()
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
-                let bal = db.take_built_alloy_bal();
+                let mut bal = db.take_built_alloy_bal();
+                if is_bogota_active && let Some(bal) = &mut bal {
+                    fill_block_access_list_storage_roots(bal, &db, &*db.database)
+                        .map_err(Self::Error::from_eth_err)?;
+                }
                 Ok(bal)
             })
             .await

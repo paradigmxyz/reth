@@ -13,7 +13,7 @@
 
 use super::bal_prewarm_pool::BalPrewarmPool;
 use crate::tree::{
-    payload_processor::multiproof::StateRootMessage,
+    payload_processor::{bal_storage_root_to_b256, multiproof::StateRootMessage},
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
     PayloadExecutionCache, SavedCache, StateProviderBuilder,
@@ -21,7 +21,7 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::keccak256;
+use alloy_primitives::{keccak256, map::B256Map};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
@@ -34,6 +34,7 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::MultiProofTargetsV2;
+use revm_primitives::hardfork::SpecId;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc::{self, channel, Receiver, Sender},
@@ -354,6 +355,8 @@ where
         let ctx = self.ctx.clone();
         let to_sparse_trie_task = self.to_sparse_trie_task.clone();
         let executor = self.executor.clone();
+        let is_bogota_active =
+            Into::<SpecId>::into(*self.ctx.env.evm_env.spec_id()).is_enabled_in(SpecId::BOGOTA);
         let parent_span = Span::current();
         let stream_parent_span = parent_span;
         let prefetch_bal = Arc::clone(&decoded_bal);
@@ -372,6 +375,21 @@ where
                 );
                 let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
+
+                if is_bogota_active {
+                    let storage_roots = stream_bal
+                        .as_bal()
+                        .iter()
+                        .filter_map(|account| {
+                            bal_storage_root_to_b256(account.storage_root_value())
+                                .map(|root| (keccak256(account.address()), root))
+                        })
+                        .collect::<B256Map<_>>();
+                    if !storage_roots.is_empty() {
+                        let _ =
+                            to_sparse_trie_task.send(StateRootMessage::StorageRoots(storage_roots));
+                    }
+                }
 
                 stream_bal.as_bal().par_iter().for_each(|account_changes| {
                     WorkerPool::with_worker_mut(|worker| {

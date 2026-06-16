@@ -245,6 +245,7 @@ mod tests {
             withdrawals: None,
             parent_beacon_block_root: None,
             slot_number: None,
+            target_gas_limit: None,
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -283,6 +284,7 @@ mod tests {
             ]),
             parent_beacon_block_root: None,
             slot_number: None,
+            target_gas_limit: None,
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -316,6 +318,7 @@ mod tests {
                 .unwrap(),
             ),
             slot_number: None,
+            target_gas_limit: None,
         };
 
         // Verify that the generated payload ID matches the expected value

@@ -115,6 +115,11 @@ where
         let Some(block_access_list_hash) = block_access_list_hash
     {
         let block_bal_hash = block.header().block_access_list_hash().unwrap_or_default();
+        tracing::info!(
+            ?block_access_list_hash,
+            ?block_bal_hash,
+            "Comparing block access list hash"
+        );
         if block_access_list_hash != block_bal_hash {
             return Err(ConsensusError::BlockAccessListHashMismatch(
                 GotExpected::new(block_access_list_hash, block_bal_hash).into(),

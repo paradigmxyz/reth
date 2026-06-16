@@ -42,7 +42,7 @@ use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     multiproof::{StateRootComputeOutcome, StateRootHandle},
-    payload_processor::PayloadProcessor,
+    payload_processor::{bal_storage_root_to_b256, PayloadProcessor},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
@@ -52,7 +52,11 @@ use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
-use alloy_primitives::{map::B256Set, B256};
+use alloy_primitives::{
+    keccak256,
+    map::{B256Map, B256Set},
+    B256,
+};
 use reth_tasks::LazyHandle;
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
@@ -67,8 +71,9 @@ use reth_engine_primitives::{
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
-    block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
-    OnStateHook, SpecFor,
+    block::BlockExecutor,
+    execute::{fill_block_access_list_storage_roots, ExecutableTxFor},
+    ConfigureEvm, EvmEnvFor, ExecutionCtxFor, OnStateHook, SpecFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
 use reth_payload_primitives::{
@@ -84,13 +89,13 @@ use reth_provider::{
     BlockExecutionOutput, BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
     StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StorageChangeSetReader, StorageSettingsCache,
+    StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm_primitives::{Address, KECCAK_EMPTY};
+use revm_primitives::{hardfork::SpecId, Address, KECCAK_EMPTY};
 use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
@@ -598,6 +603,8 @@ where
         // Execute the block and handle any execution errors.
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
+        let is_bogota_active =
+            Into::<SpecId>::into(*env.evm_env.spec_id()).is_enabled_in(SpecId::BOGOTA);
         let execute_block_start = Instant::now();
         let execution_result = if parallel_bal_execution {
             self.execute_block_bal(env, &input, &handle, &make_state_provider)
@@ -676,7 +683,7 @@ where
                 &output,
                 &mut ctx,
                 receipt_root_bloom,
-                built_bal
+                built_bal.clone()
             ),
             block
         );
@@ -795,6 +802,7 @@ where
                     provider_factory,
                     overlay_builder,
                     &hashed_state,
+                    built_bal.as_ref().filter(|_| is_bogota_active),
                 ) {
                     Ok(result) => {
                         let elapsed = root_time.elapsed();
@@ -1061,6 +1069,8 @@ where
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
         let has_bal = env.decoded_bal.is_some();
+        let is_bogota_active =
+            Into::<SpecId>::into(*env.evm_env.spec_id()).is_enabled_in(SpecId::BOGOTA);
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
@@ -1131,7 +1141,11 @@ where
         debug_span!(target: "engine::tree", "merge_transitions")
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
 
-        let built_bal = if has_bal { db.take_built_alloy_bal() } else { None };
+        let mut built_bal = if has_bal { db.take_built_alloy_bal() } else { None };
+        if is_bogota_active && let Some(built_bal) = &mut built_bal {
+            fill_block_access_list_storage_roots(built_bal, &db, &*db.database)
+                .map_err(BlockExecutionError::other)?;
+        }
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
 
         let execution_duration = execution_start.elapsed();
@@ -1198,6 +1212,7 @@ where
         V: PayloadValidator<T, Block = N::Block>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block via BAL path");
+        tracing::info!("input BAL: {:#?}", env.decoded_bal);
 
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(env.transaction_count);
         let input_bal = env.decoded_bal.ok_or_else(|| {
@@ -1208,6 +1223,16 @@ where
             let provider = make_state_provider(fill_on_miss)
                 .map_err(crate::tree::payload_processor::bal::BalExecutionError::Provider)?;
             Ok(StateProviderDatabase::new(provider))
+        };
+        let is_bogota_active =
+            Into::<SpecId>::into(*env.evm_env.spec_id()).is_enabled_in(SpecId::BOGOTA);
+        let storage_root_provider = if is_bogota_active {
+            Some(
+                make_state_provider(false)
+                    .map_err(crate::tree::payload_processor::bal::BalExecutionError::Provider)?,
+            )
+        } else {
+            None
         };
         let execution_start = Instant::now();
         let ctx =
@@ -1222,6 +1247,7 @@ where
             env.transaction_count,
             handle.clone_transaction_receiver(),
             receipt_tx,
+            storage_root_provider.as_deref().map(|provider| provider as &dyn StorageRootProvider),
         )?;
         let execution_duration = execution_start.elapsed();
 
@@ -1232,7 +1258,7 @@ where
             elapsed = ?execution_duration,
             "Executed block via BAL path",
         );
-
+        tracing::info!("output BAL: {:#?}", built_bal);
         Ok((output, senders, result_rx, Some(built_bal)))
     }
 
@@ -1364,6 +1390,7 @@ where
         provider_factory: P,
         overlay_builder: OverlayBuilder<N>,
         hashed_state: &LazyHashedPostState,
+        built_bal: Option<&BlockAccessList>,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let hashed_state = hashed_state.get();
         // The `hashed_state` argument will be taken into account as part of the overlay, but we
@@ -1374,7 +1401,19 @@ where
             overlay_builder.with_extended_hashed_state_overlay(hashed_state.clone_into_sorted());
         let overlay_factory = OverlayStateProviderFactory::new(provider_factory, overlay_builder);
         ParallelStateRoot::new(overlay_factory, prefix_sets, self.runtime.clone())
+            .with_precomputed_storage_roots(Self::bal_storage_roots(built_bal))
             .incremental_root_with_updates()
+    }
+
+    fn bal_storage_roots(built_bal: Option<&BlockAccessList>) -> B256Map<B256> {
+        built_bal
+            .into_iter()
+            .flat_map(|bal| bal.iter())
+            .filter_map(|account| {
+                bal_storage_root_to_b256(account.storage_root_value())
+                    .map(|storage_root| (keccak256(account.address()), storage_root))
+            })
+            .collect()
     }
 
     /// Compute state root for the given hashed post state in serial.

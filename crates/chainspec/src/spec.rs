@@ -312,6 +312,7 @@ pub fn create_chain_config(
         prague_time: timestamp(EthereumHardfork::Prague),
         osaka_time: timestamp(EthereumHardfork::Osaka),
         amsterdam_time: timestamp(EthereumHardfork::Amsterdam),
+        bogota_time: timestamp(EthereumHardfork::Bogota),
         bpo1_time: timestamp(EthereumHardfork::Bpo1),
         bpo2_time: timestamp(EthereumHardfork::Bpo2),
         bpo3_time: timestamp(EthereumHardfork::Bpo3),
@@ -896,6 +897,7 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::Bpo4.boxed(), genesis.config.bpo4_time),
             (EthereumHardfork::Bpo5.boxed(), genesis.config.bpo5_time),
             (EthereumHardfork::Amsterdam.boxed(), genesis.config.amsterdam_time),
+            (EthereumHardfork::Bogota.boxed(), genesis.config.bogota_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -972,6 +974,11 @@ impl<H: BlockHeader> Hardforks for ChainSpec<H> {
 impl<H: BlockHeader> EthereumHardforks for ChainSpec<H> {
     fn ethereum_fork_activation(&self, fork: EthereumHardfork) -> ForkCondition {
         self.fork(fork)
+    }
+
+    fn is_bogota_active_at_timestamp(&self, timestamp: u64) -> bool {
+        self.is_amsterdam_active_at_timestamp(timestamp) ||
+            self.is_ethereum_fork_active_at_timestamp(EthereumHardfork::Bogota, timestamp)
     }
 }
 
@@ -1215,6 +1222,19 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Enable Bogota at genesis.
+    pub fn bogota_activated(mut self) -> Self {
+        self = self.amsterdam_activated();
+        self.hardforks.insert(EthereumHardfork::Bogota, ForkCondition::Timestamp(0));
+        self
+    }
+
+    /// Enable Bogota at the given timestamp.
+    pub fn with_bogota_at(mut self, timestamp: u64) -> Self {
+        self.hardforks.insert(EthereumHardfork::Bogota, ForkCondition::Timestamp(timestamp));
+        self
+    }
+
     /// Build the resulting [`ChainSpec`].
     ///
     /// # Panics
@@ -1327,6 +1347,18 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn bogota_activates_with_amsterdam() {
+        let spec = ChainSpecBuilder::default()
+            .chain(Chain::from_id(1337))
+            .genesis(Genesis::default())
+            .with_amsterdam_at(42)
+            .build();
+
+        assert!(!spec.is_bogota_active_at_timestamp(41));
+        assert!(spec.is_bogota_active_at_timestamp(42));
     }
 
     #[test]
