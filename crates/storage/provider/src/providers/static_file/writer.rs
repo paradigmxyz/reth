@@ -1128,7 +1128,26 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     where
         N::BlockHeader: Compact,
     {
-        self.append_header_with_td(header, U256::ZERO, hash)
+        let start = Instant::now();
+        self.ensure_no_queued_prune()?;
+
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Headers);
+
+        self.increment_block(header.number())?;
+
+        self.append_column(header)?;
+        self.append_column(CompactU256::default())?;
+        self.append_column(hash)?;
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_segment_operation(
+                StaticFileSegment::Headers,
+                StaticFileProviderOperation::Append,
+                Some(start.elapsed()),
+            );
+        }
+
+        Ok(())
     }
 
     /// Appends header to static file with a specified total difficulty.
