@@ -3434,15 +3434,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn update_history_indices(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
         let storage_settings = self.cached_storage_settings();
-        if !storage_settings.storage_v2 {
-            let indices = self.changed_accounts_and_blocks_with_range(range.clone())?;
-            self.insert_account_history_index(indices)?;
+        if storage_settings.storage_v2 {
+            return Ok(());
         }
 
-        if !storage_settings.storage_v2 {
-            let indices = self.changed_storages_and_blocks_with_range(range)?;
-            self.insert_storage_history_index(indices)?;
-        }
+        let indices = self.changed_accounts_and_blocks_with_range(range.clone())?;
+        self.insert_account_history_index(indices)?;
+
+        let indices = self.changed_storages_and_blocks_with_range(range)?;
+        self.insert_storage_history_index(indices)?;
 
         Ok(())
     }
