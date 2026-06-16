@@ -70,6 +70,34 @@ impl Cli {
     }
 }
 
+impl<C, Ext, Rpc, SubCmd> Cli<C, Ext, Rpc, SubCmd>
+where
+    C: ChainSpecParser,
+    Ext: clap::Args + fmt::Debug,
+    Rpc: RpcModuleValidator,
+    SubCmd: Subcommand + fmt::Debug,
+{
+    /// Returns the node command, if this CLI was invoked with `node`.
+    pub fn as_node_command_mut(&mut self) -> Option<&mut node::NodeCommand<C, Ext>> {
+        match &mut self.command {
+            Commands::Node(command) => Some(command.as_mut()),
+            _ => None,
+        }
+    }
+
+    /// Applies a closure to the node command, if this CLI was invoked with `node`.
+    pub fn apply_node_command(
+        &mut self,
+        f: impl FnOnce(&mut node::NodeCommand<C, Ext>),
+    ) -> &mut Self {
+        if let Some(command) = self.as_node_command_mut() {
+            f(command);
+        }
+
+        self
+    }
+}
+
 impl<
         C: ChainSpecParser,
         Ext: clap::Args + fmt::Debug,
@@ -374,6 +402,30 @@ mod tests {
     fn parse_color_mode() {
         let reth = Cli::try_parse_args_from(["reth", "node", "--color", "always"]).unwrap();
         assert_eq!(reth.logs.color, ColorMode::Always);
+    }
+
+    #[test]
+    fn node_command_mut_accessor_returns_node_command() {
+        let mut reth = Cli::try_parse_args_from(["reth", "node"]).unwrap();
+
+        let node_command = reth.as_node_command_mut().expect("expected node command");
+        node_command.with_unused_ports = true;
+
+        assert!(reth.as_node_command_mut().unwrap().with_unused_ports);
+    }
+
+    #[test]
+    fn apply_node_command_only_runs_for_node_command() {
+        let mut reth = Cli::try_parse_args_from(["reth", "node"]).unwrap();
+        reth.apply_node_command(|node_command| node_command.with_unused_ports = true);
+        assert!(reth.as_node_command_mut().unwrap().with_unused_ports);
+
+        let mut reth = Cli::try_parse_args_from(["reth", "config"]).unwrap();
+        let mut applied = false;
+        reth.apply_node_command(|_| applied = true);
+
+        assert!(reth.as_node_command_mut().is_none());
+        assert!(!applied);
     }
 
     /// Tests that the help message is parsed correctly. This ensures that clap args are configured

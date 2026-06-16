@@ -929,6 +929,26 @@ impl PeersManager {
         }
     }
 
+    /// Bans the peer indefinitely and removes it from the peer set.
+    ///
+    /// This follows [`Self::remove_peer`] and does not override trusted status. Remove trusted
+    /// peers from the trusted set before banning them.
+    pub(crate) fn ban_peer_by_admin(&mut self, peer_id: PeerId) {
+        if self.trusted_peer_ids.contains(&peer_id) ||
+            self.peers.get(&peer_id).is_some_and(Peer::is_trusted)
+        {
+            return
+        }
+
+        self.remove_peer(peer_id);
+        self.ban_list.ban_peer(peer_id);
+    }
+
+    /// Removes the peer from the ban list.
+    pub(crate) fn unban_peer_by_admin(&mut self, peer_id: PeerId) {
+        self.ban_list.unban_peer(&peer_id);
+    }
+
     /// Connect to the given peer. NOTE: if the maximum number of outbound sessions is reached,
     /// this won't do anything. See `reth_network::SessionManager::dial_outbound`.
     #[cfg_attr(not(test), expect(dead_code))]
@@ -1632,6 +1652,59 @@ mod tests {
             Poll::Ready(())
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_admin_ban_removes_peer_and_bans_indefinitely() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        peers.peers.insert(peer, Peer::new(PeerAddr::from_tcp(socket_addr)));
+
+        peers.ban_peer_by_admin(peer);
+
+        assert!(peers.ban_list.is_banned_peer(&peer));
+        assert!(peers.peer_by_id(peer).is_none());
+
+        match peers.queued_actions.pop_front() {
+            Some(PeerAction::PeerRemoved(peer_id)) => assert_eq!(peer_id, peer),
+            other => panic!("unexpected action: {other:?}"),
+        }
+
+        let (_, unbanned_peers) =
+            peers.ban_list.evict(std::time::Instant::now() + Duration::from_secs(1));
+        assert!(unbanned_peers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_admin_ban_does_not_override_trusted_peer() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        peers.peers.insert(peer, Peer::trusted(PeerAddr::from_tcp(socket_addr)));
+
+        peers.ban_peer_by_admin(peer);
+
+        assert!(!peers.ban_list.is_banned_peer(&peer));
+        assert!(peers.peer_by_id(peer).is_some());
+        assert!(peers.queued_actions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_admin_unban_only_removes_banlist_entry() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        let mut peer_info = Peer::new(PeerAddr::from_tcp(socket_addr));
+        peer_info.reputation = i32::MIN;
+        peers.peers.insert(peer, peer_info);
+        peers.ban_list.ban_peer(peer);
+        assert!(peers.peers.get(&peer).is_some_and(Peer::is_banned));
+
+        peers.unban_peer_by_admin(peer);
+
+        assert!(!peers.ban_list.is_banned_peer(&peer));
+        assert!(peers.peers.get(&peer).is_some_and(Peer::is_banned));
     }
 
     #[tokio::test]

@@ -12,6 +12,7 @@ use reth_era::{
     common::{decode::DecodeCompressedRlp, file_ops::StreamReader},
     e2s::error::E2sError,
     era1::{file::Era1Reader, types::execution::BlockTuple},
+    ere::{file::EreReader, types::execution::BlockTuple as EreBlockTuple},
 };
 use reth_era_downloader::EraMeta;
 use reth_etl::Collector;
@@ -58,6 +59,39 @@ where
     }
 }
 
+impl<BH, BB> EraBlockReader<BH, BB> for Ere
+where
+    BH: FullBlockHeader + Value,
+    BB: FullBlockBody<OmmerHeader = BH>,
+{
+    fn blocks<M: EraMeta + ?Sized>(
+        meta: &M,
+    ) -> eyre::Result<impl Iterator<Item = eyre::Result<(BH, BB)>>> {
+        let reader: EreReader<std::fs::File> = open(meta)?;
+        Ok(reader.iter().map(Self::decode))
+    }
+}
+
+/// [`EraBlockReader`] for `.ere`/`.erae` files.
+#[derive(Debug)]
+pub struct Ere;
+
+impl Ere {
+    /// Extracts a pair of [`FullBlockHeader`] and [`FullBlockBody`] from an ERE block tuple, whose
+    /// header and body are RLP-compressed.
+    pub fn decode<BH, BB, E>(block: Result<EreBlockTuple, E>) -> eyre::Result<(BH, BB)>
+    where
+        BH: FullBlockHeader + Value,
+        BB: FullBlockBody<OmmerHeader = BH>,
+        E: From<E2sError> + Error + Send + Sync + 'static,
+    {
+        let block = block?;
+        let header: BH = block.header.decode()?;
+        let body: BB = block.body.decode()?;
+        Ok((header, body))
+    }
+}
+
 /// Opens the ERA file at `meta` with the format's [`StreamReader`].
 pub fn open<Reader>(meta: &(impl EraMeta + ?Sized)) -> eyre::Result<Reader>
 where
@@ -68,11 +102,15 @@ where
 
 /// Imports blocks from `downloader`, decoding each file with the [`EraBlockReader`] `S`.
 ///
+/// When `to_block` is set, the import stops after reaching that block height; otherwise it
+/// continues until the source has no more files.
+///
 /// Returns current block height.
 pub fn import<S, Downloader, Era, PF, B, BB, BH>(
     mut downloader: Downloader,
     provider_factory: &PF,
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
+    to_block: Option<BlockNumber>,
 ) -> eyre::Result<BlockNumber>
 where
     S: EraBlockReader<BH, BB>,
@@ -109,21 +147,30 @@ where
         .get_highest_static_file_block(StaticFileSegment::Headers)
         .unwrap_or_default();
 
+    let end = to_block.map_or(Bound::Unbounded, Bound::Included);
+
     while let Some(meta) = rx.recv()? {
+        let meta = meta?;
         let from = height;
         let provider = provider_factory.database_provider_rw()?;
 
         height = process::<S, _, _, _, _>(
-            &meta?,
+            &meta,
             &mut static_file_provider.latest_writer(StaticFileSegment::Headers)?,
             &provider,
             hash_collector,
-            height..,
+            (Bound::Included(height), end),
         )?;
 
         save_stage_checkpoints(&provider, from, height, height, height)?;
 
         provider.commit()?;
+
+        info!(target: "era::history::import", first = from, last = height, file = %meta.path().display(), "Imported ERA file");
+
+        if to_block.is_some_and(|to| height >= to) {
+            break;
+        }
     }
 
     let provider = provider_factory.database_provider_rw()?;
@@ -391,6 +438,27 @@ mod tests {
         fn path(&self) -> &Path {
             Path::new("test.era1")
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn import_stops_at_to_block() {
+        let pf = create_test_provider_factory();
+        init_genesis(&pf).unwrap();
+
+        let folder = tempdir().unwrap();
+        let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+
+        // Each file yields blocks 1 and 2; without `to_block` the import would reach 2.
+        let stream = futures_util::stream::iter(vec![
+            Ok(TestMeta { marked: Cell::new(false) }),
+            Ok(TestMeta { marked: Cell::new(false) }),
+        ]);
+
+        let height =
+            import::<TestEra, _, _, _, Block, _, _>(stream, &pf, &mut hash_collector, Some(1))
+                .unwrap();
+
+        assert_eq!(height, 1);
     }
 
     #[test]

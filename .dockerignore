@@ -6,6 +6,7 @@
 !/crates
 !/pkg
 !/testing
+!/.github/scripts/install_llvm_ubuntu.sh
 !book.toml
 !Cargo.lock
 !Cargo.toml
