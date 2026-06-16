@@ -111,12 +111,13 @@ impl BalPrewarmPool {
 /// a high number of threads is counterproductive due to the effects of context switching, core
 /// migration, contention, etc.
 ///
-/// However, that overhead is considered negligible compared to the benefits of fully utilizing
-/// `NVMe` resources. For example, with request latency of 100µs, 100k IO requests the expected
-/// time to finish is 312.5ms at QD=32 and 156.26ms at QD=64.
+/// However, that overhead is considered negligible compared to the benefits of utilizing `NVMe`
+/// resources. For example, with request latency of 100µs, 100k IO requests the expected time to
+/// finish is 312.5ms at QD=32 and 156.26ms at QD=64. Use the lower end of the useful range so BAL
+/// prewarming does not crowd out proof workers and execution-cache work on the same payload.
 ///
 /// This should explain why this particular value is picked.
-pub(crate) const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
+pub(crate) const DEFAULT_BAL_PREWARM_THREADS: usize = 64;
 
 fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
     // The provider (and its MDBX read txn) held for the current block, between `BeginBlock` and
