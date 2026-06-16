@@ -8526,6 +8526,7 @@ version = "2.3.0"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
+ "alloy-rlp",
  "bytes",
  "eyre",
  "futures-util",
