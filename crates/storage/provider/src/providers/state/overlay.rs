@@ -1,5 +1,5 @@
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{BlockHash, BlockNumber, B256, U256};
+use alloy_primitives::{b256, BlockHash, BlockNumber, B256, U256};
 use metrics::{Counter, Histogram};
 use reth_chain_state::{EthPrimitives, StateTrieOverlayManager, StateTrieOverlaySparseTrie};
 use reth_db_api::{tables, transaction::DbTx, DatabaseError};
@@ -18,13 +18,9 @@ use reth_storage_api::{
 };
 use reth_trie::{
     hashed_cursor::{
-        noop::NoopHashedCursor, HashedCursor, HashedCursorFactory, HashedPostStateCursor,
-        HashedStorageCursor,
+        HashedCursor, HashedCursorFactory, HashedPostStateCursor, HashedStorageCursor,
     },
-    trie_cursor::{
-        noop::NoopStorageTrieCursor, InMemoryTrieCursor, TrieCursor, TrieCursorFactory,
-        TrieStorageCursor,
-    },
+    trie_cursor::{InMemoryTrieCursor, TrieCursor, TrieCursorFactory, TrieStorageCursor},
     updates::TrieUpdatesSorted,
     BranchNodeCompact, HashedPostStateSorted, Nibbles,
 };
@@ -359,6 +355,12 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         if sparse_trie.is_some() &&
             let Some(OverlaySource::Managed { state, .. }) = &self.overlay_source
         {
+            debug!(
+                target: "providers::state::overlay",
+                parent_hash = ?self.parent_hash,
+                ?anchor_hash,
+                "using sparse trie overlay for parent"
+            );
             let trie_updates = Arc::new(TrieUpdatesSorted::default());
             let hashed_post_state = Arc::clone(state);
 
@@ -679,28 +681,189 @@ where
     fn sparse_account_trie(&self) -> Option<&reth_trie_sparse::ArenaParallelSparseTrie> {
         self.sparse_trie.as_deref()?.state_trie_ref().and_then(ConfigurableSparseTrie::as_arena)
     }
+}
 
-    fn sparse_storage_trie(&self, hashed_address: &B256) -> SparseStorageTrieRef<'_> {
-        let Some(sparse_trie) = self.sparse_trie.as_deref() else {
-            return SparseStorageTrieRef::Unrevealed
-        };
-
-        if let Some(trie) =
-            sparse_trie.storage_trie_ref(hashed_address).and_then(ConfigurableSparseTrie::as_arena)
-        {
-            SparseStorageTrieRef::Revealed(trie)
-        } else if sparse_trie.is_retained_storage_account(hashed_address) {
-            SparseStorageTrieRef::Empty
-        } else {
-            SparseStorageTrieRef::Unrevealed
-        }
-    }
+fn watch_address(hashed_address: B256) -> bool {
+    hashed_address == b256!("ab14d68802a763f7db875346d03fbf86f137de55814b191c069e721f47474733")
 }
 
 enum SparseStorageTrieRef<'a> {
     Revealed(&'a reth_trie_sparse::ArenaParallelSparseTrie),
     Empty,
     Unrevealed,
+}
+
+fn sparse_storage_trie_ref<'a>(
+    sparse_trie: &'a StateTrieOverlaySparseTrie,
+    hashed_address: &B256,
+) -> SparseStorageTrieRef<'a> {
+    if let Some(trie) =
+        sparse_trie.storage_trie_ref(hashed_address).and_then(ConfigurableSparseTrie::as_arena)
+    {
+        if watch_address(*hashed_address) {
+            debug!(
+                target: "providers::state::overlay",
+                ?hashed_address,
+                "watched sparse storage lookup found sparse storage trie"
+            );
+        }
+        SparseStorageTrieRef::Revealed(trie)
+    } else if sparse_trie.is_retained_storage_account(hashed_address) {
+        if watch_address(*hashed_address) {
+            debug!(
+                target: "providers::state::overlay",
+                ?hashed_address,
+                "watched sparse storage lookup found retained empty storage account"
+            );
+        }
+        SparseStorageTrieRef::Empty
+    } else {
+        if watch_address(*hashed_address) {
+            debug!(
+                target: "providers::state::overlay",
+                ?hashed_address,
+                retained_storage_tries = sparse_trie.retained_storage_tries_count(),
+                "watched sparse storage lookup is unrevealed in sparse trie overlay"
+            );
+        }
+        SparseStorageTrieRef::Unrevealed
+    }
+}
+
+fn apply_sparse_storage_trie<C>(
+    cursor: &mut ArenaTrieStorageCursor<C>,
+    sparse_trie: &StateTrieOverlaySparseTrie,
+    hashed_address: &B256,
+) where
+    C: TrieStorageCursor,
+{
+    match sparse_storage_trie_ref(sparse_trie, hashed_address) {
+        SparseStorageTrieRef::Revealed(trie) => cursor.set_sparse_trie(Some(trie)),
+        SparseStorageTrieRef::Empty => cursor.set_empty_sparse_trie(),
+        SparseStorageTrieRef::Unrevealed => cursor.set_sparse_trie(None),
+    }
+}
+
+fn apply_sparse_hashed_storage_trie<'a, C>(
+    cursor: &mut ArenaHashedStorageCursor<'a, C>,
+    sparse_trie: &'a StateTrieOverlaySparseTrie,
+    hashed_address: &B256,
+) where
+    C: HashedStorageCursor<Value = U256>,
+{
+    match sparse_storage_trie_ref(sparse_trie, hashed_address) {
+        SparseStorageTrieRef::Revealed(trie) => cursor.set_sparse_trie(Some(trie)),
+        SparseStorageTrieRef::Empty => cursor.set_empty_sparse_trie(),
+        SparseStorageTrieRef::Unrevealed => cursor.set_sparse_trie(None),
+    }
+}
+
+#[derive(Debug)]
+struct OverlaySparseTrieStorageCursor<'a, C> {
+    sparse_trie: &'a StateTrieOverlaySparseTrie,
+    cursor: ArenaTrieStorageCursor<C>,
+}
+
+impl<'a, C> OverlaySparseTrieStorageCursor<'a, C>
+where
+    C: TrieStorageCursor,
+{
+    fn new(sparse_trie: &'a StateTrieOverlaySparseTrie, hashed_address: B256, inner: C) -> Self {
+        let mut cursor = ArenaTrieStorageCursor::new(None, inner);
+        apply_sparse_storage_trie(&mut cursor, sparse_trie, &hashed_address);
+        Self { sparse_trie, cursor }
+    }
+}
+
+impl<C> TrieCursor for OverlaySparseTrieStorageCursor<'_, C>
+where
+    C: TrieStorageCursor,
+{
+    fn seek_exact(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        self.cursor.seek_exact(key)
+    }
+
+    fn seek(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        self.cursor.seek(key)
+    }
+
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        self.cursor.next()
+    }
+
+    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+        self.cursor.current()
+    }
+
+    fn reset(&mut self) {
+        self.cursor.reset();
+    }
+}
+
+impl<C> TrieStorageCursor for OverlaySparseTrieStorageCursor<'_, C>
+where
+    C: TrieStorageCursor,
+{
+    fn set_hashed_address(&mut self, hashed_address: B256) {
+        self.cursor.inner_mut().set_hashed_address(hashed_address);
+        apply_sparse_storage_trie(&mut self.cursor, self.sparse_trie, &hashed_address);
+    }
+}
+
+#[derive(Debug)]
+struct OverlaySparseHashedStorageCursor<'a, C> {
+    sparse_trie: &'a StateTrieOverlaySparseTrie,
+    cursor: ArenaHashedStorageCursor<'a, C>,
+}
+
+impl<'a, C> OverlaySparseHashedStorageCursor<'a, C>
+where
+    C: HashedStorageCursor<Value = U256>,
+{
+    fn new(sparse_trie: &'a StateTrieOverlaySparseTrie, hashed_address: B256, inner: C) -> Self {
+        let mut cursor = ArenaHashedStorageCursor::new(None, inner);
+        apply_sparse_hashed_storage_trie(&mut cursor, sparse_trie, &hashed_address);
+        Self { sparse_trie, cursor }
+    }
+}
+
+impl<C> HashedCursor for OverlaySparseHashedStorageCursor<'_, C>
+where
+    C: HashedStorageCursor<Value = U256>,
+{
+    type Value = U256;
+
+    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+        self.cursor.seek(key)
+    }
+
+    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+        self.cursor.next()
+    }
+
+    fn reset(&mut self) {
+        self.cursor.reset();
+    }
+}
+
+impl<C> HashedStorageCursor for OverlaySparseHashedStorageCursor<'_, C>
+where
+    C: HashedStorageCursor<Value = U256>,
+{
+    fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
+        self.cursor.is_storage_empty()
+    }
+
+    fn set_hashed_address(&mut self, hashed_address: B256) {
+        self.cursor.inner_mut().set_hashed_address(hashed_address);
+        apply_sparse_hashed_storage_trie(&mut self.cursor, self.sparse_trie, &hashed_address);
+    }
 }
 
 impl<Provider> TrieCursorFactory for OverlayStateProvider<Provider>
@@ -740,25 +903,27 @@ where
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         let db_cursor = self.storage_trie_db_cursor(hashed_address)?;
         let trie_updates = self.trie_updates.as_ref();
-        match (self.sparse_storage_trie(&hashed_address), trie_updates.is_empty()) {
-            (SparseStorageTrieRef::Revealed(sparse_trie), true) => {
-                Ok(Box::new(ArenaTrieStorageCursor::new(Some(sparse_trie), db_cursor)))
-            }
-            (SparseStorageTrieRef::Revealed(sparse_trie), false) => {
+        match (self.sparse_trie.as_deref(), trie_updates.is_empty()) {
+            (Some(sparse_trie), true) => Ok(Box::new(OverlaySparseTrieStorageCursor::new(
+                sparse_trie,
+                hashed_address,
+                db_cursor,
+            ))),
+            (Some(sparse_trie), false) => {
                 let inner =
                     InMemoryTrieCursor::new_storage(db_cursor, trie_updates, hashed_address);
-                Ok(Box::new(ArenaTrieStorageCursor::new(Some(sparse_trie), inner)))
+                Ok(Box::new(OverlaySparseTrieStorageCursor::new(
+                    sparse_trie,
+                    hashed_address,
+                    inner,
+                )))
             }
-            (SparseStorageTrieRef::Empty, true) => Ok(Box::new(NoopStorageTrieCursor::default())),
-            (SparseStorageTrieRef::Empty, false) => Ok(Box::new(InMemoryTrieCursor::new_storage(
-                NoopStorageTrieCursor::default(),
+            (None, true) => Ok(Box::new(db_cursor)),
+            (None, false) => Ok(Box::new(InMemoryTrieCursor::new_storage(
+                db_cursor,
                 trie_updates,
                 hashed_address,
             ))),
-            (SparseStorageTrieRef::Unrevealed, true) => Ok(Box::new(db_cursor)),
-            (SparseStorageTrieRef::Unrevealed, false) => Ok(Box::new(
-                InMemoryTrieCursor::new_storage(db_cursor, trie_updates, hashed_address),
-            )),
         }
     }
 }
@@ -801,32 +966,30 @@ where
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
         let db_cursor = self.hashed_storage_db_cursor(hashed_address)?;
         let hashed_post_state = self.hashed_post_state.as_ref();
-        match (self.sparse_storage_trie(&hashed_address), hashed_post_state.is_empty()) {
-            (SparseStorageTrieRef::Revealed(sparse_trie), true) => {
-                Ok(Box::new(ArenaHashedStorageCursor::new(Some(sparse_trie), db_cursor)))
-            }
-            (SparseStorageTrieRef::Revealed(sparse_trie), false) => {
+        match (self.sparse_trie.as_deref(), hashed_post_state.is_empty()) {
+            (Some(sparse_trie), true) => Ok(Box::new(OverlaySparseHashedStorageCursor::new(
+                sparse_trie,
+                hashed_address,
+                db_cursor,
+            ))),
+            (Some(sparse_trie), false) => {
                 let inner = HashedPostStateCursor::new_storage(
                     db_cursor,
                     hashed_post_state,
                     hashed_address,
                 );
-                Ok(Box::new(ArenaHashedStorageCursor::new(Some(sparse_trie), inner)))
-            }
-            (SparseStorageTrieRef::Empty, true) => {
-                Ok(Box::new(NoopHashedCursor::<U256>::default()))
-            }
-            (SparseStorageTrieRef::Empty, false) => {
-                Ok(Box::new(HashedPostStateCursor::new_storage(
-                    NoopHashedCursor::<U256>::default(),
-                    hashed_post_state,
+                Ok(Box::new(OverlaySparseHashedStorageCursor::new(
+                    sparse_trie,
                     hashed_address,
+                    inner,
                 )))
             }
-            (SparseStorageTrieRef::Unrevealed, true) => Ok(Box::new(db_cursor)),
-            (SparseStorageTrieRef::Unrevealed, false) => Ok(Box::new(
-                HashedPostStateCursor::new_storage(db_cursor, hashed_post_state, hashed_address),
-            )),
+            (None, true) => Ok(Box::new(db_cursor)),
+            (None, false) => Ok(Box::new(HashedPostStateCursor::new_storage(
+                db_cursor,
+                hashed_post_state,
+                hashed_address,
+            ))),
         }
     }
 }
