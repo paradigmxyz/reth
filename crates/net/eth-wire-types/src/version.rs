@@ -37,7 +37,7 @@ pub enum EthVersion {
 
 impl EthVersion {
     /// The latest known eth version
-    pub const LATEST: Self = Self::Eth69;
+    pub const LATEST: Self = Self::Eth71;
 
     /// All known eth versions
     pub const ALL_VERSIONS: &'static [Self] = &[Self::Eth69, Self::Eth68, Self::Eth67, Self::Eth66];
