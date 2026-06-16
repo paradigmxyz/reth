@@ -7585,7 +7585,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.5.1"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=3945b5f5434b051d97f2bc82e304b9ad207d3c40#3945b5f5434b051d97f2bc82e304b9ad207d3c40"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=bfb34d9ae099882b8b49cf8afc5f4e4673cb4e89#bfb34d9ae099882b8b49cf8afc5f4e4673cb4e89"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7605,7 +7605,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.5.1"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=3945b5f5434b051d97f2bc82e304b9ad207d3c40#3945b5f5434b051d97f2bc82e304b9ad207d3c40"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=bfb34d9ae099882b8b49cf8afc5f4e4673cb4e89#bfb34d9ae099882b8b49cf8afc5f4e4673cb4e89"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9291,7 +9291,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "0.5.1"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=3945b5f5434b051d97f2bc82e304b9ad207d3c40#3945b5f5434b051d97f2bc82e304b9ad207d3c40"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=bfb34d9ae099882b8b49cf8afc5f4e4673cb4e89#bfb34d9ae099882b8b49cf8afc5f4e4673cb4e89"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9803,7 +9803,7 @@ dependencies = [
 [[package]]
 name = "reth-rpc-traits"
 version = "0.5.1"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=3945b5f5434b051d97f2bc82e304b9ad207d3c40#3945b5f5434b051d97f2bc82e304b9ad207d3c40"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=bfb34d9ae099882b8b49cf8afc5f4e4673cb4e89#bfb34d9ae099882b8b49cf8afc5f4e4673cb4e89"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -10325,7 +10325,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.5.1"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=3945b5f5434b051d97f2bc82e304b9ad207d3c40#3945b5f5434b051d97f2bc82e304b9ad207d3c40"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=bfb34d9ae099882b8b49cf8afc5f4e4673cb4e89#bfb34d9ae099882b8b49cf8afc5f4e4673cb4e89"
 dependencies = [
  "zstd",
 ]
