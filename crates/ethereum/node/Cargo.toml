@@ -65,7 +65,6 @@ tower.workspace = true
 [dev-dependencies]
 reth-db.workspace = true
 reth-exex.workspace = true
-reth-node-core.workspace = true
 reth-e2e-test-utils.workspace = true
 reth-tasks.workspace = true
 reth-testing-utils.workspace = true
@@ -94,6 +93,7 @@ reth-rpc-layer.workspace = true
 
 [features]
 default = []
+jit = ["reth-evm-ethereum/jit"]
 asm-keccak = [
     "alloy-primitives/asm-keccak",
     "reth-node-core/asm-keccak",

@@ -8,7 +8,10 @@ use alloy_rpc_types_beacon::relay::{
     BuilderBlockValidationRequestV6, SignedBidSubmissionV3, SignedBidSubmissionV4,
     SignedBidSubmissionV6,
 };
-use alloy_rpc_types_engine::{BlobsBundleV1, ExecutionPayloadV3};
+use alloy_rpc_types_engine::{
+    BlobsBundleV1, CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar,
+    ExecutionPayloadV3, PraguePayloadFields,
+};
 use alloy_rpc_types_eth::TransactionRequest;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, MAINNET};
@@ -21,6 +24,7 @@ use reth_node_core::{
 };
 use reth_node_ethereum::EthereumNode;
 use reth_payload_primitives::BuiltPayload;
+use reth_primitives_traits::Block as _;
 use reth_rpc_api::servers::AdminApiServer;
 use reth_tasks::Runtime;
 use std::{
@@ -373,6 +377,34 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
         .await
         .is_err());
 
+    // undecodable block access list bytes are rejected before the payload is processed
+    let mut undecodable_bal_request = request.clone();
+    undecodable_bal_request.request.execution_payload.block_access_list =
+        Bytes::from_static(&[0x80]);
+    let err = provider
+        .raw_request::<_, ()>(
+            "flashbots_validateBuilderSubmissionV6".into(),
+            (&undecodable_bal_request,),
+        )
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("invalid block access list"), "{err}");
+
+    // an empty block access list with a consistent block hash is rejected because the access
+    // list rebuilt during execution doesn't match the submitted one
+    let mut mismatched_bal_request = request.clone();
+    mismatched_bal_request.request.execution_payload.block_access_list =
+        Bytes::from_static(&[0xc0]);
+    update_block_hash_v6(&mut mismatched_bal_request)?;
+    let err = provider
+        .raw_request::<_, ()>(
+            "flashbots_validateBuilderSubmissionV6".into(),
+            (&mismatched_bal_request,),
+        )
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("block access list hash mismatch"), "{err}");
+
     request.request.execution_payload.payload_inner.payload_inner.payload_inner.state_root =
         B256::ZERO;
     assert!(provider
@@ -380,6 +412,27 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
         .await
         .is_err());
 
+    Ok(())
+}
+
+/// Recomputes the block hash of the request after its execution payload has been modified and
+/// updates it in the payload and the bid trace.
+fn update_block_hash_v6(request: &mut BuilderBlockValidationRequestV6) -> eyre::Result<()> {
+    let block_hash = ExecutionPayload::V4(request.request.execution_payload.clone())
+        .try_into_block_with_sidecar::<reth_ethereum_primitives::TransactionSigned>(
+            &ExecutionPayloadSidecar::v4(
+                CancunPayloadFields {
+                    parent_beacon_block_root: request.parent_beacon_block_root,
+                    versioned_hashes: request.request.blobs_bundle.versioned_hashes(),
+                },
+                PraguePayloadFields::new(request.request.execution_requests.to_requests()),
+            ),
+        )?
+        .seal_slow()
+        .hash();
+    request.request.execution_payload.payload_inner.payload_inner.payload_inner.block_hash =
+        block_hash;
+    request.request.message.block_hash = block_hash;
     Ok(())
 }
 

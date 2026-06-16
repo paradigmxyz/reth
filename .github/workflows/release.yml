@@ -112,6 +112,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           target: ${{ matrix.configs.target }}
+      - name: Install LLVM
+        if: runner.os == 'Linux'
+        run: .github/scripts/install_llvm.sh ubuntu
+      - name: Install LLVM
+        if: runner.os == 'macOS'
+        run: .github/scripts/install_llvm.sh macos
       - name: Install cross main
         if: ${{ !matrix.configs.native }}
         id: cross_main

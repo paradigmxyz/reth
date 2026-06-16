@@ -39,7 +39,7 @@ async fn test_history_imports_from_fresh_state_successfully() {
 
     let expected_block_number = 8191;
     let actual_block_number =
-        import::<Era1, _, _, _, _, _, _>(stream, &pf, &mut hash_collector).unwrap();
+        import::<Era1, _, _, _, _, _, _>(stream, &pf, &mut hash_collector, None).unwrap();
 
     assert_eq!(actual_block_number, expected_block_number);
 }
@@ -69,7 +69,7 @@ async fn test_roundtrip_export_after_import() {
 
     // Import blocks from one era1 file into database
     let last_imported_block_height =
-        import::<Era1, _, _, _, _, _, _>(stream, &pf, &mut hash_collector).unwrap();
+        import::<Era1, _, _, _, _, _, _>(stream, &pf, &mut hash_collector, None).unwrap();
 
     assert_eq!(last_imported_block_height, 8191);
     let provider_ref = pf.provider_rw().unwrap().0;
@@ -97,7 +97,8 @@ async fn test_roundtrip_export_after_import() {
     };
 
     // Export blocks from database to era1 files
-    let exported_files = export(&provider_ref, &export_config).expect("Export should succeed");
+    let exported_files =
+        export::<Era1, _>(&provider_ref, &export_config).expect("Export should succeed");
 
     // Calculate how many files we expect based on the configuration
     // We expect 4 files for 900 blocks: first 3 files with 250 blocks each,

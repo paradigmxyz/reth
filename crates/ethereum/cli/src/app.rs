@@ -14,7 +14,7 @@ use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthereumNode};
+use reth_node_ethereum::{consensus::EthBeaconConsensus, EthereumNode};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_rpc_server_types::RpcModuleValidator;
 use reth_tasks::RayonConfig;
@@ -69,8 +69,16 @@ where
     where
         C: ChainSpecParser<ChainSpec = ChainSpec>,
     {
-        let components = |spec: Arc<ChainSpec>| {
-            (EthEvmConfig::ethereum(spec.clone()), Arc::new(EthBeaconConsensus::new(spec)))
+        let jit_args = match &self.cli.command {
+            Commands::ReExecute(cmd) => cmd.jit.clone(),
+            _ => Default::default(),
+        };
+
+        let components = move |spec: Arc<ChainSpec>| {
+            let (evm_config, _) =
+                reth_node_ethereum::node::build_evm_config(spec.clone(), &jit_args, None)
+                    .expect("failed to start revmc JIT backend");
+            (evm_config, Arc::new(EthBeaconConsensus::new(spec)))
         };
 
         self.run_with_components::<EthereumNode>(components, async move |builder, ext| {

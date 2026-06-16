@@ -1392,7 +1392,7 @@ mod tests {
         let mut state_hook = handle.state_hook().expect("state hook is None");
 
         for update in state_updates {
-            state_hook.on_state(&update);
+            state_hook.on_state(update);
         }
         drop(state_hook);
 

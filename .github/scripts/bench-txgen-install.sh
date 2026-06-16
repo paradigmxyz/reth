@@ -8,6 +8,10 @@ set -euxo pipefail
 
 TXGEN_REPO="${TXGEN_REPO:-https://github.com/tempoxyz/txgen}"
 
+if ! command -v llvm-config &>/dev/null; then
+  .github/scripts/install_llvm.sh ubuntu
+fi
+
 # txgen is private. Prefer the deploy key secret; fall back to token auth for
 # local/manual runs. Use the git CLI so cargo honors the auth configuration.
 if [ -n "${TXGEN_DEPLOY_KEY:-}" ]; then
