@@ -16,8 +16,8 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_primitives_traits::{Account, FastInstant as Instant};
 use reth_tasks::Runtime;
 use reth_trie::{
-    updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, HashedPostStateSorted, TrieAccount,
-    EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use reth_trie_parallel::{
@@ -111,9 +111,6 @@ pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = Configurab
     /// final [`HashedPostState`] and share it with main engine thread without requiring any extra
     /// hashing work.
     final_hashed_state: HashedPostState,
-    /// Sorted final hashed state used to mask pending persistence prunes that raced with this
-    /// task.
-    final_hashed_state_sorted: Option<HashedPostStateSorted>,
 
     /// Metrics for the sparse trie.
     metrics: MultiProofTaskMetrics,
@@ -172,7 +169,6 @@ where
             pending_targets: Default::default(),
             pending_updates: Default::default(),
             final_hashed_state: Default::default(),
-            final_hashed_state_sorted: None,
             metrics,
         }
     }
@@ -233,14 +229,14 @@ where
         max_values_capacity: usize,
         disable_pruning: bool,
         updates: &TrieUpdates,
-    ) -> (SparseStateTrie<A, S>, DeferredDrops, Option<HashedPostStateSorted>) {
-        let Self { mut trie, final_hashed_state_sorted, .. } = self;
+    ) -> (SparseStateTrie<A, S>, DeferredDrops) {
+        let Self { mut trie, .. } = self;
         trie.commit_updates(updates);
         if !disable_pruning {
             trie.shrink_to(max_nodes_capacity, max_values_capacity);
         }
         let deferred = trie.take_deferred_drops();
-        (trie, deferred, final_hashed_state_sorted)
+        (trie, deferred)
     }
 
     /// Clears and shrinks the trie, discarding all state.
@@ -426,7 +422,6 @@ where
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
                 let final_hashed_state = core::mem::take(&mut self.final_hashed_state);
-                self.final_hashed_state_sorted = Some(final_hashed_state.clone_into_sorted());
                 let _ = self.final_hashed_state_tx.take().unwrap().send(final_hashed_state);
                 self.finished_state_updates = true
             }
