@@ -101,10 +101,19 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
                 self.total
             );
             assert!(
-                index >= self.next && self.pending[index].is_none(),
+                index >= self.next,
                 "BAL worker returned duplicate transaction index {index}",
             );
 
+            if index == self.next {
+                self.next += 1;
+                return Some(Ok(output));
+            }
+
+            assert!(
+                self.pending[index].is_none(),
+                "BAL worker returned duplicate transaction index {index}",
+            );
             self.pending[index] = Some(output);
         }
     }
