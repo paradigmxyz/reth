@@ -1402,8 +1402,8 @@ impl RocksDBProvider {
         let mut batch = self.batch();
         let mut account_history: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
 
-        for (block_idx, block) in blocks.iter().enumerate() {
-            let block_number = ctx.first_block_number + block_idx as u64;
+        let mut block_number = ctx.first_block_number;
+        for block in blocks {
             let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
 
             // Iterate through account reverts - these are exactly the accounts that have
@@ -1413,6 +1413,7 @@ impl RocksDBProvider {
                     account_history.entry(address).or_default().push(block_number);
                 }
             }
+            block_number += 1;
         }
 
         // Write account history using proper shard append logic
@@ -1434,8 +1435,8 @@ impl RocksDBProvider {
     ) -> ProviderResult<()> {
         let mut storage_history: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
 
-        for (block_idx, block) in blocks.iter().enumerate() {
-            let block_number = ctx.first_block_number + block_idx as u64;
+        let mut block_number = ctx.first_block_number;
+        for block in blocks {
             let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
 
             // Iterate through storage reverts - these are exactly the slots that have
@@ -1451,6 +1452,7 @@ impl RocksDBProvider {
                     }
                 }
             }
+            block_number += 1;
         }
 
         let shard_puts = storage_history
