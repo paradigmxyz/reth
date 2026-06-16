@@ -13,7 +13,7 @@ pub const DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD: u64 = 16;
 pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 
 /// The size of proof targets chunk to spawn in one multiproof calculation.
-pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 5;
+pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 32;
 
 /// Default number of cache hits before an invalid header entry is evicted and reprocessed.
 pub const DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD: u8 = 128;
