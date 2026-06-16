@@ -81,6 +81,9 @@ type V2StorageProofCalculator<'a, Provider> = proof_v2::StorageProofCalculator<
     InstrumentedHashedCursor<'a, <Provider as HashedCursorFactory>::StorageCursor<'a>>,
 >;
 
+/// Shared cache of storage roots calculated while encoding account proof leaves.
+pub type StorageRootCache = Arc<DashMap<B256, B256>>;
+
 /// Tracks worker availability counts.
 ///
 /// It uses cacheline-aligned flags to avoid core-to-core chatter.
@@ -144,6 +147,8 @@ pub struct ProofWorkerHandle {
     /// Per-worker availability flags for account workers. Used to determine whether to chunk
     /// multiproofs.
     account_availability: Arc<AvailabilitySheet>,
+    /// Shared storage root cache used by account value encoders and storage proof workers.
+    cached_storage_roots: StorageRootCache,
     /// Total number of storage workers spawned
     storage_worker_count: usize,
     /// Total number of account workers spawned
@@ -178,10 +183,31 @@ impl ProofWorkerHandle {
             + Sync
             + 'static,
     {
+        Self::new_with_storage_root_cache(runtime, task_ctx, halve_workers, Default::default())
+    }
+
+    /// Spawns storage and account worker pools with an existing storage root cache.
+    #[instrument(
+        name = "ProofWorkerHandle::new",
+        level = "debug",
+        target = "trie::proof_task",
+        skip_all
+    )]
+    pub fn new_with_storage_root_cache<Factory>(
+        runtime: &Runtime,
+        task_ctx: ProofTaskCtx<Factory>,
+        halve_workers: bool,
+        cached_storage_roots: StorageRootCache,
+    ) -> Self
+    where
+        Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
-
-        let cached_storage_roots = Arc::<DashMap<_, _>>::default();
 
         let divisor = if halve_workers { 2 } else { 1 };
         let storage_worker_count =
@@ -244,6 +270,7 @@ impl ProofWorkerHandle {
         let account_rt = runtime.clone();
         let account_tx = storage_work_tx.clone();
         let account_avail = account_availability.clone();
+        let account_storage_roots = cached_storage_roots.clone();
         let account_parent_span = tracing::Span::current();
         runtime.spawn_blocking_named("account-workers", move || {
             let worker_id = AtomicUsize::new(0);
@@ -263,7 +290,7 @@ impl ProofWorkerHandle {
                     worker_id,
                     account_tx.clone(),
                     account_avail.clone(),
-                    cached_storage_roots.clone(),
+                    account_storage_roots.clone(),
                     #[cfg(feature = "metrics")]
                     metrics,
                     #[cfg(feature = "metrics")]
@@ -285,8 +312,16 @@ impl ProofWorkerHandle {
             account_work_tx,
             storage_availability,
             account_availability,
+            cached_storage_roots,
             storage_worker_count,
             account_worker_count,
+        }
+    }
+
+    /// Removes storage roots for accounts modified by the just-validated state transition.
+    pub fn invalidate_storage_roots<'a>(&self, addresses: impl IntoIterator<Item = &'a B256>) {
+        for address in addresses {
+            self.cached_storage_roots.remove(address);
         }
     }
 

@@ -9,7 +9,7 @@ use crate::tree::{
     },
     payload_processor::multiproof::MultiProofTaskMetrics,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256Set, B256};
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -111,6 +111,8 @@ pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = Configurab
     /// final [`HashedPostState`] and share it with main engine thread without requiring any extra
     /// hashing work.
     final_hashed_state: HashedPostState,
+    /// Accounts whose cached storage roots must be discarded after this state transition.
+    storage_root_cache_invalidations: B256Set,
 
     /// Metrics for the sparse trie.
     metrics: MultiProofTaskMetrics,
@@ -169,6 +171,7 @@ where
             pending_targets: Default::default(),
             pending_updates: Default::default(),
             final_hashed_state: Default::default(),
+            storage_root_cache_invalidations: Default::default(),
             metrics,
         }
     }
@@ -408,6 +411,10 @@ where
         self.storage_cache_hits = 0;
         self.storage_cache_misses = 0;
 
+        self.proof_worker_handle
+            .invalidate_storage_roots(self.storage_root_cache_invalidations.iter());
+        self.storage_root_cache_invalidations.clear();
+
         Ok(StateRootComputeOutcome {
             state_root,
             trie_updates: Arc::new(trie_updates),
@@ -469,6 +476,8 @@ where
     )]
     fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
         for (&address, storage) in &hashed_state_update.storages {
+            self.storage_root_cache_invalidations.insert(address);
+
             if !storage.storage.is_empty() {
                 // Look up outer maps once per address instead of once per slot.
                 let new_updates = self.new_storage_updates.entry(address).or_default();
@@ -501,6 +510,7 @@ where
         }
 
         for (&address, &account) in &hashed_state_update.accounts {
+            self.storage_root_cache_invalidations.insert(address);
             self.trie.record_account_touch(address);
 
             // Track account as touched.

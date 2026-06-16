@@ -31,7 +31,7 @@ use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, HashedPostState,
 };
 use reth_trie_parallel::{
-    proof_task::{ProofTaskCtx, ProofWorkerHandle},
+    proof_task::{ProofTaskCtx, ProofWorkerHandle, StorageRootCache},
     root::ParallelStateRootError,
 };
 use reth_trie_sparse::{
@@ -398,13 +398,12 @@ where
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         #[cfg(feature = "trie-debug")]
         let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
-        let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers);
-
         let (state_root_tx, state_root_rx) = channel();
         let (hashed_state_tx, hashed_state_rx) = channel();
 
         self.spawn_sparse_trie_task(
-            proof_handle,
+            task_ctx,
+            halve_workers,
             state_root_tx,
             hashed_state_tx,
             from_multi_proof,
@@ -599,15 +598,22 @@ where
     /// Spawns the [`SparseTrieCacheTask`] for this payload processor.
     ///
     /// The trie is preserved when the new payload is a child of the previous one.
-    fn spawn_sparse_trie_task(
+    fn spawn_sparse_trie_task<F>(
         &self,
-        proof_worker_handle: ProofWorkerHandle,
+        task_ctx: ProofTaskCtx<F>,
+        halve_workers: bool,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
         hashed_state_tx: mpsc::Sender<HashedPostState>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
         parent_state_root: B256,
         chunk_size: usize,
-    ) {
+    ) where
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
         let max_hot_slots = self.sparse_trie_max_hot_slots;
@@ -632,7 +638,7 @@ where
                 .sparse_trie_cache_wait_duration_histogram
                 .record(start.elapsed().as_secs_f64());
 
-            let mut sparse_state_trie = preserved
+            let (mut sparse_state_trie, storage_root_cache): (_, StorageRootCache) = preserved
                 .map(|preserved| preserved.into_trie_for(parent_state_root))
                 .unwrap_or_else(|| {
                     debug!(
@@ -642,12 +648,22 @@ where
                     let default_trie = RevealableSparseTrie::blind_from(
                         ConfigurableSparseTrie::Arena(ArenaParallelSparseTrie::default()),
                     );
-                    SparseStateTrie::default()
-                        .with_accounts_trie(default_trie.clone())
-                        .with_default_storage_trie(default_trie)
-                        .with_updates(true)
+                    (
+                        SparseStateTrie::default()
+                            .with_accounts_trie(default_trie.clone())
+                            .with_default_storage_trie(default_trie)
+                            .with_updates(true),
+                        Default::default(),
+                    )
                 });
             sparse_state_trie.set_hot_cache_capacities(max_hot_slots, max_hot_accounts);
+
+            let proof_worker_handle = ProofWorkerHandle::new_with_storage_root_cache(
+                &executor,
+                task_ctx,
+                halve_workers,
+                storage_root_cache.clone(),
+            );
 
             let mut task = SparseTrieCacheTask::new_with_trie(
                 &executor,
@@ -711,7 +727,11 @@ where
                 trie_metrics
                     .sparse_trie_retained_storage_tries
                     .set(trie.retained_storage_tries_count() as f64);
-                guard.store(PreservedSparseTrie::anchored(trie, result.state_root));
+                guard.store(PreservedSparseTrie::anchored(
+                    trie,
+                    result.state_root,
+                    storage_root_cache,
+                ));
                 deferred
             } else {
                 debug!(

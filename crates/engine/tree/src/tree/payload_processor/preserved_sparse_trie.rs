@@ -3,6 +3,7 @@
 use alloy_primitives::B256;
 use parking_lot::Mutex;
 use reth_primitives_traits::FastInstant as Instant;
+use reth_trie_parallel::proof_task::StorageRootCache;
 use reth_trie_sparse::{ConfigurableSparseTrie, SparseStateTrie};
 use std::sync::Arc;
 use tracing::debug;
@@ -78,6 +79,9 @@ pub(super) enum PreservedSparseTrie {
         /// The state root this trie represents (computed from the previous block).
         /// Used to verify continuity: new payload's `parent_state_root` must match this.
         state_root: B256,
+        /// Storage roots computed while proving this anchor, reused only for continuation
+        /// payloads.
+        storage_root_cache: StorageRootCache,
     },
     /// Cleared trie with preserved allocations, ready for fresh use.
     Cleared {
@@ -91,8 +95,12 @@ impl PreservedSparseTrie {
     ///
     /// The `state_root` is the computed state root from the trie, which becomes the
     /// anchor for determining if subsequent payloads can reuse this trie.
-    pub(super) const fn anchored(trie: SparseTrie, state_root: B256) -> Self {
-        Self::Anchored { trie, state_root }
+    pub(super) const fn anchored(
+        trie: SparseTrie,
+        state_root: B256,
+        storage_root_cache: StorageRootCache,
+    ) -> Self {
+        Self::Anchored { trie, state_root, storage_root_cache }
     }
 
     /// Creates a cleared preserved trie (allocations preserved, data cleared).
@@ -100,22 +108,24 @@ impl PreservedSparseTrie {
         Self::Cleared { trie }
     }
 
-    /// Consumes self and returns the trie for reuse.
+    /// Consumes self and returns the trie and storage-root cache for reuse.
     ///
     /// If the preserved trie is anchored and the parent state root matches, the pruned
-    /// trie structure is reused directly. Otherwise, the trie is cleared but allocations
-    /// are preserved to reduce memory overhead.
-    pub(super) fn into_trie_for(self, parent_state_root: B256) -> SparseTrie {
+    /// trie structure and storage-root cache are reused directly. Otherwise, the trie is cleared
+    /// but allocations are preserved to reduce memory overhead, and the root cache is discarded.
+    pub(super) fn into_trie_for(self, parent_state_root: B256) -> (SparseTrie, StorageRootCache) {
         match self {
-            Self::Anchored { trie, state_root } if state_root == parent_state_root => {
+            Self::Anchored { trie, state_root, storage_root_cache }
+                if state_root == parent_state_root =>
+            {
                 debug!(
                     target: "engine::tree::payload_processor",
                     %state_root,
                     "Reusing anchored sparse trie for continuation payload"
                 );
-                trie
+                (trie, storage_root_cache)
             }
-            Self::Anchored { mut trie, state_root } => {
+            Self::Anchored { mut trie, state_root, .. } => {
                 debug!(
                     target: "engine::tree::payload_processor",
                     anchor_root = %state_root,
@@ -123,7 +133,7 @@ impl PreservedSparseTrie {
                     "Clearing anchored sparse trie - parent state root mismatch"
                 );
                 trie.clear();
-                trie
+                (trie, Default::default())
             }
             Self::Cleared { trie } => {
                 debug!(
@@ -131,8 +141,45 @@ impl PreservedSparseTrie {
                     %parent_state_root,
                     "Using cleared sparse trie with preserved allocations"
                 );
-                trie
+                (trie, Default::default())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reuses_storage_root_cache_for_matching_anchor() {
+        let state_root = B256::from([1; 32]);
+        let address = B256::from([2; 32]);
+        let storage_root = B256::from([3; 32]);
+        let cache: StorageRootCache = Default::default();
+        cache.insert(address, storage_root);
+
+        let preserved =
+            PreservedSparseTrie::anchored(SparseTrie::default(), state_root, cache.clone());
+        let (_, reused_cache) = preserved.into_trie_for(state_root);
+
+        assert!(Arc::ptr_eq(&cache, &reused_cache));
+        assert_eq!(reused_cache.get(&address).map(|root| *root), Some(storage_root));
+    }
+
+    #[test]
+    fn discards_storage_root_cache_for_mismatched_anchor() {
+        let state_root = B256::from([1; 32]);
+        let parent_state_root = B256::from([9; 32]);
+        let address = B256::from([2; 32]);
+        let cache: StorageRootCache = Default::default();
+        cache.insert(address, B256::from([3; 32]));
+
+        let preserved =
+            PreservedSparseTrie::anchored(SparseTrie::default(), state_root, cache.clone());
+        let (_, new_cache) = preserved.into_trie_for(parent_state_root);
+
+        assert!(!Arc::ptr_eq(&cache, &new_cache));
+        assert!(new_cache.is_empty());
     }
 }
