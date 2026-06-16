@@ -727,8 +727,8 @@ where
                         if self.config.always_compare_trie_updates() {
                             let _has_diff = self.compare_trie_updates_with_serial(
                                 provider_builder.clone(),
-                                provider_factory,
-                                overlay_builder,
+                                provider_factory.clone(),
+                                overlay_builder.clone(),
                                 &output,
                                 trie_updates.as_ref().clone(),
                             );
@@ -750,6 +750,13 @@ where
                                 ?state_root,
                                 block_state_root = ?block.header().state_root(),
                                 "State root task returned incorrect state root"
+                            );
+                            let _has_diff = self.compare_trie_updates_with_serial(
+                                provider_builder.clone(),
+                                provider_factory.clone(),
+                                overlay_builder.clone(),
+                                &output,
+                                trie_updates.as_ref().clone(),
                             );
                             #[cfg(feature = "trie-debug")]
                             Self::write_trie_debug_recorders(

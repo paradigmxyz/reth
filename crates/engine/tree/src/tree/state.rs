@@ -8,6 +8,7 @@ use alloy_primitives::{
 };
 use reth_chain_state::{EthPrimitives, ExecutedBlock, StateTrieOverlayManager};
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, SealedHeader};
+use reth_trie::HashedPostStateSorted;
 use std::{
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
     ops::Bound,
@@ -191,7 +192,7 @@ impl<N: NodePrimitives> TreeState<N> {
         &mut self,
         upper_bound: BlockNumber,
         last_persisted_hash: B256,
-        removed_hashes: &mut Vec<B256>,
+        removed_blocks: &mut Vec<ExecutedBlock<N>>,
     ) {
         debug!(target: "engine::tree", ?upper_bound, ?last_persisted_hash, "Removing canonical blocks from the tree");
 
@@ -210,8 +211,8 @@ impl<N: NodePrimitives> TreeState<N> {
                 let hash = executed.recovered_block().hash();
                 let num_hash = executed.recovered_block().num_hash();
                 debug!(target: "engine::tree", ?num_hash, "Attempting to remove block walking back from the head");
-                if self.remove_by_hash(hash).is_some() {
-                    removed_hashes.push(hash);
+                if let Some((removed, _)) = self.remove_by_hash(hash) {
+                    removed_blocks.push(removed);
                 }
             }
         }
@@ -223,7 +224,7 @@ impl<N: NodePrimitives> TreeState<N> {
     fn prune_finalized_sidechains(
         &mut self,
         finalized_num_hash: BlockNumHash,
-        removed_hashes: &mut Vec<B256>,
+        removed_blocks: &mut Vec<ExecutedBlock<N>>,
     ) {
         let BlockNumHash { number: finalized_num, hash: finalized_hash } = finalized_num_hash;
 
@@ -243,7 +244,7 @@ impl<N: NodePrimitives> TreeState<N> {
         for hash in blocks_to_remove {
             if let Some((removed, _)) = self.remove_by_hash(hash) {
                 debug!(target: "engine::tree", num_hash=?removed.recovered_block().num_hash(), "Removed finalized sidechain block");
-                removed_hashes.push(hash);
+                removed_blocks.push(removed);
             }
         }
 
@@ -270,7 +271,7 @@ impl<N: NodePrimitives> TreeState<N> {
         while let Some(block) = blocks_to_remove.pop_front() {
             if let Some((removed, children)) = self.remove_by_hash(block) {
                 debug!(target: "engine::tree", num_hash=?removed.recovered_block().num_hash(), "Removed finalized sidechain child block");
-                removed_hashes.push(block);
+                removed_blocks.push(removed);
                 blocks_to_remove.extend(children);
             }
         }
@@ -291,7 +292,7 @@ impl<N: NodePrimitives> TreeState<N> {
         upper_bound: BlockNumHash,
         last_persisted_hash: B256,
         finalized_num_hash: Option<BlockNumHash>,
-    ) {
+    ) -> HashedPostStateSorted {
         debug!(target: "engine::tree", ?upper_bound, ?finalized_num_hash, "Removing blocks from the tree");
 
         // If the finalized num is ahead of the upper bound, and exists, we need to instead ensure
@@ -311,18 +312,32 @@ impl<N: NodePrimitives> TreeState<N> {
         // * remove all canonical blocks below the upper bound
         // * fetch the number of the finalized hash, removing any sidechains that are __below__ the
         // finalized block
-        let mut removed_hashes = Vec::new();
-        self.remove_canonical_until(upper_bound.number, last_persisted_hash, &mut removed_hashes);
+        let mut removed_blocks = Vec::new();
+        self.remove_canonical_until(upper_bound.number, last_persisted_hash, &mut removed_blocks);
 
         // Now, we have removed canonical blocks (assuming the upper bound is above the finalized
         // block) and only have sidechains below the finalized block.
         if let Some(finalized_num_hash) = finalized_num_hash {
-            self.prune_finalized_sidechains(finalized_num_hash, &mut removed_hashes);
+            self.prune_finalized_sidechains(finalized_num_hash, &mut removed_blocks);
         }
 
+        let removed_states =
+            removed_blocks.iter().map(|block| block.hashed_state()).collect::<Vec<_>>();
+        let retained_states =
+            self.blocks_by_hash.values().map(|block| block.hashed_state()).collect::<Vec<_>>();
+
+        let persisted_state = HashedPostStateSorted::disjointed_merge_batch(
+            removed_states.iter().map(AsRef::as_ref).collect(),
+            retained_states.iter().map(AsRef::as_ref).collect(),
+        );
+
+        let removed_hashes =
+            removed_blocks.iter().map(|block| block.recovered_block().hash()).collect::<Vec<_>>();
         if !removed_hashes.is_empty() {
             self.state_trie_overlays.remove_blocks(removed_hashes);
         }
+
+        persisted_state
     }
 
     /// Updates the canonical head to the given block.

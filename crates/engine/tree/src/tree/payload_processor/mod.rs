@@ -220,14 +220,14 @@ where
             return
         }
 
-        let start = Instant::now();
-        self.sparse_state_trie.prune_persisted_state(
+        if let Some(duration) = self.sparse_state_trie.prune_persisted_state(
             persisted_block,
             persisted_state,
             SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
             SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
-        );
-        self.trie_metrics.sparse_trie_prune_duration_histogram.record(start.elapsed());
+        ) {
+            self.trie_metrics.sparse_trie_prune_duration_histogram.record(duration);
+        }
     }
 }
 
@@ -699,16 +699,6 @@ where
             );
 
             let result = task.run();
-            let sparse_trie_overlay_clone = if result.is_ok() {
-                sparse_trie_overlay.map(|(manager, block_hash)| {
-                    let start = Instant::now();
-                    let trie = executor.cpu_pool().install(|| task.parallel_compact_clone());
-                    trie_metrics.sparse_trie_clone_duration_histogram.record(start.elapsed());
-                    (manager, block_hash, trie)
-                })
-            } else {
-                None
-            };
 
             // Acquire the guard before sending the result to prevent a race condition:
             // Without this, the next block could start after send() but before store(),
@@ -728,43 +718,90 @@ where
                 );
             }
 
-            // Only preserve the trie as anchored if computation succeeded.
-            // A failed computation may have left the trie in a partially updated state.
+            // Only preserve the trie as anchored if computation succeeded and the validator
+            // accepted the result. A timed-out task can finish after the sequential fallback won,
+            // and preserving it would let an unobserved trie replace the current cache.
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
-            let deferred = if let Some(result) = task_result {
-                let start = Instant::now();
-                let (trie, deferred) = task.into_trie_for_reuse(
-                    SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
-                    SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
-                    disable_cache_pruning,
-                    &result.trie_updates,
-                );
-                trie_metrics
-                    .into_trie_for_reuse_duration_histogram
-                    .record(start.elapsed().as_secs_f64());
-                trie_metrics
-                    .sparse_trie_retained_memory_bytes
-                    .set(trie.memory_size() as f64);
-                trie_metrics
-                    .sparse_trie_retained_storage_tries
-                    .set(trie.retained_storage_tries_count() as f64);
-                guard.store(PreservedSparseTrie::anchored(trie, result.state_root, base_block));
-                if let Some((manager, block_hash, trie)) = sparse_trie_overlay_clone {
-                    manager.replace_sparse_trie(block_hash, base_block.hash, trie);
+            let deferred = match (receiver_dropped, task_result) {
+                (false, Some(result)) => {
+                    let start = Instant::now();
+                    let (trie, deferred, accepted_state) = task.into_trie_for_reuse(
+                        SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
+                        SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
+                        disable_cache_pruning,
+                        &result.trie_updates,
+                    );
+                    trie_metrics
+                        .into_trie_for_reuse_duration_histogram
+                        .record(start.elapsed().as_secs_f64());
+
+                    let mut preserved =
+                        PreservedSparseTrie::anchored(trie, result.state_root, base_block);
+                    guard.apply_pending_prunes(
+                        &mut preserved,
+                        accepted_state.as_ref(),
+                        SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
+                        SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
+                        &trie_metrics,
+                    );
+                    trie_metrics
+                        .sparse_trie_retained_memory_bytes
+                        .set(preserved.trie().memory_size() as f64);
+                    trie_metrics
+                        .sparse_trie_retained_storage_tries
+                        .set(preserved.trie().retained_storage_tries_count() as f64);
+
+                    let sparse_trie_overlay_clone =
+                        sparse_trie_overlay.and_then(|(manager, block_hash)| {
+                            let base_block = preserved.base_block()?;
+                            let start = Instant::now();
+                            let trie = executor
+                                .cpu_pool()
+                                .install(|| preserved.trie().parallel_compact_clone());
+                            trie_metrics
+                                .sparse_trie_clone_duration_histogram
+                                .record(start.elapsed());
+                            Some((manager, block_hash, base_block.hash, trie))
+                        });
+
+                    guard.store_pruned(preserved);
+                    if let Some((manager, block_hash, base_hash, trie)) = sparse_trie_overlay_clone
+                    {
+                        manager.replace_sparse_trie(block_hash, base_hash, trie);
+                    }
+                    deferred
                 }
-                deferred
-            } else {
-                debug!(
-                    target: "engine::tree::payload_processor",
-                    "State root computation failed, clearing trie"
-                );
-                let (trie, deferred) = task.into_cleared_trie(
-                    SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
-                    SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
-                );
-                guard.store(PreservedSparseTrie::cleared(trie));
-                deferred
+                (false, None) => {
+                    debug!(
+                        target: "engine::tree::payload_processor",
+                        "State root computation failed, clearing trie"
+                    );
+                    let (trie, deferred) = task.into_cleared_trie(
+                        SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
+                        SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
+                    );
+                    guard.store(
+                        PreservedSparseTrie::cleared(trie),
+                        SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
+                        SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
+                        &trie_metrics,
+                    );
+                    deferred
+                }
+                (true, _) => {
+                    debug!(
+                        target: "engine::tree::payload_processor",
+                        "State root receiver dropped before result was accepted, discarding trie"
+                    );
+                    let (trie, deferred) = task.into_cleared_trie(
+                        SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
+                        SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
+                    );
+                    guard.discard_in_flight();
+                    drop(trie);
+                    deferred
+                }
             };
             drop(guard);
             executor.spawn_drop(deferred);
