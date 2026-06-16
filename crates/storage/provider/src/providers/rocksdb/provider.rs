@@ -1383,7 +1383,10 @@ impl RocksDBProvider {
         for (block, &first_tx_num) in blocks.iter().zip(tx_nums) {
             let body = block.recovered_block().body();
             for (tx_num, transaction) in (first_tx_num..).zip(body.transactions_iter()) {
-                batch.put::<tables::TransactionHashNumbers>(*transaction.tx_hash(), &tx_num)?;
+                batch.put_encoded_bytes::<tables::TransactionHashNumbers>(
+                    transaction.tx_hash().as_ref(),
+                    &tx_num,
+                )?;
             }
         }
         ctx.pending_batches.lock().push(batch.into_inner());
@@ -1794,6 +1797,13 @@ impl<'a> RocksDBBatch<'a> {
         key: &<T::Key as Encode>::Encoded,
         value: &T::Value,
     ) -> ProviderResult<()> {
+        self.put_encoded_bytes::<T>(key.as_ref(), value)
+    }
+
+    /// Puts a value into the batch using already encoded key bytes.
+    ///
+    /// If auto-commit is enabled and the batch exceeds the threshold, commits and resets.
+    fn put_encoded_bytes<T: Table>(&mut self, key: &[u8], value: &T::Value) -> ProviderResult<()> {
         let value_bytes = compress_to_buf_or_ref!(self.buf, value).unwrap_or(&self.buf);
         self.inner.put_cf(self.provider.get_cf_handle::<T>()?, key, value_bytes);
         self.maybe_auto_commit()?;
