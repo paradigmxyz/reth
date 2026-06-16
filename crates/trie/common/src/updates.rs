@@ -10,6 +10,7 @@ use alloy_primitives::{
     map::{B256Map, B256Set, HashMap, HashSet},
     FixedBytes, B256,
 };
+use smallvec::SmallVec;
 
 /// The aggregation of trie updates.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
@@ -632,7 +633,7 @@ impl TrieUpdatesSorted {
     /// For small batches, uses `extend_ref_and_sort` loop.
     /// For large batches, uses k-way merge for O(n log k) complexity.
     pub fn merge_batch<T: AsRef<Self> + From<Self>>(iter: impl IntoIterator<Item = T>) -> T {
-        let items: alloc::vec::Vec<_> = iter.into_iter().collect();
+        let items: SmallVec<[_; 16]> = iter.into_iter().collect();
         match items.len() {
             0 => Self::default().into(),
             1 => items.into_iter().next().expect("len == 1"),
