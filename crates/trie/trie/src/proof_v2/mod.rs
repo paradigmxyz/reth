@@ -1813,11 +1813,17 @@ mod tests {
         test_utils::TrieTestHarness,
         trie_cursor::{depth_first, TrieCursorFactory},
     };
-    use alloy_primitives::map::B256Set;
+    use alloy_primitives::map::{B256Map, B256Set};
     use alloy_rlp::Decodable;
     use alloy_trie::proof::AddedRemovedKeys;
     use itertools::Itertools;
-    use reth_trie_common::{prefix_set::PrefixSetMut, ProofTrieNode, TrieNode};
+    use reth_trie_common::{
+        prefix_set::PrefixSetMut, DecodedMultiProofV2, ProofTrieNode, ProofTrieNodeV2, TrieNode,
+    };
+    use reth_trie_sparse::{
+        ArenaParallelSparseTrie, LeafUpdate, RevealableSparseTrie, SparseStateTrie,
+        SparseStateTrieCursorFactory, SparseStateTrieTrieCursorFactory, SparseTrie,
+    };
     use std::collections::BTreeMap;
 
     /// Converts legacy proofs to V2 proofs by combining extension nodes with their child branch
@@ -2316,6 +2322,67 @@ mod tests {
         );
     }
 
+    fn storage_leaf_updates(changes: &BTreeMap<B256, U256>) -> B256Map<LeafUpdate> {
+        changes
+            .iter()
+            .map(|(&slot, &value)| {
+                let encoded = if value.is_zero() {
+                    Vec::new()
+                } else {
+                    alloy_rlp::encode_fixed_size(&value).to_vec()
+                };
+                (slot, LeafUpdate::Changed(encoded))
+            })
+            .collect()
+    }
+
+    fn reveal_storage_root_from_harness(
+        sparse: &mut SparseStateTrie<ArenaParallelSparseTrie, ArenaParallelSparseTrie>,
+        address: B256,
+        harness: &TrieTestHarness,
+    ) {
+        sparse
+            .reveal_decoded_multiproof_v2(DecodedMultiProofV2 {
+                storage_proofs: B256Map::from_iter([(address, vec![harness.root_node()])]),
+                ..Default::default()
+            })
+            .unwrap();
+        sparse.storage_root(&address).unwrap();
+    }
+
+    fn apply_storage_changes(
+        sparse: &mut SparseStateTrie<ArenaParallelSparseTrie, ArenaParallelSparseTrie>,
+        address: B256,
+        changes: &BTreeMap<B256, U256>,
+        mut proof_nodes: impl FnMut(&mut [ProofV2Target]) -> Vec<ProofTrieNodeV2>,
+    ) -> B256 {
+        let mut updates = storage_leaf_updates(changes);
+        loop {
+            let mut targets = Vec::new();
+            sparse
+                .get_or_create_storage_trie_mut(address)
+                .update_leaves(&mut updates, |key, min_len| {
+                    targets.push(ProofV2Target::new(key).with_min_len(min_len));
+                })
+                .unwrap();
+
+            if targets.is_empty() {
+                break;
+            }
+
+            let nodes = proof_nodes(&mut targets);
+            sparse
+                .reveal_decoded_multiproof_v2(DecodedMultiProofV2 {
+                    storage_proofs: B256Map::from_iter([(address, nodes)]),
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+
+        assert!(updates.is_empty(), "all storage updates should be drained");
+        sparse.storage_root(&address).unwrap()
+    }
+
     /// Helper to compute the keccak256 hash of a storage leaf node. The `short_key` is the
     /// leaf's key after trimming all branch/extension nibbles consumed by ancestor nodes.
     fn storage_leaf_hash(short_key: &Nibbles, value: &U256) -> B256 {
@@ -2323,6 +2390,75 @@ mod tests {
         alloy_trie::nodes::LeafNodeRef::new(short_key, &alloy_rlp::encode_fixed_size(value))
             .encode(&mut buf);
         keccak256(&buf)
+    }
+
+    #[test]
+    fn sparse_storage_cursor_proof_after_prune_matches_serial_root() {
+        let slot_a = alloy_primitives::b256!(
+            "0xa3f976dbc69a4711517ce29288580ee98a83ff5cfb1996afbc804eaf23ed6230"
+        );
+        let slot_b = alloy_primitives::b256!(
+            "0x39f49d4f86f43fed34adc8e3bba471184028ca5f9fd411d1fed934cd01a700b2"
+        );
+        let slot_c = alloy_primitives::b256!(
+            "0xadf3c47c3209a8cb0be381d5667af3abbff0b25887c7bb0b5c25e58d2f11cf94"
+        );
+
+        let mut harness = TrieTestHarness::new(BTreeMap::from([
+            (slot_a, U256::from(1)),
+            (slot_b, U256::from(2)),
+        ]));
+        let address = harness.hashed_address();
+        let mut sparse =
+            SparseStateTrie::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::default();
+        sparse.set_accounts_trie(RevealableSparseTrie::revealed_empty());
+        reveal_storage_root_from_harness(&mut sparse, address, &harness);
+
+        let retain_slot_c = BTreeMap::from([(slot_c, U256::from(3))]);
+        apply_storage_changes(&mut sparse, address, &retain_slot_c, |targets| {
+            harness.proof_v2(targets).0
+        });
+        harness.apply_changeset(retain_slot_c);
+
+        let root_after_retained_slot = sparse.storage_root(&address).unwrap();
+        sparse.storage_trie_mut(&address).unwrap().prune(&[Nibbles::unpack(slot_c)]);
+        assert_eq!(
+            sparse.storage_root(&address).unwrap(),
+            root_after_retained_slot,
+            "prune must preserve storage root"
+        );
+
+        let rewrite_blinded_and_delete_retained = BTreeMap::from([
+            (slot_a, U256::from(4)),
+            (slot_b, U256::from(5)),
+            (slot_c, U256::ZERO),
+        ]);
+        let (expected_root, _) =
+            harness.get_root_with_updates(&rewrite_blinded_and_delete_retained);
+        let proof_sparse = sparse.clone();
+
+        let actual_root = apply_storage_changes(
+            &mut sparse,
+            address,
+            &rewrite_blinded_and_delete_retained,
+            |targets| {
+                let trie_factory = SparseStateTrieTrieCursorFactory::new(
+                    &proof_sparse,
+                    harness.trie_cursor_factory(),
+                );
+                let hashed_factory = SparseStateTrieCursorFactory::new(
+                    &proof_sparse,
+                    harness.hashed_cursor_factory(),
+                );
+                let trie_cursor = trie_factory.storage_trie_cursor(address).unwrap();
+                let hashed_cursor = hashed_factory.hashed_storage_cursor(address).unwrap();
+                StorageProofCalculator::new_storage(trie_cursor, hashed_cursor)
+                    .storage_proof(address, targets)
+                    .unwrap()
+            },
+        );
+
+        assert_eq!(actual_root, expected_root);
     }
 
     /// Tests branch collapse when the removed child comes BEFORE the remaining child.

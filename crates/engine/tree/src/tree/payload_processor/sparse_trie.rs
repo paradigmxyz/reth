@@ -16,8 +16,8 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_primitives_traits::{Account, FastInstant as Instant};
 use reth_tasks::Runtime;
 use reth_trie::{
-    updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
-    TRIE_ACCOUNT_RLP_MAX_SIZE,
+    updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, HashedPostStateSorted, TrieAccount,
+    EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use reth_trie_parallel::{
@@ -28,8 +28,8 @@ use reth_trie_parallel::{
 };
 use reth_trie_sparse::{
     errors::{SparseStateTrieErrorKind, SparseTrieErrorKind, SparseTrieResult},
-    ConfigurableSparseTrie, DeferredDrops, LeafUpdate, ParallelCompactClone, RevealableSparseTrie,
-    SparseStateTrie, SparseTrie,
+    ConfigurableSparseTrie, DeferredDrops, LeafUpdate, RevealableSparseTrie, SparseStateTrie,
+    SparseTrie,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
 use tracing::{debug, debug_span, error, instrument, trace_span};
@@ -111,6 +111,9 @@ pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = Configurab
     /// final [`HashedPostState`] and share it with main engine thread without requiring any extra
     /// hashing work.
     final_hashed_state: HashedPostState,
+    /// Sorted final hashed state used to mask pending persistence prunes that raced with this
+    /// task.
+    final_hashed_state_sorted: Option<HashedPostStateSorted>,
 
     /// Metrics for the sparse trie.
     metrics: MultiProofTaskMetrics,
@@ -169,6 +172,7 @@ where
             pending_targets: Default::default(),
             pending_updates: Default::default(),
             final_hashed_state: Default::default(),
+            final_hashed_state_sorted: None,
             metrics,
         }
     }
@@ -229,23 +233,14 @@ where
         max_values_capacity: usize,
         disable_pruning: bool,
         updates: &TrieUpdates,
-    ) -> (SparseStateTrie<A, S>, DeferredDrops) {
-        let Self { mut trie, .. } = self;
+    ) -> (SparseStateTrie<A, S>, DeferredDrops, Option<HashedPostStateSorted>) {
+        let Self { mut trie, final_hashed_state_sorted, .. } = self;
         trie.commit_updates(updates);
         if !disable_pruning {
             trie.shrink_to(max_nodes_capacity, max_values_capacity);
         }
         let deferred = trie.take_deferred_drops();
-        (trie, deferred)
-    }
-
-    /// Clones the computed trie for read-only reuse outside the sparse trie task.
-    pub(super) fn parallel_compact_clone(&self) -> SparseStateTrie<A, S>
-    where
-        A: ParallelCompactClone,
-        S: ParallelCompactClone,
-    {
-        self.trie.parallel_compact_clone()
+        (trie, deferred, final_hashed_state_sorted)
     }
 
     /// Clears and shrinks the trie, discarding all state.
@@ -430,11 +425,9 @@ where
                 self.on_hashed_state_update(hashed_state)?
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
-                let _ = self
-                    .final_hashed_state_tx
-                    .take()
-                    .unwrap()
-                    .send(core::mem::take(&mut self.final_hashed_state));
+                let final_hashed_state = core::mem::take(&mut self.final_hashed_state);
+                self.final_hashed_state_sorted = Some(final_hashed_state.clone_into_sorted());
+                let _ = self.final_hashed_state_tx.take().unwrap().send(final_hashed_state);
                 self.finished_state_updates = true
             }
         }
@@ -478,7 +471,16 @@ where
         &mut self,
         hashed_state_update: HashedPostState,
     ) -> Result<(), ParallelStateRootError> {
+        let mut invalidate_account_target_cache = false;
+
         for (&address, storage) in &hashed_state_update.storages {
+            if storage.wiped || !storage.storage.is_empty() {
+                // Prewarm touches can populate proof-target caches before real writes arrive.
+                // Re-evaluate proof coverage for changed storage from the current sparse topology.
+                self.fetched_storage_targets.remove(&address);
+                invalidate_account_target_cache = true;
+            }
+
             if storage.wiped {
                 self.trie.record_storage_wipe(address);
                 self.trie.wipe_storage(address).map_err(|err| {
@@ -521,6 +523,7 @@ where
         }
 
         for (&address, &account) in &hashed_state_update.accounts {
+            invalidate_account_target_cache = true;
             self.trie.record_account_touch(address);
 
             // Track account as touched.
@@ -532,6 +535,10 @@ where
             // Track account in `pending_account_updates` so that once storage root is computed,
             // it will be updated in the accounts trie.
             self.pending_account_updates.insert(address, Some(account));
+        }
+
+        if invalidate_account_target_cache {
+            self.fetched_account_targets.clear();
         }
 
         self.final_hashed_state.extend(hashed_state_update);
@@ -746,7 +753,9 @@ where
             // - we do not insert/remove entries between pointer collection and use, so pointers
             //   stay valid and map reallocation cannot occur;
             // - each pointer is consumed by at most one rayon task, so no aliasing mutable access.
-            unsafe { (*trie).root().expect("updates are drained, trie should be revealed by now") };
+            unsafe {
+                (*trie).root().expect("updates are drained, trie should be revealed by now");
+            }
         });
     }
 
@@ -807,7 +816,8 @@ where
 
                     (account, storage_root)
                 } else {
-                    (trie_account.map(Into::into), self.trie.storage_root(addr).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
+                    let storage_root = self.trie.storage_root(addr).expect("account had storage updates that were applied to its trie, storage root must be revealed by now");
+                    (trie_account.map(Into::into), storage_root)
                 };
 
                 let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);

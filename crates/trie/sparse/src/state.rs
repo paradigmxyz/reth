@@ -307,7 +307,14 @@ where
     /// Takes the storage trie for the provided address, creating a blind one if it doesn't exist.
     pub fn take_or_create_storage_trie(&mut self, address: &B256) -> RevealableSparseTrie<S> {
         self.storage.tries.remove(address).unwrap_or_else(|| {
-            self.storage.cleared_tries.pop().unwrap_or_else(|| self.storage.default_trie.clone())
+            if self.is_retained_empty_storage_account(address) {
+                self.take_empty_storage_trie()
+            } else {
+                self.storage
+                    .cleared_tries
+                    .pop()
+                    .unwrap_or_else(|| self.storage.default_trie.clone())
+            }
         })
     }
 
@@ -321,7 +328,31 @@ where
         &mut self,
         address: B256,
     ) -> &mut RevealableSparseTrie<S> {
+        if !self.storage.tries.contains_key(&address) &&
+            self.is_retained_empty_storage_account(&address)
+        {
+            let trie = self.take_empty_storage_trie();
+            self.storage.tries.insert(address, trie);
+        }
+
         self.storage.get_or_create_trie_mut(address)
+    }
+
+    fn is_retained_empty_storage_account(&self, address: &B256) -> bool {
+        self.retained_storage_accounts.contains(address) &&
+            !self.retained_storage_slots.contains_key(address)
+    }
+
+    fn take_empty_storage_trie(&mut self) -> RevealableSparseTrie<S> {
+        let mut trie =
+            self.storage.cleared_tries.pop().unwrap_or_else(|| self.storage.default_trie.clone());
+        if trie.is_blind() {
+            trie.reveal_root(TrieNodeV2::EmptyRoot, None, self.retain_updates)
+                .expect("empty root reveal cannot fail");
+        } else {
+            trie.wipe().expect("revealed storage trie wipe cannot fail");
+        }
+        trie
     }
 
     /// Reveal unknown trie paths from multiproof.
@@ -1018,7 +1049,7 @@ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{LeafLookup, ParallelSparseTrie};
+    use crate::{LeafLookup, LeafUpdate, ParallelSparseTrie};
     use alloy_primitives::{
         b256,
         map::{HashMap, HashSet},
@@ -1313,6 +1344,56 @@ mod tests {
         assert!(sparse.is_retained_storage_account(&storage));
         assert_eq!(sparse.get_account_value(&storage), Some(&account_leaf_value));
         assert!(sparse.storage_trie_ref(&storage).is_none());
+    }
+
+    #[test]
+    fn retained_empty_storage_write_starts_from_empty_trie() {
+        let storage = B256::ZERO;
+        let stale_slot = B256::ZERO;
+        let later_slot =
+            b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
+        let account_leaf_value = alloy_rlp::encode(TrieAccount::default());
+        let stale_value = alloy_rlp::encode_fixed_size(&U256::from(42)).to_vec();
+        let later_value = alloy_rlp::encode_fixed_size(&U256::from(100)).to_vec();
+
+        let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
+        sparse
+            .reveal_decoded_multiproof_v2(reth_trie_common::DecodedMultiProofV2 {
+                account_proofs: two_leaf_v2_proof_nodes(account_leaf_value.clone()),
+                storage_proofs: B256Map::from_iter([(
+                    storage,
+                    two_leaf_v2_proof_nodes(stale_value),
+                )]),
+                ..Default::default()
+            })
+            .unwrap();
+        sparse.root().unwrap();
+        sparse.storage_root(&storage).unwrap();
+
+        sparse.record_slot_touch(storage, stale_slot);
+        sparse.record_storage_wipe(storage);
+        sparse.prune_persisted_state(&HashedPostStateSorted::new(
+            Vec::new(),
+            B256Map::from_iter([(
+                storage,
+                HashedStorageSorted {
+                    wiped: false,
+                    storage_slots: vec![(stale_slot, U256::from(42))],
+                },
+            )]),
+        ));
+
+        let mut updates = B256Map::from_iter([(later_slot, LeafUpdate::Changed(later_value))]);
+        let mut requested_proofs = Vec::new();
+        sparse
+            .get_or_create_storage_trie_mut(storage)
+            .update_leaves(&mut updates, |target, _| requested_proofs.push(target))
+            .unwrap();
+
+        assert!(updates.is_empty());
+        assert!(requested_proofs.is_empty());
+        assert!(sparse.get_storage_slot_value(&storage, &stale_slot).is_none());
+        assert!(sparse.get_storage_slot_value(&storage, &later_slot).is_some());
     }
 
     #[test]
