@@ -702,17 +702,43 @@ where
         }
         let account_reader = provider.as_ref().expect("provider just initialized");
 
-        let existing_account = account_reader.basic_account(&address).ok().flatten();
+        let account_read_start = Instant::now();
+        let existing_account = match account_reader.basic_account(&address) {
+            Ok(account) => account,
+            Err(err) => {
+                self.metrics.bal_account_read_errors.increment(1);
+                trace!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    %err,
+                    %address,
+                    "Failed to read BAL account metadata"
+                );
+                None
+            }
+        };
+        self.metrics.bal_account_read_duration.record(account_read_start.elapsed().as_secs_f64());
 
         let balance = account_changes.balance_changes.last().map(|change| change.post_balance);
         let nonce = account_changes.nonce_changes.last().map(|change| change.new_nonce);
         let code_hash = account_changes.code_changes.last().map(|code_change| {
+            self.metrics.bal_code_changes.increment(1);
+            self.metrics.bal_code_change_bytes.record(code_change.new_code.len() as f64);
             if code_change.new_code.is_empty() {
                 alloy_consensus::constants::KECCAK_EMPTY
             } else {
                 keccak256(&code_change.new_code)
             }
         });
+        if code_hash.or(existing_account.as_ref().and_then(|account| account.bytecode_hash)) ==
+            Some(alloy_consensus::constants::KECCAK_EMPTY)
+        {
+            self.metrics.bal_accounts_empty_code_hash.increment(1);
+        } else if code_hash
+            .or(existing_account.as_ref().and_then(|account| account.bytecode_hash))
+            .is_some()
+        {
+            self.metrics.bal_accounts_existing_code_hash.increment(1);
+        }
 
         if balance.is_none() &&
             nonce.is_none() &&
@@ -910,4 +936,16 @@ pub struct PrewarmMetrics {
     pub(crate) transaction_errors: Counter,
     /// A histogram of BAL slot iteration duration during prefetching
     pub(crate) bal_slot_iteration_duration: Histogram,
+    /// A histogram of BAL account metadata read duration during hashed state streaming
+    pub(crate) bal_account_read_duration: Histogram,
+    /// Counter for BAL account metadata read errors during hashed state streaming
+    pub(crate) bal_account_read_errors: Counter,
+    /// Counter for BAL accounts with non-empty code hashes during hashed state streaming
+    pub(crate) bal_accounts_existing_code_hash: Counter,
+    /// Counter for BAL accounts with the empty code hash during hashed state streaming
+    pub(crate) bal_accounts_empty_code_hash: Counter,
+    /// Counter for BAL code change entries during hashed state streaming
+    pub(crate) bal_code_changes: Counter,
+    /// A histogram of BAL code change byte lengths during hashed state streaming
+    pub(crate) bal_code_change_bytes: Histogram,
 }
