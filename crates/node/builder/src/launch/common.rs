@@ -69,8 +69,8 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
-    BalConfig, BalStoreHandle, BlockHashReader, BlockNumReader, InMemoryBalStore, ProviderError,
-    DatabaseProviderFactory, ProviderFactory, ProviderResult, RocksDBProviderFactory,
+    BalConfig, BalStoreHandle, BlockHashReader, BlockNumReader, DatabaseProviderFactory,
+    InMemoryBalStore, ProviderError, ProviderFactory, ProviderResult, RocksDBProviderFactory,
     StageCheckpointReader, StaticFileProviderBuilder, StaticFileProviderFactory,
     StorageSettingsCache,
 };

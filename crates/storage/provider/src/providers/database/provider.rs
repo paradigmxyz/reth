@@ -663,7 +663,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let last_block_number = plan.last_block().expect("checked non-empty block range").number;
 
         debug!(target: "providers::db", block_count, "Writing blocks and execution data to storage");
-        if tracing::enabled!(target: "providers::db", tracing::Level::DEBUG) {
+        if tracing::enabled!(target: "providers::db", tracing::Level::TRACE) {
             let step_plan = plan
                 .steps
                 .iter()
