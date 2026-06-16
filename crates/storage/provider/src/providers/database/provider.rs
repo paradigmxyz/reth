@@ -3087,13 +3087,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         let mut account_trie_cursor = tx.cursor_write::<A::AccountTrieTable>()?;
         // Process sorted account nodes
         for (key, updated_node) in trie_updates.account_nodes_ref() {
+            if key.is_empty() {
+                continue;
+            }
+
             let nibbles = A::AccountKey::from(*key);
             match updated_node {
                 Some(node) => {
-                    if !key.is_empty() {
-                        *num_entries += 1;
-                        account_trie_cursor.upsert(nibbles, node)?;
-                    }
+                    *num_entries += 1;
+                    account_trie_cursor.upsert(nibbles, node)?;
                 }
                 None => {
                     *num_entries += 1;
