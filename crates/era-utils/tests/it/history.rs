@@ -97,7 +97,8 @@ async fn test_roundtrip_export_after_import() {
     };
 
     // Export blocks from database to era1 files
-    let exported_files = export(&provider_ref, &export_config).expect("Export should succeed");
+    let exported_files =
+        export::<Era1, _>(&provider_ref, &export_config).expect("Export should succeed");
 
     // Calculate how many files we expect based on the configuration
     // We expect 4 files for 900 blocks: first 3 files with 250 blocks each,
