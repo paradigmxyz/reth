@@ -676,6 +676,15 @@ pub(crate) struct SharedProgressReader<R> {
     pub(crate) inner: R,
     /// Shared counters updated as bytes are read.
     pub(crate) progress: Arc<SharedProgress>,
+    /// Logical compressed bytes read by this streaming attempt.
+    downloaded: u64,
+}
+
+impl<R> SharedProgressReader<R> {
+    /// Wraps a reader with shared progress accounting for one streaming attempt.
+    pub(crate) fn new(inner: R, progress: Arc<SharedProgress>) -> Self {
+        Self { inner, progress, downloaded: 0 }
+    }
 }
 
 impl<R: Read> Read for SharedProgressReader<R> {
@@ -686,7 +695,15 @@ impl<R: Read> Read for SharedProgressReader<R> {
         }
         let n = self.inner.read(buf)?;
         self.progress.record_session_fetched_bytes(n as u64);
+        self.progress.add_active_download_bytes(n as u64);
+        self.downloaded += n as u64;
         Ok(n)
+    }
+}
+
+impl<R> Drop for SharedProgressReader<R> {
+    fn drop(&mut self) {
+        self.progress.sub_active_download_bytes(self.downloaded);
     }
 }
 
@@ -774,6 +791,7 @@ pub(crate) fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::ta
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
     use std::sync::atomic::Ordering;
 
     #[test]
@@ -803,6 +821,22 @@ mod tests {
 
         assert_eq!(progress.logical_downloaded_bytes(), 0);
         assert_eq!(progress.active_downloads.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn shared_progress_reader_tracks_active_download_bytes() {
+        let progress = SharedProgress::new(10, 20, 1, CancellationToken::new());
+
+        {
+            let mut reader =
+                SharedProgressReader::new(Cursor::new([0u8; 4]), Arc::clone(&progress));
+            let mut buf = [0u8; 8];
+            assert_eq!(reader.read(&mut buf).unwrap(), 4);
+            assert_eq!(progress.session_fetched_bytes.load(Ordering::Relaxed), 4);
+            assert_eq!(progress.logical_downloaded_bytes(), 4);
+        }
+
+        assert_eq!(progress.logical_downloaded_bytes(), 0);
     }
 
     #[test]
