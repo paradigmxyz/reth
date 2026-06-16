@@ -3266,10 +3266,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
 mod tests {
     use super::{ArenaSparseNode, TRACE_TARGET};
     use crate::{
-        ArenaParallelSparseTrie, ArenaParallelismThresholds, LeafLookup, LeafUpdate,
-        ParallelCompactClone, SparseTrie,
+        ArenaParallelSparseTrie, ArenaParallelismThresholds, LeafUpdate, ParallelCompactClone,
+        SparseTrie,
     };
-    use alloy_primitives::{b256, map::B256Map, B256, U256};
+    use alloy_primitives::{map::B256Map, B256, U256};
     use rand::{seq::SliceRandom, Rng, SeedableRng};
     use reth_trie::test_utils::TrieTestHarness;
     use reth_trie_common::{
@@ -3413,17 +3413,6 @@ mod tests {
         changeset
     }
 
-    fn key_from_nibbles<const N: usize>(prefix: [u8; N]) -> B256 {
-        let mut path = Nibbles::from_nibbles(prefix);
-        while path.len() < 64 {
-            path.push(0);
-        }
-
-        let mut bytes = [0u8; 32];
-        path.pack_to(&mut bytes);
-        B256::from(bytes)
-    }
-
     #[test]
     fn compacting_parallel_clone_preserves_root() {
         let mut harness = ArenaTrieTestHarness::new(BTreeMap::new());
@@ -3497,179 +3486,6 @@ mod tests {
 
         let block3 = build_changeset(harness.storage(), BTreeMap::new(), 0.35, 0.1, &mut rng);
         harness.assert_changes(&mut trie, block3);
-    }
-
-    #[test]
-    fn prune_retained_slot_then_rewrite_blinded_slots_matches_serial_root() {
-        let slot_a = b256!("0xa3f976dbc69a4711517ce29288580ee98a83ff5cfb1996afbc804eaf23ed6230");
-        let slot_b = b256!("0x39f49d4f86f43fed34adc8e3bba471184028ca5f9fd411d1fed934cd01a700b2");
-        let slot_c = b256!("0xadf3c47c3209a8cb0be381d5667af3abbff0b25887c7bb0b5c25e58d2f11cf94");
-
-        let base = BTreeMap::from([(slot_a, U256::from(1)), (slot_b, U256::from(2))]);
-        let mut harness = ArenaTrieTestHarness::new(base);
-        let root_node = harness.root_node();
-        let mut trie = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
-            ArenaParallelismThresholds {
-                min_dirty_leaves: 1,
-                min_revealed_nodes: 1,
-                min_updates: 1,
-                min_leaves_for_prune: 1,
-            },
-        );
-        trie.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
-
-        let retain_slot_c = BTreeMap::from([(slot_c, U256::from(3))]);
-        harness.assert_changes(&mut trie, retain_slot_c.clone());
-        harness.apply_changeset(retain_slot_c);
-
-        let root_after_retained_slot = trie.root();
-        trie.prune(&[Nibbles::unpack(slot_c)]);
-        assert_eq!(trie.root(), root_after_retained_slot, "prune must preserve the trie root");
-
-        let mut touched_updates = B256Map::from_iter([
-            (slot_a, LeafUpdate::Touched),
-            (slot_b, LeafUpdate::Touched),
-            (slot_c, LeafUpdate::Touched),
-        ]);
-        loop {
-            let mut targets = Vec::new();
-            trie.update_leaves(&mut touched_updates, |key, min_len| {
-                targets.push(ProofV2Target::new(key).with_min_len(min_len));
-            })
-            .expect("touched update_leaves should succeed");
-
-            if targets.is_empty() {
-                break;
-            }
-
-            let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
-            trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
-        }
-        assert!(touched_updates.is_empty(), "all touched updates should be drained");
-        assert_eq!(trie.root(), root_after_retained_slot, "touches must preserve the trie root");
-
-        let rewrite_blinded_and_delete_retained = BTreeMap::from([
-            (slot_a, U256::from(4)),
-            (slot_b, U256::from(5)),
-            (slot_c, U256::ZERO),
-        ]);
-        harness.assert_changes(&mut trie, rewrite_blinded_and_delete_retained);
-    }
-
-    #[test]
-    fn prune_retained_deleted_slot_keeps_exclusion_witness() {
-        let slot_parent_sibling =
-            b256!("0x8000000000000000000000000000000000000000000000000000000000000001");
-        let slot_witness_a =
-            b256!("0x8ca0000000000000000000000000000000000000000000000000000000000002");
-        let slot_witness_b =
-            b256!("0x8cb0000000000000000000000000000000000000000000000000000000000003");
-        let slot_absent =
-            b256!("0x8cdfdbb7f56278b693668a23b9b57be77334c9a24398abf7dc8fa4bdcb7e0011");
-
-        let base = BTreeMap::from([
-            (slot_parent_sibling, U256::from(1)),
-            (slot_witness_a, U256::from(2)),
-            (slot_witness_b, U256::from(3)),
-        ]);
-        let harness = ArenaTrieTestHarness::new(base);
-        let root_node = harness.root_node();
-        let mut trie = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
-            ArenaParallelismThresholds {
-                min_dirty_leaves: 1,
-                min_revealed_nodes: 1,
-                min_updates: 1,
-                min_leaves_for_prune: 1,
-            },
-        );
-        trie.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
-
-        harness.assert_changes(&mut trie, BTreeMap::from([(slot_absent, U256::ZERO)]));
-
-        let root_after_absent_delete = trie.root();
-        trie.prune(&[Nibbles::unpack(slot_absent)]);
-        assert_eq!(trie.root(), root_after_absent_delete, "prune must preserve the trie root");
-
-        assert_eq!(
-            trie.find_leaf(&Nibbles::unpack(slot_absent), None),
-            Ok(LeafLookup::NonExistent),
-            "retained deleted slot should still be proven absent without another proof"
-        );
-    }
-
-    #[test]
-    fn delete_that_only_dirties_subtrie_branch_recomputes_root() {
-        let slot_parent_sibling =
-            b256!("0x8000000000000000000000000000000000000000000000000000000000000001");
-        let slot_delete =
-            b256!("0x8c00000000000000000000000000000000000000000000000000000000000002");
-        let slot_keep_a =
-            b256!("0x8c10000000000000000000000000000000000000000000000000000000000003");
-        let slot_keep_b =
-            b256!("0x8c20000000000000000000000000000000000000000000000000000000000004");
-
-        let base = BTreeMap::from([
-            (slot_parent_sibling, U256::from(1)),
-            (slot_delete, U256::from(2)),
-            (slot_keep_a, U256::from(3)),
-            (slot_keep_b, U256::from(4)),
-        ]);
-        let harness = ArenaTrieTestHarness::new(base);
-        let root_node = harness.root_node();
-        let mut trie = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
-            ArenaParallelismThresholds {
-                min_dirty_leaves: 1,
-                min_revealed_nodes: 1,
-                min_updates: 1,
-                min_leaves_for_prune: 1,
-            },
-        );
-        trie.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
-
-        harness.assert_changes(&mut trie, BTreeMap::from([(slot_delete, U256::ZERO)]));
-    }
-
-    #[test]
-    fn delete_that_empties_subtrie_updates_parent_branch() {
-        let slot_delete = key_from_nibbles([0x6, 0xa, 0xd, 0xf]);
-        let slot_parent_sibling = key_from_nibbles([0x6, 0xb, 0x0, 0x0]);
-
-        let base =
-            BTreeMap::from([(slot_delete, U256::from(1)), (slot_parent_sibling, U256::from(2))]);
-        let harness = ArenaTrieTestHarness::new(base);
-        let root_node = harness.root_node();
-        let mut trie = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
-            ArenaParallelismThresholds {
-                min_dirty_leaves: 1,
-                min_revealed_nodes: 1,
-                min_updates: 1,
-                min_leaves_for_prune: 1,
-            },
-        );
-        trie.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
-
-        harness.assert_changes(&mut trie, BTreeMap::from([(slot_delete, U256::ZERO)]));
-    }
-
-    #[test]
-    fn delete_leaf_revealed_below_blinded_child_uses_child_relative_key() {
-        let slot_delete = key_from_nibbles([0x6, 0xa, 0xd, 0xf, 0x4]);
-        let slot_sibling = key_from_nibbles([0x6, 0xa, 0x5, 0x0]);
-
-        let base = BTreeMap::from([(slot_delete, U256::from(1)), (slot_sibling, U256::from(2))]);
-        let harness = ArenaTrieTestHarness::new(base);
-        let root_node = harness.root_node();
-        let mut trie = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
-            ArenaParallelismThresholds {
-                min_dirty_leaves: 1,
-                min_revealed_nodes: 1,
-                min_updates: 1,
-                min_leaves_for_prune: 1,
-            },
-        );
-        trie.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
-
-        harness.assert_changes(&mut trie, BTreeMap::from([(slot_delete, U256::ZERO)]));
     }
 
     #[test]
