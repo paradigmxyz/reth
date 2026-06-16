@@ -1,5 +1,6 @@
 //! Additional helpers for executing tracing calls
 
+use crate::affinity::{dedicated_core_for_name, pin_current_thread};
 use std::{
     any::Any,
     cell::RefCell,
@@ -193,6 +194,11 @@ impl WorkerPool {
             build_pool_with_panic_handler(
                 rayon::ThreadPoolBuilder::new()
                     .num_threads(self.num_threads)
+                    .start_handler(move |_| {
+                        if let Some(core) = dedicated_core_for_name(prefix) {
+                            pin_current_thread(core);
+                        }
+                    })
                     .thread_name(move |i| format!("{prefix}-{i:02}")),
             )
             .unwrap_or_else(|err| panic!("failed to build {prefix} worker pool: {err}"))
