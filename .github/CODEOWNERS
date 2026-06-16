@@ -20,7 +20,6 @@ crates/net/                 @mattsse @Rjected
 crates/net/downloaders/     @Rjected
 crates/node/                @mattsse @Rjected @klkvr
 crates/payload/             @mattsse @Rjected
-crates/primitives-traits/   @Rjected @mattsse @klkvr
 crates/primitives/          @Rjected @mattsse @klkvr
 crates/prune/               @shekhirin @joshieDo
 crates/ress/                @shekhirin @Rjected

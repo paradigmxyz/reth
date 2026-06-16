@@ -7584,9 +7584,8 @@ dependencies = [
 
 [[package]]
 name = "reth-codecs"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "312c1817d0e37c6112d30fcc9e92226d8e73cc66ea6bd640c80e0e0df956cc04"
+version = "0.5.1"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=3945b5f5434b051d97f2bc82e304b9ad207d3c40#3945b5f5434b051d97f2bc82e304b9ad207d3c40"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7605,9 +7604,8 @@ dependencies = [
 
 [[package]]
 name = "reth-codecs-derive"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "526ee2bfded1897b7bb43f46410f487ee48a41b7e93cf18031079660b433550d"
+version = "0.5.1"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=3945b5f5434b051d97f2bc82e304b9ad207d3c40#3945b5f5434b051d97f2bc82e304b9ad207d3c40"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9286,7 +9284,8 @@ dependencies = [
 
 [[package]]
 name = "reth-primitives-traits"
-version = "2.3.0"
+version = "0.5.1"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=3945b5f5434b051d97f2bc82e304b9ad207d3c40#3945b5f5434b051d97f2bc82e304b9ad207d3c40"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9305,13 +9304,10 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "quanta",
- "rand 0.8.6",
- "rand 0.9.4",
  "rayon",
  "reth-codecs",
  "secp256k1 0.30.0",
  "serde",
- "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -9800,7 +9796,8 @@ dependencies = [
 
 [[package]]
 name = "reth-rpc-traits"
-version = "2.3.0"
+version = "0.5.1"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=3945b5f5434b051d97f2bc82e304b9ad207d3c40#3945b5f5434b051d97f2bc82e304b9ad207d3c40"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -10325,9 +10322,8 @@ dependencies = [
 
 [[package]]
 name = "reth-zstd-compressors"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdd4e89ad5d14393bde9b2b152480d4fd7f2399d0f9efe80ea29ec7c0b76bcdc"
+version = "0.5.1"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=3945b5f5434b051d97f2bc82e304b9ad207d3c40#3945b5f5434b051d97f2bc82e304b9ad207d3c40"
 dependencies = [
  "zstd",
 ]

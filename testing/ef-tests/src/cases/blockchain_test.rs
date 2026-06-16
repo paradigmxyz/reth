@@ -15,9 +15,10 @@ use reth_evm::ConfigureEvm2BlockExecutor;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{ParallelBridgeBuffered, RecoveredBlock, SealedBlock};
 use reth_provider::{
-    test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
-    ExecutionOutcome, HistoryWriter, OriginalValuesKnown, StateWriteConfig, StateWriter,
-    StaticFileProviderFactory, StaticFileSegment, StaticFileWriter, StorageSettingsCache,
+    evm2_state_source_hashed_post_state, test_utils::create_test_provider_factory_with_chain_spec,
+    BlockWriter, DatabaseProviderFactory, ExecutionOutcome, HistoryWriter, OriginalValuesKnown,
+    StateWriteConfig, StateWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+    StorageSettingsCache,
 };
 use reth_trie::{KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
@@ -254,7 +255,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             .map_err(|err| Error::block_failed(block_number, err))?;
 
         // Compute and check the post state root
-        let hashed_state = output.state.hashed_post_state::<KeccakKeyHasher>();
+        let hashed_state = evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&output.state);
         let sorted = hashed_state.clone_into_sorted();
         let (computed_state_root, _) = reth_trie_db::with_adapter!(provider, |A| {
             StateRoot::<reth_trie_db::DatabaseTrieCursorFactory<_, A>, _>::overlay_root_with_updates(
