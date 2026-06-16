@@ -35,6 +35,9 @@ pub struct Header {
 }
 
 impl Header {
+    /// Serialized size of a record header in bytes (`type` + `length` + `reserved`).
+    pub const SIZE: usize = 8;
+
     /// Create a new header with the specified type and length
     pub const fn new(header_type: [u8; 2], length: u32) -> Self {
         Self { header_type, length, reserved: 0 }
@@ -94,6 +97,11 @@ impl Entry {
     /// Create a new entry
     pub const fn new(entry_type: [u8; 2], data: Vec<u8>) -> Self {
         Self { entry_type, data }
+    }
+
+    /// Total serialized size of this entry: its [`Header`] plus the payload.
+    pub const fn size(&self) -> usize {
+        Header::SIZE + self.data.len()
     }
 
     /// Read an entry from a reader
