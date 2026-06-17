@@ -237,7 +237,6 @@ async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
         suggested_fee_recipient: Address::ZERO,
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
-        target_gas_limit: None,
         slot_number: None,
         target_gas_limit: None,
     };
@@ -319,7 +318,6 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
         suggested_fee_recipient: Address::ZERO,
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
-        target_gas_limit: None,
         slot_number: None,
         target_gas_limit: None,
     };
