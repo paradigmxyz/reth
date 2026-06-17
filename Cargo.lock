@@ -3294,7 +3294,7 @@ dependencies = [
 [[package]]
 name = "evm2"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=775d5055549715eea8a0de748f6cde505d5b8809#775d5055549715eea8a0de748f6cde505d5b8809"
+source = "git+https://github.com/alloy-rs/evm2?rev=6553eec9bfe6e9a9aaeb6808c9e08b95f8034e5c#6553eec9bfe6e9a9aaeb6808c9e08b95f8034e5c"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -3326,7 +3326,7 @@ dependencies = [
 [[package]]
 name = "evm2-macros"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=775d5055549715eea8a0de748f6cde505d5b8809#775d5055549715eea8a0de748f6cde505d5b8809"
+source = "git+https://github.com/alloy-rs/evm2?rev=6553eec9bfe6e9a9aaeb6808c9e08b95f8034e5c#6553eec9bfe6e9a9aaeb6808c9e08b95f8034e5c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8044,7 +8044,7 @@ name = "reth-engine-tree"
 version = "2.3.0"
 dependencies = [
  "alloy-consensus",
- "alloy-eip7928 0.4.3",
+ "alloy-eip7928",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",

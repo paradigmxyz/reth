@@ -198,7 +198,13 @@ where
 mod tests {
     use super::*;
     use alloy_primitives::{address, Log, LogData, B256, U256};
-    use evm2::evm::{AccountInfo, Tracked};
+    use evm2::evm::{AccountChange, AccountInfo};
+
+    fn account_change(current: AccountInfo) -> AccountChange {
+        let mut change = AccountChange::default();
+        change.current = Some(current);
+        change
+    }
 
     #[test]
     fn builds_receipt_from_evm2_tx_result() {
@@ -229,16 +235,13 @@ mod tests {
         result.result.logs.push(log.clone());
         result.state_changes.accounts.insert(
             address,
-            Tracked {
-                original: None,
-                current: Some(AccountInfo {
-                    balance: U256::from(1),
-                    nonce: 1,
-                    code_hash: B256::ZERO,
-                    code: None,
-                    _non_exhaustive: (),
-                }),
-            },
+            account_change(AccountInfo {
+                balance: U256::from(1),
+                nonce: 1,
+                code_hash: B256::ZERO,
+                code: None,
+                _non_exhaustive: (),
+            }),
         );
 
         let output = RethReceiptBuilder.build_evm2_block_output(7, [(TxType::Legacy, result)]);
@@ -254,16 +257,13 @@ mod tests {
         let mut extra = StateChanges::default();
         extra.accounts.insert(
             address,
-            Tracked {
-                original: None,
-                current: Some(AccountInfo {
-                    balance: U256::from(5),
-                    nonce: 0,
-                    code_hash: B256::ZERO,
-                    code: None,
-                    _non_exhaustive: (),
-                }),
-            },
+            account_change(AccountInfo {
+                balance: U256::from(5),
+                nonce: 0,
+                code_hash: B256::ZERO,
+                code: None,
+                _non_exhaustive: (),
+            }),
         );
 
         let output = RethReceiptBuilder.build_evm2_block_output_with_state_changes(
@@ -288,47 +288,38 @@ mod tests {
         let mut pre = StateChanges::default();
         pre.accounts.insert(
             pre_address,
-            Tracked {
-                original: None,
-                current: Some(AccountInfo {
-                    balance: U256::from(1),
-                    nonce: 0,
-                    code_hash: B256::ZERO,
-                    code: None,
-                    _non_exhaustive: (),
-                }),
-            },
+            account_change(AccountInfo {
+                balance: U256::from(1),
+                nonce: 0,
+                code_hash: B256::ZERO,
+                code: None,
+                _non_exhaustive: (),
+            }),
         );
 
         let mut tx = TxResultWithState::default();
         tx.result.status = true;
         tx.state_changes.accounts.insert(
             tx_address,
-            Tracked {
-                original: None,
-                current: Some(AccountInfo {
-                    balance: U256::from(2),
-                    nonce: 0,
-                    code_hash: B256::ZERO,
-                    code: None,
-                    _non_exhaustive: (),
-                }),
-            },
+            account_change(AccountInfo {
+                balance: U256::from(2),
+                nonce: 0,
+                code_hash: B256::ZERO,
+                code: None,
+                _non_exhaustive: (),
+            }),
         );
 
         let mut post = StateChanges::default();
         post.accounts.insert(
             post_address,
-            Tracked {
-                original: None,
-                current: Some(AccountInfo {
-                    balance: U256::from(3),
-                    nonce: 0,
-                    code_hash: B256::ZERO,
-                    code: None,
-                    _non_exhaustive: (),
-                }),
-            },
+            account_change(AccountInfo {
+                balance: U256::from(3),
+                nonce: 0,
+                code_hash: B256::ZERO,
+                code: None,
+                _non_exhaustive: (),
+            }),
         );
 
         let output = RethReceiptBuilder.build_evm2_block_output_with_surrounding_state_changes(

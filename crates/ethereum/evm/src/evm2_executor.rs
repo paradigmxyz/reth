@@ -28,10 +28,10 @@ use evm2::{
     env::BlockEnv,
     ethereum::{ethereum_tx_registry, RecoveredTxEnvelope},
     evm::{
-        precompile::PrecompileProvider, AccountChangeRef, AccountInfo, BlockStateAccumulator,
-        Database, DbErrorCode, DynDatabase, StateChangeSink, StateChangeSource, StateChanges,
-        StorageChange, Tracked, BEACON_ROOTS_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS,
-        HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
+        precompile::PrecompileProvider, AccountChange, AccountChangeRef, AccountInfo,
+        BlockStateAccumulator, Database, DbErrorCode, DynDatabase, StateChangeSink,
+        StateChangeSource, StateChanges, StorageChange, BEACON_ROOTS_ADDRESS,
+        CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
     },
     registry::HandlerError,
     BaseEvmTypes, Evm, ExecutionConfig, SpecId, TxResult, Version,
@@ -882,11 +882,14 @@ where
 
     for (address, increment) in balance_increments {
         let original =
-            evm.account_info(&address).map_err(|code| map_db_error_code::<DB>(evm, code))?;
+            evm.read_account_info(&address).map_err(|code| map_db_error_code::<DB>(evm, code))?;
         let mut current = original.clone().unwrap_or_else(empty_account);
 
         current.balance = current.balance.saturating_add(increment);
-        changes.accounts.insert(address, Tracked { original, current: Some(current) });
+        let mut change = AccountChange::default();
+        change.original = original;
+        change.current = Some(current);
+        changes.accounts.insert(address, change);
     }
 
     commit_state_changes(
