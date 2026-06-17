@@ -436,9 +436,9 @@ where
             .blocking_recv()
             .expect("BAL hashed-state streaming task dropped without signaling completion");
 
-        // Drop the per-thread providers
+        // Drop the per-thread BAL streaming providers. The prewarming pool may be running BAL
+        // execution workers for this same payload and does not hold BAL prewarm state here.
         executor.bal_streaming_pool().clear();
-        executor.prewarming_pool().clear();
 
         let _ = actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
     }
