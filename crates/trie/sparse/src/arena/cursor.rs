@@ -7,11 +7,11 @@ use crate::{HashedCursor, HashedStorageCursor, TrieCursor, TrieStorageCursor};
 use alloc::{format, vec::Vec};
 use alloy_primitives::{B256, U256};
 use alloy_rlp::Decodable;
-use core::{cmp::Ordering, fmt::Debug, marker::PhantomData};
+use core::{fmt::Debug, marker::PhantomData};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{BranchNodeCompact, Nibbles, RlpNode, TrieAccount, TrieMask};
-use tracing::{debug, instrument, trace};
+use tracing::{instrument, trace};
 
 const TRACE_TARGET: &str = "trie::arena::cursor";
 
@@ -22,6 +22,8 @@ pub(super) struct ArenaCursorStackEntry {
     pub(super) index: Index,
     /// The absolute path of this node in the trie (not including its `short_key`).
     pub(super) path: Nibbles,
+    /// Whether this branch has already been yielded to cached trie cursors.
+    pub(super) branch_emitted: bool,
     /// The dense index at which to resume child iteration in [`ArenaCursor::next`].
     /// Only meaningful when this entry's node is a branch.
     pub(super) next_dense_idx: usize,
@@ -113,7 +115,12 @@ impl ArenaCursor {
     /// Pushes an entry onto the stack for the node at the given index and path.
     fn push(&mut self, arena: &NodeArena, idx: Index, path: Nibbles) {
         debug_assert!(arena.contains_key(idx), "push called with invalid arena index");
-        self.stack.push(ArenaCursorStackEntry { index: idx, path, next_dense_idx: 0 });
+        self.stack.push(ArenaCursorStackEntry {
+            index: idx,
+            path,
+            branch_emitted: false,
+            next_dense_idx: 0,
+        });
         trace!(target: TRACE_TARGET, entry = ?self.stack.last().expect("just pushed"), "Pushed stack entry");
     }
 
@@ -124,6 +131,28 @@ impl ArenaCursor {
     /// the node from the arena between the time it was pushed and the time it is popped.
     #[instrument(level = "trace", target = TRACE_TARGET, skip(self, arena))]
     pub(super) fn pop(&mut self, arena: &mut NodeArena) -> ArenaCursorStackEntry {
+        let (entry, child_is_dirty) = self.pop_inner(arena);
+
+        if child_is_dirty && let Some(parent) = self.stack.last() {
+            *arena[parent.index].state_mut() = ArenaSparseNodeState::Dirty;
+        }
+
+        entry
+    }
+
+    /// Pops the top entry from a cursor over cached trie data.
+    ///
+    /// Cached cursors are read-only, so dirty nodes indicate the cached topology is not safe to
+    /// serve through a cursor.
+    #[allow(dead_code)]
+    #[instrument(level = "trace", target = TRACE_TARGET, skip(self, arena))]
+    pub(super) fn pop_cached(&mut self, arena: &NodeArena) -> ArenaCursorStackEntry {
+        let (entry, child_is_dirty) = self.pop_inner(arena);
+        assert!(!child_is_dirty, "cached arena cursor encountered dirty node at {:?}", entry.path);
+        entry
+    }
+
+    fn pop_inner(&mut self, arena: &NodeArena) -> (ArenaCursorStackEntry, bool) {
         let entry = self.stack.pop().expect("pop can't be called on empty stack");
         trace!(target: TRACE_TARGET, entry = ?entry, "Popped stack entry");
 
@@ -136,23 +165,9 @@ impl ArenaCursor {
             );
         }
 
-        if let Some(parent) = self.stack.last() {
-            let child_is_dirty = arena.get(entry.index).is_some_and(|node| match node {
-                ArenaSparseNode::Branch(b) => matches!(b.state, ArenaSparseNodeState::Dirty),
-                ArenaSparseNode::Leaf { state, .. } => matches!(state, ArenaSparseNodeState::Dirty),
-                ArenaSparseNode::Subtrie(s) => {
-                    let root = &s.arena[s.root];
-                    matches!(root, ArenaSparseNode::EmptyRoot) ||
-                        matches!(root.state_ref(), Some(ArenaSparseNodeState::Dirty))
-                }
-                _ => false,
-            });
-            if child_is_dirty {
-                *arena[parent.index].state_mut() = ArenaSparseNodeState::Dirty;
-            }
-        }
+        let child_is_dirty = arena_node_is_dirty(arena, entry.index);
 
-        entry
+        (entry, child_is_dirty)
     }
 
     /// Drains the stack down to the root, propagating dirty state from each popped entry
@@ -254,6 +269,33 @@ impl ArenaCursor {
             self.needs_pop = false;
         }
 
+        self.next_inner(arena, should_descend)
+    }
+
+    /// Advances a read-only cursor over cached trie data.
+    ///
+    /// This is equivalent to [`Self::next`], but pops with [`Self::pop_cached`] so dirty nodes
+    /// trigger a panic instead of propagating dirty state.
+    #[allow(dead_code)]
+    #[instrument(level = "trace", target = TRACE_TARGET, skip_all, ret)]
+    pub(super) fn next_cached(
+        &mut self,
+        arena: &NodeArena,
+        should_descend: impl Fn(usize, &ArenaSparseNode) -> bool,
+    ) -> NextResult {
+        if self.needs_pop {
+            self.pop_cached(arena);
+            self.needs_pop = false;
+        }
+
+        self.next_inner(arena, should_descend)
+    }
+
+    fn next_inner(
+        &mut self,
+        arena: &NodeArena,
+        should_descend: impl Fn(usize, &ArenaSparseNode) -> bool,
+    ) -> NextResult {
         loop {
             let Some(head) = self.stack.last_mut() else {
                 return NextResult::Done;
@@ -312,6 +354,27 @@ impl ArenaCursor {
             self.pop(arena);
         }
 
+        self.seek_inner(arena, full_path)
+    }
+
+    /// Seeks a read-only cursor over cached trie data.
+    ///
+    /// This is equivalent to [`Self::seek`], but pops with [`Self::pop_cached`] so dirty nodes
+    /// trigger a panic instead of propagating dirty state.
+    #[allow(dead_code)]
+    #[instrument(level = "trace", target = TRACE_TARGET, skip(self, arena), ret)]
+    pub(super) fn seek_cached(&mut self, arena: &NodeArena, full_path: &Nibbles) -> SeekResult {
+        // Pop stack until head is ancestor of full_path.
+        while self.stack.len() > 1 &&
+            !full_path.starts_with(&self.stack.last().expect("cursor has root").path)
+        {
+            self.pop_cached(arena);
+        }
+
+        self.seek_inner(arena, full_path)
+    }
+
+    fn seek_inner(&mut self, arena: &NodeArena, full_path: &Nibbles) -> SeekResult {
         loop {
             let head = self.stack.last().expect("cursor has root");
             let head_idx = head.index;
@@ -366,6 +429,68 @@ impl ArenaCursor {
     }
 }
 
+/// A read-only topology cursor over cached arena trie data.
+#[derive(Debug, Clone)]
+pub(super) struct ArenaCachedTopologyCursor<'a> {
+    cursor: ArenaCursor,
+    arena: &'a NodeArena,
+}
+
+impl<'a> ArenaCachedTopologyCursor<'a> {
+    fn new(arena: &'a NodeArena, root: Index, path: Nibbles) -> Self {
+        let mut cursor = ArenaCursor::default();
+        cursor.reset(arena, root, path);
+        Self { cursor, arena }
+    }
+
+    pub(super) fn from_trie(trie: &'a ArenaParallelSparseTrie) -> Self {
+        Self::new(&trie.upper_arena, trie.root, Nibbles::default())
+    }
+
+    fn from_subtrie(subtrie: &'a super::ArenaSparseSubtrie) -> Self {
+        Self::new(&subtrie.arena, subtrie.root, subtrie.path)
+    }
+}
+
+/// Cursor backed by cached sparse-trie topology and an inner database cursor.
+#[derive(Debug, Clone)]
+pub struct ArenaCachedCursor<'a, C, K, V = ()> {
+    trie: Option<&'a ArenaParallelSparseTrie>,
+    frames: Vec<ArenaCachedTopologyCursor<'a>>,
+    active_blind_end: Option<Option<K>>,
+    last_key: Option<K>,
+    exhausted: bool,
+    inner: C,
+    _marker: PhantomData<V>,
+}
+
+impl<'a, C, K, V> ArenaCachedCursor<'a, C, K, V> {
+    /// Creates a new cursor for `trie`, delegating blinded ranges to `inner`.
+    pub fn new(trie: Option<&'a ArenaParallelSparseTrie>, inner: C) -> Self {
+        let mut this = Self {
+            trie,
+            frames: Vec::new(),
+            active_blind_end: None,
+            last_key: None,
+            exhausted: false,
+            inner,
+            _marker: PhantomData,
+        };
+        this.reset_sparse_cursor();
+        this
+    }
+
+    fn reset_sparse_cursor(&mut self) {
+        self.frames.clear();
+        if let Some(trie) = self.trie {
+            self.frames.push(trie.cached_cursor());
+        }
+        self.active_blind_end = None;
+        self.last_key = None;
+        self.exhausted = false;
+    }
+}
+
 /// Returns the logical path of a branch stack entry. The logical path is
 /// `entry.path + branch.short_key`.
 fn logical_branch_path(arena: &NodeArena, entry: &ArenaCursorStackEntry) -> Nibbles {
@@ -380,111 +505,120 @@ fn logical_branch_path_len(arena: &NodeArena, entry: &ArenaCursorStackEntry) -> 
     entry.path.len() + arena[entry.index].branch_ref().short_key.len()
 }
 
-/// Hashed-state cursor backed by an arena sparse trie and an inner hashed cursor.
-///
-/// Revealed sparse-trie leaves are returned directly. Revealed sparse-trie topology also proves
-/// gaps are empty, so the inner cursor is only queried for explicit blinded child ranges.
-#[derive(Debug)]
-pub struct ArenaHashedCursor<'a, C, V> {
-    items: Vec<ArenaCursorItem<'a>>,
-    topology_error: Option<DatabaseError>,
-    idx: usize,
-    active_blind_end: Option<Option<B256>>,
-    last_key: Option<B256>,
-    inner: C,
-    _marker: PhantomData<V>,
+fn arena_node_is_dirty(arena: &NodeArena, idx: Index) -> bool {
+    arena.get(idx).is_some_and(|node| match node {
+        ArenaSparseNode::Branch(b) => matches!(b.state, ArenaSparseNodeState::Dirty),
+        ArenaSparseNode::Leaf { state, .. } => matches!(state, ArenaSparseNodeState::Dirty),
+        ArenaSparseNode::Subtrie(s) => {
+            let root = &s.arena[s.root];
+            matches!(root, ArenaSparseNode::EmptyRoot) ||
+                matches!(root.state_ref(), Some(ArenaSparseNodeState::Dirty))
+        }
+        _ => false,
+    })
 }
 
-impl<'a, C, V> ArenaHashedCursor<'a, C, V>
-where
-    C: HashedCursor,
-{
-    /// Creates a new cursor for `trie`, delegating blinded ranges to `inner`.
-    pub fn new(trie: Option<&'a ArenaParallelSparseTrie>, inner: C) -> Self {
-        let mut this = Self {
-            items: Vec::new(),
-            topology_error: None,
-            idx: 0,
-            active_blind_end: None,
-            last_key: None,
-            inner,
-            _marker: PhantomData,
-        };
-        this.set_sparse_trie(trie);
-        this
-    }
+enum CachedTopologyItem<'a> {
+    Leaf { path: Nibbles, value: &'a [u8] },
+    Branch { path: Nibbles, node: BranchNodeCompact },
+    Blind { path: Nibbles },
+}
 
-    /// Creates a new cursor over a revealed-empty sparse trie.
-    pub fn new_empty(inner: C) -> Self {
-        let mut this = Self::new(None, inner);
-        this.set_empty_sparse_trie();
-        this
-    }
+impl<'a, C, K, V> ArenaCachedCursor<'a, C, K, V> {
+    fn next_topology_item(&mut self) -> Result<Option<CachedTopologyItem<'a>>, DatabaseError> {
+        loop {
+            let Some(frame) = self.frames.last_mut() else { return Ok(None) };
 
-    /// Updates the sparse trie topology used by this cursor.
-    ///
-    /// `None` means the trie is completely unrevealed, so the full keyspace is delegated to the
-    /// inner cursor.
-    pub fn set_sparse_trie(&mut self, trie: Option<&'a ArenaParallelSparseTrie>) {
-        self.items.clear();
-        self.topology_error = match trie {
-            Some(trie) => collect_hashed_trie_items(trie, &mut self.items).err(),
-            None => {
-                self.items.push(ArenaCursorItem::Blind { start: B256::ZERO, end: None });
-                None
+            if frame.cursor.needs_pop {
+                frame.cursor.pop_cached(frame.arena);
+                frame.cursor.needs_pop = false;
             }
-        };
-        self.items.sort_unstable_by(compare_items);
-        self.idx = 0;
-        self.active_blind_end = None;
-        self.last_key = None;
-        self.inner.reset();
-    }
 
-    /// Updates this cursor to use a revealed-empty sparse trie.
-    pub fn set_empty_sparse_trie(&mut self) {
-        self.items.clear();
-        self.topology_error = None;
-        self.idx = 0;
-        self.active_blind_end = None;
-        self.last_key = None;
-        self.inner.reset();
-    }
+            let Some(head) = frame.cursor.head().cloned() else {
+                self.frames.pop();
+                continue
+            };
 
-    /// Returns a mutable reference to the inner cursor.
-    pub const fn inner_mut(&mut self) -> &mut C {
-        &mut self.inner
-    }
+            match &frame.arena[head.index] {
+                ArenaSparseNode::EmptyRoot => {
+                    frame.cursor.needs_pop = true;
+                }
+                ArenaSparseNode::Leaf { state, value, key } => {
+                    ensure_node_not_dirty(state, head.path)?;
+                    let mut path = head.path;
+                    path.extend(key);
+                    frame.cursor.needs_pop = true;
+                    return Ok(Some(CachedTopologyItem::Leaf { path, value }))
+                }
+                ArenaSparseNode::Branch(branch) => {
+                    ensure_node_not_dirty(&branch.state, head.path)?;
 
-    fn first_item_idx(&self, key: B256) -> usize {
-        self.items
-            .iter()
-            .position(|item| item.may_contain_key_at_or_after(key))
-            .unwrap_or(self.items.len())
-    }
+                    let mut logical_path = head.path;
+                    logical_path.extend(&branch.short_key);
 
-    fn topology_result(&self) -> Result<(), DatabaseError> {
-        match &self.topology_error {
-            Some(error) => Err(error.clone()),
-            None => Ok(()),
+                    if !head.branch_emitted {
+                        frame.cursor.stack.last_mut().expect("head exists").branch_emitted = true;
+                        let node =
+                            branch_node_compact_for_cursor(frame.arena, branch, logical_path)?;
+                        return Ok(Some(CachedTopologyItem::Branch { path: logical_path, node }))
+                    }
+
+                    let state_mask = branch.state_mask;
+                    let start = head.next_dense_idx;
+                    let mut descended = false;
+                    for (branch_child_idx, nibble) in BranchChildIter::new(state_mask) {
+                        if branch_child_idx.get() < start {
+                            continue;
+                        }
+
+                        frame.cursor.stack.last_mut().expect("head exists").next_dense_idx =
+                            branch_child_idx.get() + 1;
+
+                        let mut child_path = logical_path;
+                        child_path.push_unchecked(nibble);
+                        match &branch.children[branch_child_idx] {
+                            ArenaSparseNodeBranchChild::Blinded(_) => {
+                                return Ok(Some(CachedTopologyItem::Blind { path: child_path }))
+                            }
+                            ArenaSparseNodeBranchChild::Revealed(child_idx) => {
+                                frame.cursor.push(frame.arena, *child_idx, child_path);
+                                descended = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if !descended {
+                        frame.cursor.needs_pop = true;
+                    }
+                }
+                ArenaSparseNode::Subtrie(subtrie) => {
+                    ensure_cached_subtrie(subtrie)?;
+                    frame.cursor.needs_pop = true;
+                    self.frames.push(ArenaCachedTopologyCursor::from_subtrie(subtrie));
+                }
+                ArenaSparseNode::TakenSubtrie => {
+                    frame.cursor.needs_pop = true;
+                    return Ok(Some(CachedTopologyItem::Blind { path: head.path }))
+                }
+            }
         }
     }
 }
 
-impl<C, V> ArenaHashedCursor<'_, C, V>
+impl<C, V> ArenaCachedCursor<'_, C, B256, V>
 where
     C: HashedCursor<Value = V>,
-    V: ArenaHashedCursorValue,
+    V: ArenaCachedHashedValue,
 {
-    fn next_inner_in_active_range(&mut self) -> Result<Option<(B256, V)>, DatabaseError> {
+    fn next_inner_in_active_hashed_range(&mut self) -> Result<Option<(B256, V)>, DatabaseError> {
         let Some(end) = self.active_blind_end else { return Ok(None) };
 
         let mut entry = self.inner.next()?;
         while let Some((key, value)) = entry {
             if !key_is_before_end(key, end) {
                 self.active_blind_end = None;
-                self.idx += 1;
-                return self.next_from_items(None)
+                return self.next_from_hashed_topology(None)
             }
             if self.last_key.is_none_or(|last_key| key > last_key) {
                 self.last_key = Some(key);
@@ -494,18 +628,57 @@ where
         }
 
         self.active_blind_end = None;
-        self.idx += 1;
-        self.next_from_items(None)
+        if self.trie.is_none() {
+            self.exhausted = true;
+            return Ok(None)
+        }
+        self.next_from_hashed_topology(None)
     }
 
-    fn next_from_items(
+    fn seek_inner_hashed_range(
+        &mut self,
+        start: B256,
+        end: Option<B256>,
+    ) -> Result<Option<(B256, V)>, DatabaseError> {
+        let mut entry = self.inner.seek(start)?;
+        while let Some((key, value)) = entry {
+            if !key_is_before_end(key, end) {
+                return Ok(None)
+            }
+            if self.last_key.is_none_or(|last_key| key > last_key) {
+                self.active_blind_end = Some(end);
+                self.last_key = Some(key);
+                return Ok(Some((key, value)))
+            }
+            entry = self.inner.next()?;
+        }
+        Ok(None)
+    }
+
+    fn next_from_hashed_topology(
         &mut self,
         seek_key: Option<B256>,
     ) -> Result<Option<(B256, V)>, DatabaseError> {
-        while let Some(item) = self.items.get(self.idx) {
-            match *item {
-                ArenaCursorItem::Leaf { key, value } => {
-                    self.idx += 1;
+        if self.exhausted {
+            return Ok(None)
+        }
+
+        if self.trie.is_none() {
+            let start = seek_key.unwrap_or(B256::ZERO);
+            let result = self.seek_inner_hashed_range(start, None)?;
+            if result.is_none() {
+                self.exhausted = true;
+            }
+            return Ok(result)
+        }
+
+        while let Some(item) = self.next_topology_item()? {
+            match item {
+                CachedTopologyItem::Leaf { path, value } => {
+                    if path.len() != B256::len_bytes() * 2 {
+                        continue
+                    }
+                    let key = B256::from_slice(&path.pack());
                     if seek_key.is_none_or(|seek_key| key >= seek_key) &&
                         self.last_key.is_none_or(|last_key| key > last_key)
                     {
@@ -514,166 +687,57 @@ where
                         return Ok(Some((key, value)))
                     }
                 }
-                ArenaCursorItem::Blind { start, end } => {
+                CachedTopologyItem::Branch { .. } => {}
+                CachedTopologyItem::Blind { path } => {
+                    if path.len() > B256::len_bytes() * 2 {
+                        continue
+                    }
+                    let start = prefix_start(&path);
+                    let end = prefix_end(&path);
+                    if seek_key.is_some_and(|seek_key| !key_is_before_end(seek_key, end)) {
+                        continue
+                    }
                     let inner_seek_key = seek_key.map_or(start, |seek_key| start.max(seek_key));
-                    if watch_key_overlaps(start, end) || seek_key.is_some_and(watch_key_matches) {
-                        debug!(
-                            target: TRACE_TARGET,
-                            ?start,
-                            ?end,
-                            ?seek_key,
-                            ?inner_seek_key,
-                            "Sparse hashed cursor seeking inner watched blind range"
-                        );
+                    if let Some(entry) = self.seek_inner_hashed_range(inner_seek_key, end)? {
+                        return Ok(Some(entry))
                     }
-                    let mut entry = self.inner.seek(inner_seek_key)?;
-                    while let Some((key, value)) = entry {
-                        if !key_is_before_end(key, end) {
-                            if watch_key_overlaps(start, end) {
-                                debug!(
-                                    target: TRACE_TARGET,
-                                    ?start,
-                                    ?end,
-                                    ?key,
-                                    "Sparse hashed cursor inner entry exited watched blind range"
-                                );
-                            }
-                            break
-                        }
-                        if self.last_key.is_none_or(|last_key| key > last_key) {
-                            if watch_key_matches(key) || watch_key_overlaps(start, end) {
-                                debug!(
-                                    target: TRACE_TARGET,
-                                    ?start,
-                                    ?end,
-                                    ?key,
-                                    "Sparse hashed cursor returning watched inner entry"
-                                );
-                            }
-                            self.active_blind_end = Some(end);
-                            self.last_key = Some(key);
-                            return Ok(Some((key, value)))
-                        }
-                        entry = self.inner.next()?;
-                    }
-
-                    self.idx += 1;
-                    self.active_blind_end = None;
                 }
             }
         }
 
+        self.exhausted = true;
         Ok(None)
     }
 }
 
-impl<C, V> HashedCursor for ArenaHashedCursor<'_, C, V>
+impl<C, V> HashedCursor for ArenaCachedCursor<'_, C, B256, V>
 where
     C: HashedCursor<Value = V>,
-    V: ArenaHashedCursorValue,
+    V: ArenaCachedHashedValue,
 {
     type Value = V;
 
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        self.topology_result()?;
-        self.idx = self.first_item_idx(key);
-        self.active_blind_end = None;
-        self.last_key = None;
-        self.next_from_items(Some(key))
+        self.reset_sparse_cursor();
+        self.inner.reset();
+        self.next_from_hashed_topology(Some(key))
     }
 
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        self.topology_result()?;
         if self.active_blind_end.is_some() {
-            self.next_inner_in_active_range()
+            self.next_inner_in_active_hashed_range()
         } else {
-            self.next_from_items(None)
+            self.next_from_hashed_topology(None)
         }
     }
 
     fn reset(&mut self) {
-        self.idx = 0;
-        self.active_blind_end = None;
-        self.last_key = None;
+        self.reset_sparse_cursor();
         self.inner.reset();
     }
 }
 
-/// Hashed storage cursor backed by an arena sparse trie and an inner hashed storage cursor.
-#[derive(Debug)]
-pub struct ArenaHashedStorageCursor<'a, C> {
-    cursor: ArenaHashedCursor<'a, C, U256>,
-    can_retarget_without_sparse_lookup: bool,
-}
-
-impl<'a, C> ArenaHashedStorageCursor<'a, C>
-where
-    C: HashedStorageCursor<Value = U256>,
-{
-    /// Creates a new storage cursor for `trie`, delegating blinded ranges to `inner`.
-    pub fn new(trie: Option<&'a ArenaParallelSparseTrie>, inner: C) -> Self {
-        Self {
-            cursor: ArenaHashedCursor::new(trie, inner),
-            can_retarget_without_sparse_lookup: trie.is_none(),
-        }
-    }
-
-    /// Creates a new storage cursor over a revealed-empty sparse trie.
-    pub fn new_empty(inner: C) -> Self {
-        Self {
-            cursor: ArenaHashedCursor::new_empty(inner),
-            can_retarget_without_sparse_lookup: false,
-        }
-    }
-
-    /// Updates the sparse trie topology used by this cursor.
-    pub fn set_sparse_trie(&mut self, trie: Option<&'a ArenaParallelSparseTrie>) {
-        self.cursor.set_sparse_trie(trie);
-        self.can_retarget_without_sparse_lookup = trie.is_none();
-    }
-
-    /// Updates this cursor to use a revealed-empty sparse trie.
-    pub fn set_empty_sparse_trie(&mut self) {
-        self.cursor.set_empty_sparse_trie();
-        self.can_retarget_without_sparse_lookup = false;
-    }
-
-    /// Returns a mutable reference to the inner cursor.
-    pub const fn inner_mut(&mut self) -> &mut C {
-        self.cursor.inner_mut()
-    }
-
-    /// Sets the hashed address on the inner cursor and updates the sparse trie topology.
-    pub fn set_hashed_address_with_sparse_trie(
-        &mut self,
-        hashed_address: B256,
-        trie: Option<&'a ArenaParallelSparseTrie>,
-    ) {
-        self.cursor.inner_mut().set_hashed_address(hashed_address);
-        self.set_sparse_trie(trie);
-    }
-}
-
-impl<C> HashedCursor for ArenaHashedStorageCursor<'_, C>
-where
-    C: HashedStorageCursor<Value = U256>,
-{
-    type Value = U256;
-
-    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        self.cursor.seek(key)
-    }
-
-    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        self.cursor.next()
-    }
-
-    fn reset(&mut self) {
-        self.cursor.reset();
-    }
-}
-
-impl<C> HashedStorageCursor for ArenaHashedStorageCursor<'_, C>
+impl<C> HashedStorageCursor for ArenaCachedCursor<'_, C, B256, U256>
 where
     C: HashedStorageCursor<Value = U256>,
 {
@@ -683,106 +747,16 @@ where
         Ok(empty)
     }
 
-    fn set_hashed_address(&mut self, hashed_address: B256) {
-        assert!(
-            self.can_retarget_without_sparse_lookup,
-            "ArenaHashedStorageCursor::set_hashed_address cannot retarget revealed sparse topology; use set_hashed_address_with_sparse_trie",
-        );
-        self.cursor.inner_mut().set_hashed_address(hashed_address);
-        self.cursor.set_sparse_trie(None);
+    fn set_hashed_address(&mut self, _hashed_address: B256) {
+        unimplemented!("ArenaCachedCursor storage retargeting")
     }
 }
 
-/// Trie cursor backed by an arena sparse trie and an inner trie cursor.
-///
-/// Revealed branch nodes are returned directly. Blinded child ranges are delegated to the inner
-/// cursor, and missing revealed children are treated as proven-empty gaps.
-#[derive(Debug)]
-pub struct ArenaTrieCursor<C> {
-    items: Vec<ArenaTrieCursorItem>,
-    topology_error: Option<DatabaseError>,
-    idx: usize,
-    active_blind_end: Option<Option<Nibbles>>,
-    last_key: Option<Nibbles>,
-    inner: C,
-}
-
-impl<C> ArenaTrieCursor<C>
+impl<C> ArenaCachedCursor<'_, C, Nibbles, BranchNodeCompact>
 where
     C: TrieCursor,
 {
-    /// Creates a new cursor for `trie`, delegating blinded ranges to `inner`.
-    pub fn new(trie: Option<&ArenaParallelSparseTrie>, inner: C) -> Self {
-        let mut this = Self {
-            items: Vec::new(),
-            topology_error: None,
-            idx: 0,
-            active_blind_end: None,
-            last_key: None,
-            inner,
-        };
-        this.set_sparse_trie(trie);
-        this
-    }
-
-    /// Creates a new cursor over a revealed-empty sparse trie.
-    pub fn new_empty(inner: C) -> Self {
-        let mut this = Self::new(None, inner);
-        this.set_empty_sparse_trie();
-        this
-    }
-
-    /// Updates the sparse trie topology used by this cursor.
-    ///
-    /// `None` means the trie is completely unrevealed, so the full keyspace is delegated to the
-    /// inner cursor.
-    pub fn set_sparse_trie(&mut self, trie: Option<&ArenaParallelSparseTrie>) {
-        self.items.clear();
-        self.topology_error = match trie {
-            Some(trie) => collect_trie_cursor_items(trie, &mut self.items).err(),
-            None => {
-                self.items
-                    .push(ArenaTrieCursorItem::Blind { start: Nibbles::default(), end: None });
-                None
-            }
-        };
-        self.items.sort_unstable_by(compare_trie_items);
-        self.idx = 0;
-        self.active_blind_end = None;
-        self.last_key = None;
-        self.inner.reset();
-    }
-
-    /// Updates this cursor to use a revealed-empty sparse trie.
-    pub fn set_empty_sparse_trie(&mut self) {
-        self.items.clear();
-        self.topology_error = None;
-        self.idx = 0;
-        self.active_blind_end = None;
-        self.last_key = None;
-        self.inner.reset();
-    }
-
-    /// Returns a mutable reference to the inner cursor.
-    pub const fn inner_mut(&mut self) -> &mut C {
-        &mut self.inner
-    }
-
-    fn topology_result(&self) -> Result<(), DatabaseError> {
-        match &self.topology_error {
-            Some(error) => Err(error.clone()),
-            None => Ok(()),
-        }
-    }
-
-    fn first_item_idx(&self, key: &Nibbles) -> usize {
-        self.items
-            .iter()
-            .position(|item| item.may_contain_key_at_or_after(key))
-            .unwrap_or(self.items.len())
-    }
-
-    fn next_inner_in_active_range(
+    fn next_inner_in_active_trie_range(
         &mut self,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let Some(end) = self.active_blind_end else { return Ok(None) };
@@ -791,8 +765,7 @@ where
         while let Some((key, node)) = entry {
             if !trie_key_is_before_end(&key, end.as_ref()) {
                 self.active_blind_end = None;
-                self.idx += 1;
-                return self.next_from_items(None)
+                return self.next_from_trie_topology(None)
             }
             if self.last_key.as_ref().is_none_or(|last_key| &key > last_key) {
                 self.last_key = Some(key);
@@ -802,81 +775,85 @@ where
         }
 
         self.active_blind_end = None;
-        self.idx += 1;
-        self.next_from_items(None)
+        if self.trie.is_none() {
+            self.exhausted = true;
+            return Ok(None)
+        }
+        self.next_from_trie_topology(None)
     }
 
-    fn next_from_items(
+    fn seek_inner_trie_range(
+        &mut self,
+        start: Nibbles,
+        end: Option<Nibbles>,
+        exact: bool,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        let mut entry =
+            if exact { self.inner.seek_exact(start)? } else { self.inner.seek(start)? };
+        while let Some((key, node)) = entry {
+            if !trie_key_is_before_end(&key, end.as_ref()) {
+                return Ok(None)
+            }
+            if self.last_key.as_ref().is_none_or(|last_key| &key > last_key) {
+                self.active_blind_end = Some(end);
+                self.last_key = Some(key);
+                return Ok(Some((key, node)))
+            }
+            entry = self.inner.next()?;
+        }
+        Ok(None)
+    }
+
+    fn next_from_trie_topology(
         &mut self,
         seek_key: Option<Nibbles>,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        while let Some(item) = self.items.get(self.idx) {
-            match item {
-                ArenaTrieCursorItem::Branch { path, node } => {
-                    self.idx += 1;
-                    if seek_key.as_ref().is_none_or(|seek_key| path >= seek_key) &&
-                        self.last_key.as_ref().is_none_or(|last_key| path > last_key)
-                    {
-                        self.last_key = Some(*path);
-                        return Ok(Some((*path, node.clone())))
-                    }
-                }
-                ArenaTrieCursorItem::Blind { start, end } => {
-                    let inner_seek_key = seek_key.map_or(*start, |seek_key| (*start).max(seek_key));
-                    if watch_path_overlaps(start) ||
-                        seek_key.as_ref().is_some_and(watch_path_overlaps)
-                    {
-                        debug!(
-                            target: TRACE_TARGET,
-                            ?start,
-                            ?end,
-                            ?seek_key,
-                            ?inner_seek_key,
-                            "Sparse trie cursor seeking inner watched blind range"
-                        );
-                    }
-                    let mut entry = self.inner.seek(inner_seek_key)?;
-                    while let Some((key, node)) = entry {
-                        if !trie_key_is_before_end(&key, end.as_ref()) {
-                            if watch_path_overlaps(start) {
-                                debug!(
-                                    target: TRACE_TARGET,
-                                    ?start,
-                                    ?end,
-                                    ?key,
-                                    "Sparse trie cursor inner entry exited watched blind range"
-                                );
-                            }
-                            break
-                        }
-                        if self.last_key.as_ref().is_none_or(|last_key| &key > last_key) {
-                            if watch_path_overlaps(&key) || watch_path_overlaps(start) {
-                                debug!(
-                                    target: TRACE_TARGET,
-                                    ?start,
-                                    ?end,
-                                    ?key,
-                                    "Sparse trie cursor returning watched inner entry"
-                                );
-                            }
-                            self.active_blind_end = Some(*end);
-                            self.last_key = Some(key);
-                            return Ok(Some((key, node)))
-                        }
-                        entry = self.inner.next()?;
-                    }
+        if self.exhausted {
+            return Ok(None)
+        }
 
-                    self.idx += 1;
-                    self.active_blind_end = None;
+        if self.trie.is_none() {
+            let start = seek_key.unwrap_or_default();
+            let result = self.seek_inner_trie_range(start, None, false)?;
+            if result.is_none() {
+                self.exhausted = true;
+            }
+            return Ok(result)
+        }
+
+        while let Some(item) = self.next_topology_item()? {
+            match item {
+                CachedTopologyItem::Branch { path, node } => {
+                    if seek_key.as_ref().is_none_or(|seek_key| &path >= seek_key) &&
+                        self.last_key.as_ref().is_none_or(|last_key| &path > last_key)
+                    {
+                        self.last_key = Some(path);
+                        return Ok(Some((path, node)))
+                    }
                 }
+                CachedTopologyItem::Blind { path } => {
+                    let end = next_prefix(&path);
+                    if seek_key
+                        .as_ref()
+                        .is_some_and(|seek_key| !trie_key_is_before_end(seek_key, end.as_ref()))
+                    {
+                        continue
+                    }
+                    let inner_seek_key = seek_key.map_or(path, |seek_key| path.max(seek_key));
+                    if let Some(entry) = self.seek_inner_trie_range(inner_seek_key, end, false)? {
+                        return Ok(Some(entry))
+                    }
+                }
+                CachedTopologyItem::Leaf { .. } => {}
             }
         }
 
+        self.exhausted = true;
         Ok(None)
     }
 }
 
-impl<C> TrieCursor for ArenaTrieCursor<C>
+impl<C> TrieCursor for ArenaCachedCursor<'_, C, Nibbles, BranchNodeCompact>
 where
     C: TrieCursor,
 {
@@ -884,42 +861,38 @@ where
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        self.topology_result()?;
-        self.idx = self.first_item_idx(&key);
-        self.active_blind_end = None;
-        self.last_key = None;
+        self.reset_sparse_cursor();
+        self.inner.reset();
 
-        while let Some(item) = self.items.get(self.idx) {
+        if self.trie.is_none() {
+            return self.seek_inner_trie_range(key, None, true)
+        }
+
+        while let Some(item) = self.next_topology_item()? {
             match item {
-                ArenaTrieCursorItem::Branch { path, node } => {
-                    if path == &key {
-                        self.idx += 1;
-                        self.last_key = Some(*path);
-                        return Ok(Some((*path, node.clone())))
+                CachedTopologyItem::Branch { path, node } => {
+                    if path == key {
+                        self.last_key = Some(path);
+                        return Ok(Some((path, node)))
                     }
-                    return Ok(None)
+                    if path > key {
+                        return Ok(None)
+                    }
                 }
-                ArenaTrieCursorItem::Blind { start, end } => {
-                    if key < *start {
+                CachedTopologyItem::Blind { path } => {
+                    let end = next_prefix(&path);
+                    if key < path {
                         return Ok(None)
                     }
                     if trie_key_is_before_end(&key, end.as_ref()) {
-                        let entry = self.inner.seek_exact(key)?;
-                        if let Some((entry_key, node)) = entry &&
-                            trie_key_is_before_end(&entry_key, end.as_ref())
-                        {
-                            self.active_blind_end = Some(*end);
-                            self.last_key = Some(entry_key);
-                            return Ok(Some((entry_key, node)))
-                        }
-                        return Ok(None)
+                        return self.seek_inner_trie_range(key, end, true)
                     }
-
-                    self.idx += 1;
                 }
+                CachedTopologyItem::Leaf { .. } => {}
             }
         }
 
+        self.exhausted = true;
         Ok(None)
     }
 
@@ -927,144 +900,47 @@ where
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        self.topology_result()?;
-        self.idx = self.first_item_idx(&key);
-        self.active_blind_end = None;
-        self.last_key = None;
-        self.next_from_items(Some(key))
+        self.reset_sparse_cursor();
+        self.inner.reset();
+        self.next_from_trie_topology(Some(key))
     }
 
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        self.topology_result()?;
         if self.active_blind_end.is_some() {
-            self.next_inner_in_active_range()
+            self.next_inner_in_active_trie_range()
         } else {
-            self.next_from_items(None)
+            self.next_from_trie_topology(None)
         }
     }
 
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
-        self.topology_result()?;
         Ok(self.last_key)
     }
 
     fn reset(&mut self) {
-        self.idx = 0;
-        self.active_blind_end = None;
-        self.last_key = None;
+        self.reset_sparse_cursor();
         self.inner.reset();
     }
 }
 
-/// Trie storage cursor backed by an arena sparse trie and an inner trie storage cursor.
-#[derive(Debug)]
-pub struct ArenaTrieStorageCursor<C> {
-    cursor: ArenaTrieCursor<C>,
-    can_retarget_without_sparse_lookup: bool,
-}
-
-impl<C> ArenaTrieStorageCursor<C>
+impl<C> TrieStorageCursor for ArenaCachedCursor<'_, C, Nibbles, BranchNodeCompact>
 where
     C: TrieStorageCursor,
 {
-    /// Creates a new storage cursor for `trie`, delegating blinded ranges to `inner`.
-    pub fn new(trie: Option<&ArenaParallelSparseTrie>, inner: C) -> Self {
-        Self {
-            cursor: ArenaTrieCursor::new(trie, inner),
-            can_retarget_without_sparse_lookup: trie.is_none(),
-        }
-    }
-
-    /// Creates a new storage trie cursor over a revealed-empty sparse trie.
-    pub fn new_empty(inner: C) -> Self {
-        Self {
-            cursor: ArenaTrieCursor::new_empty(inner),
-            can_retarget_without_sparse_lookup: false,
-        }
-    }
-
-    /// Updates the sparse trie topology used by this cursor.
-    pub fn set_sparse_trie(&mut self, trie: Option<&ArenaParallelSparseTrie>) {
-        self.cursor.set_sparse_trie(trie);
-        self.can_retarget_without_sparse_lookup = trie.is_none();
-    }
-
-    /// Updates this cursor to use a revealed-empty sparse trie.
-    pub fn set_empty_sparse_trie(&mut self) {
-        self.cursor.set_empty_sparse_trie();
-        self.can_retarget_without_sparse_lookup = false;
-    }
-
-    /// Returns a mutable reference to the inner cursor.
-    pub const fn inner_mut(&mut self) -> &mut C {
-        self.cursor.inner_mut()
-    }
-
-    /// Sets the hashed address on the inner cursor and updates the sparse trie topology.
-    pub fn set_hashed_address_with_sparse_trie(
-        &mut self,
-        hashed_address: B256,
-        trie: Option<&ArenaParallelSparseTrie>,
-    ) {
-        self.cursor.inner_mut().set_hashed_address(hashed_address);
-        self.set_sparse_trie(trie);
+    fn set_hashed_address(&mut self, _hashed_address: B256) {
+        unimplemented!("ArenaCachedCursor storage retargeting")
     }
 }
 
-impl<C> TrieCursor for ArenaTrieStorageCursor<C>
-where
-    C: TrieStorageCursor,
-{
-    fn seek_exact(
-        &mut self,
-        key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        self.cursor.seek_exact(key)
-    }
-
-    fn seek(
-        &mut self,
-        key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        self.cursor.seek(key)
-    }
-
-    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        self.cursor.next()
-    }
-
-    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
-        self.cursor.current()
-    }
-
-    fn reset(&mut self) {
-        self.cursor.reset();
-    }
-}
-
-impl<C> TrieStorageCursor for ArenaTrieStorageCursor<C>
-where
-    C: TrieStorageCursor,
-{
-    fn set_hashed_address(&mut self, hashed_address: B256) {
-        assert!(
-            self.can_retarget_without_sparse_lookup,
-            "ArenaTrieStorageCursor::set_hashed_address cannot retarget revealed sparse topology; use set_hashed_address_with_sparse_trie",
-        );
-        self.cursor.inner_mut().set_hashed_address(hashed_address);
-        self.cursor.set_sparse_trie(None);
-    }
-}
-
-/// Value decoder for sparse trie leaf values returned by [`ArenaHashedCursor`].
-pub trait ArenaHashedCursorValue: Debug {
+/// Value decoder for sparse trie leaf values returned by [`ArenaCachedCursor`].
+pub trait ArenaCachedHashedValue: Debug {
     /// Decodes an RLP-encoded sparse trie leaf value into the hashed cursor value.
     fn decode(value: &[u8]) -> Result<Self, DatabaseError>
     where
         Self: Sized;
 }
 
-impl ArenaHashedCursorValue for Account {
+impl ArenaCachedHashedValue for Account {
     fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
         let mut value = value;
         let trie_account = TrieAccount::decode(&mut value).map_err(|error| {
@@ -1074,7 +950,7 @@ impl ArenaHashedCursorValue for Account {
     }
 }
 
-impl ArenaHashedCursorValue for U256 {
+impl ArenaCachedHashedValue for U256 {
     fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
         let mut value = value;
         <U256 as Decodable>::decode(&mut value).map_err(|error| {
@@ -1083,181 +959,22 @@ impl ArenaHashedCursorValue for U256 {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-enum ArenaCursorItem<'a> {
-    Leaf { key: B256, value: &'a [u8] },
-    Blind { start: B256, end: Option<B256> },
-}
-
-impl ArenaCursorItem<'_> {
-    fn start_key(&self) -> B256 {
-        match *self {
-            Self::Leaf { key, .. } => key,
-            Self::Blind { start, .. } => start,
+fn ensure_cached_subtrie(subtrie: &super::ArenaSparseSubtrie) -> Result<(), DatabaseError> {
+    match &subtrie.arena[subtrie.root] {
+        ArenaSparseNode::EmptyRoot => Ok(()),
+        node => {
+            ensure_node_not_dirty(
+                node.state_ref().ok_or_else(|| {
+                    DatabaseError::Other(format!(
+                        "sparse trie cursor encountered uncached subtrie at {:?}",
+                        subtrie.path
+                    ))
+                })?,
+                subtrie.path,
+            )?;
+            Ok(())
         }
     }
-
-    fn may_contain_key_at_or_after(&self, key: B256) -> bool {
-        match *self {
-            Self::Leaf { key: leaf_key, .. } => leaf_key >= key,
-            Self::Blind { end, .. } => match end {
-                Some(end) => end > key,
-                None => true,
-            },
-        }
-    }
-}
-
-fn compare_items(a: &ArenaCursorItem<'_>, b: &ArenaCursorItem<'_>) -> Ordering {
-    a.start_key().cmp(&b.start_key()).then_with(|| match (a, b) {
-        (ArenaCursorItem::Leaf { .. }, ArenaCursorItem::Blind { .. }) => Ordering::Greater,
-        (ArenaCursorItem::Blind { .. }, ArenaCursorItem::Leaf { .. }) => Ordering::Less,
-        _ => Ordering::Equal,
-    })
-}
-
-#[derive(Debug, Clone)]
-enum ArenaTrieCursorItem {
-    Branch { path: Nibbles, node: BranchNodeCompact },
-    Blind { start: Nibbles, end: Option<Nibbles> },
-}
-
-impl ArenaTrieCursorItem {
-    const fn start_key(&self) -> Nibbles {
-        match self {
-            Self::Branch { path, .. } => *path,
-            Self::Blind { start, .. } => *start,
-        }
-    }
-
-    fn may_contain_key_at_or_after(&self, key: &Nibbles) -> bool {
-        match self {
-            Self::Branch { path, .. } => path >= key,
-            Self::Blind { end, .. } => match end {
-                Some(end) => end > key,
-                None => true,
-            },
-        }
-    }
-}
-
-fn compare_trie_items(a: &ArenaTrieCursorItem, b: &ArenaTrieCursorItem) -> Ordering {
-    a.start_key().cmp(&b.start_key()).then_with(|| match (a, b) {
-        (ArenaTrieCursorItem::Branch { .. }, ArenaTrieCursorItem::Blind { .. }) => {
-            Ordering::Greater
-        }
-        (ArenaTrieCursorItem::Blind { .. }, ArenaTrieCursorItem::Branch { .. }) => Ordering::Less,
-        _ => Ordering::Equal,
-    })
-}
-
-fn collect_hashed_trie_items<'a>(
-    trie: &'a ArenaParallelSparseTrie,
-    items: &mut Vec<ArenaCursorItem<'a>>,
-) -> Result<(), DatabaseError> {
-    collect_hashed_arena_items(&trie.upper_arena, trie.root, Nibbles::default(), items)
-}
-
-fn collect_trie_cursor_items(
-    trie: &ArenaParallelSparseTrie,
-    items: &mut Vec<ArenaTrieCursorItem>,
-) -> Result<(), DatabaseError> {
-    collect_trie_cursor_arena_items(&trie.upper_arena, trie.root, Nibbles::default(), items)
-}
-
-fn collect_trie_cursor_arena_items(
-    arena: &NodeArena,
-    idx: Index,
-    path: Nibbles,
-    items: &mut Vec<ArenaTrieCursorItem>,
-) -> Result<(), DatabaseError> {
-    match &arena[idx] {
-        ArenaSparseNode::EmptyRoot => {}
-        ArenaSparseNode::Leaf { state, .. } => {
-            ensure_node_not_dirty(state, path)?;
-        }
-        ArenaSparseNode::Branch(branch) => {
-            ensure_node_not_dirty(&branch.state, path)?;
-
-            let mut logical_path = path;
-            logical_path.extend(&branch.short_key);
-            let node = branch_node_compact_for_cursor(arena, branch, logical_path)?;
-            items.push(ArenaTrieCursorItem::Branch { path: logical_path, node });
-
-            for (nibble, child) in branch.child_iter() {
-                let mut child_path = logical_path;
-                child_path.push_unchecked(nibble);
-                match child {
-                    ArenaSparseNodeBranchChild::Revealed(child_idx) => {
-                        collect_trie_cursor_arena_items(arena, *child_idx, child_path, items)?;
-                    }
-                    ArenaSparseNodeBranchChild::Blinded(_) => {
-                        push_trie_blind_range(child_path, items);
-                    }
-                }
-            }
-        }
-        ArenaSparseNode::Subtrie(subtrie) => {
-            collect_trie_cursor_arena_items(&subtrie.arena, subtrie.root, subtrie.path, items)?;
-        }
-        ArenaSparseNode::TakenSubtrie => {
-            push_trie_blind_range(path, items);
-        }
-    }
-
-    Ok(())
-}
-
-fn collect_hashed_arena_items<'a>(
-    arena: &'a NodeArena,
-    idx: Index,
-    path: Nibbles,
-    items: &mut Vec<ArenaCursorItem<'a>>,
-) -> Result<(), DatabaseError> {
-    match &arena[idx] {
-        ArenaSparseNode::EmptyRoot => {}
-        ArenaSparseNode::Leaf { state, value, key } => {
-            ensure_node_not_dirty(state, path)?;
-            let mut full_path = path;
-            full_path.extend(key);
-            debug_assert_eq!(
-                full_path.len(),
-                B256::len_bytes() * 2,
-                "leaf path must contain a full hashed key"
-            );
-            if full_path.len() == B256::len_bytes() * 2 {
-                items.push(ArenaCursorItem::Leaf {
-                    key: B256::from_slice(&full_path.pack()),
-                    value,
-                });
-            }
-        }
-        ArenaSparseNode::Branch(branch) => {
-            ensure_node_not_dirty(&branch.state, path)?;
-            let mut logical_path = path;
-            logical_path.extend(&branch.short_key);
-            for (nibble, child) in branch.child_iter() {
-                let mut child_path = logical_path;
-                child_path.push_unchecked(nibble);
-                match child {
-                    ArenaSparseNodeBranchChild::Revealed(child_idx) => {
-                        collect_hashed_arena_items(arena, *child_idx, child_path, items)?;
-                    }
-                    ArenaSparseNodeBranchChild::Blinded(_) => {
-                        push_blind_range(child_path, items);
-                    }
-                }
-            }
-        }
-        ArenaSparseNode::Subtrie(subtrie) => {
-            collect_hashed_arena_items(&subtrie.arena, subtrie.root, subtrie.path, items)?;
-        }
-        ArenaSparseNode::TakenSubtrie => {
-            push_blind_range(path, items);
-        }
-    }
-
-    Ok(())
 }
 
 fn branch_node_compact_for_cursor(
@@ -1334,45 +1051,6 @@ fn ensure_node_not_dirty(state: &ArenaSparseNodeState, path: Nibbles) -> Result<
         )))
     }
     Ok(())
-}
-
-fn push_blind_range(path: Nibbles, items: &mut Vec<ArenaCursorItem<'_>>) {
-    if path.len() > B256::len_bytes() * 2 {
-        return
-    }
-
-    if watch_path_overlaps(&path) {
-        debug!(target: TRACE_TARGET, ?path, "Sparse hashed cursor collected watched blind range");
-    }
-    items.push(ArenaCursorItem::Blind { start: prefix_start(&path), end: prefix_end(&path) });
-}
-
-fn push_trie_blind_range(path: Nibbles, items: &mut Vec<ArenaTrieCursorItem>) {
-    if watch_path_overlaps(&path) {
-        debug!(target: TRACE_TARGET, ?path, "Sparse trie cursor collected watched blind range");
-    }
-    items.push(ArenaTrieCursorItem::Blind { start: path, end: next_prefix(&path) });
-}
-
-fn watch_path_overlaps(path: &Nibbles) -> bool {
-    let watch_prefix = Nibbles::from_nibbles_unchecked([0x07, 0x0c, 0x05, 0x0a, 0x05, 0x04]);
-    path.starts_with(&watch_prefix) || watch_prefix.starts_with(path)
-}
-
-fn watch_key_matches(key: B256) -> bool {
-    let watch_prefix =
-        prefix_start(&Nibbles::from_nibbles_unchecked([0x07, 0x0c, 0x05, 0x0a, 0x05, 0x04]));
-    let watch_end =
-        prefix_end(&Nibbles::from_nibbles_unchecked([0x07, 0x0c, 0x05, 0x0a, 0x05, 0x04]));
-    key >= watch_prefix && key_is_before_end(key, watch_end)
-}
-
-fn watch_key_overlaps(start: B256, end: Option<B256>) -> bool {
-    let watch_prefix =
-        prefix_start(&Nibbles::from_nibbles_unchecked([0x07, 0x0c, 0x05, 0x0a, 0x05, 0x04]));
-    let watch_end =
-        prefix_end(&Nibbles::from_nibbles_unchecked([0x07, 0x0c, 0x05, 0x0a, 0x05, 0x04]));
-    key_is_before_end(start, watch_end) && end.is_none_or(|end| end > watch_prefix)
 }
 
 fn prefix_start(prefix: &Nibbles) -> B256 {
