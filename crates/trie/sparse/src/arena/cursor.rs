@@ -429,34 +429,12 @@ impl ArenaCursor {
     }
 }
 
-/// A read-only topology cursor over cached arena trie data.
-#[derive(Debug, Clone)]
-pub(super) struct ArenaCachedTopologyCursor<'a> {
-    cursor: ArenaCursor,
-    arena: &'a NodeArena,
-}
-
-impl<'a> ArenaCachedTopologyCursor<'a> {
-    fn new(arena: &'a NodeArena, root: Index, path: Nibbles) -> Self {
-        let mut cursor = ArenaCursor::default();
-        cursor.reset(arena, root, path);
-        Self { cursor, arena }
-    }
-
-    pub(super) fn from_trie(trie: &'a ArenaParallelSparseTrie) -> Self {
-        Self::new(&trie.upper_arena, trie.root, Nibbles::default())
-    }
-
-    fn from_subtrie(subtrie: &'a super::ArenaSparseSubtrie) -> Self {
-        Self::new(&subtrie.arena, subtrie.root, subtrie.path)
-    }
-}
-
 /// Cursor backed by cached sparse-trie topology and an inner database cursor.
 #[derive(Debug, Clone)]
 pub struct ArenaCachedCursor<'a, C, K, V = ()> {
     trie: Option<&'a ArenaParallelSparseTrie>,
-    frames: Vec<ArenaCachedTopologyCursor<'a>>,
+    cursor: ArenaCursor,
+    active_subtrie: Option<&'a super::ArenaSparseSubtrie>,
     active_blind_end: Option<Option<K>>,
     last_key: Option<K>,
     exhausted: bool,
@@ -469,7 +447,8 @@ impl<'a, C, K, V> ArenaCachedCursor<'a, C, K, V> {
     pub fn new(trie: Option<&'a ArenaParallelSparseTrie>, inner: C) -> Self {
         let mut this = Self {
             trie,
-            frames: Vec::new(),
+            cursor: ArenaCursor::default(),
+            active_subtrie: None,
             active_blind_end: None,
             last_key: None,
             exhausted: false,
@@ -481,13 +460,41 @@ impl<'a, C, K, V> ArenaCachedCursor<'a, C, K, V> {
     }
 
     fn reset_sparse_cursor(&mut self) {
-        self.frames.clear();
+        self.cursor = ArenaCursor::default();
+        self.active_subtrie = None;
         if let Some(trie) = self.trie {
-            self.frames.push(trie.cached_cursor());
+            self.cursor = trie.cached_cursor();
         }
         self.active_blind_end = None;
         self.last_key = None;
         self.exhausted = false;
+    }
+
+    fn active_arena(&self) -> Option<&'a NodeArena> {
+        self.active_subtrie
+            .map(|subtrie| &subtrie.arena)
+            .or_else(|| self.trie.map(|trie| &trie.upper_arena))
+    }
+
+    fn pop_cached(&mut self) {
+        if let Some(subtrie) = self.active_subtrie {
+            self.cursor.pop_cached(&subtrie.arena);
+            if !self.cursor.head().is_some_and(|entry| entry.path.starts_with(&subtrie.path)) {
+                self.active_subtrie = None;
+            }
+        } else if let Some(trie) = self.trie {
+            self.cursor.pop_cached(&trie.upper_arena);
+        }
+    }
+
+    fn enter_subtrie(&mut self, subtrie: &'a super::ArenaSparseSubtrie) {
+        let head = self.cursor.stack.last_mut().expect("head exists");
+        head.index = subtrie.root;
+        head.path = subtrie.path;
+        head.branch_emitted = false;
+        head.next_dense_idx = 0;
+        self.cursor.needs_pop = false;
+        self.active_subtrie = Some(subtrie);
     }
 }
 
@@ -527,27 +534,23 @@ enum CachedTopologyItem<'a> {
 impl<'a, C, K, V> ArenaCachedCursor<'a, C, K, V> {
     fn next_topology_item(&mut self) -> Result<Option<CachedTopologyItem<'a>>, DatabaseError> {
         loop {
-            let Some(frame) = self.frames.last_mut() else { return Ok(None) };
-
-            if frame.cursor.needs_pop {
-                frame.cursor.pop_cached(frame.arena);
-                frame.cursor.needs_pop = false;
+            if self.cursor.needs_pop {
+                self.pop_cached();
+                self.cursor.needs_pop = false;
             }
 
-            let Some(head) = frame.cursor.head().cloned() else {
-                self.frames.pop();
-                continue
-            };
+            let Some(head) = self.cursor.head().cloned() else { return Ok(None) };
+            let Some(arena) = self.active_arena() else { return Ok(None) };
 
-            match &frame.arena[head.index] {
+            match &arena[head.index] {
                 ArenaSparseNode::EmptyRoot => {
-                    frame.cursor.needs_pop = true;
+                    self.cursor.needs_pop = true;
                 }
                 ArenaSparseNode::Leaf { state, value, key } => {
                     ensure_node_not_dirty(state, head.path)?;
                     let mut path = head.path;
                     path.extend(key);
-                    frame.cursor.needs_pop = true;
+                    self.cursor.needs_pop = true;
                     return Ok(Some(CachedTopologyItem::Leaf { path, value }))
                 }
                 ArenaSparseNode::Branch(branch) => {
@@ -557,9 +560,8 @@ impl<'a, C, K, V> ArenaCachedCursor<'a, C, K, V> {
                     logical_path.extend(&branch.short_key);
 
                     if !head.branch_emitted {
-                        frame.cursor.stack.last_mut().expect("head exists").branch_emitted = true;
-                        let node =
-                            branch_node_compact_for_cursor(frame.arena, branch, logical_path)?;
+                        self.cursor.stack.last_mut().expect("head exists").branch_emitted = true;
+                        let node = branch_node_compact_for_cursor(arena, branch, logical_path)?;
                         return Ok(Some(CachedTopologyItem::Branch { path: logical_path, node }))
                     }
 
@@ -571,7 +573,7 @@ impl<'a, C, K, V> ArenaCachedCursor<'a, C, K, V> {
                             continue;
                         }
 
-                        frame.cursor.stack.last_mut().expect("head exists").next_dense_idx =
+                        self.cursor.stack.last_mut().expect("head exists").next_dense_idx =
                             branch_child_idx.get() + 1;
 
                         let mut child_path = logical_path;
@@ -581,7 +583,7 @@ impl<'a, C, K, V> ArenaCachedCursor<'a, C, K, V> {
                                 return Ok(Some(CachedTopologyItem::Blind { path: child_path }))
                             }
                             ArenaSparseNodeBranchChild::Revealed(child_idx) => {
-                                frame.cursor.push(frame.arena, *child_idx, child_path);
+                                self.cursor.push(arena, *child_idx, child_path);
                                 descended = true;
                                 break;
                             }
@@ -589,16 +591,15 @@ impl<'a, C, K, V> ArenaCachedCursor<'a, C, K, V> {
                     }
 
                     if !descended {
-                        frame.cursor.needs_pop = true;
+                        self.cursor.needs_pop = true;
                     }
                 }
                 ArenaSparseNode::Subtrie(subtrie) => {
                     ensure_cached_subtrie(subtrie)?;
-                    frame.cursor.needs_pop = true;
-                    self.frames.push(ArenaCachedTopologyCursor::from_subtrie(subtrie));
+                    self.enter_subtrie(subtrie);
                 }
                 ArenaSparseNode::TakenSubtrie => {
-                    frame.cursor.needs_pop = true;
+                    self.cursor.needs_pop = true;
                     return Ok(Some(CachedTopologyItem::Blind { path: head.path }))
                 }
             }

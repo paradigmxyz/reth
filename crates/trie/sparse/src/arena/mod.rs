@@ -4,7 +4,7 @@ mod nodes;
 
 use branch_child_idx::{BranchChildIdx, BranchChildIter};
 pub use cursor::{ArenaCachedCursor, ArenaCachedHashedValue};
-use cursor::{ArenaCachedTopologyCursor, ArenaCursor, NextResult, SeekResult};
+use cursor::{ArenaCursor, NextResult, SeekResult};
 use nodes::{
     ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
 };
@@ -727,8 +727,10 @@ pub struct ArenaParallelSparseTrie {
 
 impl ArenaParallelSparseTrie {
     /// Creates a read-only cursor over this trie's cached topology.
-    fn cached_cursor(&self) -> ArenaCachedTopologyCursor<'_> {
-        ArenaCachedTopologyCursor::from_trie(self)
+    fn cached_cursor(&self) -> ArenaCursor {
+        let mut cursor = ArenaCursor::default();
+        cursor.reset(&self.upper_arena, self.root, Nibbles::default());
+        cursor
     }
 
     /// Sets the thresholds that control when parallelism is used during operations.
