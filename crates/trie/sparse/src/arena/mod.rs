@@ -2804,7 +2804,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         let mut recorded_proof_targets: Vec<(B256, u8)> = Vec::new();
 
         let threshold = self.parallelism_thresholds.min_updates;
-        let parallelize_distributed_updates = sorted.len() >= threshold.saturating_mul(4);
+        let parallelize_distributed_updates = updates.len() >= threshold.saturating_mul(4);
 
         // Drain and sort updates lexicographically by nibbles path.
         let mut sorted: Vec<_> =
