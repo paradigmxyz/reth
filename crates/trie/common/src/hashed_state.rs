@@ -628,7 +628,7 @@ impl HashedPostStateSorted {
     /// For small batches, uses `extend_ref_and_sort` loop.
     /// For large batches, uses k-way merge for O(n log k) complexity.
     pub fn merge_slice<T: AsRef<Self>>(items: &[T]) -> Self {
-        const THRESHOLD: usize = 30;
+        const THRESHOLD: usize = 8;
 
         let k = items.len();
 
