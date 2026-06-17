@@ -32,7 +32,7 @@ use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockReader, StateProviderFactory, StateReader,
 };
 use reth_revm::database::StateProviderDatabase;
-use reth_tasks::{pool::WorkerPool, Runtime};
+use reth_tasks::{pool::WorkerPool, utils::increase_thread_priority, Runtime};
 use reth_trie_common::MultiProofTargetsV2;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -132,6 +132,8 @@ where
         let span = Span::current();
 
         self.executor.spawn_blocking_named("prewarm-txs", move || {
+            reth_tasks::once!(increase_thread_priority);
+
             let _enter = debug_span!(
                 target: "engine::tree::payload_processor::prewarm",
                 parent: &span,
@@ -458,6 +460,8 @@ where
     where
         Tx: ExecutableTxFor<Evm> + Send + 'static,
     {
+        reth_tasks::once!(increase_thread_priority);
+
         // Spawn execution tasks based on mode
         match mode {
             PrewarmMode::Transactions(pending) => {
