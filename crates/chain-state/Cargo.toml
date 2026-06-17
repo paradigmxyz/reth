@@ -38,6 +38,7 @@ tokio-stream = { workspace = true, features = ["sync"] }
 tracing.workspace = true
 
 # misc
+blake3.workspace = true
 derive_more.workspace = true
 metrics.workspace = true
 parking_lot.workspace = true
@@ -73,6 +74,7 @@ serde = [
     "revm-database/serde",
     "revm-state?/serde",
     "reth-storage-api/serde",
+    "blake3/serde",
 ]
 test-utils = [
     "alloy-primitives/getrandom",

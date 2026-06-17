@@ -2,7 +2,8 @@
 
 use crate::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
-    ChainInfoTracker, ComputedTrieData, DeferredTrieData, MemoryOverlayStateProvider,
+    ChainInfoTracker, ComputedTrieData, DeferredTrieData, LthashAccumulator,
+    MemoryOverlayStateProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
@@ -757,6 +758,10 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     /// This allows deferring the computation of the trie data which can be expensive.
     /// The data can be populated asynchronously after the block was validated.
     pub trie_data: DeferredTrieData,
+    /// Full Lthash accumulator after executing this block.
+    ///
+    /// Descendants need the full accumulator to compute the next checksum.
+    pub lthash_accumulator: Option<Arc<LthashAccumulator>>,
 }
 
 impl<N: NodePrimitives> Default for ExecutedBlock<N> {
@@ -773,13 +778,14 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
                 state: Default::default(),
             }),
             trie_data: DeferredTrieData::ready(ComputedTrieData::default()),
+            lthash_accumulator: None,
         }
     }
 }
 
 impl<N: NodePrimitives> PartialEq for ExecutedBlock<N> {
     fn eq(&self, other: &Self) -> bool {
-        // Trie data is computed asynchronously and doesn't define block identity.
+        // Auxiliary state data doesn't define block identity.
         self.recovered_block == other.recovered_block &&
             self.execution_output == other.execution_output
     }
@@ -795,7 +801,12 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
         trie_data: ComputedTrieData,
     ) -> Self {
-        Self { recovered_block, execution_output, trie_data: DeferredTrieData::ready(trie_data) }
+        Self {
+            recovered_block,
+            execution_output,
+            trie_data: DeferredTrieData::ready(trie_data),
+            lthash_accumulator: None,
+        }
     }
 
     /// Create a new [`ExecutedBlock`] with deferred trie data.
@@ -816,7 +827,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
         trie_data: DeferredTrieData,
     ) -> Self {
-        Self { recovered_block, execution_output, trie_data }
+        Self { recovered_block, execution_output, trie_data, lthash_accumulator: None }
     }
 
     /// Returns a reference to an inner [`SealedBlock`]
@@ -855,6 +866,28 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     #[inline]
     pub fn trie_data_handle(&self) -> DeferredTrieData {
         self.trie_data.clone()
+    }
+
+    /// Returns the Lthash accumulator after executing this block.
+    #[inline]
+    pub fn lthash_accumulator(&self) -> Option<&LthashAccumulator> {
+        self.lthash_accumulator.as_deref()
+    }
+
+    /// Returns a clone of the Lthash accumulator handle.
+    #[inline]
+    pub fn lthash_accumulator_handle(&self) -> Option<Arc<LthashAccumulator>> {
+        self.lthash_accumulator.clone()
+    }
+
+    /// Sets the Lthash accumulator for this block.
+    #[inline]
+    pub fn with_lthash_accumulator(
+        mut self,
+        accumulator: impl Into<Arc<LthashAccumulator>>,
+    ) -> Self {
+        self.lthash_accumulator = Some(accumulator.into());
+        self
     }
 
     /// Returns the hashed state result of the execution outcome.
