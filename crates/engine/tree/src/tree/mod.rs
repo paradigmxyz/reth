@@ -37,10 +37,9 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority, WorkerPool};
-use reth_trie::HashedPostStateSorted;
 use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
-use state::TreeState;
+use state::{RemovedBlockState, TreeState};
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
 
 use crossbeam_channel::{Receiver, Sender};
@@ -2143,15 +2142,17 @@ where
         }
 
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
-        let persisted_state =
+        let removed_block_state =
             self.remove_before(self.persistence_state.last_persisted_block, finalized)?;
         let persisted_block = BlockNumHash {
             number: self.persistence_state.last_persisted_block.number,
             hash: self.persistence_state.last_persisted_block.hash,
         };
         let _ = self.canonical_in_memory_state.remove_persisted_blocks(persisted_block);
-        self.payload_validator
-            .prune_sparse_state_trie_after_persistence(persisted_block, &persisted_state);
+        self.payload_validator.prune_sparse_state_trie_after_persistence(
+            persisted_block,
+            &removed_block_state.retained_state_mask,
+        );
         Ok(())
     }
 
@@ -3325,7 +3326,7 @@ where
         &mut self,
         upper_bound: BlockNumHash,
         finalized_hash: Option<B256>,
-    ) -> ProviderResult<HashedPostStateSorted> {
+    ) -> ProviderResult<RemovedBlockState> {
         // first fetch the finalized block number and then call the remove_before method on
         // tree_state
         let num = if let Some(hash) = finalized_hash {
@@ -3334,12 +3335,12 @@ where
             None
         };
 
-        let persisted_state = self.state.tree_state.remove_until(
+        let removed_block_state = self.state.tree_state.remove_until(
             upper_bound,
             self.persistence_state.last_persisted_block.hash,
             num,
         );
-        Ok(persisted_state)
+        Ok(removed_block_state)
     }
 
     /// Returns a builder for creating state providers for the given hash.

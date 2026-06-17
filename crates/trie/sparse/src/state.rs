@@ -2,10 +2,7 @@
 use crate::debug_recorder::TrieDebugRecorder;
 use crate::{traits::SparseTrie as SparseTrieTrait, ParallelSparseTrie, RevealableSparseTrie};
 use alloc::vec::Vec;
-use alloy_primitives::{
-    map::{B256Map, B256Set},
-    B256,
-};
+use alloy_primitives::{map::B256Map, B256};
 use alloy_rlp::{Decodable, Encodable};
 use either::Either;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
@@ -47,12 +44,6 @@ pub struct SparseStateTrie<
     account_rlp_buf: Vec<u8>,
     /// Holds data that should be dropped after final state root is calculated.
     deferred_drops: DeferredDrops,
-    /// Account keys revealed by currently in-memory block hashed states.
-    retained_accounts: B256Set,
-    /// Storage account keys revealed by currently in-memory block hashed states.
-    retained_storage_accounts: B256Set,
-    /// Storage slot keys revealed by currently in-memory block hashed states, grouped by account.
-    retained_storage_slots: B256Map<B256Set>,
     /// Metrics for the sparse state trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::SparseStateTrieMetrics,
@@ -70,9 +61,6 @@ where
             retain_updates: self.retain_updates,
             account_rlp_buf: self.account_rlp_buf.clone(),
             deferred_drops: self.deferred_drops.clone(),
-            retained_accounts: self.retained_accounts.clone(),
-            retained_storage_accounts: self.retained_storage_accounts.clone(),
-            retained_storage_slots: self.retained_storage_slots.clone(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -98,9 +86,6 @@ where
             retain_updates: self.retain_updates,
             account_rlp_buf: self.account_rlp_buf.clone(),
             deferred_drops: self.deferred_drops.clone(),
-            retained_accounts: self.retained_accounts.clone(),
-            retained_storage_accounts: self.retained_storage_accounts.clone(),
-            retained_storage_slots: self.retained_storage_slots.clone(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -119,9 +104,6 @@ where
             retain_updates: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
             deferred_drops: DeferredDrops::default(),
-            retained_accounts: Default::default(),
-            retained_storage_accounts: Default::default(),
-            retained_storage_slots: Default::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -240,26 +222,6 @@ where
         trie.find_leaf(&path, None).is_ok()
     }
 
-    /// Records a storage slot update that belongs to an in-memory block.
-    #[inline]
-    pub fn record_slot_touch(&mut self, account: B256, slot: B256) {
-        self.retained_storage_accounts.insert(account);
-        self.retained_storage_slots.entry(account).or_default().insert(slot);
-    }
-
-    /// Clears previously retained storage slots for an in-memory storage wipe.
-    #[inline]
-    pub fn record_storage_wipe(&mut self, account: B256) {
-        self.retained_storage_accounts.insert(account);
-        self.retained_storage_slots.remove(&account);
-    }
-
-    /// Records an account update that belongs to an in-memory block.
-    #[inline]
-    pub fn record_account_touch(&mut self, account: B256) {
-        self.retained_accounts.insert(account);
-    }
-
     /// Returns reference to bytes representing leaf value for the target account.
     pub fn get_account_value(&self, account: &B256) -> Option<&Vec<u8>> {
         self.state.as_revealed_ref()?.get_leaf_value(&Nibbles::unpack(account))
@@ -278,15 +240,6 @@ where
     /// Returns reference to storage trie if it was revealed.
     pub fn storage_trie_ref(&self, address: &B256) -> Option<&S> {
         self.storage.tries.get(address).and_then(|e| e.as_revealed_ref())
-    }
-
-    /// Returns `true` if storage for `address` is covered by currently retained in-memory state.
-    ///
-    /// This can be true even when no storage trie is retained, for example after an in-memory
-    /// storage wipe with no remaining slot updates. In that case callers should treat the storage
-    /// trie as revealed-empty instead of falling back to the database.
-    pub fn is_retained_storage_account(&self, address: &B256) -> bool {
-        self.retained_storage_accounts.contains(address)
     }
 
     /// Returns mutable reference to storage sparse trie if it was revealed.
@@ -712,9 +665,6 @@ where
         self.state.clear();
         self.storage.clear();
         self.account_rlp_buf.clear();
-        self.retained_accounts.clear();
-        self.retained_storage_accounts.clear();
-        self.retained_storage_slots.clear();
     }
 
     /// Returns a heuristic for the total in-memory size of this state trie in bytes.
@@ -783,8 +733,7 @@ where
         self.storage.shrink_to(storage_nodes, storage_values);
     }
 
-    /// Removes persisted state keys from the exact retained-key set, then prunes account/storage
-    /// tries to the remaining in-memory hashed state keys.
+    /// Prunes account/storage tries to the hashed state keys retained in memory.
     ///
     /// # Preconditions
     ///
@@ -798,51 +747,33 @@ where
         target = "trie::sparse",
         skip_all
     )]
-    pub fn prune_persisted_state(&mut self, persisted_state: &HashedPostStateSorted) {
-        let mut removed_accounts = 0usize;
-        for (address, _) in &persisted_state.accounts {
-            removed_accounts += self.retained_accounts.remove(address) as usize;
-        }
-
-        let mut removed_slots = 0usize;
-        let mut removed_storage_accounts = 0usize;
-        for (address, storage) in &persisted_state.storages {
-            let had_retained_slots = self.retained_storage_slots.contains_key(address);
-            let mut empty = false;
-            if let Some(retained_slots) = self.retained_storage_slots.get_mut(address) {
-                for (slot, _) in storage.storage_slots_ref() {
-                    removed_slots += retained_slots.remove(slot) as usize;
-                }
-                empty = retained_slots.is_empty();
-            }
-            if empty {
-                self.retained_storage_slots.remove(address);
-            }
-
-            if (had_retained_slots && !self.retained_storage_slots.contains_key(address)) ||
-                (!had_retained_slots && storage.wiped)
-            {
-                removed_storage_accounts += self.retained_storage_accounts.remove(address) as usize;
-            }
-        }
-
+    pub fn prune_persisted_state(&mut self, retained_state_mask: &HashedPostStateSorted) {
         let mut retained_storage_slots = B256Map::with_capacity_and_hasher(
-            self.retained_storage_slots.len(),
+            retained_state_mask.storages.len(),
             Default::default(),
         );
-        for (address, slots) in &self.retained_storage_slots {
-            let mut retained = Vec::with_capacity(slots.len());
-            retained.extend(slots.iter().map(|slot| Nibbles::unpack(*slot)));
+        for (address, storage) in &retained_state_mask.storages {
+            if storage.storage_slots_ref().is_empty() {
+                continue;
+            }
+
+            let mut retained = Vec::with_capacity(storage.storage_slots_ref().len());
+            retained
+                .extend(storage.storage_slots_ref().iter().map(|(slot, _)| Nibbles::unpack(*slot)));
             retained.sort_unstable();
             retained_storage_slots.insert(*address, retained);
         }
 
-        let mut retained_account_keys = self.retained_accounts.clone();
-        retained_account_keys.extend(self.retained_storage_accounts.iter().copied());
-        let mut retained_account_paths = Vec::with_capacity(retained_account_keys.len());
+        let mut retained_account_paths = Vec::with_capacity(
+            retained_state_mask.accounts.len() + retained_state_mask.storages.len(),
+        );
+        retained_account_paths.extend(
+            retained_state_mask.accounts.iter().map(|(account, _)| Nibbles::unpack(*account)),
+        );
         retained_account_paths
-            .extend(retained_account_keys.iter().map(|account| Nibbles::unpack(*account)));
+            .extend(retained_state_mask.storages.keys().map(|account| Nibbles::unpack(*account)));
         retained_account_paths.sort_unstable();
+        retained_account_paths.dedup();
 
         let retained_accounts = retained_account_paths.len();
         let retained_storage_tries = retained_storage_slots.len();
@@ -860,9 +791,6 @@ where
 
         debug!(
             target: "trie::sparse",
-            removed_accounts,
-            removed_slots,
-            removed_storage_accounts,
             retained_accounts,
             retained_storage_tries,
             account_nodes_pruned,
@@ -1044,6 +972,14 @@ mod tests {
     }
 
     fn two_leaf_v2_proof_nodes(leaf_value: Vec<u8>) -> Vec<ProofTrieNodeV2> {
+        two_leaf_v2_proof_nodes_at(0x0, 0x1, leaf_value)
+    }
+
+    fn two_leaf_v2_proof_nodes_at(
+        first_nibble: u8,
+        second_nibble: u8,
+        leaf_value: Vec<u8>,
+    ) -> Vec<ProofTrieNodeV2> {
         let leaf_1_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value.clone()));
         let leaf_2_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value));
 
@@ -1053,14 +989,22 @@ mod tests {
                 RlpNode::from_rlp(&alloy_rlp::encode(&leaf_1_node)),
                 RlpNode::from_rlp(&alloy_rlp::encode(&leaf_2_node)),
             ],
-            state_mask: TrieMask::new(0b11),
+            state_mask: TrieMask::new((1u16 << first_nibble) | (1u16 << second_nibble)),
             branch_rlp_node: None,
         });
 
         vec![
             ProofTrieNodeV2 { path: Nibbles::default(), node: branch_node, masks: None },
-            ProofTrieNodeV2 { path: Nibbles::from_nibbles([0x0]), node: leaf_1_node, masks: None },
-            ProofTrieNodeV2 { path: Nibbles::from_nibbles([0x1]), node: leaf_2_node, masks: None },
+            ProofTrieNodeV2 {
+                path: Nibbles::from_nibbles([first_nibble]),
+                node: leaf_1_node,
+                masks: None,
+            },
+            ProofTrieNodeV2 {
+                path: Nibbles::from_nibbles([second_nibble]),
+                node: leaf_2_node,
+                masks: None,
+            },
         ]
     }
 
@@ -1190,7 +1134,7 @@ mod tests {
     }
 
     #[test]
-    fn prune_persisted_state_prunes_to_remaining_hashed_state_keys() {
+    fn prune_persisted_state_prunes_to_retained_hashed_state_mask() {
         let removed_account = B256::ZERO;
         let kept_account =
             b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
@@ -1214,23 +1158,15 @@ mod tests {
         sparse.root().unwrap();
         sparse.storage_root(&storage).unwrap();
 
-        sparse.record_account_touch(removed_account);
-        sparse.record_account_touch(kept_account);
-        sparse.record_slot_touch(storage, removed_slot);
-        sparse.record_slot_touch(storage, kept_slot);
-
-        let persisted_state = HashedPostStateSorted::new(
-            vec![(removed_account, None)],
+        let retained_state_mask = HashedPostStateSorted::new(
+            vec![(kept_account, None)],
             B256Map::from_iter([(
                 storage,
-                HashedStorageSorted {
-                    wiped: false,
-                    storage_slots: vec![(removed_slot, U256::ZERO)],
-                },
+                HashedStorageSorted { wiped: false, storage_slots: vec![(kept_slot, U256::ZERO)] },
             )]),
         );
 
-        sparse.prune_persisted_state(&persisted_state);
+        sparse.prune_persisted_state(&retained_state_mask);
 
         assert!(sparse.get_account_value(&removed_account).is_none());
         assert_eq!(sparse.get_account_value(&kept_account), Some(&account_leaf_value));
@@ -1239,80 +1175,43 @@ mod tests {
     }
 
     #[test]
-    fn storage_wipe_tracking_prunes_masked_slots() {
-        let storage = B256::ZERO;
-        let stale_slot = B256::ZERO;
+    fn prune_persisted_state_retains_witness_leaf_by_head_path() {
+        let storage = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
+        let witness_slot =
+            b256!("0xa000000000000000000000000000000000000000000000000000000000000000");
         let retained_slot =
-            b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
-        let account_leaf_value = alloy_rlp::encode(TrieAccount::default());
+            b256!("0xaec0000000000000000000000000000000000000000000000000000000000000");
         let storage_leaf_value = alloy_rlp::encode_fixed_size(&U256::from(42)).to_vec();
 
         let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
         sparse
             .reveal_decoded_multiproof_v2(reth_trie_common::DecodedMultiProofV2 {
-                account_proofs: two_leaf_v2_proof_nodes(account_leaf_value.clone()),
                 storage_proofs: B256Map::from_iter([(
                     storage,
-                    two_leaf_v2_proof_nodes(storage_leaf_value.clone()),
+                    two_leaf_v2_proof_nodes_at(0xa, 0xb, storage_leaf_value.clone()),
                 )]),
                 ..Default::default()
             })
             .unwrap();
-        sparse.root().unwrap();
         sparse.storage_root(&storage).unwrap();
 
-        sparse.record_slot_touch(storage, stale_slot);
-        sparse.record_storage_wipe(storage);
-        sparse.record_slot_touch(storage, retained_slot);
-        sparse.prune_persisted_state(&HashedPostStateSorted::default());
-
-        assert_eq!(sparse.get_account_value(&storage), Some(&account_leaf_value));
-        assert!(sparse.get_storage_slot_value(&storage, &stale_slot).is_none());
-        assert_eq!(
-            sparse.get_storage_slot_value(&storage, &retained_slot),
-            Some(&storage_leaf_value)
-        );
-    }
-
-    #[test]
-    fn retained_storage_wipe_survives_pruning_older_storage_touch() {
-        let storage = B256::ZERO;
-        let stale_slot = B256::ZERO;
-        let account_leaf_value = alloy_rlp::encode(TrieAccount::default());
-        let storage_leaf_value = alloy_rlp::encode_fixed_size(&U256::from(42)).to_vec();
-
-        let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
-        sparse
-            .reveal_decoded_multiproof_v2(reth_trie_common::DecodedMultiProofV2 {
-                account_proofs: two_leaf_v2_proof_nodes(account_leaf_value.clone()),
-                storage_proofs: B256Map::from_iter([(
-                    storage,
-                    two_leaf_v2_proof_nodes(storage_leaf_value),
-                )]),
-                ..Default::default()
-            })
-            .unwrap();
-        sparse.root().unwrap();
-        sparse.storage_root(&storage).unwrap();
-
-        sparse.record_slot_touch(storage, stale_slot);
-        sparse.record_storage_wipe(storage);
-
-        let persisted_state = HashedPostStateSorted::new(
+        let retained_state_mask = HashedPostStateSorted::new(
             Vec::new(),
             B256Map::from_iter([(
                 storage,
                 HashedStorageSorted {
                     wiped: false,
-                    storage_slots: vec![(stale_slot, U256::from(42))],
+                    storage_slots: vec![(retained_slot, U256::ZERO)],
                 },
             )]),
         );
-        sparse.prune_persisted_state(&persisted_state);
 
-        assert!(sparse.is_retained_storage_account(&storage));
-        assert_eq!(sparse.get_account_value(&storage), Some(&account_leaf_value));
-        assert!(sparse.storage_trie_ref(&storage).is_none());
+        sparse.prune_persisted_state(&retained_state_mask);
+
+        assert_eq!(
+            sparse.get_storage_slot_value(&storage, &witness_slot),
+            Some(&storage_leaf_value)
+        );
     }
 
     #[test]
