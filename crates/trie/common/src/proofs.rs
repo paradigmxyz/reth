@@ -236,14 +236,6 @@ impl MultiProof {
             .map(|(_, node)| node)
             .collect::<Vec<_>>();
 
-        // An empty account trie is represented by a single empty-root sentinel node (`0x80`).
-        // Geth returns an empty proof array in this case (EIP-1186), so normalize it away.
-        let proof = if proof.len() == 1 && proof[0].as_ref() == [EMPTY_STRING_CODE] {
-            Vec::new()
-        } else {
-            proof
-        };
-
         // Inspect the last node in the proof. If it's a leaf node with matching suffix,
         // then the node contains the encoded trie account.
         let info = 'info: {
@@ -373,11 +365,6 @@ impl DecodedMultiProof {
             .into_iter()
             .map(|(_, node)| node)
             .collect::<Vec<_>>();
-
-        // An empty account trie is represented by a single empty-root sentinel node (`0x80`).
-        // Geth returns an empty proof array in this case (EIP-1186), so normalize it away.
-        let proof =
-            if proof.len() == 1 && proof[0] == TrieNode::EmptyRoot { Vec::new() } else { proof };
 
         // Inspect the last node in the proof. If it's a leaf node with matching suffix,
         // then the node contains the encoded trie account.
@@ -631,11 +618,6 @@ impl StorageMultiProof {
     pub fn storage_proof(&self, slot: B256) -> Result<StorageProof, alloy_rlp::Error> {
         let nibbles = Nibbles::unpack(keccak256(slot));
 
-        // Empty trie has no nodes to prove — return empty proof (geth compat).
-        if self.root == EMPTY_ROOT_HASH {
-            return Ok(StorageProof { key: slot, nibbles, value: U256::ZERO, proof: vec![] });
-        }
-
         // Retrieve the storage proof.
         let proof = self
             .subtree
@@ -685,11 +667,6 @@ impl DecodedStorageMultiProof {
     /// Return storage proofs for the target storage slot (unhashed).
     pub fn storage_proof(&self, slot: B256) -> Result<DecodedStorageProof, alloy_rlp::Error> {
         let nibbles = Nibbles::unpack(keccak256(slot));
-
-        // Empty trie has no nodes to prove — return empty proof (geth compat).
-        if self.root == EMPTY_ROOT_HASH {
-            return Ok(DecodedStorageProof { key: slot, nibbles, value: U256::ZERO, proof: vec![] });
-        }
 
         // Retrieve the storage proof.
         let proof = self
@@ -745,6 +722,22 @@ pub struct AccountProof {
     pub storage_proofs: Vec<StorageProof>,
 }
 
+/// Normalize an empty-trie proof for the EIP-1186 (`eth_getProof`) response.
+///
+/// An empty trie is internally represented by a single empty-root sentinel node (`0x80`, the
+/// RLP empty string whose hash is `EMPTY_ROOT_HASH`). EIP-1186 defines the proof field as the
+/// array of trie nodes along the key path; an empty trie has none, and geth returns `[]`. This
+/// strips that lone sentinel so the response matches geth and the spec. It is applied only at
+/// the response boundary, leaving the underlying proof construction unchanged.
+#[cfg(feature = "eip1186")]
+fn strip_empty_trie_sentinel(proof: Vec<Bytes>) -> Vec<Bytes> {
+    if proof.len() == 1 && proof[0].as_ref() == [EMPTY_STRING_CODE] {
+        Vec::new()
+    } else {
+        proof
+    }
+}
+
 #[cfg(feature = "eip1186")]
 impl AccountProof {
     /// Convert into an EIP-1186 account proof response.
@@ -789,7 +782,7 @@ impl AccountProof {
             code_hash,
             nonce: info.nonce,
             storage_hash,
-            account_proof: self.proof,
+            account_proof: strip_empty_trie_sentinel(self.proof),
             storage_proof: self
                 .storage_proofs
                 .into_iter()
@@ -974,7 +967,11 @@ impl StorageProof {
         self,
         slot: alloy_serde::JsonStorageKey,
     ) -> alloy_rpc_types_eth::EIP1186StorageProof {
-        alloy_rpc_types_eth::EIP1186StorageProof { key: slot, value: self.value, proof: self.proof }
+        alloy_rpc_types_eth::EIP1186StorageProof {
+            key: slot,
+            value: self.value,
+            proof: strip_empty_trie_sentinel(self.proof),
+        }
     }
 
     /// Convert from an
@@ -1383,50 +1380,6 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_storage_trie_returns_empty_proof() {
-        let multiproof = StorageMultiProof::empty();
-        assert_eq!(multiproof.root, EMPTY_ROOT_HASH);
-
-        let slot = B256::with_last_byte(1);
-        let proof = multiproof.storage_proof(slot).unwrap();
-        assert_eq!(proof.key, slot);
-        assert_eq!(proof.value, U256::ZERO);
-        assert!(
-            proof.proof.is_empty(),
-            "empty trie must return empty proof vec, got {:?}",
-            proof.proof
-        );
-    }
-
-    #[test]
-    fn test_empty_storage_trie_multiple_slots_all_empty() {
-        let multiproof = StorageMultiProof::empty();
-
-        for i in 0..5u8 {
-            let slot = B256::with_last_byte(i);
-            let proof = multiproof.storage_proof(slot).unwrap();
-            assert_eq!(proof.value, U256::ZERO);
-            assert!(proof.proof.is_empty(), "slot {i}: expected empty proof");
-        }
-    }
-
-    #[test]
-    fn test_decoded_empty_storage_trie_returns_empty_proof() {
-        let multiproof = DecodedStorageMultiProof::empty();
-        assert_eq!(multiproof.root, EMPTY_ROOT_HASH);
-
-        let slot = B256::with_last_byte(42);
-        let proof = multiproof.storage_proof(slot).unwrap();
-        assert_eq!(proof.key, slot);
-        assert_eq!(proof.value, U256::ZERO);
-        assert!(
-            proof.proof.is_empty(),
-            "decoded empty trie must return empty proof vec, got {:?}",
-            proof.proof
-        );
-    }
-
-    #[test]
     fn test_nonempty_storage_trie_returns_nonempty_proof() {
         let slot = B256::with_last_byte(1);
         let nibbles = Nibbles::unpack(keccak256(slot));
@@ -1449,36 +1402,59 @@ mod tests {
         assert_eq!(proof.value, value);
     }
 
+    #[cfg(feature = "eip1186")]
     #[test]
-    fn test_empty_account_trie_returns_empty_proof() {
-        // Empty account (state) trie is represented by a single `0x80` sentinel node.
-        let account_subtree =
-            ProofNodes::from_iter([(Nibbles::default(), Bytes::from([EMPTY_STRING_CODE]))]);
-        let multiproof = MultiProof { account_subtree, ..Default::default() };
+    fn eip1186_response_strips_empty_trie_sentinel() {
+        let slot = B256::with_last_byte(1);
+        let sentinel = || vec![Bytes::from([EMPTY_STRING_CODE])];
 
-        let proof = multiproof.account_proof(Address::ZERO, &[]).unwrap();
-        assert_eq!(proof.info, None);
-        assert_eq!(proof.storage_root, EMPTY_ROOT_HASH);
+        // Empty account trie + empty storage trie: both proofs are the lone `0x80` sentinel.
+        let account = AccountProof {
+            address: Address::ZERO,
+            info: None,
+            proof: sentinel(),
+            storage_root: EMPTY_ROOT_HASH,
+            storage_proofs: vec![StorageProof::new(slot).with_proof(sentinel())],
+        };
+
+        let resp = account.into_eip1186_response(vec![alloy_serde::JsonStorageKey::from(slot)]);
+
         assert!(
-            proof.proof.is_empty(),
-            "empty account trie must return empty proof vec, got {:?}",
-            proof.proof
+            resp.account_proof.is_empty(),
+            "empty account trie must yield empty account_proof, got {:?}",
+            resp.account_proof
+        );
+        assert_eq!(resp.storage_proof.len(), 1);
+        assert!(
+            resp.storage_proof[0].proof.is_empty(),
+            "empty storage trie must yield empty storage proof, got {:?}",
+            resp.storage_proof[0].proof
         );
     }
 
+    #[cfg(feature = "eip1186")]
     #[test]
-    fn test_decoded_empty_account_trie_returns_empty_proof() {
-        let account_subtree =
-            DecodedProofNodes::from_iter([(Nibbles::default(), TrieNode::EmptyRoot)]);
-        let multiproof = DecodedMultiProof { account_subtree, ..Default::default() };
+    fn eip1186_response_keeps_nonempty_proof() {
+        // A real (non-empty) proof must pass through unchanged: multiple nodes, and a single
+        // node that is not the `0x80` sentinel.
+        let multi = vec![Bytes::from([0x01, 0x02]), Bytes::from([0x03])];
+        let single_non_sentinel = vec![Bytes::from([0xf8, 0x44])];
 
-        let proof = multiproof.account_proof(Address::ZERO, &[]).unwrap();
-        assert_eq!(proof.info, None);
-        assert_eq!(proof.storage_root, EMPTY_ROOT_HASH);
-        assert!(
-            proof.proof.is_empty(),
-            "decoded empty account trie must return empty proof vec, got {:?}",
-            proof.proof
-        );
+        let account = AccountProof {
+            address: Address::ZERO,
+            info: None,
+            proof: multi.clone(),
+            storage_root: EMPTY_ROOT_HASH,
+            storage_proofs: vec![
+                StorageProof::new(B256::with_last_byte(1)).with_proof(single_non_sentinel.clone())
+            ],
+        };
+
+        let resp = account.into_eip1186_response(vec![alloy_serde::JsonStorageKey::from(
+            B256::with_last_byte(1),
+        )]);
+
+        assert_eq!(resp.account_proof, multi);
+        assert_eq!(resp.storage_proof[0].proof, single_non_sentinel);
     }
 }
