@@ -21,6 +21,7 @@ use alloy_primitives::B256;
 use reth_engine_tree::tree::{payload_validator::CustomStateRoot, BasicEngineValidator};
 use reth_ethereum::{
     chainspec::ChainSpec,
+    evm::Evm2TxEnv,
     node::{
         builder::{
             rpc::{
@@ -35,7 +36,7 @@ use reth_ethereum::{
     tasks::Runtime,
     EthPrimitives,
 };
-use reth_evm::{ConfigureEvm, ConfigureEvm2BlockExecutor, ConfigureEvm2Engine};
+use reth_evm::{ConfigureEvm, ConfigureEvm2Engine, ConfigureEvm2Prewarm};
 use reth_trie::updates::TrieUpdates;
 
 // ---------------------------------------------------------------------------
@@ -65,8 +66,8 @@ where
         Evm: reth_ethereum::node::builder::ConfigureEngineEvm<
             alloy_rpc_types_engine::ExecutionData,
         > + ConfigureEvm2Engine<alloy_rpc_types_engine::ExecutionData>
-                 + ConfigureEvm2BlockExecutor<Primitives = EthPrimitives>
-                 + ConfigureEvm<Primitives = EthPrimitives>,
+                 + ConfigureEvm2Prewarm<Primitives = EthPrimitives>
+                 + ConfigureEvm<Primitives = EthPrimitives, TxEnv = Evm2TxEnv>,
     >,
 {
     type EngineValidator = BasicEngineValidator<

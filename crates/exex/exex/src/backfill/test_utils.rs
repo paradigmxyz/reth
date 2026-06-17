@@ -5,14 +5,17 @@ use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{b256, Address, TxKind, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN_TRANSACTION_GAS};
 use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction};
-use reth_evm::{execute::BlockExecutionOutput, ConfigureEvm2BlockExecutor};
+use reth_evm::{
+    execute::{BlockExecutionOutput, Executor},
+    ConfigureEvm,
+};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_types::evm2_block_state_hashed_post_state_sorted;
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProvider,
-    ProviderFactory,
+    ProviderFactory, SharedEvm2StateProviderDatabase,
 };
 use reth_testing_utils::generators::sign_tx_with_key_pair;
 use reth_trie_common::KeccakKeyHasher;
@@ -65,8 +68,13 @@ where
     let provider = provider_factory.provider()?;
 
     // Execute the block to produce a block execution output.
+    let state_provider = LatestStateProvider::new(provider);
+    // SAFETY: The shared database is consumed by this synchronous execution call and does not
+    // outlive the state provider borrowed here.
+    let database = unsafe { SharedEvm2StateProviderDatabase::new(&state_provider) };
     let block_execution_output = EthEvmConfig::ethereum(chain_spec)
-        .execute_evm2_block_with_state_provider(LatestStateProvider::new(provider), block)
+        .executor(database)
+        .execute(block)
         .map_err(|err| eyre::eyre!(err.to_string()))?;
 
     // Convert the block execution output to an execution outcome for committing to the database

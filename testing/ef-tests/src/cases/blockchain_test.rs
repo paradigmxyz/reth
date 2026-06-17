@@ -11,14 +11,14 @@ use reth_consensus::{Consensus, HeaderValidator};
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
 use reth_ethereum_primitives::Block;
-use reth_evm::ConfigureEvm2BlockExecutor;
+use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{ParallelBridgeBuffered, RecoveredBlock, SealedBlock};
 use reth_provider::{
     evm2_state_source_hashed_post_state, test_utils::create_test_provider_factory_with_chain_spec,
     BlockWriter, DatabaseProviderFactory, ExecutionOutcome, HistoryWriter, OriginalValuesKnown,
-    StateWriteConfig, StateWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
-    StorageSettingsCache,
+    SharedEvm2StateProviderDatabase, StateWriteConfig, StateWriter, StaticFileProviderFactory,
+    StaticFileSegment, StaticFileWriter, StorageSettingsCache,
 };
 use reth_trie::{KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
@@ -244,11 +244,12 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
         // Execute the block
         let state_provider = provider.latest();
-        let output = executor_provider
-            .execute_evm2_block_with_state_provider_ref(&state_provider, block)
-            .map_err(|err| {
-                Error::block_failed(block_number, std::io::Error::other(err.to_string()))
-            })?;
+        // SAFETY: The shared database is consumed by this synchronous execution call and does not
+        // outlive the state provider borrowed here.
+        let database = unsafe { SharedEvm2StateProviderDatabase::new(&state_provider) };
+        let output = executor_provider.executor(database).execute(block).map_err(|err| {
+            Error::block_failed(block_number, std::io::Error::other(err.to_string()))
+        })?;
 
         // Consensus checks after block execution
         validate_block_post_execution(block, &chain_spec, &output, None, None)

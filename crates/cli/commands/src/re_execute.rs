@@ -12,7 +12,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
-use reth_evm::ConfigureEvm2BlockExecutor;
+use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_execution_types::{
     evm2_block_reverts_and_accumulator_extend, evm2_state_source_size_hint, Evm2BlockReverts,
     Evm2BlockStateAccumulator, Evm2RevertAccount,
@@ -24,7 +24,9 @@ use reth_provider::{
     StaticFileProviderFactory, TransactionVariant,
 };
 use reth_stages::stages::calculate_gas_used_from_headers;
-use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader};
+use reth_storage_api::{
+    ChangeSetReader, DBProvider, SharedEvm2StateProviderDatabase, StorageChangeSetReader,
+};
 use std::{
     collections::HashMap,
     sync::{
@@ -174,9 +176,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                         let state_provider =
                             provider.history_by_block_number(block.number().saturating_sub(1))?;
-                        let output = match evm_config
-                            .execute_evm2_block_with_state_provider_ref(&*state_provider, &block)
-                        {
+                        // SAFETY: The shared database is consumed by this synchronous execution
+                        // call and does not outlive the state provider borrowed here.
+                        let database =
+                            unsafe { SharedEvm2StateProviderDatabase::new(&*state_provider) };
+                        let output = match evm_config.executor(database).execute(&block) {
                             Ok(output) => output,
                             Err(err) => {
                                 if skip_invalid_blocks {

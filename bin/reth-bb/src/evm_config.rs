@@ -7,18 +7,17 @@ pub(crate) use reth_engine_primitives::BigBlockData;
 
 use alloy_consensus::transaction::Recovered;
 use alloy_eips::Decodable2718;
-use alloy_primitives::Bytes;
+use alloy_primitives::{Address, Bytes};
 use alloy_rpc_types::engine::ExecutionData;
 use core::{convert::Infallible, fmt};
-use reth_ethereum_primitives::{Block, EthPrimitives, Receipt, TransactionSigned};
+use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
-    execute::BlockExecutionOutput, ConfigureEngineEvm, ConfigureEvm, ConfigureEvm2BlockExecutor,
-    ConfigureEvm2Engine, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor, NextBlockEnvAttributes,
+    ConfigureEngineEvm, ConfigureEvm, ConfigureEvm2Engine, ConfigureEvm2Prewarm, EvmEnvFor,
+    ExecutableTxIterator, ExecutionCtxFor, NextBlockEnvAttributes, TxEnvFor,
 };
-use reth_evm_ethereum::EthEvmConfig;
+use reth_evm_ethereum::{EthEvmConfig, EthEvmEnv, Evm2TxEnv};
 use reth_primitives_traits::{
-    BlockTy, HeaderTy, ReceiptTy, RecoveredBlock, SealedBlock, SealedHeader, SignedTransaction,
-    TxTy,
+    BlockTy, HeaderTy, SealedBlock, SealedHeader, SignedTransaction, TxTy,
 };
 use reth_storage_api::StateProvider;
 use reth_storage_errors::any::AnyError;
@@ -59,18 +58,25 @@ where
         Primitives = EthPrimitives,
         Error = Infallible,
         NextBlockEnvCtx = NextBlockEnvAttributes,
+        EvmEnv = EthEvmEnv,
+        TxEnv = Evm2TxEnv,
     >,
 {
     type Primitives = EthPrimitives;
     type Error = Infallible;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
     type Spec = <EthEvmConfig<C> as ConfigureEvm>::Spec;
-    type EvmEnv = <EthEvmConfig<C> as ConfigureEvm>::EvmEnv;
-    type TxEnv = <EthEvmConfig<C> as ConfigureEvm>::TxEnv;
+    type EvmEnv = EthEvmEnv;
+    type TxEnv = Evm2TxEnv;
     type ExecutionCtx<'a>
         = <EthEvmConfig<C> as ConfigureEvm>::ExecutionCtx<'a>
     where
         Self: 'a;
+    type Executor<DB>
+        = <EthEvmConfig<C> as ConfigureEvm>::Executor<DB>
+    where
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static;
 
     fn evm_env(&self, header: &HeaderTy<Self::Primitives>) -> Result<EvmEnvFor<Self>, Self::Error> {
         self.inner.evm_env(header)
@@ -103,6 +109,14 @@ where
         Self: 'a,
     {
         self.inner.context_for_next_block(parent, attributes)
+    }
+
+    fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
+    where
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static,
+    {
+        self.inner.executor(db)
     }
 }
 
@@ -154,6 +168,10 @@ where
         self.inner.evm2_chain_id()
     }
 
+    fn evm2_deposit_contract_address(&self) -> Option<Address> {
+        self.inner.evm2_deposit_contract_address()
+    }
+
     fn evm2_spec_for_header(
         &self,
         header: &HeaderTy<Self::Primitives>,
@@ -202,32 +220,50 @@ where
     }
 }
 
-impl<C> ConfigureEvm2BlockExecutor for BbEvmConfig<C>
+impl<C> ConfigureEvm2Prewarm for BbEvmConfig<C>
 where
-    Self: ConfigureEvm<Primitives = EthPrimitives>,
-    EthEvmConfig<C>: ConfigureEvm2BlockExecutor<Primitives = EthPrimitives>,
+    Self: ConfigureEvm<Primitives = EthPrimitives, EvmEnv = EthEvmEnv, TxEnv = Evm2TxEnv>,
+    EthEvmConfig<C>: ConfigureEvm<Primitives = EthPrimitives, EvmEnv = EthEvmEnv, TxEnv = Evm2TxEnv>
+        + ConfigureEvm2Prewarm<Primitives = EthPrimitives>,
 {
-    type Primitives = EthPrimitives;
+    type PrewarmEvm<DB>
+        = <EthEvmConfig<C> as ConfigureEvm2Prewarm>::PrewarmEvm<DB>
+    where
+        DB: StateProvider + Send + 'static;
 
-    fn execute_evm2_block_with_state_provider<DB>(
-        &self,
-        state_provider: DB,
-        block: &RecoveredBlock<Block>,
-    ) -> Result<BlockExecutionOutput<Receipt>, Box<dyn core::error::Error + Send + Sync>>
+    fn evm2_prewarm_evm<DB>(&self, state_provider: DB, env: EvmEnvFor<Self>) -> Self::PrewarmEvm<DB>
     where
         DB: StateProvider + Send + 'static,
     {
-        self.inner.execute_evm2_block_with_state_provider(state_provider, block)
+        self.inner.evm2_prewarm_evm(state_provider, env)
     }
 
-    fn execute_evm2_block_with_state_provider_ref(
+    fn evm2_prewarm_spec(&self, env: &EvmEnvFor<Self>) -> evm2::SpecId {
+        self.inner.evm2_prewarm_spec(env)
+    }
+
+    fn evm2_prewarm_evm_with_precompiles<DB>(
         &self,
-        state_provider: &dyn StateProvider,
-        block: &RecoveredBlock<Block>,
-    ) -> Result<
-        BlockExecutionOutput<ReceiptTy<Self::Primitives>>,
-        Box<dyn core::error::Error + Send + Sync>,
-    > {
-        self.inner.execute_evm2_block_with_state_provider_ref(state_provider, block)
+        state_provider: DB,
+        env: EvmEnvFor<Self>,
+        precompiles: Box<dyn evm2::precompile::PrecompileProvider<evm2::BaseEvmTypes>>,
+    ) -> Self::PrewarmEvm<DB>
+    where
+        DB: StateProvider + Send + 'static,
+    {
+        self.inner.evm2_prewarm_evm_with_precompiles(state_provider, env, precompiles)
+    }
+
+    fn evm2_prewarm_tx<DB, S>(
+        &self,
+        evm: &mut Self::PrewarmEvm<DB>,
+        tx: TxEnvFor<Self>,
+        sink: &mut S,
+    ) -> Result<evm2::TxResult, Box<dyn core::error::Error + Send + Sync>>
+    where
+        DB: StateProvider + Send + 'static,
+        S: evm2::evm::StateChangeSink<Error = Infallible>,
+    {
+        self.inner.evm2_prewarm_tx(evm, tx, sink)
     }
 }

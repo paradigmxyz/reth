@@ -1,5 +1,5 @@
 use crate::StreamBackfillJob;
-use reth_evm::ConfigureEvm2BlockExecutor;
+use reth_evm::{execute::Executor, ConfigureEvm};
 use std::{
     collections::BTreeMap,
     ops::RangeInclusive,
@@ -16,8 +16,8 @@ use reth_execution_types::{
 use reth_node_api::{Block as _, BlockBody as _, NodePrimitives};
 use reth_primitives_traits::{format_gas_throughput, RecoveredBlock, SignedTransaction};
 use reth_provider::{
-    BlockReader, Chain, ExecutionOutcome, HeaderProvider, ProviderError, StateProviderFactory,
-    TransactionVariant,
+    BlockReader, Chain, ExecutionOutcome, HeaderProvider, ProviderError,
+    SharedEvm2StateProviderDatabase, StateProviderFactory, TransactionVariant,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
@@ -42,7 +42,7 @@ pub struct BackfillJob<E, P> {
 
 impl<E, P> Iterator for BackfillJob<E, P>
 where
-    E: ConfigureEvm2BlockExecutor<Primitives: NodePrimitives<Block = P::Block>> + 'static,
+    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
     P: HeaderProvider + BlockReader<Transaction: SignedTransaction> + StateProviderFactory,
 {
     type Item = BackfillJobResult<Chain<E::Primitives>>;
@@ -58,7 +58,7 @@ where
 
 impl<E, P> BackfillJob<E, P>
 where
-    E: ConfigureEvm2BlockExecutor<Primitives: NodePrimitives<Block = P::Block>> + 'static,
+    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
     P: BlockReader<Transaction: SignedTransaction> + HeaderProvider + StateProviderFactory,
 {
     /// Converts the backfill job into a single block backfill job.
@@ -118,10 +118,10 @@ where
                 .provider
                 .history_by_block_number(block_number.saturating_sub(1))
                 .map_err(BlockExecutionError::other)?;
-            let output = self
-                .evm_config
-                .execute_evm2_block_with_state_provider(state_provider, &block)
-                .map_err(evm2_execution_error)?;
+            // SAFETY: The shared database is consumed by this synchronous execution call and does
+            // not outlive the state provider borrowed here.
+            let database = unsafe { SharedEvm2StateProviderDatabase::new(&*state_provider) };
+            let output = self.evm_config.executor(database).execute(&block).map_err(evm_error)?;
             execution_duration += execute_start.elapsed();
 
             evm2_block_state_accumulator_extend(&mut state, &output.state);
@@ -174,7 +174,7 @@ pub struct SingleBlockBackfillJob<E, P> {
 
 impl<E, P> Iterator for SingleBlockBackfillJob<E, P>
 where
-    E: ConfigureEvm2BlockExecutor<Primitives: NodePrimitives<Block = P::Block>> + 'static,
+    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
     type Item = BackfillJobResult<(
@@ -189,7 +189,7 @@ where
 
 impl<E, P> SingleBlockBackfillJob<E, P>
 where
-    E: ConfigureEvm2BlockExecutor<Primitives: NodePrimitives<Block = P::Block>> + 'static,
+    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
     /// Converts the single block backfill job into a stream.
@@ -226,16 +226,17 @@ where
 
         trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.body().transaction_count(), "Executing block");
 
-        let block_execution_output = self
-            .evm_config
-            .execute_evm2_block_with_state_provider(state_provider, &block_with_senders)
-            .map_err(evm2_execution_error)?;
+        // SAFETY: The shared database is consumed by this synchronous execution call and does not
+        // outlive the state provider borrowed here.
+        let database = unsafe { SharedEvm2StateProviderDatabase::new(&*state_provider) };
+        let block_execution_output =
+            self.evm_config.executor(database).execute(&block_with_senders).map_err(evm_error)?;
 
         Ok((block_with_senders, block_execution_output))
     }
 }
 
-fn evm2_execution_error(error: Box<dyn core::error::Error + Send + Sync>) -> BlockExecutionError {
+fn evm_error(error: impl core::error::Error) -> BlockExecutionError {
     BlockExecutionError::other(std::io::Error::other(error.to_string()))
 }
 
