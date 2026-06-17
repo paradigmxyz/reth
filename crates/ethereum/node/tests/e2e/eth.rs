@@ -3,7 +3,7 @@ use alloy_eips::{eip4844::BlobAndProofV1, eip7685::RequestsOrHash};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::{
-    ClientVersionV1, ExecutionPayloadEnvelopeV4, ForkchoiceState, ForkchoiceUpdated,
+    ssz_engine_types::BuiltPayloadPrague, ClientVersionV1, ForkchoiceState, ForkchoiceUpdated,
     PayloadAttributes, PayloadStatus, PayloadStatusEnum,
 };
 use jsonrpsee_core::client::ClientT;
@@ -435,7 +435,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
             .and_then(|value| value.to_str().ok()),
         Some("no-store")
     );
-    ExecutionPayloadEnvelopeV4::from_ssz_bytes(&get_payload_response.bytes().await?).unwrap();
+    BuiltPayloadPrague::from_ssz_bytes(&get_payload_response.bytes().await?).unwrap();
 
     let new_payload_response = client
         .post(format!("{auth_url}{ENGINE_PRAGUE_PAYLOADS_ROUTE}"))

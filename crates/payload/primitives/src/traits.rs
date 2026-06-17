@@ -242,7 +242,6 @@ mod tests {
             .unwrap(),
             withdrawals: None,
             parent_beacon_block_root: None,
-            target_gas_limit: None,
             slot_number: None,
             target_gas_limit: None,
         };
@@ -282,7 +281,6 @@ mod tests {
                 },
             ]),
             parent_beacon_block_root: None,
-            target_gas_limit: None,
             slot_number: None,
             target_gas_limit: None,
         };
@@ -317,7 +315,6 @@ mod tests {
                 )
                 .unwrap(),
             ),
-            target_gas_limit: None,
             slot_number: None,
             target_gas_limit: None,
         };

@@ -11,6 +11,10 @@ use alloy_eips::{
 };
 use alloy_primitives::{Bytes, B128, B256};
 use alloy_rpc_types_engine::{
+    ssz_engine_types::{
+        BuiltPayloadAmsterdam, BuiltPayloadOsaka, BuiltPayloadParis, BuiltPayloadPrague,
+        BuiltPayloadShanghai,
+    },
     CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayload,
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
     ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6, ExecutionPayloadSidecar,
@@ -444,22 +448,31 @@ async fn handle_get_payload(
 
 fn encode_get_payload_response(version: u8, payload: EthBuiltPayload) -> HttpResponse {
     match version {
-        1 => ssz_response(ExecutionPayloadV1::from(payload)),
-        2 => ssz_response(ExecutionPayloadEnvelopeV2::from(payload)),
+        1 => {
+            let block_value = payload.fees();
+            ssz_response(BuiltPayloadParis {
+                payload: ExecutionPayloadV1::from(payload),
+                block_value,
+            })
+        }
+        2 => match BuiltPayloadShanghai::try_from(ExecutionPayloadEnvelopeV2::from(payload)) {
+            Ok(payload) => ssz_response(payload),
+            Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+        },
         3 => match ExecutionPayloadEnvelopeV3::try_from(payload) {
             Ok(payload) => ssz_response(payload),
             Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
         },
         4 => match ExecutionPayloadEnvelopeV4::try_from(payload) {
-            Ok(payload) => ssz_response(payload),
+            Ok(payload) => ssz_response(BuiltPayloadPrague::from(payload)),
             Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
         },
         5 => match ExecutionPayloadEnvelopeV5::try_from(payload) {
-            Ok(payload) => ssz_response(payload),
+            Ok(payload) => ssz_response(BuiltPayloadOsaka::from(payload)),
             Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
         },
         6 => match ExecutionPayloadEnvelopeV6::try_from(payload) {
-            Ok(payload) => ssz_response(payload),
+            Ok(payload) => ssz_response(BuiltPayloadAmsterdam::from(payload)),
             Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
         },
         _ => text_response(STATUS_BAD_REQUEST, "unsupported getPayload endpoint version"),
