@@ -615,6 +615,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let rocksdb_provider = self.rocksdb_provider.clone();
         let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
         let rocksdb_enabled = rocksdb_ctx.storage_settings.storage_v2;
+        let batch_bytecodes_only = save_mode.with_state() &&
+            rocksdb_ctx.storage_settings.use_hashed_state() &&
+            sf_ctx.write_receipts &&
+            sf_ctx.write_account_changesets &&
+            sf_ctx.write_storage_changesets;
 
         let mut sf_result = None;
         let mut rocksdb_result = None;
@@ -686,6 +691,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
+            let mut batch_bytecodes = batch_bytecodes_only.then(Vec::new);
             for (i, block) in blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
 
@@ -695,6 +701,16 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
                 if save_mode.with_state() {
                     let execution_output = block.execution_outcome();
+                    if let Some(bytecodes) = batch_bytecodes.as_mut() {
+                        bytecodes.extend(
+                            execution_output
+                                .state
+                                .contracts
+                                .iter()
+                                .map(|(hash, bytecode)| (*hash, Bytecode(bytecode.clone()))),
+                        );
+                        continue
+                    }
 
                     // Write state and changesets to the database.
                     // Must be written after blocks because of the receipt lookup.
@@ -712,6 +728,13 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                             write_storage_changesets: !sf_ctx.write_storage_changesets,
                         },
                     )?;
+                    timings.write_state += start.elapsed();
+                }
+            }
+            if let Some(bytecodes) = batch_bytecodes {
+                if !bytecodes.is_empty() {
+                    let start = Instant::now();
+                    self.write_bytecodes(bytecodes)?;
                     timings.write_state += start.elapsed();
                 }
             }
