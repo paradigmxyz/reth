@@ -397,7 +397,6 @@ where
 
         for chunk_start in (start..=end).step_by(TRACE_FILTER_FETCH_CHUNK_SIZE) {
             let chunk_end = (chunk_start + TRACE_FILTER_FETCH_CHUNK_SIZE as u64 - 1).min(end);
-            let expected_blocks = (chunk_end - chunk_start + 1) as usize;
 
             let blocks = self
                 .eth_api()
@@ -406,10 +405,6 @@ where
                         .provider()
                         .recovered_block_range(chunk_start..=chunk_end)
                         .map_err(Eth::Error::from_eth_err)?;
-
-                    if blocks.len() != expected_blocks {
-                        return Err(EthApiError::HeaderNotFound(chunk_start.into()).into())
-                    }
 
                     Ok(blocks.into_iter().map(Arc::new).collect::<Vec<_>>())
                 })
