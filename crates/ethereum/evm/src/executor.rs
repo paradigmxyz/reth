@@ -1,13 +1,15 @@
 //! evm2-backed Ethereum executor.
 
 use crate::{
-    evm2_block_env_with_blob_params, evm2_spec, execute_evm2_block_with_context_and_precompiles,
+    evm2_block_env_with_blob_params,
+    evm2_executor::execute_evm2_block_with_dyn_database_context_and_precompiles, evm2_spec,
     Evm2BlockExecutionContext, Evm2BlockSystemCalls, Evm2ExecutionError,
 };
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{rc::Rc, sync::Arc, vec::Vec};
 use alloy_consensus::{transaction::Recovered, Header};
 use alloy_primitives::Bytes;
-use evm2::evm::Database;
+use core::cell::RefCell;
+use evm2::evm::{CacheDB, Database, Db, DbErrorCode, DbResult, DynDatabase, StateChangeSource};
 use reth_chainspec::{EthChainSpec, EthExecutorSpec};
 use reth_ethereum_forks::Hardforks;
 use reth_ethereum_primitives::{Block, EthPrimitives, Receipt, TransactionSigned};
@@ -47,6 +49,17 @@ where
         &self,
         block: &RecoveredBlock<Block>,
     ) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<DB::Error>> {
+        self.execute_block_with_database::<DB>(block, Db::new(self.database.clone()))
+    }
+
+    fn execute_block_with_database<ErrorDB>(
+        &self,
+        block: &RecoveredBlock<Block>,
+        database: impl DynDatabase + 'static,
+    ) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<ErrorDB::Error>>
+    where
+        ErrorDB: Database + 'static,
+    {
         let header = block.header();
         let transactions = block
             .senders_iter()
@@ -65,13 +78,13 @@ where
         };
         let spec_id = evm2_spec(self.chain_spec.as_ref(), header);
 
-        execute_evm2_block_with_context_and_precompiles(
+        execute_evm2_block_with_dyn_database_context_and_precompiles::<ErrorDB>(
             spec_id,
             evm2_block_env_with_blob_params(
                 header,
                 self.chain_spec.as_ref().blob_params_at_timestamp(header.timestamp),
             ),
-            self.database.clone(),
+            database,
             header.number,
             transactions,
             context,
@@ -114,13 +127,25 @@ where
     {
         let mut blocks = blocks.into_iter();
         let Some(block) = blocks.next() else { return Ok(ExecutionOutcome::default()) };
-        if blocks.next().is_some() {
-            return Err(Evm2ExecutionError::UnsupportedBatchExecution)
+
+        let first_block = block.header().number;
+        let database = SharedBatchDatabase::new(self.database.clone());
+        let mut states = Vec::new();
+        let mut results = Vec::new();
+
+        let output = self.execute_block_with_database::<DB>(block, database.clone())?;
+        database.commit_source(&output.state);
+        results.push(output.result);
+        states.push(output.state.into_inner());
+
+        for block in blocks {
+            let output = self.execute_block_with_database::<DB>(block, database.clone())?;
+            database.commit_source(&output.state);
+            results.push(output.result);
+            states.push(output.state.into_inner());
         }
 
-        let block_number = block.header().number;
-        let output = self.execute_block(block)?;
-        Ok(ExecutionOutcome::single(block_number, output))
+        Ok(ExecutionOutcome::from_block_states(first_block, states, results))
     }
 
     fn size_hint(&self) -> usize {
@@ -133,3 +158,64 @@ where
 }
 
 type TransactionSignedWithSigner = Recovered<TransactionSigned>;
+
+struct SharedBatchDatabase<DB: Database> {
+    inner: Rc<RefCell<CacheDB<Db<DB>>>>,
+}
+
+impl<DB: Database> Clone for SharedBatchDatabase<DB> {
+    fn clone(&self) -> Self {
+        Self { inner: Rc::clone(&self.inner) }
+    }
+}
+
+impl<DB> SharedBatchDatabase<DB>
+where
+    DB: Database,
+{
+    fn new(database: DB) -> Self {
+        Self { inner: Rc::new(RefCell::new(CacheDB::new(Db::new(database)))) }
+    }
+
+    fn commit_source<S: StateChangeSource>(&self, source: &S) {
+        self.inner.borrow_mut().commit_source(source);
+    }
+}
+
+impl<DB> DynDatabase for SharedBatchDatabase<DB>
+where
+    DB: Database + 'static,
+{
+    fn get_account(
+        &mut self,
+        address: &alloy_primitives::Address,
+    ) -> DbResult<Option<evm2::evm::AccountInfo>> {
+        self.inner.borrow_mut().get_account(address)
+    }
+
+    fn get_code_by_hash(
+        &mut self,
+        code_hash: &alloy_primitives::B256,
+    ) -> DbResult<evm2::bytecode::Bytecode> {
+        self.inner.borrow_mut().get_code_by_hash(code_hash)
+    }
+
+    fn get_storage(
+        &mut self,
+        address: &alloy_primitives::Address,
+        key: &evm2::interpreter::Word,
+    ) -> DbResult<evm2::interpreter::Word> {
+        self.inner.borrow_mut().get_storage(address, key)
+    }
+
+    fn get_block_hash(
+        &mut self,
+        number: &evm2::interpreter::Word,
+    ) -> DbResult<Option<alloy_primitives::B256>> {
+        self.inner.borrow_mut().get_block_hash(number)
+    }
+
+    fn error(&mut self, code: DbErrorCode) -> alloc::boxed::Box<dyn core::error::Error> {
+        self.inner.borrow_mut().error(code)
+    }
+}
