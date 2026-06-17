@@ -2700,18 +2700,21 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let mut hashed_storage_cursor =
             self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
         for (hashed_address, storage) in sorted_storages {
-            if storage.is_wiped() && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
+            let storage_wiped = storage.is_wiped();
+            if storage_wiped && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
                 hashed_storage_cursor.delete_current_duplicates()?;
             }
 
             for (hashed_slot, value) in storage.storage_slots_ref() {
                 let entry = StorageEntry { key: *hashed_slot, value: *value };
 
-                if let Some(db_entry) =
-                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
-                    db_entry.key == entry.key
-                {
-                    hashed_storage_cursor.delete_current()?;
+                if !storage_wiped {
+                    if let Some(db_entry) =
+                        hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
+                        db_entry.key == entry.key
+                    {
+                        hashed_storage_cursor.delete_current()?;
+                    }
                 }
 
                 if !entry.value.is_zero() {
@@ -3953,7 +3956,8 @@ mod tests {
     use reth_storage_api::MetadataWriter;
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
-        HashedPostState, KeccakKeyHasher, Nibbles, StoredNibbles, StoredNibblesSubKey,
+        HashedPostState, HashedPostStateSorted, HashedStorageSorted, KeccakKeyHasher, Nibbles,
+        StoredNibbles, StoredNibblesSubKey,
     };
     use revm_database::BundleState;
     use revm_state::AccountInfo;
@@ -4372,9 +4376,19 @@ mod tests {
             ],
         };
 
+        let post_wipe_node = BranchNodeCompact::new(
+            0b1111_0000_1111_0000,
+            0b0000_0000_0000_0000,
+            0b0000_0000_0000_0000,
+            vec![],
+            None,
+        );
         let storage_trie2 = StorageTrieUpdatesSorted {
-            is_deleted: true, // Wipe all storage for this address
-            storage_nodes: vec![],
+            is_deleted: true, // Wipe all storage for this address, then write a fresh node.
+            storage_nodes: vec![(
+                Nibbles::from_nibbles([0xe, 0xf]),
+                Some(post_wipe_node.clone()),
+            )],
         };
 
         let mut storage_tries = B256Map::default();
@@ -4387,8 +4401,8 @@ mod tests {
         let num_entries = provider_rw.write_trie_updates_sorted(&trie_updates).unwrap();
 
         // We should have 2 account insertions + 1 account deletion + 1 storage insertion + 1
-        // storage deletion = 5
-        assert_eq!(num_entries, 5);
+        // storage deletion + 1 post-wipe storage insertion = 6
+        assert_eq!(num_entries, 6);
 
         // Verify account trie updates were written correctly
         let tx = provider_rw.tx_ref();
@@ -4435,15 +4449,92 @@ mod tests {
             "Remaining entry should be [0x1, 0x0]"
         );
 
-        // Check storage for address2 was wiped
+        // Check storage for address2 was wiped before its fresh node was inserted.
         let storage_entries2: Vec<_> = storage_cursor
             .walk_dup(Some(storage_address2), None)
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(storage_entries2.len(), 0, "Storage address2 should be empty after wipe");
+        assert_eq!(
+            storage_entries2.len(),
+            1,
+            "Storage address2 should only contain the post-wipe entry"
+        );
+        assert_eq!(
+            storage_entries2[0].1.nibbles.0,
+            Nibbles::from_nibbles([0xe, 0xf]),
+            "Old wiped storage nodes should not remain"
+        );
+        assert_eq!(storage_entries2[0].1.node, post_wipe_node);
 
         provider_rw.commit().unwrap();
+    }
+
+    #[test]
+    fn test_write_hashed_state_wipe_writes_fresh_slots() {
+        let factory = create_test_provider_factory();
+        let provider_rw = factory.provider_rw().unwrap();
+
+        let hashed_address = B256::from([0x42; 32]);
+        let old_slot = B256::from([0x01; 32]);
+        let replaced_slot = B256::from([0x02; 32]);
+        let fresh_slot = B256::from([0x03; 32]);
+        let deleted_after_wipe_slot = B256::from([0x04; 32]);
+
+        {
+            let mut cursor =
+                provider_rw.tx_ref().cursor_dup_write::<tables::HashedStorages>().unwrap();
+            cursor
+                .upsert(hashed_address, &StorageEntry { key: old_slot, value: U256::from(1) })
+                .unwrap();
+            cursor
+                .upsert(
+                    hashed_address,
+                    &StorageEntry { key: replaced_slot, value: U256::from(2) },
+                )
+                .unwrap();
+        }
+
+        let mut storages = B256Map::default();
+        storages.insert(
+            hashed_address,
+            HashedStorageSorted {
+                wiped: true,
+                storage_slots: vec![
+                    (replaced_slot, U256::from(20)),
+                    (fresh_slot, U256::from(30)),
+                    (deleted_after_wipe_slot, U256::ZERO),
+                ],
+            },
+        );
+
+        provider_rw
+            .write_hashed_state(&HashedPostStateSorted::new(Vec::new(), storages))
+            .unwrap();
+
+        let mut cursor = provider_rw
+            .tx_ref()
+            .cursor_dup_read::<tables::HashedStorages>()
+            .unwrap();
+        let entries = cursor
+            .walk_dup(Some(hashed_address), None)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(
+            entries,
+            vec![
+                (
+                    hashed_address,
+                    StorageEntry { key: replaced_slot, value: U256::from(20) },
+                ),
+                (
+                    hashed_address,
+                    StorageEntry { key: fresh_slot, value: U256::from(30) },
+                ),
+            ]
+        );
     }
 
     #[test]
