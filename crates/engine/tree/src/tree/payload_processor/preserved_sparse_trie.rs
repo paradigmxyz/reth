@@ -58,6 +58,8 @@ impl SharedPreservedSparseTrie {
         &self,
         persisted_block: BlockNumHash,
         retained_state_mask: &HashedPostStateSorted,
+        max_hot_slots: usize,
+        max_hot_accounts: usize,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
     ) -> Option<std::time::Duration> {
@@ -74,6 +76,8 @@ impl SharedPreservedSparseTrie {
         preserved.prune_persisted_state(
             persisted_block,
             retained_state_mask,
+            max_hot_slots,
+            max_hot_accounts,
             max_nodes_capacity,
             max_values_capacity,
         );
@@ -189,6 +193,8 @@ impl PreservedSparseTrie {
         &mut self,
         persisted_block: BlockNumHash,
         retained_state_mask: &HashedPostStateSorted,
+        max_hot_slots: usize,
+        max_hot_accounts: usize,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
     ) {
@@ -196,7 +202,7 @@ impl PreservedSparseTrie {
             Self::Anchored { trie, .. } | Self::Cleared { trie } => trie,
         };
 
-        trie.prune_persisted_state(retained_state_mask);
+        trie.prune_persisted_state(retained_state_mask, max_hot_slots, max_hot_accounts);
         trie.shrink_to(max_nodes_capacity, max_values_capacity);
         if let Self::Anchored { base_block, .. } = self {
             if persisted_block.number > base_block.number {
