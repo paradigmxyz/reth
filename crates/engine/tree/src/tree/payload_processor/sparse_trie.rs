@@ -14,7 +14,7 @@ use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_primitives_traits::{Account, FastInstant as Instant};
-use reth_tasks::Runtime;
+use reth_tasks::{utils::increase_thread_priority, Runtime};
 use reth_trie::{
     updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
@@ -139,6 +139,8 @@ where
         let parent_span = tracing::Span::current();
         let hashing_metrics = metrics.clone();
         executor.spawn_blocking_named("trie-hashing", move || {
+            reth_tasks::once!(increase_thread_priority);
+
             let _span = trace_span!(parent: parent_span, "run_hashing_task").entered();
             Self::run_hashing_task(updates, hashed_state_tx, hashing_metrics)
         });

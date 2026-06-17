@@ -308,14 +308,7 @@ impl WorkerPool {
 pub fn build_pool_with_panic_handler(
     builder: rayon::ThreadPoolBuilder,
 ) -> Result<rayon::ThreadPool, rayon::ThreadPoolBuildError> {
-    builder
-        .panic_handler(|_| {})
-        // Lazy `WorkerPool`s build their rayon pool on first access, which may happen on a thread
-        // that raised its own priority (e.g. the engine thread). On Linux the eagerly-spawned
-        // rayon workers would then inherit that elevated nice value for the process lifetime, so
-        // reset each worker to normal priority when it starts.
-        .start_handler(|_| crate::utils::reset_thread_priority())
-        .build()
+    builder.panic_handler(|_| {}).build()
 }
 
 /// Per-thread state container for a [`WorkerPool`].
