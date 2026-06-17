@@ -1092,18 +1092,26 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         tx_num: TxNumber,
         value: V,
     ) -> ProviderResult<()> {
-        if let Some(range) = self.writer.user_header().tx_range() {
+        let tx_range_start = if let Some(range) = self.writer.user_header().tx_range() {
             let next_tx = range.end() + 1;
             if next_tx != tx_num {
-                return Err(ProviderError::UnexpectedStaticFileTxNumber(
+                return Err(unexpected_static_file_tx_number(
                     self.writer.user_header().segment(),
                     tx_num,
                     next_tx,
                 ))
             }
-            self.writer.user_header_mut().increment_tx();
+
+            Some(range.start())
         } else {
-            self.writer.user_header_mut().set_tx_range(tx_num, tx_num);
+            None
+        };
+
+        let header = self.writer.user_header_mut();
+        if let Some(start) = tx_range_start {
+            header.set_tx_range(start, tx_num);
+        } else {
+            header.set_tx_range(tx_num, tx_num);
         }
 
         self.append_column(value)?;
@@ -1717,6 +1725,16 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     pub const fn inner(&mut self) -> &mut NippyJarWriter<SegmentHeader> {
         &mut self.writer
     }
+}
+
+#[cold]
+#[inline(never)]
+fn unexpected_static_file_tx_number(
+    segment: StaticFileSegment,
+    tx_num: TxNumber,
+    next_tx: TxNumber,
+) -> ProviderError {
+    ProviderError::UnexpectedStaticFileTxNumber(segment, tx_num, next_tx)
 }
 
 fn create_jar(
