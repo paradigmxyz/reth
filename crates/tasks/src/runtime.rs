@@ -933,7 +933,8 @@ impl RuntimeBuilder {
                 WorkerPool::new(proof_account_worker_threads, "proof-acct");
 
             let prewarming_threads = config.rayon.prewarming_threads.unwrap_or(default_threads);
-            let prewarming_pool = WorkerPool::new(prewarming_threads, "prewarm");
+            let prewarming_pool =
+                WorkerPool::new(prewarming_threads, "prewarm").with_elevated_thread_priority();
 
             let bal_streaming_threads =
                 config.rayon.bal_streaming_threads.unwrap_or(default_threads);

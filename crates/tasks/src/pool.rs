@@ -175,6 +175,7 @@ pub struct WorkerPool {
     pool: OnceLock<rayon::ThreadPool>,
     num_threads: usize,
     thread_name_prefix: &'static str,
+    thread_priority: WorkerPoolThreadPriority,
 }
 
 impl WorkerPool {
@@ -183,17 +184,30 @@ impl WorkerPool {
     /// The underlying rayon pool is not created until the first method that requires it is called.
     /// Thread names follow the pattern `"{prefix}-{index:02}"`.
     pub const fn new(num_threads: usize, thread_name_prefix: &'static str) -> Self {
-        Self { pool: OnceLock::new(), num_threads, thread_name_prefix }
+        Self {
+            pool: OnceLock::new(),
+            num_threads,
+            thread_name_prefix,
+            thread_priority: WorkerPoolThreadPriority::Normal,
+        }
+    }
+
+    /// Raises each worker thread's priority after normalizing inherited priority.
+    pub const fn with_elevated_thread_priority(mut self) -> Self {
+        self.thread_priority = WorkerPoolThreadPriority::Elevated;
+        self
     }
 
     /// Returns a reference to the underlying rayon pool, creating it on first access.
     fn pool(&self) -> &rayon::ThreadPool {
         self.pool.get_or_init(|| {
             let prefix = self.thread_name_prefix;
-            build_pool_with_panic_handler(
+            let thread_priority = self.thread_priority;
+            build_pool_with_panic_handler_and_start_handler(
                 rayon::ThreadPoolBuilder::new()
                     .num_threads(self.num_threads)
                     .thread_name(move |i| format!("{prefix}-{i:02}")),
+                move |_| thread_priority.set_for_current_thread(),
             )
             .unwrap_or_else(|err| panic!("failed to build {prefix} worker pool: {err}"))
         })
@@ -301,6 +315,24 @@ impl WorkerPool {
     }
 }
 
+/// Priority policy applied when a [`WorkerPool`] thread starts.
+#[derive(Debug, Clone, Copy)]
+enum WorkerPoolThreadPriority {
+    /// Reset inherited priority and keep the worker at normal priority.
+    Normal,
+    /// Reset inherited priority, then explicitly raise priority for critical workers.
+    Elevated,
+}
+
+impl WorkerPoolThreadPriority {
+    fn set_for_current_thread(self) {
+        crate::utils::reset_thread_priority();
+        if matches!(self, Self::Elevated) {
+            crate::utils::increase_thread_priority();
+        }
+    }
+}
+
 /// Builds a rayon thread pool with a panic handler that prevents aborting the process.
 ///
 /// Rust's default panic hook already logs the panic message and backtrace to stderr, so the handler
@@ -308,13 +340,22 @@ impl WorkerPool {
 pub fn build_pool_with_panic_handler(
     builder: rayon::ThreadPoolBuilder,
 ) -> Result<rayon::ThreadPool, rayon::ThreadPoolBuildError> {
+    build_pool_with_panic_handler_and_start_handler(builder, |_| {
+        crate::utils::reset_thread_priority();
+    })
+}
+
+fn build_pool_with_panic_handler_and_start_handler(
+    builder: rayon::ThreadPoolBuilder,
+    start_handler: impl Fn(usize) + Send + Sync + 'static,
+) -> Result<rayon::ThreadPool, rayon::ThreadPoolBuildError> {
     builder
         .panic_handler(|_| {})
         // Lazy `WorkerPool`s build their rayon pool on first access, which may happen on a thread
         // that raised its own priority (e.g. the engine thread). On Linux the eagerly-spawned
         // rayon workers would then inherit that elevated nice value for the process lifetime, so
         // reset each worker to normal priority when it starts.
-        .start_handler(|_| crate::utils::reset_thread_priority())
+        .start_handler(start_handler)
         .build()
 }
 
