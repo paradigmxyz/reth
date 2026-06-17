@@ -52,12 +52,12 @@ where
     ///
     /// Note: depending on the installed [`PayloadJobGenerator`], this may or may not terminate the
     /// job, See [`PayloadJob::resolve`].
-    pub async fn resolve_kind(
+    pub fn resolve_kind(
         &self,
         id: PayloadId,
         kind: PayloadKind,
-    ) -> Option<Result<T::BuiltPayload, PayloadBuilderError>> {
-        self.inner.resolve_kind(id, kind).await
+    ) -> impl Future<Output = Option<Result<T::BuiltPayload, PayloadBuilderError>>> {
+        self.inner.resolve_kind(id, kind)
     }
 
     /// Resolves the payload job and returns the best payload that has been built so far.
@@ -147,28 +147,29 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
     }
 
     /// Resolves the payload job and returns the best payload that has been built so far.
-    pub async fn resolve_kind(
+    ///
+    /// # Cancellation safety
+    ///
+    /// The future returned by this method is not cancellation-safe. This method sends the resolve
+    /// command before returning the future, so dropping the returned future drops the response
+    /// receiver and cancels the job identified by `id`.
+    pub fn resolve_kind(
         &self,
         id: PayloadId,
         kind: PayloadKind,
-    ) -> Option<Result<T::BuiltPayload, PayloadBuilderError>> {
+    ) -> impl Future<Output = Option<Result<T::BuiltPayload, PayloadBuilderError>>> {
         let (tx, rx) = oneshot::channel();
-        self.to_service.send(PayloadServiceCommand::Resolve(id, kind, tx)).ok()?;
-        match rx.await.transpose()? {
-            Ok(fut) => Some(fut.await),
-            Err(e) => Some(Err(e.into())),
-        }
-    }
+        let sent = self.to_service.send(PayloadServiceCommand::Resolve(id, kind, tx)).is_ok();
+        async move {
+            if !sent {
+                return None
+            }
 
-    /// Same as [`Self::resolve_kind`] but returns the underlying future.
-    pub async fn resolve_kind_fut(
-        &self,
-        id: PayloadId,
-        kind: PayloadKind,
-    ) -> Result<Option<PayloadFuture<T::BuiltPayload>>, PayloadBuilderError> {
-        let (tx, rx) = oneshot::channel();
-        self.to_service.send(PayloadServiceCommand::Resolve(id, kind, tx))?;
-        rx.await.map_err(Into::into)
+            match rx.await.transpose()? {
+                Ok(fut) => Some(fut.await),
+                Err(e) => Some(Err(e.into())),
+            }
+        }
     }
 
     /// Sends a message to the service to subscribe to payload events.

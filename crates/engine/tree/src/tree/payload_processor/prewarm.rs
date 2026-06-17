@@ -21,19 +21,19 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, B256};
+use alloy_primitives::{keccak256, B256, U256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
 use reth_metrics::Metrics;
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockReader, StateProviderFactory, StateReader,
 };
-use reth_revm::{database::StateProviderDatabase, state::EvmState};
+use reth_revm::database::StateProviderDatabase;
 use reth_tasks::{pool::WorkerPool, Runtime};
-use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
+use reth_trie_common::MultiProofTargetsV2;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc::{self, channel, Receiver, Sender},
@@ -247,7 +247,7 @@ where
             }
 
             if index > 0 {
-                let (targets, storage_targets) = multiproof_targets_from_state(res.state);
+                let (targets, storage_targets) = MultiProofTargetsV2::from_state(res.state);
                 ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
                 if let Some(to_sparse_trie_task) = to_sparse_trie_task {
                     let _ = to_sparse_trie_task.send(StateRootMessage::PrefetchProofs(targets));
@@ -634,8 +634,9 @@ where
 
     /// Hashes and streams a single BAL account's state to the sparse trie task.
     ///
-    /// For each account, storage slots are hashed and sent immediately, then the account is read
-    /// from the database and sent as a separate update.
+    /// For each changed account, storage slots are hashed and sent immediately, then the account
+    /// is sent as a separate update. The parent account is read only when the BAL did not provide
+    /// all account leaf fields needed by the sparse trie.
     ///
     /// The `provider` is lazily initialized on first call and reused across accounts on the same
     /// thread.
@@ -651,6 +652,11 @@ where
         }
         let address = account_changes.address;
         let mut hashed_address = None;
+        let account_fields = BalAccountStateFields::from_changes(account_changes);
+
+        if !bal_account_changes_state_root(account_changes, account_fields) {
+            return;
+        }
 
         if !account_changes.storage_changes.is_empty() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
@@ -668,75 +674,44 @@ where
             let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
         }
 
-        if provider.is_none() {
-            let _span = debug_span!(
-                target: "engine::tree::payload_processor::prewarm",
-                parent: parent_span,
-                "bal_hashed_state_provider_init",
-                has_saved_cache = !self.disable_bal_batch_io && self.saved_cache.is_some(),
-            )
-            .entered();
+        let existing_account = if account_fields.needs_parent_account() {
+            if provider.is_none() {
+                let _span = debug_span!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    parent: parent_span,
+                    "bal_hashed_state_provider_init",
+                    has_saved_cache = !self.disable_bal_batch_io && self.saved_cache.is_some(),
+                )
+                .entered();
 
-            let inner = match self.provider.build() {
-                Ok(p) => p,
-                Err(err) => {
-                    warn!(
-                        target: "engine::tree::payload_processor::prewarm",
-                        ?err,
-                        "Failed to build provider for BAL account reads"
-                    );
-                    return;
-                }
-            };
-            let boxed: Box<dyn AccountReader> = match (self.disable_bal_batch_io, &self.saved_cache)
-            {
-                (false, Some(saved)) => {
-                    let caches = saved.cache().clone();
-                    Box::new(CachedStateProvider::new_prewarm(inner, caches))
-                }
-                _ => Box::new(inner),
-            };
-            *provider = Some(boxed);
-        }
-        let account_reader = provider.as_ref().expect("provider just initialized");
-
-        let existing_account = account_reader.basic_account(&address).ok().flatten();
-
-        let balance = account_changes.balance_changes.last().map(|change| change.post_balance);
-        let nonce = account_changes.nonce_changes.last().map(|change| change.new_nonce);
-        let code_hash = account_changes.code_changes.last().map(|code_change| {
-            if code_change.new_code.is_empty() {
-                alloy_consensus::constants::KECCAK_EMPTY
-            } else {
-                keccak256(&code_change.new_code)
+                let inner = match self.provider.build() {
+                    Ok(p) => p,
+                    Err(err) => {
+                        warn!(
+                            target: "engine::tree::payload_processor::prewarm",
+                            ?err,
+                            "Failed to build provider for BAL account reads"
+                        );
+                        return;
+                    }
+                };
+                let boxed: Box<dyn AccountReader> =
+                    match (self.disable_bal_batch_io, &self.saved_cache) {
+                        (false, Some(saved)) => {
+                            let caches = saved.cache().clone();
+                            Box::new(CachedStateProvider::new_prewarm(inner, caches))
+                        }
+                        _ => Box::new(inner),
+                    };
+                *provider = Some(boxed);
             }
-        });
-
-        if balance.is_none() &&
-            nonce.is_none() &&
-            code_hash.is_none() &&
-            account_changes.storage_changes.is_empty()
-        {
-            return;
-        }
-
-        let account = reth_primitives_traits::Account {
-            balance: balance.unwrap_or_else(|| {
-                existing_account
-                    .as_ref()
-                    .map(|account| account.balance)
-                    .unwrap_or(alloy_primitives::U256::ZERO)
-            }),
-            nonce: nonce.unwrap_or_else(|| {
-                existing_account.as_ref().map(|account| account.nonce).unwrap_or(0)
-            }),
-            bytecode_hash: code_hash.or_else(|| {
-                existing_account
-                    .as_ref()
-                    .and_then(|account| account.bytecode_hash)
-                    .or(Some(alloy_consensus::constants::KECCAK_EMPTY))
-            }),
+            let account_reader = provider.as_ref().expect("provider just initialized");
+            account_reader.basic_account(&address).ok().flatten()
+        } else {
+            None
         };
+
+        let account = account_fields.into_account(existing_account);
 
         let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
         let mut hashed_state = reth_trie::HashedPostState::default();
@@ -746,49 +721,61 @@ where
     }
 }
 
-/// Returns a set of [`MultiProofTargetsV2`] and the total amount of storage targets, based on the
-/// given state.
-fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize) {
-    let mut targets = MultiProofTargetsV2::default();
-    targets.account_targets.reserve(state.len());
-    targets.storage_targets.reserve(state.len());
-    let mut storage_target_count = 0;
-    for (addr, account) in state {
-        // if the account was not touched, or if the account was selfdestructed, do not
-        // fetch proofs for it
-        //
-        // Since selfdestruct can only happen in the same transaction, we can skip
-        // prefetching proofs for selfdestructed accounts
-        //
-        // See: https://eips.ethereum.org/EIPS/eip-6780
-        if !account.is_touched() || account.is_selfdestructed() {
-            continue
-        }
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct BalAccountStateFields {
+    balance: Option<U256>,
+    nonce: Option<u64>,
+    code_hash: Option<B256>,
+}
 
-        let hashed_address = keccak256(addr);
-
-        if account.info != account.original_info() {
-            targets.account_targets.push(hashed_address.into());
-        }
-
-        let mut storage_slots = Vec::with_capacity(account.storage.len());
-        for (key, slot) in account.storage {
-            // do nothing if unchanged
-            if !slot.is_changed() {
-                continue
-            }
-
-            let hashed_slot = keccak256(B256::new(key.to_be_bytes()));
-            storage_slots.push(ProofV2Target::from(hashed_slot));
-        }
-
-        storage_target_count += storage_slots.len();
-        if !storage_slots.is_empty() {
-            targets.storage_targets.insert(hashed_address, storage_slots);
+impl BalAccountStateFields {
+    fn from_changes(account_changes: &alloy_eip7928::AccountChanges) -> Self {
+        Self {
+            balance: account_changes.balance_changes.last().map(|change| change.post_balance),
+            nonce: account_changes.nonce_changes.last().map(|change| change.new_nonce),
+            code_hash: account_changes.code_changes.last().map(|code_change| {
+                if code_change.new_code.is_empty() {
+                    alloy_consensus::constants::KECCAK_EMPTY
+                } else {
+                    keccak256(&code_change.new_code)
+                }
+            }),
         }
     }
 
-    (targets, storage_target_count)
+    const fn is_empty(self) -> bool {
+        self.balance.is_none() && self.nonce.is_none() && self.code_hash.is_none()
+    }
+
+    const fn needs_parent_account(self) -> bool {
+        self.balance.is_none() || self.nonce.is_none() || self.code_hash.is_none()
+    }
+
+    fn into_account(self, existing_account: Option<Account>) -> Account {
+        let existing_account = existing_account.as_ref();
+        Account {
+            balance: self.balance.unwrap_or_else(|| {
+                existing_account
+                    .map(|account| account.balance)
+                    .unwrap_or(alloy_primitives::U256::ZERO)
+            }),
+            nonce: self
+                .nonce
+                .unwrap_or_else(|| existing_account.map(|account| account.nonce).unwrap_or(0)),
+            bytecode_hash: self.code_hash.or_else(|| {
+                existing_account
+                    .and_then(|account| account.bytecode_hash)
+                    .or(Some(alloy_consensus::constants::KECCAK_EMPTY))
+            }),
+        }
+    }
+}
+
+const fn bal_account_changes_state_root(
+    account_changes: &alloy_eip7928::AccountChanges,
+    account_fields: BalAccountStateFields,
+) -> bool {
+    !account_fields.is_empty() || !account_changes.storage_changes.is_empty()
 }
 
 /// Returns [`MultiProofTargetsV2`] for withdrawal addresses.
@@ -799,6 +786,67 @@ fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProof
     MultiProofTargetsV2 {
         account_targets: withdrawals.iter().map(|w| keccak256(w.address).into()).collect(),
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_eip7928::{
+        AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges,
+        StorageChange,
+    };
+    use alloy_primitives::{address, bytes};
+
+    #[test]
+    fn bal_read_only_account_does_not_change_state_root() {
+        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
+            .with_storage_read(U256::from(1));
+        let fields = BalAccountStateFields::from_changes(&changes);
+
+        assert!(fields.is_empty());
+        assert!(!bal_account_changes_state_root(&changes, fields));
+    }
+
+    #[test]
+    fn bal_account_with_all_leaf_fields_does_not_need_parent_account() {
+        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
+            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)))
+            .with_nonce_change(NonceChange::new(BlockAccessIndex::new(1), 7))
+            .with_code_change(CodeChange::new(BlockAccessIndex::new(1), bytes!("6001600155")));
+        let fields = BalAccountStateFields::from_changes(&changes);
+
+        assert!(bal_account_changes_state_root(&changes, fields));
+        assert!(!fields.needs_parent_account());
+    }
+
+    #[test]
+    fn bal_storage_change_needs_parent_account_when_leaf_fields_missing() {
+        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
+            .with_storage_change(SlotChanges::new(
+                U256::from(1),
+                vec![StorageChange::new(BlockAccessIndex::new(1), U256::from(2))],
+            ));
+        let fields = BalAccountStateFields::from_changes(&changes);
+
+        assert!(bal_account_changes_state_root(&changes, fields));
+        assert!(fields.needs_parent_account());
+    }
+
+    #[test]
+    fn bal_account_uses_existing_fields_only_when_missing() {
+        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
+            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)));
+        let fields = BalAccountStateFields::from_changes(&changes);
+        let account = fields.into_account(Some(Account {
+            balance: U256::from(1),
+            nonce: 3,
+            bytecode_hash: Some(B256::repeat_byte(0xaa)),
+        }));
+
+        assert_eq!(account.balance, U256::from(10));
+        assert_eq!(account.nonce, 3);
+        assert_eq!(account.bytecode_hash, Some(B256::repeat_byte(0xaa)));
     }
 }
 
