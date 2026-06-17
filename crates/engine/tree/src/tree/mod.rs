@@ -2148,7 +2148,7 @@ where
             number: self.persistence_state.last_persisted_block.number,
             hash: self.persistence_state.last_persisted_block.hash,
         };
-        let _ = self.canonical_in_memory_state.remove_persisted_blocks(persisted_block);
+        self.canonical_in_memory_state.remove_persisted_blocks(persisted_block);
         self.payload_validator.prune_sparse_state_trie_after_persistence(
             persisted_block,
             &removed_block_state.retained_state_mask,

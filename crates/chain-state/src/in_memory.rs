@@ -316,13 +316,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     ///
     /// This will update the links between blocks and remove all blocks that are [..
     /// `persisted_height`].
-    ///
-    /// Returns the merged hashed post state for removed persisted blocks, excluding keys that are
-    /// overwritten by blocks that remain in memory.
-    pub fn remove_persisted_blocks(
-        &self,
-        persisted_num_hash: BlockNumHash,
-    ) -> HashedPostStateSorted {
+    pub fn remove_persisted_blocks(&self, persisted_num_hash: BlockNumHash) {
         self.set_persisted(persisted_num_hash);
         // if the persisted hash is not in the canonical in memory state, do nothing, because it
         // means canonical blocks were not actually persisted.
@@ -331,11 +325,11 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         {
             if self.inner.in_memory_state.blocks.read().get(&persisted_num_hash.hash).is_none() {
                 // do nothing
-                return HashedPostStateSorted::default()
+                return
             }
         }
 
-        let (removed_blocks, retained_blocks, retained_pending_block) = {
+        {
             // acquire locks, starting with the numbers lock
             let mut numbers = self.inner.in_memory_state.numbers.write();
             let mut blocks = self.inner.in_memory_state.blocks.write();
@@ -344,8 +338,6 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
             // clear all numbers
             numbers.clear();
-
-            let mut removed_blocks = Vec::new();
 
             // drain all blocks and only keep the ones that are not persisted (below the persisted
             // height)
@@ -356,7 +348,6 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
                     if block.recovered_block().number() > persisted_height {
                         Some(block)
                     } else {
-                        removed_blocks.push(block);
                         None
                     }
                 })
@@ -364,8 +355,6 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
             // sort the blocks by number so we can insert them back in natural order (low -> high)
             old_blocks.sort_unstable_by_key(|block| block.recovered_block().number());
-            removed_blocks.sort_unstable_by_key(|block| block.recovered_block().number());
-            let retained_blocks = old_blocks.clone();
 
             // re-insert the blocks in natural order and connect them to their parent blocks
             for block in old_blocks {
@@ -385,30 +374,8 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
                     p.parent = blocks.get(&p.block_ref().recovered_block().parent_hash()).cloned();
                 }
             });
-            let retained_pending_block = self
-                .inner
-                .in_memory_state
-                .pending
-                .borrow()
-                .as_ref()
-                .filter(|pending| pending.number() > persisted_height)
-                .map(|pending| pending.block());
-
-            (removed_blocks, retained_blocks, retained_pending_block)
-        };
-        self.inner.in_memory_state.update_metrics();
-
-        let removed_states =
-            removed_blocks.iter().map(|block| block.hashed_state()).collect::<Vec<_>>();
-        let mut retained_states =
-            retained_blocks.iter().map(|block| block.hashed_state()).collect::<Vec<_>>();
-        if let Some(pending_block) = &retained_pending_block {
-            retained_states.push(pending_block.hashed_state());
         }
-        HashedPostStateSorted::disjointed_merge_batch(
-            removed_states.iter().map(AsRef::as_ref).collect(),
-            retained_states.iter().map(AsRef::as_ref).collect(),
-        )
+        self.inner.in_memory_state.update_metrics();
     }
 
     /// Returns in memory state corresponding the given hash.
@@ -1026,7 +993,7 @@ mod tests {
     use super::*;
     use crate::test_utils::TestBlockBuilder;
     use alloy_eips::eip7685::Requests;
-    use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, U256};
+    use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue};
     use rand::Rng;
     use reth_errors::ProviderResult;
     use reth_ethereum_primitives::{EthPrimitives, Receipt};
@@ -1036,8 +1003,8 @@ mod tests {
         StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
     };
     use reth_trie::{
-        updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, HashedStorageSorted,
-        MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+        updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
+        MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
     };
 
     fn create_mock_state(
@@ -1330,152 +1297,6 @@ mod tests {
         );
 
         assert_eq!(state.inner.in_memory_state.block_count(), 1);
-    }
-
-    #[test]
-    fn test_remove_persisted_blocks_returns_disjoint_hashed_state() {
-        let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
-        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
-
-        let mut block1 = test_block_builder.get_executed_block_with_number(1, B256::random());
-        let mut block2 =
-            test_block_builder.get_executed_block_with_number(2, block1.recovered_block().hash());
-
-        let persisted_account = B256::with_last_byte(1);
-        let masked_account = B256::with_last_byte(2);
-        let persisted_storage = B256::with_last_byte(3);
-        let masked_storage = B256::with_last_byte(4);
-        let persisted_slot = B256::with_last_byte(5);
-        let masked_slot = B256::with_last_byte(6);
-
-        block1.trie_data = DeferredTrieData::ready(ComputedTrieData::new(
-            Arc::new(HashedPostStateSorted::new(
-                vec![
-                    (persisted_account, Some(Account::default())),
-                    (masked_account, Some(Account { nonce: 1, ..Default::default() })),
-                ],
-                B256Map::from_iter([
-                    (
-                        persisted_storage,
-                        HashedStorageSorted {
-                            wiped: false,
-                            storage_slots: vec![(persisted_slot, U256::from(1))],
-                        },
-                    ),
-                    (
-                        masked_storage,
-                        HashedStorageSorted {
-                            wiped: false,
-                            storage_slots: vec![(masked_slot, U256::from(2))],
-                        },
-                    ),
-                ]),
-            )),
-            Arc::new(TrieUpdatesSorted::default()),
-        ));
-        block2.trie_data = DeferredTrieData::ready(ComputedTrieData::new(
-            Arc::new(HashedPostStateSorted::new(
-                vec![(masked_account, Some(Account { nonce: 2, ..Default::default() }))],
-                B256Map::from_iter([(
-                    masked_storage,
-                    HashedStorageSorted {
-                        wiped: false,
-                        storage_slots: vec![(masked_slot, U256::from(3))],
-                    },
-                )]),
-            )),
-            Arc::new(TrieUpdatesSorted::default()),
-        ));
-
-        state.update_chain(NewCanonicalChain::Commit { new: vec![block1.clone(), block2.clone()] });
-
-        let removed_state = state.remove_persisted_blocks(block1.recovered_block().num_hash());
-
-        assert_eq!(removed_state.accounts, vec![(persisted_account, Some(Account::default()))]);
-        assert_eq!(
-            removed_state.storages.get(&persisted_storage),
-            Some(&HashedStorageSorted {
-                wiped: false,
-                storage_slots: vec![(persisted_slot, U256::from(1))]
-            })
-        );
-        assert!(!removed_state.storages.contains_key(&masked_storage));
-        assert!(state.state_by_hash(block1.recovered_block().hash()).is_none());
-        assert!(state.state_by_hash(block2.recovered_block().hash()).is_some());
-    }
-
-    #[test]
-    fn test_remove_persisted_blocks_masks_with_pending_hashed_state() {
-        let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
-        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
-
-        let mut block1 = test_block_builder.get_executed_block_with_number(1, B256::random());
-        let mut block2 =
-            test_block_builder.get_executed_block_with_number(2, block1.recovered_block().hash());
-
-        let persisted_account = B256::with_last_byte(1);
-        let masked_account = B256::with_last_byte(2);
-        let persisted_storage = B256::with_last_byte(3);
-        let masked_storage = B256::with_last_byte(4);
-        let persisted_slot = B256::with_last_byte(5);
-        let masked_slot = B256::with_last_byte(6);
-
-        block1.trie_data = DeferredTrieData::ready(ComputedTrieData::new(
-            Arc::new(HashedPostStateSorted::new(
-                vec![
-                    (persisted_account, Some(Account::default())),
-                    (masked_account, Some(Account { nonce: 1, ..Default::default() })),
-                ],
-                B256Map::from_iter([
-                    (
-                        persisted_storage,
-                        HashedStorageSorted {
-                            wiped: false,
-                            storage_slots: vec![(persisted_slot, U256::from(1))],
-                        },
-                    ),
-                    (
-                        masked_storage,
-                        HashedStorageSorted {
-                            wiped: false,
-                            storage_slots: vec![(masked_slot, U256::from(2))],
-                        },
-                    ),
-                ]),
-            )),
-            Arc::new(TrieUpdatesSorted::default()),
-        ));
-        block2.trie_data = DeferredTrieData::ready(ComputedTrieData::new(
-            Arc::new(HashedPostStateSorted::new(
-                vec![(masked_account, Some(Account { nonce: 2, ..Default::default() }))],
-                B256Map::from_iter([(
-                    masked_storage,
-                    HashedStorageSorted {
-                        wiped: false,
-                        storage_slots: vec![(masked_slot, U256::from(3))],
-                    },
-                )]),
-            )),
-            Arc::new(TrieUpdatesSorted::default()),
-        ));
-
-        state.update_chain(NewCanonicalChain::Commit { new: vec![block1.clone()] });
-        state.set_pending_block(block2);
-
-        let removed_state = state.remove_persisted_blocks(block1.recovered_block().num_hash());
-
-        assert_eq!(removed_state.accounts, vec![(persisted_account, Some(Account::default()))]);
-        assert_eq!(
-            removed_state.storages.get(&persisted_storage),
-            Some(&HashedStorageSorted {
-                wiped: false,
-                storage_slots: vec![(persisted_slot, U256::from(1))]
-            })
-        );
-        assert!(!removed_state.accounts.iter().any(|(key, _)| *key == masked_account));
-        assert!(!removed_state.storages.contains_key(&masked_storage));
-        assert!(state.state_by_hash(block1.recovered_block().hash()).is_none());
-        assert!(state.pending_state().is_some());
     }
 
     #[test]
