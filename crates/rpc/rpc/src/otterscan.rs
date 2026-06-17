@@ -3,12 +3,22 @@ use alloy_eips::{eip1898::LenientBlockNumberOrTag, BlockId};
 use alloy_network::{ReceiptResponse, TransactionResponse};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use alloy_rpc_types_eth::{BlockTransactions, TransactionReceipt};
-use alloy_rpc_types_trace::otterscan::{
-    BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, OtsReceipt,
-    OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
+use alloy_rpc_types_trace::{
+    otterscan::{
+        BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
+        OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
+    },
+    parity::{Action, CreateAction, CreateOutput, TraceOutput},
 };
 use async_trait::async_trait;
+use evm2::{ethereum::RecoveredTxEnvelope, interpreter::InstrStop, NoopInspector};
+use evm2_inspectors::{
+    tracing::TracingInspectorConfig,
+    transfer::{TransferInspector, TransferKind},
+};
 use jsonrpsee::core::RpcResult;
+use jsonrpsee_types::ErrorObjectOwned;
+use reth_evm::TxEnvFor;
 use reth_primitives_traits::TxTy;
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_convert::RpcTxReq;
@@ -16,15 +26,11 @@ use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
     FullEthApiTypes, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
-use reth_rpc_eth_types::EthApiError;
+use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
+use reth_storage_api::ProviderTx;
 
 const API_LEVEL: u64 = 8;
-
-fn unsupported_otterscan_trace<T>() -> RpcResult<T> {
-    Err(EthApiError::Unsupported("Otterscan tracing is unsupported by the evm2 execution path")
-        .into())
-}
 
 /// Otterscan API.
 #[derive(Debug)]
@@ -75,6 +81,8 @@ where
         > + EthTransactions
         + TraceExt
         + 'static,
+    TxEnvFor<Eth::Evm>: AsRef<RecoveredTxEnvelope>,
+    ProviderTx<Eth::Provider>: Clone,
 {
     /// Handler for `ots_getHeaderByNumber` and `erigon_getHeaderByNumber`
     async fn get_header_by_number(
@@ -96,77 +104,69 @@ where
 
     /// Handler for `ots_getInternalOperations`
     async fn get_internal_operations(&self, tx_hash: TxHash) -> RpcResult<Vec<InternalOperation>> {
-        let _ = tx_hash;
-        #[cfg(any())]
-        {
-            let internal_operations = self
-                .eth
-                .spawn_trace_transaction_in_block_with_inspector(
-                    tx_hash,
-                    TransferInspector::new(false),
-                    |_tx_info, inspector, _, _| Ok(inspector.into_transfers()),
-                )
-                .await
-                .map_err(Into::into)?
-                .map(|transfer_operations| {
-                    transfer_operations
-                        .iter()
-                        .map(|op| InternalOperation {
-                            from: op.from,
-                            to: op.to,
-                            value: op.value,
-                            r#type: match op.kind {
-                                TransferKind::Call => OperationType::OpTransfer,
-                                TransferKind::Create => OperationType::OpCreate,
-                                TransferKind::Create2 => OperationType::OpCreate2,
-                                TransferKind::SelfDestruct => OperationType::OpSelfDestruct,
-                            },
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            Ok(internal_operations)
-        }
-        unsupported_otterscan_trace()
+        let internal_operations = self
+            .eth
+            .spawn_trace_transaction_in_block_with_inspector(
+                tx_hash,
+                TransferInspector::new(false),
+                |_tx_info, inspector, _, _| Ok(inspector.into_transfers()),
+            )
+            .await
+            .map_err(Into::into)?
+            .map(|transfer_operations| {
+                transfer_operations
+                    .iter()
+                    .map(|op| InternalOperation {
+                        from: op.from,
+                        to: op.to,
+                        value: op.value,
+                        r#type: match op.kind {
+                            TransferKind::Call => OperationType::OpTransfer,
+                            TransferKind::Create => OperationType::OpCreate,
+                            TransferKind::Create2 => OperationType::OpCreate2,
+                            TransferKind::SelfDestruct => OperationType::OpSelfDestruct,
+                        },
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        Ok(internal_operations)
     }
 
     /// Handler for `ots_getTransactionError`
     async fn get_transaction_error(&self, tx_hash: TxHash) -> RpcResult<Option<Bytes>> {
-        let _ = tx_hash;
-        #[cfg(any())]
-        {
-            let maybe_revert = self
-                .eth
-                .spawn_replay_transaction(tx_hash, |_tx_info, res, _| match res.result {
-                    ExecutionResult::Revert { output, .. } => Ok(Some(output)),
-                    _ => Ok(None),
-                })
-                .await
-                .map(Option::flatten)
-                .map_err(Into::into)?;
-            Ok(maybe_revert)
-        }
-        unsupported_otterscan_trace()
+        let maybe_revert = self
+            .eth
+            .spawn_trace_transaction_in_block_with_inspector(
+                tx_hash,
+                NoopInspector::default(),
+                |_tx_info, _inspector, res, _| {
+                    Ok((res.result.stop == InstrStop::Revert).then_some(res.result.output))
+                },
+            )
+            .await
+            .map(Option::flatten)
+            .map_err(Into::into)?;
+        Ok(maybe_revert)
     }
 
     /// Handler for `ots_traceTransaction`
     async fn trace_transaction(&self, tx_hash: TxHash) -> RpcResult<Option<Vec<TraceEntry>>> {
-        let _ = tx_hash;
-        #[cfg(any())]
-        {
-            let traces = self
-                .eth
-                .spawn_trace_transaction_in_block(
-                    tx_hash,
-                    TracingInspectorConfig::default_parity(),
-                    move |_tx_info, inspector, _, _| Ok(inspector.into_traces().into_nodes()),
-                )
-                .await
-                .map_err(Into::into)?
-                .map(|traces| {
-                    traces
-                        .into_iter()
-                        .map(|CallTraceNode { trace, .. }| TraceEntry {
+        let traces = self
+            .eth
+            .spawn_trace_transaction_in_block(
+                tx_hash,
+                TracingInspectorConfig::default_parity(),
+                move |_tx_info, inspector, _, _| Ok(inspector.into_traces().into_nodes()),
+            )
+            .await
+            .map_err(Into::into)?
+            .map(|traces| {
+                traces
+                    .into_iter()
+                    .map(|node| {
+                        let trace = node.trace;
+                        TraceEntry {
                             r#type: if trace.is_selfdestruct() {
                                 "SELFDESTRUCT".to_string()
                             } else {
@@ -178,12 +178,11 @@ where
                             value: Some(trace.value),
                             input: trace.data,
                             output: trace.output,
-                        })
-                        .collect::<Vec<_>>()
-                });
-            Ok(traces)
-        }
-        unsupported_otterscan_trace()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            });
+        Ok(traces)
     }
 
     /// Handler for `ots_getBlockDetails`
@@ -329,75 +328,69 @@ where
 
     /// Handler for `ots_getContractCreator`
     async fn get_contract_creator(&self, address: Address) -> RpcResult<Option<ContractCreator>> {
-        let _ = address;
-        #[cfg(any())]
-        {
-            if !self.has_code(address, None).await? {
-                return Ok(None);
-            }
+        if !self.has_code(address, None).await? {
+            return Ok(None)
+        }
 
-            let num = binary_search::<_, _, ErrorObjectOwned>(
-                1,
-                self.eth.block_number()?.saturating_to(),
-                |mid| {
-                    Box::pin(async move {
-                        Ok(!EthApiServer::get_code(&self.eth, address, Some(mid.into()))
-                            .await?
-                            .is_empty())
-                    })
+        let num = binary_search::<_, _, ErrorObjectOwned>(
+            1,
+            self.eth.block_number()?.saturating_to(),
+            |mid| {
+                Box::pin(async move {
+                    Ok(!EthApiServer::get_code(&self.eth, address, Some(mid.into()))
+                        .await?
+                        .is_empty())
+                })
+            },
+        )
+        .await?;
+
+        let traces = self
+            .eth
+            .trace_block_with(
+                num.into(),
+                None,
+                TracingInspectorConfig::default_parity(),
+                |tx_info, ctx| {
+                    Ok(ctx
+                        .take_inspector()
+                        .into_parity_builder()
+                        .into_localized_transaction_traces(tx_info))
                 },
             )
-            .await?;
-
-            let traces = self
-                .eth
-                .trace_block_with(
-                    num.into(),
-                    None,
-                    TracingInspectorConfig::default_parity(),
-                    |tx_info, mut ctx| {
-                        Ok(ctx
-                            .take_inspector()
-                            .into_parity_builder()
-                            .into_localized_transaction_traces(tx_info))
-                    },
-                )
-                .await
-                .map_err(Into::into)?
-                .map(|traces| {
-                    traces
-                        .into_iter()
-                        .flatten()
-                        .map(|tx_trace| {
-                            let trace = tx_trace.trace;
-                            Ok(match (trace.action, trace.result, trace.error) {
-                                (
-                                    Action::Create(CreateAction { from: creator, .. }),
-                                    Some(TraceOutput::Create(CreateOutput {
-                                        address: contract,
-                                        ..
-                                    })),
-                                    None,
-                                ) if contract == address => Some(ContractCreator {
-                                    hash: tx_trace
-                                        .transaction_hash
-                                        .ok_or(EthApiError::TransactionNotFound)?,
-                                    creator,
-                                }),
-                                _ => None,
-                            })
+            .await
+            .map_err(Into::into)?
+            .map(|traces| {
+                traces
+                    .into_iter()
+                    .flatten()
+                    .map(|tx_trace| {
+                        let trace = tx_trace.trace;
+                        Ok(match (trace.action, trace.result, trace.error) {
+                            (
+                                Action::Create(CreateAction { from: creator, .. }),
+                                Some(TraceOutput::Create(CreateOutput {
+                                    address: contract, ..
+                                })),
+                                None,
+                            ) if contract == address => Some(ContractCreator {
+                                hash: tx_trace
+                                    .transaction_hash
+                                    .ok_or(EthApiError::TransactionNotFound)?,
+                                creator,
+                            }),
+                            _ => None,
                         })
-                        .filter_map(Result::transpose)
-                        .collect::<Result<Vec<_>, EthApiError>>()
-                })
-                .transpose()?;
+                    })
+                    .filter_map(Result::transpose)
+                    .collect::<Result<Vec<_>, EthApiError>>()
+            })
+            .transpose()?;
 
-            // A contract maybe created and then destroyed in multiple transactions, here we
-            // return the first found transaction, this behavior is consistent with etherscan's
-            let found = traces.and_then(|traces| traces.first().copied());
-            Ok(found)
-        }
-        unsupported_otterscan_trace()
+        // A contract maybe created and then destroyed in multiple transactions, here we
+        // return the first found transaction, this behavior is consistent with etherscan's
+        let found = traces.and_then(|traces| traces.first().copied());
+        Ok(found)
     }
 }
 
