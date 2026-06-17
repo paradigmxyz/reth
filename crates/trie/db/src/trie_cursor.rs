@@ -12,7 +12,7 @@ use reth_trie::{
     BranchNodeCompact, Nibbles, PackedStorageTrieEntry, PackedStoredNibbles,
     PackedStoredNibblesSubKey, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
 };
-use std::marker::PhantomData;
+use std::{cmp::Ordering, marker::PhantomData};
 
 /// Trait abstracting nibble encoding for trie keys.
 ///
@@ -281,24 +281,66 @@ where
         &mut self,
         updates: &StorageTrieUpdatesSorted,
     ) -> Result<usize, DatabaseError> {
+        const SEQUENTIAL_DELETE_SCAN_MIN_NODES: usize = 8;
+
         // The storage trie for this account has to be deleted.
         if updates.is_deleted() && self.cursor.seek_exact(self.hashed_address)?.is_some() {
             self.cursor.delete_current_duplicates()?;
         }
 
         let mut num_entries = 0;
-        for (nibbles, maybe_updated) in updates.storage_nodes.iter().filter(|(n, _)| !n.is_empty())
-        {
+
+        let updated_nodes = updates.storage_nodes.iter().filter(|(n, _)| !n.is_empty());
+        let use_sequential_delete_scan = !updates.is_deleted() &&
+            updated_nodes.clone().nth(SEQUENTIAL_DELETE_SCAN_MIN_NODES - 1).is_some();
+
+        if use_sequential_delete_scan {
+            if let Some((first_nibbles, _)) = updated_nodes.clone().next() {
+                let first_subkey = A::StorageSubKey::from(*first_nibbles);
+                let mut walker =
+                    self.cursor.walk_dup(Some(self.hashed_address), Some(first_subkey))?;
+                let mut targets = updated_nodes.clone().peekable();
+
+                while let Some((_, db_entry)) = walker.next().transpose()? {
+                    let current_subkey = db_entry.nibbles().clone();
+
+                    while let Some((target_nibbles, _)) = targets.peek() {
+                        let target_subkey = A::StorageSubKey::from(*target_nibbles);
+
+                        match target_subkey.cmp(&current_subkey) {
+                            Ordering::Less => {
+                                targets.next();
+                            }
+                            Ordering::Equal => {
+                                walker.delete_current()?;
+                                targets.next();
+                                break;
+                            }
+                            Ordering::Greater => break,
+                        }
+                    }
+
+                    if targets.peek().is_none() {
+                        break;
+                    }
+                }
+            }
+        }
+
+        for (nibbles, maybe_updated) in updated_nodes {
             num_entries += 1;
             let nibbles = A::StorageSubKey::from(*nibbles);
-            // Delete the old entry if it exists.
-            if self
-                .cursor
-                .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
-                .as_ref()
-                .is_some_and(|e| *e.nibbles() == nibbles)
-            {
-                self.cursor.delete_current()?;
+
+            if !updates.is_deleted() && !use_sequential_delete_scan {
+                // Delete the old entry if it exists.
+                if self
+                    .cursor
+                    .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
+                    .as_ref()
+                    .is_some_and(|e| *e.nibbles() == nibbles)
+                {
+                    self.cursor.delete_current()?;
+                }
             }
 
             // There is an updated version of this node, insert new entry.
@@ -374,7 +416,10 @@ where
 mod tests {
     use super::*;
     use alloy_primitives::hex_literal::hex;
-    use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
+    use reth_db_api::{
+        cursor::{DbCursorRW, DbDupCursorRO},
+        transaction::DbTxMut,
+    };
     use reth_provider::test_utils::create_test_provider_factory;
 
     #[test]
@@ -440,5 +485,67 @@ mod tests {
             let mut cursor = trie_factory.storage_trie_cursor(hashed_address).unwrap();
             assert_eq!(cursor.seek(key.into()).unwrap().unwrap().1, value);
         });
+    }
+
+    #[test]
+    fn test_storage_trie_sorted_updates_sequential_delete_scan() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+
+        let hashed_address = B256::repeat_byte(0xaa);
+        let nibbles = |nibble| Nibbles::from_nibbles_unchecked([nibble]);
+        let subkey = |nibble| StoredNibblesSubKey::from(nibbles(nibble));
+        let node = |tag| BranchNodeCompact::new(1, 0, 0, Vec::new(), Some(B256::repeat_byte(tag)));
+
+        for nibble in 1..=12 {
+            cursor
+                .upsert(
+                    hashed_address,
+                    &StorageTrieEntry { nibbles: subkey(nibble), node: node(nibble) },
+                )
+                .unwrap();
+        }
+
+        let updates = StorageTrieUpdatesSorted {
+            is_deleted: false,
+            storage_nodes: vec![
+                (nibbles(2), Some(node(102))),
+                (nibbles(3), None),
+                (nibbles(4), Some(node(104))),
+                (nibbles(6), None),
+                (nibbles(8), Some(node(108))),
+                (nibbles(9), Some(node(109))),
+                (nibbles(10), None),
+                (nibbles(12), Some(node(112))),
+            ],
+        };
+
+        let mut trie_cursor =
+            DatabaseStorageTrieCursor::<_, LegacyKeyAdapter>::new(cursor, hashed_address);
+        assert_eq!(trie_cursor.write_storage_trie_updates_sorted(&updates).unwrap(), 8);
+        let mut cursor = trie_cursor.cursor;
+
+        let mut exact_node = |nibble| {
+            let key = subkey(nibble);
+            cursor
+                .seek_by_key_subkey(hashed_address, key.clone())
+                .unwrap()
+                .filter(|entry| entry.nibbles == key)
+                .map(|entry| entry.node)
+        };
+
+        assert_eq!(exact_node(1), Some(node(1)));
+        assert_eq!(exact_node(2), Some(node(102)));
+        assert_eq!(exact_node(3), None);
+        assert_eq!(exact_node(4), Some(node(104)));
+        assert_eq!(exact_node(5), Some(node(5)));
+        assert_eq!(exact_node(6), None);
+        assert_eq!(exact_node(7), Some(node(7)));
+        assert_eq!(exact_node(8), Some(node(108)));
+        assert_eq!(exact_node(9), Some(node(109)));
+        assert_eq!(exact_node(10), None);
+        assert_eq!(exact_node(11), Some(node(11)));
+        assert_eq!(exact_node(12), Some(node(112)));
     }
 }
