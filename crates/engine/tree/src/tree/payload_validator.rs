@@ -1114,16 +1114,12 @@ where
             deposit_contract_address: self.evm_config.evm2_deposit_contract_address(),
         };
         let precompiles: Box<dyn evm2::precompile::PrecompileProvider<evm2::BaseEvmTypes>> =
-            if self.config.precompile_cache_disabled() {
-                Box::new(evm2::Precompiles::base(spec_id))
-            } else {
-                Box::new(CachedPrecompileProvider::new(
-                    evm2::Precompiles::base(spec_id),
-                    self.precompile_cache_map.clone(),
-                    spec_id,
-                    None,
-                ))
-            };
+            Box::new(CachedPrecompileProvider::new(
+                evm2::Precompiles::base(spec_id),
+                self.precompile_cache_map.clone(),
+                spec_id,
+                None,
+            ));
 
         let state_hook_sender = handle.state_hook_sender();
         let streamed_state_updates = state_hook_sender.is_some();

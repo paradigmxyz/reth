@@ -1,5 +1,5 @@
 use crate::{
-    execute::{ExecutableTxFor, ExecutableTxParts, RecoveredTx},
+    execute::{ExecutableTxFor, ExecutableTxParts, Executor, RecoveredTx},
     ConfigureEvm, EvmEnvFor, ExecutionCtxFor, TxEnvFor,
 };
 use alloc::{boxed::Box, vec::Vec};
@@ -9,7 +9,7 @@ use core::convert::Infallible;
 use rayon::prelude::*;
 use reth_execution_types::BlockExecutionOutput;
 use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, RecoveredBlock, TxTy};
-use reth_storage_api::StateProvider;
+use reth_storage_api::{SharedEvm2StateProviderDatabase, StateProvider};
 
 /// [`ConfigureEvm`] extension providing methods for executing payloads.
 pub trait ConfigureEngineEvm<ExecutionData>: ConfigureEvm {
@@ -65,61 +65,65 @@ pub trait ConfigureEvm2Engine<ExecutionData>: ConfigureEngineEvm<ExecutionData> 
     ) -> Result<Vec<Recovered<TxTy<Self::Primitives>>>, Box<dyn core::error::Error + Send + Sync>>;
 }
 
-/// Configuration for evm2-native block execution.
-pub trait ConfigureEvm2BlockExecutor: Clone + core::fmt::Debug + Send + Sync + Unpin {
-    /// The primitives type used by the evm2 executor.
-    type Primitives: reth_primitives_traits::NodePrimitives;
-
+/// Compatibility adapter for evm2-native block execution call sites.
+pub trait ConfigureEvm2BlockExecutor: ConfigureEvm {
     /// Executes a recovered block using evm2 against the provided state.
     fn execute_evm2_block_with_state_provider<DB>(
         &self,
         state_provider: DB,
-        block: &RecoveredBlock<BlockTy<Self::Primitives>>,
+        block: &RecoveredBlock<BlockTy<<Self as ConfigureEvm>::Primitives>>,
     ) -> Result<
-        BlockExecutionOutput<ReceiptTy<Self::Primitives>>,
+        BlockExecutionOutput<ReceiptTy<<Self as ConfigureEvm>::Primitives>>,
         Box<dyn core::error::Error + Send + Sync>,
     >
     where
-        DB: StateProvider + Send + 'static;
+        DB: StateProvider + Send + 'static,
+    {
+        // SAFETY: The shared database is consumed by this synchronous execution call and never
+        // outlives the state provider borrowed here.
+        let database = unsafe { SharedEvm2StateProviderDatabase::new(&state_provider) };
+        self.executor(database)
+            .execute(block)
+            .map_err(|err| Box::new(err) as Box<dyn core::error::Error + Send + Sync>)
+    }
 
     /// Executes a recovered block using evm2 against a borrowed state provider.
     fn execute_evm2_block_with_state_provider_ref(
         &self,
         state_provider: &dyn StateProvider,
-        block: &RecoveredBlock<BlockTy<Self::Primitives>>,
+        block: &RecoveredBlock<BlockTy<<Self as ConfigureEvm>::Primitives>>,
     ) -> Result<
-        BlockExecutionOutput<ReceiptTy<Self::Primitives>>,
+        BlockExecutionOutput<ReceiptTy<<Self as ConfigureEvm>::Primitives>>,
         Box<dyn core::error::Error + Send + Sync>,
-    >;
+    > {
+        // SAFETY: The shared database is consumed by this synchronous execution call and never
+        // outlives the borrowed state provider.
+        let database = unsafe { SharedEvm2StateProviderDatabase::new(state_provider) };
+        self.executor(database)
+            .execute(block)
+            .map_err(|err| Box::new(err) as Box<dyn core::error::Error + Send + Sync>)
+    }
 
     /// Executes a recovered block using evm2 against the provided evm2 database.
     fn execute_evm2_block_with_database<DB>(
         &self,
         database: DB,
-        block: &RecoveredBlock<BlockTy<Self::Primitives>>,
+        block: &RecoveredBlock<BlockTy<<Self as ConfigureEvm>::Primitives>>,
     ) -> Result<
-        BlockExecutionOutput<ReceiptTy<Self::Primitives>>,
+        BlockExecutionOutput<ReceiptTy<<Self as ConfigureEvm>::Primitives>>,
         Box<dyn core::error::Error + Send + Sync>,
     >
     where
-        DB: evm2::evm::Database + 'static,
-        DB::Error: Send + Sync;
-
-    /// Executes a recovered block using evm2 against the provided evm2 database and precompile
-    /// cache.
-    fn execute_evm2_block_with_database_and_precompile_cache<DB>(
-        &self,
-        database: DB,
-        block: &RecoveredBlock<BlockTy<Self::Primitives>>,
-        precompile_cache_map: crate::evm2_precompile_cache::Evm2PrecompileCacheMap,
-    ) -> Result<
-        BlockExecutionOutput<ReceiptTy<Self::Primitives>>,
-        Box<dyn core::error::Error + Send + Sync>,
-    >
-    where
-        DB: evm2::evm::Database + 'static,
-        DB::Error: Send + Sync;
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static,
+    {
+        self.executor(database)
+            .execute(block)
+            .map_err(|err| Box::new(err) as Box<dyn core::error::Error + Send + Sync>)
+    }
 }
+
+impl<T> ConfigureEvm2BlockExecutor for T where T: ConfigureEvm {}
 
 /// Configuration for evm2-native transaction prewarming.
 pub trait ConfigureEvm2Prewarm: ConfigureEvm {

@@ -590,6 +590,7 @@ mod tests {
 
         let output = BlockExecutionOutput::<Receipt> {
             state: Evm2BlockState::default().into(),
+            hashed_state: None,
             result: BlockExecutionResult {
                 receipts: vec![],
                 requests: Requests::default(),

@@ -47,7 +47,7 @@ use reth_db_common::init::{
 };
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
-use reth_evm::{noop::NoopEvmConfig, ConfigureEvm2BlockExecutor};
+use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
 use reth_exex::ExExManagerHandle;
 use reth_fs_util as fs;
 use reth_network_p2p::headers::client::HeadersClient;
@@ -481,7 +481,7 @@ where
     ) -> eyre::Result<ProviderFactory<N>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
-        Evm: ConfigureEvm2BlockExecutor<Primitives = N::Primitives> + 'static,
+        Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
         // Validate static files configuration
         let static_files_config = &self.toml_config().static_files;
@@ -603,7 +603,7 @@ where
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
-        Evm: ConfigureEvm2BlockExecutor<Primitives = N::Primitives> + 'static,
+        Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
         let factory = self
             .create_provider_factory::<N, Evm>(changeset_cache, rocksdb_provider, disabled_stages)
@@ -891,7 +891,7 @@ where
     T: FullNodeTypes<Types: NodeTypesForProvider>,
     CB: NodeComponentsBuilder<T>,
     <CB::Components as NodeComponents<T>>::Evm:
-        ConfigureEvm2BlockExecutor<Primitives = <T::Types as NodeTypes>::Primitives>,
+        ConfigureEvm<Primitives = <T::Types as NodeTypes>::Primitives>,
 {
     /// Returns the configured `ProviderFactory`.
     pub const fn provider_factory(

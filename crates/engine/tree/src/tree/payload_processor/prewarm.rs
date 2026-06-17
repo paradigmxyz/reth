@@ -572,8 +572,6 @@ where
     /// loop. Prewarm workers skip transactions with `index < counter` since those have already
     /// been executed.
     pub executed_tx_index: Arc<AtomicUsize>,
-    /// Whether the precompile cache is disabled.
-    pub precompile_cache_disabled: bool,
     /// The precompile cache map.
     pub precompile_cache_map: PrecompileCacheMap<evm2::SpecId>,
     /// Whether to disable BAL-driven parallel state root computation.
@@ -618,16 +616,12 @@ where
         let env = self.env.evm_env.clone();
         let spec = self.evm_config.evm2_prewarm_spec(&env);
         let precompiles: Box<dyn evm2::precompile::PrecompileProvider<evm2::BaseEvmTypes>> =
-            if self.precompile_cache_disabled {
-                Box::new(evm2::Precompiles::base(spec))
-            } else {
-                Box::new(CachedPrecompileProvider::new(
-                    evm2::Precompiles::base(spec),
-                    self.precompile_cache_map.clone(),
-                    spec,
-                    None,
-                ))
-            };
+            Box::new(CachedPrecompileProvider::new(
+                evm2::Precompiles::base(spec),
+                self.precompile_cache_map.clone(),
+                spec,
+                None,
+            ));
 
         Some(self.evm_config.evm2_prewarm_evm_with_precompiles(state_provider, env, precompiles))
     }

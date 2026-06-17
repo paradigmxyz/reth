@@ -380,13 +380,7 @@ async fn run_pipeline_forward_and_unwind(
         );
 
         // Write the plain state to database so subsequent blocks build on it
-        let execution_outcome = reth_execution_types::ExecutionOutcome::from_state_and_reverts(
-            output.state.clone(),
-            vec![],
-            vec![],
-            block_num,
-            vec![],
-        );
+        let execution_outcome = reth_execution_types::ExecutionOutcome::single(block_num, output);
         provider.write_state(
             &execution_outcome,
             OriginalValuesKnown::Yes,
