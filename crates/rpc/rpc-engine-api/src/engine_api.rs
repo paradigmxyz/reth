@@ -2043,7 +2043,6 @@ mod tests {
             suggested_fee_recipient: Address::ZERO,
             withdrawals: Some(vec![]),
             parent_beacon_block_root: None,
-            target_gas_limit: None,
             slot_number: None,
             target_gas_limit: None,
         };
@@ -2100,7 +2099,6 @@ mod tests {
             withdrawals: Some(vec![]),
             // Invalid for V3/Cancun, but should be ignored if forkchoice is SYNCING.
             parent_beacon_block_root: None,
-            target_gas_limit: None,
             slot_number: None,
             target_gas_limit: None,
         };
@@ -2150,7 +2148,6 @@ mod tests {
             suggested_fee_recipient: Address::ZERO,
             withdrawals: Some(vec![]),
             parent_beacon_block_root: None,
-            target_gas_limit: None,
             slot_number: None,
             target_gas_limit: None,
         };

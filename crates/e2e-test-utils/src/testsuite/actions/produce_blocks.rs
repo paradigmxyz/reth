@@ -227,7 +227,6 @@ where
                 suggested_fee_recipient: alloy_primitives::Address::random(),
                 withdrawals: Some(vec![]),
                 parent_beacon_block_root: Some(B256::ZERO),
-                target_gas_limit: None,
                 slot_number: None,
                 target_gas_limit: None,
             };
@@ -302,7 +301,6 @@ where
                     suggested_fee_recipient: alloy_primitives::Address::random(),
                     withdrawals: Some(vec![]),
                     parent_beacon_block_root: Some(B256::ZERO),
-                    target_gas_limit: None,
                     slot_number: None,
                     target_gas_limit: None,
                 };
