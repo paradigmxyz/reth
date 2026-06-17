@@ -142,14 +142,6 @@ impl PreservedSparseTrie {
         }
     }
 
-    /// Returns the fallback base block for an anchored sparse trie.
-    pub(super) const fn base_block(&self) -> Option<BlockNumHash> {
-        match self {
-            Self::Anchored { base_block, .. } => Some(*base_block),
-            Self::Cleared { .. } => None,
-        }
-    }
-
     /// Consumes self and returns the trie for reuse.
     ///
     /// If the preserved trie is anchored and the parent state root matches, the pruned
