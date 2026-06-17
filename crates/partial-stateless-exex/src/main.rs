@@ -16,7 +16,8 @@ use partial_stateless::{
     network_cache::NetworkStateCache,
     persistence::{load_from_file, save_to_file},
     policy::LastNBlocksPolicy,
-    witness::{measure_multiproof_size, miss_to_proof_targets},
+    witness::{measure_multiproof_size, build_sidecar_targets},
+    PartialStatelessSidecar, SerializableMultiProof,
 };
 use reth_ethereum::{
     chainspec::EthChainSpec,
@@ -30,9 +31,13 @@ use reth_ethereum::{
     storage::StateProofProvider,
     EthPrimitives,
 };
+use reth_provider::HeaderProvider;
 use reth_trie_common::TrieInput;
+use alloy_primitives::Bytes;
 use std::time::Instant;
+use std::fs;
 use tracing::{info, warn};
+
 
 /// Configuration for the partial statelessness cache.
 struct CacheConfig {
@@ -177,10 +182,10 @@ async fn partial_stateless_exex<
                     "Witness requirement (cache miss)"
                 );
 
-                // === Phase 2: Compute actual witness (Merkle proof) size ===
+                // === Phase 2: Compute actual witness (Merkle proof) size & Generate Sidecar ===
                 if miss.total_missed > 0 {
-                    // Convert miss result to proof targets (hashed addresses/slots)
-                    let targets = miss_to_proof_targets(&miss);
+                    // Extract raw targets and hashed multiproof targets in one pass
+                    let (raw_targets, targets) = build_sidecar_targets(&miss);
                     let target_accounts = targets.len();
                     let target_slots: usize = targets.values().map(|slots| slots.len()).sum();
 
@@ -190,6 +195,11 @@ async fn partial_stateless_exex<
                         .filter_map(|code_hash| accessed.codes.get(code_hash))
                         .map(|bytes| bytes.len())
                         .sum();
+
+                    let missed_bytecodes: Vec<Bytes> = miss.missed_codes
+                        .iter()
+                        .filter_map(|code_hash| accessed.codes.get(code_hash).cloned())
+                        .collect();
 
                     // Get state provider for the parent block (proof against pre-execution state)
                     // We use tip_block - 1 because the witness proves state BEFORE this block
@@ -205,6 +215,100 @@ async fn partial_stateless_exex<
                                         result.computation_time_ms = Some(elapsed_ms);
                                         result.target_accounts = target_accounts;
                                         result.target_storage_slots = target_slots;
+
+                                        // --- Generate and Save Sidecar ---
+                                        let sidecar_generation_result = 'sidecar: {
+                                            // Get tip block header info
+                                            let Some(block) = new.blocks().get(&tip_block) else {
+                                                break 'sidecar Err(eyre::eyre!("Tip block {} not found in commit blocks", tip_block));
+                                            };
+
+                                            let parent_hash = block.parent_hash;
+                                            let parent_header = match ctx.provider().sealed_header_by_hash(parent_hash) {
+                                                Ok(Some(h)) => h,
+                                                Ok(None) => break 'sidecar Err(eyre::eyre!("Parent header not found for hash {:?}", parent_hash)),
+                                                Err(e) => break 'sidecar Err(eyre::eyre!("Failed to fetch parent header: {:?}", e)),
+                                            };
+                                            let parent_state_root = parent_header.state_root;
+
+                                            // Check cache coherency
+                                            // Since cache.on_block_executed(tip_block) has already been called,
+                                            // the cache block should be at `tip_block`.
+                                            if cache.current_block() != tip_block {
+                                                warn!(
+                                                    target: "partial_stateless",
+                                                    block = tip_block,
+                                                    cache_block = cache.current_block(),
+                                                    expected_block = tip_block,
+                                                    "Cache state mismatch: cache block is not synced to tip block number. Skipping sidecar generation."
+                                                );
+                                                break 'sidecar Ok(());
+                                            }
+
+                                            // Convert proof to serializable format
+                                            let serializable_proof = SerializableMultiProof::from_multiproof(&proof);
+                                            let serialized_multiproof = match bincode::serialize(&serializable_proof) {
+                                                Ok(b) => b,
+                                                Err(e) => break 'sidecar Err(eyre::eyre!("Failed to serialize multiproof: {:?}", e)),
+                                            };
+
+                                            let sidecar = PartialStatelessSidecar {
+                                                parent_hash,
+                                                parent_state_root,
+                                                block_hash: block.hash(),
+                                                block_number: tip_block,
+                                                cache_block: tip_block - 1,
+                                                cache_policy_metadata: format!(
+                                                    "LastNBlocks(account: {}, storage/code: {})",
+                                                    config.account_window, config.storage_window
+                                                ),
+                                                raw_targets: raw_targets.clone(),
+                                                serialized_multiproof,
+                                                missed_bytecodes: missed_bytecodes.clone(),
+                                                stats: result.clone(),
+                                            };
+
+                                            // Ensure sidecar directory exists under workspace root
+                                            // Resolves to ./sidecar from the process current working directory
+                                            let sidecar_dir = std::env::current_dir()
+                                                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                                                .join("sidecar");
+                                            if let Err(e) = fs::create_dir_all(&sidecar_dir) {
+                                                break 'sidecar Err(eyre::eyre!("Failed to create sidecar directory: {:?}", e));
+                                            }
+
+                                            let sidecar_filename = format!("block_{}_{:?}.bin", tip_block, block.hash());
+                                            let sidecar_path = sidecar_dir.join(sidecar_filename);
+
+                                            let sidecar_bytes = match bincode::serialize(&sidecar) {
+                                                Ok(b) => b,
+                                                Err(e) => break 'sidecar Err(eyre::eyre!("Failed to serialize sidecar: {:?}", e)),
+                                            };
+
+                                            if let Err(e) = fs::write(&sidecar_path, sidecar_bytes) {
+                                                break 'sidecar Err(eyre::eyre!("Failed to write sidecar file {:?}: {:?}", sidecar_path, e));
+                                            }
+
+                                            info!(
+                                                target: "partial_stateless",
+                                                block = tip_block,
+                                                path = %sidecar_path.display(),
+                                                size = format_bytes(fs::metadata(&sidecar_path).map(|m| m.len() as usize).unwrap_or(0)),
+                                                "Saved witness sidecar successfully"
+                                            );
+
+                                            Ok(())
+                                        };
+
+                                        if let Err(e) = sidecar_generation_result {
+                                            warn!(
+                                                target: "partial_stateless",
+                                                block = tip_block,
+                                                error = %e,
+                                                "Sidecar generation failed (non-fatal)"
+                                            );
+                                        }
+
                                         Some(result)
                                     }
                                     Err(e) => {

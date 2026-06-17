@@ -6477,10 +6477,12 @@ name = "partial-stateless-exex"
 version = "0.1.0"
 dependencies = [
  "alloy-primitives",
+ "bincode",
  "eyre",
  "futures",
  "partial-stateless",
  "reth-ethereum",
+ "reth-provider",
  "reth-trie-common",
  "serde_json",
  "tokio",
