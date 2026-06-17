@@ -5,6 +5,8 @@
 
 extern crate alloc;
 
+mod lfu;
+
 mod state;
 pub use state::*;
 

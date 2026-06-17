@@ -145,6 +145,10 @@ where
     /// allocated memory. Stored with the block hash it was computed for to enable trie
     /// preservation across sequential payload validations.
     sparse_state_trie: SharedPreservedSparseTrie,
+    /// LFU hot-slot capacity: max storage slots retained across prune cycles.
+    sparse_trie_max_hot_slots: usize,
+    /// LFU hot-account capacity: max account addresses retained across prune cycles.
+    sparse_trie_max_hot_accounts: usize,
     /// Whether sparse trie cache pruning is fully disabled.
     disable_sparse_trie_cache_pruning: bool,
     /// Whether to disable BAL-driven parallel state root computation.
@@ -185,6 +189,8 @@ where
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
             sparse_state_trie: SharedPreservedSparseTrie::default(),
+            sparse_trie_max_hot_slots: config.sparse_trie_max_hot_slots(),
+            sparse_trie_max_hot_accounts: config.sparse_trie_max_hot_accounts(),
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
             cache_metrics: (!config.disable_cache_metrics())
                 .then(|| CachedStateMetrics::zeroed(CachedStateMetricsSource::Engine)),
@@ -223,6 +229,8 @@ where
         if let Some(duration) = self.sparse_state_trie.prune_persisted_state(
             persisted_block,
             retained_state_mask,
+            self.sparse_trie_max_hot_slots,
+            self.sparse_trie_max_hot_accounts,
             SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
             SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
         ) {
@@ -656,6 +664,8 @@ where
     ) {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
+        let max_hot_slots = self.sparse_trie_max_hot_slots;
+        let max_hot_accounts = self.sparse_trie_max_hot_accounts;
         let disable_cache_pruning = self.disable_sparse_trie_cache_pruning;
         let executor = self.executor.clone();
 
@@ -676,7 +686,7 @@ where
                 .sparse_trie_cache_wait_duration_histogram
                 .record(start.elapsed().as_secs_f64());
 
-            let (sparse_state_trie, base_block) = preserved
+            let (mut sparse_state_trie, base_block) = preserved
                 .map(|preserved| preserved.into_trie_for(parent, parent_state_root))
                 .unwrap_or_else(|| {
                     debug!(
@@ -693,6 +703,7 @@ where
                         .with_updates(true);
                     (trie, parent)
                 });
+            sparse_state_trie.set_hot_cache_capacities(max_hot_slots, max_hot_accounts);
             let mut task = SparseTrieCacheTask::new_with_trie(
                 &executor,
                 from_multi_proof,
