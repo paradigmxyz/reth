@@ -599,25 +599,21 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         let first_block_number = blocks[0].recovered_block().number();
 
-        let mut r_headers = None;
         let mut r_txs = None;
         let mut r_senders = None;
         let mut r_receipts = None;
         let mut r_account_changesets = None;
         let mut r_storage_changesets = None;
 
+        let r_headers =
+            self.write_segment(StaticFileSegment::Headers, first_block_number, |w| {
+                Self::write_headers(w, blocks)
+            });
+
         // Propagate tracing context into rayon-spawned threads so that per-segment
         // write spans appear as children of write_blocks_data in traces.
         let span = tracing::Span::current();
         runtime.storage_pool().in_place_scope(|s| {
-            s.spawn(|_| {
-                let _guard = span.enter();
-                r_headers =
-                    Some(self.write_segment(StaticFileSegment::Headers, first_block_number, |w| {
-                        Self::write_headers(w, blocks)
-                    }));
-            });
-
             s.spawn(|_| {
                 let _guard = span.enter();
                 r_txs = Some(self.write_segment(
@@ -672,7 +668,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             }
         });
 
-        r_headers.ok_or(StaticFileWriterError::ThreadPanic("headers"))??;
+        r_headers?;
         r_txs.ok_or(StaticFileWriterError::ThreadPanic("transactions"))??;
         if ctx.write_senders {
             r_senders.ok_or(StaticFileWriterError::ThreadPanic("senders"))??;
