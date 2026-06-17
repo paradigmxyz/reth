@@ -34,13 +34,14 @@ pub const DEFAULT_SPARSE_TRIE_PRUNE_DEPTH: usize = 4;
 
 /// Default LFU hot-slot capacity for sparse trie pruning.
 ///
-/// Limits the number of `(address, slot)` pairs retained across prune cycles.
-pub const DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS: usize = 1500;
+/// Limits the number of `(address, slot)` pairs retained across prune cycles. This is kept large
+/// enough for replay to carry hot storage paths across adjacent blocks while still bounding memory.
+pub const DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS: usize = 16_384;
 
 /// Default LFU hot-account capacity for sparse trie pruning.
 ///
 /// Limits the number of account addresses retained across prune cycles.
-pub const DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS: usize = 1000;
+pub const DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS: usize = 8_192;
 
 /// Default timeout for the state root task before spawning a sequential fallback.
 pub const DEFAULT_STATE_ROOT_TASK_TIMEOUT: Duration = Duration::from_secs(1);
