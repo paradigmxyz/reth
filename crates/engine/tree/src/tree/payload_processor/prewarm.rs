@@ -32,7 +32,7 @@ use evm2::evm::{AccountChangeRef, StateChangeSink, StorageChange};
 use metrics::{Counter, Gauge, Histogram};
 #[cfg(any())]
 use rayon::prelude::*;
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, ConfigureEvm2Prewarm, Evm2Env, EvmEnvFor};
+use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm2Env, EvmEnvFor};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 #[cfg(any())]
@@ -90,7 +90,7 @@ impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
 where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
-    Evm: ConfigureEvm2Prewarm<Primitives = N> + 'static,
+    Evm: ConfigureEvm<Primitives = N> + 'static,
     EvmEnvFor<Evm>: Evm2Env,
 {
     /// Initializes the task with the given transactions pending execution
@@ -237,7 +237,7 @@ where
             // Prewarm workers must not commit speculative writes into the reused worker EVM:
             // task scheduling would otherwise make later prewarm reads observe non-canonical state.
             let mut proof_targets = PrewarmProofTargetsSink::default();
-            if let Err(err) = ctx.evm_config.evm2_prewarm_tx(evm, tx_env, &mut proof_targets) {
+            if let Err(err) = ctx.evm_config.prewarm_tx(evm, tx_env, &mut proof_targets) {
                 trace!(
                     target: "engine::tree::payload_processor::prewarm",
                     %err,
@@ -578,13 +578,13 @@ where
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
 type PrewarmEvmState<Evm> =
-    Option<<Evm as ConfigureEvm2Prewarm>::PrewarmEvm<reth_provider::StateProviderBox>>;
+    Option<<Evm as ConfigureEvm>::PrewarmEvm<reth_provider::StateProviderBox>>;
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
-    Evm: ConfigureEvm2Prewarm<Primitives = N> + 'static,
+    Evm: ConfigureEvm<Primitives = N> + 'static,
     EvmEnvFor<Evm>: Evm2Env,
 {
     /// Creates a per-thread EVM for prewarming.
@@ -618,7 +618,7 @@ where
                 None,
             ));
 
-        Some(self.evm_config.evm2_prewarm_evm_with_precompiles(state_provider, env, precompiles))
+        Some(self.evm_config.prewarm_evm_with_precompiles(state_provider, env, precompiles))
     }
 
     /// Returns `true` if prewarming should stop.

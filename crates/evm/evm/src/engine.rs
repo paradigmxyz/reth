@@ -2,12 +2,9 @@ use crate::{
     execute::{ExecutableTxFor, ExecutableTxParts, RecoveredTx},
     ConfigureEvm, EvmEnvFor, ExecutionCtxFor, TxEnvFor,
 };
-use alloc::boxed::Box;
 use alloy_consensus::transaction::Either;
-use core::convert::Infallible;
 use rayon::prelude::*;
 use reth_primitives_traits::TxTy;
-use reth_storage_api::StateProvider;
 
 /// [`ConfigureEvm`] extension providing methods for executing payloads.
 pub trait ConfigureEngineEvm<ExecutionData>: ConfigureEvm {
@@ -25,36 +22,6 @@ pub trait ConfigureEngineEvm<ExecutionData>: ConfigureEvm {
         &self,
         payload: &ExecutionData,
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error>;
-}
-
-/// Configuration for evm2-native transaction prewarming.
-pub trait ConfigureEvm2Prewarm: ConfigureEvm {
-    /// Per-thread evm2 instance used by prewarm workers.
-    type PrewarmEvm<DB>
-    where
-        DB: StateProvider + Send + 'static;
-
-    /// Creates a prewarm evm over the provided state with the provided precompile provider.
-    fn evm2_prewarm_evm_with_precompiles<DB>(
-        &self,
-        state_provider: DB,
-        env: EvmEnvFor<Self>,
-        precompiles: Box<dyn evm2::precompile::PrecompileProvider<evm2::BaseEvmTypes>>,
-    ) -> Self::PrewarmEvm<DB>
-    where
-        DB: StateProvider + Send + 'static;
-
-    /// Executes a transaction for prewarming, streams its state changes into `sink`, and discards
-    /// them.
-    fn evm2_prewarm_tx<DB, S>(
-        &self,
-        evm: &mut Self::PrewarmEvm<DB>,
-        tx: TxEnvFor<Self>,
-        sink: &mut S,
-    ) -> Result<evm2::TxResult, Box<dyn core::error::Error + Send + Sync>>
-    where
-        DB: StateProvider + Send + 'static,
-        S: evm2::evm::StateChangeSink<Error = Infallible>;
 }
 
 /// Converts a raw transaction into an executable transaction.

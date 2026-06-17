@@ -1,7 +1,5 @@
 //! Helpers for testing.
 
-#[cfg(feature = "std")]
-use crate::ConfigureEvm2Prewarm;
 use crate::{ConfigureEvm, EvmEnvFor};
 #[cfg(feature = "std")]
 use alloc::boxed::Box;
@@ -50,6 +48,11 @@ where
     where
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static;
+    #[cfg(feature = "std")]
+    type PrewarmEvm<DB>
+        = Inner::PrewarmEvm<DB>
+    where
+        DB: StateProvider + Send + 'static;
 
     fn evm_env(&self, header: &HeaderTy<Self::Primitives>) -> Result<EvmEnvFor<Self>, Self::Error> {
         self.inner().evm_env(header)
@@ -99,19 +102,9 @@ where
     {
         self.inner().executor(db)
     }
-}
 
-#[cfg(feature = "std")]
-impl<Inner> ConfigureEvm2Prewarm for NoopEvmConfig<Inner>
-where
-    Inner: ConfigureEvm2Prewarm,
-{
-    type PrewarmEvm<DB>
-        = Inner::PrewarmEvm<DB>
-    where
-        DB: StateProvider + Send + 'static;
-
-    fn evm2_prewarm_evm_with_precompiles<DB>(
+    #[cfg(feature = "std")]
+    fn prewarm_evm_with_precompiles<DB>(
         &self,
         state_provider: DB,
         env: EvmEnvFor<Self>,
@@ -120,10 +113,11 @@ where
     where
         DB: StateProvider + Send + 'static,
     {
-        self.inner().evm2_prewarm_evm_with_precompiles(state_provider, env, precompiles)
+        self.inner().prewarm_evm_with_precompiles(state_provider, env, precompiles)
     }
 
-    fn evm2_prewarm_tx<DB, S>(
+    #[cfg(feature = "std")]
+    fn prewarm_tx<DB, S>(
         &self,
         evm: &mut Self::PrewarmEvm<DB>,
         tx: crate::TxEnvFor<Self>,
@@ -133,7 +127,7 @@ where
         DB: StateProvider + Send + 'static,
         S: evm2::evm::StateChangeSink<Error = core::convert::Infallible>,
     {
-        self.inner().evm2_prewarm_tx(evm, tx, sink)
+        self.inner().prewarm_tx(evm, tx, sink)
     }
 }
 
