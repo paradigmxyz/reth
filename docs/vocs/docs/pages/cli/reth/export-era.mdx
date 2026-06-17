@@ -134,6 +134,10 @@ Storage:
       --file-type <FILE_TYPE>
           The ERA file format to export: `era1` writes `.era1` files, `ere` writes `.ere` files.
 
+          Possible values:
+          - era1: Execution blocks written in the `.era1` format
+          - ere:  Execution blocks written in the `.ere` format
+
           [default: era1]
 
       --first-block-number <first-block-number>
@@ -149,8 +153,8 @@ Storage:
           Must be less than or equal to 8192.
 
       --path <EXPORT_PATH>
-          The directory path where to export the ERA files.
-          The block data are read from the database.
+          The directory where the exported ERA files are written.
+          Defaults to `<data-dir>/<chain>/<format>-export/`, where `<format>` is `era1` or `ere`.
 
 Logging:
       --log.stdout.format <FORMAT>
