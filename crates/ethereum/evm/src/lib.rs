@@ -16,7 +16,7 @@ use alloy_consensus::Header;
 use alloy_eips::eip4895::Withdrawal;
 #[cfg(feature = "std")]
 use alloy_eips::Decodable2718;
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{Address, Bytes, B256};
 #[cfg(feature = "std")]
 use alloy_rpc_types_engine::ExecutionData;
 use core::{convert::Infallible, fmt::Debug, marker::PhantomData};
@@ -27,8 +27,8 @@ use reth_ethereum_primitives::TransactionSigned;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 #[cfg(feature = "std")]
 use reth_evm::{
-    evm2_precompile_cache::{CachedPrecompileProvider, PrecompileCacheMap},
-    ConfigureEngineEvm, ConfigureEvm2Engine, ConfigureEvm2Prewarm, ExecutableTxIterator,
+    evm2_precompile_cache::PrecompileCacheMap, ConfigureEngineEvm, ConfigureEvm2Prewarm, Evm2Env,
+    ExecutableTxIterator,
 };
 use reth_evm::{ConfigureEvm, EvmEnvFor, NextBlockEnvAttributes};
 #[cfg(feature = "std")]
@@ -49,6 +49,16 @@ pub struct EthEvmEnv {
     pub spec: evm2::SpecId,
     /// evm2 block environment.
     pub block: evm2::env::BlockEnv,
+}
+
+impl Evm2Env for EthEvmEnv {
+    fn spec_id(&self) -> evm2::SpecId {
+        self.spec
+    }
+
+    fn block_env(&self) -> evm2::env::BlockEnv {
+        self.block.clone()
+    }
 }
 
 /// Ethereum block execution context.
@@ -200,43 +210,6 @@ impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory> {
     }
 }
 
-impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory>
-where
-    ChainSpec: EthChainSpec<Header = Header> + EthereumHardforks,
-{
-    /// Returns the evm2 spec id for the provided block header.
-    pub fn evm2_spec_for_header(&self, header: &Header) -> evm2::SpecId {
-        evm2_spec(self.chain_spec.as_ref(), header)
-    }
-
-    /// Returns the evm2 block environment for the provided block header.
-    pub fn evm2_block_env_for_header(&self, header: &Header) -> evm2::env::BlockEnv {
-        evm2_block_env_with_blob_params(
-            header,
-            self.chain_spec.as_ref().blob_params_at_timestamp(header.timestamp),
-        )
-    }
-
-    /// Returns the evm2 spec id for the provided engine payload.
-    #[cfg(feature = "std")]
-    pub fn evm2_spec_for_payload(&self, payload: &ExecutionData) -> evm2::SpecId {
-        evm2_spec_by_timestamp_and_block_number(
-            self.chain_spec.as_ref(),
-            payload.payload.timestamp(),
-            payload.payload.block_number(),
-        )
-    }
-
-    /// Returns the evm2 block environment for the provided engine payload.
-    #[cfg(feature = "std")]
-    pub fn evm2_block_env_for_payload(&self, payload: &ExecutionData) -> evm2::env::BlockEnv {
-        evm2_payload_block_env(
-            payload,
-            self.chain_spec.as_ref().blob_params_at_timestamp(payload.payload.timestamp()),
-        )
-    }
-}
-
 impl<ChainSpec, EvmF> ConfigureEvm for EthEvmConfig<ChainSpec, EvmF>
 where
     ChainSpec: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
@@ -343,6 +316,14 @@ where
         })
     }
 
+    fn chain_id(&self) -> u64 {
+        self.chain_spec.chain_id()
+    }
+
+    fn deposit_contract_address(&self) -> Option<Address> {
+        self.chain_spec.deposit_contract_address()
+    }
+
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: evm2::evm::Database + Clone + 'static,
@@ -412,54 +393,6 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<ChainSpec, EvmF> ConfigureEvm2Engine<ExecutionData> for EthEvmConfig<ChainSpec, EvmF>
-where
-    ChainSpec:
-        EthExecutorSpec + EthChainSpec<Header = Header> + EthereumHardforks + Hardforks + 'static,
-    EvmF: Clone + Debug + Send + Sync + Unpin + 'static,
-{
-    fn evm2_chain_id(&self) -> u64 {
-        self.chain_spec.chain_id()
-    }
-
-    fn evm2_deposit_contract_address(&self) -> Option<alloy_primitives::Address> {
-        self.chain_spec.deposit_contract_address()
-    }
-
-    fn evm2_spec_for_header(&self, header: &Header) -> Result<evm2::SpecId, Self::Error> {
-        Ok(evm2_spec(self.chain_spec.as_ref(), header))
-    }
-
-    fn evm2_block_env_for_header(
-        &self,
-        header: &Header,
-    ) -> Result<evm2::env::BlockEnv, Self::Error> {
-        Ok(evm2_block_env_with_blob_params(
-            header,
-            self.chain_spec.as_ref().blob_params_at_timestamp(header.timestamp),
-        ))
-    }
-
-    fn evm2_spec_for_payload(&self, payload: &ExecutionData) -> Result<evm2::SpecId, Self::Error> {
-        Ok(evm2_spec_by_timestamp_and_block_number(
-            self.chain_spec.as_ref(),
-            payload.payload.timestamp(),
-            payload.payload.block_number(),
-        ))
-    }
-
-    fn evm2_block_env_for_payload(
-        &self,
-        payload: &ExecutionData,
-    ) -> Result<evm2::env::BlockEnv, Self::Error> {
-        Ok(evm2_payload_block_env(
-            payload,
-            self.chain_spec.as_ref().blob_params_at_timestamp(payload.payload.timestamp()),
-        ))
-    }
-}
-
-#[cfg(feature = "std")]
 impl<ChainSpec, EvmF> ConfigureEvm2Prewarm for EthEvmConfig<ChainSpec, EvmF>
 where
     ChainSpec:
@@ -470,27 +403,6 @@ where
         = evm2::Evm<evm2::BaseEvmTypes>
     where
         DB: reth_storage_api::StateProvider + Send + 'static;
-
-    fn evm2_prewarm_evm<DB>(&self, state_provider: DB, env: EthEvmEnv) -> Self::PrewarmEvm<DB>
-    where
-        DB: reth_storage_api::StateProvider + Send + 'static,
-    {
-        let spec = env.spec;
-        self.evm2_prewarm_evm_with_precompiles(
-            state_provider,
-            env,
-            alloc::boxed::Box::new(CachedPrecompileProvider::new(
-                evm2::Precompiles::base(spec),
-                self.precompile_cache_map.clone(),
-                spec,
-                None,
-            )),
-        )
-    }
-
-    fn evm2_prewarm_spec(&self, env: &EthEvmEnv) -> evm2::SpecId {
-        env.spec
-    }
 
     fn evm2_prewarm_evm_with_precompiles<DB>(
         &self,
@@ -581,7 +493,7 @@ mod tests {
     use reth_chainspec::{Chain, ChainSpec};
 
     #[test]
-    fn test_evm2_block_env_for_header_uses_chain_blob_params() {
+    fn test_evm_env_for_header_uses_chain_blob_params() {
         let chain_spec = ChainSpec::builder()
             .chain(Chain::mainnet())
             .genesis(Genesis::default())
@@ -592,7 +504,7 @@ mod tests {
         let header =
             Header { timestamp: 1, excess_blob_gas: Some(excess_blob_gas), ..Default::default() };
 
-        let env = EthEvmConfig::new(Arc::new(chain_spec)).evm2_block_env_for_header(&header);
+        let env = EthEvmConfig::new(Arc::new(chain_spec)).evm_env(&header).unwrap().block;
 
         assert_eq!(env.blob_basefee, U256::from(blob_params.calc_blob_fee(excess_blob_gas)));
     }

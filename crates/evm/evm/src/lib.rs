@@ -35,12 +35,20 @@ pub mod execute;
 mod aliases;
 pub use aliases::*;
 
+/// Resolved EVM environment data needed by the evm2 execution path.
+pub trait Evm2Env: Debug + Clone + Send + Sync + 'static {
+    /// Returns the active evm2 spec.
+    fn spec_id(&self) -> evm2::SpecId;
+
+    /// Returns the evm2 block environment.
+    fn block_env(&self) -> evm2::env::BlockEnv;
+}
+
 #[cfg(feature = "std")]
 mod engine;
 #[cfg(feature = "std")]
 pub use engine::{
-    ConfigureEngineEvm, ConfigureEvm2Engine, ConfigureEvm2Prewarm, ConvertTx, ExecutableTxIterator,
-    ExecutableTxTuple,
+    ConfigureEngineEvm, ConfigureEvm2Prewarm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple,
 };
 
 #[cfg(feature = "metrics")]
@@ -111,6 +119,14 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error>
     where
         Self: 'a;
+
+    /// Returns the chain id used for transaction validation and the `CHAINID` opcode.
+    fn chain_id(&self) -> u64;
+
+    /// Returns the deposit contract address used to derive EIP-6110 deposit requests.
+    fn deposit_contract_address(&self) -> Option<Address> {
+        None
+    }
 
     /// Returns a transaction environment from a transaction.
     fn tx_env(&self, transaction: impl IntoTxEnv<TxEnvFor<Self>>) -> TxEnvFor<Self> {
