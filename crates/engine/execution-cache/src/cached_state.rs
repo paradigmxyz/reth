@@ -338,7 +338,7 @@ impl CacheMetricCounts {
         counter.set(counter.get() + 1);
     }
 
-    fn take(&self) -> CacheMetricSnapshot {
+    const fn take(&self) -> CacheMetricSnapshot {
         CacheMetricSnapshot {
             account_hits: self.account_hits.replace(0),
             account_misses: self.account_misses.replace(0),
