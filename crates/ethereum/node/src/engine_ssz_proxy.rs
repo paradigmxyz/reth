@@ -952,10 +952,17 @@ fn decode_forkchoice_request(
     body: &[u8],
 ) -> Result<(ForkchoiceState, Option<PayloadAttributes>), &'static str> {
     match version {
-        1..=4 => {
+        1..=3 => {
             let (forkchoice_state, payload_attributes) =
                 <(ForkchoiceState, Vec<PayloadAttributes>)>::from_ssz_bytes(body)
                     .map_err(|_| "invalid ssz")?;
+            Ok((forkchoice_state, payload_attrs(version, payload_attributes)?))
+        }
+        4 => {
+            let (forkchoice_state, payload_attributes, custody_columns) =
+                <(ForkchoiceState, Vec<PayloadAttributes>, Vec<B128>)>::from_ssz_bytes(body)
+                    .map_err(|_| "invalid ssz")?;
+            custody_columns_opt(custody_columns)?;
             Ok((forkchoice_state, payload_attrs(version, payload_attributes)?))
         }
         _ => Err("unsupported forkchoice endpoint version"),
@@ -978,6 +985,14 @@ fn payload_attrs(
     }
 
     attrs.into_iter().next().map(|attrs| validate_payload_attrs_version(version, attrs)).transpose()
+}
+
+fn custody_columns_opt(custody_columns: Vec<B128>) -> Result<Option<B128>, &'static str> {
+    if custody_columns.len() > 1 {
+        return Err("invalid params")
+    }
+
+    Ok(custody_columns.into_iter().next())
 }
 
 fn validate_payload_attrs_version(
