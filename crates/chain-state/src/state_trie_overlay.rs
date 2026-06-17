@@ -92,28 +92,18 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
     }
 
     /// Replaces the sparse trie clone held for `block_hash`.
-    pub fn replace_sparse_trie(
-        &self,
-        block_hash: B256,
-        base_hash: B256,
-        trie: StateTrieOverlaySparseTrie,
-    ) {
-        *self.sparse_trie.lock() =
-            Some(AnchoredSparseTrie { block_hash, base_hash, trie: Arc::new(trie) });
+    pub fn replace_sparse_trie(&self, block_hash: B256, trie: StateTrieOverlaySparseTrie) {
+        *self.sparse_trie.lock() = Some(AnchoredSparseTrie { block_hash, trie: Arc::new(trie) });
     }
 
-    /// Returns the sparse trie clone if it exactly covers `base_hash..=parent_hash`.
+    /// Returns the sparse trie clone for `parent_hash`.
     pub fn sparse_trie_for_parent(
         &self,
         parent_hash: B256,
-        base_hash: B256,
     ) -> Option<Arc<StateTrieOverlaySparseTrie>> {
         let sparse_trie = self.sparse_trie.lock();
         let anchored = sparse_trie.as_ref()?;
-        (anchored.block_hash == parent_hash &&
-            anchored.base_hash == base_hash &&
-            self.blocks.contains_key(&parent_hash))
-        .then(|| Arc::clone(&anchored.trie))
+        (anchored.block_hash == parent_hash).then(|| Arc::clone(&anchored.trie))
     }
 
     /// Inserts an executed in-memory block into the state trie overlay manager.
@@ -184,10 +174,6 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         span.record("removed_blocks", removed_blocks);
 
         if removed_blocks > 0 {
-            let mut sparse_trie = self.sparse_trie.lock();
-            *sparse_trie = None;
-            drop(sparse_trie);
-
             let overlays_before = self.overlays.len();
             let blocks = Arc::clone(&self.blocks);
             self.overlays.retain(|key, _| {
@@ -440,7 +426,6 @@ struct OverlayCacheKey {
 #[derive(Clone, Debug)]
 struct AnchoredSparseTrie {
     block_hash: B256,
-    base_hash: B256,
     trie: Arc<StateTrieOverlaySparseTrie>,
 }
 
@@ -765,28 +750,27 @@ mod tests {
     }
 
     #[test]
-    fn sparse_trie_clone_is_replaced_and_removed_with_anchor_block() {
+    fn sparse_trie_clone_is_replaced_and_retained_after_block_removal() {
         let manager = StateTrieOverlayManager::default();
         let blocks = test_blocks();
         let first_hash = blocks[0].recovered_block().hash();
         let second_hash = blocks[1].recovered_block().hash();
-        let base_hash = blocks[0].recovered_block().parent_hash();
 
-        manager.replace_sparse_trie(first_hash, base_hash, StateTrieOverlaySparseTrie::default());
-        assert!(manager.sparse_trie_for_parent(first_hash, base_hash).is_none());
+        manager.replace_sparse_trie(first_hash, StateTrieOverlaySparseTrie::default());
+        assert!(manager.sparse_trie_for_parent(first_hash).is_some());
 
         manager.insert_block(blocks[0].clone());
-        manager.replace_sparse_trie(first_hash, base_hash, StateTrieOverlaySparseTrie::default());
-        assert!(manager.sparse_trie_for_parent(first_hash, base_hash).is_some());
-        assert!(manager.sparse_trie_for_parent(first_hash, B256::with_last_byte(0xaa)).is_none());
+        manager.replace_sparse_trie(first_hash, StateTrieOverlaySparseTrie::default());
+        assert!(manager.sparse_trie_for_parent(first_hash).is_some());
+        assert!(manager.sparse_trie_for_parent(B256::with_last_byte(0xaa)).is_none());
 
         manager.insert_block(blocks[1].clone());
-        manager.replace_sparse_trie(second_hash, base_hash, StateTrieOverlaySparseTrie::default());
-        assert!(manager.sparse_trie_for_parent(first_hash, base_hash).is_none());
-        assert!(manager.sparse_trie_for_parent(second_hash, base_hash).is_some());
+        manager.replace_sparse_trie(second_hash, StateTrieOverlaySparseTrie::default());
+        assert!(manager.sparse_trie_for_parent(first_hash).is_none());
+        assert!(manager.sparse_trie_for_parent(second_hash).is_some());
 
         manager.remove_blocks([second_hash]);
-        assert!(manager.sparse_trie_for_parent(second_hash, base_hash).is_none());
+        assert!(manager.sparse_trie_for_parent(second_hash).is_some());
     }
 
     #[test]

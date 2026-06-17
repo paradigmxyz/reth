@@ -348,7 +348,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         let revert_blocks = self.reverts_required(provider, db_tip_block, anchor_hash)?;
         let sparse_trie = match &self.overlay_source {
             Some(OverlaySource::Managed { manager, .. }) if revert_blocks.is_none() => {
-                manager.sparse_trie_for_parent(self.parent_hash, anchor_hash)
+                manager.sparse_trie_for_parent(self.parent_hash)
             }
             _ => None,
         };

@@ -750,23 +750,17 @@ where
                         .sparse_trie_retained_storage_tries
                         .set(preserved.trie().retained_storage_tries_count() as f64);
 
-                    let sparse_trie_overlay_clone =
-                        sparse_trie_overlay.and_then(|(manager, block_hash)| {
-                            let base_block = preserved.base_block()?;
-                            let start = Instant::now();
-                            let trie = executor
-                                .cpu_pool()
-                                .install(|| preserved.trie().parallel_compact_clone());
-                            trie_metrics
-                                .sparse_trie_clone_duration_histogram
-                                .record(start.elapsed());
-                            Some((manager, block_hash, base_block.hash, trie))
-                        });
+                    let sparse_trie_overlay_clone = sparse_trie_overlay.map(|(manager, block_hash)| {
+                        let start = Instant::now();
+                        let trie =
+                            executor.cpu_pool().install(|| preserved.trie().parallel_compact_clone());
+                        trie_metrics.sparse_trie_clone_duration_histogram.record(start.elapsed());
+                        (manager, block_hash, trie)
+                    });
 
                     guard.store(preserved);
-                    if let Some((manager, block_hash, base_hash, trie)) = sparse_trie_overlay_clone
-                    {
-                        manager.replace_sparse_trie(block_hash, base_hash, trie);
+                    if let Some((manager, block_hash, trie)) = sparse_trie_overlay_clone {
+                        manager.replace_sparse_trie(block_hash, trie);
                     }
                     deferred
                 }
