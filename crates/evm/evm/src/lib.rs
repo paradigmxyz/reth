@@ -11,7 +11,7 @@
 
 extern crate alloc;
 
-use crate::execute::{IntoTxEnv, UnsupportedExecutor};
+use crate::execute::{Executor, IntoTxEnv};
 use alloc::string::String;
 use alloy_consensus::transaction::Recovered;
 use alloy_eips::eip4895::Withdrawals;
@@ -79,6 +79,12 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     where
         Self: 'a;
 
+    /// Executor returned for block execution over the provided database.
+    type Executor<DB>: Executor<Primitives = Self::Primitives>
+    where
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static;
+
     /// Creates a new EVM environment for the given header.
     fn evm_env(&self, header: &HeaderTy<Self::Primitives>) -> Result<EvmEnvFor<Self>, Self::Error>;
 
@@ -134,16 +140,20 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         None
     }
 
-    /// Returns a parked executor for old legacy executor block execution call sites.
-    #[auto_impl(keep_default_for(&, Arc))]
-    fn executor<DB>(&self, _db: DB) -> UnsupportedExecutor<Self::Primitives> {
-        UnsupportedExecutor::default()
-    }
+    /// Returns an executor for block execution over the provided database.
+    fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
+    where
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static;
 
-    /// Returns a parked batch executor for old legacy executor block execution call sites.
+    /// Returns an executor for batch block execution over the provided database.
     #[auto_impl(keep_default_for(&, Arc))]
-    fn batch_executor<DB>(&self, _db: DB) -> UnsupportedExecutor<Self::Primitives> {
-        UnsupportedExecutor::default()
+    fn batch_executor<DB>(&self, db: DB) -> Self::Executor<DB>
+    where
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static,
+    {
+        self.executor(db)
     }
 }
 

@@ -116,8 +116,6 @@ where
     disable_state_cache: bool,
     /// Determines how to configure the evm for execution.
     evm_config: Evm,
-    /// Whether precompile cache should be disabled.
-    precompile_cache_disabled: bool,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<evm2::SpecId>,
     /// A preserved `SparseStateTrie`, kept around as a cache of already revealed trie nodes and to
@@ -192,7 +190,6 @@ where
             disable_transaction_prewarming: config.disable_prewarming(),
             evm_config: _evm_config,
             disable_state_cache: config.disable_state_cache(),
-            precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map: _precompile_cache_map,
             sparse_state_trie: SharedPreservedSparseTrie::default(),
             sparse_trie_max_hot_slots: config.sparse_trie_max_hot_slots(),
@@ -599,7 +596,6 @@ where
             cache_state_metrics: self.cache_state_metrics.clone(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::clone(&executed_tx_index),
-            precompile_cache_disabled: self.precompile_cache_disabled,
             precompile_cache_map: self.precompile_cache_map.clone(),
             disable_bal_parallel_state_root: self.disable_bal_parallel_state_root,
             disable_bal_batch_io: self.disable_bal_batch_io,

@@ -77,6 +77,8 @@ pub enum Evm2ExecutionError<E> {
     },
     /// Deposit request logs could not be decoded.
     DepositRequestDecode(String),
+    /// Batch execution requires a retained inter-block state overlay.
+    UnsupportedBatchExecution,
 }
 
 impl<E> core::fmt::Display for Evm2ExecutionError<E>
@@ -100,6 +102,9 @@ where
                 write!(f, "evm2 system call to {address} failed: {reason}")
             }
             Self::DepositRequestDecode(err) => write!(f, "failed to decode deposit request: {err}"),
+            Self::UnsupportedBatchExecution => f.write_str(
+                "evm2 batch execution is not supported without a retained state overlay",
+            ),
         }
     }
 }
@@ -322,6 +327,7 @@ where
 /// Executes a block worth of evm2-native recovered transactions with additional block-level
 /// context, invoking `on_transaction_executed` after each transaction is committed to the block
 /// state and `on_hashed_state_update` after each committed state update.
+#[cfg(feature = "std")]
 pub(crate) fn execute_evm2_block_with_context_precompiles_and_hooks_envelopes<DB>(
     spec_id: SpecId,
     block_env: BlockEnv,

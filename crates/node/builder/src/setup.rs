@@ -10,7 +10,7 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_evm::ConfigureEvm2BlockExecutor;
+use reth_evm::ConfigureEvm;
 use reth_exex::ExExManagerHandle;
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, BlockClient,
@@ -47,7 +47,7 @@ pub fn build_networked_pipeline<N, Client, Evm>(
 where
     N: ProviderNodeTypes,
     Client: BlockClient<Block = BlockTy<N>> + 'static,
-    Evm: ConfigureEvm2BlockExecutor<Primitives = N::Primitives> + 'static,
+    Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
 {
     // building network downloaders using the fetch client
     let header_downloader = ReverseHeadersDownloaderBuilder::new(config.headers)
@@ -98,7 +98,7 @@ where
     N: ProviderNodeTypes,
     H: HeaderDownloader<Header = HeaderTy<N>> + 'static,
     B: BodyDownloader<Block = BlockTy<N>> + 'static,
-    Evm: ConfigureEvm2BlockExecutor<Primitives = N::Primitives> + 'static,
+    Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
 {
     let mut builder = Pipeline::<N>::builder();
 

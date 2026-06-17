@@ -1,17 +1,13 @@
 //! Helpers for testing.
 
-use crate::{ConfigureEvm, EvmEnvFor};
 #[cfg(feature = "std")]
-use crate::{ConfigureEvm2BlockExecutor, ConfigureEvm2Prewarm};
+use crate::ConfigureEvm2Prewarm;
+use crate::{ConfigureEvm, EvmEnvFor};
 #[cfg(feature = "std")]
 use alloc::boxed::Box;
 #[cfg(feature = "std")]
-use reth_execution_types::BlockExecutionOutput;
-#[cfg(feature = "std")]
 use reth_primitives_traits::TxTy;
 use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader};
-#[cfg(feature = "std")]
-use reth_primitives_traits::{ReceiptTy, RecoveredBlock};
 #[cfg(feature = "std")]
 use reth_storage_api::StateProvider;
 
@@ -51,6 +47,11 @@ where
         = Inner::ExecutionCtx<'a>
     where
         Self: 'a;
+    type Executor<DB>
+        = Inner::Executor<DB>
+    where
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static;
 
     fn evm_env(&self, header: &HeaderTy<Self::Primitives>) -> Result<EvmEnvFor<Self>, Self::Error> {
         self.inner().evm_env(header)
@@ -84,73 +85,13 @@ where
     {
         self.inner().context_for_next_block(parent, attributes)
     }
-}
 
-#[cfg(feature = "std")]
-impl<Inner> ConfigureEvm2BlockExecutor for NoopEvmConfig<Inner>
-where
-    Inner: ConfigureEvm2BlockExecutor,
-{
-    type Primitives = Inner::Primitives;
-
-    fn execute_evm2_block_with_state_provider<DB>(
-        &self,
-        state_provider: DB,
-        block: &RecoveredBlock<BlockTy<<Self as ConfigureEvm2BlockExecutor>::Primitives>>,
-    ) -> Result<
-        BlockExecutionOutput<ReceiptTy<<Self as ConfigureEvm2BlockExecutor>::Primitives>>,
-        Box<dyn core::error::Error + Send + Sync>,
-    >
+    fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
-        DB: StateProvider + Send + 'static,
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static,
     {
-        self.inner().execute_evm2_block_with_state_provider(state_provider, block)
-    }
-
-    fn execute_evm2_block_with_state_provider_ref(
-        &self,
-        state_provider: &dyn StateProvider,
-        block: &RecoveredBlock<BlockTy<<Self as ConfigureEvm2BlockExecutor>::Primitives>>,
-    ) -> Result<
-        BlockExecutionOutput<ReceiptTy<<Self as ConfigureEvm2BlockExecutor>::Primitives>>,
-        Box<dyn core::error::Error + Send + Sync>,
-    > {
-        self.inner().execute_evm2_block_with_state_provider_ref(state_provider, block)
-    }
-
-    fn execute_evm2_block_with_database<DB>(
-        &self,
-        database: DB,
-        block: &RecoveredBlock<BlockTy<<Self as ConfigureEvm2BlockExecutor>::Primitives>>,
-    ) -> Result<
-        BlockExecutionOutput<ReceiptTy<<Self as ConfigureEvm2BlockExecutor>::Primitives>>,
-        Box<dyn core::error::Error + Send + Sync>,
-    >
-    where
-        DB: evm2::evm::Database + 'static,
-        DB::Error: Send + Sync,
-    {
-        self.inner().execute_evm2_block_with_database(database, block)
-    }
-
-    fn execute_evm2_block_with_database_and_precompile_cache<DB>(
-        &self,
-        database: DB,
-        block: &RecoveredBlock<BlockTy<<Self as ConfigureEvm2BlockExecutor>::Primitives>>,
-        precompile_cache_map: crate::evm2_precompile_cache::Evm2PrecompileCacheMap,
-    ) -> Result<
-        BlockExecutionOutput<ReceiptTy<<Self as ConfigureEvm2BlockExecutor>::Primitives>>,
-        Box<dyn core::error::Error + Send + Sync>,
-    >
-    where
-        DB: evm2::evm::Database + 'static,
-        DB::Error: Send + Sync,
-    {
-        self.inner().execute_evm2_block_with_database_and_precompile_cache(
-            database,
-            block,
-            precompile_cache_map,
-        )
+        self.inner().executor(db)
     }
 }
 
