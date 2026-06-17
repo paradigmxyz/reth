@@ -7,6 +7,7 @@ use cursor::{ArenaCursor, NextResult, SeekResult};
 use nodes::{
     ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
 };
+use rayon::slice::ParallelSliceMut;
 
 use crate::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates};
 use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
@@ -2802,13 +2803,18 @@ impl SparseTrie for ArenaParallelSparseTrie {
         #[cfg(feature = "trie-debug")]
         let mut recorded_proof_targets: Vec<(B256, u8)> = Vec::new();
 
+        let threshold = self.parallelism_thresholds.min_updates;
+        let parallelize_distributed_updates = sorted.len() >= threshold.saturating_mul(4);
+
         // Drain and sort updates lexicographically by nibbles path.
         let mut sorted: Vec<_> =
             updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
-        sorted.sort_unstable_by_key(|entry| entry.1);
 
-        let threshold = self.parallelism_thresholds.min_updates;
-        let parallelize_distributed_updates = sorted.len() >= threshold.saturating_mul(4);
+        if parallelize_distributed_updates {
+            sorted.par_sort_unstable_by_key(|entry| entry.1);
+        } else {
+            sorted.sort_unstable_by_key(|entry| entry.1);
+        }
 
         let mut cursor = mem::take(&mut self.buffers.cursor);
         cursor.reset(&self.upper_arena, self.root, Nibbles::default());
