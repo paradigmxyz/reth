@@ -520,9 +520,26 @@ where
 
         let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
 
+        // Only the StateRootTask BAL path consumes decoded BAL inside the background prewarm task.
+        // Other strategies and serial BAL execution keep using the original env below.
+        let include_processor_bal =
+            parallel_bal_execution && matches!(strategy, StateRootStrategy::StateRootTask);
+        let processor_env = ExecutionEnv {
+            evm_env: env.evm_env.clone(),
+            hash: env.hash,
+            parent_hash: env.parent_hash,
+            parent_state_root: env.parent_state_root,
+            transaction_count: env.transaction_count,
+            gas_used: env.gas_used,
+            withdrawals: env.withdrawals.clone(),
+            decoded_bal: include_processor_bal
+                .then(|| env.decoded_bal.as_ref().map(Arc::clone))
+                .flatten(),
+        };
+
         // Spawn the appropriate processor based on strategy
         let mut handle = ensure_ok!(self.spawn_payload_processor(
-            env.clone(),
+            processor_env,
             txs,
             provider_builder.clone(),
             overlay_factory,
