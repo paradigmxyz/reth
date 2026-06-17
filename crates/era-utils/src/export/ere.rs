@@ -37,15 +37,20 @@ impl EraBlockWriter for Ere {
     {
         // Total difficulty and the accumulator are pre-merge only: post-merge blocks have zero
         // difficulty and the accumulator is frozen at the merge. Difficulty drops to zero
-        // monotonically, so the first block decides the whole file.
+        // monotonically, so the first block decides whether the file carries them at all.
         let pre_merge = !blocks[0].header.difficulty().is_zero();
+        // Post-merge blocks are not part of any epoch accumulator, so a merge-spanning file builds
+        // its accumulator from the pre-merge prefix only, while total difficulty is kept for every
+        // block.
+        let pre_merge_count = blocks.partition_point(|b| !b.header.difficulty().is_zero());
 
         let tuples = blocks
             .iter()
             .map(|block| compress_block(block, pre_merge))
             .collect::<Result<Vec<_>>>()?;
-        let accumulator =
-            pre_merge.then(|| super::accumulator::<Accumulator, _, _, _>(blocks)).transpose()?;
+        let accumulator = pre_merge
+            .then(|| super::accumulator::<Accumulator, _, _, _>(&blocks[..pre_merge_count]))
+            .transpose()?;
         let id = file_id(network, max_blocks_per_file, blocks)?;
         let index = block_index(blocks[0].header.number(), &tuples, accumulator.as_ref());
 
@@ -200,20 +205,24 @@ mod tests {
     use reth_ethereum_primitives::{BlockBody, Receipt as EthReceipt};
     use tempfile::tempdir;
 
-    /// `count` empty blocks sharing one difficulty, so the chunk is uniformly pre- or post-merge.
+    /// One empty block with the given number and difficulty (zero difficulty marks a post-merge
+    /// block).
+    fn export_block(number: u64, difficulty: U256) -> ExportBlock<Header, BlockBody, EthReceipt> {
+        ExportBlock {
+            header: Header { number, difficulty, ..Default::default() },
+            block_hash: B256::repeat_byte(number as u8 + 1),
+            body: BlockBody::default(),
+            receipts: Vec::new(),
+            total_difficulty: U256::from(number + 1),
+        }
+    }
+
+    /// `count` blocks sharing one difficulty, so the chunk is uniformly pre- or post-merge.
     fn export_blocks(
         count: u64,
         difficulty: U256,
     ) -> Vec<ExportBlock<Header, BlockBody, EthReceipt>> {
-        (0..count)
-            .map(|number| ExportBlock {
-                header: Header { number, difficulty, ..Default::default() },
-                block_hash: B256::repeat_byte(number as u8 + 1),
-                body: BlockBody::default(),
-                receipts: Vec::new(),
-                total_difficulty: U256::from(number + 1),
-            })
-            .collect()
+        (0..count).map(|number| export_block(number, difficulty)).collect()
     }
 
     fn write_and_read(blocks: &[ExportBlock<Header, BlockBody, EthReceipt>]) -> EreFile {
@@ -239,5 +248,31 @@ mod tests {
         assert!(file.group.accumulator.is_none());
         assert_eq!(file.group.index.component_count(), 3);
         assert!(file.group.blocks.iter().all(|b| b.total_difficulty.is_none()));
+    }
+
+    #[test]
+    fn merge_spanning_file_excludes_post_merge_blocks_from_accumulator() {
+        // Blocks 0-1 pre-merge (non-zero difficulty), blocks 2-3 post-merge (zero difficulty).
+        let blocks: Vec<_> = (0..4)
+            .map(|n| export_block(n, if n < 2 { U256::from(1) } else { U256::ZERO }))
+            .collect();
+        let file = write_and_read(&blocks);
+
+        // Total difficulty is kept for every block, so the component count stays at 4.
+        assert_eq!(file.group.index.component_count(), 4);
+        assert!(file.group.blocks.iter().all(|b| b.total_difficulty.is_some()));
+
+        // The accumulator must cover only the pre-merge blocks, not the whole chunk.
+        let expected = Accumulator::from_header_records(
+            &blocks[..2]
+                .iter()
+                .map(|b| HeaderRecord {
+                    block_hash: b.block_hash,
+                    total_difficulty: b.total_difficulty,
+                })
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        assert_eq!(file.group.accumulator.unwrap().root, expected.root);
     }
 }
