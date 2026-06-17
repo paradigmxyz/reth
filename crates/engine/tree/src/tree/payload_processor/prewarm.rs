@@ -34,13 +34,21 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::MultiProofTargetsV2;
-use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering},
-    mpsc::{self, channel, Receiver, Sender},
-    Arc,
+use std::{
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc::{self, channel, Receiver, Sender},
+        Arc,
+    },
+    thread,
+    time::Duration,
 };
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
+
+const PREWARM_LOOKAHEAD_PER_THREAD: usize = 4;
+const MIN_PREWARM_LOOKAHEAD: usize = 16;
+const PREWARM_LOOKAHEAD_WAIT: Duration = Duration::from_micros(50);
 
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 #[derive(Debug)]
@@ -144,18 +152,38 @@ where
 
             let mut tx_count = 0usize;
             let to_sparse_trie_task = to_sparse_trie_task.as_ref();
+            let max_prewarm_ahead = pool
+                .current_num_threads()
+                .saturating_mul(PREWARM_LOOKAHEAD_PER_THREAD)
+                .max(MIN_PREWARM_LOOKAHEAD);
             pool.in_place_scope(|s| {
                 s.spawn(|_| {
                     pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
                 });
 
-                while let Ok((index, tx)) = pending.recv() {
+                'dispatch: while let Ok((index, tx)) = pending.recv() {
                     if ctx.should_stop() {
                         trace!(
                             target: "engine::tree::payload_processor::prewarm",
                             "Termination requested, stopping transaction distribution"
                         );
                         break;
+                    }
+
+                    // Bound speculative EVM work so prewarming stays near the main executor
+                    // instead of queuing the whole block on the prewarming pool at once.
+                    while index.saturating_sub(ctx.executed_tx_index.load(Ordering::Relaxed)) >
+                        max_prewarm_ahead
+                    {
+                        if ctx.should_stop() {
+                            trace!(
+                                target: "engine::tree::payload_processor::prewarm",
+                                "Termination requested while waiting for prewarm lookahead"
+                            );
+                            break 'dispatch
+                        }
+
+                        thread::sleep(PREWARM_LOOKAHEAD_WAIT);
                     }
 
                     // skip transactions already executed by the main loop
