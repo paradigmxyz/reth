@@ -263,54 +263,28 @@ where
         }
     }
 
-    /// Takes a child which has been removed from the `child_stack` and converts it to an
-    /// [`RlpNode`].
-    ///
-    /// Calling this method indicates that the child will not undergo any further modifications, and
-    /// therefore can be retained as a proof node if applicable.
-    fn commit_child<'a>(
+    /// Converts a child known to be retained into both a proof node and its encoded [`RlpNode`].
+    fn commit_retained_child(
         &mut self,
-        targets: &mut Option<TargetsCursor<'a>>,
         child_path: Nibbles,
         child: ProofTrieBranchChild<VE::DeferredEncoder>,
     ) -> Result<RlpNode, StateProofError> {
-        // If the child is already an `RlpNode` then there is nothing to do.
-        if let ProofTrieBranchChild::RlpNode(rlp_node) = child {
-            return Ok(rlp_node)
-        }
+        trace!(target: TRACE_TARGET, ?child_path, "Retaining child");
 
-        // If we should retain the child then do so.
-        if self.should_retain(targets, &child_path, true) {
-            trace!(target: TRACE_TARGET, ?child_path, "Retaining child");
-
-            // Convert to `ProofTrieNodeV2`, which will be what is retained.
-            //
-            // If this node is a branch then its `rlp_nodes_buf` will be taken and not returned to
-            // the `rlp_nodes_bufs` free-list.
-            self.rlp_encode_buf.clear();
-            let proof_node = child.into_proof_trie_node(child_path, &mut self.rlp_encode_buf)?;
-
-            // Use the `ProofTrieNodeV2` to encode the `RlpNode`, and then push it onto retained
-            // nodes before returning.
-            self.rlp_encode_buf.clear();
-            proof_node.node.encode(&mut self.rlp_encode_buf);
-
-            self.retained_proofs.push(proof_node);
-            return Ok(RlpNode::from_rlp(&self.rlp_encode_buf));
-        }
-
-        // If the child path is not being retained then we convert directly to an `RlpNode`
-        // using `into_rlp`. Since we are not retaining the node we can recover any `RlpNode`
-        // buffers for the free-list here, hence why we do this as a separate logical branch.
+        // Convert to `ProofTrieNodeV2`, which will be what is retained.
+        //
+        // If this node is a branch then its `rlp_nodes_buf` will be taken and not returned to
+        // the `rlp_nodes_bufs` free-list.
         self.rlp_encode_buf.clear();
-        let (child_rlp_node, freed_rlp_nodes_buf) = child.into_rlp(&mut self.rlp_encode_buf)?;
+        let proof_node = child.into_proof_trie_node(child_path, &mut self.rlp_encode_buf)?;
 
-        // If there is an `RlpNode` buffer which can be re-used then push it onto the free-list.
-        if let Some(buf) = freed_rlp_nodes_buf {
-            self.rlp_nodes_bufs.push(buf);
-        }
+        // Use the `ProofTrieNodeV2` to encode the `RlpNode`, and then push it onto retained
+        // nodes before returning.
+        self.rlp_encode_buf.clear();
+        proof_node.node.encode(&mut self.rlp_encode_buf);
 
-        Ok(child_rlp_node)
+        self.retained_proofs.push(proof_node);
+        Ok(RlpNode::from_rlp(&self.rlp_encode_buf))
     }
 
     /// Returns the path of the child of the currently under-construction branch at the given
@@ -377,7 +351,7 @@ where
         // Only commit immediately if retained for the proof. Otherwise, defer conversion
         // to pop_branch() to give DeferredEncoder time for async work.
         if self.should_retain(targets, &child_path, true) {
-            let child_rlp_node = self.commit_child(targets, child_path, child)?;
+            let child_rlp_node = self.commit_retained_child(child_path, child)?;
             trace!(target: TRACE_TARGET, ?child_rlp_node, "Pushing committed child RlpNode onto stack");
             self.child_stack.push(ProofTrieBranchChild::RlpNode(child_rlp_node));
         } else {
