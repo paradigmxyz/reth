@@ -217,6 +217,10 @@ async fn test_ere_roundtrip_export_after_import() {
             "ERE file {} should carry the noproofs profile, got '{file_name}'",
             i + 1
         );
+
+        // The importer streams records by type and never consults the block index, so the
+        // exported offsets are otherwise unverified.
+        assert_ere_index_offsets_resolve(file_path);
     }
 
     // Reimport the exported `.ere` files into a fresh database to close the export -> import loop.
@@ -246,5 +250,59 @@ async fn test_ere_roundtrip_export_after_import() {
             provider_ref.block_by_number(block).unwrap(),
             "Reimported block {block} should match the original",
         );
+    }
+}
+
+/// Asserts every offset in an exported `.ere` file's [`DynamicBlockIndex`] points at the byte
+/// position of the component entry it claims.
+///
+/// Offsets are `i64`, relative to the index record, laid out per block as
+/// `[header, body, receipts, difficulty]` (the `noproofs` profile, so no proof component).
+fn assert_ere_index_offsets_resolve(path: &std::path::Path) {
+    use reth_era::{
+        e2s::types::{Entry, Header},
+        ere::types::{
+            execution::{
+                COMPRESSED_BODY, COMPRESSED_HEADER, COMPRESSED_SLIM_RECEIPTS, TOTAL_DIFFICULTY,
+            },
+            group::{DynamicBlockIndex, DYNAMIC_BLOCK_INDEX},
+        },
+    };
+    use std::collections::HashMap;
+
+    let bytes = fs::read(path).unwrap();
+
+    // Walk the TLV stream, recording each record's start position and type.
+    let mut positions: HashMap<usize, [u8; 2]> = HashMap::new();
+    let mut index_pos = None;
+    let mut pos = 0usize;
+    while pos < bytes.len() {
+        let entry_type = [bytes[pos], bytes[pos + 1]];
+        let length = u32::from_le_bytes(bytes[pos + 2..pos + 6].try_into().unwrap()) as usize;
+        positions.insert(pos, entry_type);
+        if entry_type == DYNAMIC_BLOCK_INDEX {
+            index_pos = Some(pos);
+        }
+        pos += Header::SIZE + length;
+    }
+
+    let index_pos = index_pos.expect("file must contain a block index");
+    let index_entry = Entry::read(&mut &bytes[index_pos..]).unwrap().unwrap();
+    let index = DynamicBlockIndex::from_entry(&index_entry).unwrap();
+
+    let expected_types =
+        [COMPRESSED_HEADER, COMPRESSED_BODY, COMPRESSED_SLIM_RECEIPTS, TOTAL_DIFFICULTY];
+    let start = index.starting_number();
+    for block in start..start + index.block_count() as u64 {
+        let offsets = index.offsets_for_block(block).expect("offsets for in-range block");
+        for (offset, expected_type) in offsets.iter().zip(expected_types) {
+            let target = index_pos as i64 + offset;
+            assert!(target >= 0, "block {block} offset {offset} points before the file start");
+            assert_eq!(
+                positions.get(&(target as usize)),
+                Some(&expected_type),
+                "block {block} offset {offset} should resolve to an entry of the expected type",
+            );
+        }
     }
 }
