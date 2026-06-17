@@ -6,7 +6,7 @@ mod history;
 
 mod export;
 
-pub use export::{export, ExportConfig};
+pub use export::{export, EraBlockWriter, ExportBlock, ExportConfig};
 
 pub use history::{
     build_index, calculate_td_by_number, decode, import, open, process, process_iter,
