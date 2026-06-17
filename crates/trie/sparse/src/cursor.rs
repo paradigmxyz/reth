@@ -166,7 +166,9 @@ where
     C: HashedStorageCursor<Value = U256>,
 {
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
-        self.cursor.is_storage_empty()
+        let empty = self.cursor.seek(B256::ZERO)?.is_none();
+        self.cursor.reset();
+        Ok(empty)
     }
 
     fn set_hashed_address(&mut self, hashed_address: B256) {

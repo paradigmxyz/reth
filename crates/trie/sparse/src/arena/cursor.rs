@@ -3,7 +3,7 @@ use super::{
     ArenaParallelSparseTrie, ArenaSparseNode, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
     Index, NodeArena,
 };
-use crate::{HashedCursor, HashedStorageCursor, TrieCursor, TrieStorageCursor};
+use crate::{HashedCursor, TrieCursor};
 use alloc::{format, vec::Vec};
 use alloy_primitives::{B256, U256};
 use alloy_rlp::Decodable;
@@ -752,21 +752,6 @@ where
     }
 }
 
-impl<C> HashedStorageCursor for ArenaCachedCursor<'_, C, B256, U256>
-where
-    C: HashedStorageCursor<Value = U256>,
-{
-    fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
-        let empty = self.seek(B256::ZERO)?.is_none();
-        self.reset();
-        Ok(empty)
-    }
-
-    fn set_hashed_address(&mut self, _hashed_address: B256) {
-        unimplemented!("ArenaCachedCursor storage retargeting")
-    }
-}
-
 impl<C> ArenaCachedCursor<'_, C, Nibbles, BranchNodeCompact>
 where
     C: TrieCursor,
@@ -934,15 +919,6 @@ where
     fn reset(&mut self) {
         self.reset_sparse_cursor();
         self.inner.reset();
-    }
-}
-
-impl<C> TrieStorageCursor for ArenaCachedCursor<'_, C, Nibbles, BranchNodeCompact>
-where
-    C: TrieStorageCursor,
-{
-    fn set_hashed_address(&mut self, _hashed_address: B256) {
-        unimplemented!("ArenaCachedCursor storage retargeting")
     }
 }
 
