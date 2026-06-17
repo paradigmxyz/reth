@@ -36,7 +36,7 @@ use reth_ethereum::{
     tasks::Runtime,
     EthPrimitives,
 };
-use reth_evm::{ConfigureEvm, ConfigureEvm2Prewarm, Evm2Env, EvmEnvFor};
+use reth_evm::{ConfigureEvm, Evm2Env, EvmEnvFor};
 use reth_trie::updates::TrieUpdates;
 
 // ---------------------------------------------------------------------------
@@ -65,8 +65,7 @@ where
         Types = EthereumNode,
         Evm: reth_ethereum::node::builder::ConfigureEngineEvm<
             alloy_rpc_types_engine::ExecutionData,
-        > + ConfigureEvm2Prewarm<Primitives = EthPrimitives>
-                 + ConfigureEvm<Primitives = EthPrimitives, TxEnv = Evm2TxEnv>,
+        > + ConfigureEvm<Primitives = EthPrimitives, TxEnv = Evm2TxEnv>,
     >,
     EvmEnvFor<N::Evm>: Evm2Env,
 {

@@ -12,7 +12,7 @@
 extern crate alloc;
 
 use crate::execute::{Executor, IntoTxEnv};
-use alloc::string::String;
+use alloc::{boxed::Box, string::String};
 use alloy_consensus::transaction::Recovered;
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{Address, Bytes, B256};
@@ -47,9 +47,7 @@ pub trait Evm2Env: Debug + Clone + Send + Sync + 'static {
 #[cfg(feature = "std")]
 mod engine;
 #[cfg(feature = "std")]
-pub use engine::{
-    ConfigureEngineEvm, ConfigureEvm2Prewarm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple,
-};
+pub use engine::{ConfigureEngineEvm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple};
 
 #[cfg(feature = "metrics")]
 pub mod metrics;
@@ -92,6 +90,12 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     where
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static;
+
+    /// Per-thread evm2 instance used by prewarm workers.
+    #[cfg(feature = "std")]
+    type PrewarmEvm<DB>
+    where
+        DB: reth_storage_api::StateProvider + Send + 'static;
 
     /// Creates a new EVM environment for the given header.
     fn evm_env(&self, header: &HeaderTy<Self::Primitives>) -> Result<EvmEnvFor<Self>, Self::Error>;
@@ -171,6 +175,30 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     {
         self.executor(db)
     }
+
+    /// Creates a prewarm evm over the provided state with the provided precompile provider.
+    #[cfg(feature = "std")]
+    fn prewarm_evm_with_precompiles<DB>(
+        &self,
+        state_provider: DB,
+        env: EvmEnvFor<Self>,
+        precompiles: Box<dyn evm2::precompile::PrecompileProvider<evm2::BaseEvmTypes>>,
+    ) -> Self::PrewarmEvm<DB>
+    where
+        DB: reth_storage_api::StateProvider + Send + 'static;
+
+    /// Executes a transaction for prewarming, streams its state changes into `sink`, and discards
+    /// them.
+    #[cfg(feature = "std")]
+    fn prewarm_tx<DB, S>(
+        &self,
+        evm: &mut Self::PrewarmEvm<DB>,
+        tx: TxEnvFor<Self>,
+        sink: &mut S,
+    ) -> Result<evm2::TxResult, Box<dyn core::error::Error + Send + Sync>>
+    where
+        DB: reth_storage_api::StateProvider + Send + 'static,
+        S: evm2::evm::StateChangeSink<Error = core::convert::Infallible>;
 }
 
 /// JIT backend controls exposed by an EVM configuration.

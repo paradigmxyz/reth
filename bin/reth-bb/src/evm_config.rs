@@ -11,8 +11,8 @@ use alloy_rpc_types::engine::ExecutionData;
 use core::{convert::Infallible, fmt};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
-    ConfigureEngineEvm, ConfigureEvm, ConfigureEvm2Prewarm, EvmEnvFor, ExecutableTxIterator,
-    ExecutionCtxFor, NextBlockEnvAttributes, TxEnvFor,
+    ConfigureEngineEvm, ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor,
+    NextBlockEnvAttributes, TxEnvFor,
 };
 use reth_evm_ethereum::{EthEvmConfig, EthEvmEnv, Evm2TxEnv};
 use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader, TxTy};
@@ -74,6 +74,10 @@ where
     where
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static;
+    type PrewarmEvm<DB>
+        = <EthEvmConfig<C> as ConfigureEvm>::PrewarmEvm<DB>
+    where
+        DB: StateProvider + Send + 'static;
 
     fn evm_env(&self, header: &HeaderTy<Self::Primitives>) -> Result<EvmEnvFor<Self>, Self::Error> {
         self.inner.evm_env(header)
@@ -123,6 +127,31 @@ where
     {
         self.inner.executor(db)
     }
+
+    fn prewarm_evm_with_precompiles<DB>(
+        &self,
+        state_provider: DB,
+        env: EvmEnvFor<Self>,
+        precompiles: Box<dyn evm2::precompile::PrecompileProvider<evm2::BaseEvmTypes>>,
+    ) -> Self::PrewarmEvm<DB>
+    where
+        DB: StateProvider + Send + 'static,
+    {
+        self.inner.prewarm_evm_with_precompiles(state_provider, env, precompiles)
+    }
+
+    fn prewarm_tx<DB, S>(
+        &self,
+        evm: &mut Self::PrewarmEvm<DB>,
+        tx: TxEnvFor<Self>,
+        sink: &mut S,
+    ) -> Result<evm2::TxResult, Box<dyn core::error::Error + Send + Sync>>
+    where
+        DB: StateProvider + Send + 'static,
+        S: evm2::evm::StateChangeSink<Error = Infallible>,
+    {
+        self.inner.prewarm_tx(evm, tx, sink)
+    }
 }
 
 impl<C> ConfigureEngineEvm<BigBlockData<ExecutionData>> for BbEvmConfig<C>
@@ -155,42 +184,5 @@ where
         };
 
         Ok((transactions, convert))
-    }
-}
-
-impl<C> ConfigureEvm2Prewarm for BbEvmConfig<C>
-where
-    Self: ConfigureEvm<Primitives = EthPrimitives, EvmEnv = EthEvmEnv, TxEnv = Evm2TxEnv>,
-    EthEvmConfig<C>: ConfigureEvm<Primitives = EthPrimitives, EvmEnv = EthEvmEnv, TxEnv = Evm2TxEnv>
-        + ConfigureEvm2Prewarm<Primitives = EthPrimitives>,
-{
-    type PrewarmEvm<DB>
-        = <EthEvmConfig<C> as ConfigureEvm2Prewarm>::PrewarmEvm<DB>
-    where
-        DB: StateProvider + Send + 'static;
-
-    fn evm2_prewarm_evm_with_precompiles<DB>(
-        &self,
-        state_provider: DB,
-        env: EvmEnvFor<Self>,
-        precompiles: Box<dyn evm2::precompile::PrecompileProvider<evm2::BaseEvmTypes>>,
-    ) -> Self::PrewarmEvm<DB>
-    where
-        DB: StateProvider + Send + 'static,
-    {
-        self.inner.evm2_prewarm_evm_with_precompiles(state_provider, env, precompiles)
-    }
-
-    fn evm2_prewarm_tx<DB, S>(
-        &self,
-        evm: &mut Self::PrewarmEvm<DB>,
-        tx: TxEnvFor<Self>,
-        sink: &mut S,
-    ) -> Result<evm2::TxResult, Box<dyn core::error::Error + Send + Sync>>
-    where
-        DB: StateProvider + Send + 'static,
-        S: evm2::evm::StateChangeSink<Error = Infallible>,
-    {
-        self.inner.evm2_prewarm_tx(evm, tx, sink)
     }
 }

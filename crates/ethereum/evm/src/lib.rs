@@ -21,14 +21,13 @@ use alloy_primitives::{Address, Bytes, B256};
 use alloy_rpc_types_engine::ExecutionData;
 use core::{convert::Infallible, fmt::Debug, marker::PhantomData};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthExecutorSpec, MAINNET};
-use reth_ethereum_forks::{EthereumHardforks, Hardforks};
+use reth_ethereum_forks::Hardforks;
 #[cfg(feature = "std")]
 use reth_ethereum_primitives::TransactionSigned;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 #[cfg(feature = "std")]
 use reth_evm::{
-    evm2_precompile_cache::PrecompileCacheMap, ConfigureEngineEvm, ConfigureEvm2Prewarm, Evm2Env,
-    ExecutableTxIterator,
+    evm2_precompile_cache::PrecompileCacheMap, ConfigureEngineEvm, Evm2Env, ExecutableTxIterator,
 };
 use reth_evm::{ConfigureEvm, EvmEnvFor, NextBlockEnvAttributes};
 #[cfg(feature = "std")]
@@ -237,6 +236,11 @@ where
     where
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static;
+    #[cfg(feature = "std")]
+    type PrewarmEvm<DB>
+        = evm2::Evm<evm2::BaseEvmTypes>
+    where
+        DB: reth_storage_api::StateProvider + Send + 'static;
 
     fn evm_env(&self, header: &Header) -> Result<EvmEnvFor<Self>, Self::Error> {
         Ok(EthEvmEnv {
@@ -340,6 +344,74 @@ where
             reth_evm::execute::UnsupportedExecutor::default()
         }
     }
+
+    #[cfg(feature = "std")]
+    fn prewarm_evm_with_precompiles<DB>(
+        &self,
+        state_provider: DB,
+        env: EthEvmEnv,
+        precompiles: alloc::boxed::Box<
+            dyn evm2::precompile::PrecompileProvider<evm2::BaseEvmTypes>,
+        >,
+    ) -> Self::PrewarmEvm<DB>
+    where
+        DB: reth_storage_api::StateProvider + Send + 'static,
+    {
+        let mut version = evm2::Version::new(env.spec);
+        version.chain_id = self.chain_spec.chain_id();
+        version.features.remove(evm2::EvmFeatures::NONCE_CHECK);
+        version.features.remove(evm2::EvmFeatures::BALANCE_CHECK);
+
+        evm2::Evm::<evm2::BaseEvmTypes>::new_with_execution_config(
+            evm2::ExecutionConfig::for_spec_and_version(env.spec, version),
+            env.spec,
+            env.block,
+            evm2::ethereum::ethereum_tx_registry(env.spec),
+            evm2::evm::Db::new(reth_storage_api::Evm2StateProviderDatabase::new(state_provider)),
+            precompiles,
+        )
+    }
+
+    #[cfg(feature = "std")]
+    fn prewarm_tx<DB, S>(
+        &self,
+        evm: &mut Self::PrewarmEvm<DB>,
+        tx: Evm2TxEnv,
+        sink: &mut S,
+    ) -> Result<evm2::TxResult, alloc::boxed::Box<dyn core::error::Error + Send + Sync>>
+    where
+        DB: reth_storage_api::StateProvider + Send + 'static,
+        S: evm2::evm::StateChangeSink<Error = Infallible>,
+    {
+        enum PrewarmResolution {
+            Outcome(evm2::TxResult),
+            DatabaseError(evm2::evm::DbErrorCode),
+            HandlerError(evm2::registry::HandlerError),
+        }
+
+        let resolution = match evm.transact(tx.as_envelope()) {
+            Ok(executed) => {
+                if let Some(code) = executed.result().db_error_code {
+                    let _ = executed.discard();
+                    PrewarmResolution::DatabaseError(code)
+                } else {
+                    let Ok(result) = executed.discard_with(sink);
+                    PrewarmResolution::Outcome(result)
+                }
+            }
+            Err(err) => PrewarmResolution::HandlerError(err),
+        };
+
+        match resolution {
+            PrewarmResolution::Outcome(outcome) => Ok(outcome),
+            PrewarmResolution::DatabaseError(code) => {
+                Err(alloc::boxed::Box::new(prewarm_db_error::<DB>(evm, code)))
+            }
+            PrewarmResolution::HandlerError(err) => {
+                Err(alloc::boxed::Box::new(Evm2ExecutionError::<ProviderError>::Handler(err)))
+            }
+        }
+    }
 }
 
 #[cfg(feature = "std")]
@@ -393,86 +465,7 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<ChainSpec, EvmF> ConfigureEvm2Prewarm for EthEvmConfig<ChainSpec, EvmF>
-where
-    ChainSpec:
-        EthExecutorSpec + EthChainSpec<Header = Header> + EthereumHardforks + Hardforks + 'static,
-    EvmF: Clone + Debug + Send + Sync + Unpin + 'static,
-{
-    type PrewarmEvm<DB>
-        = evm2::Evm<evm2::BaseEvmTypes>
-    where
-        DB: reth_storage_api::StateProvider + Send + 'static;
-
-    fn evm2_prewarm_evm_with_precompiles<DB>(
-        &self,
-        state_provider: DB,
-        env: EthEvmEnv,
-        precompiles: alloc::boxed::Box<
-            dyn evm2::precompile::PrecompileProvider<evm2::BaseEvmTypes>,
-        >,
-    ) -> Self::PrewarmEvm<DB>
-    where
-        DB: reth_storage_api::StateProvider + Send + 'static,
-    {
-        let mut version = evm2::Version::new(env.spec);
-        version.chain_id = self.chain_spec.chain_id();
-        version.features.remove(evm2::EvmFeatures::NONCE_CHECK);
-        version.features.remove(evm2::EvmFeatures::BALANCE_CHECK);
-
-        evm2::Evm::<evm2::BaseEvmTypes>::new_with_execution_config(
-            evm2::ExecutionConfig::for_spec_and_version(env.spec, version),
-            env.spec,
-            env.block,
-            evm2::ethereum::ethereum_tx_registry(env.spec),
-            evm2::evm::Db::new(reth_storage_api::Evm2StateProviderDatabase::new(state_provider)),
-            precompiles,
-        )
-    }
-
-    fn evm2_prewarm_tx<DB, S>(
-        &self,
-        evm: &mut Self::PrewarmEvm<DB>,
-        tx: Evm2TxEnv,
-        sink: &mut S,
-    ) -> Result<evm2::TxResult, alloc::boxed::Box<dyn core::error::Error + Send + Sync>>
-    where
-        DB: reth_storage_api::StateProvider + Send + 'static,
-        S: evm2::evm::StateChangeSink<Error = Infallible>,
-    {
-        enum PrewarmResolution {
-            Outcome(evm2::TxResult),
-            DatabaseError(evm2::evm::DbErrorCode),
-            HandlerError(evm2::registry::HandlerError),
-        }
-
-        let resolution = match evm.transact(tx.as_envelope()) {
-            Ok(executed) => {
-                if let Some(code) = executed.result().db_error_code {
-                    let _ = executed.discard();
-                    PrewarmResolution::DatabaseError(code)
-                } else {
-                    let Ok(result) = executed.discard_with(sink);
-                    PrewarmResolution::Outcome(result)
-                }
-            }
-            Err(err) => PrewarmResolution::HandlerError(err),
-        };
-
-        match resolution {
-            PrewarmResolution::Outcome(outcome) => Ok(outcome),
-            PrewarmResolution::DatabaseError(code) => {
-                Err(alloc::boxed::Box::new(evm2_prewarm_db_error::<DB>(evm, code)))
-            }
-            PrewarmResolution::HandlerError(err) => {
-                Err(alloc::boxed::Box::new(Evm2ExecutionError::<ProviderError>::Handler(err)))
-            }
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-fn evm2_prewarm_db_error<DB>(
+fn prewarm_db_error<DB>(
     evm: &mut evm2::Evm<evm2::BaseEvmTypes>,
     code: evm2::evm::DbErrorCode,
 ) -> Evm2ExecutionError<ProviderError>

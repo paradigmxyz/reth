@@ -18,8 +18,7 @@ use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_evm::{
     execute::{ExecutableTxFor, ExecutableTxParts, WithTxEnv},
-    ConfigureEvm, ConfigureEvm2Prewarm, ConvertTx, Evm2Env, EvmEnvFor, ExecutableTxIterator,
-    ExecutableTxTuple, TxEnvFor,
+    ConfigureEvm, ConvertTx, Evm2Env, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, TxEnvFor,
 };
 use reth_execution_types::Evm2BlockState;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
@@ -304,7 +303,7 @@ where
             + Send
             + Sync
             + 'static,
-        Evm: ConfigureEvm2Prewarm<Primitives = N>,
+        Evm: ConfigureEvm<Primitives = N>,
         EvmEnvFor<Evm>: Evm2Env,
     {
         // start preparing transactions immediately
@@ -349,7 +348,7 @@ where
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
-        Evm: ConfigureEvm2Prewarm<Primitives = N>,
+        Evm: ConfigureEvm<Primitives = N>,
         EvmEnvFor<Evm>: Evm2Env,
     {
         let (prewarm_rx, execution_rx) =
@@ -512,7 +511,7 @@ where
     ) -> CacheTaskHandle<N::Receipt>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
-        Evm: ConfigureEvm2Prewarm<Primitives = N>,
+        Evm: ConfigureEvm<Primitives = N>,
         EvmEnvFor<Evm>: Evm2Env,
     {
         let mode = if parallel_bal_execution {
