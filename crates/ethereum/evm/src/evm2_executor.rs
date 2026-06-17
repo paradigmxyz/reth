@@ -25,9 +25,9 @@ use evm2::{
     ethereum::{ethereum_tx_registry, RecoveredTxEnvelope},
     evm::{
         precompile::PrecompileProvider, AccountChangeRef, AccountInfo, BlockStateAccumulator,
-        Database, Db, DbErrorCode, StateChangeSink, StateChangeSource, StateChanges, StorageChange,
-        Tracked, BEACON_ROOTS_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS,
-        WITHDRAWAL_REQUEST_ADDRESS,
+        Database, Db, DbErrorCode, DynDatabase, StateChangeSink, StateChangeSource, StateChanges,
+        StorageChange, Tracked, BEACON_ROOTS_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS,
+        HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
     },
     registry::HandlerError,
     BaseEvmTypes, Evm, ExecutionConfig, Precompiles, SpecId, TxResult, Version,
@@ -77,8 +77,6 @@ pub enum Evm2ExecutionError<E> {
     },
     /// Deposit request logs could not be decoded.
     DepositRequestDecode(String),
-    /// Batch execution requires a retained inter-block state overlay.
-    UnsupportedBatchExecution,
 }
 
 impl<E> core::fmt::Display for Evm2ExecutionError<E>
@@ -102,9 +100,6 @@ where
                 write!(f, "evm2 system call to {address} failed: {reason}")
             }
             Self::DepositRequestDecode(err) => write!(f, "failed to decode deposit request: {err}"),
-            Self::UnsupportedBatchExecution => f.write_str(
-                "evm2 batch execution is not supported without a retained state overlay",
-            ),
         }
     }
 }
@@ -229,7 +224,7 @@ pub fn execute_evm2_block_with_context<DB>(
 where
     DB: Database + 'static,
 {
-    execute_evm2_block_with_context_precompiles_and_hook(
+    execute_evm2_block_with_context_and_precompiles(
         spec_id,
         block_env,
         database,
@@ -237,7 +232,6 @@ where
         transactions,
         context,
         Box::new(Precompiles::base(spec_id)),
-        |_| {},
     )
 }
 
@@ -255,7 +249,32 @@ pub fn execute_evm2_block_with_context_and_precompiles<DB>(
 where
     DB: Database + 'static,
 {
-    execute_evm2_block_with_context_precompiles_and_hook(
+    execute_evm2_block_with_dyn_database_context_and_precompiles::<DB>(
+        spec_id,
+        block_env,
+        Db::new(database),
+        block_number,
+        transactions,
+        context,
+        precompiles,
+    )
+}
+
+/// Executes a block worth of recovered Ethereum transactions with additional block-level context,
+/// the provided precompile provider, and a dynamic evm2 database.
+pub(crate) fn execute_evm2_block_with_dyn_database_context_and_precompiles<DB>(
+    spec_id: SpecId,
+    block_env: BlockEnv,
+    database: impl DynDatabase + 'static,
+    block_number: u64,
+    transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
+    context: Evm2BlockExecutionContext<'_>,
+    precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
+) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<DB::Error>>
+where
+    DB: Database + 'static,
+{
+    execute_evm2_block_with_context_precompiles_and_hook::<DB>(
         spec_id,
         block_env,
         database,
@@ -272,7 +291,7 @@ where
 fn execute_evm2_block_with_context_precompiles_and_hook<DB>(
     spec_id: SpecId,
     block_env: BlockEnv,
-    database: DB,
+    database: impl DynDatabase + 'static,
     block_number: u64,
     transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
     context: Evm2BlockExecutionContext<'_>,
@@ -282,7 +301,7 @@ fn execute_evm2_block_with_context_precompiles_and_hook<DB>(
 where
     DB: Database + 'static,
 {
-    execute_evm2_block_with_context_precompiles_and_hook_envelopes(
+    execute_evm2_block_with_context_precompiles_and_hook_envelopes::<DB>(
         spec_id,
         block_env,
         database,
@@ -300,7 +319,7 @@ where
 pub(crate) fn execute_evm2_block_with_context_precompiles_and_hook_envelopes<DB>(
     spec_id: SpecId,
     block_env: BlockEnv,
-    database: DB,
+    database: impl DynDatabase + 'static,
     block_number: u64,
     transactions: impl IntoIterator<Item = RecoveredTxEnvelope>,
     context: Evm2BlockExecutionContext<'_>,
@@ -310,7 +329,7 @@ pub(crate) fn execute_evm2_block_with_context_precompiles_and_hook_envelopes<DB>
 where
     DB: Database + 'static,
 {
-    execute_evm2_block_with_context_precompiles_and_hooks_envelopes_with_hashed_state_mode(
+    execute_evm2_block_with_context_precompiles_and_hooks_envelopes_with_hashed_state_mode::<DB>(
         spec_id,
         block_env,
         database,
@@ -331,7 +350,7 @@ where
 pub(crate) fn execute_evm2_block_with_context_precompiles_and_hooks_envelopes<DB>(
     spec_id: SpecId,
     block_env: BlockEnv,
-    database: DB,
+    database: impl DynDatabase + 'static,
     block_number: u64,
     transactions: impl IntoIterator<Item = RecoveredTxEnvelope>,
     context: Evm2BlockExecutionContext<'_>,
@@ -342,7 +361,7 @@ pub(crate) fn execute_evm2_block_with_context_precompiles_and_hooks_envelopes<DB
 where
     DB: Database + 'static,
 {
-    execute_evm2_block_with_context_precompiles_and_hooks_envelopes_with_hashed_state_mode(
+    execute_evm2_block_with_context_precompiles_and_hooks_envelopes_with_hashed_state_mode::<DB>(
         spec_id,
         block_env,
         database,
@@ -364,7 +383,7 @@ pub(crate) fn execute_evm2_block_with_context_precompiles_and_hooks_envelopes_wi
 >(
     spec_id: SpecId,
     block_env: BlockEnv,
-    database: DB,
+    database: impl DynDatabase + 'static,
     block_number: u64,
     transactions: impl IntoIterator<Item = RecoveredTxEnvelope>,
     context: Evm2BlockExecutionContext<'_>,
@@ -384,7 +403,7 @@ where
         spec_id,
         block_env,
         ethereum_tx_registry(spec_id),
-        Db::new(database),
+        database,
         precompiles,
     );
     let mut block_state = BlockStateAccumulator::new();
@@ -568,10 +587,10 @@ pub fn execute_evm2_block_with_state_provider_context_precompiles_and_hook<DB>(
 where
     DB: StateProvider + Send + 'static,
 {
-    execute_evm2_block_with_context_precompiles_and_hook(
+    execute_evm2_block_with_context_precompiles_and_hook::<Evm2StateProviderDatabase<DB>>(
         spec_id,
         block_env,
-        Evm2StateProviderDatabase::new(state_provider),
+        Db::new(Evm2StateProviderDatabase::new(state_provider)),
         block_number,
         transactions,
         context,
@@ -598,10 +617,10 @@ pub fn execute_evm2_block_with_state_provider_context_precompiles_and_hook_envel
 where
     DB: StateProvider + Send + 'static,
 {
-    execute_evm2_block_with_context_precompiles_and_hook_envelopes(
+    execute_evm2_block_with_context_precompiles_and_hook_envelopes::<Evm2StateProviderDatabase<DB>>(
         spec_id,
         block_env,
-        Evm2StateProviderDatabase::new(state_provider),
+        Db::new(Evm2StateProviderDatabase::new(state_provider)),
         block_number,
         transactions,
         context,
@@ -628,10 +647,10 @@ pub fn execute_evm2_block_with_state_provider_context_precompiles_and_hooks_enve
 where
     DB: StateProvider + Send + 'static,
 {
-    execute_evm2_block_with_context_precompiles_and_hooks_envelopes(
+    execute_evm2_block_with_context_precompiles_and_hooks_envelopes::<Evm2StateProviderDatabase<DB>>(
         spec_id,
         block_env,
-        Evm2StateProviderDatabase::new(state_provider),
+        Db::new(Evm2StateProviderDatabase::new(state_provider)),
         block_number,
         transactions,
         context,
@@ -661,10 +680,12 @@ pub fn execute_evm2_block_with_state_provider_context_precompiles_and_hooks_enve
 where
     DB: StateProvider + Send + 'static,
 {
-    execute_evm2_block_with_context_precompiles_and_hooks_envelopes_with_hashed_state_mode(
+    execute_evm2_block_with_context_precompiles_and_hooks_envelopes_with_hashed_state_mode::<
+        Evm2StateProviderDatabase<DB>,
+    >(
         spec_id,
         block_env,
-        Evm2StateProviderDatabase::new(state_provider),
+        Db::new(Evm2StateProviderDatabase::new(state_provider)),
         block_number,
         transactions,
         context,
@@ -700,18 +721,18 @@ where
     DB: Database + 'static,
 {
     match err {
-        HandlerError::Database(code) => take_database_error::<DB>(evm)
+        HandlerError::Database(code) => take_database_error::<DB>(evm, code)
             .map(Evm2ExecutionError::Database)
             .unwrap_or(Evm2ExecutionError::MissingDatabaseError(code)),
         err => Evm2ExecutionError::Handler(err),
     }
 }
 
-fn take_database_error<DB>(evm: &mut Evm<BaseEvmTypes>) -> Option<DB::Error>
+fn take_database_error<DB>(evm: &mut Evm<BaseEvmTypes>, code: DbErrorCode) -> Option<DB::Error>
 where
     DB: Database + 'static,
 {
-    evm.database_as_mut::<Db<DB>>().and_then(Db::take_result)
+    evm.database_mut().error(code).downcast::<DB::Error>().map(|err| *err).ok()
 }
 
 struct RethEvm2StateSink<'a> {
@@ -870,7 +891,7 @@ fn map_db_error_code<DB>(
 where
     DB: Database + 'static,
 {
-    take_database_error::<DB>(evm)
+    take_database_error::<DB>(evm, code)
         .map(Evm2ExecutionError::Database)
         .unwrap_or(Evm2ExecutionError::MissingDatabaseError(code))
 }
@@ -1305,10 +1326,12 @@ mod tests {
 
         let mut streamed_updates = Vec::new();
         let output =
-            execute_evm2_block_with_context_precompiles_and_hooks_envelopes_with_hashed_state_mode(
+            execute_evm2_block_with_context_precompiles_and_hooks_envelopes_with_hashed_state_mode::<
+                TestDatabase,
+            >(
                 SpecId::FRONTIER,
                 BlockEnv::default(),
-                database,
+                Db::new(database),
                 1,
                 [evm2_recovered_tx(transaction)],
                 Evm2BlockExecutionContext::default(),
@@ -1336,10 +1359,12 @@ mod tests {
 
         let mut streamed_updates = Vec::new();
         let output =
-            execute_evm2_block_with_context_precompiles_and_hooks_envelopes_with_hashed_state_mode(
+            execute_evm2_block_with_context_precompiles_and_hooks_envelopes_with_hashed_state_mode::<
+                TestDatabase,
+            >(
                 SpecId::FRONTIER,
                 BlockEnv::default(),
-                database,
+                Db::new(database),
                 1,
                 [evm2_recovered_tx(transaction)],
                 Evm2BlockExecutionContext::default(),
