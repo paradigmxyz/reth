@@ -26,6 +26,12 @@ impl ProofV2Target {
 
     /// Returns the key the target was initialized with.
     pub fn key(&self) -> B256 {
+        if self.key_nibbles.byte_len() == 32 {
+            let mut packed = [0u8; 32];
+            self.key_nibbles.pack_to(&mut packed);
+            return B256::from(packed)
+        }
+
         B256::from_slice(&self.key_nibbles.pack())
     }
 
