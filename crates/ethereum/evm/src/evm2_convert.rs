@@ -136,6 +136,12 @@ impl Evm2TxEnv {
     }
 }
 
+impl AsRef<RecoveredTxEnvelope> for Evm2TxEnv {
+    fn as_ref(&self) -> &RecoveredTxEnvelope {
+        self.as_envelope()
+    }
+}
+
 impl From<Recovered<TransactionSigned>> for Evm2TxEnv {
     fn from(value: Recovered<TransactionSigned>) -> Self {
         Self(evm2_recovered_tx(value))

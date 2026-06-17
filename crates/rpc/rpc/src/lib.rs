@@ -41,6 +41,8 @@ mod txpool;
 mod validation;
 mod web3;
 
+use alloy_eip7928 as _;
+
 pub use admin::AdminApi;
 pub use aliases::*;
 pub use debug::DebugApi;

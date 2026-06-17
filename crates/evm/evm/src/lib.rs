@@ -176,6 +176,43 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         self.executor(db)
     }
 
+    /// Creates an evm2 instance for single-transaction execution with the configured environment.
+    #[cfg(feature = "std")]
+    fn evm_with_env<DB>(&self, db: DB, evm_env: EvmEnvFor<Self>) -> evm2::Evm<evm2::BaseEvmTypes>
+    where
+        DB: evm2::evm::DynDatabase + 'static;
+
+    /// Creates an evm2 instance for single-transaction execution with an inspector.
+    #[cfg(feature = "std")]
+    fn evm_with_env_and_inspector<DB, I>(
+        &self,
+        db: DB,
+        evm_env: EvmEnvFor<Self>,
+        inspector: I,
+    ) -> evm2::Evm<evm2::BaseEvmTypes>
+    where
+        DB: evm2::evm::DynDatabase + 'static,
+        I: evm2::Inspector<evm2::BaseEvmTypes> + 'static,
+    {
+        let mut evm = self.evm_with_env(db, evm_env);
+        evm.set_inspector(inspector);
+        evm
+    }
+
+    /// Applies block-level state changes required before transaction execution.
+    #[cfg(feature = "std")]
+    fn pre_block_state_changes<'a, DB>(
+        &self,
+        db: DB,
+        evm_env: EvmEnvFor<Self>,
+        block_number: u64,
+        ctx: ExecutionCtxFor<'a, Self>,
+    ) -> Result<evm2::BlockStateAccumulator, Box<dyn Error + Send + Sync>>
+    where
+        Self: 'a,
+        DB: evm2::evm::Database + 'static,
+        DB::Error: Error + Send + Sync + 'static;
+
     /// Creates a prewarm evm over the provided state with the provided precompile provider.
     #[cfg(feature = "std")]
     fn prewarm_evm_with_precompiles<DB>(

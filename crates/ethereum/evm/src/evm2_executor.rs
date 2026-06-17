@@ -456,6 +456,29 @@ where
     }
 }
 
+pub(crate) fn apply_pre_execution_system_calls<DB>(
+    evm: &mut Evm<BaseEvmTypes>,
+    block_number: u64,
+    context: Evm2BlockExecutionContext<'_>,
+) -> Result<BlockStateAccumulator, Evm2ExecutionError<DB::Error>>
+where
+    DB: Database + 'static,
+{
+    let mut block_state = BlockStateAccumulator::new();
+    let spec_id = evm.spec_id();
+    pre_execution_system_call_state_changes::<DB>(
+        evm,
+        &mut block_state,
+        None,
+        false,
+        &mut |_| {},
+        spec_id,
+        block_number,
+        context,
+    )?;
+    Ok(block_state)
+}
+
 fn take_database_error<DB>(evm: &mut Evm<BaseEvmTypes>, code: DbErrorCode) -> Option<DB::Error>
 where
     DB: Database + 'static,
