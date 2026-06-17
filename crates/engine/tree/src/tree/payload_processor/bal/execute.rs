@@ -155,10 +155,11 @@ where
             let _ = canonical_executor.commit_transaction(output.result);
             senders.push(output.signer);
 
-            let current_len = canonical_executor.receipts().len();
+            let receipts = canonical_executor.receipts();
+            let current_len = receipts.len();
             if current_len > last_sent_len {
                 last_sent_len = current_len;
-                if let Some(receipt) = canonical_executor.receipts().last() {
+                if let Some(receipt) = receipts.last() {
                     let tx_index = current_len - 1;
                     let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
                 }
