@@ -254,9 +254,11 @@ mod tests {
         TrieNodeV2, EMPTY_ROOT_HASH,
     };
     use std::{
+        cell::Cell,
         collections::BTreeMap,
         fmt::Debug,
         ops::Bound::{Excluded, Unbounded},
+        rc::Rc,
     };
 
     const KEY_0: B256 = b256!("0x0000000000000000000000000000000000000000000000000000000000000000");
@@ -312,11 +314,17 @@ mod tests {
     struct TestHashedCursorFactory {
         accounts: BTreeMap<B256, Account>,
         storage: B256Map<BTreeMap<B256, U256>>,
+        counts: Option<Rc<CursorCounts>>,
     }
 
     impl TestHashedCursorFactory {
         fn new(accounts: BTreeMap<B256, Account>, storage: B256Map<BTreeMap<B256, U256>>) -> Self {
-            Self { accounts, storage }
+            Self { accounts, storage, counts: None }
+        }
+
+        fn with_counts(mut self, counts: Rc<CursorCounts>) -> Self {
+            self.counts = Some(counts);
+            self
         }
     }
 
@@ -331,14 +339,23 @@ mod tests {
             Self: 'a;
 
         fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
-            Ok(TestAccountCursor { values: self.accounts.clone(), current: None })
+            Ok(TestAccountCursor {
+                values: self.accounts.clone(),
+                current: None,
+                counts: self.counts.clone(),
+            })
         }
 
         fn hashed_storage_cursor(
             &self,
             hashed_address: B256,
         ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
-            Ok(TestStorageCursor { values: self.storage.clone(), hashed_address, current: None })
+            Ok(TestStorageCursor {
+                values: self.storage.clone(),
+                hashed_address,
+                current: None,
+                counts: self.counts.clone(),
+            })
         }
     }
 
@@ -346,6 +363,7 @@ mod tests {
     struct TestAccountCursor<T> {
         values: BTreeMap<B256, T>,
         current: Option<B256>,
+        counts: Option<Rc<CursorCounts>>,
     }
 
     impl<T> HashedCursor for TestAccountCursor<T>
@@ -355,12 +373,18 @@ mod tests {
         type Value = T;
 
         fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+            if let Some(counts) = &self.counts {
+                counts.seeks.set(counts.seeks.get() + 1);
+            }
             let entry = self.values.range(key..).next().map(|(key, value)| (*key, value.clone()));
             self.current = entry.as_ref().map(|(key, _)| *key);
             Ok(entry)
         }
 
         fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+            if let Some(counts) = &self.counts {
+                counts.nexts.set(counts.nexts.get() + 1);
+            }
             let entry = match self.current {
                 Some(current) => self
                     .values
@@ -374,6 +398,9 @@ mod tests {
         }
 
         fn reset(&mut self) {
+            if let Some(counts) = &self.counts {
+                counts.resets.set(counts.resets.get() + 1);
+            }
             self.current = None;
         }
     }
@@ -383,6 +410,7 @@ mod tests {
         values: B256Map<BTreeMap<B256, U256>>,
         hashed_address: B256,
         current: Option<B256>,
+        counts: Option<Rc<CursorCounts>>,
     }
 
     impl TestStorageCursor {
@@ -395,6 +423,9 @@ mod tests {
         type Value = U256;
 
         fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+            if let Some(counts) = &self.counts {
+                counts.seeks.set(counts.seeks.get() + 1);
+            }
             let entry = self
                 .current_values()
                 .and_then(|values| values.range(key..).next())
@@ -404,6 +435,9 @@ mod tests {
         }
 
         fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+            if let Some(counts) = &self.counts {
+                counts.nexts.set(counts.nexts.get() + 1);
+            }
             let entry = match self.current {
                 Some(current) => self
                     .current_values()
@@ -419,6 +453,9 @@ mod tests {
         }
 
         fn reset(&mut self) {
+            if let Some(counts) = &self.counts {
+                counts.resets.set(counts.resets.get() + 1);
+            }
             self.current = None;
         }
     }
@@ -438,6 +475,7 @@ mod tests {
     struct TestTrieCursorFactory {
         account_nodes: BTreeMap<Nibbles, BranchNodeCompact>,
         storage_nodes: B256Map<BTreeMap<Nibbles, BranchNodeCompact>>,
+        counts: Option<Rc<CursorCounts>>,
     }
 
     impl TestTrieCursorFactory {
@@ -445,7 +483,12 @@ mod tests {
             account_nodes: BTreeMap<Nibbles, BranchNodeCompact>,
             storage_nodes: B256Map<BTreeMap<Nibbles, BranchNodeCompact>>,
         ) -> Self {
-            Self { account_nodes, storage_nodes }
+            Self { account_nodes, storage_nodes, counts: None }
+        }
+
+        fn with_counts(mut self, counts: Rc<CursorCounts>) -> Self {
+            self.counts = Some(counts);
+            self
         }
     }
 
@@ -460,7 +503,11 @@ mod tests {
             Self: 'a;
 
         fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
-            Ok(TestTrieCursor { nodes: self.account_nodes.clone(), current: None })
+            Ok(TestTrieCursor {
+                nodes: self.account_nodes.clone(),
+                current: None,
+                counts: self.counts.clone(),
+            })
         }
 
         fn storage_trie_cursor(
@@ -471,6 +518,7 @@ mod tests {
                 nodes: self.storage_nodes.clone(),
                 hashed_address,
                 current: None,
+                counts: self.counts.clone(),
             })
         }
     }
@@ -479,6 +527,7 @@ mod tests {
     struct TestTrieCursor {
         nodes: BTreeMap<Nibbles, BranchNodeCompact>,
         current: Option<Nibbles>,
+        counts: Option<Rc<CursorCounts>>,
     }
 
     impl TrieCursor for TestTrieCursor {
@@ -486,6 +535,9 @@ mod tests {
             &mut self,
             key: Nibbles,
         ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            if let Some(counts) = &self.counts {
+                counts.seek_exacts.set(counts.seek_exacts.get() + 1);
+            }
             let entry = self.nodes.get(&key).cloned().map(|node| (key, node));
             self.current = entry.as_ref().map(|(key, _)| *key);
             Ok(entry)
@@ -495,12 +547,18 @@ mod tests {
             &mut self,
             key: Nibbles,
         ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            if let Some(counts) = &self.counts {
+                counts.seeks.set(counts.seeks.get() + 1);
+            }
             let entry = self.nodes.range(key..).next().map(|(key, node)| (*key, node.clone()));
             self.current = entry.as_ref().map(|(key, _)| *key);
             Ok(entry)
         }
 
         fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            if let Some(counts) = &self.counts {
+                counts.nexts.set(counts.nexts.get() + 1);
+            }
             let entry = match self.current {
                 Some(current) => self
                     .nodes
@@ -518,6 +576,9 @@ mod tests {
         }
 
         fn reset(&mut self) {
+            if let Some(counts) = &self.counts {
+                counts.resets.set(counts.resets.get() + 1);
+            }
             self.current = None;
         }
     }
@@ -527,6 +588,7 @@ mod tests {
         nodes: B256Map<BTreeMap<Nibbles, BranchNodeCompact>>,
         hashed_address: B256,
         current: Option<Nibbles>,
+        counts: Option<Rc<CursorCounts>>,
     }
 
     impl TestStorageTrieCursor {
@@ -540,6 +602,9 @@ mod tests {
             &mut self,
             key: Nibbles,
         ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            if let Some(counts) = &self.counts {
+                counts.seek_exacts.set(counts.seek_exacts.get() + 1);
+            }
             let entry = self
                 .current_nodes()
                 .and_then(|nodes| nodes.get(&key))
@@ -553,6 +618,9 @@ mod tests {
             &mut self,
             key: Nibbles,
         ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            if let Some(counts) = &self.counts {
+                counts.seeks.set(counts.seeks.get() + 1);
+            }
             let entry = self
                 .current_nodes()
                 .and_then(|nodes| nodes.range(key..).next())
@@ -562,6 +630,9 @@ mod tests {
         }
 
         fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            if let Some(counts) = &self.counts {
+                counts.nexts.set(counts.nexts.get() + 1);
+            }
             let entry = match self.current {
                 Some(current) => self
                     .current_nodes()
@@ -581,6 +652,9 @@ mod tests {
         }
 
         fn reset(&mut self) {
+            if let Some(counts) = &self.counts {
+                counts.resets.set(counts.resets.get() + 1);
+            }
             self.current = None;
         }
     }
@@ -594,6 +668,14 @@ mod tests {
 
     fn empty_branch_node() -> BranchNodeCompact {
         BranchNodeCompact::default()
+    }
+
+    #[derive(Debug, Default)]
+    struct CursorCounts {
+        seeks: Cell<usize>,
+        seek_exacts: Cell<usize>,
+        nexts: Cell<usize>,
+        resets: Cell<usize>,
     }
 
     fn dirty_cursor_error(error: DatabaseError) -> bool {
@@ -784,6 +866,99 @@ mod tests {
             Some((Nibbles::from_nibbles([0x0, 0x1]), other_inner_node))
         );
         assert_eq!(cursor.next().unwrap(), None);
+    }
+
+    #[test]
+    fn hashed_cursor_forward_seek_preserves_position() {
+        let account_0 = account(60);
+        let account_1 = account(61);
+        let outside_account = account(62);
+        let counts = Rc::new(CursorCounts::default());
+
+        let mut sparse =
+            SparseStateTrie::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::default();
+        sparse
+            .reveal_decoded_multiproof_v2(DecodedMultiProofV2 {
+                account_proofs: partial_two_leaf_proof(
+                    account_leaf(account_0),
+                    account_leaf(account_1),
+                ),
+                ..Default::default()
+            })
+            .unwrap();
+
+        let inner = TestHashedCursorFactory::new(
+            BTreeMap::from([(KEY_1, account_1), (KEY_2, outside_account)]),
+            B256Map::default(),
+        )
+        .with_counts(counts.clone());
+        let factory = SparseStateTrieCursorFactory::new(&sparse, inner);
+
+        let mut cursor = factory.hashed_account_cursor().unwrap();
+        assert_eq!(cursor.seek(KEY_0).unwrap(), Some((KEY_0, account_0)));
+        assert_eq!(counts.resets.get(), 0);
+        assert_eq!(counts.seeks.get(), 0);
+
+        assert_eq!(cursor.seek(KEY_1).unwrap(), Some((KEY_1, account_1)));
+        assert_eq!(counts.resets.get(), 0);
+        assert_eq!(counts.seeks.get(), 1);
+
+        assert_eq!(cursor.seek(KEY_2).unwrap(), None);
+        assert_eq!(counts.resets.get(), 0);
+        assert_eq!(counts.seeks.get(), 1);
+
+        assert_eq!(cursor.seek(KEY_0).unwrap(), Some((KEY_0, account_0)));
+        assert_eq!(counts.resets.get(), 1);
+    }
+
+    #[test]
+    fn trie_cursor_forward_seek_preserves_position() {
+        let account_0 = account(70);
+        let account_1 = account(71);
+        let inner_node = empty_branch_node();
+        let counts = Rc::new(CursorCounts::default());
+
+        let mut sparse =
+            SparseStateTrie::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::default();
+        sparse
+            .reveal_decoded_multiproof_v2(DecodedMultiProofV2 {
+                account_proofs: partial_two_leaf_proof(
+                    account_leaf(account_0),
+                    account_leaf(account_1),
+                ),
+                ..Default::default()
+            })
+            .unwrap();
+        sparse.root().unwrap();
+
+        let inner = TestTrieCursorFactory::new(
+            BTreeMap::from([
+                (Nibbles::from_nibbles([0x1, 0x2]), inner_node.clone()),
+                (Nibbles::from_nibbles([0x2]), empty_branch_node()),
+            ]),
+            B256Map::default(),
+        )
+        .with_counts(counts.clone());
+        let factory = SparseStateTrieTrieCursorFactory::new(&sparse, inner);
+
+        let mut cursor = factory.account_trie_cursor().unwrap();
+        assert_eq!(cursor.seek(Nibbles::default()).unwrap().unwrap().0, Nibbles::default());
+        assert_eq!(counts.resets.get(), 0);
+        assert_eq!(counts.seeks.get(), 0);
+
+        assert_eq!(
+            cursor.seek(Nibbles::from_nibbles([0x1, 0x2])).unwrap(),
+            Some((Nibbles::from_nibbles([0x1, 0x2]), inner_node))
+        );
+        assert_eq!(counts.resets.get(), 0);
+        assert_eq!(counts.seeks.get(), 1);
+
+        assert_eq!(cursor.seek(Nibbles::from_nibbles([0x2])).unwrap(), None);
+        assert_eq!(counts.resets.get(), 0);
+        assert_eq!(counts.seeks.get(), 1);
+
+        assert_eq!(cursor.seek(Nibbles::default()).unwrap().unwrap().0, Nibbles::default());
+        assert_eq!(counts.resets.get(), 1);
     }
 
     #[test]
