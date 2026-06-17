@@ -510,9 +510,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         fs::create_dir_all(target_dir)?;
         let startup_summary = summarize_download_startup(&planned_downloads.archives, target_dir)?;
         info!(target: "reth::cli",
-            reusable = startup_summary.reusable,
+            maybe_reusable = startup_summary.maybe_reusable,
             needs_download = startup_summary.needs_download,
-            "Startup integrity summary (plain output files)"
+            "Startup file summary (plain output sizes)"
         );
 
         info!(target: "reth::cli",
