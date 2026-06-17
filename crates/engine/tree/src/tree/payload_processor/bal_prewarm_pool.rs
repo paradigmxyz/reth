@@ -1,4 +1,5 @@
-use alloy_primitives::{Address, StorageKey};
+use alloy_primitives::{Address, StorageKey, B256};
+use dashmap::DashSet;
 use reth_execution_cache::{CachedStateProvider, ExecutionCache};
 use reth_provider::{
     AccountReader, BytecodeReader, ProviderResult, StateProvider, StateProviderBox,
@@ -26,7 +27,11 @@ enum PrewarmTarget {
 /// FIFO): one `BeginBlock`, then the worker's share of `Warm`s, then one `EndBlock`.
 enum PrewarmMsg {
     /// Open a read txn for the new block: build a provider over the parent state and hold it.
-    BeginBlock { build: Arc<BuildProviderFn>, caches: ExecutionCache },
+    BeginBlock {
+        build: Arc<BuildProviderFn>,
+        caches: ExecutionCache,
+        warmed_code_hashes: Arc<DashSet<B256>>,
+    },
     /// Warm one target into the held provider's cache. Ignored if no provider is held.
     Warm(PrewarmTarget),
     /// Drop the held provider (and its read txn).
@@ -66,9 +71,13 @@ impl BalPrewarmPool {
     /// Begins a block: hands every worker the provider builder and shared cache so each opens its
     /// own read txn over the parent state. Pair with [`end_block`](Self::end_block).
     pub(crate) fn begin_block(&self, build: Arc<BuildProviderFn>, caches: ExecutionCache) {
+        let warmed_code_hashes = Arc::new(DashSet::new());
         for worker in &self.workers {
-            let _ = worker
-                .send(PrewarmMsg::BeginBlock { build: build.clone(), caches: caches.clone() });
+            let _ = worker.send(PrewarmMsg::BeginBlock {
+                build: build.clone(),
+                caches: caches.clone(),
+                warmed_code_hashes: warmed_code_hashes.clone(),
+            });
         }
     }
 
@@ -118,17 +127,25 @@ impl BalPrewarmPool {
 /// This should explain why this particular value is picked.
 pub(crate) const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
 
+struct ActivePrewarmProvider {
+    provider: CachedStateProvider<StateProviderBox>,
+    warmed_code_hashes: Arc<DashSet<B256>>,
+}
+
 fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
     // The provider (and its MDBX read txn) held for the current block, between `BeginBlock` and
     // `EndBlock`. `None` while idle, so no read txn is pinned across the inter-block gap.
-    let mut provider: Option<CachedStateProvider<StateProviderBox>> = None;
+    let mut provider: Option<ActivePrewarmProvider> = None;
 
     // Blocks when idle; the channel disconnects (and the loop ends) when the pool is dropped.
     while let Ok(msg) = rx.recv() {
         match msg {
-            PrewarmMsg::BeginBlock { build, caches } => {
+            PrewarmMsg::BeginBlock { build, caches, warmed_code_hashes } => {
                 provider = match (build)() {
-                    Ok(inner) => Some(CachedStateProvider::new_prewarm(inner, caches)),
+                    Ok(inner) => Some(ActivePrewarmProvider {
+                        provider: CachedStateProvider::new_prewarm(inner, caches),
+                        warmed_code_hashes,
+                    }),
                     Err(err) => {
                         trace!(target: "engine::tree::bal_prewarm_pool", %err, "failed to build provider");
                         None
@@ -139,15 +156,17 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                 let Some(provider) = provider.as_ref() else { continue };
                 match target {
                     PrewarmTarget::Account(addr) => {
-                        if let Ok(Some(account)) = provider.basic_account(&addr) &&
+                        if let Ok(Some(account)) = provider.provider.basic_account(&addr) &&
                             let Some(code_hash) = account.bytecode_hash &&
                             code_hash != alloy_consensus::constants::KECCAK_EMPTY
                         {
-                            let _ = provider.bytecode_by_hash(&code_hash);
+                            if provider.warmed_code_hashes.insert(code_hash) {
+                                let _ = provider.provider.bytecode_by_hash(&code_hash);
+                            }
                         }
                     }
                     PrewarmTarget::Storage(addr, slot) => {
-                        let _ = provider.storage(addr, slot);
+                        let _ = provider.provider.storage(addr, slot);
                     }
                 }
             }
