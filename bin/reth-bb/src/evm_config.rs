@@ -6,19 +6,16 @@
 pub(crate) use reth_engine_primitives::BigBlockData;
 
 use alloy_consensus::transaction::Recovered;
-use alloy_eips::Decodable2718;
 use alloy_primitives::{Address, Bytes};
 use alloy_rpc_types::engine::ExecutionData;
 use core::{convert::Infallible, fmt};
-use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
+use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
     ConfigureEngineEvm, ConfigureEvm, ConfigureEvm2Engine, ConfigureEvm2Prewarm, EvmEnvFor,
     ExecutableTxIterator, ExecutionCtxFor, NextBlockEnvAttributes, TxEnvFor,
 };
 use reth_evm_ethereum::{EthEvmConfig, EthEvmEnv, Evm2TxEnv};
-use reth_primitives_traits::{
-    BlockTy, HeaderTy, SealedBlock, SealedHeader, SignedTransaction, TxTy,
-};
+use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader, TxTy};
 use reth_storage_api::StateProvider;
 use reth_storage_errors::any::AnyError;
 
@@ -198,25 +195,6 @@ where
         payload: &BigBlockData<ExecutionData>,
     ) -> Result<evm2::env::BlockEnv, Self::Error> {
         self.inner.evm2_block_env_for_payload(&payload.env_switches[0])
-    }
-
-    fn evm2_recovered_txs_for_payload(
-        &self,
-        payload: &BigBlockData<ExecutionData>,
-    ) -> Result<Vec<Recovered<TxTy<Self::Primitives>>>, Box<dyn core::error::Error + Send + Sync>>
-    {
-        payload
-            .env_switches
-            .iter()
-            .flat_map(|exec_data| exec_data.payload.transactions().iter())
-            .map(|tx| {
-                let tx =
-                    TransactionSigned::decode_2718_exact(tx.as_ref()).map_err(AnyError::new)?;
-                let signer = tx.try_recover().map_err(AnyError::new)?;
-                Ok(tx.with_signer(signer))
-            })
-            .collect::<Result<Vec<_>, AnyError>>()
-            .map_err(|err| Box::new(err) as Box<dyn core::error::Error + Send + Sync>)
     }
 }
 

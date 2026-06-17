@@ -5,8 +5,6 @@ use crate::ConfigureEvm2Prewarm;
 use crate::{ConfigureEvm, EvmEnvFor};
 #[cfg(feature = "std")]
 use alloc::boxed::Box;
-#[cfg(feature = "std")]
-use reth_primitives_traits::TxTy;
 use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader};
 #[cfg(feature = "std")]
 use reth_storage_api::StateProvider;
@@ -199,15 +197,5 @@ where
 
     fn evm2_block_env_for_payload(&self, payload: &T) -> Result<evm2::env::BlockEnv, Self::Error> {
         self.inner().evm2_block_env_for_payload(payload)
-    }
-
-    fn evm2_recovered_txs_for_payload(
-        &self,
-        payload: &T,
-    ) -> Result<
-        alloc::vec::Vec<alloy_consensus::transaction::Recovered<TxTy<Self::Primitives>>>,
-        alloc::boxed::Box<dyn core::error::Error + Send + Sync>,
-    > {
-        self.inner().evm2_recovered_txs_for_payload(payload)
     }
 }

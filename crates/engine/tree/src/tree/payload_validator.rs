@@ -127,7 +127,8 @@ use reth_chain_state::{
 };
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
-    ConfigureEvm2Engine, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
+    ConfigureEngineEvm, ConfigureEvm2Engine, ExecutableTxIterator, ExecutionPayload,
+    InvalidBlockHook, PayloadValidator,
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
@@ -394,7 +395,7 @@ where
     ) -> Result<EvmEnvFor<Evm>, Evm::Error>
     where
         V: PayloadValidator<T, Block = N::Block>,
-        Evm: ConfigureEvm2Engine<T::ExecutionData, Primitives = N>,
+        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         match input {
             BlockOrPayload::Payload(payload) => Ok(self.evm_config.evm_env_for_payload(payload)?),
@@ -409,7 +410,7 @@ where
     ) -> Result<impl ExecutableTxIterator<Evm>, NewPayloadError>
     where
         V: PayloadValidator<T, Block = N::Block>,
-        Evm: ConfigureEvm2Engine<T::ExecutionData, Primitives = N>,
+        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         Ok(match input {
             BlockOrPayload::Payload(payload) => {
@@ -434,7 +435,7 @@ where
     ) -> Result<ExecutionCtxFor<'a, Evm>, Evm::Error>
     where
         V: PayloadValidator<T, Block = N::Block>,
-        Evm: ConfigureEvm2Engine<T::ExecutionData, Primitives = N>,
+        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         match input {
             BlockOrPayload::Payload(payload) => Ok(self.evm_config.context_for_payload(payload)?),
