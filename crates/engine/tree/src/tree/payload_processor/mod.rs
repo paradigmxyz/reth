@@ -434,7 +434,7 @@ where
     /// ordered consumer can block for up to ~1ms waiting for the first slot. By converting
     /// a small head sequentially and sending it immediately, execution can start without
     /// waiting for rayon scheduling.
-    const PARALLEL_PREFETCH_COUNT: usize = 4;
+    const PARALLEL_PREFETCH_COUNT: usize = 1000;
 
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     ///
