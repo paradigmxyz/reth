@@ -105,10 +105,7 @@ pub struct CachedStateProvider<S> {
     /// Metrics for the cached state provider.
     metrics: Option<CachedStateMetrics>,
 
-    /// How cache hit/miss metrics are recorded.
-    metrics_mode: CacheMetricsMode,
-
-    /// Provider-local hit/miss counters used when metrics are buffered.
+    /// Provider-local hit/miss counters flushed when the provider is dropped.
     metric_counts: CacheMetricCounts,
 
     /// Whether cache misses should populate the shared execution cache.
@@ -146,31 +143,10 @@ impl<S> CachedStateProvider<S> {
         metrics: Option<CachedStateMetrics>,
         cache_stats: Option<Arc<CacheStats>>,
     ) -> Self {
-        Self::new_with_mode_and_metrics_mode(
-            state_provider,
-            caches,
-            fill_mode,
-            metrics,
-            cache_stats,
-            CacheMetricsMode::Immediate,
-        )
-    }
-
-    /// Creates a [`CachedStateProvider`] with explicit cache fill behavior, optional block-local
-    /// cache stats, and control over how cache hit/miss metrics are recorded.
-    pub const fn new_with_mode_and_metrics_mode(
-        state_provider: S,
-        caches: ExecutionCache,
-        fill_mode: CacheFillMode,
-        metrics: Option<CachedStateMetrics>,
-        cache_stats: Option<Arc<CacheStats>>,
-        metrics_mode: CacheMetricsMode,
-    ) -> Self {
         Self {
             state_provider,
             caches,
             metrics,
-            metrics_mode,
             metric_counts: CacheMetricCounts::new(),
             fill_mode,
             cache_stats,
@@ -221,18 +197,12 @@ impl<S> CachedStateProvider<S> {
 
     #[inline]
     fn record_metric(&self, kind: CacheMetricKind) {
-        match (&self.metrics, self.metrics_mode) {
-            (Some(metrics), CacheMetricsMode::Immediate) => metrics.record_access(kind, 1),
-            (Some(_), CacheMetricsMode::Buffered) => self.metric_counts.record(kind),
-            (None, _) => {}
+        if self.metrics.is_some() {
+            self.metric_counts.record(kind);
         }
     }
 
     fn flush_buffered_metrics(&self) {
-        if self.metrics_mode != CacheMetricsMode::Buffered {
-            return;
-        }
-
         let counts = self.metric_counts.take();
         if counts.is_empty() {
             return;
@@ -261,15 +231,6 @@ pub enum CacheFillMode {
     LookupOnly,
     /// Insert values loaded from the underlying provider.
     FillOnMiss,
-}
-
-/// Controls how execution-cache hit/miss metrics are recorded.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CacheMetricsMode {
-    /// Record each hit or miss directly.
-    Immediate,
-    /// Accumulate hit/miss counts locally and flush them when the provider is dropped.
-    Buffered,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
