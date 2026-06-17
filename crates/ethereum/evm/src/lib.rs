@@ -11,11 +11,7 @@
 
 extern crate alloc;
 
-#[cfg(feature = "std")]
-use alloc::vec::Vec;
 use alloc::{borrow::Cow, sync::Arc};
-#[cfg(feature = "std")]
-use alloy_consensus::transaction::Recovered;
 use alloy_consensus::Header;
 use alloy_eips::eip4895::Withdrawal;
 #[cfg(feature = "std")]
@@ -460,30 +456,6 @@ where
             payload,
             self.chain_spec.as_ref().blob_params_at_timestamp(payload.payload.timestamp()),
         ))
-    }
-
-    fn evm2_recovered_txs_for_payload(
-        &self,
-        payload: &ExecutionData,
-    ) -> Result<
-        Vec<Recovered<TransactionSigned>>,
-        alloc::boxed::Box<dyn core::error::Error + Send + Sync>,
-    > {
-        payload
-            .payload
-            .transactions()
-            .iter()
-            .map(|tx| {
-                let tx =
-                    TransactionSigned::decode_2718_exact(tx.as_ref()).map_err(AnyError::new)?;
-                let signer = tx.try_recover().map_err(AnyError::new)?;
-                Ok(tx.with_signer(signer))
-            })
-            .collect::<Result<Vec<_>, AnyError>>()
-            .map_err(|err| {
-                alloc::boxed::Box::new(err)
-                    as alloc::boxed::Box<dyn core::error::Error + Send + Sync>
-            })
     }
 }
 

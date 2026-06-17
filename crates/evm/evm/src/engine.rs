@@ -2,8 +2,8 @@ use crate::{
     execute::{ExecutableTxFor, ExecutableTxParts, RecoveredTx},
     ConfigureEvm, EvmEnvFor, ExecutionCtxFor, TxEnvFor,
 };
-use alloc::{boxed::Box, vec::Vec};
-use alloy_consensus::transaction::{Either, Recovered};
+use alloc::boxed::Box;
+use alloy_consensus::transaction::Either;
 use alloy_primitives::Address;
 use core::convert::Infallible;
 use rayon::prelude::*;
@@ -56,12 +56,6 @@ pub trait ConfigureEvm2Engine<ExecutionData>: ConfigureEngineEvm<ExecutionData> 
         &self,
         payload: &ExecutionData,
     ) -> Result<evm2::env::BlockEnv, Self::Error>;
-
-    /// Returns recovered transactions for evm2-native payload execution.
-    fn evm2_recovered_txs_for_payload(
-        &self,
-        payload: &ExecutionData,
-    ) -> Result<Vec<Recovered<TxTy<Self::Primitives>>>, Box<dyn core::error::Error + Send + Sync>>;
 }
 
 /// Configuration for evm2-native transaction prewarming.
