@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, StorageKey};
+use alloy_primitives::{Address, StorageKey, B256};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache};
 use reth_provider::{
     AccountReader, BytecodeReader, ProviderResult, StateProvider, StateProviderBox,
@@ -141,7 +141,8 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                     PrewarmTarget::Account(addr) => {
                         if let Ok(Some(account)) = provider.basic_account(&addr) &&
                             let Some(code_hash) = account.bytecode_hash &&
-                            code_hash != alloy_consensus::constants::KECCAK_EMPTY
+                            code_hash != alloy_consensus::constants::KECCAK_EMPTY &&
+                            code_hash != B256::ZERO
                         {
                             let _ = provider.bytecode_by_hash(&code_hash);
                         }
