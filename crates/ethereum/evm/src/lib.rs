@@ -27,9 +27,10 @@ use reth_ethereum_primitives::TransactionSigned;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 #[cfg(feature = "std")]
 use reth_evm::{
-    evm2_precompile_cache::PrecompileCacheMap, ConfigureEngineEvm, Evm2Env, ExecutableTxIterator,
+    evm2_precompile_cache::{CachedPrecompileProvider, PrecompileCacheMap},
+    ConfigureEngineEvm, ExecutableTxIterator,
 };
-use reth_evm::{ConfigureEvm, EvmEnvFor, NextBlockEnvAttributes};
+use reth_evm::{ConfigureEvm, Evm2Env, EvmEnvFor, NextBlockEnvAttributes};
 #[cfg(feature = "std")]
 use reth_primitives_traits::SignedTransaction;
 use reth_primitives_traits::{SealedBlock, SealedHeader};
@@ -359,6 +360,54 @@ where
             let _ = db;
             reth_evm::execute::UnsupportedExecutor::default()
         }
+    }
+
+    #[cfg(feature = "std")]
+    fn evm_with_env<DB>(&self, db: DB, env: EthEvmEnv) -> evm2::Evm<evm2::BaseEvmTypes>
+    where
+        DB: evm2::evm::DynDatabase + 'static,
+    {
+        let mut version = evm2::Version::new(env.spec);
+        version.chain_id = self.chain_spec.chain_id();
+
+        evm2::Evm::<evm2::BaseEvmTypes>::new_with_execution_config(
+            evm2::ExecutionConfig::for_spec_and_version(env.spec, version),
+            env.spec,
+            env.block,
+            evm2::ethereum::ethereum_tx_registry(env.spec),
+            db,
+            alloc::boxed::Box::new(CachedPrecompileProvider::new(
+                evm2::Precompiles::base(env.spec),
+                self.precompile_cache_map.clone(),
+                env.spec,
+                None,
+            )),
+        )
+    }
+
+    #[cfg(feature = "std")]
+    fn pre_block_state_changes<'a, DB>(
+        &self,
+        db: DB,
+        env: EthEvmEnv,
+        block_number: u64,
+        ctx: EthBlockExecutionCtx<'a>,
+    ) -> Result<evm2::BlockStateAccumulator, alloc::boxed::Box<dyn core::error::Error + Send + Sync>>
+    where
+        Self: 'a,
+        DB: evm2::evm::Database + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static,
+    {
+        let mut evm = self.evm_with_env(evm2::evm::Db::new(db), env);
+        crate::evm2_executor::apply_pre_execution_system_calls::<DB>(
+            &mut evm,
+            block_number,
+            ctx.as_evm2_block_execution_context(
+                self.chain_spec.chain_id(),
+                self.chain_spec.deposit_contract_address(),
+            ),
+        )
+        .map_err(Into::into)
     }
 
     #[cfg(feature = "std")]
