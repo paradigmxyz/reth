@@ -218,7 +218,7 @@ impl Default for TreeConfig {
             legacy_state_root: false,
             always_compare_trie_updates: false,
             disable_state_cache: false,
-            disable_prewarming: false,
+            disable_prewarming: true,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),

@@ -269,7 +269,7 @@ impl Default for DefaultEngineValues {
             invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
             legacy_state_root_task_enabled: false,
             state_cache_disabled: false,
-            prewarming_disabled: false,
+            prewarming_disabled: true,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
             state_root_task_compare_updates: false,
@@ -352,8 +352,14 @@ pub struct EngineArgs {
     #[arg(long = "engine.disable-state-cache", default_value_t = DefaultEngineValues::get_global().state_cache_disabled)]
     pub state_cache_disabled: bool,
 
-    /// Disable parallel prewarming
-    #[arg(long = "engine.disable-prewarming", alias = "engine.disable-caching-and-prewarming", default_value_t = DefaultEngineValues::get_global().prewarming_disabled)]
+    /// Disable transaction prewarming
+    #[arg(
+        long = "engine.disable-prewarming",
+        alias = "engine.disable-caching-and-prewarming",
+        default_value_t = DefaultEngineValues::get_global().prewarming_disabled,
+        num_args = 0..=1,
+        default_missing_value = "true",
+    )]
     pub prewarming_disabled: bool,
 
     /// CAUTION: This CLI flag has no effect anymore. The parallel sparse trie is always enabled.
@@ -720,6 +726,24 @@ mod tests {
             args.persistence_backpressure_threshold(),
             DefaultEngineValues::get_global().persistence_backpressure_threshold
         );
+    }
+
+    #[test]
+    fn transaction_prewarming_defaults_to_disabled_but_can_be_enabled() {
+        let default_args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
+        assert!(default_args.prewarming_disabled);
+        assert!(default_args.tree_config().disable_prewarming());
+
+        let enabled_args =
+            CommandParser::<EngineArgs>::parse_from(["reth", "--engine.disable-prewarming=false"])
+                .args;
+        assert!(!enabled_args.prewarming_disabled);
+        assert!(!enabled_args.tree_config().disable_prewarming());
+
+        let disabled_args =
+            CommandParser::<EngineArgs>::parse_from(["reth", "--engine.disable-prewarming"]).args;
+        assert!(disabled_args.prewarming_disabled);
+        assert!(disabled_args.tree_config().disable_prewarming());
     }
 
     #[test]
