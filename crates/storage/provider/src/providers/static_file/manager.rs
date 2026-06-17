@@ -493,6 +493,18 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         tx_nums: &[TxNumber],
         ctx: &StaticFileWriteCtx,
     ) -> ProviderResult<()> {
+        if !ctx.receipts_prunable {
+            for (block, &first_tx) in blocks.iter().zip(tx_nums) {
+                let block_number = block.recovered_block().number();
+                w.increment_block(block_number)?;
+
+                for (i, receipt) in block.execution_outcome().receipts.iter().enumerate() {
+                    w.append_receipt(first_tx + i as u64, receipt)?;
+                }
+            }
+            return Ok(())
+        }
+
         for (block, &first_tx) in blocks.iter().zip(tx_nums) {
             let block_number = block.recovered_block().number();
             w.increment_block(block_number)?;
