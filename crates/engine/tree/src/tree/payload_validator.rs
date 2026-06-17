@@ -1102,7 +1102,8 @@ where
 
         let transaction_count = input.transaction_count();
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
-        let executed_tx_index = Arc::clone(handle.executed_tx_index());
+        let executed_tx_index =
+            handle.tracks_executed_tx_index().then(|| Arc::clone(handle.executed_tx_index()));
         executor.evm_mut().db_mut().set_state_hook(
             handle.state_hook().map(|hook| Box::new(hook) as Box<dyn OnStateHook + 'static>),
         );
@@ -1115,7 +1116,7 @@ where
             transaction_count,
             handle.iter_transactions(),
             &receipt_tx,
-            &executed_tx_index,
+            executed_tx_index.as_deref(),
             has_bal,
         )?;
         drop(receipt_tx);
@@ -1266,7 +1267,7 @@ where
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
         receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
-        executed_tx_index: &AtomicUsize,
+        executed_tx_index: Option<&AtomicUsize>,
         has_bal: bool,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
@@ -1326,7 +1327,9 @@ where
             self.metrics.record_transaction_execution(tx_start.elapsed());
 
             // advance the shared counter so prewarm workers skip already-executed txs
-            executed_tx_index.store(senders.len(), Ordering::Relaxed);
+            if let Some(executed_tx_index) = executed_tx_index {
+                executed_tx_index.store(senders.len(), Ordering::Relaxed);
+            }
 
             let current_len = executor.receipts().len();
             if current_len > last_sent_len {

@@ -534,6 +534,7 @@ where
         } else {
             PrewarmMode::Transactions(transactions)
         };
+        let track_executed_tx_index = matches!(mode, PrewarmMode::Transactions(_));
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
@@ -572,6 +573,7 @@ where
             saved_cache,
             to_prewarm_task: Some(to_prewarm_task),
             executed_tx_index,
+            track_executed_tx_index,
             cache_metrics: self.cache_metrics.clone(),
         }
     }
@@ -887,6 +889,11 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
         &self.prewarm_handle.executed_tx_index
     }
 
+    /// Returns true when transaction prewarming is active and reads the progress counter.
+    pub const fn tracks_executed_tx_index(&self) -> bool {
+        self.prewarm_handle.track_executed_tx_index
+    }
+
     /// Terminates the pre-warming transaction processing.
     ///
     /// Note: This does not terminate the task yet.
@@ -937,6 +944,8 @@ pub struct CacheTaskHandle<R> {
     /// Shared counter tracking the next transaction index to be executed by the main execution
     /// loop. Prewarm workers skip transactions below this index.
     executed_tx_index: Arc<AtomicUsize>,
+    /// Whether transaction prewarming workers read the executed transaction index.
+    track_executed_tx_index: bool,
     /// Metrics for the execution cache.
     cache_metrics: Option<CachedStateMetrics>,
 }
