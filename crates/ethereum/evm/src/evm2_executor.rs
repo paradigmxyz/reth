@@ -19,27 +19,25 @@ use alloy_eips::{
 use alloy_primitives::{map::AddressMap, Address, Bytes, B256, KECCAK256_EMPTY, U256};
 use alloy_sol_types::{sol, SolEvent};
 use core::convert::Infallible;
+#[cfg(test)]
+use evm2::evm::Db;
+#[cfg(test)]
+use evm2::Precompiles;
 use evm2::{
     bytecode::Bytecode as Evm2Bytecode,
     env::BlockEnv,
     ethereum::{ethereum_tx_registry, RecoveredTxEnvelope},
     evm::{
         precompile::PrecompileProvider, AccountChangeRef, AccountInfo, BlockStateAccumulator,
-        Database, Db, DbErrorCode, DynDatabase, StateChangeSink, StateChangeSource, StateChanges,
+        Database, DbErrorCode, DynDatabase, StateChangeSink, StateChangeSource, StateChanges,
         StorageChange, Tracked, BEACON_ROOTS_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS,
         HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
     },
     registry::HandlerError,
-    BaseEvmTypes, Evm, ExecutionConfig, Precompiles, SpecId, TxResult, Version,
+    BaseEvmTypes, Evm, ExecutionConfig, SpecId, TxResult, Version,
 };
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_execution_types::{BlockExecutionOutput, HashedPostStateSink};
-#[cfg(feature = "std")]
-use reth_storage_api::{
-    BorrowedEvm2StateProviderDatabase, Evm2StateProviderDatabase, StateProvider,
-};
-#[cfg(feature = "std")]
-use reth_storage_errors::provider::ProviderError;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 
 const DEPOSIT_BYTES_SIZE: usize = 48 + 32 + 8 + 96 + 8;
@@ -164,7 +162,8 @@ impl Evm2HashedStateMode {
 }
 
 /// Executes a block worth of recovered Ethereum transactions with evm2.
-pub fn execute_evm2_block<DB>(
+#[cfg(test)]
+fn execute_evm2_block<DB>(
     spec_id: SpecId,
     block_env: BlockEnv,
     database: DB,
@@ -185,7 +184,8 @@ where
 }
 
 /// Executes a block worth of recovered Ethereum transactions and post-block withdrawals with evm2.
-pub fn execute_evm2_block_with_withdrawals<DB>(
+#[cfg(test)]
+fn execute_evm2_block_with_withdrawals<DB>(
     spec_id: SpecId,
     block_env: BlockEnv,
     database: DB,
@@ -213,7 +213,8 @@ where
 }
 
 /// Executes a block worth of recovered Ethereum transactions with additional block-level context.
-pub fn execute_evm2_block_with_context<DB>(
+#[cfg(test)]
+fn execute_evm2_block_with_context<DB>(
     spec_id: SpecId,
     block_env: BlockEnv,
     database: DB,
@@ -237,7 +238,8 @@ where
 
 /// Executes a block worth of recovered Ethereum transactions with additional block-level context
 /// and the provided precompile provider.
-pub fn execute_evm2_block_with_context_and_precompiles<DB>(
+#[cfg(test)]
+fn execute_evm2_block_with_context_and_precompiles<DB>(
     spec_id: SpecId,
     block_env: BlockEnv,
     database: DB,
@@ -345,38 +347,6 @@ where
 
 /// Executes a block worth of evm2-native recovered transactions with additional block-level
 /// context, invoking `on_transaction_executed` after each transaction is committed to the block
-/// state and `on_hashed_state_update` after each committed state update.
-#[cfg(feature = "std")]
-pub(crate) fn execute_evm2_block_with_context_precompiles_and_hooks_envelopes<DB>(
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    database: impl DynDatabase + 'static,
-    block_number: u64,
-    transactions: impl IntoIterator<Item = RecoveredTxEnvelope>,
-    context: Evm2BlockExecutionContext<'_>,
-    precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
-    on_transaction_executed: impl FnMut(usize),
-    on_hashed_state_update: impl FnMut(HashedPostState),
-) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<DB::Error>>
-where
-    DB: Database + 'static,
-{
-    execute_evm2_block_with_context_precompiles_and_hooks_envelopes_with_hashed_state_mode::<DB>(
-        spec_id,
-        block_env,
-        database,
-        block_number,
-        transactions,
-        context,
-        precompiles,
-        on_transaction_executed,
-        on_hashed_state_update,
-        Evm2HashedStateMode::OutputAndStream,
-    )
-}
-
-/// Executes a block worth of evm2-native recovered transactions with additional block-level
-/// context, invoking `on_transaction_executed` after each transaction is committed to the block
 /// state and optionally producing hashed post-state according to `hashed_state_mode`.
 pub(crate) fn execute_evm2_block_with_context_precompiles_and_hooks_envelopes_with_hashed_state_mode<
     DB,
@@ -469,248 +439,6 @@ where
     output.result.requests = requests;
 
     Ok(output)
-}
-
-/// Executes a block worth of recovered Ethereum transactions with an evm2 database adapter backed
-/// by a Reth state provider.
-#[cfg(feature = "std")]
-pub fn execute_evm2_block_with_state_provider<DB>(
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    state_provider: DB,
-    block_number: u64,
-    transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
-) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<ProviderError>>
-where
-    DB: StateProvider + Send + 'static,
-{
-    execute_evm2_block(
-        spec_id,
-        block_env,
-        Evm2StateProviderDatabase::new(state_provider),
-        block_number,
-        transactions,
-    )
-}
-
-/// Executes a block worth of recovered Ethereum transactions and withdrawals with an evm2 database
-/// adapter backed by a Reth state provider.
-#[cfg(feature = "std")]
-pub fn execute_evm2_block_with_state_provider_and_withdrawals<DB>(
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    state_provider: DB,
-    block_number: u64,
-    transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
-    withdrawals: Option<&[Withdrawal]>,
-) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<ProviderError>>
-where
-    DB: StateProvider + Send + 'static,
-{
-    execute_evm2_block_with_withdrawals(
-        spec_id,
-        block_env,
-        Evm2StateProviderDatabase::new(state_provider),
-        block_number,
-        transactions,
-        withdrawals,
-    )
-}
-
-/// Executes a block worth of recovered Ethereum transactions with additional block-level context
-/// and an evm2 database adapter backed by a Reth state provider.
-#[cfg(feature = "std")]
-pub fn execute_evm2_block_with_state_provider_context<DB>(
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    state_provider: DB,
-    block_number: u64,
-    transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
-    context: Evm2BlockExecutionContext<'_>,
-) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<ProviderError>>
-where
-    DB: StateProvider + Send + 'static,
-{
-    execute_evm2_block_with_context(
-        spec_id,
-        block_env,
-        Evm2StateProviderDatabase::new(state_provider),
-        block_number,
-        transactions,
-        context,
-    )
-}
-
-/// Executes a block worth of recovered Ethereum transactions with additional block-level context
-/// and an evm2 database adapter backed by a Reth state provider, invoking
-/// `on_transaction_executed` after each transaction is committed to the block state.
-#[cfg(feature = "std")]
-pub fn execute_evm2_block_with_state_provider_context_and_hook<DB>(
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    state_provider: DB,
-    block_number: u64,
-    transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
-    context: Evm2BlockExecutionContext<'_>,
-    on_transaction_executed: impl FnMut(usize),
-) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<ProviderError>>
-where
-    DB: StateProvider + Send + 'static,
-{
-    execute_evm2_block_with_state_provider_context_precompiles_and_hook(
-        spec_id,
-        block_env,
-        state_provider,
-        block_number,
-        transactions,
-        context,
-        Box::new(Precompiles::base(spec_id)),
-        on_transaction_executed,
-    )
-}
-
-/// Executes a block worth of recovered Ethereum transactions with additional block-level context
-/// and an evm2 database adapter backed by a Reth state provider, using the provided precompile
-/// provider and invoking `on_transaction_executed` after each transaction is committed to the block
-/// state.
-#[cfg(feature = "std")]
-pub fn execute_evm2_block_with_state_provider_context_precompiles_and_hook<DB>(
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    state_provider: DB,
-    block_number: u64,
-    transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
-    context: Evm2BlockExecutionContext<'_>,
-    precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
-    on_transaction_executed: impl FnMut(usize),
-) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<ProviderError>>
-where
-    DB: StateProvider + Send + 'static,
-{
-    execute_evm2_block_with_context_precompiles_and_hook::<Evm2StateProviderDatabase<DB>>(
-        spec_id,
-        block_env,
-        Db::new(Evm2StateProviderDatabase::new(state_provider)),
-        block_number,
-        transactions,
-        context,
-        precompiles,
-        on_transaction_executed,
-    )
-}
-
-/// Executes a block worth of evm2-native recovered transactions with additional block-level context
-/// and an evm2 database adapter backed by a Reth state provider, using the provided precompile
-/// provider and invoking `on_transaction_executed` after each transaction is committed to the block
-/// state.
-#[cfg(feature = "std")]
-pub fn execute_evm2_block_with_state_provider_context_precompiles_and_hook_envelopes<DB>(
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    state_provider: DB,
-    block_number: u64,
-    transactions: impl IntoIterator<Item = RecoveredTxEnvelope>,
-    context: Evm2BlockExecutionContext<'_>,
-    precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
-    on_transaction_executed: impl FnMut(usize),
-) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<ProviderError>>
-where
-    DB: StateProvider + Send + 'static,
-{
-    execute_evm2_block_with_context_precompiles_and_hook_envelopes::<Evm2StateProviderDatabase<DB>>(
-        spec_id,
-        block_env,
-        Db::new(Evm2StateProviderDatabase::new(state_provider)),
-        block_number,
-        transactions,
-        context,
-        precompiles,
-        on_transaction_executed,
-    )
-}
-
-/// Executes a block worth of evm2-native recovered transactions with additional block-level context
-/// and an evm2 database adapter backed by a Reth state provider, using the provided precompile
-/// provider and invoking hooks after transactions and state updates are committed.
-#[cfg(feature = "std")]
-pub fn execute_evm2_block_with_state_provider_context_precompiles_and_hooks_envelopes<DB>(
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    state_provider: DB,
-    block_number: u64,
-    transactions: impl IntoIterator<Item = RecoveredTxEnvelope>,
-    context: Evm2BlockExecutionContext<'_>,
-    precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
-    on_transaction_executed: impl FnMut(usize),
-    on_hashed_state_update: impl FnMut(HashedPostState),
-) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<ProviderError>>
-where
-    DB: StateProvider + Send + 'static,
-{
-    execute_evm2_block_with_context_precompiles_and_hooks_envelopes::<Evm2StateProviderDatabase<DB>>(
-        spec_id,
-        block_env,
-        Db::new(Evm2StateProviderDatabase::new(state_provider)),
-        block_number,
-        transactions,
-        context,
-        precompiles,
-        on_transaction_executed,
-        on_hashed_state_update,
-    )
-}
-
-/// Executes a block worth of evm2-native recovered transactions with additional block-level
-/// context and explicit hashed post-state output behavior.
-#[cfg(feature = "std")]
-pub fn execute_evm2_block_with_state_provider_context_precompiles_and_hooks_envelopes_with_hashed_state_mode<
-    DB,
->(
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    state_provider: DB,
-    block_number: u64,
-    transactions: impl IntoIterator<Item = RecoveredTxEnvelope>,
-    context: Evm2BlockExecutionContext<'_>,
-    precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
-    on_transaction_executed: impl FnMut(usize),
-    on_hashed_state_update: impl FnMut(HashedPostState),
-    hashed_state_mode: Evm2HashedStateMode,
-) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<ProviderError>>
-where
-    DB: StateProvider + Send + 'static,
-{
-    execute_evm2_block_with_context_precompiles_and_hooks_envelopes_with_hashed_state_mode::<
-        Evm2StateProviderDatabase<DB>,
-    >(
-        spec_id,
-        block_env,
-        Db::new(Evm2StateProviderDatabase::new(state_provider)),
-        block_number,
-        transactions,
-        context,
-        precompiles,
-        on_transaction_executed,
-        on_hashed_state_update,
-        hashed_state_mode,
-    )
-}
-
-/// Executes a block worth of recovered Ethereum transactions with additional block-level context
-/// and an evm2 database adapter backed by a borrowed Reth state provider.
-#[cfg(feature = "std")]
-pub fn execute_evm2_block_with_borrowed_state_provider_context(
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    state_provider: &dyn StateProvider,
-    block_number: u64,
-    transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
-    context: Evm2BlockExecutionContext<'_>,
-) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<ProviderError>> {
-    // SAFETY: The borrowed database is constructed and consumed by this synchronous execution call.
-    // It is not stored beyond `execute_evm2_block_with_context`.
-    let db = unsafe { BorrowedEvm2StateProviderDatabase::new(state_provider) };
-    execute_evm2_block_with_context(spec_id, block_env, db, block_number, transactions, context)
 }
 
 fn map_handler_error<DB>(

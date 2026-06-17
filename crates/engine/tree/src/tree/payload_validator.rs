@@ -103,7 +103,7 @@ use crate::tree::{
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     multiproof::{StateRootComputeOutcome, StateRootHandle, StateRootMessage},
     payload_processor::{PayloadProcessor, PayloadProcessorSpawnOptions},
-    precompile_cache::{CachedPrecompileProvider, PrecompileCacheMap},
+    precompile_cache::PrecompileCacheMap,
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
     PayloadHandle, StateProviderBuilder, TreeConfig, WaitForCaches,
@@ -136,8 +136,7 @@ use reth_evm::{
     ConfigureEvm, Evm2Env, EvmEnvFor, ExecutionCtxFor,
 };
 use reth_evm_ethereum::{
-    execute_evm2_block_with_state_provider_context_precompiles_and_hooks_envelopes_with_hashed_state_mode,
-    Evm2BlockExecutionContext, Evm2BlockSystemCalls, Evm2HashedStateMode, Evm2TxEnv,
+    AsEvm2BlockExecutionContext, Evm2HashedStateMode, Evm2PayloadExecutor, Evm2TxEnv,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
 use reth_execution_types::evm2_state_source_hashed_post_state;
@@ -151,10 +150,10 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     providers::{OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory},
-    BlockExecutionOutput, BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
-    StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StorageChangeSetReader, StorageSettingsCache,
+    BlockExecutionOutput, BlockNumReader, BlockReader, BorrowedEvm2StateProviderDatabase,
+    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
+    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,
+    StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
 use reth_trie_common::KeccakKeyHasher;
@@ -293,8 +292,6 @@ where
     config: TreeConfig,
     /// Payload processor for state root computation.
     payload_processor: PayloadProcessor<Evm>,
-    /// Shared evm2 precompile cache for prewarming and execution.
-    precompile_cache_map: PrecompileCacheMap<evm2::SpecId>,
     /// Hook to call when invalid blocks are encountered.
     #[debug(skip)]
     invalid_block_hook: Box<dyn InvalidBlockHook<Evm::Primitives>>,
@@ -355,7 +352,6 @@ where
             consensus,
             evm_config,
             payload_processor,
-            precompile_cache_map,
             config,
             invalid_block_hook,
             metrics: EngineApiMetrics::default(),
@@ -467,6 +463,8 @@ where
         V: PayloadValidator<T, Block = N::Block> + Clone,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N, TxEnv = Evm2TxEnv>,
         EvmEnvFor<Evm>: Evm2Env,
+        for<'a> ExecutionCtxFor<'a, Evm>: AsEvm2BlockExecutionContext,
+        Evm::Executor<BorrowedEvm2StateProviderDatabase>: Evm2PayloadExecutor,
         N: NodePrimitives<SignedTx = TransactionSigned, Receipt = Receipt>,
     {
         let parent_hash = input.parent_hash();
@@ -1140,6 +1138,8 @@ where
         T::ExecutionData: ExecutionPayload,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N, TxEnv = Evm2TxEnv>,
         EvmEnvFor<Evm>: Evm2Env,
+        for<'a> ExecutionCtxFor<'a, Evm>: AsEvm2BlockExecutionContext,
+        Evm::Executor<BorrowedEvm2StateProviderDatabase>: Evm2PayloadExecutor,
         N: NodePrimitives<SignedTx = TransactionSigned, Receipt = Receipt>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
@@ -1160,26 +1160,11 @@ where
             })
             .collect::<Result<Vec<_>, BlockExecutionError>>()?;
 
-        let spec_id = env.evm_env.spec_id();
-        let block_env = env.evm_env.block_env();
-        let block_number = block_env.number.to::<u64>();
-        let context = Evm2BlockExecutionContext {
-            chain_id: self.evm_config.chain_id(),
-            system_calls: Some(Evm2BlockSystemCalls {
-                parent_hash: input.parent_hash(),
-                parent_beacon_block_root: input.parent_beacon_block_root(),
-            }),
-            ommers: None,
-            withdrawals: env.withdrawals.as_deref(),
-            deposit_contract_address: self.evm_config.deposit_contract_address(),
-        };
-        let precompiles: Box<dyn evm2::precompile::PrecompileProvider<evm2::BaseEvmTypes>> =
-            Box::new(CachedPrecompileProvider::new(
-                evm2::Precompiles::base(spec_id),
-                self.precompile_cache_map.clone(),
-                spec_id,
-                None,
-            ));
+        let execution_ctx = self.execution_ctx_for(input).map_err(BlockExecutionError::other)?;
+        let context = execution_ctx.as_evm2_block_execution_context(
+            self.evm_config.chain_id(),
+            self.evm_config.deposit_contract_address(),
+        );
 
         let state_hook_sender = handle.state_hook_sender();
         let streamed_state_updates = state_hook_sender.is_some();
@@ -1195,14 +1180,13 @@ where
                         sender.send_hashed_state(hashed_state);
                     }
                 };
-                execute_evm2_block_with_state_provider_context_precompiles_and_hooks_envelopes_with_hashed_state_mode(
-                    spec_id,
-                    block_env,
-                    state_provider,
-                    block_number,
+                // SAFETY: The borrowed evm2 database is consumed by this synchronous block
+                // execution call and cannot outlive `state_provider`.
+                let db = unsafe { BorrowedEvm2StateProviderDatabase::new(&state_provider) };
+                self.evm_config.executor(db).execute_payload_with_hashed_state_hook(
+                    env.evm_env.clone(),
                     transactions,
                     context,
-                    precompiles,
                     |executed| {
                         executed_tx_index.store(executed, Ordering::Relaxed);
                     },
@@ -2088,6 +2072,8 @@ where
         + ConfigureEvm<Primitives = N>
         + 'static,
     EvmEnvFor<Evm>: Evm2Env,
+    for<'a> ExecutionCtxFor<'a, Evm>: AsEvm2BlockExecutionContext,
+    Evm::Executor<BorrowedEvm2StateProviderDatabase>: Evm2PayloadExecutor,
     Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
 {
     fn validate_payload_attributes_against_header(

@@ -18,7 +18,10 @@ use std::sync::Arc;
 
 use alloy_genesis::Genesis;
 use alloy_primitives::B256;
-use reth_engine_tree::tree::{payload_validator::CustomStateRoot, BasicEngineValidator};
+use reth_engine_tree::tree::{
+    payload_validator::CustomStateRoot, AsEvm2BlockExecutionContext, BasicEngineValidator,
+    Evm2PayloadExecutor,
+};
 use reth_ethereum::{
     chainspec::ChainSpec,
     evm::Evm2TxEnv,
@@ -33,10 +36,11 @@ use reth_ethereum::{
         core::{args::RpcServerArgs, node_config::NodeConfig},
         EthereumAddOns, EthereumEngineValidatorBuilder, EthereumEthApiBuilder, EthereumNode,
     },
+    provider::BorrowedEvm2StateProviderDatabase,
     tasks::Runtime,
     EthPrimitives,
 };
-use reth_evm::{ConfigureEvm, Evm2Env, EvmEnvFor};
+use reth_evm::{ConfigureEvm, Evm2Env, EvmEnvFor, ExecutionCtxFor};
 use reth_trie::updates::TrieUpdates;
 
 // ---------------------------------------------------------------------------
@@ -68,6 +72,8 @@ where
         > + ConfigureEvm<Primitives = EthPrimitives, TxEnv = Evm2TxEnv>,
     >,
     EvmEnvFor<N::Evm>: Evm2Env,
+    for<'a> ExecutionCtxFor<'a, N::Evm>: AsEvm2BlockExecutionContext,
+    <N::Evm as ConfigureEvm>::Executor<BorrowedEvm2StateProviderDatabase>: Evm2PayloadExecutor,
 {
     type EngineValidator = BasicEngineValidator<
         N::Provider,

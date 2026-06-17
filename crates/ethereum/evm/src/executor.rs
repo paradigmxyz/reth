@@ -2,23 +2,32 @@
 
 use crate::{
     evm2_block_env_with_blob_params,
-    evm2_executor::execute_evm2_block_with_dyn_database_context_and_precompiles, evm2_spec,
-    Evm2BlockExecutionContext, Evm2BlockSystemCalls, Evm2ExecutionError,
+    evm2_executor::{
+        execute_evm2_block_with_context_precompiles_and_hooks_envelopes_with_hashed_state_mode,
+        execute_evm2_block_with_dyn_database_context_and_precompiles,
+    },
+    evm2_spec, Evm2BlockExecutionContext, Evm2BlockSystemCalls, Evm2ExecutionError,
+    Evm2HashedStateMode,
 };
 use alloc::{rc::Rc, sync::Arc, vec::Vec};
 use alloy_consensus::{transaction::Recovered, Header};
 use alloy_primitives::Bytes;
 use core::cell::RefCell;
-use evm2::evm::{CacheDB, Database, Db, DbErrorCode, DbResult, DynDatabase, StateChangeSource};
+use evm2::{
+    ethereum::RecoveredTxEnvelope,
+    evm::{CacheDB, Database, Db, DbErrorCode, DbResult, DynDatabase, StateChangeSource},
+};
 use reth_chainspec::{EthChainSpec, EthExecutorSpec};
 use reth_ethereum_forks::Hardforks;
 use reth_ethereum_primitives::{Block, EthPrimitives, Receipt, TransactionSigned};
 use reth_evm::{
     evm2_precompile_cache::{CachedPrecompileProvider, PrecompileCacheMap},
     execute::{BlockExecutionOutput, ExecutionOutcome, Executor},
+    Evm2Env,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{BlockBody, RecoveredBlock};
+use reth_trie_common::HashedPostState;
 
 /// evm2-backed Ethereum block executor.
 #[derive(Debug, Clone)]
@@ -154,6 +163,75 @@ where
 
     fn take_bal(&mut self) -> Option<Bytes> {
         None
+    }
+}
+
+/// Specialized evm2 executor hooks used by engine payload validation.
+pub trait Evm2PayloadExecutor {
+    /// Error returned by payload execution.
+    type Error: core::error::Error + Send + Sync + 'static;
+
+    /// Executes evm2-native transaction envelopes with progress and hashed-state hooks.
+    fn execute_payload_with_hashed_state_hook<I, F, H, Env>(
+        self,
+        evm_env: Env,
+        transactions: I,
+        context: Evm2BlockExecutionContext<'_>,
+        on_transaction_executed: F,
+        on_hashed_state_update: H,
+        hashed_state_mode: Evm2HashedStateMode,
+    ) -> Result<BlockExecutionOutput<Receipt>, Self::Error>
+    where
+        Env: Evm2Env,
+        I: IntoIterator<Item = RecoveredTxEnvelope>,
+        F: FnMut(usize),
+        H: FnMut(HashedPostState);
+}
+
+impl<C, DB> Evm2PayloadExecutor for EthEvm2Executor<C, DB>
+where
+    C: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
+    DB: Database + Clone + 'static,
+    DB::Error: core::error::Error + Send + Sync + 'static,
+{
+    type Error = Evm2ExecutionError<DB::Error>;
+
+    fn execute_payload_with_hashed_state_hook<I, F, H, Env>(
+        self,
+        evm_env: Env,
+        transactions: I,
+        context: Evm2BlockExecutionContext<'_>,
+        on_transaction_executed: F,
+        on_hashed_state_update: H,
+        hashed_state_mode: Evm2HashedStateMode,
+    ) -> Result<BlockExecutionOutput<Receipt>, Self::Error>
+    where
+        Env: Evm2Env,
+        I: IntoIterator<Item = RecoveredTxEnvelope>,
+        F: FnMut(usize),
+        H: FnMut(HashedPostState),
+    {
+        let spec_id = evm_env.spec_id();
+        let block_env = evm_env.block_env();
+        let block_number = block_env.number.to::<u64>();
+
+        execute_evm2_block_with_context_precompiles_and_hooks_envelopes_with_hashed_state_mode::<DB>(
+            spec_id,
+            block_env,
+            Db::new(self.database),
+            block_number,
+            transactions,
+            context,
+            alloc::boxed::Box::new(CachedPrecompileProvider::new(
+                evm2::Precompiles::base(spec_id),
+                self.precompile_cache_map,
+                spec_id,
+                None,
+            )),
+            on_transaction_executed,
+            on_hashed_state_update,
+            hashed_state_mode,
+        )
     }
 }
 
