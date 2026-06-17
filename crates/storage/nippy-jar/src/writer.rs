@@ -11,6 +11,9 @@ use std::{
 /// Size of one offset in bytes.
 pub(crate) const OFFSET_SIZE_BYTES: u8 = 8;
 
+/// Minimum number of pending offsets worth staging into one contiguous write.
+const BUFFERED_OFFSET_WRITE_THRESHOLD: usize = 64;
+
 /// Writer of [`NippyJar`]. Handles table data and offsets only.
 ///
 /// Table data is written directly to disk, while offsets and configuration need to be flushed by
@@ -423,14 +426,27 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
         self.offsets_file.seek(SeekFrom::End(0))?;
 
-        // Appends new offsets to disk
-        for offset in self.offsets.drain(..) {
-            if let Some(last_offset_ondisk) = last_offset_ondisk.take() &&
-                last_offset_ondisk == offset
-            {
-                continue
+        // Appends new offsets to disk.
+        if self.offsets.len() >= BUFFERED_OFFSET_WRITE_THRESHOLD {
+            let mut buf = Vec::with_capacity(self.offsets.len() * OFFSET_SIZE_BYTES as usize);
+            for offset in self.offsets.drain(..) {
+                if let Some(last_offset_ondisk) = last_offset_ondisk.take() &&
+                    last_offset_ondisk == offset
+                {
+                    continue
+                }
+                buf.extend_from_slice(&offset.to_le_bytes());
             }
-            self.offsets_file.write_all(&offset.to_le_bytes())?;
+            self.offsets_file.write_all(&buf)?;
+        } else {
+            for offset in self.offsets.drain(..) {
+                if let Some(last_offset_ondisk) = last_offset_ondisk.take() &&
+                    last_offset_ondisk == offset
+                {
+                    continue
+                }
+                self.offsets_file.write_all(&offset.to_le_bytes())?;
+            }
         }
         self.offsets_file.flush()?;
 
