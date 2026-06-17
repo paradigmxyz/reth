@@ -462,6 +462,8 @@ where
                 "using sequential sig recovery for small block"
             );
             self.executor.spawn_blocking_named("tx-iterator", move || {
+                reth_tasks::once!(increase_thread_priority);
+
                 let (transactions, convert) = transactions.into_parts();
                 convert_serial(transactions.into_iter(), &convert, &prewarm_tx, &execute_tx);
             });
@@ -475,6 +477,8 @@ where
             let prefetch = Self::PARALLEL_PREFETCH_COUNT.min(transaction_count);
             let executor = self.executor.clone();
             self.executor.spawn_blocking_named("tx-iterator", move || {
+                reth_tasks::once!(increase_thread_priority);
+
                 let (transactions, convert) = transactions.into_parts();
                 let mut all: Vec<_> = transactions.into_iter().collect();
                 let rest = all.split_off(prefetch.min(all.len()));
