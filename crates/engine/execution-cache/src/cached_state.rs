@@ -154,51 +154,51 @@ impl<S> CachedStateProvider<S> {
     }
 
     fn record_account_hit(&self) {
-        self.record_metric(CacheMetricKind::AccountHit);
+        self.record_metric(&self.metric_counts.account_hits);
         if let Some(stats) = &self.cache_stats {
             stats.record_account_hit();
         }
     }
 
     fn record_account_miss(&self) {
-        self.record_metric(CacheMetricKind::AccountMiss);
+        self.record_metric(&self.metric_counts.account_misses);
         if let Some(stats) = &self.cache_stats {
             stats.record_account_miss();
         }
     }
 
     fn record_storage_hit(&self) {
-        self.record_metric(CacheMetricKind::StorageHit);
+        self.record_metric(&self.metric_counts.storage_hits);
         if let Some(stats) = &self.cache_stats {
             stats.record_storage_hit();
         }
     }
 
     fn record_storage_miss(&self) {
-        self.record_metric(CacheMetricKind::StorageMiss);
+        self.record_metric(&self.metric_counts.storage_misses);
         if let Some(stats) = &self.cache_stats {
             stats.record_storage_miss();
         }
     }
 
     fn record_code_hit(&self) {
-        self.record_metric(CacheMetricKind::CodeHit);
+        self.record_metric(&self.metric_counts.code_hits);
         if let Some(stats) = &self.cache_stats {
             stats.record_code_hit();
         }
     }
 
     fn record_code_miss(&self) {
-        self.record_metric(CacheMetricKind::CodeMiss);
+        self.record_metric(&self.metric_counts.code_misses);
         if let Some(stats) = &self.cache_stats {
             stats.record_code_miss();
         }
     }
 
     #[inline]
-    fn record_metric(&self, kind: CacheMetricKind) {
+    fn record_metric(&self, counter: &Cell<u64>) {
         if self.metrics.is_some() {
-            self.metric_counts.record(kind);
+            counter.set(counter.get() + 1);
         }
     }
 
@@ -233,16 +233,6 @@ pub enum CacheFillMode {
     FillOnMiss,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CacheMetricKind {
-    AccountHit,
-    AccountMiss,
-    StorageHit,
-    StorageMiss,
-    CodeHit,
-    CodeMiss,
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct CacheMetricSnapshot {
     account_hits: u64,
@@ -255,12 +245,12 @@ struct CacheMetricSnapshot {
 
 impl CacheMetricSnapshot {
     const fn is_empty(&self) -> bool {
-        self.account_hits == 0 &&
-            self.account_misses == 0 &&
-            self.storage_hits == 0 &&
-            self.storage_misses == 0 &&
-            self.code_hits == 0 &&
-            self.code_misses == 0
+        self.account_hits == 0
+            && self.account_misses == 0
+            && self.storage_hits == 0
+            && self.storage_misses == 0
+            && self.code_hits == 0
+            && self.code_misses == 0
     }
 }
 
@@ -284,19 +274,6 @@ impl CacheMetricCounts {
             code_hits: Cell::new(0),
             code_misses: Cell::new(0),
         }
-    }
-
-    #[inline]
-    fn record(&self, kind: CacheMetricKind) {
-        let counter = match kind {
-            CacheMetricKind::AccountHit => &self.account_hits,
-            CacheMetricKind::AccountMiss => &self.account_misses,
-            CacheMetricKind::StorageHit => &self.storage_hits,
-            CacheMetricKind::StorageMiss => &self.storage_misses,
-            CacheMetricKind::CodeHit => &self.code_hits,
-            CacheMetricKind::CodeMiss => &self.code_misses,
-        };
-        counter.set(counter.get() + 1);
     }
 
     const fn take(&self) -> CacheMetricSnapshot {
@@ -428,35 +405,24 @@ impl CachedStateMetrics {
         zeroed
     }
 
-    fn record_access(&self, kind: CacheMetricKind, count: u64) {
-        match kind {
-            CacheMetricKind::AccountHit => self.account_cache_hits.increment(count as f64),
-            CacheMetricKind::AccountMiss => self.account_cache_misses.increment(count as f64),
-            CacheMetricKind::StorageHit => self.storage_cache_hits.increment(count as f64),
-            CacheMetricKind::StorageMiss => self.storage_cache_misses.increment(count as f64),
-            CacheMetricKind::CodeHit => self.code_cache_hits.increment(count as f64),
-            CacheMetricKind::CodeMiss => self.code_cache_misses.increment(count as f64),
-        }
-    }
-
     fn record_access_counts(&self, counts: CacheMetricSnapshot) {
         if counts.account_hits != 0 {
-            self.record_access(CacheMetricKind::AccountHit, counts.account_hits);
+            self.account_cache_hits.increment(counts.account_hits as f64);
         }
         if counts.account_misses != 0 {
-            self.record_access(CacheMetricKind::AccountMiss, counts.account_misses);
+            self.account_cache_misses.increment(counts.account_misses as f64);
         }
         if counts.storage_hits != 0 {
-            self.record_access(CacheMetricKind::StorageHit, counts.storage_hits);
+            self.storage_cache_hits.increment(counts.storage_hits as f64);
         }
         if counts.storage_misses != 0 {
-            self.record_access(CacheMetricKind::StorageMiss, counts.storage_misses);
+            self.storage_cache_misses.increment(counts.storage_misses as f64);
         }
         if counts.code_hits != 0 {
-            self.record_access(CacheMetricKind::CodeHit, counts.code_hits);
+            self.code_cache_hits.increment(counts.code_hits as f64);
         }
         if counts.code_misses != 0 {
-            self.record_access(CacheMetricKind::CodeMiss, counts.code_misses);
+            self.code_cache_misses.increment(counts.code_misses as f64);
         }
     }
 
@@ -1025,7 +991,7 @@ impl ExecutionCache {
             // If the account was not modified, as in not changed and not destroyed, then we have
             // nothing to do w.r.t. this particular account and can move on
             if account.status.is_not_modified() {
-                continue
+                continue;
             }
 
             // If the original account had code (was a contract), we must clear the entire cache
@@ -1048,7 +1014,7 @@ impl ExecutionCache {
                         );
                     });
                     self.clear();
-                    return Ok(())
+                    return Ok(());
                 }
 
                 self.0.account_cache.remove(addr);
@@ -1060,7 +1026,7 @@ impl ExecutionCache {
             // `None` current info, should be destroyed.
             let Some(ref account_info) = account.info else {
                 trace!(target: "engine::caching", ?account, "Account with None account info found in state updates");
-                return Err(())
+                return Err(());
             };
 
             // Now we iterate over all storage and make updates to the cached storage values
