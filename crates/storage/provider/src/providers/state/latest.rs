@@ -80,6 +80,20 @@ impl<Provider: DBProvider + StorageSettingsCache> AccountReader
             self.tx().get_by_encoded_key::<tables::PlainAccountState>(address).map_err(Into::into)
         }
     }
+
+    fn basic_account_by_hashed(
+        &self,
+        address: &Address,
+        hashed_address: B256,
+    ) -> ProviderResult<Option<Account>> {
+        if self.0.cached_storage_settings().use_hashed_state() {
+            self.tx()
+                .get_by_encoded_key::<tables::HashedAccounts>(&hashed_address)
+                .map_err(Into::into)
+        } else {
+            self.tx().get_by_encoded_key::<tables::PlainAccountState>(address).map_err(Into::into)
+        }
+    }
 }
 
 impl<Provider: BlockHashReader> BlockHashReader for LatestStateProviderRef<'_, Provider> {

@@ -119,6 +119,22 @@ impl<N: NodePrimitives> AccountReader for MemoryOverlayStateProviderRef<'_, N> {
 
         self.historical.basic_account(address)
     }
+
+    fn basic_account_by_hashed(
+        &self,
+        address: &Address,
+        hashed_address: B256,
+    ) -> ProviderResult<Option<Account>> {
+        // The in-memory overlay is keyed by plain address; only the historical (db-backed) read
+        // benefits from the precomputed hash.
+        for block in self.in_memory.iter() {
+            if let Some(account) = block.execution_output.account(address) {
+                return Ok(account);
+            }
+        }
+
+        self.historical.basic_account_by_hashed(address, hashed_address)
+    }
 }
 
 impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, N> {

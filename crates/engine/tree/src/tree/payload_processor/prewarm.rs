@@ -651,15 +651,18 @@ where
             return;
         }
         let address = account_changes.address;
-        let mut hashed_address = None;
         let account_fields = BalAccountStateFields::from_changes(account_changes);
 
         if !bal_account_changes_state_root(account_changes, account_fields) {
             return;
         }
 
+        // Hash the address once and reuse it for both the account read and the `HashedPostState`
+        // keys below. The hashed-state ("v2") read path keys `HashedAccounts` by this hash, so
+        // passing it avoids a second `keccak256(address)` inside `basic_account`.
+        let hashed_address = keccak256(address);
+
         if !account_changes.storage_changes.is_empty() {
-            let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
             let mut storage_map = reth_trie::HashedStorage::new(false);
 
             for slot_changes in &account_changes.storage_changes {
@@ -706,14 +709,12 @@ where
                 *provider = Some(boxed);
             }
             let account_reader = provider.as_ref().expect("provider just initialized");
-            account_reader.basic_account(&address).ok().flatten()
+            account_reader.basic_account_by_hashed(&address, hashed_address).ok().flatten()
         } else {
             None
         };
 
         let account = account_fields.into_account(existing_account);
-
-        let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
         let mut hashed_state = reth_trie::HashedPostState::default();
         hashed_state.accounts.insert(hashed_address, Some(account));
 

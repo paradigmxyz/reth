@@ -165,6 +165,20 @@ impl<S: AccountReader> AccountReader for InstrumentedStateProvider<S> {
         self.stats.total_account_fetch_latency.add_duration(elapsed);
         res
     }
+
+    fn basic_account_by_hashed(
+        &self,
+        address: &Address,
+        hashed_address: B256,
+    ) -> ProviderResult<Option<Account>> {
+        let start = Instant::now();
+        let res = self.state_provider.basic_account_by_hashed(address, hashed_address);
+        let elapsed = start.elapsed();
+        self.metrics.account_fetch_latency.record(elapsed);
+        self.stats.total_account_fetches.fetch_add(1, Ordering::Relaxed);
+        self.stats.total_account_fetch_latency.add_duration(elapsed);
+        res
+    }
 }
 
 impl<S: StateProvider> StateProvider for InstrumentedStateProvider<S> {
