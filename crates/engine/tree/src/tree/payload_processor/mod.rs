@@ -210,11 +210,11 @@ where
     pub fn prune_sparse_state_trie_after_persistence(
         &self,
         persisted_block: BlockNumHash,
-        persisted_state: &HashedPostStateSorted,
+        retained_state_mask: &HashedPostStateSorted,
     ) {
         self.trie_metrics
             .sparse_trie_masked_hashed_post_state_size
-            .record(masked_hashed_post_state_size(persisted_state) as f64);
+            .record(masked_hashed_post_state_size(retained_state_mask) as f64);
 
         if self.disable_sparse_trie_cache_pruning {
             return
@@ -222,7 +222,7 @@ where
 
         if let Some(duration) = self.sparse_state_trie.prune_persisted_state(
             persisted_block,
-            persisted_state,
+            retained_state_mask,
             SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
             SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
         ) {
@@ -693,7 +693,6 @@ where
                         .with_updates(true);
                     (trie, parent)
                 });
-
             let mut task = SparseTrieCacheTask::new_with_trie(
                 &executor,
                 from_multi_proof,

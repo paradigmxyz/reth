@@ -276,7 +276,6 @@ where
 
         let mut total_idle_time = std::time::Duration::ZERO;
         let mut idle_start = Instant::now();
-
         loop {
             let mut t = Instant::now();
             crossbeam_channel::select_biased! {
@@ -479,7 +478,6 @@ where
             }
 
             if storage.wiped {
-                self.trie.record_storage_wipe(address);
                 self.trie.wipe_storage(address).map_err(|err| {
                     ParallelStateRootError::Other(format!(
                         "could not wipe sparse storage trie: {err:?}"
@@ -494,8 +492,6 @@ where
                 let mut existing_updates = self.storage_updates.get_mut(&address);
 
                 for (&slot, &value) in &storage.storage {
-                    self.trie.record_slot_touch(address, slot);
-
                     let encoded = if value.is_zero() {
                         Vec::new()
                     } else {
@@ -520,8 +516,6 @@ where
         }
 
         for (&address, &account) in &hashed_state_update.accounts {
-            self.trie.record_account_touch(address);
-
             // Track account as touched.
             //
             // This might overwrite an existing update, which is fine, because storage root from it

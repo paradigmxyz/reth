@@ -386,16 +386,7 @@ impl ArenaSparseSubtrie {
                 let mut child_path = branch_logical_path;
                 child_path.push(nibble);
 
-                // Child's full prefix for the retention check.
-                let child_short_key = match &self.arena[old_child_idx] {
-                    ArenaSparseNode::Branch(b) => &b.short_key,
-                    ArenaSparseNode::Leaf { key, .. } => key,
-                    other => unreachable!("subtrie prune: unexpected child node kind: {other:?}"),
-                };
-                let mut child_prefix = child_path;
-                child_prefix.extend(child_short_key);
-
-                if has_prefix(retained_leaves, &child_prefix) {
+                if has_prefix(retained_leaves, &child_path) {
                     // Retained — move child to new arena.
                     let child_node = self.arena.remove(old_child_idx).expect("child exists");
                     let new_child_idx = new_arena.insert(child_node);
@@ -2842,11 +2833,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         continue;
                     }
 
-                    let short_key =
-                        self.upper_arena[head_idx].short_key().expect("must be branch or leaf");
-                    let mut node_prefix = head_path;
-                    node_prefix.extend(short_key);
-                    let range = prefix_range(&retained_leaves, 0, &node_prefix);
+                    let range = prefix_range(&retained_leaves, 0, &head_path);
                     if !range.is_empty() {
                         continue;
                     }

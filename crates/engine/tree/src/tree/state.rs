@@ -43,6 +43,13 @@ pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     pub(crate) state_trie_overlays: StateTrieOverlayManager<N>,
 }
 
+/// Hashed state information derived while removing persisted blocks from [`TreeState`].
+#[derive(Debug, Default)]
+pub struct RemovedBlockState {
+    /// Hashed post-state keys from blocks still retained in memory.
+    pub retained_state_mask: HashedPostStateSorted,
+}
+
 impl<N: NodePrimitives> TreeState<N> {
     /// Returns a new, empty tree state that points to the given canonical head.
     pub fn new(
@@ -292,7 +299,7 @@ impl<N: NodePrimitives> TreeState<N> {
         upper_bound: BlockNumHash,
         last_persisted_hash: B256,
         finalized_num_hash: Option<BlockNumHash>,
-    ) -> HashedPostStateSorted {
+    ) -> RemovedBlockState {
         debug!(target: "engine::tree", ?upper_bound, ?finalized_num_hash, "Removing blocks from the tree");
 
         // If the finalized num is ahead of the upper bound, and exists, we need to instead ensure
@@ -321,15 +328,14 @@ impl<N: NodePrimitives> TreeState<N> {
             self.prune_finalized_sidechains(finalized_num_hash, &mut removed_blocks);
         }
 
-        let removed_states =
-            removed_blocks.iter().map(|block| block.hashed_state()).collect::<Vec<_>>();
+        let mut retained_blocks = self.blocks_by_hash.values().collect::<Vec<_>>();
+        retained_blocks.sort_unstable_by(|a, b| {
+            b.recovered_block().number().cmp(&a.recovered_block().number())
+        });
         let retained_states =
-            self.blocks_by_hash.values().map(|block| block.hashed_state()).collect::<Vec<_>>();
+            retained_blocks.iter().map(|block| block.hashed_state()).collect::<Vec<_>>();
 
-        let persisted_state = HashedPostStateSorted::disjointed_merge_batch(
-            removed_states.iter().map(AsRef::as_ref).collect(),
-            retained_states.iter().map(AsRef::as_ref).collect(),
-        );
+        let retained_state_mask = HashedPostStateSorted::merge_slice(&retained_states);
 
         let removed_hashes =
             removed_blocks.iter().map(|block| block.recovered_block().hash()).collect::<Vec<_>>();
@@ -337,7 +343,7 @@ impl<N: NodePrimitives> TreeState<N> {
             self.state_trie_overlays.remove_blocks(removed_hashes);
         }
 
-        persisted_state
+        RemovedBlockState { retained_state_mask }
     }
 
     /// Updates the canonical head to the given block.

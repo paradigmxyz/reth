@@ -689,7 +689,6 @@ fn watch_address(hashed_address: B256) -> bool {
 
 enum SparseStorageTrieRef<'a> {
     Revealed(&'a reth_trie_sparse::ArenaParallelSparseTrie),
-    Empty,
     Unrevealed,
 }
 
@@ -708,15 +707,6 @@ fn sparse_storage_trie_ref<'a>(
             );
         }
         SparseStorageTrieRef::Revealed(trie)
-    } else if sparse_trie.is_retained_storage_account(hashed_address) {
-        if watch_address(*hashed_address) {
-            debug!(
-                target: "providers::state::overlay",
-                ?hashed_address,
-                "watched sparse storage lookup found retained empty storage account"
-            );
-        }
-        SparseStorageTrieRef::Empty
     } else {
         if watch_address(*hashed_address) {
             debug!(
@@ -739,7 +729,6 @@ fn apply_sparse_storage_trie<C>(
 {
     match sparse_storage_trie_ref(sparse_trie, hashed_address) {
         SparseStorageTrieRef::Revealed(trie) => cursor.set_sparse_trie(Some(trie)),
-        SparseStorageTrieRef::Empty => cursor.set_empty_sparse_trie(),
         SparseStorageTrieRef::Unrevealed => cursor.set_sparse_trie(None),
     }
 }
@@ -753,7 +742,6 @@ fn apply_sparse_hashed_storage_trie<'a, C>(
 {
     match sparse_storage_trie_ref(sparse_trie, hashed_address) {
         SparseStorageTrieRef::Revealed(trie) => cursor.set_sparse_trie(Some(trie)),
-        SparseStorageTrieRef::Empty => cursor.set_empty_sparse_trie(),
         SparseStorageTrieRef::Unrevealed => cursor.set_sparse_trie(None),
     }
 }
