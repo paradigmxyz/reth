@@ -457,6 +457,17 @@ impl<'a, C, K, V> ArenaCachedCursor<'a, C, K, V> {
         this
     }
 
+    /// Updates the sparse trie backing this cursor.
+    pub fn set_trie(&mut self, trie: Option<&'a ArenaParallelSparseTrie>) {
+        self.trie = trie;
+        self.reset_sparse_cursor();
+    }
+
+    /// Returns the inner cursor.
+    pub fn inner_mut(&mut self) -> &mut C {
+        &mut self.inner
+    }
+
     fn reset_sparse_cursor(&mut self) {
         self.cursor = ArenaCursor::default();
         self.active_subtrie = None;
