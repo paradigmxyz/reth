@@ -292,6 +292,9 @@ struct RuntimeInner {
     /// BAL streaming pool (BAL hashed state streaming).
     #[cfg(feature = "rayon")]
     bal_streaming_pool: WorkerPool,
+    /// BAL worker pool (speculative BAL transaction execution).
+    #[cfg(feature = "rayon")]
+    bal_worker_pool: WorkerPool,
     /// State trie overlay worker pool.
     #[cfg(feature = "rayon")]
     state_trie_overlay_worker_pool: Arc<WorkerPool>,
@@ -384,6 +387,12 @@ impl Runtime {
     #[cfg(feature = "rayon")]
     pub fn bal_streaming_pool(&self) -> &WorkerPool {
         &self.0.bal_streaming_pool
+    }
+
+    /// Get the BAL worker pool.
+    #[cfg(feature = "rayon")]
+    pub fn bal_worker_pool(&self) -> &WorkerPool {
+        &self.0.bal_worker_pool
     }
 
     /// Get the state trie overlay worker pool.
@@ -894,6 +903,7 @@ impl RuntimeBuilder {
             proof_account_worker_pool,
             prewarming_pool,
             bal_streaming_pool,
+            bal_worker_pool,
             state_trie_overlay_worker_pool,
         ) = {
             let default_threads = config.rayon.default_thread_count();
@@ -938,6 +948,8 @@ impl RuntimeBuilder {
             let bal_streaming_threads =
                 config.rayon.bal_streaming_threads.unwrap_or(default_threads);
             let bal_streaming_pool = WorkerPool::new(bal_streaming_threads, "bal-stream");
+            let bal_worker_threads = bal_streaming_threads;
+            let bal_worker_pool = WorkerPool::new(bal_worker_threads, "bal-worker");
 
             let state_trie_overlay_worker_threads = config
                 .rayon
@@ -954,6 +966,7 @@ impl RuntimeBuilder {
                 proof_account_worker_threads,
                 prewarming_threads,
                 bal_streaming_threads,
+                bal_worker_threads,
                 state_trie_overlay_worker_threads,
                 max_blocking_tasks = config.rayon.max_blocking_tasks,
                 "Configured lazy rayon worker pools"
@@ -968,6 +981,7 @@ impl RuntimeBuilder {
                 proof_account_worker_pool,
                 prewarming_pool,
                 bal_streaming_pool,
+                bal_worker_pool,
                 state_trie_overlay_worker_pool,
             )
         };
@@ -1003,6 +1017,8 @@ impl RuntimeBuilder {
             prewarming_pool,
             #[cfg(feature = "rayon")]
             bal_streaming_pool,
+            #[cfg(feature = "rayon")]
+            bal_worker_pool,
             #[cfg(feature = "rayon")]
             state_trie_overlay_worker_pool,
             worker_map: WorkerMap::new(),
@@ -1092,6 +1108,7 @@ mod tests {
 
         // Worker pools are lazy — not initialized until first access.
         assert!(!runtime.0.bal_streaming_pool.is_initialized());
+        assert!(!runtime.0.bal_worker_pool.is_initialized());
         assert!(!runtime.0.proof_storage_worker_pool.is_initialized());
         assert!(!runtime.0.state_trie_overlay_worker_pool.is_initialized());
 
@@ -1099,9 +1116,29 @@ mod tests {
         assert_eq!(runtime.bal_streaming_pool().current_num_threads(), 2);
         assert!(runtime.0.bal_streaming_pool.is_initialized());
 
+        assert_eq!(runtime.bal_worker_pool().current_num_threads(), 2);
+        assert!(runtime.0.bal_worker_pool.is_initialized());
+
         assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), 2);
         assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), 2);
         assert_eq!(runtime.prewarming_pool().current_num_threads(), 2);
         assert_eq!(runtime.state_trie_overlay_worker_pool().current_num_threads(), 2);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn test_bal_worker_pool_defaults_to_streaming_threads() {
+        let rt = TokioRuntime::new().unwrap();
+        let config = RuntimeConfig::default()
+            .with_tokio(TokioConfig::existing_handle(rt.handle().clone()))
+            .with_rayon(RayonConfig {
+                cpu_threads: Some(2),
+                bal_streaming_threads: Some(3),
+                ..Default::default()
+            });
+        let runtime = RuntimeBuilder::new(config).build().unwrap();
+
+        assert_eq!(runtime.bal_streaming_pool().current_num_threads(), 3);
+        assert_eq!(runtime.bal_worker_pool().current_num_threads(), 3);
     }
 }
