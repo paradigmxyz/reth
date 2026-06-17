@@ -1489,7 +1489,8 @@ impl RocksDBProvider {
         );
 
         let last_key = StorageShardedKey::last(address, storage_key);
-        let last_shard_opt = self.get::<tables::StoragesHistory>(last_key.clone())?;
+        let encoded_last_key = last_key.clone().encode();
+        let last_shard_opt = self.get_encoded::<tables::StoragesHistory>(&encoded_last_key)?;
         let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
 
         last_shard.append(indices).map_err(ProviderError::other)?;
@@ -1914,14 +1915,16 @@ impl<'a> RocksDBBatch<'a> {
         );
 
         let last_key = ShardedKey::new(address, u64::MAX);
-        let last_shard_opt = self.provider.get::<tables::AccountsHistory>(last_key.clone())?;
+        let encoded_last_key = last_key.clone().encode();
+        let last_shard_opt =
+            self.provider.get_encoded::<tables::AccountsHistory>(&encoded_last_key)?;
         let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
 
         last_shard.append(indices).map_err(ProviderError::other)?;
 
         // Fast path: all indices fit in one shard
         if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
-            self.put::<tables::AccountsHistory>(last_key, &last_shard)?;
+            self.put_encoded::<tables::AccountsHistory>(&encoded_last_key, &last_shard)?;
             return Ok(());
         }
 
