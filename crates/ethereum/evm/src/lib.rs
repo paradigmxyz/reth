@@ -79,6 +79,35 @@ pub struct EthBlockExecutionCtx<'a> {
     pub slot_number: Option<u64>,
 }
 
+/// Converts a resolved execution context into evm2's Ethereum block execution context.
+pub trait AsEvm2BlockExecutionContext {
+    /// Returns the evm2 block execution context.
+    fn as_evm2_block_execution_context(
+        &self,
+        chain_id: u64,
+        deposit_contract_address: Option<Address>,
+    ) -> crate::evm2_executor::Evm2BlockExecutionContext<'_>;
+}
+
+impl AsEvm2BlockExecutionContext for EthBlockExecutionCtx<'_> {
+    fn as_evm2_block_execution_context(
+        &self,
+        chain_id: u64,
+        deposit_contract_address: Option<Address>,
+    ) -> crate::evm2_executor::Evm2BlockExecutionContext<'_> {
+        crate::evm2_executor::Evm2BlockExecutionContext {
+            chain_id,
+            system_calls: Some(crate::evm2_executor::Evm2BlockSystemCalls {
+                parent_hash: self.parent_hash,
+                parent_beacon_block_root: self.parent_beacon_block_root,
+            }),
+            ommers: Some(self.ommers),
+            withdrawals: self.withdrawals.as_deref(),
+            deposit_contract_address,
+        }
+    }
+}
+
 /// Helper type with backwards compatible methods to obtain Ethereum executor providers.
 #[doc(hidden)]
 pub mod execute {
@@ -94,7 +123,7 @@ pub use build::EthBlockAssembler;
 #[cfg(feature = "std")]
 mod executor;
 #[cfg(feature = "std")]
-pub use executor::EthEvm2Executor;
+pub use executor::{EthEvm2Executor, Evm2PayloadExecutor};
 
 mod evm2_convert;
 pub use evm2_convert::{
@@ -105,20 +134,7 @@ pub use evm2_convert::{
 
 mod evm2_executor;
 pub use evm2_executor::{
-    execute_evm2_block, execute_evm2_block_with_context,
-    execute_evm2_block_with_context_and_precompiles, execute_evm2_block_with_withdrawals,
     Evm2BlockExecutionContext, Evm2BlockSystemCalls, Evm2ExecutionError, Evm2HashedStateMode,
-};
-#[cfg(feature = "std")]
-pub use evm2_executor::{
-    execute_evm2_block_with_borrowed_state_provider_context,
-    execute_evm2_block_with_state_provider, execute_evm2_block_with_state_provider_and_withdrawals,
-    execute_evm2_block_with_state_provider_context,
-    execute_evm2_block_with_state_provider_context_and_hook,
-    execute_evm2_block_with_state_provider_context_precompiles_and_hook,
-    execute_evm2_block_with_state_provider_context_precompiles_and_hook_envelopes,
-    execute_evm2_block_with_state_provider_context_precompiles_and_hooks_envelopes,
-    execute_evm2_block_with_state_provider_context_precompiles_and_hooks_envelopes_with_hashed_state_mode,
 };
 
 mod receipt;
