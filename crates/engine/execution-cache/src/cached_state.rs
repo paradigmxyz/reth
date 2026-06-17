@@ -19,6 +19,7 @@ use reth_trie::{
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use std::{
+    cell::Cell,
     fmt,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -104,6 +105,12 @@ pub struct CachedStateProvider<S> {
     /// Metrics for the cached state provider.
     metrics: Option<CachedStateMetrics>,
 
+    /// How cache hit/miss metrics are recorded.
+    metrics_mode: CacheMetricsMode,
+
+    /// Provider-local hit/miss counters used when metrics are buffered.
+    metric_counts: CacheMetricCounts,
+
     /// Whether cache misses should populate the shared execution cache.
     fill_mode: CacheFillMode,
 
@@ -139,65 +146,111 @@ impl<S> CachedStateProvider<S> {
         metrics: Option<CachedStateMetrics>,
         cache_stats: Option<Arc<CacheStats>>,
     ) -> Self {
-        Self { state_provider, caches, metrics, fill_mode, cache_stats }
+        Self::new_with_mode_and_metrics_mode(
+            state_provider,
+            caches,
+            fill_mode,
+            metrics,
+            cache_stats,
+            CacheMetricsMode::Immediate,
+        )
+    }
+
+    /// Creates a [`CachedStateProvider`] with explicit cache fill behavior, optional block-local
+    /// cache stats, and control over how cache hit/miss metrics are recorded.
+    pub const fn new_with_mode_and_metrics_mode(
+        state_provider: S,
+        caches: ExecutionCache,
+        fill_mode: CacheFillMode,
+        metrics: Option<CachedStateMetrics>,
+        cache_stats: Option<Arc<CacheStats>>,
+        metrics_mode: CacheMetricsMode,
+    ) -> Self {
+        Self {
+            state_provider,
+            caches,
+            metrics,
+            metrics_mode,
+            metric_counts: CacheMetricCounts::new(),
+            fill_mode,
+            cache_stats,
+        }
     }
 
     fn record_account_hit(&self) {
-        if let Some(metrics) = &self.metrics {
-            metrics.account_cache_hits.increment(1);
-        }
+        self.record_metric(CacheMetricKind::AccountHit);
         if let Some(stats) = &self.cache_stats {
             stats.record_account_hit();
         }
     }
 
     fn record_account_miss(&self) {
-        if let Some(metrics) = &self.metrics {
-            metrics.account_cache_misses.increment(1);
-        }
+        self.record_metric(CacheMetricKind::AccountMiss);
         if let Some(stats) = &self.cache_stats {
             stats.record_account_miss();
         }
     }
 
     fn record_storage_hit(&self) {
-        if let Some(metrics) = &self.metrics {
-            metrics.storage_cache_hits.increment(1);
-        }
+        self.record_metric(CacheMetricKind::StorageHit);
         if let Some(stats) = &self.cache_stats {
             stats.record_storage_hit();
         }
     }
 
     fn record_storage_miss(&self) {
-        if let Some(metrics) = &self.metrics {
-            metrics.storage_cache_misses.increment(1);
-        }
+        self.record_metric(CacheMetricKind::StorageMiss);
         if let Some(stats) = &self.cache_stats {
             stats.record_storage_miss();
         }
     }
 
     fn record_code_hit(&self) {
-        if let Some(metrics) = &self.metrics {
-            metrics.code_cache_hits.increment(1);
-        }
+        self.record_metric(CacheMetricKind::CodeHit);
         if let Some(stats) = &self.cache_stats {
             stats.record_code_hit();
         }
     }
 
     fn record_code_miss(&self) {
-        if let Some(metrics) = &self.metrics {
-            metrics.code_cache_misses.increment(1);
-        }
+        self.record_metric(CacheMetricKind::CodeMiss);
         if let Some(stats) = &self.cache_stats {
             stats.record_code_miss();
         }
     }
 
+    #[inline]
+    fn record_metric(&self, kind: CacheMetricKind) {
+        match (&self.metrics, self.metrics_mode) {
+            (Some(metrics), CacheMetricsMode::Immediate) => metrics.record_access(kind, 1),
+            (Some(_), CacheMetricsMode::Buffered) => self.metric_counts.record(kind),
+            (None, _) => {}
+        }
+    }
+
+    fn flush_buffered_metrics(&self) {
+        if self.metrics_mode != CacheMetricsMode::Buffered {
+            return;
+        }
+
+        let counts = self.metric_counts.take();
+        if counts.is_empty() {
+            return;
+        }
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_access_counts(counts);
+        }
+    }
+
     const fn should_fill_on_miss(&self) -> bool {
         matches!(self.fill_mode, CacheFillMode::FillOnMiss)
+    }
+}
+
+impl<S> Drop for CachedStateProvider<S> {
+    fn drop(&mut self) {
+        self.flush_buffered_metrics();
     }
 }
 
@@ -208,6 +261,93 @@ pub enum CacheFillMode {
     LookupOnly,
     /// Insert values loaded from the underlying provider.
     FillOnMiss,
+}
+
+/// Controls how execution-cache hit/miss metrics are recorded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheMetricsMode {
+    /// Record each hit or miss directly.
+    Immediate,
+    /// Accumulate hit/miss counts locally and flush them when the provider is dropped.
+    Buffered,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CacheMetricKind {
+    AccountHit,
+    AccountMiss,
+    StorageHit,
+    StorageMiss,
+    CodeHit,
+    CodeMiss,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct CacheMetricSnapshot {
+    account_hits: u64,
+    account_misses: u64,
+    storage_hits: u64,
+    storage_misses: u64,
+    code_hits: u64,
+    code_misses: u64,
+}
+
+impl CacheMetricSnapshot {
+    const fn is_empty(&self) -> bool {
+        self.account_hits == 0 &&
+            self.account_misses == 0 &&
+            self.storage_hits == 0 &&
+            self.storage_misses == 0 &&
+            self.code_hits == 0 &&
+            self.code_misses == 0
+    }
+}
+
+#[derive(Debug, Default)]
+struct CacheMetricCounts {
+    account_hits: Cell<u64>,
+    account_misses: Cell<u64>,
+    storage_hits: Cell<u64>,
+    storage_misses: Cell<u64>,
+    code_hits: Cell<u64>,
+    code_misses: Cell<u64>,
+}
+
+impl CacheMetricCounts {
+    const fn new() -> Self {
+        Self {
+            account_hits: Cell::new(0),
+            account_misses: Cell::new(0),
+            storage_hits: Cell::new(0),
+            storage_misses: Cell::new(0),
+            code_hits: Cell::new(0),
+            code_misses: Cell::new(0),
+        }
+    }
+
+    #[inline]
+    fn record(&self, kind: CacheMetricKind) {
+        let counter = match kind {
+            CacheMetricKind::AccountHit => &self.account_hits,
+            CacheMetricKind::AccountMiss => &self.account_misses,
+            CacheMetricKind::StorageHit => &self.storage_hits,
+            CacheMetricKind::StorageMiss => &self.storage_misses,
+            CacheMetricKind::CodeHit => &self.code_hits,
+            CacheMetricKind::CodeMiss => &self.code_misses,
+        };
+        counter.set(counter.get() + 1);
+    }
+
+    fn take(&self) -> CacheMetricSnapshot {
+        CacheMetricSnapshot {
+            account_hits: self.account_hits.replace(0),
+            account_misses: self.account_misses.replace(0),
+            storage_hits: self.storage_hits.replace(0),
+            storage_misses: self.storage_misses.replace(0),
+            code_hits: self.code_hits.replace(0),
+            code_misses: self.code_misses.replace(0),
+        }
+    }
 }
 
 /// Represents the status of a key in the cache.
@@ -325,6 +465,38 @@ impl CachedStateMetrics {
         let zeroed = Self::new_with_labels(&[("source", source.to_string())]);
         zeroed.reset();
         zeroed
+    }
+
+    fn record_access(&self, kind: CacheMetricKind, count: u64) {
+        match kind {
+            CacheMetricKind::AccountHit => self.account_cache_hits.increment(count as f64),
+            CacheMetricKind::AccountMiss => self.account_cache_misses.increment(count as f64),
+            CacheMetricKind::StorageHit => self.storage_cache_hits.increment(count as f64),
+            CacheMetricKind::StorageMiss => self.storage_cache_misses.increment(count as f64),
+            CacheMetricKind::CodeHit => self.code_cache_hits.increment(count as f64),
+            CacheMetricKind::CodeMiss => self.code_cache_misses.increment(count as f64),
+        }
+    }
+
+    fn record_access_counts(&self, counts: CacheMetricSnapshot) {
+        if counts.account_hits != 0 {
+            self.record_access(CacheMetricKind::AccountHit, counts.account_hits);
+        }
+        if counts.account_misses != 0 {
+            self.record_access(CacheMetricKind::AccountMiss, counts.account_misses);
+        }
+        if counts.storage_hits != 0 {
+            self.record_access(CacheMetricKind::StorageHit, counts.storage_hits);
+        }
+        if counts.storage_misses != 0 {
+            self.record_access(CacheMetricKind::StorageMiss, counts.storage_misses);
+        }
+        if counts.code_hits != 0 {
+            self.record_access(CacheMetricKind::CodeHit, counts.code_hits);
+        }
+        if counts.code_misses != 0 {
+            self.record_access(CacheMetricKind::CodeMiss, counts.code_misses);
+        }
     }
 
     /// Records a new execution cache creation with its duration.

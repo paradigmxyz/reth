@@ -70,7 +70,7 @@ use reth_evm::{
     block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
     OnStateHook, SpecFor,
 };
-use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
+use reth_execution_cache::{CacheFillMode, CacheMetricsMode, CacheStats, SavedCache};
 use reth_payload_primitives::{
     BuiltPayload, BuiltPayloadExecutedBlock, InvalidPayloadAttributesError, NewPayloadError,
     PayloadTypes,
@@ -567,12 +567,18 @@ where
                 } else {
                     CacheFillMode::LookupOnly
                 };
-                Box::new(CachedStateProvider::new_with_mode(
+                let metrics_mode = if parallel_bal_execution {
+                    CacheMetricsMode::Buffered
+                } else {
+                    CacheMetricsMode::Immediate
+                };
+                Box::new(CachedStateProvider::new_with_mode_and_metrics_mode(
                     provider,
                     caches.clone(),
                     fill_mode,
                     cache_metrics.clone(),
                     cache_stats.clone(),
+                    metrics_mode,
                 )) as StateProviderBox
             } else {
                 provider
