@@ -430,7 +430,7 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "875f71adaafb2d29f300866f54c2ff58b9dbed9b", default-features = false }
 
 # evm2
-evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "775d5055549715eea8a0de748f6cde505d5b8809", default-features = false, features = ["std", "secp256k1"] }
+evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "6553eec9bfe6e9a9aaeb6808c9e08b95f8034e5c", default-features = false, features = ["std", "secp256k1"] }
 
 # eth
 alloy-dyn-abi = "1.6.0"
