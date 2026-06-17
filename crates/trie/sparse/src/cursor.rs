@@ -1,6 +1,6 @@
 use crate::{
-    ArenaCachedCursor, ArenaParallelSparseTrie, HashedCursorFactory, SparseStateTrie,
-    TrieCursorFactory,
+    ArenaCachedCursor, ArenaParallelSparseTrie, HashedCursor, HashedCursorFactory,
+    HashedStorageCursor, SparseStateTrie, TrieCursor, TrieCursorFactory, TrieStorageCursor,
 };
 use alloy_primitives::{B256, U256};
 use reth_primitives_traits::Account;
@@ -45,7 +45,7 @@ where
     where
         Self: 'a;
     type StorageCursor<'a>
-        = ArenaCachedCursor<'sparse, H::StorageCursor<'a>, B256, U256>
+        = SparseStateTrieStorageCursor<'sparse, H::StorageCursor<'a>>
     where
         Self: 'a;
 
@@ -59,7 +59,7 @@ where
         hashed_address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
         let inner = self.inner.hashed_storage_cursor(hashed_address)?;
-        Ok(ArenaCachedCursor::new(self.sparse_trie.storage_trie_ref(&hashed_address), inner))
+        Ok(SparseStateTrieStorageCursor::new(self.sparse_trie, hashed_address, inner))
     }
 }
 
@@ -101,7 +101,7 @@ where
     where
         Self: 'a;
     type StorageTrieCursor<'a>
-        = ArenaCachedCursor<'sparse, T::StorageTrieCursor<'a>, Nibbles, BranchNodeCompact>
+        = SparseStateTrieStorageTrieCursor<'sparse, T::StorageTrieCursor<'a>>
     where
         Self: 'a;
 
@@ -115,7 +115,127 @@ where
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         let inner = self.inner.storage_trie_cursor(hashed_address)?;
-        Ok(ArenaCachedCursor::new(self.sparse_trie.storage_trie_ref(&hashed_address), inner))
+        Ok(SparseStateTrieStorageTrieCursor::new(self.sparse_trie, hashed_address, inner))
+    }
+}
+
+/// Hashed storage cursor backed by a sparse state trie and an inner storage cursor.
+#[derive(Debug, Clone)]
+pub struct SparseStateTrieStorageCursor<'sparse, C> {
+    sparse_trie: &'sparse SparseStateTrie<ArenaParallelSparseTrie, ArenaParallelSparseTrie>,
+    cursor: ArenaCachedCursor<'sparse, C, B256, U256>,
+}
+
+impl<'sparse, C> SparseStateTrieStorageCursor<'sparse, C>
+where
+    C: HashedStorageCursor<Value = U256>,
+{
+    fn new(
+        sparse_trie: &'sparse SparseStateTrie<ArenaParallelSparseTrie, ArenaParallelSparseTrie>,
+        hashed_address: B256,
+        inner: C,
+    ) -> Self {
+        Self {
+            sparse_trie,
+            cursor: ArenaCachedCursor::new(sparse_trie.storage_trie_ref(&hashed_address), inner),
+        }
+    }
+}
+
+impl<C> HashedCursor for SparseStateTrieStorageCursor<'_, C>
+where
+    C: HashedStorageCursor<Value = U256>,
+{
+    type Value = U256;
+
+    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+        self.cursor.seek(key)
+    }
+
+    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+        self.cursor.next()
+    }
+
+    fn reset(&mut self) {
+        self.cursor.reset();
+    }
+}
+
+impl<C> HashedStorageCursor for SparseStateTrieStorageCursor<'_, C>
+where
+    C: HashedStorageCursor<Value = U256>,
+{
+    fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
+        self.cursor.is_storage_empty()
+    }
+
+    fn set_hashed_address(&mut self, hashed_address: B256) {
+        self.cursor.inner_mut().set_hashed_address(hashed_address);
+        self.cursor.set_trie(self.sparse_trie.storage_trie_ref(&hashed_address));
+    }
+}
+
+/// Trie storage cursor backed by a sparse state trie and an inner storage trie cursor.
+#[derive(Debug, Clone)]
+pub struct SparseStateTrieStorageTrieCursor<'sparse, C> {
+    sparse_trie: &'sparse SparseStateTrie<ArenaParallelSparseTrie, ArenaParallelSparseTrie>,
+    cursor: ArenaCachedCursor<'sparse, C, Nibbles, BranchNodeCompact>,
+}
+
+impl<'sparse, C> SparseStateTrieStorageTrieCursor<'sparse, C>
+where
+    C: TrieStorageCursor,
+{
+    fn new(
+        sparse_trie: &'sparse SparseStateTrie<ArenaParallelSparseTrie, ArenaParallelSparseTrie>,
+        hashed_address: B256,
+        inner: C,
+    ) -> Self {
+        Self {
+            sparse_trie,
+            cursor: ArenaCachedCursor::new(sparse_trie.storage_trie_ref(&hashed_address), inner),
+        }
+    }
+}
+
+impl<C> TrieCursor for SparseStateTrieStorageTrieCursor<'_, C>
+where
+    C: TrieStorageCursor,
+{
+    fn seek_exact(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        self.cursor.seek_exact(key)
+    }
+
+    fn seek(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        self.cursor.seek(key)
+    }
+
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        self.cursor.next()
+    }
+
+    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+        self.cursor.current()
+    }
+
+    fn reset(&mut self) {
+        self.cursor.reset();
+    }
+}
+
+impl<C> TrieStorageCursor for SparseStateTrieStorageTrieCursor<'_, C>
+where
+    C: TrieStorageCursor,
+{
+    fn set_hashed_address(&mut self, hashed_address: B256) {
+        self.cursor.inner_mut().set_hashed_address(hashed_address);
+        self.cursor.set_trie(self.sparse_trie.storage_trie_ref(&hashed_address));
     }
 }
 
