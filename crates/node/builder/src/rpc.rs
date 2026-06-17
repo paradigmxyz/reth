@@ -13,8 +13,8 @@ pub use reth_rpc_builder::{
 pub use reth_trie_db::ChangesetCache;
 
 use crate::{
-    invalid_block_hook::InvalidBlockHookExt, ConfigureEngineEvm, ConfigureEvm2Engine,
-    ConsensusEngineEvent, ConsensusEngineHandle,
+    invalid_block_hook::InvalidBlockHookExt, ConfigureEngineEvm, ConsensusEngineEvent,
+    ConsensusEngineHandle,
 };
 use alloy_consensus::{EthereumReceipt, EthereumTxEnvelope, TxEip4844};
 use alloy_rpc_types::engine::ClientVersionV1;
@@ -23,7 +23,7 @@ use jsonrpsee::RpcModule;
 use parking_lot::Mutex;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
-use reth_evm::{ConfigureEvm, ConfigureEvm2Prewarm};
+use reth_evm::{ConfigureEvm, ConfigureEvm2Prewarm, Evm2Env, EvmEnvFor};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
     NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
@@ -1453,11 +1453,10 @@ where
     Node: FullNodeComponents<
         Evm: ConfigureEngineEvm<
             <<Node::Types as NodeTypes>::Payload as PayloadTypes>::ExecutionData,
-        > + ConfigureEvm2Engine<
-            <<Node::Types as NodeTypes>::Payload as PayloadTypes>::ExecutionData,
         > + ConfigureEvm2Prewarm<Primitives = PrimitivesTy<Node::Types>>
                  + ConfigureEvm<Primitives = PrimitivesTy<Node::Types>, TxEnv = Evm2TxEnv>,
     >,
+    EvmEnvFor<Node::Evm>: Evm2Env,
     PrimitivesTy<Node::Types>: reth_node_api::NodePrimitives<
         SignedTx = EthereumTxEnvelope<TxEip4844>,
         Receipt = EthereumReceipt,

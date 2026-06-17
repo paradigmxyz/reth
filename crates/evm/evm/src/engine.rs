@@ -4,10 +4,9 @@ use crate::{
 };
 use alloc::boxed::Box;
 use alloy_consensus::transaction::Either;
-use alloy_primitives::Address;
 use core::convert::Infallible;
 use rayon::prelude::*;
-use reth_primitives_traits::{HeaderTy, TxTy};
+use reth_primitives_traits::TxTy;
 use reth_storage_api::StateProvider;
 
 /// [`ConfigureEvm`] extension providing methods for executing payloads.
@@ -28,54 +27,12 @@ pub trait ConfigureEngineEvm<ExecutionData>: ConfigureEvm {
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error>;
 }
 
-/// [`ConfigureEvm`] extension exposing evm2-native environments for engine execution.
-pub trait ConfigureEvm2Engine<ExecutionData>: ConfigureEngineEvm<ExecutionData> {
-    /// Returns the chain id used by evm2 for transaction validation and the `CHAINID` opcode.
-    fn evm2_chain_id(&self) -> u64;
-
-    /// Returns the deposit contract address used to derive EIP-6110 deposit requests.
-    fn evm2_deposit_contract_address(&self) -> Option<Address>;
-
-    /// Returns the evm2 spec id for the given block header.
-    fn evm2_spec_for_header(
-        &self,
-        header: &HeaderTy<Self::Primitives>,
-    ) -> Result<evm2::SpecId, Self::Error>;
-
-    /// Returns the evm2 block environment for the given block header.
-    fn evm2_block_env_for_header(
-        &self,
-        header: &HeaderTy<Self::Primitives>,
-    ) -> Result<evm2::env::BlockEnv, Self::Error>;
-
-    /// Returns the evm2 spec id for the given engine payload.
-    fn evm2_spec_for_payload(&self, payload: &ExecutionData) -> Result<evm2::SpecId, Self::Error>;
-
-    /// Returns the evm2 block environment for the given engine payload.
-    fn evm2_block_env_for_payload(
-        &self,
-        payload: &ExecutionData,
-    ) -> Result<evm2::env::BlockEnv, Self::Error>;
-}
-
 /// Configuration for evm2-native transaction prewarming.
 pub trait ConfigureEvm2Prewarm: ConfigureEvm {
     /// Per-thread evm2 instance used by prewarm workers.
     type PrewarmEvm<DB>
     where
         DB: StateProvider + Send + 'static;
-
-    /// Creates a prewarm evm over the provided state.
-    fn evm2_prewarm_evm<DB>(
-        &self,
-        state_provider: DB,
-        env: EvmEnvFor<Self>,
-    ) -> Self::PrewarmEvm<DB>
-    where
-        DB: StateProvider + Send + 'static;
-
-    /// Returns the evm2 spec id for a prewarm environment.
-    fn evm2_prewarm_spec(&self, env: &EvmEnvFor<Self>) -> evm2::SpecId;
 
     /// Creates a prewarm evm over the provided state with the provided precompile provider.
     fn evm2_prewarm_evm_with_precompiles<DB>(

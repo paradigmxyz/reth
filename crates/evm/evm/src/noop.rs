@@ -84,6 +84,14 @@ where
         self.inner().context_for_next_block(parent, attributes)
     }
 
+    fn chain_id(&self) -> u64 {
+        self.inner().chain_id()
+    }
+
+    fn deposit_contract_address(&self) -> Option<alloy_primitives::Address> {
+        self.inner().deposit_contract_address()
+    }
+
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: evm2::evm::Database + Clone + 'static,
@@ -102,17 +110,6 @@ where
         = Inner::PrewarmEvm<DB>
     where
         DB: StateProvider + Send + 'static;
-
-    fn evm2_prewarm_evm<DB>(&self, state_provider: DB, env: EvmEnvFor<Self>) -> Self::PrewarmEvm<DB>
-    where
-        DB: StateProvider + Send + 'static,
-    {
-        self.inner().evm2_prewarm_evm(state_provider, env)
-    }
-
-    fn evm2_prewarm_spec(&self, env: &EvmEnvFor<Self>) -> evm2::SpecId {
-        self.inner().evm2_prewarm_spec(env)
-    }
 
     fn evm2_prewarm_evm_with_precompiles<DB>(
         &self,
@@ -161,41 +158,5 @@ where
         payload: &T,
     ) -> Result<impl crate::ExecutableTxIterator<Self>, Self::Error> {
         self.inner().tx_iterator_for_payload(payload)
-    }
-}
-
-#[cfg(feature = "std")]
-impl<Inner, T> crate::ConfigureEvm2Engine<T> for NoopEvmConfig<Inner>
-where
-    Inner: crate::ConfigureEvm2Engine<T>,
-{
-    fn evm2_chain_id(&self) -> u64 {
-        self.inner().evm2_chain_id()
-    }
-
-    fn evm2_deposit_contract_address(&self) -> Option<alloy_primitives::Address> {
-        self.inner().evm2_deposit_contract_address()
-    }
-
-    fn evm2_spec_for_header(
-        &self,
-        header: &HeaderTy<Self::Primitives>,
-    ) -> Result<evm2::SpecId, Self::Error> {
-        self.inner().evm2_spec_for_header(header)
-    }
-
-    fn evm2_block_env_for_header(
-        &self,
-        header: &HeaderTy<Self::Primitives>,
-    ) -> Result<evm2::env::BlockEnv, Self::Error> {
-        self.inner().evm2_block_env_for_header(header)
-    }
-
-    fn evm2_spec_for_payload(&self, payload: &T) -> Result<evm2::SpecId, Self::Error> {
-        self.inner().evm2_spec_for_payload(payload)
-    }
-
-    fn evm2_block_env_for_payload(&self, payload: &T) -> Result<evm2::env::BlockEnv, Self::Error> {
-        self.inner().evm2_block_env_for_payload(payload)
     }
 }

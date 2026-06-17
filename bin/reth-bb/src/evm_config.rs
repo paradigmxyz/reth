@@ -11,8 +11,8 @@ use alloy_rpc_types::engine::ExecutionData;
 use core::{convert::Infallible, fmt};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
-    ConfigureEngineEvm, ConfigureEvm, ConfigureEvm2Engine, ConfigureEvm2Prewarm, EvmEnvFor,
-    ExecutableTxIterator, ExecutionCtxFor, NextBlockEnvAttributes, TxEnvFor,
+    ConfigureEngineEvm, ConfigureEvm, ConfigureEvm2Prewarm, EvmEnvFor, ExecutableTxIterator,
+    ExecutionCtxFor, NextBlockEnvAttributes, TxEnvFor,
 };
 use reth_evm_ethereum::{EthEvmConfig, EthEvmEnv, Evm2TxEnv};
 use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader, TxTy};
@@ -108,6 +108,14 @@ where
         self.inner.context_for_next_block(parent, attributes)
     }
 
+    fn chain_id(&self) -> u64 {
+        self.inner.chain_id()
+    }
+
+    fn deposit_contract_address(&self) -> Option<Address> {
+        self.inner.deposit_contract_address()
+    }
+
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: evm2::evm::Database + Clone + 'static,
@@ -150,54 +158,6 @@ where
     }
 }
 
-impl<C> ConfigureEvm2Engine<BigBlockData<ExecutionData>> for BbEvmConfig<C>
-where
-    Self: ConfigureEngineEvm<
-        BigBlockData<ExecutionData>,
-        Primitives = EthPrimitives,
-        Error = Infallible,
-    >,
-    EthEvmConfig<C>: ConfigureEvm2Engine<ExecutionData>
-        + ConfigureEngineEvm<ExecutionData>
-        + ConfigureEvm<Primitives = EthPrimitives, Error = Infallible>,
-{
-    fn evm2_chain_id(&self) -> u64 {
-        self.inner.evm2_chain_id()
-    }
-
-    fn evm2_deposit_contract_address(&self) -> Option<Address> {
-        self.inner.evm2_deposit_contract_address()
-    }
-
-    fn evm2_spec_for_header(
-        &self,
-        header: &HeaderTy<Self::Primitives>,
-    ) -> Result<evm2::SpecId, Self::Error> {
-        self.inner.evm2_spec_for_header(header)
-    }
-
-    fn evm2_block_env_for_header(
-        &self,
-        header: &HeaderTy<Self::Primitives>,
-    ) -> Result<evm2::env::BlockEnv, Self::Error> {
-        self.inner.evm2_block_env_for_header(header)
-    }
-
-    fn evm2_spec_for_payload(
-        &self,
-        payload: &BigBlockData<ExecutionData>,
-    ) -> Result<evm2::SpecId, Self::Error> {
-        self.inner.evm2_spec_for_payload(&payload.env_switches[0])
-    }
-
-    fn evm2_block_env_for_payload(
-        &self,
-        payload: &BigBlockData<ExecutionData>,
-    ) -> Result<evm2::env::BlockEnv, Self::Error> {
-        self.inner.evm2_block_env_for_payload(&payload.env_switches[0])
-    }
-}
-
 impl<C> ConfigureEvm2Prewarm for BbEvmConfig<C>
 where
     Self: ConfigureEvm<Primitives = EthPrimitives, EvmEnv = EthEvmEnv, TxEnv = Evm2TxEnv>,
@@ -208,17 +168,6 @@ where
         = <EthEvmConfig<C> as ConfigureEvm2Prewarm>::PrewarmEvm<DB>
     where
         DB: StateProvider + Send + 'static;
-
-    fn evm2_prewarm_evm<DB>(&self, state_provider: DB, env: EvmEnvFor<Self>) -> Self::PrewarmEvm<DB>
-    where
-        DB: StateProvider + Send + 'static,
-    {
-        self.inner.evm2_prewarm_evm(state_provider, env)
-    }
-
-    fn evm2_prewarm_spec(&self, env: &EvmEnvFor<Self>) -> evm2::SpecId {
-        self.inner.evm2_prewarm_spec(env)
-    }
 
     fn evm2_prewarm_evm_with_precompiles<DB>(
         &self,

@@ -32,7 +32,7 @@ use evm2::evm::{AccountChangeRef, StateChangeSink, StorageChange};
 use metrics::{Counter, Gauge, Histogram};
 #[cfg(any())]
 use rayon::prelude::*;
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, ConfigureEvm2Prewarm};
+use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, ConfigureEvm2Prewarm, Evm2Env, EvmEnvFor};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 #[cfg(any())]
@@ -91,6 +91,7 @@ where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm2Prewarm<Primitives = N> + 'static,
+    EvmEnvFor<Evm>: Evm2Env,
 {
     /// Initializes the task with the given transactions pending execution
     pub fn new(
@@ -591,6 +592,7 @@ where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm2Prewarm<Primitives = N> + 'static,
+    EvmEnvFor<Evm>: Evm2Env,
 {
     /// Creates a per-thread EVM for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
@@ -614,7 +616,7 @@ where
         }
 
         let env = self.env.evm_env.clone();
-        let spec = self.evm_config.evm2_prewarm_spec(&env);
+        let spec = env.spec_id();
         let precompiles: Box<dyn evm2::precompile::PrecompileProvider<evm2::BaseEvmTypes>> =
             Box::new(CachedPrecompileProvider::new(
                 evm2::Precompiles::base(spec),
