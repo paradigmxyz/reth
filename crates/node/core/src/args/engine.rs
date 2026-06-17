@@ -57,6 +57,7 @@ pub struct DefaultEngineValues {
     suppress_persistence_during_build: bool,
     bal_parallel_execution_disabled: bool,
     bal_parallel_state_root_disabled: bool,
+    skip_state_root: bool,
 }
 
 impl DefaultEngineValues {
@@ -157,6 +158,12 @@ impl DefaultEngineValues {
     /// Set whether to enable state root fallback by default
     pub const fn with_state_root_fallback(mut self, v: bool) -> Self {
         self.state_root_fallback = v;
+        self
+    }
+
+    /// Set whether to skip trie state-root computation during engine validation by default.
+    pub const fn with_skip_state_root(mut self, v: bool) -> Self {
+        self.skip_state_root = v;
         self
     }
 
@@ -294,6 +301,7 @@ impl Default for DefaultEngineValues {
             suppress_persistence_during_build: false,
             bal_parallel_execution_disabled: false,
             bal_parallel_state_root_disabled: false,
+            skip_state_root: false,
         }
     }
 }
@@ -406,6 +414,11 @@ pub struct EngineArgs {
     /// Enable state root fallback, useful for testing
     #[arg(long = "engine.state-root-fallback", default_value_t = DefaultEngineValues::get_global().state_root_fallback)]
     pub state_root_fallback: bool,
+
+    /// Skip trie state-root computation during engine validation. The header state root is trusted
+    /// and Lthash still runs when wired by the payload processor. Intended for experiments.
+    #[arg(long = "engine.skip-state-root", default_value_t = DefaultEngineValues::get_global().skip_state_root)]
+    pub skip_state_root: bool,
 
     /// Always process payload attributes and begin a payload build process even if
     /// `forkchoiceState.headBlockHash` is already the canonical head or an ancestor. See
@@ -586,6 +599,7 @@ impl Default for EngineArgs {
             suppress_persistence_during_build,
             bal_parallel_execution_disabled,
             bal_parallel_state_root_disabled,
+            skip_state_root,
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
@@ -626,6 +640,7 @@ impl Default for EngineArgs {
             bal_parallel_execution_disabled,
             bal_parallel_state_root_disabled,
             disable_bal_batch_io: false,
+            skip_state_root,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -692,7 +707,8 @@ impl EngineArgs {
             .with_suppress_persistence_during_build(self.suppress_persistence_during_build)
             .without_bal_parallel_execution(self.bal_parallel_execution_disabled)
             .without_bal_parallel_state_root(self.bal_parallel_state_root_disabled)
-            .without_bal_batch_io(self.disable_bal_batch_io);
+            .without_bal_batch_io(self.disable_bal_batch_io)
+            .with_skip_state_root(self.skip_state_root);
         #[cfg(feature = "trie-debug")]
         let config = config.with_proof_jitter(self.proof_jitter);
         config
@@ -812,6 +828,7 @@ mod tests {
             bal_parallel_execution_disabled: true,
             bal_parallel_state_root_disabled: true,
             disable_bal_batch_io: true,
+            skip_state_root: true,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         };
@@ -859,6 +876,7 @@ mod tests {
             "--engine.disable-bal-parallel-execution",
             "--engine.disable-bal-parallel-state-root",
             "--engine.disable-bal-batch-io",
+            "--engine.skip-state-root",
         ])
         .args;
 

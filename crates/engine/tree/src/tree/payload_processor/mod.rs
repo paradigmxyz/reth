@@ -2,7 +2,10 @@
 
 use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
-    payload_processor::prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
+    payload_processor::{
+        lthash::{spawn_lthash_task, LthashHandle, LthashOutcome, PayloadStateHook},
+        prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
+    },
     sparse_trie::SparseTrieCacheTask,
     CacheWaitDurations, CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource,
     ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
@@ -15,6 +18,7 @@ use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender
 use multiproof::*;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
+use reth_chain_state::LthashAccumulator;
 use reth_evm::{
     block::ExecutableTxParts,
     execute::{ExecutableTxFor, WithTxEnv},
@@ -23,7 +27,8 @@ use reth_evm::{
 };
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
-    BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader,
+    BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProviderBox,
+    StateProviderFactory, StateReader,
 };
 use reth_revm::db::BundleState;
 use reth_tasks::{utils::increase_thread_priority, ForEachOrdered, Runtime};
@@ -48,6 +53,7 @@ use std::{
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
 pub mod bal;
+pub(crate) mod lthash;
 pub mod multiproof;
 mod preserved_sparse_trie;
 pub mod prewarm;
@@ -329,10 +335,13 @@ where
             provider_builder,
             Some(state_root_handle.updates_tx().clone()),
             parallel_bal_execution,
+            true,
         );
+        let (prewarm_handle, lthash_handle) = prewarm_handle;
 
         PayloadHandle {
             state_root_handle: Some(state_root_handle),
+            lthash_handle,
             install_state_hook,
             prewarm_handle,
             transactions: execution_rx,
@@ -349,17 +358,26 @@ where
         env: ExecutionEnv<Evm>,
         transactions: I,
         provider_builder: StateProviderBuilder<N, P>,
+        parallel_bal_execution: bool,
+        enable_lthash: bool,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count);
-        let prewarm_handle =
-            self.spawn_caching_with(env, prewarm_rx, provider_builder, None, false);
+        let (prewarm_handle, lthash_handle) = self.spawn_caching_with(
+            env,
+            prewarm_rx,
+            provider_builder,
+            None,
+            parallel_bal_execution,
+            enable_lthash,
+        );
         PayloadHandle {
             state_root_handle: None,
-            install_state_hook: false,
+            lthash_handle,
+            install_state_hook: enable_lthash && !parallel_bal_execution,
             prewarm_handle,
             transactions: execution_rx,
             _span: Span::current(),
@@ -519,7 +537,8 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
         parallel_bal_execution: bool,
-    ) -> CacheTaskHandle<N::Receipt>
+        enable_lthash: bool,
+    ) -> (CacheTaskHandle<N::Receipt>, Option<LthashHandle>)
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
@@ -535,6 +554,30 @@ where
             PrewarmMode::Transactions(transactions)
         };
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
+        let lthash = enable_lthash.then(|| {
+            let state_io_pool = self.state_io_pool();
+            let parent_accumulator = provider_builder
+                .lthash_parent_accumulator()
+                .as_deref()
+                .cloned()
+                .unwrap_or_else(LthashAccumulator::zero);
+            let (handle, old_values_tx) =
+                spawn_lthash_task(&self.executor, parent_accumulator, state_io_pool.clone());
+            let caches = saved_cache
+                .as_ref()
+                .map(|saved| saved.cache().clone())
+                .unwrap_or_else(|| ExecutionCache::new(1));
+            let provider_builder = provider_builder.clone();
+            let build: Arc<
+                dyn Fn() -> reth_provider::ProviderResult<StateProviderBox> + Send + Sync,
+            > = Arc::new(move || provider_builder.build());
+            state_io_pool.begin_block(build, caches, Some(old_values_tx));
+            (handle, state_io_pool)
+        });
+        let (lthash_handle, lthash_state_io_pool) = match lthash {
+            Some((handle, pool)) => (Some(handle), Some(pool)),
+            None => (None, None),
+        };
 
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
         // configure prewarming
@@ -543,7 +586,9 @@ where
             evm_config: self.evm_config.clone(),
             saved_cache: saved_cache.clone(),
             provider: provider_builder,
-            state_io_pool: parallel_bal_execution.then(|| self.state_io_pool()),
+            state_io_pool: lthash_state_io_pool
+                .or_else(|| parallel_bal_execution.then(|| self.state_io_pool())),
+            state_io_pool_opened_by_lthash: lthash_handle.is_some(),
             metrics: PrewarmMetrics::default(),
             cache_metrics: self.cache_metrics.clone(),
             cache_state_metrics: self.cache_state_metrics.clone(),
@@ -560,6 +605,7 @@ where
             self.execution_cache.clone(),
             prewarm_ctx,
             to_sparse_trie_task,
+            lthash_handle.as_ref().map(|handle| handle.updates_tx()),
         );
         {
             let to_prewarm_task = to_prewarm_task.clone();
@@ -568,12 +614,15 @@ where
             });
         }
 
-        CacheTaskHandle {
-            saved_cache,
-            to_prewarm_task: Some(to_prewarm_task),
-            executed_tx_index,
-            cache_metrics: self.cache_metrics.clone(),
-        }
+        (
+            CacheTaskHandle {
+                saved_cache,
+                to_prewarm_task: Some(to_prewarm_task),
+                executed_tx_index,
+                cache_metrics: self.cache_metrics.clone(),
+            },
+            lthash_handle,
+        )
     }
 
     /// Returns the cache for the given parent hash.
@@ -815,6 +864,8 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
 pub struct PayloadHandle<Tx, Err, R> {
     /// Handle to the background state root computation, if spawned.
     state_root_handle: Option<StateRootHandle>,
+    /// Handle to the background Lthash computation, if spawned.
+    lthash_handle: Option<LthashHandle>,
     /// Whether main execution should stream per-tx state updates into the sparse trie task.
     install_state_hook: bool,
     // must include the receiver of the state root wired to the sparse trie
@@ -857,9 +908,22 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     ///
     /// Returns `None` when BAL-driven hashed state streaming feeds the sparse trie task.
     pub fn state_hook(&self) -> Option<impl OnStateHook> {
-        self.install_state_hook
-            .then(|| self.state_root_handle.as_ref().map(|handle| handle.state_hook()))
-            .flatten()
+        if !self.install_state_hook {
+            return None
+        }
+
+        let sparse = self
+            .state_root_handle
+            .as_ref()
+            .map(|handle| StateHookSender::new(handle.updates_tx().clone()));
+        let lthash = self.lthash_handle.as_ref().map(|handle| handle.updates_tx());
+
+        (sparse.is_some() || lthash.is_some()).then(|| PayloadStateHook::new(sparse, lthash))
+    }
+
+    /// Awaits the Lthash task if one was spawned.
+    pub(crate) fn lthash_outcome(&mut self) -> Result<Option<LthashOutcome>, lthash::LthashError> {
+        self.lthash_handle.take().map(LthashHandle::outcome).transpose()
     }
 
     /// Returns a clone of the sender that streams updates into the sparse-trie task. The BAL
