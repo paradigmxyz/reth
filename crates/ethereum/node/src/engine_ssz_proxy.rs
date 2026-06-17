@@ -12,8 +12,8 @@ use alloy_eips::{
 use alloy_primitives::{Bytes, B128, B256};
 use alloy_rpc_types_engine::{
     ssz_engine_types::{
-        BuiltPayloadAmsterdam, BuiltPayloadOsaka, BuiltPayloadParis, BuiltPayloadPrague,
-        BuiltPayloadShanghai,
+        BuiltPayloadAmsterdam, BuiltPayloadCancun, BuiltPayloadOsaka, BuiltPayloadParis,
+        BuiltPayloadPrague, BuiltPayloadShanghai,
     },
     CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayload,
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
@@ -236,7 +236,7 @@ where
             }
             let response = if let Some(payload_id) = parse_payload_id(&payload_id) {
                 if let Some(payload_store) = handle.payload_store().await {
-                    handle_get_payload(payload_store, fork.get_payload_version(), payload_id).await
+                    handle_get_payload(payload_store, fork, payload_id).await
                 } else {
                     text_response(STATUS_SERVICE_UNAVAILABLE, "payload store unavailable")
                 }
@@ -354,17 +354,6 @@ impl EngineSszFork {
             Self::Amsterdam => 4,
         }
     }
-
-    const fn get_payload_version(self) -> u8 {
-        match self {
-            Self::Paris => 1,
-            Self::Shanghai => 2,
-            Self::Cancun => 3,
-            Self::Prague => 4,
-            Self::Osaka => 5,
-            Self::Amsterdam => 6,
-        }
-    }
 }
 
 impl std::str::FromStr for EngineSszFork {
@@ -434,7 +423,7 @@ async fn handle_new_payload(
 
 async fn handle_get_payload(
     payload_store: Arc<PayloadStore<EthEngineTypes>>,
-    version: u8,
+    fork: EngineSszFork,
     payload_id: PayloadId,
 ) -> HttpResponse {
     let payload = match payload_store.resolve(payload_id).await {
@@ -443,39 +432,40 @@ async fn handle_get_payload(
         None => return text_response(STATUS_NOT_FOUND, "unknown payload"),
     };
 
-    encode_get_payload_response(version, payload)
+    encode_get_payload_response(fork, payload)
 }
 
-fn encode_get_payload_response(version: u8, payload: EthBuiltPayload) -> HttpResponse {
-    match version {
-        1 => {
+fn encode_get_payload_response(fork: EngineSszFork, payload: EthBuiltPayload) -> HttpResponse {
+    match fork {
+        EngineSszFork::Paris => {
             let block_value = payload.fees();
             ssz_response(BuiltPayloadParis {
                 payload: ExecutionPayloadV1::from(payload),
                 block_value,
             })
         }
-        2 => match BuiltPayloadShanghai::try_from(ExecutionPayloadEnvelopeV2::from(payload)) {
+        EngineSszFork::Shanghai => {
+            match BuiltPayloadShanghai::try_from(ExecutionPayloadEnvelopeV2::from(payload)) {
+                Ok(payload) => ssz_response(payload),
+                Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+            }
+        }
+        EngineSszFork::Cancun => match BuiltPayloadCancun::try_from(payload) {
             Ok(payload) => ssz_response(payload),
             Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
         },
-        3 => match ExecutionPayloadEnvelopeV3::try_from(payload) {
-            Ok(payload) => ssz_response(payload),
-            Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
-        },
-        4 => match ExecutionPayloadEnvelopeV4::try_from(payload) {
+        EngineSszFork::Prague => match ExecutionPayloadEnvelopeV4::try_from(payload) {
             Ok(payload) => ssz_response(BuiltPayloadPrague::from(payload)),
             Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
         },
-        5 => match ExecutionPayloadEnvelopeV5::try_from(payload) {
+        EngineSszFork::Osaka => match ExecutionPayloadEnvelopeV5::try_from(payload) {
             Ok(payload) => ssz_response(BuiltPayloadOsaka::from(payload)),
             Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
         },
-        6 => match ExecutionPayloadEnvelopeV6::try_from(payload) {
+        EngineSszFork::Amsterdam => match ExecutionPayloadEnvelopeV6::try_from(payload) {
             Ok(payload) => ssz_response(BuiltPayloadAmsterdam::from(payload)),
             Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
         },
-        _ => text_response(STATUS_BAD_REQUEST, "unsupported getPayload endpoint version"),
     }
 }
 
@@ -829,7 +819,6 @@ mod tests {
             panic!("expected get payload route")
         };
         assert_eq!(fork, EngineSszFork::Prague);
-        assert_eq!(fork.get_payload_version(), 4);
         assert_eq!(
             parse_payload_id(&payload_id),
             Some(PayloadId::new([0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef]))
