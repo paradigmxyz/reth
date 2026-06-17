@@ -11,7 +11,7 @@
 //! 2. Prewarming tasks execute transactions in parallel using shared caches
 //! 3. When actual block execution happens, it benefits from the warmed cache
 
-use super::bal_prewarm_pool::BalPrewarmPool;
+use super::state_io_pool::StateIoPool;
 use crate::tree::{
     payload_processor::multiproof::StateRootMessage,
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
@@ -395,11 +395,11 @@ where
 
         if let Some(saved_cache) = ctx.saved_cache &&
             !ctx.disable_bal_batch_io &&
-            let Some(pool) = ctx.bal_prewarm_pool.as_ref()
+            let Some(pool) = ctx.state_io_pool.as_ref()
         {
             // If
             //
-            // - BAL path is enabled (and so bal_prewarm_pool is present),
+            // - BAL path is enabled (and so state_io_pool is present),
             // - dispatch_bal_batch_io is false
             // - execution cache is not disabled
             //
@@ -413,7 +413,7 @@ where
             let provider_builder = ctx.provider.clone();
             let build = Arc::new(move || provider_builder.build());
 
-            pool.begin_block(build, caches);
+            pool.begin_block(build, caches, None);
             for account in prefetch_bal.as_bal() {
                 pool.warm_account(account.address);
                 for change in &account.storage_changes {
@@ -423,7 +423,7 @@ where
                     pool.warm_storage(account.address, slot.into());
                 }
             }
-            pool.end_block();
+            let _ = pool.end_block();
             let _ = prefetch_tx.send(());
         } else {
             let _ = prefetch_tx.send(());
@@ -530,9 +530,9 @@ where
     pub saved_cache: Option<SavedCache>,
     /// Provider to obtain the state
     pub provider: StateProviderBuilder<N, P>,
-    /// Dedicated blocking pool for warming the BAL read-set. `Some` only on the BAL parallel
-    /// execution path; the pool is owned by the [`PayloadProcessor`](super::PayloadProcessor).
-    pub(crate) bal_prewarm_pool: Option<Arc<BalPrewarmPool>>,
+    /// Dedicated blocking pool for parent-state I/O. `Some` only on paths that need background
+    /// parent-state reads; the pool is owned by the [`PayloadProcessor`](super::PayloadProcessor).
+    pub(crate) state_io_pool: Option<Arc<StateIoPool>>,
     /// The metrics for the prewarm task.
     pub metrics: PrewarmMetrics,
     /// Metrics for the execution cache.

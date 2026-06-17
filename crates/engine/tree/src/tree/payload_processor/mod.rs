@@ -48,12 +48,12 @@ use std::{
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
 pub mod bal;
-pub(crate) mod bal_prewarm_pool;
 pub mod multiproof;
 mod preserved_sparse_trie;
 pub mod prewarm;
 pub mod receipt_root_task;
 pub mod sparse_trie;
+pub(crate) mod state_io_pool;
 
 use preserved_sparse_trie::{PreservedSparseTrie, SharedPreservedSparseTrie};
 
@@ -154,9 +154,9 @@ where
     disable_bal_parallel_state_root: bool,
     /// Whether BAL state prefetching during prewarm is disabled.
     disable_bal_batch_io: bool,
-    /// Dedicated blocking pool for warming the BAL read-set, created lazily on the first BAL block
-    /// (see [`Self::bal_prewarm_pool`]). Its threads exit when the processor is dropped.
-    bal_prewarm_pool: OnceLock<Arc<bal_prewarm_pool::BalPrewarmPool>>,
+    /// Dedicated blocking pool for parent-state I/O, created lazily on the first BAL block or
+    /// Lthash block. Its threads exit when the processor is dropped.
+    state_io_pool: OnceLock<Arc<state_io_pool::StateIoPool>>,
 }
 
 impl<N, Evm> PayloadProcessor<Evm>
@@ -196,16 +196,16 @@ where
                 .then(CachedStateCacheMetrics::default),
             disable_bal_parallel_state_root: config.disable_bal_parallel_state_root(),
             disable_bal_batch_io: config.disable_bal_batch_io(),
-            bal_prewarm_pool: OnceLock::new(),
+            state_io_pool: OnceLock::new(),
         }
     }
 
-    /// Returns the dedicated BAL read-set prewarm pool, spawning its blocking worker threads on
-    /// first use (only the BAL parallel execution path calls this).
-    fn bal_prewarm_pool(&self) -> Arc<bal_prewarm_pool::BalPrewarmPool> {
-        self.bal_prewarm_pool
+    /// Returns the dedicated parent-state I/O pool, spawning its blocking worker threads on first
+    /// use.
+    fn state_io_pool(&self) -> Arc<state_io_pool::StateIoPool> {
+        self.state_io_pool
             .get_or_init(|| {
-                bal_prewarm_pool::BalPrewarmPool::new(bal_prewarm_pool::DEFAULT_BAL_PREWARM_THREADS)
+                state_io_pool::StateIoPool::new(state_io_pool::DEFAULT_STATE_IO_THREADS)
             })
             .clone()
     }
@@ -543,7 +543,7 @@ where
             evm_config: self.evm_config.clone(),
             saved_cache: saved_cache.clone(),
             provider: provider_builder,
-            bal_prewarm_pool: parallel_bal_execution.then(|| self.bal_prewarm_pool()),
+            state_io_pool: parallel_bal_execution.then(|| self.state_io_pool()),
             metrics: PrewarmMetrics::default(),
             cache_metrics: self.cache_metrics.clone(),
             cache_state_metrics: self.cache_state_metrics.clone(),
