@@ -582,6 +582,48 @@ mod tests {
     }
 
     #[test]
+    fn test_consistency_senders_before_prune_checkpoint() {
+        use reth_db_api::models::StorageSettings;
+        use reth_storage_api::StorageSettingsCache;
+
+        let db = seed_data(90).unwrap();
+        db.factory.set_storage_settings_cache(StorageSettings::v2());
+        let static_file_provider = db.factory.static_file_provider();
+
+        // Same scenario as the `Distance` case, but pruned with a `Before` mode. The check is
+        // bounded by the prune checkpoint block regardless of the prune mode, so a node that
+        // pruned senders with `Before` must not be told to unwind to 0 either.
+        assert!(matches!(
+            static_file_provider.check_consistency(&db.factory.database_provider_ro().unwrap()),
+            Ok(Some(PipelineTarget::Unwind(0)))
+        ));
+
+        let provider_rw = db.factory.provider_rw().unwrap();
+        for segment in [
+            PruneSegment::SenderRecovery,
+            PruneSegment::AccountHistory,
+            PruneSegment::StorageHistory,
+        ] {
+            provider_rw
+                .save_prune_checkpoint(
+                    segment,
+                    PruneCheckpoint {
+                        block_number: Some(89),
+                        tx_number: None,
+                        prune_mode: PruneMode::Before(90),
+                    },
+                )
+                .unwrap();
+        }
+        provider_rw.commit().unwrap();
+
+        assert!(matches!(
+            static_file_provider.check_consistency(&db.factory.database_provider_ro().unwrap()),
+            Ok(None)
+        ));
+    }
+
+    #[test]
     fn test_consistency_unwind_bounded_by_prune_checkpoint() {
         use reth_db_api::models::StorageSettings;
         use reth_storage_api::StorageSettingsCache;
