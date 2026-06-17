@@ -41,7 +41,7 @@ impl EraBlockWriter for Ere {
     {
         let tuples = blocks.iter().map(compress_block).collect::<Result<Vec<_>>>()?;
         let accumulator = super::accumulator::<Accumulator, _, _, _>(blocks)?;
-        let id = file_id(network, max_blocks_per_file, blocks, &accumulator);
+        let id = file_id(network, max_blocks_per_file, blocks)?;
         let index = block_index(blocks[0].header.number(), &tuples, &accumulator);
 
         let file_path = dir.join(id.to_file_name());
@@ -100,23 +100,22 @@ impl ChunkAccumulator for Accumulator {
     }
 }
 
-/// Builds the file identifier, taking the short hash from the accumulator root.
+/// Builds the file identifier.
+///
+/// Per the [`EreId`] contract, the short hash is the first four bytes of the last block's hash.
 fn file_id<H: BlockHeader, B, R>(
     network: &str,
     max_blocks_per_file: u64,
     blocks: &[ExportBlock<H, B, R>],
-    accumulator: &Accumulator,
-) -> EreId {
-    let file_hash = super::short_hash(accumulator.root);
+) -> Result<EreId> {
+    let last_block_hash =
+        blocks.last().ok_or_else(|| eyre!("cannot build ERE file id from empty block range"))?;
+    let file_hash = super::short_hash(last_block_hash.block_hash);
     let id = EreId::new(network, blocks[0].header.number(), blocks.len() as u32)
         .with_hash(file_hash)
         .with_profile(EreProfile::NoProofs);
     // Custom block-per-file exports tag the era count into the filename.
-    if max_blocks_per_file == MAX_BLOCKS_PER_ERE as u64 {
-        id
-    } else {
-        id.with_era_count()
-    }
+    Ok(if max_blocks_per_file == MAX_BLOCKS_PER_ERE as u64 { id } else { id.with_era_count() })
 }
 
 /// Builds the [`DynamicBlockIndex`] for the file's sectioned layout.
