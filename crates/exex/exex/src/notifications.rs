@@ -3,7 +3,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use futures::{Stream, StreamExt};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::ConfigureEvm2BlockExecutor;
+use reth_evm::ConfigureEvm;
 use reth_exex_types::ExExHead;
 use reth_node_api::NodePrimitives;
 use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
@@ -24,7 +24,7 @@ use tokio::sync::mpsc::Receiver;
 #[derive(Debug)]
 pub struct ExExNotifications<P, E>
 where
-    E: ConfigureEvm2BlockExecutor,
+    E: ConfigureEvm,
 {
     inner: ExExNotificationsInner<P, E>,
 }
@@ -77,7 +77,7 @@ pub trait ExExNotificationsStream<N: NodePrimitives = EthPrimitives>:
 #[derive(Debug)]
 enum ExExNotificationsInner<P, E>
 where
-    E: ConfigureEvm2BlockExecutor,
+    E: ConfigureEvm,
 {
     /// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks.
     WithoutHead(ExExNotificationsWithoutHead<P, E>),
@@ -91,7 +91,7 @@ where
 
 impl<P, E> ExExNotifications<P, E>
 where
-    E: ConfigureEvm2BlockExecutor,
+    E: ConfigureEvm,
 {
     /// Creates a new stream of [`ExExNotifications`] without a head.
     pub const fn new(
@@ -116,10 +116,7 @@ where
 impl<P, E> ExExNotificationsStream<E::Primitives> for ExExNotifications<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: ConfigureEvm2BlockExecutor<Primitives: NodePrimitives<Block = P::Block>>
-        + Clone
-        + Unpin
-        + 'static,
+    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + Clone + Unpin + 'static,
 {
     fn set_without_head(&mut self) {
         let current = std::mem::replace(&mut self.inner, ExExNotificationsInner::Invalid);
@@ -176,7 +173,7 @@ where
 impl<P, E> Stream for ExExNotifications<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: ConfigureEvm2BlockExecutor<Primitives: NodePrimitives<Block = P::Block>> + 'static,
+    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
 {
     type Item = eyre::Result<ExExNotification<E::Primitives>>;
 
@@ -197,7 +194,7 @@ where
 /// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks.
 pub struct ExExNotificationsWithoutHead<P, E>
 where
-    E: ConfigureEvm2BlockExecutor,
+    E: ConfigureEvm,
 {
     node_head: BlockNumHash,
     provider: P,
@@ -208,7 +205,7 @@ where
 
 impl<P: Debug, E> Debug for ExExNotificationsWithoutHead<P, E>
 where
-    E: ConfigureEvm2BlockExecutor + Debug,
+    E: ConfigureEvm + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExExNotifications")
@@ -221,7 +218,7 @@ where
 
 impl<P, E> ExExNotificationsWithoutHead<P, E>
 where
-    E: ConfigureEvm2BlockExecutor,
+    E: ConfigureEvm,
 {
     /// Creates a new instance of [`ExExNotificationsWithoutHead`].
     const fn new(
@@ -249,7 +246,7 @@ where
 
 impl<P: Unpin, E> Stream for ExExNotificationsWithoutHead<P, E>
 where
-    E: ConfigureEvm2BlockExecutor,
+    E: ConfigureEvm,
 {
     type Item = ExExNotification<E::Primitives>;
 
@@ -269,7 +266,7 @@ where
 #[derive(Debug)]
 pub struct ExExNotificationsWithHead<P, E>
 where
-    E: ConfigureEvm2BlockExecutor,
+    E: ConfigureEvm,
 {
     /// The node's local head at launch.
     initial_local_head: BlockNumHash,
@@ -297,7 +294,7 @@ where
 
 impl<P, E> ExExNotificationsWithHead<P, E>
 where
-    E: ConfigureEvm2BlockExecutor,
+    E: ConfigureEvm,
 {
     /// Creates a new [`ExExNotificationsWithHead`].
     const fn new(
@@ -340,10 +337,7 @@ where
 impl<P, E> ExExNotificationsWithHead<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: ConfigureEvm2BlockExecutor<Primitives: NodePrimitives<Block = P::Block>>
-        + Clone
-        + Unpin
-        + 'static,
+    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + Clone + Unpin + 'static,
 {
     /// Checks if the ExEx head is on the canonical chain.
     ///
@@ -433,10 +427,7 @@ where
 impl<P, E> Stream for ExExNotificationsWithHead<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: ConfigureEvm2BlockExecutor<Primitives: NodePrimitives<Block = P::Block>>
-        + Clone
-        + Unpin
-        + 'static,
+    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + Clone + Unpin + 'static,
 {
     type Item = eyre::Result<ExExNotification<E::Primitives>>;
 

@@ -3,10 +3,12 @@ use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
-use reth_evm::ConfigureEvm2BlockExecutor;
+use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_execution_types::{evm2_state_source_hashed_post_state, Evm2AccountInfo, Evm2BlockState};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
+use reth_provider::{
+    BlockExecutionOutput, SharedEvm2StateProviderDatabase, StateProvider, StateProviderFactory,
+};
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
 use reth_trie::updates::TrieUpdates;
@@ -170,7 +172,7 @@ impl<P, E> InvalidBlockWitnessHook<P, E> {
 impl<P, E, N> InvalidBlockWitnessHook<P, E>
 where
     P: StateProviderFactory + Send + Sync + 'static,
-    E: ConfigureEvm2BlockExecutor<Primitives = N> + 'static,
+    E: ConfigureEvm<Primitives = N> + 'static,
     N: NodePrimitives,
 {
     /// Re-executes the block and collects execution data
@@ -180,9 +182,13 @@ where
         block: &RecoveredBlock<N::Block>,
     ) -> eyre::Result<(ExecutionWitness, Evm2BlockState)> {
         let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
+        // SAFETY: The shared database is consumed by this synchronous execution call and does not
+        // outlive the state provider borrowed here.
+        let database = unsafe { SharedEvm2StateProviderDatabase::new(&*state_provider) };
         let output = self
             .evm_config
-            .execute_evm2_block_with_state_provider_ref(&*state_provider, block)
+            .executor(database)
+            .execute(block)
             .map_err(|err| eyre::eyre!(err.to_string()))?;
         let (codes, preimages, hashed_state, block_state) =
             collect_execution_data(output.state.into_inner())?;
@@ -358,7 +364,7 @@ where
 impl<P, E, N: NodePrimitives> InvalidBlockHook<N> for InvalidBlockWitnessHook<P, E>
 where
     P: StateProviderFactory + Send + Sync + 'static,
-    E: ConfigureEvm2BlockExecutor<Primitives = N> + 'static,
+    E: ConfigureEvm<Primitives = N> + 'static,
 {
     fn on_invalid_block(
         &self,

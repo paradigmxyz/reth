@@ -14,7 +14,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_ethereum_primitives::{Block, BlockBody, Transaction};
-use reth_evm::ConfigureEvm2BlockExecutor;
+use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_types::evm2_block_state_hashed_post_state_sorted;
 use reth_network_p2p::{
@@ -36,8 +36,8 @@ use reth_stages::sets::DefaultStages;
 use reth_stages_api::{Pipeline, StageId};
 use reth_static_file::StaticFileProducer;
 use reth_storage_api::{
-    ChangeSetReader, StateProvider, StateWriteConfig, StorageChangeSetReader, StorageSettings,
-    StorageSettingsCache,
+    ChangeSetReader, SharedEvm2StateProviderDatabase, StateProvider, StateWriteConfig,
+    StorageChangeSetReader, StorageSettings, StorageSettingsCache,
 };
 use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
 use reth_trie::{KeccakKeyHasher, StateRoot};
@@ -339,8 +339,12 @@ async fn run_pipeline_forward_and_unwind(
         // Execute in a scope so state_provider is dropped before we use provider for writes
         let output = {
             let state_provider = provider.latest();
+            // SAFETY: The shared database is consumed by this synchronous execution call and does
+            // not outlive the state provider borrowed here.
+            let database = unsafe { SharedEvm2StateProviderDatabase::new(&*state_provider) };
             evm_config
-                .execute_evm2_block_with_state_provider_ref(&*state_provider, &block_with_senders)
+                .executor(database)
+                .execute(&block_with_senders)
                 .map_err(|err| eyre::eyre!(err.to_string()))?
         };
 
