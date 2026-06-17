@@ -3,7 +3,7 @@
 
 use alloy_consensus::Header;
 use alloy_eips::NumHash;
-use alloy_primitives::{keccak256, BlockHash, BlockNumber, Bytes, Sealed, B256};
+use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use rand::Rng;
 use reth_eth_wire::{BlockAccessLists, EthVersion, GetBlockAccessLists, HeadersDirection};
 use reth_ethereum_primitives::Block;
@@ -21,7 +21,7 @@ use reth_network_p2p::{
 };
 use reth_provider::{
     test_utils::MockEthProvider, BalNotificationStream, BalStore, BalStoreHandle, InMemoryBalStore,
-    ProviderError, ProviderResult, SealedBal,
+    ProviderError, ProviderResult, RawBal,
 };
 use reth_transaction_pool::test_utils::{TestPool, TransactionGenerator};
 use std::sync::Arc;
@@ -548,8 +548,8 @@ async fn test_eth71_get_block_access_lists() {
     let bal0 = Bytes::from_static(&[0xc1, 0x01]);
     let bal2 = Bytes::from_static(&[0xc1, 0x02]);
 
-    bal_store.insert(NumHash::new(1, hash0), sealed_bal(bal0.clone())).unwrap();
-    bal_store.insert(NumHash::new(3, hash2), sealed_bal(bal2.clone())).unwrap();
+    bal_store.insert(NumHash::new(1, hash0), RawBal::from(bal0.clone())).unwrap();
+    bal_store.insert(NumHash::new(3, hash2), RawBal::from(bal2.clone())).unwrap();
 
     let response = request_block_access_lists(&net, vec![hash0, hash1, hash2]).await;
     assert_eq!(response, BlockAccessLists(vec![Some(bal0), None, Some(bal2)]));
@@ -569,9 +569,9 @@ async fn test_eth71_get_block_access_lists_respects_response_soft_limit() {
     let bal2 = raw_bal_with_len(2);
     assert!(bal0.len() + bal1.len() > SOFT_RESPONSE_LIMIT);
 
-    bal_store.insert(NumHash::new(1, hash0), sealed_bal(bal0.clone())).unwrap();
-    bal_store.insert(NumHash::new(2, hash1), sealed_bal(bal1.clone())).unwrap();
-    bal_store.insert(NumHash::new(3, hash2), sealed_bal(bal2)).unwrap();
+    bal_store.insert(NumHash::new(1, hash0), RawBal::from(bal0.clone())).unwrap();
+    bal_store.insert(NumHash::new(2, hash1), RawBal::from(bal1.clone())).unwrap();
+    bal_store.insert(NumHash::new(3, hash2), RawBal::from(bal2)).unwrap();
 
     let response = request_block_access_lists(&net, vec![hash0, hash1, hash2]).await;
 
@@ -589,8 +589,8 @@ async fn test_eth71_get_block_access_lists_returns_single_oversized_bal() {
     let bal0 = raw_bal_with_len(SOFT_RESPONSE_LIMIT + 1);
     let bal1 = raw_bal_with_len(2);
 
-    bal_store.insert(NumHash::new(1, hash0), sealed_bal(bal0.clone())).unwrap();
-    bal_store.insert(NumHash::new(2, hash1), sealed_bal(bal1)).unwrap();
+    bal_store.insert(NumHash::new(1, hash0), RawBal::from(bal0.clone())).unwrap();
+    bal_store.insert(NumHash::new(2, hash1), RawBal::from(bal1)).unwrap();
 
     let response = request_block_access_lists(&net, vec![hash0, hash1]).await;
 
@@ -621,7 +621,7 @@ async fn test_eth71_get_block_access_lists_caps_count() {
     // Insert one BAL so the store isn't entirely empty (not strictly needed,
     // but keeps the test path closer to real usage).
     let bal = Bytes::from_static(&[0xc1, 0x01]);
-    bal_store.insert(NumHash::new(1, hashes[0]), sealed_bal(bal)).unwrap();
+    bal_store.insert(NumHash::new(1, hashes[0]), RawBal::from(bal)).unwrap();
 
     let response = request_block_access_lists(&net, hashes).await;
 
@@ -638,7 +638,7 @@ async fn test_eth71_fetch_client_get_block_access_lists() {
     let hash1 = B256::random();
     let bal0 = Bytes::from_static(&[0xc1, 0x01]);
 
-    bal_store.insert(NumHash::new(1, hash0), sealed_bal(bal0.clone())).unwrap();
+    bal_store.insert(NumHash::new(1, hash0), RawBal::from(bal0.clone())).unwrap();
 
     let fetch = net.peers()[0].network().fetch_client().await.unwrap();
     let response = fetch.get_block_access_lists(vec![hash0, hash1]).await.unwrap().into_data();
@@ -713,7 +713,7 @@ async fn spawn_bal_testnet_with_store(
 struct FailingLookupBalStore;
 
 impl BalStore for FailingLookupBalStore {
-    fn insert(&self, _num_hash: NumHash, _bal: SealedBal) -> ProviderResult<()> {
+    fn insert(&self, _num_hash: NumHash, _bal: RawBal) -> ProviderResult<()> {
         Ok(())
     }
 
@@ -765,8 +765,4 @@ fn raw_bal_with_len(len: usize) -> Bytes {
     alloy_rlp::Header { list: true, payload_length }.encode(&mut out);
     out.resize(len, alloy_rlp::EMPTY_LIST_CODE);
     Bytes::from(out)
-}
-
-fn sealed_bal(bal: Bytes) -> SealedBal {
-    Sealed::new_unchecked(bal.clone(), keccak256(&bal))
 }

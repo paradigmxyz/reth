@@ -11,7 +11,9 @@
 #               BENCH_WORK_DIR, BENCH_WAIT_TIME, BENCH_BASELINE_ARGS,
 #               BENCH_FEATURE_ARGS, BENCH_OTLP_TRACES_ENDPOINT,
 #               BENCH_OTLP_LOGS_ENDPOINT, BENCH_OTLP_DISABLED,
-#               BENCH_TRACY, BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ,
+#               BENCH_TRACING_CHROME, BENCH_TRACY,
+#               BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ,
+#               BENCH_POST_WARMUP_SLEEP_SECONDS,
 #               TXGEN_PAYLOADS_DIR (pre-extracted payloads; skips extraction),
 #               BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS (optional txgen override)
 set -euxo pipefail
@@ -160,6 +162,21 @@ bal_enabled_for_label() {
 USE_BAL="$(bal_enabled_for_label)"
 echo "BAL replay for ${LABEL}: ${USE_BAL} (mode=${BENCH_BAL:-false})"
 
+call_reth_jit() {
+  local action="$1"
+  local response
+  if ! response=$(curl -sf http://127.0.0.1:8545 -X POST \
+    -H 'Content-Type: application/json' \
+    -d "{\"jsonrpc\":\"2.0\",\"method\":\"reth_jit\",\"params\":[\"${action}\"],\"id\":1}"); then
+    echo "::error::reth_jit ${action} request failed"
+    exit 1
+  fi
+  if jq -e '.error? != null' <<< "$response" > /dev/null 2>&1; then
+    echo "::error::reth_jit ${action} failed: ${response}"
+    exit 1
+  fi
+}
+
 cleanup() {
   kill "${TAIL_PID:-}" 2>/dev/null || true
   if [ -n "${TRACY_PID:-}" ] && kill -0 "$TRACY_PID" 2>/dev/null; then
@@ -232,6 +249,7 @@ RETH_ARGS=(
   --log.file.directory "$OUTPUT_DIR/reth-logs"
   --engine.accept-execution-requests-hash
   --http
+  --http.api eth,net,web3,debug,reth
   --http.port 8545
   --ws
   --ws.api all
@@ -278,6 +296,22 @@ if [ "${BENCH_TRACY:-off}" != "off" ]; then
   fi
 fi
 
+JIT_ENABLED=false
+for arg in "${RETH_ARGS[@]}"; do
+  if [ "$arg" = "--jit" ]; then
+    JIT_ENABLED=true
+    break
+  fi
+done
+
+if [ -n "${BENCH_POST_WARMUP_SLEEP_SECONDS:-}" ]; then
+  POST_WARMUP_SLEEP_SECONDS="$BENCH_POST_WARMUP_SLEEP_SECONDS"
+elif [ "$JIT_ENABLED" = "true" ]; then
+  POST_WARMUP_SLEEP_SECONDS=120
+else
+  POST_WARMUP_SLEEP_SECONDS=0
+fi
+
 SUDO_ENV=()
 if [ -n "${OTEL_RESOURCE_ATTRIBUTES:-}" ]; then
   SUDO_ENV+=("OTEL_RESOURCE_ATTRIBUTES=${OTEL_RESOURCE_ATTRIBUTES}")
@@ -290,6 +324,20 @@ echo "Memory limit: $(( MEM_LIMIT / 1024 / 1024 ))MB (95% of $(( TOTAL_MEM_KB / 
 
 if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
   RETH_ARGS+=(--log.samply)
+fi
+
+if [ "${BENCH_TRACING_CHROME:-false}" = "true" ]; then
+  if "$BINARY" node --log.tracing-chrome --log.tracing-chrome.file "$OUTPUT_DIR/tracing-chrome-profile.json" --help >/dev/null 2>&1; then
+    RETH_ARGS+=(
+      --log.tracing-chrome
+      --log.tracing-chrome.file "$OUTPUT_DIR/tracing-chrome-profile.json"
+    )
+  else
+    echo "Chrome trace recording requested, but ${LABEL} binary rejected --log.tracing-chrome; skipping"
+  fi
+fi
+
+if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
   SAMPLY="$(which samply)"
   # shellcheck disable=SC2024
   sudo systemd-run --quiet --scope --collect --unit="$RETH_SCOPE" \
@@ -449,6 +497,11 @@ else
   echo "Skipping warmup (0 blocks)..."
 fi
 
+if [ "$WARMUP" -gt 0 ] 2>/dev/null && [ "$POST_WARMUP_SLEEP_SECONDS" -gt 0 ] 2>/dev/null; then
+  echo "Sleeping ${POST_WARMUP_SLEEP_SECONDS}s after warmup to let background JIT finish..."
+  sleep "$POST_WARMUP_SLEEP_SECONDS"
+fi
+
 if [ "${BENCH_TRACY:-off}" != "off" ]; then
   echo "Starting tracy-capture..."
   tracy-capture -f -o "$OUTPUT_DIR/tracy-profile.tracy" &
@@ -503,6 +556,11 @@ if [ -n "${BENCH_VICTORIAMETRICS_URL:-}" ]; then
       fi
     done
   fi
+fi
+
+if [ "$JIT_ENABLED" = "true" ]; then
+  echo "Pausing JIT helper before measured benchmark..."
+  call_reth_jit pause
 fi
 
 echo "Running txgen measured benchmark (${BLOCKS} blocks)..."

@@ -167,6 +167,30 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     }
 }
 
+/// Pauses JIT helper execution while validating imported payloads.
+///
+/// Validation still queues JIT work and can use resident compiled code, but helper execution is
+/// paused during validation to minimize latency. Queued work resumes when validation exits, so JIT
+/// compilation is biased toward idle periods instead of competing with payload validation.
+struct JitPauseGuard<Evm: ConfigureEvm>(Evm);
+
+impl<Evm: ConfigureEvm> JitPauseGuard<Evm> {
+    fn new(evm_config: &Evm) -> Self {
+        if let Some(jit_backend) = evm_config.jit_backend() {
+            jit_backend.pause();
+        }
+        Self(evm_config.clone())
+    }
+}
+
+impl<Evm: ConfigureEvm> Drop for JitPauseGuard<Evm> {
+    fn drop(&mut self) {
+        if let Some(jit_backend) = self.0.jit_backend() {
+            jit_backend.resume();
+        }
+    }
+}
+
 /// A helper type that provides reusable payload validation logic for network-specific validators.
 ///
 /// This type satisfies [`EngineValidator`] and is responsible for executing blocks/payloads.
@@ -367,6 +391,7 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         let parent_hash = input.parent_hash();
+        let _jit_pause = JitPauseGuard::new(&self.evm_config);
 
         // Fetch parent block. This goes to memory most of the time unless the parent block is
         // beyond the in-memory buffer.
@@ -466,7 +491,7 @@ where
             transaction_count: input.transaction_count(),
             gas_used: input.gas_used(),
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
-            decoded_bal,
+            decoded_bal: decoded_bal.as_ref().map(Arc::clone),
         };
 
         // Plan the strategy used for state root computation.
@@ -896,7 +921,8 @@ where
             trie_output,
             changeset_provider,
         );
-        Ok(ValidationOutput::new(executed_block, timing_stats))
+        let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
+        Ok(ValidationOutput::new(executed_block, timing_stats).with_raw_bal(raw_bal))
     }
 
     /// Spawns a background task to convert a [`BlockOrPayload`] into a [`SealedBlock`] and perform
@@ -954,10 +980,11 @@ where
         })
     }
 
-    /// Spawns a background task that creates the changeset provider used by the deferred trie task.
+    /// Spawns a background task that creates the changeset provider used by the deferred trie
+    /// producer.
     ///
     /// This is started before execution so overlay construction can run concurrently with payload
-    /// validation, then awaited before the deferred trie task is spawned.
+    /// validation, then awaited before the deferred trie producer is spawned.
     fn spawn_changeset_provider_task(
         &self,
         overlay_factory: OverlayStateProviderFactory<P, N>,
@@ -1045,7 +1072,8 @@ where
         let (spec_id, mut executor) = {
             let _span = debug_span!(target: "engine::tree", "create_evm").entered();
             let spec_id = *env.evm_env.spec_id();
-            let evm = self.evm_config.evm_with_env(&mut db, env.evm_env);
+            let evm_config = self.evm_config.clone().with_jit_support();
+            let evm = evm_config.evm_with_env(&mut db, env.evm_env);
             let ctx = self
                 .execution_ctx_for(input)
                 .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
@@ -1281,8 +1309,8 @@ where
 
             senders.push(tx_signer);
 
-            let _enter = tracing::enabled!(target: "engine::tree", Level::DEBUG).then(|| {
-                debug_span!(
+            let _enter = tracing::enabled!(target: "engine::tree", Level::TRACE).then(|| {
+                tracing::trace_span!(
                     target: "engine::tree",
                     "execute tx",
                     tx_index = senders.len() - 1,
@@ -1793,17 +1821,16 @@ where
 
     /// Spawns a background task to compute and sort trie data for the executed block.
     ///
-    /// This function creates a [`DeferredTrieData`] handle with fallback inputs and spawns a
-    /// blocking task that calls `wait_cloned()` to:
+    /// This function creates a [`DeferredTrieData`] handle and spawns a blocking task that:
     /// 1. Sort the block's hashed state and trie updates
-    /// 2. Cache the result so subsequent calls return immediately
+    /// 2. Publishes the result so subsequent calls return immediately
     ///
-    /// If the background task hasn't completed when `trie_data()` is called, `wait_cloned()`
-    /// computes from the stored inputs, eliminating deadlock risk and duplicate computation.
+    /// If the background task hasn't completed when `trie_data()` is called, callers wait for the
+    /// publishing task instead of computing synchronously.
     ///
     /// The validation hot path can return immediately after state root verification,
-    /// while consumers (DB writes, overlay providers, proofs) get trie data either
-    /// from the completed task or via fallback computation.
+    /// while consumers (DB writes, overlay providers, proofs) get trie data from the completed
+    /// task.
     fn spawn_deferred_trie_task(
         &self,
         block: Arc<RecoveredBlock<N::Block>>,
@@ -1812,15 +1839,15 @@ where
         trie_output: Arc<TrieUpdates>,
         changeset_provider: impl TrieCursorFactory + Send + 'static,
     ) -> ExecutedBlock<N> {
-        // Create deferred handle with fallback inputs in case the background task hasn't completed.
+        // Create deferred handle and task that owns the unsorted inputs.
         // Resolve the lazy handle into Arc<HashedPostState>. By this point the hashed state has
         // already been computed and used for state root verification, so .get() returns instantly.
         let hashed_state = match hashed_state.try_into_inner() {
             Ok(state) => state,
             Err(handle) => handle.get().clone(),
         };
-        let deferred_trie_data = DeferredTrieData::pending(hashed_state, trie_output);
-        let deferred_handle_task = deferred_trie_data.clone();
+        let (deferred_trie_data, deferred_trie_task) =
+            DeferredTrieData::pending(hashed_state, trie_output);
         let block_validation_metrics = self.metrics.block_validation.clone();
 
         // Capture block info and cache handle for changeset computation
@@ -1832,8 +1859,8 @@ where
         // The guard ensures the pending entry is cancelled if the task panics.
         let pending_changeset_guard = self.changeset_cache.register_pending(block_hash);
 
-        // Spawn background task to compute trie data. Calling `wait_cloned` will compute from
-        // the stored inputs and cache the result, so subsequent calls return immediately.
+        // Spawn background task to compute trie data. The task publishes the sorted result before
+        // computing changesets, so trie data waiters do not block on changeset computation.
         let compute_trie_input_task = move || {
             let _span = debug_span!(
                 target: "engine::tree::payload_validator",
@@ -1844,7 +1871,7 @@ where
 
             let result = panic::catch_unwind(AssertUnwindSafe(|| {
                 let compute_start = Instant::now();
-                let computed = deferred_handle_task.wait_cloned();
+                let computed = deferred_trie_task.compute_and_publish();
                 block_validation_metrics
                     .deferred_trie_compute_duration
                     .record(compute_start.elapsed().as_secs_f64());
@@ -1880,7 +1907,7 @@ where
                             target: "engine::tree::changeset",
                             ?block_number,
                             ?e,
-                            "Failed to compute changesets in deferred trie task"
+                            "Failed to compute changesets for deferred trie producer"
                         );
                     }
                 }
@@ -1889,7 +1916,7 @@ where
             if result.is_err() {
                 error!(
                     target: "engine::tree::payload_validator",
-                    "Deferred trie task panicked; fallback computation will be used when trie data is accessed"
+                    "Deferred trie task panicked"
                 );
             }
         };

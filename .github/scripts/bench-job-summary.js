@@ -7,6 +7,7 @@
 //   BENCH_CORES          – CPU core limit (0 = all)
 //   BENCH_WARMUP_BLOCKS  – Number of warmup blocks
 //   BENCH_SAMPLY         – 'true' if samply profiling was enabled
+//   BENCH_TRACING_CHROME – 'true' if Chrome trace recording was enabled
 //   BENCH_RUN_PAIRS      – Number of configured benchmark run pairs
 //
 // Usage from actions/github-script:
@@ -14,7 +15,15 @@
 //   await jobSummary({ core, context, chartSha, grafanaUrl, logsUrl, tracesUrl, runId });
 
 const fs = require('fs');
-const { verdict, loadSamplyUrls, blocksLabel, metricRows, waitTimeRows, fmtChange } = require('./bench-utils');
+const {
+  verdict,
+  loadSamplyUrls,
+  loadTracingChromeUrls,
+  blocksLabel,
+  metricRows,
+  waitTimeRows,
+  fmtChange,
+} = require('./bench-utils');
 
 function fmtMetricValue(v) {
   if (v === null || v === undefined || !Number.isFinite(v)) return 'n/a';
@@ -124,6 +133,13 @@ module.exports = async function ({ core, context, chartSha, grafanaUrl, logsUrl,
   const samplyLinks = Object.entries(samplyUrls).map(([run, url]) => `- **${run}**: [Firefox Profiler](${url})`);
   if (samplyLinks.length > 0) {
     md += `### Samply Profiles\n\n${samplyLinks.join('\n')}\n\n`;
+  }
+
+  const tracingChromeUrls = loadTracingChromeUrls(process.env.BENCH_WORK_DIR);
+  const tracingChromeLinks = Object.entries(tracingChromeUrls)
+    .map(([run, url]) => `- **${run}**: [Perfetto](${url})`);
+  if (tracingChromeLinks.length > 0) {
+    md += `### Chrome Traces\n\n${tracingChromeLinks.join('\n')}\n\n`;
   }
 
   // Observability

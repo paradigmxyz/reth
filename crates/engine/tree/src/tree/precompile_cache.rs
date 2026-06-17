@@ -52,7 +52,6 @@ where
     fn default() -> Self {
         Self(
             moka::sync::CacheBuilder::new(MAX_CACHE_SIZE as u64)
-                .initial_capacity(MAX_CACHE_SIZE as usize)
                 .eviction_policy(EvictionPolicy::lru())
                 .weigher(|key: &Bytes, value: &CacheEntry<S>| {
                     (key.len() + value.output.bytes.len()) as u32

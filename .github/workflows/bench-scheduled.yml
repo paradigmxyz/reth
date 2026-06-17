@@ -347,6 +347,7 @@ jobs:
             const jobUrl = job ? job.html_url : `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             core.exportVariable('BENCH_JOB_URL', jobUrl);
 
+      - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
         continue-on-error: true
@@ -370,6 +371,9 @@ jobs:
             curl -sSfL https://dl.min.io/client/mc/release/linux-amd64/mc -o "$HOME/.local/bin/mc"
             chmod +x "$HOME/.local/bin/mc"
           fi
+
+          # llvm
+          .github/scripts/install_llvm.sh ubuntu
 
           # uv (Python package manager)
           if ! command -v uv &>/dev/null; then
@@ -885,6 +889,7 @@ jobs:
             const { emoji, label } = verdict(changes);
             const headerEmoji = SLACK_VERDICT[emoji] || emoji;
             const commitUrl = `https://github.com/${repo}/commit`;
+            const repoLink = `<https://github.com/${repo}|Reth>`;
             const baselineLink = `<${commitUrl}/${summary.baseline.ref}|${summary.baseline.name}>`;
             const featureLink = `<${commitUrl}/${summary.feature.ref}|${summary.feature.name}>`;
             const diffUrl = `https://github.com/${repo}/compare/${summary.baseline.ref}...${summary.feature.ref}`;
@@ -895,6 +900,7 @@ jobs:
             const modeLabel = mode === 'release' ? 'Release Regression' : mode === 'hourly' ? 'Hourly Regression' : 'Nightly Regression';
             const sectionText = [
               `*${modeLabel}*`,
+              `*Repo:* ${repoLink}`,
               '',
               `*Baseline:* ${baselineLink}`,
               `*Feature:* ${featureLink}`,

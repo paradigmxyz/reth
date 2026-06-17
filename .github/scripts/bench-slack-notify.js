@@ -10,6 +10,7 @@
 //   BENCH_BASELINE_ARGS    – Extra CLI args for the baseline reth node
 //   BENCH_FEATURE_ARGS     – Extra CLI args for the feature reth node
 //   BENCH_SAMPLY           – 'true' if samply profiling was enabled
+//   BENCH_TRACING_CHROME   – 'true' if Chrome trace recording was enabled
 //
 // Usage from actions/github-script:
 //   const notify = require('./.github/scripts/bench-slack-notify.js');
@@ -18,7 +19,16 @@
 
 const fs = require('fs');
 const path = require('path');
-const { fmtChange, fmtMs, verdict, isWin, loadSamplyUrls, blocksLabel, metricRows } = require('./bench-utils');
+const {
+  fmtChange,
+  fmtMs,
+  verdict,
+  isWin,
+  loadSamplyUrls,
+  loadTracingChromeUrls,
+  blocksLabel,
+  metricRows,
+} = require('./bench-utils');
 
 const SLACK_API = 'https://slack.com/api/chat.postMessage';
 
@@ -72,6 +82,16 @@ function profileLinks(samplyUrls, prefix) {
     });
 }
 
+function chromeTraceLinks(tracingChromeUrls, prefix) {
+  return Object.entries(tracingChromeUrls)
+    .filter(([run]) => run.startsWith(`${prefix}-`))
+    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+    .map(([run, url]) => {
+      const index = run.slice(prefix.length + 1);
+      return `<${url}|Chrome ${index}>`;
+    });
+}
+
 // Slack shortcodes for verdict (Block Kit header doesn't support unicode emoji)
 const SLACK_VERDICT = {
   '⚠️': ':warning:',
@@ -94,6 +114,7 @@ function benchConfigLine() {
   add('big-blocks-target-gas', process.env.BENCH_BIG_BLOCKS_TARGET_GAS);
   add('bal', process.env.BENCH_BAL, 'false');
   add('samply', process.env.BENCH_SAMPLY, 'false');
+  add('tracing-chrome', process.env.BENCH_TRACING_CHROME, 'false');
   add('slack', process.env.BENCH_SLACK, 'always');
   add('cores', process.env.BENCH_CORES, '0');
   add('run-pairs', process.env.BENCH_RUN_PAIRS);
@@ -106,7 +127,16 @@ function benchConfigLine() {
   return parts.length ? `*Workflow:* ${parts.join(' ')}` : '';
 }
 
-function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, repo, samplyUrls }) {
+function buildSuccessBlocks({
+  summary,
+  prNumber,
+  actor,
+  actorSlackId,
+  jobUrl,
+  repo,
+  samplyUrls,
+  tracingChromeUrls,
+}) {
   const { emoji, label } = verdict(summary.changes);
   const headerEmoji = SLACK_VERDICT[emoji] || emoji;
 
@@ -125,10 +155,14 @@ function buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, re
   let baselineLine = `*Baseline:* ${baselineLink}`;
   const baselineProfiles = profileLinks(samplyUrls, 'baseline');
   if (baselineProfiles.length) baselineLine += ` | ${baselineProfiles.join(' | ')}`;
+  const baselineTraces = chromeTraceLinks(tracingChromeUrls, 'baseline');
+  if (baselineTraces.length) baselineLine += ` | ${baselineTraces.join(' | ')}`;
 
   let featureLine = `*Feature:* ${featureLink}`;
   const featureProfiles = profileLinks(samplyUrls, 'feature');
   if (featureProfiles.length) featureLine += ` | ${featureProfiles.join(' | ')}`;
+  const featureTraces = chromeTraceLinks(tracingChromeUrls, 'feature');
+  if (featureTraces.length) featureLine += ` | ${featureTraces.join(' | ')}`;
 
   const countsLine = blocksLabel(summary).map(p => `*${p.key}:* ${p.value}`).join(' | ');
   const configLine = benchConfigLine();
@@ -254,11 +288,21 @@ async function success({ core, context }) {
     `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
   const samplyUrls = loadSamplyUrls(process.env.BENCH_WORK_DIR);
+  const tracingChromeUrls = loadTracingChromeUrls(process.env.BENCH_WORK_DIR);
 
   const slackUsers = loadSlackUsers(process.env.GITHUB_WORKSPACE || '.');
   const actorSlackId = slackUsers[actor];
 
-  const blocks = buildSuccessBlocks({ summary, prNumber, actor, actorSlackId, jobUrl, repo, samplyUrls });
+  const blocks = buildSuccessBlocks({
+    summary,
+    prNumber,
+    actor,
+    actorSlackId,
+    jobUrl,
+    repo,
+    samplyUrls,
+    tracingChromeUrls,
+  });
   const text = `Bench: ${summary.baseline.name} vs ${summary.feature.name}`;
 
   const slackMode = process.env.BENCH_SLACK || 'always';

@@ -91,6 +91,14 @@ pub trait PayloadAttributes:
     ///
     /// `Some` for post-Amsterdam blocks, `None` for earlier blocks.
     fn slot_number(&self) -> Option<u64>;
+
+    /// Returns the target gas limit for the new payload.
+    ///
+    /// `Some` for payload attributes that specify the desired gas limit, `None` if the builder
+    /// should use its configured target.
+    fn target_gas_limit(&self) -> Option<u64> {
+        None
+    }
 }
 
 impl PayloadAttributes for EthPayloadAttributes {
@@ -112,6 +120,10 @@ impl PayloadAttributes for EthPayloadAttributes {
 
     fn slot_number(&self) -> Option<u64> {
         self.slot_number
+    }
+
+    fn target_gas_limit(&self) -> Option<u64> {
+        self.target_gas_limit
     }
 }
 
@@ -233,6 +245,7 @@ mod tests {
             withdrawals: None,
             parent_beacon_block_root: None,
             slot_number: None,
+            target_gas_limit: None,
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -271,6 +284,7 @@ mod tests {
             ]),
             parent_beacon_block_root: None,
             slot_number: None,
+            target_gas_limit: None,
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -304,6 +318,7 @@ mod tests {
                 .unwrap(),
             ),
             slot_number: None,
+            target_gas_limit: None,
         };
 
         // Verify that the generated payload ID matches the expected value

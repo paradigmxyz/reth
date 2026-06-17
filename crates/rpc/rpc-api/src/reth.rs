@@ -1,6 +1,7 @@
 use alloy_eips::BlockId;
 use alloy_primitives::{map::AddressMap, U256, U64};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use serde::{Deserialize, Serialize};
 
 // Required for the subscription attributes below
 use reth_chain_state as _;
@@ -27,6 +28,10 @@ pub trait RethApi {
         block_id: BlockId,
         count: Option<U64>,
     ) -> RpcResult<Option<serde_json::Value>>;
+
+    /// Controls the revmc JIT backend.
+    #[method(name = "jit")]
+    async fn reth_jit(&self, action: RethJitAction) -> RpcResult<()>;
 
     /// Subscribe to json `ChainNotifications`
     #[subscription(
@@ -58,4 +63,20 @@ pub trait RethApi {
     async fn reth_subscribe_finalized_chain_notifications(
         &self,
     ) -> jsonrpsee::core::SubscriptionResult;
+}
+
+/// Supported `reth_jit` control actions.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RethJitAction {
+    /// Enable JIT compilation for the backend.
+    Enable,
+    /// Disable JIT compilation for the backend.
+    Disable,
+    /// Pause background JIT compilation.
+    Pause,
+    /// Resume background JIT compilation.
+    Unpause,
+    /// Clear resident and persisted JIT artifacts.
+    Clear,
 }

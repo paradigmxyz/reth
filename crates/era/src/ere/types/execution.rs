@@ -524,7 +524,14 @@ pub struct HeaderRecord {
     pub total_difficulty: U256,
 }
 
-/// A block tuple in an `ERE` file, containing all components for a single block
+/// A single block's components in an `ERE` file.
+///
+/// Only the header and body are mandatory; receipts, total difficulty, and the proof are optional,
+/// so subset profiles or post-merge blocks can omit them.
+/// [`component_count`](Self::component_count) reports how many are present, matching the file's
+/// `DynamicBlockIndex` `component-count`.
+///
+/// See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/ere.md#specification>
 #[derive(Debug, Clone)]
 pub struct BlockTuple {
     /// Compressed block header
@@ -533,22 +540,50 @@ pub struct BlockTuple {
     /// Compressed block body
     pub body: CompressedBody,
 
-    /// Compressed receipts
-    pub receipts: CompressedSlimReceipts,
+    /// Compressed slim receipts, omitted by the `noreceipts` profile
+    pub receipts: Option<CompressedSlimReceipts>,
 
-    /// Total difficulty
-    pub total_difficulty: TotalDifficulty,
+    /// Total difficulty, absent once it stops advancing after the merge
+    pub total_difficulty: Option<TotalDifficulty>,
+
+    /// Proof of block validity, omitted by the `noproofs` profile
+    pub proof: Option<Proof>,
 }
 
 impl BlockTuple {
-    /// Create a new [`BlockTuple`]
-    pub const fn new(
-        header: CompressedHeader,
-        body: CompressedBody,
-        receipts: CompressedSlimReceipts,
-        total_difficulty: TotalDifficulty,
-    ) -> Self {
-        Self { header, body, receipts, total_difficulty }
+    /// Create a new [`BlockTuple`] with only the mandatory header and body.
+    ///
+    /// Attach the optional components with [`with_receipts`](Self::with_receipts),
+    /// [`with_total_difficulty`](Self::with_total_difficulty), and
+    /// [`with_proof`](Self::with_proof).
+    pub const fn new(header: CompressedHeader, body: CompressedBody) -> Self {
+        Self { header, body, receipts: None, total_difficulty: None, proof: None }
+    }
+
+    /// Attach compressed slim receipts.
+    pub fn with_receipts(mut self, receipts: CompressedSlimReceipts) -> Self {
+        self.receipts = Some(receipts);
+        self
+    }
+
+    /// Attach the total difficulty.
+    pub const fn with_total_difficulty(mut self, total_difficulty: TotalDifficulty) -> Self {
+        self.total_difficulty = Some(total_difficulty);
+        self
+    }
+
+    /// Attach a validity proof.
+    pub fn with_proof(mut self, proof: Proof) -> Self {
+        self.proof = Some(proof);
+        self
+    }
+
+    /// Number of index components this block contributes: the mandatory header and body plus each
+    /// optional component present. Always in the range 2-5, matching the file's `component-count`.
+    pub const fn component_count(&self) -> u64 {
+        2 + self.receipts.is_some() as u64 +
+            self.total_difficulty.is_some() as u64 +
+            self.proof.is_some() as u64
     }
 
     /// Convert to an `alloy_consensus::Block`
@@ -559,7 +594,7 @@ impl BlockTuple {
         Ok(Block::new(header, body))
     }
 
-    /// Create from an `alloy_consensus::Block`
+    /// Create from an `alloy_consensus::Block`, attaching the given receipts and total difficulty.
     pub fn from_alloy_block<T: Encodable, R: Encodable>(
         block: &Block<T>,
         receipts: &R,
@@ -572,7 +607,9 @@ impl BlockTuple {
 
         let difficulty = TotalDifficulty::new(total_difficulty);
 
-        Ok(Self::new(header, body, compressed_receipts, difficulty))
+        Ok(Self::new(header, body)
+            .with_receipts(compressed_receipts)
+            .with_total_difficulty(difficulty))
     }
 }
 
@@ -689,6 +726,25 @@ mod tests {
         assert_eq!(decoded_block.body.transactions[0], Bytes::from(vec![1, 2, 3, 4]));
         assert_eq!(decoded_block.body.transactions[1], Bytes::from(vec![5, 6, 7, 8]));
         assert!(decoded_block.body.withdrawals.is_some());
+    }
+
+    #[test]
+    fn test_block_tuple_component_count() {
+        let base = BlockTuple::new(CompressedHeader::new(vec![1]), CompressedBody::new(vec![2]));
+        // Mandatory header + body only.
+        assert_eq!(base.component_count(), 2);
+
+        // Each optional component bumps the count, up to the 5-component maximum.
+        assert_eq!(
+            base.clone().with_receipts(CompressedSlimReceipts::new(vec![3])).component_count(),
+            3
+        );
+        let full = base
+            .with_receipts(CompressedSlimReceipts::new(vec![3]))
+            .with_total_difficulty(TotalDifficulty::new(U256::from(1u64)))
+            .with_proof(Proof::new(vec![4]));
+        assert_eq!(full.component_count(), 5);
+        assert!(full.receipts.is_some() && full.total_difficulty.is_some() && full.proof.is_some());
     }
 
     #[test]

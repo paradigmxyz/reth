@@ -88,7 +88,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ExportEraC
         // Only read access is needed for the database provider
         let provider = provider_factory.database_provider_ro()?;
 
-        let exported_files = era1::export(&provider, &export_config)?;
+        let exported_files = era1::export::<era1::Era1, _>(&provider, &export_config)?;
 
         info!(
             target: "reth::cli",

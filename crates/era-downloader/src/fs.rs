@@ -2,6 +2,7 @@ use crate::{EraMeta, BLOCKS_PER_FILE};
 use alloy_primitives::{hex, hex::ToHexExt, BlockNumber};
 use eyre::{eyre, OptionExt};
 use futures_util::{stream, Stream};
+use reth_era::common::file_ops::EraFileType;
 use reth_fs_util as fs;
 use sha2::{Digest, Sha256};
 use std::{fmt::Debug, io, io::BufRead, path::Path, str::FromStr};
@@ -19,11 +20,13 @@ pub fn read_dir(
             (|| {
                 let path = entry?.path();
 
-                if path.extension() == Some("era1".as_ref()) &&
-                    let Some(last) = path.components().next_back()
+                if let Some(name) = path.file_name().and_then(|name| name.to_str()) &&
+                    matches!(
+                        EraFileType::from_filename(name),
+                        Some(EraFileType::Era1 | EraFileType::Ere)
+                    )
                 {
-                    let str = last.as_os_str().to_string_lossy().to_string();
-                    let parts = str.split('-').collect::<Vec<_>>();
+                    let parts = name.split('-').collect::<Vec<_>>();
 
                     if parts.len() == 3 {
                         let number = usize::from_str(parts[1])?;
