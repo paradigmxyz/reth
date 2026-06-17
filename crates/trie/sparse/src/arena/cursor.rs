@@ -7,7 +7,7 @@ use crate::{HashedCursor, TrieCursor};
 use alloc::{format, vec::Vec};
 use alloy_primitives::{B256, U256};
 use alloy_rlp::Decodable;
-use core::{fmt::Debug, marker::PhantomData};
+use core::{cmp::Ordering, fmt::Debug};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{BranchNodeCompact, Nibbles, RlpNode, TrieAccount, TrieMask};
@@ -436,9 +436,8 @@ pub struct ArenaCachedCursor<'a, C, K, V = ()> {
     cursor: ArenaCursor,
     active_subtrie: Option<&'a super::ArenaSparseSubtrie>,
     mode: CursorMode<K>,
-    current_key: Option<K>,
+    current: Option<(K, V)>,
     inner: C,
-    _marker: PhantomData<V>,
 }
 
 impl<'a, C, K, V> ArenaCachedCursor<'a, C, K, V> {
@@ -449,9 +448,8 @@ impl<'a, C, K, V> ArenaCachedCursor<'a, C, K, V> {
             cursor: ArenaCursor::default(),
             active_subtrie: None,
             mode: CursorMode::Sparse,
-            current_key: None,
+            current: None,
             inner,
-            _marker: PhantomData,
         };
         this.reset_sparse_cursor();
         this
@@ -475,7 +473,7 @@ impl<'a, C, K, V> ArenaCachedCursor<'a, C, K, V> {
             self.cursor = trie.cached_cursor();
         }
         self.mode = CursorMode::Sparse;
-        self.current_key = None;
+        self.current = None;
     }
 
     fn active_arena(&self) -> Option<&'a NodeArena> {
@@ -625,8 +623,22 @@ impl<'a, C, K, V> ArenaCachedCursor<'a, C, K, V> {
 impl<C, V> ArenaCachedCursor<'_, C, B256, V>
 where
     C: HashedCursor<Value = V>,
-    V: ArenaCachedHashedValue,
+    V: ArenaCachedHashedValue + Clone,
 {
+    fn current_hashed_key(&self) -> Option<B256> {
+        self.current.as_ref().map(|(key, _)| *key)
+    }
+
+    fn set_current_hashed(&mut self, key: B256, value: V) -> (B256, V) {
+        self.current = Some((key, value.clone()));
+        (key, value)
+    }
+
+    fn reset_for_hashed_seek(&mut self) {
+        self.reset_sparse_cursor();
+        self.inner.reset();
+    }
+
     fn next_inner_in_active_hashed_range(&mut self) -> Result<Option<(B256, V)>, DatabaseError> {
         let CursorMode::InnerRange { end } = self.mode else { return Ok(None) };
 
@@ -636,9 +648,8 @@ where
                 self.mode = CursorMode::Sparse;
                 return self.next_from_hashed_topology(None)
             }
-            if self.current_key.is_none_or(|current_key| key > current_key) {
-                self.current_key = Some(key);
-                return Ok(Some((key, value)))
+            if self.current_hashed_key().is_none_or(|current_key| key > current_key) {
+                return Ok(Some(self.set_current_hashed(key, value)))
             }
             entry = self.inner.next()?;
         }
@@ -661,10 +672,9 @@ where
             if !key_is_before_end(key, end) {
                 return Ok(None)
             }
-            if self.current_key.is_none_or(|current_key| key > current_key) {
+            if self.current_hashed_key().is_none_or(|current_key| key > current_key) {
                 self.mode = CursorMode::InnerRange { end };
-                self.current_key = Some(key);
-                return Ok(Some((key, value)))
+                return Ok(Some(self.set_current_hashed(key, value)))
             }
             entry = self.inner.next()?;
         }
@@ -696,11 +706,10 @@ where
                     }
                     let key = B256::from_slice(&path.pack());
                     if seek_key.is_none_or(|seek_key| key >= seek_key) &&
-                        self.current_key.is_none_or(|current_key| key > current_key)
+                        self.current_hashed_key().is_none_or(|current_key| key > current_key)
                     {
                         let value = V::decode(value)?;
-                        self.current_key = Some(key);
-                        return Ok(Some((key, value)))
+                        return Ok(Some(self.set_current_hashed(key, value)))
                     }
                 }
                 CachedTopologyItem::Branch { .. } => {}
@@ -729,14 +738,40 @@ where
 impl<C, V> HashedCursor for ArenaCachedCursor<'_, C, B256, V>
 where
     C: HashedCursor<Value = V>,
-    V: ArenaCachedHashedValue,
+    V: ArenaCachedHashedValue + Clone,
 {
     type Value = V;
 
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        self.reset_sparse_cursor();
-        self.inner.reset();
-        self.next_from_hashed_topology(Some(key))
+        if let Some((current_key, current_value)) = self.current.as_ref() {
+            match key.cmp(current_key) {
+                Ordering::Less => self.reset_for_hashed_seek(),
+                Ordering::Equal => return Ok(Some((*current_key, current_value.clone()))),
+                Ordering::Greater if matches!(self.mode, CursorMode::Exhausted) => return Ok(None),
+                Ordering::Greater => {}
+            }
+        } else if matches!(self.mode, CursorMode::Exhausted) {
+            self.reset_for_hashed_seek();
+        }
+
+        match self.mode {
+            CursorMode::InnerRange { end } if key_is_before_end(key, end) => {
+                if let Some(entry) = self.seek_inner_hashed_range(key, end)? {
+                    return Ok(Some(entry))
+                }
+                self.mode = CursorMode::Sparse;
+                if self.trie.is_none() {
+                    self.mode = CursorMode::Exhausted;
+                    return Ok(None)
+                }
+                self.next_from_hashed_topology(Some(key))
+            }
+            CursorMode::InnerRange { .. } => {
+                self.mode = CursorMode::Sparse;
+                self.next_from_hashed_topology(Some(key))
+            }
+            CursorMode::Sparse | CursorMode::Exhausted => self.next_from_hashed_topology(Some(key)),
+        }
     }
 
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
@@ -756,6 +791,24 @@ impl<C> ArenaCachedCursor<'_, C, Nibbles, BranchNodeCompact>
 where
     C: TrieCursor,
 {
+    fn current_trie_key(&self) -> Option<&Nibbles> {
+        self.current.as_ref().map(|(key, _)| key)
+    }
+
+    fn set_current_trie(
+        &mut self,
+        key: Nibbles,
+        node: BranchNodeCompact,
+    ) -> (Nibbles, BranchNodeCompact) {
+        self.current = Some((key, node.clone()));
+        (key, node)
+    }
+
+    fn reset_for_trie_seek(&mut self) {
+        self.reset_sparse_cursor();
+        self.inner.reset();
+    }
+
     fn next_inner_in_active_trie_range(
         &mut self,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
@@ -767,9 +820,8 @@ where
                 self.mode = CursorMode::Sparse;
                 return self.next_from_trie_topology(None)
             }
-            if self.current_key.as_ref().is_none_or(|current_key| &key > current_key) {
-                self.current_key = Some(key);
-                return Ok(Some((key, node)))
+            if self.current_trie_key().is_none_or(|current_key| &key > current_key) {
+                return Ok(Some(self.set_current_trie(key, node)))
             }
             entry = self.inner.next()?;
         }
@@ -794,10 +846,9 @@ where
             if !trie_key_is_before_end(&key, end.as_ref()) {
                 return Ok(None)
             }
-            if self.current_key.as_ref().is_none_or(|current_key| &key > current_key) {
+            if self.current_trie_key().is_none_or(|current_key| &key > current_key) {
                 self.mode = CursorMode::InnerRange { end };
-                self.current_key = Some(key);
-                return Ok(Some((key, node)))
+                return Ok(Some(self.set_current_trie(key, node)))
             }
             entry = self.inner.next()?;
         }
@@ -825,10 +876,9 @@ where
             match item {
                 CachedTopologyItem::Branch { path, node } => {
                     if seek_key.as_ref().is_none_or(|seek_key| &path >= seek_key) &&
-                        self.current_key.as_ref().is_none_or(|current_key| &path > current_key)
+                        self.current_trie_key().is_none_or(|current_key| &path > current_key)
                     {
-                        self.current_key = Some(path);
-                        return Ok(Some((path, node)))
+                        return Ok(Some(self.set_current_trie(path, node)))
                     }
                 }
                 CachedTopologyItem::Blind { path } => {
@@ -851,29 +901,28 @@ where
         self.mode = CursorMode::Exhausted;
         Ok(None)
     }
-}
 
-impl<C> TrieCursor for ArenaCachedCursor<'_, C, Nibbles, BranchNodeCompact>
-where
-    C: TrieCursor,
-{
-    fn seek_exact(
+    fn seek_exact_from_trie_topology(
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        self.reset_sparse_cursor();
-        self.inner.reset();
+        if matches!(self.mode, CursorMode::Exhausted) {
+            return Ok(None)
+        }
 
         if self.trie.is_none() {
-            return self.seek_inner_trie_range(key, None, true)
+            let result = self.seek_inner_trie_range(key, None, true)?;
+            if result.is_none() {
+                self.mode = CursorMode::Exhausted;
+            }
+            return Ok(result)
         }
 
         while let Some(item) = self.next_topology_item()? {
             match item {
                 CachedTopologyItem::Branch { path, node } => {
                     if path == key {
-                        self.current_key = Some(path);
-                        return Ok(Some((path, node)))
+                        return Ok(Some(self.set_current_trie(path, node)))
                     }
                     if path > key {
                         return Ok(None)
@@ -895,14 +944,72 @@ where
         self.mode = CursorMode::Exhausted;
         Ok(None)
     }
+}
+
+impl<C> TrieCursor for ArenaCachedCursor<'_, C, Nibbles, BranchNodeCompact>
+where
+    C: TrieCursor,
+{
+    fn seek_exact(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        if let Some((current_key, current_node)) = self.current.as_ref() {
+            match key.cmp(current_key) {
+                Ordering::Less => self.reset_for_trie_seek(),
+                Ordering::Equal => return Ok(Some((*current_key, current_node.clone()))),
+                Ordering::Greater if matches!(self.mode, CursorMode::Exhausted) => return Ok(None),
+                Ordering::Greater => {}
+            }
+        } else if matches!(self.mode, CursorMode::Exhausted) {
+            self.reset_for_trie_seek();
+        }
+
+        match self.mode {
+            CursorMode::InnerRange { end } if trie_key_is_before_end(&key, end.as_ref()) => {
+                self.seek_inner_trie_range(key, end, true)
+            }
+            CursorMode::InnerRange { .. } => {
+                self.mode = CursorMode::Sparse;
+                self.seek_exact_from_trie_topology(key)
+            }
+            CursorMode::Sparse | CursorMode::Exhausted => self.seek_exact_from_trie_topology(key),
+        }
+    }
 
     fn seek(
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        self.reset_sparse_cursor();
-        self.inner.reset();
-        self.next_from_trie_topology(Some(key))
+        if let Some((current_key, current_node)) = self.current.as_ref() {
+            match key.cmp(current_key) {
+                Ordering::Less => self.reset_for_trie_seek(),
+                Ordering::Equal => return Ok(Some((*current_key, current_node.clone()))),
+                Ordering::Greater if matches!(self.mode, CursorMode::Exhausted) => return Ok(None),
+                Ordering::Greater => {}
+            }
+        } else if matches!(self.mode, CursorMode::Exhausted) {
+            self.reset_for_trie_seek();
+        }
+
+        match self.mode {
+            CursorMode::InnerRange { end } if trie_key_is_before_end(&key, end.as_ref()) => {
+                if let Some(entry) = self.seek_inner_trie_range(key, end, false)? {
+                    return Ok(Some(entry))
+                }
+                self.mode = CursorMode::Sparse;
+                if self.trie.is_none() {
+                    self.mode = CursorMode::Exhausted;
+                    return Ok(None)
+                }
+                self.next_from_trie_topology(Some(key))
+            }
+            CursorMode::InnerRange { .. } => {
+                self.mode = CursorMode::Sparse;
+                self.next_from_trie_topology(Some(key))
+            }
+            CursorMode::Sparse | CursorMode::Exhausted => self.next_from_trie_topology(Some(key)),
+        }
     }
 
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
@@ -913,7 +1020,7 @@ where
     }
 
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
-        Ok(self.current_key)
+        Ok(self.current.as_ref().map(|(key, _)| *key))
     }
 
     fn reset(&mut self) {
