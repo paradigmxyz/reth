@@ -29,7 +29,7 @@ use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
-use reth_provider::test_utils::MockEthProvider;
+use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
 use reth_tasks::spawn_os_thread;
 use std::{
     collections::BTreeMap,
@@ -672,6 +672,38 @@ fn test_disconnected_block() {
             missing_ancestor: sealed.parent_num_hash()
         })
     );
+}
+
+#[test]
+fn test_validated_payload_bal_is_inserted_into_store() {
+    let mut block_builder = TestBlockBuilder::eth();
+    let parent = block_builder.get_executed_block_with_number(1, B256::ZERO);
+    let child = block_builder.get_executed_block_with_number(2, parent.recovered_block().hash());
+    let child_block = child.recovered_block().clone_sealed_block();
+    let child_num_hash = child_block.num_hash();
+    let raw_bal = Bytes::from_static(&[0xc0]);
+
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(vec![parent]);
+    let bal_store = BalStoreHandle::new(InMemoryBalStore::default());
+    test_harness.tree.provider.bal_store = bal_store.clone();
+
+    let outcome = test_harness
+        .tree
+        .insert_block_or_payload(
+            child_block.block_with_parent(),
+            child,
+            |_, executed, _| {
+                Ok::<_, InsertPayloadError<Block>>(
+                    ValidationOutput::new(executed, None)
+                        .with_raw_bal(Some(RawBal::from(raw_bal.clone()))),
+                )
+            },
+            |_, executed| Ok(executed.recovered_block().clone_sealed_block()),
+        )
+        .unwrap();
+
+    assert_eq!(outcome, InsertPayloadOk::Inserted(BlockStatus::Valid));
+    assert_eq!(bal_store.get_by_hash(child_num_hash.hash).unwrap(), Some(raw_bal));
 }
 
 #[tokio::test]
