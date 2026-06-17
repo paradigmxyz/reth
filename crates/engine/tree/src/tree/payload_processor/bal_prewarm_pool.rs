@@ -158,11 +158,10 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                     PrewarmTarget::Account(addr) => {
                         if let Ok(Some(account)) = provider.provider.basic_account(&addr) &&
                             let Some(code_hash) = account.bytecode_hash &&
-                            code_hash != alloy_consensus::constants::KECCAK_EMPTY
+                            code_hash != alloy_consensus::constants::KECCAK_EMPTY &&
+                            provider.warmed_code_hashes.insert(code_hash)
                         {
-                            if provider.warmed_code_hashes.insert(code_hash) {
-                                let _ = provider.provider.bytecode_by_hash(&code_hash);
-                            }
+                            let _ = provider.provider.bytecode_by_hash(&code_hash);
                         }
                     }
                     PrewarmTarget::Storage(addr, slot) => {
