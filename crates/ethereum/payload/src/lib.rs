@@ -19,18 +19,15 @@ use reth_basic_payload_builder::{
     PayloadConfig,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthExecutorSpec, EthereumHardforks};
-use reth_ethereum_primitives::TransactionSigned;
-use reth_evm_ethereum::{
-    evm2_block_env_with_blob_params, evm2_spec,
-    execute_evm2_block_with_borrowed_state_provider_context, EthEvmConfig,
-    Evm2BlockExecutionContext, Evm2BlockSystemCalls,
-};
+use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
+use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_types::evm2_block_state_hashed_post_state_sorted;
 use reth_payload_builder::{BlobSidecars, EthBuiltPayload};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadAttributes as _;
 use reth_primitives_traits::RecoveredBlock;
-use reth_storage_api::StateProviderFactory;
+use reth_storage_api::{BorrowedEvm2StateProviderDatabase, StateProviderFactory};
 use reth_transaction_pool::{
     BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
     ValidPoolTransaction,
@@ -77,7 +74,7 @@ impl<Pool, Client, EvmConfig> EthereumPayloadBuilder<Pool, Client, EvmConfig> {
 // Default implementation of [PayloadBuilder] for unit type
 impl<Pool, Client, EvmConfig> PayloadBuilder for EthereumPayloadBuilder<Pool, Client, EvmConfig>
 where
-    EvmConfig: Clone + Send + Sync,
+    EvmConfig: ConfigureEvm<Primitives = EthPrimitives> + Clone + Send + Sync,
     Client: StateProviderFactory
         + ChainSpecProvider<
             ChainSpec: EthereumHardforks + EthExecutorSpec + EthChainSpec<Header = Header>,
@@ -153,7 +150,7 @@ pub fn default_ethereum_payload<EvmConfig, Client, Pool, F>(
     best_txs: F,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
-    EvmConfig: Clone + Send + Sync,
+    EvmConfig: ConfigureEvm<Primitives = EthPrimitives> + Clone + Send + Sync,
     Client: StateProviderFactory
         + ChainSpecProvider<
             ChainSpec: EthereumHardforks + EthExecutorSpec + EthChainSpec<Header = Header>,
@@ -164,7 +161,7 @@ where
     let BuildArguments { cached_reads, execution_cache, trie_handle, config, cancel, best_payload } =
         args;
     let PayloadConfig { parent_header, attributes, payload_id, .. } = config;
-    let _ = (evm_config, execution_cache, trie_handle);
+    let _ = (execution_cache, trie_handle);
 
     if client.chain_spec().is_amsterdam_active_at_timestamp(attributes.timestamp()) {
         return Err(PayloadBuilderError::other(std::io::Error::new(
@@ -266,28 +263,11 @@ where
         Block { header: execution_header, body: body.clone() },
         senders.clone(),
     );
-    let output = execute_evm2_block_with_borrowed_state_provider_context(
-        evm2_spec(chain_spec.as_ref(), execution_block.header()),
-        evm2_block_env_with_blob_params(execution_block.header(), blob_params),
-        state_provider.as_ref(),
-        execution_block.number,
-        execution_block.senders_iter().zip(execution_block.body().transactions.iter()).map(
-            |(sender, tx)| {
-                alloy_consensus::transaction::Recovered::new_unchecked(tx.clone(), *sender)
-            },
-        ),
-        Evm2BlockExecutionContext {
-            chain_id: chain_spec.chain_id(),
-            system_calls: Some(Evm2BlockSystemCalls {
-                parent_hash: parent_header.hash(),
-                parent_beacon_block_root: attributes.parent_beacon_block_root(),
-            }),
-            ommers: Some(&body.ommers),
-            withdrawals: body.withdrawals.as_ref().map(|withdrawals| withdrawals.as_slice()),
-            deposit_contract_address: chain_spec.deposit_contract_address(),
-        },
-    )
-    .map_err(PayloadBuilderError::evm)?;
+    // SAFETY: The borrowed evm2 database is consumed by this synchronous block execution call and
+    // cannot outlive `state_provider`.
+    let db = unsafe { BorrowedEvm2StateProviderDatabase::new(state_provider.as_ref()) };
+    let output =
+        evm_config.executor(db).execute(&execution_block).map_err(PayloadBuilderError::evm)?;
 
     let total_fees = U256::ZERO;
     if !is_better_payload(best_payload.as_ref(), total_fees) {

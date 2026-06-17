@@ -8393,6 +8393,7 @@ dependencies = [
  "reth-basic-payload-builder",
  "reth-chainspec",
  "reth-ethereum-primitives",
+ "reth-evm",
  "reth-evm-ethereum",
  "reth-execution-types",
  "reth-payload-builder",
