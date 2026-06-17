@@ -436,9 +436,8 @@ where
             .blocking_recv()
             .expect("BAL hashed-state streaming task dropped without signaling completion");
 
-        // Drop the per-thread providers
+        // Drop the per-thread providers opened by BAL hashed-state streaming.
         executor.bal_streaming_pool().clear();
-        executor.prewarming_pool().clear();
 
         let _ = actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
     }
