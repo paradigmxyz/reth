@@ -1709,6 +1709,7 @@ dependencies = [
  "cfg-if",
  "constant_time_eq",
  "cpufeatures 0.3.0",
+ "serde",
 ]
 
 [[package]]
@@ -7742,6 +7743,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-signer",
  "alloy-signer-local",
+ "blake3",
  "derive_more",
  "metrics",
  "parking_lot",
