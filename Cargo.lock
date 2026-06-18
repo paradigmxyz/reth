@@ -3592,6 +3592,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-custom-block-executor"
+version = "0.0.0"
+dependencies = [
+ "alloy-genesis",
+ "alloy-network",
+ "eyre",
+ "reth-engine-tree",
+ "reth-ethereum",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "example-custom-dev-node"
 version = "0.0.0"
 dependencies = [
