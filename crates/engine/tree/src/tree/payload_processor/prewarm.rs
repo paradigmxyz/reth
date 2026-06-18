@@ -365,6 +365,7 @@ where
         let to_sparse_trie_task = self.to_sparse_trie_task.clone();
         let to_lthash_task = self.to_lthash_task.clone();
         let finish_lthash_task = to_lthash_task.clone();
+        let lthash_warms_storage_changes = to_lthash_task.is_some();
         let executor = self.executor.clone();
         let parent_span = Span::current();
         let stream_parent_span = parent_span;
@@ -419,8 +420,9 @@ where
             // - execution cache is not disabled
             //
             // we launch prewarming sequence of the BAL read set here. The BAL read-set consists
-            // of the accounts, their code if present, and declared storages (both storage_reads
-            // and storage_changes).
+            // of the accounts, their code if present, and declared storages. When Lthash is active,
+            // non-empty changed storage slots are read through the same pool for old-value
+            // subtraction, and that read also fills the shared execution cache.
             //
             // This runs side-by-side with the parallel transaction execution reducing the time it
             // spends blocking on the data.
@@ -434,7 +436,9 @@ where
             for account in prefetch_bal.as_bal() {
                 pool.warm_account(account.address);
                 for change in &account.storage_changes {
-                    pool.warm_storage(account.address, change.slot.into());
+                    if !lthash_warms_storage_changes || change.changes.is_empty() {
+                        pool.warm_storage(account.address, change.slot.into());
+                    }
                 }
                 for &slot in &account.storage_reads {
                     pool.warm_storage(account.address, slot.into());
