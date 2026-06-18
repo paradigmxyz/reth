@@ -95,6 +95,11 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
             };
 
             let index = output.index;
+            if index == self.next {
+                self.next += 1;
+                return Some(Ok(output));
+            }
+
             assert!(
                 index < self.total,
                 "BAL worker returned out-of-bounds transaction index {index}; total={}",
