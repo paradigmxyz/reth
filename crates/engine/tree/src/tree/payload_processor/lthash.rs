@@ -269,26 +269,19 @@ impl LthashTask {
     }
 
     pub(crate) fn run(mut self) -> Result<LthashOutcome, LthashError> {
-        let mut finished = false;
-
-        while !finished {
+        'updates: loop {
             let mut did_work = false;
 
             while let Ok(message) = self.updates.try_recv() {
                 did_work = true;
                 if self.handle_message(message)? {
-                    finished = true;
-                    break
+                    self.drain_ready_old_values()?;
+                    break 'updates
                 }
             }
 
-            while let Ok(result) = self.old_values.try_recv() {
+            if self.drain_ready_old_values()? {
                 did_work = true;
-                self.state.apply_old_result(result)?;
-            }
-
-            if finished {
-                break
             }
 
             if !did_work && self.state.process_dirty_batch(LTHASH_DIRTY_BATCH_SIZE) > 0 {
@@ -316,7 +309,7 @@ impl LthashTask {
                             "lthash blocked select received update"
                         );
                         if self.handle_message(message)? {
-                            finished = true;
+                            break 'updates
                         }
                     }
                     recv(self.old_values) -> result => {
@@ -358,6 +351,15 @@ impl LthashTask {
         self.drain_pending_old_values()?;
         self.state.process_all_dirty();
         Ok(self.state.finish())
+    }
+
+    fn drain_ready_old_values(&mut self) -> Result<bool, LthashError> {
+        let mut did_work = false;
+        while let Ok(result) = self.old_values.try_recv() {
+            did_work = true;
+            self.state.apply_old_result(result)?;
+        }
+        Ok(did_work)
     }
 
     fn handle_message(&mut self, message: LthashMessage) -> Result<bool, LthashError> {
