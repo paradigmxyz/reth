@@ -1,9 +1,9 @@
-use crate::{ClientWithFakeIndex, ITHACA_ERA_INDEX_URL};
+use crate::{ClientWithFakeIndex, FileMeta, ITHACA_ERA_INDEX_URL};
 use reqwest::{Client, Url};
 use reth_db_common::init::init_genesis;
 use reth_era::era1::types::execution::MAX_BLOCKS_PER_ERA1;
 use reth_era_downloader::{EraClient, EraStream, EraStreamConfig};
-use reth_era_utils::{export, import, Era1, ExportConfig};
+use reth_era_utils::{export, import, Era1, Ere, ExportConfig};
 use reth_etl::Collector;
 use reth_fs_util as fs;
 use reth_provider::{test_utils::create_test_provider_factory, BlockNumReader, BlockReader};
@@ -158,5 +158,151 @@ async fn test_roundtrip_export_after_import() {
             hash_part.len(),
             file_name
         );
+    }
+}
+
+/// Roundtrip for `.ere` files: import era1 data into a database, export it back out as `.ere`,
+/// then reimport those `.ere` files into a fresh database and verify the blocks survive intact.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_ere_roundtrip_export_after_import() {
+    // Populate a database by importing one mainnet era1 file (blocks 0..=8191).
+    let url = Url::from_str(ITHACA_ERA_INDEX_URL).unwrap();
+    let download_folder = tempdir().unwrap();
+    let download_folder = download_folder.path().to_owned().into_boxed_path();
+    let client = EraClient::new(ClientWithFakeIndex(Client::new()), url, download_folder);
+    let config = EraStreamConfig::default().with_max_files(1).with_max_concurrent_downloads(1);
+    let stream = EraStream::new(client, config);
+
+    let pf = create_test_provider_factory();
+    init_genesis(&pf).unwrap();
+    let collector_dir = tempdir().unwrap();
+    let mut hash_collector = Collector::new(4096, Some(collector_dir.path().to_owned()));
+
+    let imported_height =
+        import::<Era1, _, _, _, _, _, _>(stream, &pf, &mut hash_collector, None).unwrap();
+    assert_eq!(imported_height, 8191);
+
+    let provider_ref = pf.provider_rw().unwrap().0;
+
+    // Export blocks 0..=899 as `.ere` files, 250 blocks per file.
+    let ere_folder = tempdir().unwrap();
+    let export_config = ExportConfig {
+        dir: ere_folder.path().to_path_buf(),
+        first_block_number: EXPORT_FIRST_BLOCK,
+        last_block_number: EXPORT_LAST_BLOCK,
+        max_blocks_per_file: EXPORT_BLOCKS_PER_FILE,
+        network: "mainnet".to_string(),
+    };
+    let ere_files =
+        export::<Ere, _>(&provider_ref, &export_config).expect("ERE export should succeed");
+
+    let expected_files_number = EXPORT_TOTAL_BLOCKS.div_ceil(EXPORT_BLOCKS_PER_FILE) as usize;
+    assert_eq!(
+        ere_files.len(),
+        expected_files_number,
+        "ERE export should create {expected_files_number} files"
+    );
+    for (i, file_path) in ere_files.iter().enumerate() {
+        assert!(file_path.exists(), "ERE file {} should exist", i + 1);
+        assert!(
+            fs::metadata(file_path).unwrap().len() > 0,
+            "ERE file {} should not be empty",
+            i + 1
+        );
+
+        // Portal Network header proofs are not produced, so files carry the `noproofs` profile.
+        let file_name = file_path.file_name().unwrap().to_str().unwrap();
+        assert!(
+            file_name.ends_with("-noproofs.ere"),
+            "ERE file {} should carry the noproofs profile, got '{file_name}'",
+            i + 1
+        );
+
+        // The importer streams records by type and never consults the block index, so the
+        // exported offsets are otherwise unverified.
+        assert_ere_index_offsets_resolve(file_path);
+    }
+
+    // Reimport the exported `.ere` files into a fresh database to close the export -> import loop.
+    let reimport_pf = create_test_provider_factory();
+    init_genesis(&reimport_pf).unwrap();
+    let reimport_collector_dir = tempdir().unwrap();
+    let mut reimport_collector =
+        Collector::new(4096, Some(reimport_collector_dir.path().to_owned()));
+
+    // The exported files are returned in ascending block order, which is the order the importer
+    // expects.
+    let stream = futures_util::stream::iter(ere_files.into_iter().map(|p| Ok(FileMeta::new(p))));
+    let reimported_height =
+        import::<Ere, _, _, _, _, _, _>(stream, &reimport_pf, &mut reimport_collector, None)
+            .unwrap();
+
+    assert_eq!(
+        reimported_height, EXPORT_LAST_BLOCK,
+        "Reimporting the exported `.ere` files should restore blocks up to {EXPORT_LAST_BLOCK}"
+    );
+
+    // The reimported blocks must match the originals exactly (header + body round-trip).
+    let reimport_provider = reimport_pf.provider().unwrap();
+    for block in [EXPORT_FIRST_BLOCK, EXPORT_LAST_BLOCK / 2, EXPORT_LAST_BLOCK] {
+        assert_eq!(
+            reimport_provider.block_by_number(block).unwrap(),
+            provider_ref.block_by_number(block).unwrap(),
+            "Reimported block {block} should match the original",
+        );
+    }
+}
+
+/// Asserts every offset in an exported `.ere` file's [`DynamicBlockIndex`] points at the byte
+/// position of the component entry it claims.
+///
+/// Offsets are `i64`, relative to the index record, laid out per block as
+/// `[header, body, receipts, difficulty]` (the `noproofs` profile, so no proof component).
+fn assert_ere_index_offsets_resolve(path: &std::path::Path) {
+    use reth_era::{
+        e2s::types::{Entry, Header},
+        ere::types::{
+            execution::{
+                COMPRESSED_BODY, COMPRESSED_HEADER, COMPRESSED_SLIM_RECEIPTS, TOTAL_DIFFICULTY,
+            },
+            group::{DynamicBlockIndex, DYNAMIC_BLOCK_INDEX},
+        },
+    };
+    use std::collections::HashMap;
+
+    let bytes = fs::read(path).unwrap();
+
+    // Walk the TLV stream, recording each record's start position and type.
+    let mut positions: HashMap<usize, [u8; 2]> = HashMap::new();
+    let mut index_pos = None;
+    let mut pos = 0usize;
+    while pos < bytes.len() {
+        let entry_type = [bytes[pos], bytes[pos + 1]];
+        let length = u32::from_le_bytes(bytes[pos + 2..pos + 6].try_into().unwrap()) as usize;
+        positions.insert(pos, entry_type);
+        if entry_type == DYNAMIC_BLOCK_INDEX {
+            index_pos = Some(pos);
+        }
+        pos += Header::SIZE + length;
+    }
+
+    let index_pos = index_pos.expect("file must contain a block index");
+    let index_entry = Entry::read(&mut &bytes[index_pos..]).unwrap().unwrap();
+    let index = DynamicBlockIndex::from_entry(&index_entry).unwrap();
+
+    let expected_types =
+        [COMPRESSED_HEADER, COMPRESSED_BODY, COMPRESSED_SLIM_RECEIPTS, TOTAL_DIFFICULTY];
+    let start = index.starting_number();
+    for block in start..start + index.block_count() as u64 {
+        let offsets = index.offsets_for_block(block).expect("offsets for in-range block");
+        for (offset, expected_type) in offsets.iter().zip(expected_types) {
+            let target = index_pos as i64 + offset;
+            assert!(target >= 0, "block {block} offset {offset} points before the file start");
+            assert_eq!(
+                positions.get(&(target as usize)),
+                Some(&expected_type),
+                "block {block} offset {offset} should resolve to an entry of the expected type",
+            );
+        }
     }
 }

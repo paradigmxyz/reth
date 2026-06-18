@@ -5,9 +5,10 @@
 //! turns one chunk of [`ExportBlock`]s into one on-disk file and owns every format-specific detail
 //! (receipt encoding, accumulator, block index, record layout, file naming).
 //!
-//! [`Era1`](crate::Era1) writes `.era1` files.
+//! [`Era1`](crate::Era1) writes `.era1` files and [`Ere`](crate::Ere) writes `.ere` files.
 
 mod era1;
+mod ere;
 
 use crate::calculate_td_by_number;
 use alloy_consensus::{BlockHeader, Sealable};
