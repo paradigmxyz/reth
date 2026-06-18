@@ -744,6 +744,10 @@ where
             return Ok(());
         }
 
+        let pending_account_updates = self.pending_account_updates.len();
+        self.account_updates.reserve(pending_account_updates);
+        self.fetched_account_targets.reserve(pending_account_updates);
+
         self.compute_drained_storage_roots();
 
         loop {
