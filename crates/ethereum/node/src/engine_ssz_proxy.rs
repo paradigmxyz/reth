@@ -11,7 +11,7 @@ use alloy_eips::{
 };
 use alloy_primitives::{Bytes, B128, B256};
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
+    CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
     ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ExecutionPayloadV4,
     ForkchoiceState, PayloadAttributes, PraguePayloadFields,
 };
@@ -20,7 +20,6 @@ use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
 use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::EngineApiValidator;
 use reth_ethereum_engine_primitives::EthEngineTypes;
-use reth_node_core::version::{version_metadata, CLIENT_CODE};
 use reth_rpc::EngineApi;
 use reth_storage_api::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
@@ -74,6 +73,10 @@ impl<C, Provider, Pool, Validator> std::fmt::Debug
 impl<ChainSpec, Provider, Pool, Validator>
     EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>
 {
+    fn new() -> Self {
+        Self { engine_api: Default::default() }
+    }
+
     fn with_engine_api(engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>) -> Self {
         Self { engine_api: Arc::new(RwLock::new(Some(engine_api))) }
     }
@@ -84,6 +87,17 @@ impl<ChainSpec, Provider, Pool, Validator>
         engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
     ) {
         *self.engine_api.write().await = Some(engine_api);
+    }
+
+    /// Sets the Engine API implementation during synchronous launch wiring.
+    pub fn set_engine_api_sync(
+        &self,
+        engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
+    ) {
+        *self
+            .engine_api
+            .try_write()
+            .expect("engine api handle should not be locked during launch") = Some(engine_api);
     }
 }
 
@@ -193,7 +207,10 @@ where
             if method != "GET" {
                 return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
             }
-            handle_identity(handle.client_version().await)
+            let Some(engine_api) = handle.engine_api().await else {
+                return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
+            };
+            handle_identity(engine_api)
         }
         EngineSszEndpoint::Payloads(fork) => {
             if method != "POST" {
@@ -332,8 +349,16 @@ fn handle_capabilities() -> HttpResponse {
     }))
 }
 
-fn handle_identity(client_version: Option<ClientVersionV1>) -> HttpResponse {
-    json_response(client_version.into_iter().collect::<Vec<_>>())
+fn handle_identity<Provider, Pool, Validator, ChainSpec>(
+    engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
+) -> HttpResponse
+where
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
+    Pool: TransactionPool + 'static,
+    Validator: EngineApiValidator<EthEngineTypes>,
+    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+{
+    json_response(vec![engine_api.client_version().clone()])
 }
 
 async fn handle_new_payload<Provider, Pool, Validator, ChainSpec>(

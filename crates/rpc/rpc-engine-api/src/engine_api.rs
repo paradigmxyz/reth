@@ -72,6 +72,11 @@ impl<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSpec>
     pub fn chain_spec(&self) -> &Arc<ChainSpec> {
         &self.inner.chain_spec
     }
+
+    /// Returns the configured client version.
+    pub fn client_version(&self) -> &ClientVersionV1 {
+        &self.inner.client
+    }
 }
 
 impl<Provider, PayloadT, Pool, Validator, ChainSpec>

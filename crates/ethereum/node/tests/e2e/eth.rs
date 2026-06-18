@@ -12,19 +12,18 @@ use reth_e2e_test_utils::{
     node::NodeTestContext, setup, setup_engine, transaction::TransactionTestContext, wallet::Wallet,
 };
 use reth_node_api::TreeConfig;
-use reth_node_builder::{NodeBuilder, NodeHandle};
+use reth_node_builder::{rpc::BasicEngineApiBuilder, EngineApiExt, NodeBuilder, NodeHandle};
 use reth_node_core::{
     args::RpcServerArgs,
     node_config::NodeConfig,
     version::{version_metadata, CLIENT_CODE},
 };
 use reth_node_ethereum::{
-    engine_ssz_proxy::EngineSszProxyLayer, EthereumAddOns, EthereumEngineValidator, EthereumNode,
+    engine_ssz_proxy::EngineSszProxyLayer, EthereumAddOns, EthereumEngineValidatorBuilder,
+    EthereumNode,
 };
-use reth_payload_builder::PayloadStore;
 use reth_provider::BlockNumReader;
 use reth_rpc_api::TestingBuildBlockRequestV1;
-use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_layer::secret_to_bearer_header;
 use reth_tasks::Runtime;
 use ssz::{Decode, Encode};
@@ -299,34 +298,25 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
         );
 
     let (ssz_layer, ssz_handle) = EngineSszProxyLayer::new();
+    let engine_api_handle = ssz_handle.clone();
+    let engine_api_builder = EngineApiExt::new(
+        BasicEngineApiBuilder::<EthereumEngineValidatorBuilder>::default(),
+        move |engine_api| {
+            engine_api_handle.set_engine_api_sync(engine_api);
+        },
+    );
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
         .testing_node(runtime)
         .with_types::<EthereumNode>()
         .with_components(EthereumNode::components())
-        .with_add_ons(EthereumAddOns::default().with_auth_http_middleware(ssz_layer))
+        .with_add_ons(
+            EthereumAddOns::default()
+                .with_engine_api(engine_api_builder)
+                .with_auth_http_middleware(ssz_layer),
+        )
         .launch()
         .await?;
 
-    let engine_api = EngineApi::new(
-        node.provider.clone(),
-        chain_spec.clone(),
-        node.add_ons_handle.beacon_engine_handle.clone(),
-        PayloadStore::new(node.payload_builder_handle.clone()),
-        node.pool.clone(),
-        node.task_executor.clone(),
-        ClientVersionV1 {
-            code: CLIENT_CODE,
-            name: version_metadata().name_client.to_string(),
-            version: version_metadata().cargo_pkg_version.to_string(),
-            commit: version_metadata().vergen_git_sha.to_string(),
-        },
-        EngineCapabilities::default(),
-        EthereumEngineValidator::new(chain_spec.clone()),
-        node.config.engine.accept_execution_requests_hash,
-        node.network.clone(),
-    );
-
-    ssz_handle.set_engine_api(engine_api).await;
     let node = NodeTestContext::new(node, eth_payload_attributes).await?;
 
     let wallets = Wallet::new(2).wallet_gen();
