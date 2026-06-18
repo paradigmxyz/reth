@@ -23,9 +23,9 @@ use alloy_consensus::transaction::TxHashRef;
 #[cfg(any())]
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, Address, B256, U256};
 #[cfg(any())]
 use alloy_primitives::StorageKey;
+use alloy_primitives::{keccak256, Address, B256, U256};
 use core::convert::Infallible;
 use crossbeam_channel::Sender as CrossbeamSender;
 use evm2::evm::{AccountChangeRef, StateChangeSink, StorageChange};
