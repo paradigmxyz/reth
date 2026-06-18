@@ -1,7 +1,7 @@
 use super::{
     branch_child_idx::{BranchChildIdx, BranchChildIter},
-    ArenaParallelSparseTrie, ArenaSparseNode, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
-    Index, NodeArena,
+    ArenaParallelSparseTrie, ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeBranchChild,
+    ArenaSparseNodeState, Index, NodeArena,
 };
 use crate::{HashedCursor, TrieCursor};
 use alloc::{format, vec::Vec};
@@ -533,7 +533,7 @@ fn arena_node_is_dirty(arena: &NodeArena, idx: Index) -> bool {
 
 enum CachedTopologyItem<'a> {
     Leaf { path: Nibbles, value: &'a [u8] },
-    Branch { path: Nibbles, node: BranchNodeCompact },
+    Branch { path: Nibbles, arena: &'a NodeArena, branch: &'a ArenaSparseNodeBranch },
     Blind { path: Nibbles },
 }
 
@@ -545,7 +545,10 @@ enum CursorMode<K> {
 }
 
 impl<'a, C, K, V> ArenaCachedCursor<'a, C, K, V> {
-    fn next_topology_item(&mut self) -> Result<Option<CachedTopologyItem<'a>>, DatabaseError> {
+    fn next_topology_item(
+        &mut self,
+        emit_branches: bool,
+    ) -> Result<Option<CachedTopologyItem<'a>>, DatabaseError> {
         loop {
             if self.cursor.needs_pop {
                 self.pop_cached();
@@ -572,10 +575,13 @@ impl<'a, C, K, V> ArenaCachedCursor<'a, C, K, V> {
                     let mut logical_path = head.path;
                     logical_path.extend(&branch.short_key);
 
-                    if !head.branch_emitted {
+                    if emit_branches && !head.branch_emitted {
                         self.cursor.stack.last_mut().expect("head exists").branch_emitted = true;
-                        let node = branch_node_compact_for_cursor(arena, branch, logical_path)?;
-                        return Ok(Some(CachedTopologyItem::Branch { path: logical_path, node }))
+                        return Ok(Some(CachedTopologyItem::Branch {
+                            path: logical_path,
+                            arena,
+                            branch,
+                        }))
                     }
 
                     let state_mask = branch.state_mask;
@@ -698,13 +704,13 @@ where
             return Ok(result)
         }
 
-        while let Some(item) = self.next_topology_item()? {
+        while let Some(item) = self.next_topology_item(false)? {
             match item {
                 CachedTopologyItem::Leaf { path, value } => {
                     if path.len() != B256::len_bytes() * 2 {
                         continue
                     }
-                    let key = B256::from_slice(&path.pack());
+                    let key = nibbles_to_b256(&path);
                     if seek_key.is_none_or(|seek_key| key >= seek_key) &&
                         self.current_hashed_key().is_none_or(|current_key| key > current_key)
                     {
@@ -712,7 +718,6 @@ where
                         return Ok(Some(self.set_current_hashed(key, value)))
                     }
                 }
-                CachedTopologyItem::Branch { .. } => {}
                 CachedTopologyItem::Blind { path } => {
                     if path.len() > B256::len_bytes() * 2 {
                         continue
@@ -726,6 +731,9 @@ where
                     if let Some(entry) = self.seek_inner_hashed_range(inner_seek_key, end)? {
                         return Ok(Some(entry))
                     }
+                }
+                CachedTopologyItem::Branch { .. } => {
+                    unreachable!("hashed sparse cursor never emits branch nodes")
                 }
             }
         }
@@ -872,12 +880,13 @@ where
             return Ok(result)
         }
 
-        while let Some(item) = self.next_topology_item()? {
+        while let Some(item) = self.next_topology_item(true)? {
             match item {
-                CachedTopologyItem::Branch { path, node } => {
+                CachedTopologyItem::Branch { path, arena, branch } => {
                     if seek_key.as_ref().is_none_or(|seek_key| &path >= seek_key) &&
                         self.current_trie_key().is_none_or(|current_key| &path > current_key)
                     {
+                        let node = branch_node_compact_for_cursor(arena, branch, path)?;
                         return Ok(Some(self.set_current_trie(path, node)))
                     }
                 }
@@ -918,10 +927,11 @@ where
             return Ok(result)
         }
 
-        while let Some(item) = self.next_topology_item()? {
+        while let Some(item) = self.next_topology_item(true)? {
             match item {
-                CachedTopologyItem::Branch { path, node } => {
+                CachedTopologyItem::Branch { path, arena, branch } => {
                     if path == key {
+                        let node = branch_node_compact_for_cursor(arena, branch, path)?;
                         return Ok(Some(self.set_current_trie(path, node)))
                     }
                     if path > key {
@@ -1081,7 +1091,7 @@ fn branch_node_compact_for_cursor(
 ) -> Result<BranchNodeCompact, DatabaseError> {
     let mut tree_mask = TrieMask::default();
     let mut hash_mask = TrieMask::default();
-    let mut hashes = Vec::new();
+    let mut hashes = Vec::with_capacity(branch.state_mask.count_bits() as usize);
 
     for (nibble, child) in branch.child_iter() {
         let child_path = {
@@ -1150,24 +1160,58 @@ fn ensure_node_not_dirty(state: &ArenaSparseNodeState, path: Nibbles) -> Result<
     Ok(())
 }
 
+fn nibbles_to_b256(nibbles: &Nibbles) -> B256 {
+    let mut bytes = [0u8; 32];
+    for idx in 0..nibbles.len() {
+        set_packed_nibble(&mut bytes, idx, nibbles.get_unchecked(idx));
+    }
+    B256::from(bytes)
+}
+
+fn set_packed_nibble(bytes: &mut [u8; 32], idx: usize, nibble: u8) {
+    let byte = &mut bytes[idx / 2];
+    if idx % 2 == 0 {
+        *byte = (*byte & 0x0f) | (nibble << 4);
+    } else {
+        *byte = (*byte & 0xf0) | nibble;
+    }
+}
+
 fn prefix_start(prefix: &Nibbles) -> B256 {
-    B256::right_padding_from(&prefix.pack())
+    nibbles_to_b256(prefix)
 }
 
 fn prefix_end(prefix: &Nibbles) -> Option<B256> {
-    next_prefix(prefix).map(|next_prefix| prefix_start(&next_prefix))
+    let mut bytes = [0u8; 32];
+    let mut increment_idx = None;
+
+    for idx in 0..prefix.len() {
+        let nibble = prefix.get_unchecked(idx);
+        if nibble < 0x0f {
+            increment_idx = Some(idx);
+        }
+        set_packed_nibble(&mut bytes, idx, nibble);
+    }
+
+    let increment_idx = increment_idx?;
+    set_packed_nibble(&mut bytes, increment_idx, prefix.get_unchecked(increment_idx) + 1);
+    for idx in increment_idx + 1..prefix.len() {
+        set_packed_nibble(&mut bytes, idx, 0);
+    }
+
+    Some(B256::from(bytes))
 }
 
 fn next_prefix(prefix: &Nibbles) -> Option<Nibbles> {
-    let mut nibbles = Vec::with_capacity(prefix.len());
-    for idx in 0..prefix.len() {
-        nibbles.push(prefix.get_unchecked(idx));
-    }
-
-    while let Some(nibble) = nibbles.pop() {
+    for idx in (0..prefix.len()).rev() {
+        let nibble = prefix.get_unchecked(idx);
         if nibble < 0x0f {
-            nibbles.push(nibble + 1);
-            return Some(Nibbles::from_nibbles_unchecked(nibbles))
+            let mut next = Nibbles::new();
+            for prefix_idx in 0..idx {
+                next.push_unchecked(prefix.get_unchecked(prefix_idx));
+            }
+            next.push_unchecked(nibble + 1);
+            return Some(next)
         }
     }
 
