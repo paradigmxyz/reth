@@ -2144,7 +2144,13 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
             return if tx_range.is_empty() {
                 Ok(Some(Vec::new()))
             } else {
-                self.receipts_by_tx_range(tx_range).map(Some)
+                let receipts = self.receipts_by_tx_range(tx_range)?;
+
+                if receipts.len() != body.tx_count as usize {
+                    return Ok(None)
+                }
+
+                Ok(Some(receipts))
             }
         }
         Ok(None)
@@ -4227,6 +4233,20 @@ mod tests {
     }
 
     #[test]
+    fn test_receipts_by_block_returns_none_for_missing_unpruned_receipts() {
+        let factory = create_test_provider_factory();
+        let data = BlockchainTestData::default();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.blocks[0].0).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        assert!(provider.receipts_by_block(1.into()).unwrap().is_none());
+    }
+
+    #[test]
     fn test_write_trie_updates_sorted() {
         use reth_trie::{
             updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
@@ -4507,12 +4527,11 @@ mod tests {
 
             let provider = factory.provider().unwrap();
 
-            for (block, num_receipts) in [(0, 0), (tip_block - 1, 1)] {
-                assert!(provider
-                    .receipts_by_block(block.into())
-                    .unwrap()
-                    .is_some_and(|r| r.len() == num_receipts));
-            }
+            assert!(provider.receipts_by_block(0.into()).unwrap().is_none());
+            assert!(provider
+                .receipts_by_block((tip_block - 1).into())
+                .unwrap()
+                .is_some_and(|r| r.len() == 1));
         }
 
         // Static files mode
@@ -4570,14 +4589,16 @@ mod tests {
             // to the block number it belongs to easily identify and assert.
             let provider = factory.provider().unwrap();
             assert!(EitherWriter::receipts_destination(&provider).is_static_file());
-            for (num, num_receipts) in [(0, 0), (1, 0), (2, 1), (3, 1)] {
-                assert!(provider
-                    .receipts_by_block(num.into())
-                    .unwrap()
-                    .is_some_and(|r| r.len() == num_receipts));
+            for (num, has_receipt) in [(0, false), (1, false), (2, true), (3, true)] {
+                let receipts = provider.receipts_by_block(num.into()).unwrap();
+                if has_receipt {
+                    assert!(receipts.is_some_and(|r| r.len() == 1));
+                } else {
+                    assert!(receipts.is_none());
+                }
 
                 let receipt = provider.receipt(num).unwrap();
-                if num_receipts > 0 {
+                if has_receipt {
                     assert!(receipt.is_some_and(|r| r.cumulative_gas_used == num));
                 } else {
                     assert!(receipt.is_none());
