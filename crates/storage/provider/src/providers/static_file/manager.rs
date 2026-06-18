@@ -849,14 +849,17 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             return Ok(Vec::new());
         }
 
+        let Some(mut block_height) = self.get_lowest_range_end(segment) else {
+            return Ok(Vec::new());
+        };
+
+        if block_height >= block {
+            return Ok(Vec::new());
+        }
+
         let highest_block = self.get_highest_static_file_block(segment);
         let mut deleted_headers = Vec::new();
-
         loop {
-            let Some(block_height) = self.get_lowest_range_end(segment) else {
-                return Ok(deleted_headers);
-            };
-
             // Stop if we've reached the target block or the highest static file
             if block_height >= block || Some(block_height) == highest_block {
                 return Ok(deleted_headers);
@@ -876,6 +879,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             })?;
 
             deleted_headers.push(header);
+
+            let Some(next_block_height) = self.get_lowest_range_end(segment) else {
+                return Ok(deleted_headers);
+            };
+            block_height = next_block_height;
         }
     }
 
