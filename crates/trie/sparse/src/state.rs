@@ -4,7 +4,7 @@ use crate::{
     lfu::BucketedLfu, traits::SparseTrie as SparseTrieTrait, ParallelSparseTrie,
     RevealableSparseTrie,
 };
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rlp::{Decodable, Encodable};
 use either::Either;
@@ -381,6 +381,28 @@ where
             trie.wipe()?;
         }
         Ok(())
+    }
+
+    /// Wipe the storage trie at the provided address, creating a revealed empty trie if needed.
+    ///
+    /// This is used when the post-state explicitly wipes an account's storage. In that case the
+    /// old storage trie is irrelevant for the new root, so callers can avoid revealing it before
+    /// applying any post-wipe slot updates.
+    pub fn wipe_or_create_storage(&mut self, address: B256)
+    where
+        S: SparseTrieTrait + Default,
+    {
+        let trie = self.storage.tries.entry(address).or_insert_with(RevealableSparseTrie::blind);
+
+        let mut revealed = match core::mem::replace(trie, RevealableSparseTrie::blind()) {
+            RevealableSparseTrie::Blind(Some(cleared)) => cleared,
+            RevealableSparseTrie::Blind(None) => Box::default(),
+            RevealableSparseTrie::Revealed(revealed) => revealed,
+        };
+
+        revealed.set_updates(self.retain_updates);
+        revealed.wipe();
+        *trie = RevealableSparseTrie::Revealed(revealed);
     }
 
     /// Calculates the hashes of subtries.
@@ -925,10 +947,10 @@ impl BucketedLfu<HotSlotKey> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{LeafLookup, ParallelSparseTrie};
+    use crate::{LeafLookup, LeafUpdate, ParallelSparseTrie};
     use alloy_primitives::{
         b256,
-        map::{HashMap, HashSet},
+        map::{B256Map, HashMap, HashSet},
         U256,
     };
     use arbitrary::Arbitrary;
@@ -1212,6 +1234,37 @@ mod tests {
         let err = sparse.root().unwrap_err();
 
         assert!(matches!(err.kind(), SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind)));
+    }
+
+    #[test]
+    fn wipe_or_create_storage_tracks_deleted_storage_without_revealing_old_trie() {
+        let address = b256!("0x4200000000000000000000000000000000000000000000000000000000000000");
+        let slot = b256!("0x2400000000000000000000000000000000000000000000000000000000000000");
+        let value = U256::from(42);
+
+        let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default().with_updates(true);
+        sparse.wipe_or_create_storage(address);
+        let mut leaf_updates = B256Map::from_iter([(
+            slot,
+            LeafUpdate::Changed(alloy_rlp::encode_fixed_size(&value).to_vec()),
+        )]);
+        let mut proof_targets = Vec::new();
+        sparse
+            .get_or_create_storage_trie_mut(address)
+            .update_leaves(&mut leaf_updates, |target, min_len| {
+                proof_targets.push((target, min_len));
+            })
+            .unwrap();
+
+        assert!(leaf_updates.is_empty());
+        assert!(proof_targets.is_empty());
+
+        assert_ne!(sparse.storage_root(&address).unwrap(), EMPTY_ROOT_HASH);
+
+        let updates = sparse.storage_trie_updates();
+        let storage_updates = updates.get(&address).unwrap();
+        assert!(storage_updates.is_deleted);
+        assert!(storage_updates.removed_nodes.is_empty());
     }
 
     #[test]

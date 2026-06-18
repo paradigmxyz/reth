@@ -9,7 +9,7 @@ use crate::tree::{
     },
     payload_processor::multiproof::MultiProofTaskMetrics,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256Set, B256};
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -88,6 +88,9 @@ pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = Configurab
     /// Cache of storage proof targets that have already been fetched/requested from the proof
     /// workers. account -> slot -> lowest `min_len` requested.
     fetched_storage_targets: B256Map<B256Map<u8>>,
+    /// Storage tries wiped by the current block. Stale in-flight storage proofs for these accounts
+    /// are ignored because post-wipe roots start from an empty trie.
+    wiped_storage_tries: B256Set,
     /// Reusable buffer for RLP encoding of accounts.
     account_rlp_buf: Vec<u8>,
     /// Whether the last state update has been received.
@@ -160,6 +163,7 @@ where
             pending_account_updates: Default::default(),
             fetched_account_targets: Default::default(),
             fetched_storage_targets: Default::default(),
+            wiped_storage_tries: Default::default(),
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
             finished_state_updates: Default::default(),
             account_cache_hits: 0,
@@ -469,6 +473,16 @@ where
     )]
     fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
         for (&address, storage) in &hashed_state_update.storages {
+            if storage.wiped {
+                self.trie.wipe_or_create_storage(address);
+                self.new_storage_updates.remove(&address);
+                self.storage_updates.remove(&address);
+                self.storage_updates.insert(address, B256Map::default());
+                self.fetched_storage_targets.remove(&address);
+                self.pending_targets.remove_storage_targets(&address);
+                self.wiped_storage_tries.insert(address);
+            }
+
             if !storage.storage.is_empty() {
                 // Look up outer maps once per address instead of once per slot.
                 let new_updates = self.new_storage_updates.entry(address).or_default();
@@ -519,8 +533,14 @@ where
 
     fn on_proof_result(
         &mut self,
-        result: DecodedMultiProofV2,
+        mut result: DecodedMultiProofV2,
     ) -> Result<(), ParallelStateRootError> {
+        if !self.wiped_storage_tries.is_empty() {
+            result
+                .storage_proofs
+                .retain(|address, _| !self.wiped_storage_tries.contains(address));
+        }
+
         self.trie.reveal_decoded_multiproof_v2(result).map_err(|e| {
             ParallelStateRootError::Other(format!("could not reveal multiproof: {e:?}"))
         })
@@ -893,6 +913,13 @@ impl PendingTargets {
     fn extend_storage_targets(&mut self, address: &B256, targets: Vec<ProofV2Target>) {
         self.len += targets.len();
         self.targets.storage_targets.entry(*address).or_default().extend(targets);
+    }
+
+    /// Removes queued storage proof targets for a wiped storage trie.
+    fn remove_storage_targets(&mut self, address: &B256) {
+        if let Some(targets) = self.targets.storage_targets.remove(address) {
+            self.len -= targets.len();
+        }
     }
 }
 
