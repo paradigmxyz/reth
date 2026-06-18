@@ -84,6 +84,9 @@ use std::{
 };
 use tracing::{debug, instrument, trace};
 
+/// Inline capacity for per-block transaction-number starts in `save_blocks`.
+const SAVE_BLOCKS_TX_NUMS_INLINE: usize = 16;
+
 /// Determines the commit order for database operations.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum CommitOrder {
@@ -596,7 +599,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             .map(|(n, _)| n + 1)
             .unwrap_or_default();
 
-        let tx_nums: SmallVec<[TxNumber; 4]> = {
+        let tx_nums: SmallVec<[TxNumber; SAVE_BLOCKS_TX_NUMS_INLINE]> = {
             let mut nums = SmallVec::with_capacity(blocks.len());
             let mut current = first_tx_num;
             for block in &blocks {
