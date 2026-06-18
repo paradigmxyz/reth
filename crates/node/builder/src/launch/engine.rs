@@ -39,7 +39,7 @@ use reth_provider::{
 };
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
-use reth_tracing::tracing::{debug, error, info};
+use reth_tracing::tracing::{debug, error, info, trace};
 use reth_trie_db::ChangesetCache;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
@@ -328,7 +328,7 @@ impl EngineNodeLauncher {
                 tokio::select! {
                     event = orchestrator.next() => {
                         let Some(event) = event else { break };
-                        debug!(target: "reth::cli", "Event: {event}");
+                        trace!(target: "reth::cli", "Event: {event}");
                         match event {
                             ChainEvent::BackfillSyncFinished => {
                                 if terminate_after_backfill {
