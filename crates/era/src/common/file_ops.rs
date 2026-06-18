@@ -241,14 +241,13 @@ impl EraFileType {
         format!("{network_name}-{era_number:05}{era_count}-{hash}{}", self.extension())
     }
 
-    /// Detects the execution-layer file type from the files in `dir`.
+    /// Detects the ERA file type from the files in `dir`.
     ///
-    /// Returns the type of the first `.era1` or `.ere`/`.erae` file found. Consensus-layer
-    /// `.era` files are ignored.
+    /// Returns the type of the first recognized `.era`, `.era1` or `.ere`/`.erae` file found.
     pub fn from_dir(dir: impl AsRef<Path>) -> io::Result<Option<Self>> {
         for entry in std::fs::read_dir(dir)? {
             if let Some(name) = entry?.file_name().to_str() &&
-                let Some(era_type @ (Self::Era1 | Self::Ere)) = Self::from_filename(name)
+                let Some(era_type) = Self::from_filename(name)
             {
                 return Ok(Some(era_type));
             }

@@ -7,7 +7,7 @@ use reqwest::{Client, Url};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_era::common::file_ops::EraFileType;
-use reth_era_downloader::{read_dir, EraClient, EraStream, EraStreamConfig};
+use reth_era_downloader::{read_dir, read_era_dir, EraClient, EraStream, EraStreamConfig};
 use reth_era_utils as era;
 use reth_etl::Collector;
 use reth_fs_util as fs;
@@ -91,22 +91,29 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
 
         if let Some(path) = self.import.path {
             let era_type = EraFileType::from_dir(&path)?.ok_or_else(|| {
-                eyre!("No ERA1 (.era1) or ERE (.ere, .erae) files found in {}", path.display())
+                eyre!(
+                    "No ERA (.era), ERA1 (.era1) or ERE (.ere, .erae) files found in {}",
+                    path.display()
+                )
             })?;
 
             info!(target: "reth::cli", ?era_type, path = %path.display(), to_block = ?self.to_block, "Starting ERA import");
 
-            let stream = read_dir(path, next_block)?;
-
             match era_type {
-                EraFileType::Ere => era::import::<era::Ere, _, _, _, _, _, _>(
-                    stream,
+                EraFileType::Era => era::import::<era::Era, _, _, _, _, _, _>(
+                    read_era_dir(path)?,
                     &provider_factory,
                     &mut hash_collector,
                     self.to_block,
                 )?,
-                _ => era::import::<era::Era1, _, _, _, _, _, _>(
-                    stream,
+                EraFileType::Ere => era::import::<era::Ere, _, _, _, _, _, _>(
+                    read_dir(path, next_block)?,
+                    &provider_factory,
+                    &mut hash_collector,
+                    self.to_block,
+                )?,
+                EraFileType::Era1 => era::import::<era::Era1, _, _, _, _, _, _>(
+                    read_dir(path, next_block)?,
                     &provider_factory,
                     &mut hash_collector,
                     self.to_block,

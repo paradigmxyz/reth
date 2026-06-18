@@ -1,5 +1,14 @@
 use alloy_consensus::BlockHeader;
+use alloy_eips::eip2718::Decodable2718;
 use alloy_primitives::{BlockHash, BlockNumber, U256};
+use alloy_rpc_types_beacon::block::{
+    SignedBeaconBlockBellatrix, SignedBeaconBlockCapella, SignedBeaconBlockDeneb,
+    SignedBeaconBlockElectra,
+};
+use alloy_rpc_types_engine::{
+    CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1,
+    ExecutionPayloadV2, ExecutionPayloadV3, PraguePayloadFields,
+};
 use futures_util::{Stream, StreamExt};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -11,13 +20,14 @@ use reth_db_api::{
 use reth_era::{
     common::{decode::DecodeCompressedRlp, file_ops::StreamReader},
     e2s::error::E2sError,
+    era::{file::EraReader, types::consensus::CompressedSignedBeaconBlock},
     era1::{file::Era1Reader, types::execution::BlockTuple},
     ere::{file::EreReader, types::execution::BlockTuple as EreBlockTuple},
 };
 use reth_era_downloader::EraMeta;
 use reth_etl::Collector;
 use reth_fs_util as fs;
-use reth_primitives_traits::{Block, FullBlockBody, FullBlockHeader, NodePrimitives};
+use reth_primitives_traits::{Block, BlockBody, FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_provider::{
     providers::StaticFileProviderRWRefMut, BlockReader, BlockWriter, StaticFileProviderFactory,
     StaticFileSegment, StaticFileWriter,
@@ -90,6 +100,110 @@ impl Ere {
         let body: BB = block.body.decode()?;
         Ok((header, body))
     }
+}
+
+/// [`EraBlockReader`] for consensus-layer `.era` files.
+///
+/// Unlike `.era1`/`.ere` files, `.era` files store consensus `SignedBeaconBlock`s. Post-merge
+/// blocks embed an execution payload; this source SSZ-decodes each beacon block, extracts that
+/// payload, and converts it into an execution `(header, body)` pair. Pre-merge slots carry no
+/// payload and are skipped.
+#[derive(Debug)]
+pub struct Era;
+
+impl<BH, BB> EraBlockReader<BH, BB> for Era
+where
+    BH: FullBlockHeader,
+    BB: FullBlockBody,
+{
+    fn blocks<M: EraMeta + ?Sized>(
+        meta: &M,
+    ) -> eyre::Result<impl Iterator<Item = eyre::Result<(BH, BB)>>> {
+        let reader: EraReader<std::fs::File> = open(meta)?;
+        Ok(reader.iter().filter_map(|block| Self::decode(block).transpose()))
+    }
+}
+
+impl Era {
+    /// Decodes the execution `(header, body)` embedded in a consensus `SignedBeaconBlock`.
+    ///
+    /// Returns `Ok(None)` for pre-merge slots, which carry no execution payload.
+    pub fn decode<BH, BB>(
+        block: Result<CompressedSignedBeaconBlock, E2sError>,
+    ) -> eyre::Result<Option<(BH, BB)>>
+    where
+        BH: FullBlockHeader,
+        BB: FullBlockBody,
+    {
+        let ssz = block?.decompress()?;
+        let Some(alloy_consensus::Block { header, body }) =
+            decode_execution_block::<<BB as BlockBody>::Transaction>(&ssz)?
+        else {
+            return Ok(None);
+        };
+        // The beacon payload decodes into alloy execution types; re-encode and decode into the
+        // node's own primitives through the same RLP representation the `.era1`/`.ere` paths use.
+        Ok(Some((reencode_rlp(&header)?, reencode_rlp(&body)?)))
+    }
+}
+
+/// SSZ-decodes a consensus `SignedBeaconBlock` and extracts its execution block, if it has one.
+///
+/// Only post-merge (Bellatrix and later) blocks carry a payload. The fork is found by
+/// trial-decoding newest to oldest, relying on SSZ length validation to reject the wrong layout.
+/// Cancun (`parent_beacon_block_root`) and Prague (`requests`) header fields are taken from the
+/// beacon block.
+pub fn decode_execution_block<T: Decodable2718>(
+    ssz: &[u8],
+) -> eyre::Result<Option<alloy_consensus::Block<T>>> {
+    use ssz::Decode;
+
+    if let Ok(beacon) = SignedBeaconBlockElectra::<ExecutionPayloadV3>::from_ssz_bytes(ssz) {
+        let parent_beacon_block_root = beacon.message.parent_root;
+        let requests = beacon.message.body.execution_requests.to_requests();
+        let payload = ExecutionPayload::V3(beacon.message.body.execution_payload);
+        let sidecar = ExecutionPayloadSidecar::v4(
+            CancunPayloadFields { parent_beacon_block_root, versioned_hashes: Vec::new() },
+            PraguePayloadFields::new(requests),
+        );
+        return Ok(Some(payload.try_into_block_with_sidecar(&sidecar)?));
+    }
+
+    if let Ok(beacon) = SignedBeaconBlockDeneb::<ExecutionPayloadV3>::from_ssz_bytes(ssz) {
+        let parent_beacon_block_root = beacon.message.parent_root;
+        let payload = ExecutionPayload::V3(beacon.message.body.execution_payload);
+        let sidecar = ExecutionPayloadSidecar::v3(CancunPayloadFields {
+            parent_beacon_block_root,
+            versioned_hashes: Vec::new(),
+        });
+        return Ok(Some(payload.try_into_block_with_sidecar(&sidecar)?));
+    }
+
+    if let Ok(beacon) = SignedBeaconBlockCapella::<ExecutionPayloadV2>::from_ssz_bytes(ssz) {
+        let payload = ExecutionPayload::V2(beacon.message.body.execution_payload);
+        return Ok(Some(payload.try_into_block()?));
+    }
+
+    if let Ok(beacon) = SignedBeaconBlockBellatrix::<ExecutionPayloadV1>::from_ssz_bytes(ssz) {
+        let payload = ExecutionPayload::V1(beacon.message.body.execution_payload);
+        return Ok(Some(payload.try_into_block()?));
+    }
+
+    // Pre-merge (phase0/altair): no execution payload.
+    Ok(None)
+}
+
+/// Re-encodes an alloy execution type as RLP and decodes it back into the node's primitive type.
+///
+/// `.era` files yield alloy execution headers/bodies, while the import pipeline writes the node's
+/// own primitives. Both share the canonical execution RLP encoding, so a round-trip bridges them
+/// without requiring a direct `From` conversion.
+fn reencode_rlp<T, U>(value: &T) -> eyre::Result<U>
+where
+    T: alloy_rlp::Encodable,
+    U: alloy_rlp::Decodable,
+{
+    Ok(<U as alloy_rlp::Decodable>::decode(&mut alloy_rlp::encode(value).as_slice())?)
 }
 
 /// Opens the ERA file at `meta` with the format's [`StreamReader`].
@@ -404,7 +518,7 @@ mod tests {
     use super::*;
     use alloy_consensus::Header;
     use reth_db_common::init::init_genesis;
-    use reth_ethereum_primitives::{Block, BlockBody};
+    use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
     use reth_provider::{
         test_utils::create_test_provider_factory, DatabaseProviderFactory,
         StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
@@ -438,6 +552,14 @@ mod tests {
         fn path(&self) -> &Path {
             Path::new("test.era1")
         }
+    }
+
+    #[test]
+    fn decode_execution_block_skips_non_post_merge() {
+        // Bytes that don't decode as any post-merge (Bellatrix+) beacon block fork carry no
+        // execution payload and are treated as pre-merge slots, yielding `None`.
+        assert!(decode_execution_block::<TransactionSigned>(&[]).unwrap().is_none());
+        assert!(decode_execution_block::<TransactionSigned>(&[0u8; 8]).unwrap().is_none());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

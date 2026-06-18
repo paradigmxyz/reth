@@ -2,59 +2,36 @@
 //!
 //! # Decoding
 //!
-//! This crate only handles compression/decompression.
-//! To decode the SSZ data into concrete beacon types, use the [Lighthouse `types`](https://github.com/sigp/lighthouse/tree/stable/consensus/types)
-//! crate or another SSZ-compatible library.
+//! This crate only handles compression/decompression. The decompressed bytes are SSZ-encoded
+//! consensus types, which can be decoded with [`alloy_rpc_types_beacon`]'s fork-specific beacon
+//! block types — no external consensus client is required.
 //!
-//! # Examples
+//! For extracting the execution block embedded in a post-merge beacon block, see
+//! [`reth_era_utils::decode_execution_block`](https://docs.rs/reth-era-utils).
 //!
-//! ## Decoding a [`CompressedBeaconState`]
+//! [`alloy_rpc_types_beacon`]: https://docs.rs/alloy-rpc-types-beacon
 //!
-//! ```ignore
-//! use types::{BeaconState, ChainSpec, MainnetEthSpec};
-//! use reth_era::era::types::consensus::CompressedBeaconState;
-//!
-//! fn decode_state(
-//!     compressed_state: &CompressedBeaconState,
-//! ) -> Result<(), Box<dyn std::error::Error>> {
-//!     let spec = ChainSpec::mainnet();
-//!
-//!     // Decompress to get SSZ bytes
-//!     let ssz_bytes = compressed_state.decompress()?;
-//!
-//!     // Decode with fork-aware method, chainSpec determines fork from slot in SSZ
-//!     let state = BeaconState::<MainnetEthSpec>::from_ssz_bytes(&ssz_bytes, &spec)
-//!         .map_err(|e| format!("{:?}", e))?;
-//!
-//!     println!("State slot: {}", state.slot());
-//!     println!("Fork: {:?}", state.fork_name_unchecked());
-//!     println!("Validators: {}", state.validators().len());
-//!     println!("Finalized checkpoint: {:?}", state.finalized_checkpoint());
-//!     Ok(())
-//! }
-//! ```
+//! # Example
 //!
 //! ## Decoding a [`CompressedSignedBeaconBlock`]
 //!
-//! ```ignore
-//! use consensus_types::{ForkName, ForkVersionDecode, MainnetEthSpec, SignedBeaconBlock};
+//! ```no_run
+//! use alloy_rpc_types_beacon::block::SignedBeaconBlockDeneb;
+//! use alloy_rpc_types_engine::ExecutionPayloadV3;
 //! use reth_era::era::types::consensus::CompressedSignedBeaconBlock;
+//! use ssz::Decode;
 //!
-//! // Decode using fork-aware decoding, fork must be known beforehand
 //! fn decode_block(
 //!     compressed: &CompressedSignedBeaconBlock,
-//!     fork: ForkName,
 //! ) -> Result<(), Box<dyn std::error::Error>> {
-//!     // Decompress to get SSZ bytes
+//!     // Decompress to get the SSZ bytes, then decode for the known fork.
 //!     let ssz_bytes = compressed.decompress()?;
+//!     let block = SignedBeaconBlockDeneb::<ExecutionPayloadV3>::from_ssz_bytes(&ssz_bytes)
+//!         .map_err(|e| format!("{e:?}"))?;
 //!
-//!     let block = SignedBeaconBlock::<MainnetEthSpec>::from_ssz_bytes_by_fork(&ssz_bytes, fork)
-//!         .map_err(|e| format!("{:?}", e))?;
-//!
-//!     println!("Block slot: {}", block.message().slot());
-//!     println!("Proposer index: {}", block.message().proposer_index());
-//!     println!("Parent root: {:?}", block.message().parent_root());
-//!     println!("State root: {:?}", block.message().state_root());
+//!     let payload = &block.message.body.execution_payload;
+//!     println!("Parent root: {:?}", block.message.parent_root);
+//!     println!("Execution block number: {}", payload.payload_inner.payload_inner.block_number);
 //!
 //!     Ok(())
 //! }
