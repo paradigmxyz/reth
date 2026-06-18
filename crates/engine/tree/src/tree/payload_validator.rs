@@ -1915,8 +1915,7 @@ where
                                     "Computed and caching changesets"
                                 );
 
-                                pending_changeset_guard
-                                    .resolve(block_number, Arc::new(changesets));
+                                pending_changeset_guard.resolve(block_number, Arc::new(changesets));
                             }
                             Err(e) => {
                                 warn!(
