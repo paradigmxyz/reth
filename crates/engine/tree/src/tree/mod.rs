@@ -1495,8 +1495,9 @@ where
         // the finalized block if set.
         let min_threshold =
             last_persisted_block_number.saturating_sub(CHANGESET_CACHE_RETENTION_BLOCKS);
+        let finalized_num_hash = self.canonical_in_memory_state.get_finalized_num_hash();
         let eviction_threshold =
-            if let Some(finalized) = self.canonical_in_memory_state.get_finalized_num_hash() {
+            if let Some(finalized) = finalized_num_hash {
                 // Use the minimum of finalized block and retention threshold to be conservative
                 finalized.number.min(min_threshold)
             } else {
@@ -1506,7 +1507,7 @@ where
         debug!(
             target: "engine::tree",
             last_persisted = last_persisted_block_number,
-            finalized_number = ?self.canonical_in_memory_state.get_finalized_num_hash().map(|f| f.number),
+            finalized_number = ?finalized_num_hash.map(|f| f.number),
             eviction_threshold,
             "Evicting changesets below threshold"
         );
