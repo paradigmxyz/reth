@@ -1,11 +1,11 @@
 //! Representation of state accessed during a single block's execution.
 //!
 //! This is the input to `NetworkStateCache::on_block_executed()`.
-//! It can be constructed from reth's `BundleState` after block execution.
+//! It can be constructed from revm's `State` database after block execution.
 
 use crate::policy::AccountData;
 use alloy_primitives::{Address, Bytes, B256, U256};
-use revm_database::BundleState;
+use revm_database::State;
 use revm_primitives::KECCAK_EMPTY;
 use std::collections::{HashMap, HashSet};
 
@@ -21,47 +21,72 @@ pub struct BlockAccessedState {
 }
 
 impl BlockAccessedState {
-    /// Construct from revm's `BundleState` output after block execution.
+    /// Construct from revm's `State` database after block execution.
     ///
-    /// The BundleState contains all accounts/storage that were touched during execution.
-    /// We extract the accessed keys and their current values.
-    pub fn from_bundle(bundle: &BundleState) -> Self {
+    /// This captures the complete read-set (including read-only accounts and contracts)
+    /// from the database cache and bundle state.
+    pub fn from_simulated_state<DB>(statedb: &State<DB>) -> Self {
         let mut accounts = HashMap::new();
         let mut storage = HashMap::new();
         let mut codes = HashMap::new();
 
-        for (address, account) in &bundle.state {
-            // Record account data
-            if let Some(info) = &account.info {
-                let code_hash =
-                    if info.code_hash == KECCAK_EMPTY { None } else { Some(info.code_hash) };
+        // 1. Traverse cached accounts (captures both read-only and modified state)
+        for (address, cache_account) in &statedb.cache.accounts {
+            if let Some(account) = &cache_account.account {
+                // If account is present, record its info
+                let code_hash = if account.info.code_hash == KECCAK_EMPTY {
+                    None
+                } else {
+                    Some(account.info.code_hash)
+                };
                 accounts.insert(
                     *address,
-                    AccountData { nonce: info.nonce, balance: info.balance, code_hash },
+                    AccountData {
+                        nonce: account.info.nonce,
+                        balance: account.info.balance,
+                        code_hash,
+                    },
                 );
-            } else {
-                // Account was accessed but is empty/destroyed
-                accounts.insert(
-                    *address,
-                    AccountData { nonce: 0, balance: U256::ZERO, code_hash: None },
-                );
-            }
 
-            // Record storage slots
-            for (slot, slot_value) in &account.storage {
-                let slot_b256 = B256::from(*slot);
-                // Use present_value
-                storage.insert((*address, slot_b256), slot_value.present_value);
+                // Record accessed storage slots
+                for (slot, value) in &account.storage {
+                    let slot_b256 = B256::from(*slot);
+                    storage.insert((*address, slot_b256), *value);
+                }
+            } else {
+                // Account is empty/destroyed/not found but was accessed
+                accounts.insert(
+                    *address,
+                    AccountData {
+                        nonce: 0,
+                        balance: U256::ZERO,
+                        code_hash: None,
+                    },
+                );
             }
         }
 
-        // Record deployed/accessed contracts
-        for (code_hash, bytecode) in &bundle.contracts {
-            codes.insert(*code_hash, bytecode.original_bytes());
+        // 2. Traverse bytecodes (contracts)
+        // Check cache.contracts
+        for (code_hash, code) in &statedb.cache.contracts {
+            let bytes = code.original_bytes();
+            if !bytes.is_empty() {
+                codes.insert(*code_hash, bytes);
+            }
+        }
+
+        // Check bundle_state.contracts (for newly created contracts in the block)
+        for (code_hash, code) in &statedb.bundle_state.contracts {
+            let bytes = code.original_bytes();
+            if !bytes.is_empty() {
+                codes.insert(*code_hash, bytes);
+            }
         }
 
         Self { accounts, storage, codes }
     }
+
+
 
     /// Total number of unique state keys accessed.
     pub fn total_keys(&self) -> usize {

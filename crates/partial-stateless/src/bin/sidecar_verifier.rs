@@ -91,6 +91,27 @@ fn norm_hex(s: &str) -> String {
     s.trim().trim_start_matches("0x").to_ascii_lowercase()
 }
 
+fn clean_inline_nodes(proof: &mut Vec<alloy_primitives::Bytes>) {
+    let mut to_remove = std::collections::HashSet::new();
+    for i in 0..proof.len() {
+        for j in 0..proof.len() {
+            if i != j && proof[i].len() < proof[j].len() {
+                // Check if proof[i] is a substring of proof[j]
+                if proof[j].windows(proof[i].len()).any(|w| w == proof[i].as_ref()) {
+                    to_remove.insert(i);
+                }
+            }
+        }
+    }
+    let mut new_proof = Vec::new();
+    for (i, node) in proof.iter().enumerate() {
+        if !to_remove.contains(&i) {
+            new_proof.push(node.clone());
+        }
+    }
+    *proof = new_proof;
+}
+
 /// Crypto-verify the sidecar's proofs and code preimages against `parent_state_root`.
 fn crypto_verify(sidecar: &PartialStatelessSidecar) -> Res<CryptoVerdict> {
     let serializable: SerializableMultiProof =
@@ -110,9 +131,16 @@ fn crypto_verify(sidecar: &PartialStatelessSidecar) -> Res<CryptoVerdict> {
 
     let mut storage_checked = 0usize;
     for (addr, slots) in &slots_by_account {
-        let account_proof = multiproof
+        let mut account_proof = multiproof
             .account_proof(*addr, slots)
             .map_err(|e| format!("account {addr:?}: could not build proof: {e}"))?;
+
+        // Clean up inline nodes
+        clean_inline_nodes(&mut account_proof.proof);
+        for sp in &mut account_proof.storage_proofs {
+            clean_inline_nodes(&mut sp.proof);
+        }
+
         account_proof
             .verify(root)
             .map_err(|e| format!("account {addr:?}: proof failed against parent_state_root: {e}"))?;
@@ -169,16 +197,22 @@ fn coverage(sidecar: &PartialStatelessSidecar, witness: &ReferenceWitness) -> Co
     }
     let covered_keys = ref_keys.intersection(&sidecar_keys).count();
 
-    // Headers: the current sidecar schema carries none.
-    let ref_headers = witness.headers.len();
+    // Headers: compare RLP encoded bytes by hex (exact match).
+    let ref_headers_set: HashSet<String> = witness.headers.iter().map(|h| norm_hex(h)).collect();
+    let sidecar_headers_set: HashSet<String> = sidecar
+        .ancestor_headers
+        .iter()
+        .map(|bytes| norm_hex(&hex::encode(bytes)))
+        .collect();
+    let covered_headers = ref_headers_set.intersection(&sidecar_headers_set).count();
 
     CoverageReport {
         ref_codes: ref_code_hashes.len(),
         covered_codes,
         ref_keys: ref_keys.len(),
         covered_keys,
-        ref_headers,
-        covered_headers: 0,
+        ref_headers: ref_headers_set.len(),
+        covered_headers,
     }
 }
 

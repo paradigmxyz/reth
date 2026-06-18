@@ -6462,6 +6462,7 @@ name = "partial-stateless"
 version = "0.1.0"
 dependencies = [
  "alloy-primitives",
+ "alloy-rlp",
  "bincode",
  "reth-trie-common",
  "revm-database",
@@ -6477,13 +6478,17 @@ name = "partial-stateless-exex"
 version = "0.1.0"
 dependencies = [
  "alloy-primitives",
+ "alloy-rlp",
  "bincode",
  "eyre",
  "futures",
  "partial-stateless",
  "reth-ethereum",
+ "reth-evm",
  "reth-provider",
+ "reth-revm",
  "reth-trie-common",
+ "revm",
  "serde_json",
  "tokio",
  "tracing",
