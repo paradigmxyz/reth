@@ -56,6 +56,19 @@ where
             debug!(target: "pruner", "Pruning transaction senders from static files.");
 
             if self.mode.is_full() {
+                if let Some(checkpoint) = input.previous_checkpoint.as_ref()
+                    && checkpoint.prune_mode.is_full()
+                {
+                    return Ok(SegmentOutput {
+                        progress: PruneProgress::Finished,
+                        pruned: 0,
+                        checkpoint: Some(SegmentOutputCheckpoint {
+                            block_number: Some(input.to_block),
+                            tx_number: checkpoint.tx_number,
+                        }),
+                    });
+                }
+
                 debug!(target: "pruner", "PruneMode::Full: deleting all transaction senders static files.");
                 return segments::delete_static_files_segment(
                     provider,
@@ -141,13 +154,39 @@ mod tests {
         FoldWhile::{Continue, Done},
         Itertools,
     };
-    use reth_db_api::tables;
+    use reth_db_api::{models::StorageSettings, tables};
     use reth_primitives_traits::SignerRecoverable;
-    use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
+    use reth_provider::{
+        DBProvider, DatabaseProviderFactory, PruneCheckpointReader, StorageSettingsCache,
+    };
     use reth_prune_types::{PruneCheckpoint, PruneMode, PruneProgress, PruneSegment};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
     use std::ops::Sub;
+
+    #[test]
+    fn prune_static_full_checkpoint_advances_without_rescanning() {
+        let db = TestStageDB::default();
+        db.factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let input = PruneInput {
+            previous_checkpoint: Some(PruneCheckpoint {
+                block_number: Some(10),
+                tx_number: Some(20),
+                prune_mode: PruneMode::Full,
+            }),
+            to_block: 15,
+            limiter: PruneLimiter::default(),
+        };
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = SenderRecovery::new(PruneMode::Full).prune(&provider, input).unwrap();
+
+        assert_eq!(result.progress, PruneProgress::Finished);
+        assert_eq!(result.pruned, 0);
+        let checkpoint = result.checkpoint.unwrap();
+        assert_eq!(checkpoint.block_number, Some(15));
+        assert_eq!(checkpoint.tx_number, Some(20));
+    }
 
     #[test]
     fn prune() {
