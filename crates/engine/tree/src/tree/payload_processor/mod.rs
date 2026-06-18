@@ -502,18 +502,18 @@ where
                     // entering the parallel iterator for the remainder.
                     let prefetch = Self::PARALLEL_PREFETCH_COUNT.min(transaction_count);
                     let mut all: Vec<_> = transactions.into_iter().collect();
-                    let rest = all.split_off(prefetch);
 
                     // Convert the first few transactions sequentially so execution can
                     // start immediately without waiting for rayon work-stealing.
-                    convert_serial(all.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                    let head_len = prefetch.min(all.len());
+                    convert_serial(all.drain(..head_len), &convert, &prewarm_tx, &execute_tx);
 
                     // Without BALs, we need to preserve the initial order of transactions,
                     // so we have to use `for_each_ordered_in`.
-                    rest.into_par_iter()
+                    all.into_par_iter()
                         .enumerate()
                         .map(|(i, tx)| {
-                            let idx = i + prefetch;
+                            let idx = i + head_len;
                             let tx = convert.convert(tx);
                             (idx, tx)
                         })
