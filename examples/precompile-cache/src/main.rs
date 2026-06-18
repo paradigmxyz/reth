@@ -103,7 +103,6 @@ impl EvmFactory for MyEvmFactory {
 }
 
 /// A custom precompile that contains the cache and precompile it wraps.
-#[derive(Clone)]
 pub struct WrappedPrecompile {
     /// The precompile to wrap.
     precompile: DynPrecompile,

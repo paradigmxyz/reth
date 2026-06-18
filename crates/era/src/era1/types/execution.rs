@@ -590,6 +590,14 @@ impl BlockTuple {
         Self { header, body, receipts, total_difficulty }
     }
 
+    /// Total serialized size of the tuple's four records (each an e2store [`Entry`]) on disk.
+    pub fn size(&self) -> usize {
+        self.header.to_entry().size() +
+            self.body.to_entry().size() +
+            self.receipts.to_entry().size() +
+            self.total_difficulty.to_entry().size()
+    }
+
     /// Convert to an `alloy_consensus::Block`
     pub fn to_alloy_block<T: Decodable>(&self) -> Result<Block<T>, E2sError> {
         let header: Header = self.header.decode()?;

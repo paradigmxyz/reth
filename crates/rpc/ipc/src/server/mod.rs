@@ -68,7 +68,7 @@ impl<HttpMiddleware, RpcMiddleware> IpcServer<HttpMiddleware, RpcMiddleware> {
 
 impl<HttpMiddleware, RpcMiddleware> IpcServer<HttpMiddleware, RpcMiddleware>
 where
-    RpcMiddleware: for<'a> Layer<RpcService, Service: RpcServiceT> + Clone + Send + 'static,
+    RpcMiddleware: Layer<RpcService, Service: RpcServiceT> + Clone + Send + 'static,
     HttpMiddleware: Layer<
             TowerServiceNoHttp<RpcMiddleware>,
             Service: Service<
@@ -371,8 +371,8 @@ pub struct TowerServiceNoHttp<L> {
 
 impl<RpcMiddleware> Service<String> for TowerServiceNoHttp<RpcMiddleware>
 where
-    RpcMiddleware: for<'a> Layer<RpcService>,
-    for<'a> <RpcMiddleware as Layer<RpcService>>::Service:
+    RpcMiddleware: Layer<RpcService>,
+    <RpcMiddleware as Layer<RpcService>>::Service:
         Send + Sync + 'static + RpcServiceT<MethodResponse = MethodResponse>,
 {
     /// The response of a handled RPC call
