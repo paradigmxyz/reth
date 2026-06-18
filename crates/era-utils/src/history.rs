@@ -141,9 +141,8 @@ impl Era {
         else {
             return Ok(None);
         };
-        // The beacon payload decodes into alloy execution types; re-encode and decode into the
-        // node's own primitives through the same RLP representation the `.era1`/`.ere` paths use.
-        Ok(Some((reencode_rlp(&header)?, reencode_rlp(&body)?)))
+        // Convert the alloy execution header/body into the node's own primitives.
+        Ok(Some((BH::from_ethereum_header(header), BB::from_ethereum_body(body))))
     }
 }
 
