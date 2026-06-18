@@ -193,6 +193,24 @@ mod tests {
     }
 
     #[test]
+    fn busy_placeholder_blocks_checkout_until_installed() {
+        let cache = PayloadExecutionCache::default();
+        let hash = B256::from([3u8; 32]);
+        let saved_cache = SavedCache::new(hash, ExecutionCache::new(1_000));
+        let install_guard = saved_cache.clone();
+
+        cache.update_with_guard(|slot| {
+            *slot = Some(saved_cache);
+        });
+
+        assert!(cache.get_cache_for(hash).is_none());
+
+        drop(install_guard);
+
+        assert!(cache.get_cache_for(hash).is_some());
+    }
+
+    #[test]
     fn hash_mismatch_clears_and_retags() {
         let cache = PayloadExecutionCache::default();
         let hash_a = B256::from([0xAA; 32]);

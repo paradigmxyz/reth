@@ -263,12 +263,15 @@ where
     /// 1. All prewarming tasks have completed execution
     /// 2. No other concurrent operations are accessing the cache
     ///
-    /// Saves the warmed caches back into the shared slot after prewarming completes.
+    /// Schedules the warmed caches to be saved back into the shared slot after prewarming
+    /// completes.
     ///
     /// This consumes the `SavedCache` held by the task, which releases its usage guard and allows
     /// the new, warmed cache to be inserted.
     ///
-    /// This method is called from `run()` only after all execution tasks are complete.
+    /// This method is called from `run()` only after all execution tasks are complete. Cache
+    /// population still waits for block validation, but that wait runs on a separate worker so the
+    /// prewarm worker can start later payloads.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn save_cache(
         self,
@@ -278,6 +281,7 @@ where
         let start = Instant::now();
 
         let Self {
+            executor,
             execution_cache,
             ctx: PrewarmContext { env, metrics, cache_state_metrics, saved_cache, .. },
             ..
@@ -285,40 +289,54 @@ where
         let hash = env.hash;
 
         if let Some(saved_cache) = saved_cache {
-            debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
+            debug!(target: "engine::caching", parent_hash=?hash, "Scheduling execution cache update");
+
+            let caches = saved_cache.cache().clone();
+            let new_cache = SavedCache::new(hash, caches);
+
+            // Install a placeholder for this block immediately and keep a clone alive in the
+            // background task. This makes the cache unavailable to the next payload until the
+            // validated post-state has been inserted, preventing concurrent cache mutation.
             execution_cache.update_with_guard(|cached| {
-                // consumes the `SavedCache` held by the prewarming task, which releases its usage
-                // guard
-                let caches = saved_cache.cache().clone();
-                let new_cache = SavedCache::new(hash, caches);
-
-                // Insert state into cache while holding the lock
-                // Access the BundleState through the shared ExecutionOutcome
-                if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
-                    // Clear the cache on error to prevent having a polluted cache
-                    *cached = None;
-                    debug!(target: "engine::caching", "cleared execution cache on update error");
-                    return;
-                }
-
-                new_cache.update_metrics(cache_state_metrics.as_ref());
-
-                if valid_block_rx.recv().is_ok() {
-                    // Replace the shared cache with the new one; the previous cache (if any) is
-                    // dropped.
-                    *cached = Some(new_cache);
-                } else {
-                    // Block was invalid; caches were already mutated by insert_state above,
-                    // so we must clear to prevent using polluted state
-                    *cached = None;
-                    debug!(target: "engine::caching", "cleared execution cache on invalid block");
-                }
+                *cached = Some(new_cache.clone());
             });
 
-            let elapsed = start.elapsed();
-            debug!(target: "engine::caching", parent_hash=?hash, elapsed=?elapsed, "Updated execution cache");
+            executor.spawn_blocking_named("cache-save", move || {
+                let _span = debug_span!(
+                    target: "engine::caching",
+                    "install_execution_cache",
+                    parent_hash = ?hash,
+                )
+                .entered();
 
-            metrics.cache_saving_duration.set(elapsed.as_secs_f64());
+                let mut clear_placeholder = false;
+
+                if valid_block_rx.recv().is_ok() {
+                    if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
+                        clear_placeholder = true;
+                        debug!(target: "engine::caching", "cleared execution cache on update error");
+                    } else {
+                        new_cache.update_metrics(cache_state_metrics.as_ref());
+                    }
+                } else {
+                    clear_placeholder = true;
+                    debug!(target: "engine::caching", "cleared execution cache on invalid block");
+                }
+
+                if clear_placeholder {
+                    execution_cache.update_with_guard(|cached| {
+                        if cached.as_ref().is_some_and(|cache| cache.executed_block_hash() == hash)
+                        {
+                            *cached = None;
+                        }
+                    });
+                }
+
+                let elapsed = start.elapsed();
+                debug!(target: "engine::caching", parent_hash=?hash, elapsed=?elapsed, "Updated execution cache");
+
+                metrics.cache_saving_duration.set(elapsed.as_secs_f64());
+            });
         }
     }
 
