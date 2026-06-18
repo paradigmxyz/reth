@@ -256,6 +256,36 @@ pub struct StaticFileProviderRW<N> {
 }
 
 impl<N: NodePrimitives> StaticFileProviderRW<N> {
+    #[inline]
+    fn metrics_start(&self) -> Option<Instant> {
+        self.metrics.is_some().then(Instant::now)
+    }
+
+    #[inline]
+    fn record_segment_operation(
+        &self,
+        segment: StaticFileSegment,
+        operation: StaticFileProviderOperation,
+        start: Option<Instant>,
+    ) {
+        if let (Some(metrics), Some(start)) = (&self.metrics, start) {
+            metrics.record_segment_operation(segment, operation, Some(start.elapsed()));
+        }
+    }
+
+    #[inline]
+    fn record_segment_operations(
+        &self,
+        segment: StaticFileSegment,
+        operation: StaticFileProviderOperation,
+        count: u64,
+        start: Option<Instant>,
+    ) {
+        if let (Some(metrics), Some(start)) = (&self.metrics, start) {
+            metrics.record_segment_operations(segment, operation, count, Some(start.elapsed()));
+        }
+    }
+
     /// Creates a new [`StaticFileProviderRW`] for a [`StaticFileSegment`].
     ///
     /// Before use, transaction based segments should ensure the block end range is the expected
@@ -299,7 +329,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         reader: Weak<StaticFileProviderInner<N>>,
         metrics: Option<Arc<StaticFileProviderMetrics>>,
     ) -> ProviderResult<(NippyJarWriter<SegmentHeader>, PathBuf)> {
-        let start = Instant::now();
+        let start = metrics.is_some().then(Instant::now);
 
         let static_file_provider = Self::upgrade_provider_to_strong_reference(&reader);
 
@@ -329,7 +359,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             Err(e) => Err(ProviderError::other(e)),
         }?;
 
-        if let Some(metrics) = &metrics {
+        if let (Some(metrics), Some(start)) = (&metrics, start) {
             metrics.record_segment_operation(
                 segment,
                 StaticFileProviderOperation::OpenWriter,
@@ -1144,7 +1174,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     where
         N::BlockHeader: Compact,
     {
-        let start = Instant::now();
+        let start = self.metrics_start();
         self.ensure_no_queued_prune()?;
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Headers);
@@ -1155,13 +1185,11 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.append_column(CompactU256::from(total_difficulty))?;
         self.append_column(hash)?;
 
-        if let Some(metrics) = &self.metrics {
-            metrics.record_segment_operation(
-                StaticFileSegment::Headers,
-                StaticFileProviderOperation::Append,
-                Some(start.elapsed()),
-            );
-        }
+        self.record_segment_operation(
+            StaticFileSegment::Headers,
+            StaticFileProviderOperation::Append,
+            start,
+        );
 
         Ok(())
     }
@@ -1177,7 +1205,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     where
         N::BlockHeader: Compact,
     {
-        let start = Instant::now();
+        let start = self.metrics_start();
         self.ensure_no_queued_prune()?;
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Headers);
@@ -1186,13 +1214,11 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.append_column(CompactU256::from(total_difficulty))?;
         self.append_column(hash)?;
 
-        if let Some(metrics) = &self.metrics {
-            metrics.record_segment_operation(
-                StaticFileSegment::Headers,
-                StaticFileProviderOperation::Append,
-                Some(start.elapsed()),
-            );
-        }
+        self.record_segment_operation(
+            StaticFileSegment::Headers,
+            StaticFileProviderOperation::Append,
+            start,
+        );
 
         Ok(())
     }
@@ -1205,19 +1231,17 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     where
         N::SignedTx: Compact,
     {
-        let start = Instant::now();
+        let start = self.metrics_start();
         self.ensure_no_queued_prune()?;
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Transactions);
         self.append_with_tx_number(tx_num, tx)?;
 
-        if let Some(metrics) = &self.metrics {
-            metrics.record_segment_operation(
-                StaticFileSegment::Transactions,
-                StaticFileProviderOperation::Append,
-                Some(start.elapsed()),
-            );
-        }
+        self.record_segment_operation(
+            StaticFileSegment::Transactions,
+            StaticFileProviderOperation::Append,
+            start,
+        );
 
         Ok(())
     }
@@ -1230,19 +1254,17 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     where
         N::Receipt: Compact,
     {
-        let start = Instant::now();
+        let start = self.metrics_start();
         self.ensure_no_queued_prune()?;
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Receipts);
         self.append_with_tx_number(tx_num, receipt)?;
 
-        if let Some(metrics) = &self.metrics {
-            metrics.record_segment_operation(
-                StaticFileSegment::Receipts,
-                StaticFileProviderOperation::Append,
-                Some(start.elapsed()),
-            );
-        }
+        self.record_segment_operation(
+            StaticFileSegment::Receipts,
+            StaticFileProviderOperation::Append,
+            start,
+        );
 
         Ok(())
     }
@@ -1262,7 +1284,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             return Ok(());
         }
 
-        let start = Instant::now();
+        let start = self.metrics_start();
         self.ensure_no_queued_prune()?;
 
         // At this point receipts contains at least one receipt, so this would be overwritten.
@@ -1274,14 +1296,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             count += 1;
         }
 
-        if let Some(metrics) = &self.metrics {
-            metrics.record_segment_operations(
-                StaticFileSegment::Receipts,
-                StaticFileProviderOperation::Append,
-                count,
-                Some(start.elapsed()),
-            );
-        }
+        self.record_segment_operations(
+            StaticFileSegment::Receipts,
+            StaticFileProviderOperation::Append,
+            count,
+            start,
+        );
 
         Ok(())
     }
@@ -1295,19 +1315,17 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         tx_num: TxNumber,
         sender: &alloy_primitives::Address,
     ) -> ProviderResult<()> {
-        let start = Instant::now();
+        let start = self.metrics_start();
         self.ensure_no_queued_prune()?;
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::TransactionSenders);
         self.append_with_tx_number(tx_num, sender)?;
 
-        if let Some(metrics) = &self.metrics {
-            metrics.record_segment_operation(
-                StaticFileSegment::TransactionSenders,
-                StaticFileProviderOperation::Append,
-                Some(start.elapsed()),
-            );
-        }
+        self.record_segment_operation(
+            StaticFileSegment::TransactionSenders,
+            StaticFileProviderOperation::Append,
+            start,
+        );
 
         Ok(())
     }
@@ -1325,7 +1343,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             return Ok(());
         }
 
-        let start = Instant::now();
+        let start = self.metrics_start();
         self.ensure_no_queued_prune()?;
 
         // At this point senders contains at least one sender, so this would be overwritten.
@@ -1335,14 +1353,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             count += 1;
         }
 
-        if let Some(metrics) = &self.metrics {
-            metrics.record_segment_operations(
-                StaticFileSegment::TransactionSenders,
-                StaticFileProviderOperation::Append,
-                count,
-                Some(start.elapsed()),
-            );
-        }
+        self.record_segment_operations(
+            StaticFileSegment::TransactionSenders,
+            StaticFileProviderOperation::Append,
+            count,
+            start,
+        );
 
         Ok(())
     }
@@ -1358,7 +1374,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         block_number: u64,
     ) -> ProviderResult<()> {
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::AccountChangeSets);
-        let start = Instant::now();
+        let start = self.metrics_start();
 
         self.increment_block(block_number)?;
         self.ensure_no_queued_prune()?;
@@ -1373,14 +1389,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             count += 1;
         }
 
-        if let Some(metrics) = &self.metrics {
-            metrics.record_segment_operations(
-                StaticFileSegment::AccountChangeSets,
-                StaticFileProviderOperation::Append,
-                count,
-                Some(start.elapsed()),
-            );
-        }
+        self.record_segment_operations(
+            StaticFileSegment::AccountChangeSets,
+            StaticFileProviderOperation::Append,
+            count,
+            start,
+        );
 
         Ok(())
     }
@@ -1422,7 +1436,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         block_number: u64,
     ) -> ProviderResult<()> {
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::StorageChangeSets);
-        let start = Instant::now();
+        let start = self.metrics_start();
 
         self.increment_block(block_number)?;
         self.ensure_no_queued_prune()?;
@@ -1436,14 +1450,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             count += 1;
         }
 
-        if let Some(metrics) = &self.metrics {
-            metrics.record_segment_operations(
-                StaticFileSegment::StorageChangeSets,
-                StaticFileProviderOperation::Append,
-                count,
-                Some(start.elapsed()),
-            );
-        }
+        self.record_segment_operations(
+            StaticFileSegment::StorageChangeSets,
+            StaticFileProviderOperation::Append,
+            count,
+            start,
+        );
 
         Ok(())
     }
