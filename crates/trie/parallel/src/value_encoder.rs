@@ -34,9 +34,7 @@ impl DispatchedStorageProof {
     }
 
     /// Creates a dispatched storage proof used only to precompute an account leaf's storage root.
-    pub(crate) const fn root_only(
-        result_rx: CrossbeamReceiver<StorageProofResultMessage>,
-    ) -> Self {
+    pub(crate) const fn root_only(result_rx: CrossbeamReceiver<StorageProofResultMessage>) -> Self {
         Self { result_rx, collect_proof: false }
     }
 
@@ -84,8 +82,7 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
         /// The receiver for the storage proof result. This is an `Option` so that `encode` can
         /// take ownership of the receiver, preventing the `Drop` impl from trying to receive on
         /// it again.
-        proof_result_rx:
-            Option<Result<DispatchedStorageProof, DatabaseError>>,
+        proof_result_rx: Option<Result<DispatchedStorageProof, DatabaseError>>,
         /// Shared storage proof results.
         storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNodeV2>>>>,
         /// Shared stats for tracking wait time and counts.

@@ -1218,24 +1218,21 @@ mod tests {
             ProofV2Target::new(account_with_storage).with_min_len(8),
         ];
         let mut storage_targets = B256Map::default();
-        storage_targets.insert(
-            account_with_storage,
-            vec![ProofV2Target::new(storage_slot).with_min_len(12)],
-        );
+        storage_targets
+            .insert(account_with_storage, vec![ProofV2Target::new(storage_slot).with_min_len(12)]);
 
         let receivers =
             dispatch_v2_storage_proofs(&work_tx, &account_targets, storage_targets).unwrap();
 
         assert_eq!(receivers.len(), 2);
-        assert!(
-            !receivers.get(&account_only).expect("account-only receiver").should_collect_proof()
-        );
-        assert!(
-            receivers
-                .get(&account_with_storage)
-                .expect("storage receiver")
-                .should_collect_proof()
-        );
+        assert!(!receivers
+            .get(&account_only)
+            .expect("account-only receiver")
+            .should_collect_proof());
+        assert!(receivers
+            .get(&account_with_storage)
+            .expect("storage receiver")
+            .should_collect_proof());
 
         let mut jobs = Vec::new();
         while let Ok(StorageWorkerJob::StorageProof { input, .. }) = work_rx.try_recv() {
