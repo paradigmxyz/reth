@@ -3090,6 +3090,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     where
         TX: DbTxMut,
     {
+        if trie_updates.account_nodes_ref().is_empty() {
+            return Ok(())
+        }
+
         let mut account_trie_cursor = tx.cursor_write::<A::AccountTrieTable>()?;
         // Process sorted account nodes
         for (key, updated_node) in trie_updates.account_nodes_ref() {
