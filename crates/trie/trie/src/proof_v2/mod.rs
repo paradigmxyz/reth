@@ -37,6 +37,9 @@ static TRACE_TARGET: &str = "trie::proof_v2";
 /// Number of bytes to pre-allocate for [`ProofCalculator`]'s `rlp_encode_buf` field.
 const RLP_ENCODE_BUF_SIZE: usize = 1024;
 
+/// Maximum cached trie nodes to scan with `next` before falling back to an absolute seek.
+const LINEAR_TRIE_CURSOR_ADVANCE_LIMIT: usize = 16;
+
 /// A proof calculator that generates merkle proofs using only leaf data.
 ///
 /// The calculator:
@@ -854,6 +857,42 @@ where
         Ok(entry)
     }
 
+    /// Advances the trie cursor to at least `key` when the cursor is already positioned before it.
+    ///
+    /// Cached branch traversal often asks for the next child of the same parent branch. In that
+    /// case a few sequential cursor steps avoid a full MDBX seek, while the cap keeps sparse jumps
+    /// on the existing seek path.
+    fn advance_trie_cursor_forward(
+        &mut self,
+        trie_cursor_state: &mut TrieCursorState,
+        key: Nibbles,
+    ) -> Result<(), StateProofError> {
+        debug_assert!(
+            trie_cursor_state.path().is_some_and(|path| path < &key),
+            "advance_trie_cursor_forward called when cursor is not before {key:?}: {trie_cursor_state:?}",
+        );
+
+        for _ in 0..LINEAR_TRIE_CURSOR_ADVANCE_LIMIT {
+            let mut entry = self.trie_cursor.next()?;
+            while let Some((ref path, ref branch)) = entry {
+                if !self.should_skip_cached_branch(path, branch) {
+                    break
+                }
+                entry = self.trie_cursor.next()?;
+            }
+
+            *trie_cursor_state = TrieCursorState::seeked(entry);
+
+            match trie_cursor_state.path() {
+                Some(path) if path < &key => continue,
+                _ => return Ok(()),
+            }
+        }
+
+        *trie_cursor_state = TrieCursorState::seeked(self.trie_cursor_seek(key)?);
+        Ok(())
+    }
+
     /// Returns true if the cached branch should be skipped entirely and its sub-trie recalculated
     /// from leaves.
     fn should_skip_cached_branch(
@@ -927,8 +966,7 @@ where
         // If the trie cursor is seeked to a branch whose leaves have already been processed
         // then we can't use it, instead we seek forward and try again.
         if trie_cursor_path < uncalculated_lower_bound {
-            *trie_cursor_state =
-                TrieCursorState::seeked(self.trie_cursor_seek(*uncalculated_lower_bound)?);
+            self.advance_trie_cursor_forward(trie_cursor_state, *uncalculated_lower_bound)?;
 
             // Having just seeked forward we need to check if the cursor is now exhausted,
             // extracting the new path at the same time.
@@ -1244,7 +1282,7 @@ where
             // trie cursor to the next cached node at-or-after `child_path`.
             if trie_cursor_state.path().is_some_and(|path| path < &child_path) {
                 trace!(target: TRACE_TARGET, ?child_path, "Seeking trie cursor to child path");
-                *trie_cursor_state = TrieCursorState::seeked(self.trie_cursor_seek(child_path)?);
+                self.advance_trie_cursor_forward(trie_cursor_state, child_path)?;
             }
 
             // If the next cached branch node is a child of `child_path` then we can assume it is
