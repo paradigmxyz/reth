@@ -12,7 +12,7 @@ use std::{
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
     ops::Bound,
 };
-use tracing::debug;
+use tracing::{debug, trace};
 
 /// Keeps track of the state of the tree.
 ///
@@ -209,7 +209,7 @@ impl<N: NodePrimitives> TreeState<N> {
             if executed.recovered_block().number() <= upper_bound {
                 let hash = executed.recovered_block().hash();
                 let num_hash = executed.recovered_block().num_hash();
-                debug!(target: "engine::tree", ?num_hash, "Attempting to remove block walking back from the head");
+                trace!(target: "engine::tree", ?num_hash, "Attempting to remove block walking back from the head");
                 if self.remove_by_hash(hash).is_some() {
                     removed_hashes.push(hash);
                 }
