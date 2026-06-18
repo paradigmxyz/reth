@@ -4,13 +4,14 @@ use crate::{EthEngineTypes, EthEvmConfig};
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
 use alloy_network::Ethereum;
 use alloy_rpc_types_engine::ExecutionData;
+use evm2::ethereum::RecoveredTxEnvelope;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthExecutorSpec, EthereumHardforks, Hardforks};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_engine_primitives::EngineTypes;
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthBuiltPayload, EthPayloadAttributes};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
-use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
+use reth_evm::{ConfigureEvm, Evm2Env, NextBlockEnvAttributes, TxEnvFor};
 use reth_network::{primitives::BasicNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives,
@@ -34,7 +35,10 @@ use reth_node_core::args::JitArgs;
 use reth_payload_primitives::PayloadTypes;
 use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
 use reth_rpc::{
-    eth::core::{EthApiFor, EthRpcConverterFor},
+    eth::{
+        core::{EthApiFor, EthRpcConverterFor},
+        RpcNodeCore,
+    },
     TestingApi, ValidationApi,
 };
 use reth_rpc_api::servers::{BlockSubmissionValidationApiServer, TestingApiServer};
@@ -58,7 +62,7 @@ use std::{marker::PhantomData, sync::Arc, time::SystemTime};
 pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
 
 /// Handles the legacy JIT helper subcommand hook.
-pub fn maybe_run_jit_helper() -> eyre::Result<std::ops::ControlFlow<()>> {
+pub const fn maybe_run_jit_helper() -> eyre::Result<std::ops::ControlFlow<()>> {
     Ok(std::ops::ControlFlow::Continue(()))
 }
 
@@ -315,6 +319,8 @@ where
         Evm: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthB: EthApiBuilder<N>,
+    <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm<EvmEnv: Evm2Env>,
+    TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<RecoveredTxEnvelope>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
@@ -392,6 +398,8 @@ where
         Evm: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthB: EthApiBuilder<N>,
+    <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm<EvmEnv: Evm2Env>,
+    TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<RecoveredTxEnvelope>,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,

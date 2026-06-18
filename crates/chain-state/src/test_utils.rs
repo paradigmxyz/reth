@@ -74,7 +74,7 @@ impl<N: NodePrimitives> Default for TestBlockBuilder<N> {
             chain_spec: ChainSpec::default(),
             signer,
             signer_pk,
-            signer_execute_account_info: initial_account_info.clone(),
+            signer_execute_account_info: initial_account_info,
             signer_build_account_info: initial_account_info,
             post_block_state: B256HashMap::default(),
             with_state: false,
@@ -259,11 +259,8 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         let single_cost = Self::single_tx_cost();
 
         // Look up parent's post-block state for correct revert construction.
-        let (pre_info, old_slot_value) = self
-            .post_block_state
-            .get(&parent_hash)
-            .cloned()
-            .unwrap_or_else(|| (initial_info.clone(), U256::ZERO));
+        let (pre_info, old_slot_value) =
+            self.post_block_state.get(&parent_hash).copied().unwrap_or((initial_info, U256::ZERO));
 
         let mut final_balance = pre_info.balance;
         for _ in 0..num_txs {
@@ -283,10 +280,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
         let storage_key = B256::new(TEST_STORAGE_SLOT.to_be_bytes());
         let mut state_init = ExecutionStateInit::default();
-        state_init.insert(
-            self.signer,
-            (Some(pre_info.clone()), Some(post_info.clone()), Default::default()),
-        );
+        state_init.insert(self.signer, (Some(pre_info), Some(post_info), Default::default()));
         state_init.insert(
             TEST_STORAGE_ADDRESS,
             (None, None, B256HashMap::from_iter([(storage_key, (old_slot_value, new_slot_value))])),
@@ -421,7 +415,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         state_init.insert(
             self.signer,
             (
-                Some(self.signer_execute_account_info.clone()),
+                Some(self.signer_execute_account_info),
                 Some(Account { nonce: final_nonce, balance: final_balance, ..Default::default() }),
                 Default::default(),
             ),

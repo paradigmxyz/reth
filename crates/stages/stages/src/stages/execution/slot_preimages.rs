@@ -167,7 +167,7 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     let reader = preimages.reader().map_err(fatal)?;
 
     for block_reverts in state.block_reverts_mut() {
-        for (address, revert) in block_reverts.storage.iter_mut() {
+        for (address, revert) in &mut block_reverts.storage {
             if !revert.wiped {
                 continue;
             }

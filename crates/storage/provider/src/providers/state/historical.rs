@@ -1384,11 +1384,11 @@ mod tests {
         type Revert = Vec<(Address, Option<Account>, Vec<(U256, U256)>)>;
         let mut reverts: Vec<Revert> = vec![Vec::new(); 16];
 
-        reverts[3] = vec![(ADDRESS, Some(account.clone()), vec![(slot, U256::ZERO)])];
-        reverts[4] = vec![(HIGHER_ADDRESS, Some(higher_account.clone()), vec![(slot, U256::ZERO)])];
-        reverts[7] = vec![(ADDRESS, Some(account.clone()), vec![(slot, U256::from(7))])];
-        reverts[10] = vec![(ADDRESS, Some(account.clone()), vec![(slot, U256::from(10))])];
-        reverts[15] = vec![(ADDRESS, Some(account.clone()), vec![(slot, U256::from(15))])];
+        reverts[3] = vec![(ADDRESS, Some(account), vec![(slot, U256::ZERO)])];
+        reverts[4] = vec![(HIGHER_ADDRESS, Some(higher_account), vec![(slot, U256::ZERO)])];
+        reverts[7] = vec![(ADDRESS, Some(account), vec![(slot, U256::from(7))])];
+        reverts[10] = vec![(ADDRESS, Some(account), vec![(slot, U256::from(10))])];
+        reverts[15] = vec![(ADDRESS, Some(account), vec![(slot, U256::from(15))])];
 
         let state = evm2_block_state_from_init(
             [

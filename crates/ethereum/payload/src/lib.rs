@@ -211,7 +211,7 @@ where
         "building evm2 payload"
     );
 
-    let mut best_txs = best_txs(BestTransactionsAttributes::new(
+    let best_txs = best_txs(BestTransactionsAttributes::new(
         base_fee,
         blob_params.and_then(|params| excess_blob_gas.map(|gas| params.calc_blob_fee(gas) as u64)),
     ));
@@ -219,7 +219,7 @@ where
     let mut senders = Vec::new();
     let mut cumulative_gas_limit = 0u64;
 
-    while let Some(pool_tx) = best_txs.next() {
+    for pool_tx in best_txs {
         if cancel.is_cancelled() {
             return Ok(BuildOutcome::Cancelled)
         }
@@ -257,7 +257,7 @@ where
             .withdrawals
             .as_ref()
             .map(|withdrawals| calculate_withdrawals_root(withdrawals.as_slice())),
-        ..block_env_header.clone()
+        ..block_env_header
     };
     let execution_block = RecoveredBlock::new_unhashed(
         Block { header: execution_header, body: body.clone() },
