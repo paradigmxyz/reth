@@ -921,7 +921,10 @@ where
             trie_output,
             changeset_provider,
         );
-        let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
+        let raw_bal = decoded_bal.map(|decoded_bal| match Arc::try_unwrap(decoded_bal) {
+            Ok(decoded_bal) => decoded_bal.split_raw_bal().1,
+            Err(decoded_bal) => decoded_bal.as_raw_bal().clone(),
+        });
         Ok(ValidationOutput::new(executed_block, timing_stats).with_raw_bal(raw_bal))
     }
 
