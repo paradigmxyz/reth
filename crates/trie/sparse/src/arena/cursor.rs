@@ -1094,18 +1094,32 @@ fn branch_node_compact_for_cursor(
             child_path
         };
 
-        let (child_is_tree, child_rlp) = match child {
-            ArenaSparseNodeBranchChild::Blinded(rlp_node) => (true, Some(rlp_node)),
+        let (child_hash_bit, child_tree_bit, child_hash) = match child {
+            ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
+                let hash_bit = branch.branch_masks.hash_mask.is_bit_set(nibble);
+                let hash = hash_bit
+                    .then(|| {
+                        rlp_node.as_hash().ok_or_else(|| {
+                            DatabaseError::Other(format!(
+                                "sparse trie cursor encountered non-hash blinded child at {child_path:?}"
+                            ))
+                        })
+                    })
+                    .transpose()?;
+                (hash_bit, branch.branch_masks.tree_mask.is_bit_set(nibble), hash)
+            }
             ArenaSparseNodeBranchChild::Revealed(child_idx) => {
-                child_cursor_shape_and_rlp(arena, *child_idx, child_path)?
+                child_cursor_masks_and_hash(arena, *child_idx, child_path)?
             }
         };
 
-        if child_is_tree {
+        if child_tree_bit {
             tree_mask.set_bit(nibble);
         }
-        if let Some(hash) = child_rlp.and_then(RlpNode::as_hash) {
+        if child_hash_bit {
             hash_mask.set_bit(nibble);
+        }
+        if let Some(hash) = child_hash {
             hashes.push(hash);
         }
     }
@@ -1113,25 +1127,30 @@ fn branch_node_compact_for_cursor(
     Ok(BranchNodeCompact::new(branch.state_mask, tree_mask, hash_mask, hashes, None))
 }
 
-fn child_cursor_shape_and_rlp(
+fn child_cursor_masks_and_hash(
     arena: &NodeArena,
     idx: Index,
     path: Nibbles,
-) -> Result<(bool, Option<&RlpNode>), DatabaseError> {
+) -> Result<(bool, bool, Option<B256>), DatabaseError> {
     match &arena[idx] {
-        ArenaSparseNode::EmptyRoot => Ok((false, None)),
+        ArenaSparseNode::EmptyRoot => Ok((false, false, None)),
         ArenaSparseNode::Branch(branch) => {
             ensure_node_not_dirty(&branch.state, path)?;
-            Ok((true, Some(cached_rlp_node_for_cursor(&branch.state, path)?)))
+            let rlp_node = cached_rlp_node_for_cursor(&branch.state, path)?;
+            let hash_bit = branch.short_key.is_empty() && rlp_node.is_hash();
+            let hash = hash_bit.then(|| {
+                rlp_node.as_hash().expect("hash bit set only when RlpNode is already a hash")
+            });
+            Ok((hash_bit, !branch.branch_masks.is_empty(), hash))
         }
         ArenaSparseNode::Leaf { state, .. } => {
             ensure_node_not_dirty(state, path)?;
-            Ok((false, Some(cached_rlp_node_for_cursor(state, path)?)))
+            Ok((false, false, None))
         }
         ArenaSparseNode::Subtrie(subtrie) => {
-            child_cursor_shape_and_rlp(&subtrie.arena, subtrie.root, subtrie.path)
+            child_cursor_masks_and_hash(&subtrie.arena, subtrie.root, subtrie.path)
         }
-        ArenaSparseNode::TakenSubtrie => Ok((true, None)),
+        ArenaSparseNode::TakenSubtrie => Ok((false, true, None)),
     }
 }
 

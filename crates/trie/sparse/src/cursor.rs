@@ -802,9 +802,9 @@ mod tests {
         let (root_path, root_node) = cursor.seek(Nibbles::default()).unwrap().unwrap();
         assert_eq!(root_path, Nibbles::default());
         assert_eq!(root_node.state_mask, TrieMask::new(0b11));
-        assert_eq!(root_node.tree_mask, TrieMask::new(0b10));
-        assert_eq!(root_node.hash_mask, TrieMask::new(0b11));
-        assert_eq!(root_node.hashes.len(), 2);
+        assert_eq!(root_node.tree_mask, TrieMask::default());
+        assert_eq!(root_node.hash_mask, TrieMask::default());
+        assert!(root_node.hashes.is_empty());
 
         assert_eq!(cursor.next().unwrap(), Some((Nibbles::from_nibbles([0x1, 0x2]), inner_node)));
         assert_eq!(cursor.next().unwrap(), None);
