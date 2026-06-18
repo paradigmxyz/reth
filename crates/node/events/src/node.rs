@@ -272,7 +272,7 @@ impl NodeState {
                 warn!(number=block.number(), hash=?block.hash(), %error, "Encountered invalid block");
             }
             ConsensusEngineEvent::BlockReceived(num_hash) => {
-                info!(number=num_hash.number, hash=?num_hash.hash, "Received new payload from consensus engine");
+                debug!(number=num_hash.number, hash=?num_hash.hash, "Received new payload from consensus engine");
             }
             ConsensusEngineEvent::SlowBlock(info) => {
                 Self::log_slow_block(&info);
