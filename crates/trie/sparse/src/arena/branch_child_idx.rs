@@ -1,8 +1,5 @@
-use alloy_trie::{TrieMask, TrieMaskIter};
-use core::{
-    iter::Enumerate,
-    ops::{Index, IndexMut},
-};
+use alloy_trie::TrieMask;
+use core::ops::{Index, IndexMut};
 use smallvec::SmallVec;
 
 /// A dense index into a branch node's children array.
@@ -65,16 +62,28 @@ impl<T> IndexMut<BranchChildIdx> for SmallVec<[T; 4]> {
 
 /// An iterator over a branch's children that yields `(BranchChildIdx, nibble)` pairs.
 ///
-/// Wraps `TrieMask::iter().enumerate()` to produce [`BranchChildIdx`] values instead of raw
-/// `usize` indices.
+/// Iterates directly over set bits in the state mask while tracking the corresponding dense child
+/// index.
 pub(super) struct BranchChildIter {
-    inner: Enumerate<TrieMaskIter>,
+    state_mask: TrieMask,
+    mask: u16,
 }
 
 impl BranchChildIter {
     /// Creates a new iterator over the occupied children of the given `state_mask`.
     pub(super) fn new(state_mask: TrieMask) -> Self {
-        Self { inner: state_mask.iter().enumerate() }
+        Self::from_nibble(state_mask, 0)
+    }
+
+    /// Creates a new iterator over the occupied children of the given `state_mask`, starting at
+    /// `start_nibble`.
+    pub(super) fn from_nibble(state_mask: TrieMask, start_nibble: u8) -> Self {
+        let mask = if start_nibble >= TrieMask::BITS as u8 {
+            0
+        } else {
+            state_mask.get() & (u16::MAX << start_nibble)
+        };
+        Self { state_mask, mask }
     }
 }
 
@@ -82,10 +91,19 @@ impl Iterator for BranchChildIter {
     type Item = (BranchChildIdx, u8);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next().map(|(dense, nibble)| (BranchChildIdx(dense as u8), nibble))
+        if self.mask == 0 {
+            return None
+        }
+
+        let nibble = self.mask.trailing_zeros() as u8;
+        self.mask &= self.mask - 1;
+
+        let idx = BranchChildIdx::new_unchecked(self.state_mask, nibble);
+        Some((idx, nibble))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
+        let count = self.mask.count_ones() as usize;
+        (count, Some(count))
     }
 }

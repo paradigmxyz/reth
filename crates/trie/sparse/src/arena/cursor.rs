@@ -24,9 +24,9 @@ pub(super) struct ArenaCursorStackEntry {
     pub(super) path: Nibbles,
     /// Whether this branch has already been yielded to cached trie cursors.
     pub(super) branch_emitted: bool,
-    /// The dense index at which to resume child iteration in [`ArenaCursor::next`].
+    /// The child nibble at which to resume iteration in [`ArenaCursor::next`].
     /// Only meaningful when this entry's node is a branch.
-    pub(super) next_dense_idx: usize,
+    pub(super) next_child_nibble: u8,
 }
 
 /// Result of [`ArenaCursor::seek`] describing the state at the deepest ancestor node.
@@ -119,7 +119,7 @@ impl ArenaCursor {
             index: idx,
             path,
             branch_emitted: false,
-            next_dense_idx: 0,
+            next_child_nibble: 0,
         });
         trace!(target: TRACE_TARGET, entry = ?self.stack.last().expect("just pushed"), "Pushed stack entry");
     }
@@ -308,15 +308,12 @@ impl ArenaCursor {
             };
 
             let state_mask = branch.state_mask;
-            let start = head.next_dense_idx;
+            let start_nibble = head.next_child_nibble;
             let child_depth = self.stack.len();
 
             let mut descended = false;
-            for (branch_child_idx, nibble) in BranchChildIter::new(state_mask) {
-                if branch_child_idx.get() < start {
-                    continue;
-                }
-
+            for (branch_child_idx, nibble) in BranchChildIter::from_nibble(state_mask, start_nibble)
+            {
                 let child_idx = match &arena[head_idx].branch_ref().children[branch_child_idx] {
                     ArenaSparseNodeBranchChild::Revealed(child_idx) => *child_idx,
                     ArenaSparseNodeBranchChild::Blinded(_) => continue,
@@ -324,8 +321,7 @@ impl ArenaCursor {
 
                 if should_descend(child_depth, &arena[child_idx]) {
                     // Record where to resume iteration when we return to this entry.
-                    self.stack.last_mut().expect("head exists").next_dense_idx =
-                        branch_child_idx.get() + 1;
+                    self.stack.last_mut().expect("head exists").next_child_nibble = nibble + 1;
                     let path = self.child_path(arena, nibble);
                     self.push(arena, child_idx, path);
                     descended = true;
@@ -498,7 +494,7 @@ impl<'a, C, K, V> ArenaCachedCursor<'a, C, K, V> {
         head.index = subtrie.root;
         head.path = subtrie.path;
         head.branch_emitted = false;
-        head.next_dense_idx = 0;
+        head.next_child_nibble = 0;
         self.cursor.needs_pop = false;
         self.active_subtrie = Some(subtrie);
     }
@@ -585,15 +581,13 @@ impl<'a, C, K, V> ArenaCachedCursor<'a, C, K, V> {
                     }
 
                     let state_mask = branch.state_mask;
-                    let start = head.next_dense_idx;
+                    let start_nibble = head.next_child_nibble;
                     let mut descended = false;
-                    for (branch_child_idx, nibble) in BranchChildIter::new(state_mask) {
-                        if branch_child_idx.get() < start {
-                            continue;
-                        }
-
-                        self.cursor.stack.last_mut().expect("head exists").next_dense_idx =
-                            branch_child_idx.get() + 1;
+                    for (branch_child_idx, nibble) in
+                        BranchChildIter::from_nibble(state_mask, start_nibble)
+                    {
+                        self.cursor.stack.last_mut().expect("head exists").next_child_nibble =
+                            nibble + 1;
 
                         let mut child_path = logical_path;
                         child_path.push_unchecked(nibble);
