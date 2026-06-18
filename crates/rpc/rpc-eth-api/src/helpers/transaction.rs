@@ -583,8 +583,9 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     let header =
                         self.provider().latest_header().map_err(Self::Error::from_eth_err)?;
                     let base_fee = header.and_then(|h| h.base_fee_per_gas()).unwrap_or_default();
-                    // Use `2 * base_fee` as headroom, matching go-ethereum's `setLondonFeeDefaults`,
-                    // so the transaction does not become invalid if the base fee rises before it is
+                    // Use `2 * base_fee` as headroom, matching go-ethereum's
+                    // `setLondonFeeDefaults`, so the transaction does not
+                    // become invalid if the base fee rises before it is
                     // included. This does not increase the effective price the sender pays:
                     // `max_fee_per_gas` is only an upper bound and the sender still pays
                     // `base_fee + min(tip, max_fee_per_gas - base_fee)`.
