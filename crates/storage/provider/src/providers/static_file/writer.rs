@@ -157,22 +157,21 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
     }
 
     pub(crate) fn has_unwind_queued(&self) -> bool {
-        for writer_lock in [
-            &self.headers,
-            &self.transactions,
-            &self.receipts,
-            &self.transaction_senders,
-            &self.account_change_sets,
-            &self.storage_change_sets,
-        ] {
-            let writer = writer_lock.read();
-            if let Some(writer) = writer.as_ref() &&
-                writer.will_prune_on_commit()
-            {
-                return true
-            }
-        }
-        false
+        self.headers.read().as_ref().is_some_and(|writer| writer.will_prune_on_commit()) ||
+            self.transactions.read().as_ref().is_some_and(|writer| writer.will_prune_on_commit()) ||
+            self.receipts.read().as_ref().is_some_and(|writer| writer.will_prune_on_commit()) ||
+            self.transaction_senders
+                .read()
+                .as_ref()
+                .is_some_and(|writer| writer.will_prune_on_commit()) ||
+            self.account_change_sets
+                .read()
+                .as_ref()
+                .is_some_and(|writer| writer.will_prune_on_commit()) ||
+            self.storage_change_sets
+                .read()
+                .as_ref()
+                .is_some_and(|writer| writer.will_prune_on_commit())
     }
 
     /// Finalizes all writers by committing their configuration to disk and updating indices.
