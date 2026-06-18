@@ -192,19 +192,6 @@ pub fn decode_execution_block<T: Decodable2718>(
     Ok(None)
 }
 
-/// Re-encodes an alloy execution type as RLP and decodes it back into the node's primitive type.
-///
-/// `.era` files yield alloy execution headers/bodies, while the import pipeline writes the node's
-/// own primitives. Both share the canonical execution RLP encoding, so a round-trip bridges them
-/// without requiring a direct `From` conversion.
-fn reencode_rlp<T, U>(value: &T) -> eyre::Result<U>
-where
-    T: alloy_rlp::Encodable,
-    U: alloy_rlp::Decodable,
-{
-    Ok(<U as alloy_rlp::Decodable>::decode(&mut alloy_rlp::encode(value).as_slice())?)
-}
-
 /// Opens the ERA file at `meta` with the format's [`StreamReader`].
 pub fn open<Reader>(meta: &(impl EraMeta + ?Sized)) -> eyre::Result<Reader>
 where
