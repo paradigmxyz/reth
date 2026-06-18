@@ -25,7 +25,7 @@ use reth_provider::{
 };
 use reth_stages::stages::calculate_gas_used_from_headers;
 use reth_storage_api::{
-    ChangeSetReader, DBProvider, SharedEvm2StateProviderDatabase, StorageChangeSetReader,
+    ChangeSetReader, DBProvider, LocalEvm2StateProviderDatabase, StorageChangeSetReader,
 };
 use std::{
     collections::HashMap,
@@ -176,10 +176,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                         let state_provider =
                             provider.history_by_block_number(block.number().saturating_sub(1))?;
-                        // SAFETY: The shared database is consumed by this synchronous execution
+                        // SAFETY: The local database is consumed by this synchronous execution
                         // call and does not outlive the state provider borrowed here.
                         let database =
-                            unsafe { SharedEvm2StateProviderDatabase::new(&*state_provider) };
+                            unsafe { LocalEvm2StateProviderDatabase::new(&*state_provider) };
                         let output = match evm_config.executor(database).execute(&block) {
                             Ok(output) => output,
                             Err(err) => {

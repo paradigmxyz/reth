@@ -4,13 +4,14 @@ use crate::{
     AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
     StateProvider, StateRootProvider, StorageRootProvider,
 };
-use alloc::vec::Vec;
+use alloc::{rc::Rc, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
     map::{AddressMap, AddressSet, B256Map, U256Map},
     Address, BlockNumber, Bytes, B256, U256,
 };
 use core::{
+    cell::RefCell,
     mem,
     ops::{Deref, DerefMut},
     ptr::NonNull,
@@ -247,6 +248,76 @@ impl Database for SharedEvm2StateProviderDatabase {
 
     fn get_block_hash(&mut self, number: &Word) -> Result<Option<B256>, Self::Error> {
         let mut db = self.lock()?;
+        db.get_block_hash(number).map_err(|code| Self::provider_error(&mut db, code))
+    }
+}
+
+/// A cloneable evm2 database handle that shares one cache over a borrowed Reth state provider
+/// within a single thread.
+///
+/// This avoids synchronization overhead for synchronous replay paths while still preserving cache
+/// visibility across short-lived evm2 instances.
+#[derive(Clone)]
+pub struct LocalEvm2StateProviderDatabase {
+    inner: Rc<RefCell<CacheDB<Db<BorrowedEvm2StateProviderDatabase>>>>,
+}
+
+impl LocalEvm2StateProviderDatabase {
+    /// Creates a new local shared cache over a borrowed state provider.
+    ///
+    /// # Safety
+    ///
+    /// This has the same lifetime erasure requirements as
+    /// [`BorrowedEvm2StateProviderDatabase::new`]. The returned handle and its clones must not
+    /// outlive `provider`.
+    pub unsafe fn new(provider: &dyn StateProvider) -> Self {
+        Self {
+            // SAFETY: The caller upholds the lifetime requirements for the borrowed provider.
+            inner: Rc::new(RefCell::new(CacheDB::new(Db::new(unsafe {
+                BorrowedEvm2StateProviderDatabase::new(provider)
+            })))),
+        }
+    }
+
+    /// Applies accepted state changes into the local shared cache.
+    pub fn commit_source<S: StateChangeSource>(&self, source: &S) {
+        self.inner.borrow_mut().commit_source(source);
+    }
+
+    fn provider_error(
+        db: &mut CacheDB<Db<BorrowedEvm2StateProviderDatabase>>,
+        code: DbErrorCode,
+    ) -> ProviderError {
+        SharedEvm2StateProviderDatabase::provider_error(db, code)
+    }
+}
+
+impl core::fmt::Debug for LocalEvm2StateProviderDatabase {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("LocalEvm2StateProviderDatabase").finish_non_exhaustive()
+    }
+}
+
+impl Database for LocalEvm2StateProviderDatabase {
+    type Error = ProviderError;
+
+    fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
+        let mut db = self.inner.borrow_mut();
+        db.get_account(address).map_err(|code| Self::provider_error(&mut db, code))
+    }
+
+    fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Bytecode, Self::Error> {
+        let mut db = self.inner.borrow_mut();
+        db.get_code_by_hash(code_hash).map_err(|code| Self::provider_error(&mut db, code))
+    }
+
+    fn get_storage(&mut self, address: &Address, key: &Word) -> Result<Word, Self::Error> {
+        let mut db = self.inner.borrow_mut();
+        db.get_storage(address, key).map_err(|code| Self::provider_error(&mut db, code))
+    }
+
+    fn get_block_hash(&mut self, number: &Word) -> Result<Option<B256>, Self::Error> {
+        let mut db = self.inner.borrow_mut();
         db.get_block_hash(number).map_err(|code| Self::provider_error(&mut db, code))
     }
 }
