@@ -98,9 +98,11 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
                 push(indexed_receipt.receipt);
                 next += 1;
 
-                while let Some(receipt) = pending.remove(&next) {
-                    push(receipt);
-                    next += 1;
+                if !pending.is_empty() {
+                    while let Some(receipt) = pending.remove(&next) {
+                        push(receipt);
+                        next += 1;
+                    }
                 }
             } else {
                 pending.insert(indexed_receipt.index, indexed_receipt.receipt);
