@@ -50,10 +50,12 @@ const MAX_PAYLOAD_BYTES: u64 = 64 * 1024 * 1024;
 
 type EthEngineApi<Provider, Pool, Validator, ChainSpec> =
     EngineApi<Provider, EthEngineTypes, Pool, Validator, ChainSpec>;
+type SharedEthEngineApi<Provider, Pool, Validator, ChainSpec> =
+    Arc<RwLock<Option<EthEngineApi<Provider, Pool, Validator, ChainSpec>>>>;
 
 /// Shared handle used by [`EngineSszProxyLayer`].
 pub struct EngineSszProxyHandle<ChainSpec, Provider = (), Pool = (), Validator = ()> {
-    engine_api: Arc<RwLock<Option<EthEngineApi<Provider, Pool, Validator, ChainSpec>>>>,
+    engine_api: SharedEthEngineApi<Provider, Pool, Validator, ChainSpec>,
 }
 
 impl<C, Provider, Pool, Validator> Clone for EngineSszProxyHandle<C, Provider, Pool, Validator> {
