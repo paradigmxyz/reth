@@ -1687,6 +1687,9 @@ impl ArenaParallelSparseTrie {
                     SubtrieCounterDeltas { num_leaves_delta: 1, num_dirty_leaves_delta: 1 },
                 )
             }
+            SeekResult::RevealedBranch => {
+                unreachable!("RevealedBranch is not a valid leaf upsert result")
+            }
             SeekResult::RevealedLeaf => {
                 // RevealedLeaf guarantees the leaf's full path matches the target exactly.
                 let head_idx = head.index;
@@ -1784,7 +1787,10 @@ impl ArenaParallelSparseTrie {
             SeekResult::Blinded | SeekResult::RevealedSubtrie => {
                 unreachable!("Blinded/RevealedSubtrie must be handled by caller")
             }
-            SeekResult::EmptyRoot | SeekResult::Diverged | SeekResult::NoChild { .. } => {
+            SeekResult::EmptyRoot |
+            SeekResult::RevealedBranch |
+            SeekResult::Diverged |
+            SeekResult::NoChild { .. } => {
                 (RemoveLeafResult::NotFound, SubtrieCounterDeltas::default())
             }
             SeekResult::RevealedLeaf => {
@@ -2441,7 +2447,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             let find_result = cursor.seek(&mut self.upper_arena, &nodes[node_idx].path);
 
             match find_result {
-                SeekResult::RevealedLeaf => {
+                SeekResult::RevealedBranch | SeekResult::RevealedLeaf => {
                     trace!(target: TRACE_TARGET, path = ?nodes[node_idx].path, "Skipping reveal: leaf head");
                     node_idx += 1;
                 }
@@ -3062,6 +3068,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 }
                 // EmptyRoot, leaf, diverged branch, or empty child slot — upsert directly.
                 find_result @ (SeekResult::EmptyRoot |
+                SeekResult::RevealedBranch |
                 SeekResult::RevealedLeaf |
                 SeekResult::Diverged |
                 SeekResult::NoChild { .. }) => match update {

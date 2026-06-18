@@ -268,6 +268,10 @@ mod tests {
         b256!("0xa000000000000000000000000000000000000000000000000000000000000000");
     const ADDRESS_1: B256 =
         b256!("0xb000000000000000000000000000000000000000000000000000000000000000");
+    const KEY_12: B256 =
+        b256!("0x1200000000000000000000000000000000000000000000000000000000000000");
+    const KEY_13: B256 =
+        b256!("0x1300000000000000000000000000000000000000000000000000000000000000");
 
     fn account(nonce: u64) -> Account {
         Account { nonce, balance: U256::from(nonce), bytecode_hash: None }
@@ -959,6 +963,42 @@ mod tests {
 
         assert_eq!(cursor.seek(Nibbles::default()).unwrap().unwrap().0, Nibbles::default());
         assert_eq!(counts.resets.get(), 1);
+    }
+
+    #[test]
+    fn trie_cursor_seek_exact_miss_does_not_consume_later_sparse_branch() {
+        let mut sparse =
+            SparseStateTrie::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::default();
+        sparse.set_accounts_trie(RevealableSparseTrie::revealed_empty());
+        let mut updates = B256Map::from_iter([
+            (
+                KEY_12,
+                LeafUpdate::Changed(alloy_rlp::encode(
+                    account(80).into_trie_account(EMPTY_ROOT_HASH),
+                )),
+            ),
+            (
+                KEY_13,
+                LeafUpdate::Changed(alloy_rlp::encode(
+                    account(81).into_trie_account(EMPTY_ROOT_HASH),
+                )),
+            ),
+        ]);
+        sparse
+            .trie_mut()
+            .as_revealed_mut()
+            .unwrap()
+            .update_leaves(&mut updates, |_, _| panic!("revealed empty trie needs no proofs"))
+            .unwrap();
+        sparse.root().unwrap();
+
+        let factory =
+            SparseStateTrieTrieCursorFactory::new(&sparse, TestTrieCursorFactory::default());
+        let mut cursor = factory.account_trie_cursor().unwrap();
+        assert_eq!(cursor.seek_exact(Nibbles::from_nibbles([0x0])).unwrap(), None);
+
+        let branch_path = Nibbles::from_nibbles([0x1]);
+        assert_eq!(cursor.seek_exact(branch_path).unwrap().unwrap().0, branch_path);
     }
 
     #[test]
