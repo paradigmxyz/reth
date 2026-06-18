@@ -25,7 +25,9 @@ use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
 #[cfg(any())]
 use alloy_primitives::StorageKey;
-use alloy_primitives::{keccak256, Address, B256, U256};
+use alloy_primitives::{keccak256, Address};
+#[cfg(any(test, any()))]
+use alloy_primitives::{B256, U256};
 use core::convert::Infallible;
 use crossbeam_channel::Sender as CrossbeamSender;
 use evm2::evm::{AccountChangeRef, StateChangeSink, StorageChange};
@@ -34,7 +36,9 @@ use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm2Env, EvmEnvFor};
 use reth_metrics::Metrics;
-use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
+#[cfg(any(test, any()))]
+use reth_primitives_traits::Account;
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 #[cfg(any())]
 use reth_provider::AccountReader;
 use reth_provider::{BlockExecutionOutput, BlockReader, StateProviderFactory, StateReader};
@@ -784,6 +788,7 @@ where
     }
 }
 
+#[cfg(any(test, any()))]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct BalAccountStateFields {
     balance: Option<U256>,
@@ -791,6 +796,7 @@ struct BalAccountStateFields {
     code_hash: Option<B256>,
 }
 
+#[cfg(any(test, any()))]
 impl BalAccountStateFields {
     fn from_changes(account_changes: &alloy_eip7928::AccountChanges) -> Self {
         Self {
@@ -834,6 +840,7 @@ impl BalAccountStateFields {
     }
 }
 
+#[cfg(any(test, any()))]
 const fn bal_account_changes_state_root(
     account_changes: &alloy_eip7928::AccountChanges,
     account_fields: BalAccountStateFields,
