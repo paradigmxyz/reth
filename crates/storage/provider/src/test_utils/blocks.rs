@@ -185,11 +185,11 @@ fn execution_state_root(execution_outcome: &ExecutionOutcome) -> B256 {
     }))
 }
 
-fn test_account(nonce: u64, balance: U256) -> Account {
+const fn test_account(nonce: u64, balance: U256) -> Account {
     Account { nonce, balance, bytecode_hash: None }
 }
 
-fn account_info_to_reth(info: &Evm2AccountInfo) -> Account {
+const fn account_info_to_reth(info: &Evm2AccountInfo) -> Account {
     Account { nonce: info.nonce, balance: info.balance, bytecode_hash: None }
 }
 
@@ -229,11 +229,7 @@ fn block1(
         [
             (
                 account1,
-                (
-                    None,
-                    Some(info.clone()),
-                    BTreeMap::from_iter([(slot, (U256::ZERO, U256::from(10)))]),
-                ),
+                (None, Some(info), BTreeMap::from_iter([(slot, (U256::ZERO, U256::from(10)))])),
             ),
             (account2, (None, Some(info), Default::default())),
         ],
@@ -413,8 +409,7 @@ fn block4(
     let mut block_reverts = Evm2BlockReverts::default();
     for idx in address_range {
         let address = Address::with_last_byte(idx);
-        let current =
-            if idx.is_multiple_of(2) { Some(test_account(1, U256::from(idx * 2))) } else { None };
+        let current = idx.is_multiple_of(2).then(|| test_account(1, U256::from(idx * 2)));
         accounts.push((
             address,
             (

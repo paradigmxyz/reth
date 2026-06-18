@@ -1185,6 +1185,7 @@ fn reward_trace<H: BlockHeader>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::Address;
 
     fn localized_transaction_trace(
         block_number: u64,

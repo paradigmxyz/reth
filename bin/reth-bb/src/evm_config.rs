@@ -128,6 +128,28 @@ where
         self.inner.executor(db)
     }
 
+    fn evm_with_env<DB>(&self, db: DB, evm_env: EvmEnvFor<Self>) -> evm2::Evm<evm2::BaseEvmTypes>
+    where
+        DB: evm2::evm::DynDatabase + 'static,
+    {
+        self.inner.evm_with_env(db, evm_env)
+    }
+
+    fn pre_block_state_changes<'a, DB>(
+        &self,
+        db: DB,
+        evm_env: EvmEnvFor<Self>,
+        block_number: u64,
+        ctx: ExecutionCtxFor<'a, Self>,
+    ) -> Result<evm2::BlockStateAccumulator, Box<dyn core::error::Error + Send + Sync>>
+    where
+        Self: 'a,
+        DB: evm2::evm::Database + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static,
+    {
+        self.inner.pre_block_state_changes(db, evm_env, block_number, ctx)
+    }
+
     fn prewarm_evm_with_precompiles<DB>(
         &self,
         state_provider: DB,

@@ -552,14 +552,12 @@ mod tests {
         .unwrap();
 
         let hashed_state = sink.into_hashed_post_state();
-        let storage = hashed_state.storages.get(&KeccakKeyHasher::hash_key(&address)).unwrap();
+        let storage = hashed_state.storages.get(&KeccakKeyHasher::hash_key(address)).unwrap();
 
         assert!(storage.wiped);
         assert_eq!(storage.storage.len(), 1);
         assert_eq!(
-            storage
-                .storage
-                .get(&KeccakKeyHasher::hash_key(&B256::new(U256::from(3).to_be_bytes()))),
+            storage.storage.get(&KeccakKeyHasher::hash_key(B256::new(U256::from(3).to_be_bytes()))),
             Some(&U256::from(4))
         );
     }

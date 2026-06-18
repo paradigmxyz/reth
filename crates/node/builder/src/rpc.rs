@@ -21,11 +21,12 @@ use crate::{
 use alloy_consensus::{EthereumReceipt, EthereumTxEnvelope, TxEip4844};
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
+use evm2::ethereum::RecoveredTxEnvelope;
 use jsonrpsee::RpcModule;
 use parking_lot::Mutex;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
-use reth_evm::{ConfigureEvm, Evm2Env, EvmEnvFor, ExecutionCtxFor};
+use reth_evm::{ConfigureEvm, Evm2Env, EvmEnvFor, ExecutionCtxFor, TxEnvFor};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
     NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
@@ -38,7 +39,7 @@ use reth_node_core::{
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
 use reth_provider::BorrowedEvm2StateProviderDatabase;
 use reth_rpc::{
-    eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer},
+    eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer, RpcNodeCore},
     AdminApi,
 };
 use reth_rpc_api::{eth::helpers::EthTransactions, IntoEngineApiRpcModule};
@@ -945,6 +946,8 @@ where
     N::Evm: ConfigureEvm<Primitives = PrimitivesTy<N::Types>>,
     N::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
+    <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm<EvmEnv: Evm2Env>,
+    TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<RecoveredTxEnvelope>,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
@@ -1251,6 +1254,8 @@ where
     N::Evm: ConfigureEvm<Primitives = PrimitivesTy<N::Types>>,
     <N as FullNodeTypes>::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
+    <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm<EvmEnv: Evm2Env>,
+    TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<RecoveredTxEnvelope>,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,

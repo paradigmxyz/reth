@@ -212,8 +212,7 @@ mod tests {
             address: address!("0000000000000000000000000000000000000001"),
             data: LogData::new_unchecked(vec![B256::ZERO], Default::default()),
         };
-        let mut result = TxResult::default();
-        result.status = true;
+        let mut result = TxResult { status: true, ..Default::default() };
         result.logs.push(log.clone());
 
         let receipt = RethReceiptBuilder.build_evm2_receipt(TxType::Eip1559, result, 42);

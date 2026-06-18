@@ -2,15 +2,16 @@ use alloy_consensus::{EthereumTxEnvelope, TxEip4844Variant};
 use alloy_eips::eip7594::BlobTransactionSidecarVariant;
 use alloy_network::eip2718::Decodable2718;
 use alloy_primitives::{Bytes, B256};
+use evm2::ethereum::RecoveredTxEnvelope;
 use reth_chainspec::EthereumHardforks;
-use reth_evm::ConfigureEvm;
+use reth_evm::{ConfigureEvm, Evm2Env, TxEnvFor};
 use reth_node_api::{BlockTy, FullNodeComponents, PrimitivesTy};
 use reth_node_builder::{rpc::RpcRegistry, NodeTypes};
 use reth_provider::BlockReader;
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
     helpers::{EthApiSpec, EthTransactions, TraceExt},
-    EthApiTypes,
+    EthApiTypes, RpcNodeCore,
 };
 
 #[expect(missing_debug_implementations)]
@@ -36,6 +37,8 @@ impl<Node, EthApi> RpcTestContext<Node, EthApi>
 where
     Node: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
     Node::Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
+    <EthApi as RpcNodeCore>::Evm: ConfigureEvm<EvmEnv: Evm2Env>,
+    TxEnvFor<<EthApi as RpcNodeCore>::Evm>: AsRef<RecoveredTxEnvelope>,
     EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
         + EthTransactions
         + TraceExt,
