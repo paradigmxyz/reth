@@ -502,7 +502,7 @@ where
                     // entering the parallel iterator for the remainder.
                     let prefetch = Self::PARALLEL_PREFETCH_COUNT.min(transaction_count);
                     let mut all: Vec<_> = transactions.into_iter().collect();
-                    let rest = all.split_off(prefetch);
+                    let rest = all.split_off(prefetch.min(all.len()));
 
                     // Convert the first few transactions sequentially so execution can
                     // start immediately without waiting for rayon work-stealing.
