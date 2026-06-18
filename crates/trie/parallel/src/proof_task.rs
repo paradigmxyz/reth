@@ -31,7 +31,7 @@
 
 use crate::{
     root::ParallelStateRootError,
-    value_encoder::{AsyncAccountValueEncoder, ValueEncoderStats},
+    value_encoder::{AsyncAccountValueEncoder, DispatchedStorageProof, ValueEncoderStats},
 };
 use alloy_primitives::{
     map::{B256Map, B256Set},
@@ -1063,16 +1063,14 @@ fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
     account_targets: &[ProofV2Target],
     mut storage_targets: B256Map<Vec<ProofV2Target>>,
-) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
-    if storage_targets.is_empty() {
+) -> Result<B256Map<DispatchedStorageProof>, ParallelStateRootError> {
+    if account_targets.is_empty() && storage_targets.is_empty() {
         return Ok(B256Map::default())
     }
 
-    let mut storage_proof_receivers =
-        B256Map::with_capacity_and_hasher(storage_targets.len(), Default::default());
-
     // Collect hashed addresses from account targets that need their storage roots computed
     let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
+    let storage_target_addresses: B256Set = storage_targets.keys().copied().collect();
 
     // For storage targets with associated account proofs, ensure the first target has
     // min_len(0) so the root node is returned for storage root computation
@@ -1087,11 +1085,25 @@ fn dispatch_v2_storage_proofs(
     // Sort storage targets by address for optimal dispatch order.
     // Since trie walk processes accounts in lexicographical order, dispatching in the same order
     // reduces head-of-line blocking when consuming results.
-    let mut sorted_storage_targets: Vec<_> = storage_targets.into_iter().collect();
-    sorted_storage_targets.sort_unstable_by_key(|(addr, _)| *addr);
+    let mut sorted_storage_targets: Vec<_> =
+        storage_targets.into_iter().map(|(addr, targets)| (addr, targets, true)).collect();
+
+    // Account targets without storage-slot targets still need their storage root when the account
+    // leaf is encoded. Dispatch root-only jobs so account proof workers can overlap that work with
+    // the storage worker pool, but do not reveal these root-only proofs into the sparse trie.
+    sorted_storage_targets.extend(
+        account_target_addresses
+            .iter()
+            .filter(|addr| !storage_target_addresses.contains(*addr))
+            .map(|addr| (*addr, Vec::new(), false)),
+    );
+    sorted_storage_targets.sort_unstable_by_key(|(addr, _, _)| *addr);
+
+    let mut storage_proof_receivers =
+        B256Map::with_capacity_and_hasher(sorted_storage_targets.len(), Default::default());
 
     // Dispatch all proofs for targeted storage slots
-    for (hashed_address, targets) in sorted_storage_targets {
+    for (hashed_address, targets, collect_proof) in sorted_storage_targets {
         // Create channel for receiving StorageProofResultMessage
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
         let input = StorageProofInput::new(hashed_address, targets);
@@ -1104,7 +1116,12 @@ fn dispatch_v2_storage_proofs(
                 ))
             })?;
 
-        storage_proof_receivers.insert(hashed_address, result_rx);
+        let dispatched = if collect_proof {
+            DispatchedStorageProof::collect_proof(result_rx)
+        } else {
+            DispatchedStorageProof::root_only(result_rx)
+        };
+        storage_proof_receivers.insert(hashed_address, dispatched);
     }
 
     Ok(storage_proof_receivers)
@@ -1187,5 +1204,51 @@ mod tests {
 
         // Workers shut down automatically when handle is dropped
         drop(proof_handle);
+    }
+
+    #[test]
+    fn dispatches_root_only_jobs_for_account_targets_without_storage_targets() {
+        let (work_tx, work_rx) = crossbeam_channel::unbounded();
+        let account_only = B256::repeat_byte(0x11);
+        let account_with_storage = B256::repeat_byte(0x22);
+        let storage_slot = B256::repeat_byte(0x33);
+
+        let account_targets = vec![
+            ProofV2Target::new(account_only).with_min_len(4),
+            ProofV2Target::new(account_with_storage).with_min_len(8),
+        ];
+        let mut storage_targets = B256Map::default();
+        storage_targets.insert(
+            account_with_storage,
+            vec![ProofV2Target::new(storage_slot).with_min_len(12)],
+        );
+
+        let receivers =
+            dispatch_v2_storage_proofs(&work_tx, &account_targets, storage_targets).unwrap();
+
+        assert_eq!(receivers.len(), 2);
+        assert!(
+            !receivers.get(&account_only).expect("account-only receiver").should_collect_proof()
+        );
+        assert!(
+            receivers
+                .get(&account_with_storage)
+                .expect("storage receiver")
+                .should_collect_proof()
+        );
+
+        let mut jobs = Vec::new();
+        while let Ok(StorageWorkerJob::StorageProof { input, .. }) = work_rx.try_recv() {
+            jobs.push((input.hashed_address, input.targets));
+        }
+        jobs.sort_unstable_by_key(|(address, _)| *address);
+
+        assert_eq!(jobs.len(), 2);
+        assert_eq!(jobs[0].0, account_only);
+        assert!(jobs[0].1.is_empty());
+        assert_eq!(jobs[1].0, account_with_storage);
+        assert_eq!(jobs[1].1.len(), 1);
+        assert_eq!(jobs[1].1[0].key(), storage_slot);
+        assert_eq!(jobs[1].1[0].min_len, 0);
     }
 }

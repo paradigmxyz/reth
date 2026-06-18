@@ -18,6 +18,34 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// A storage proof result that was dispatched before account proof encoding reached the
+/// corresponding account leaf.
+pub(crate) struct DispatchedStorageProof {
+    result_rx: CrossbeamReceiver<StorageProofResultMessage>,
+    collect_proof: bool,
+}
+
+impl DispatchedStorageProof {
+    /// Creates a dispatched storage proof whose proof nodes should be returned to the sparse trie.
+    pub(crate) const fn collect_proof(
+        result_rx: CrossbeamReceiver<StorageProofResultMessage>,
+    ) -> Self {
+        Self { result_rx, collect_proof: true }
+    }
+
+    /// Creates a dispatched storage proof used only to precompute an account leaf's storage root.
+    pub(crate) const fn root_only(
+        result_rx: CrossbeamReceiver<StorageProofResultMessage>,
+    ) -> Self {
+        Self { result_rx, collect_proof: false }
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn should_collect_proof(&self) -> bool {
+        self.collect_proof
+    }
+}
+
 /// Stats collected by [`AsyncAccountValueEncoder`] during proof computation.
 ///
 /// Tracks time spent waiting for storage proofs and counts of each deferred encoder variant used.
@@ -57,7 +85,7 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
         /// take ownership of the receiver, preventing the `Drop` impl from trying to receive on
         /// it again.
         proof_result_rx:
-            Option<Result<CrossbeamReceiver<StorageProofResultMessage>, DatabaseError>>,
+            Option<Result<DispatchedStorageProof, DatabaseError>>,
         /// Shared storage proof results.
         storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNodeV2>>>>,
         /// Shared stats for tracking wait time and counts.
@@ -97,10 +125,10 @@ impl<TC, HC> Drop for AsyncAccountDeferredValueEncoder<TC, HC> {
             let Some(proof_result_rx) = proof_result_rx.take() else { return };
 
             (|| -> Result<(), StateProofError> {
-                let rx = proof_result_rx?;
+                let dispatched = proof_result_rx?;
 
                 let wait_start = Instant::now();
-                let msg = rx.recv().map_err(|_| {
+                let msg = dispatched.result_rx.recv().map_err(|_| {
                     StateProofError::Database(DatabaseError::Other(format!(
                         "Storage proof channel closed for {hashed_address:?}",
                     )))
@@ -109,7 +137,9 @@ impl<TC, HC> Drop for AsyncAccountDeferredValueEncoder<TC, HC> {
 
                 stats.borrow_mut().storage_wait_time += wait_start.elapsed();
 
-                storage_proof_results.borrow_mut().insert(*hashed_address, result.proof);
+                if dispatched.collect_proof {
+                    storage_proof_results.borrow_mut().insert(*hashed_address, result.proof);
+                }
                 Ok(())
             })()
         } else {
@@ -145,7 +175,10 @@ where
                     .take()
                     .expect("encode called on already-consumed Dispatched encoder");
                 let wait_start = Instant::now();
-                let result = proof_result_rx?
+                let dispatched = proof_result_rx?;
+                let collect_proof = dispatched.collect_proof;
+                let result = dispatched
+                    .result_rx
                     .recv()
                     .map_err(|_| {
                         StateProofError::Database(DatabaseError::Other(format!(
@@ -154,8 +187,6 @@ where
                     })?
                     .result?;
                 stats.borrow_mut().storage_wait_time += wait_start.elapsed();
-
-                storage_proof_results.borrow_mut().insert(hashed_address, result.proof);
 
                 let root = match result.root {
                     Some(root) => root,
@@ -178,6 +209,14 @@ where
                         storage_root
                     }
                 };
+
+                if !collect_proof {
+                    cached_storage_roots.insert(hashed_address, root);
+                }
+
+                if collect_proof {
+                    storage_proof_results.borrow_mut().insert(hashed_address, result.proof);
+                }
 
                 (account, root)
             }
@@ -212,7 +251,7 @@ where
 /// multiple accounts.
 pub(crate) struct AsyncAccountValueEncoder<TC, HC> {
     /// Storage proof jobs which were dispatched ahead of time.
-    dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
+    dispatched: B256Map<DispatchedStorageProof>,
     /// Storage roots which have already been computed. This can be used only if a storage proof
     /// wasn't dispatched for an account, otherwise we must consume the proof result.
     cached_storage_roots: Arc<DashMap<B256, B256>>,
@@ -235,7 +274,7 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
     /// - `cached_storage_roots`: Shared cache of already-computed storage roots
     /// - `storage_calculator`: Shared storage proof calculator for synchronous computation
     pub(crate) fn new(
-        dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
+        dispatched: B256Map<DispatchedStorageProof>,
         cached_storage_roots: Arc<DashMap<B256, B256>>,
         storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
     ) -> Self {
@@ -270,9 +309,10 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
 
         // Any remaining dispatched proofs need to have their results collected.
         // These are proofs that were pre-dispatched but not consumed during proof calculation.
-        for (hashed_address, rx) in &self.dispatched {
+        for (hashed_address, dispatched) in &self.dispatched {
             let wait_start = Instant::now();
-            let result = rx
+            let result = dispatched
+                .result_rx
                 .recv()
                 .map_err(|_| {
                     StateProofError::Database(DatabaseError::Other(format!(
@@ -282,7 +322,9 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
                 .result?;
             stats.storage_wait_time += wait_start.elapsed();
 
-            storage_proof_results.insert(*hashed_address, result.proof);
+            if dispatched.collect_proof {
+                storage_proof_results.insert(*hashed_address, result.proof);
+            }
         }
 
         Ok((storage_proof_results, stats))
