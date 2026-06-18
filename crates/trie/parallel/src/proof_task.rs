@@ -31,7 +31,7 @@
 
 use crate::{
     root::ParallelStateRootError,
-    value_encoder::{AsyncAccountValueEncoder, ValueEncoderStats},
+    value_encoder::{AsyncAccountValueEncoder, DispatchedStorageProof, ValueEncoderStats},
 };
 use alloy_primitives::{
     map::{B256Map, B256Set},
@@ -1063,7 +1063,7 @@ fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
     account_targets: &[ProofV2Target],
     mut storage_targets: B256Map<Vec<ProofV2Target>>,
-) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
+) -> Result<B256Map<DispatchedStorageProof>, ParallelStateRootError> {
     if storage_targets.is_empty() {
         return Ok(B256Map::default())
     }
@@ -1104,7 +1104,13 @@ fn dispatch_v2_storage_proofs(
                 ))
             })?;
 
-        storage_proof_receivers.insert(hashed_address, result_rx);
+        storage_proof_receivers.insert(
+            hashed_address,
+            DispatchedStorageProof {
+                rx: result_rx,
+                cache_missing_root: !account_target_addresses.contains(&hashed_address),
+            },
+        );
     }
 
     Ok(storage_proof_receivers)

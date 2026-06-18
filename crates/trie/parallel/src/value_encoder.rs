@@ -18,6 +18,14 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// A dispatched storage proof result and whether a missing-root fallback should cache its root.
+pub(crate) struct DispatchedStorageProof {
+    /// Receiver for the storage proof result.
+    pub(crate) rx: CrossbeamReceiver<StorageProofResultMessage>,
+    /// Whether a synchronous missing-root fallback should populate the shared root cache.
+    pub(crate) cache_missing_root: bool,
+}
+
 /// Stats collected by [`AsyncAccountValueEncoder`] during proof computation.
 ///
 /// Tracks time spent waiting for storage proofs and counts of each deferred encoder variant used.
@@ -56,8 +64,7 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
         /// The receiver for the storage proof result. This is an `Option` so that `encode` can
         /// take ownership of the receiver, preventing the `Drop` impl from trying to receive on
         /// it again.
-        proof_result_rx:
-            Option<Result<CrossbeamReceiver<StorageProofResultMessage>, DatabaseError>>,
+        proof_result_rx: Option<Result<DispatchedStorageProof, DatabaseError>>,
         /// Shared storage proof results.
         storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNodeV2>>>>,
         /// Shared stats for tracking wait time and counts.
@@ -65,8 +72,8 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
         /// Shared storage proof calculator for synchronous fallback when dispatched proof has no
         /// root.
         storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
-        /// Cache to store computed storage roots for future reuse.
-        cached_storage_roots: Arc<DashMap<B256, B256>>,
+        /// Cache to store missing-root fallback roots for future reuse.
+        cached_storage_roots: Option<Arc<DashMap<B256, B256>>>,
     },
     /// The storage root was found in cache.
     FromCache { account: Account, root: B256 },
@@ -97,7 +104,7 @@ impl<TC, HC> Drop for AsyncAccountDeferredValueEncoder<TC, HC> {
             let Some(proof_result_rx) = proof_result_rx.take() else { return };
 
             (|| -> Result<(), StateProofError> {
-                let rx = proof_result_rx?;
+                let rx = proof_result_rx?.rx;
 
                 let wait_start = Instant::now();
                 let msg = rx.recv().map_err(|_| {
@@ -146,6 +153,7 @@ where
                     .expect("encode called on already-consumed Dispatched encoder");
                 let wait_start = Instant::now();
                 let result = proof_result_rx?
+                    .rx
                     .recv()
                     .map_err(|_| {
                         StateProofError::Database(DatabaseError::Other(format!(
@@ -174,7 +182,9 @@ where
                             .compute_root_hash(&[root_node])?
                             .expect("storage_root_node returns a node at empty path");
 
-                        cached_storage_roots.insert(hashed_address, storage_root);
+                        if let Some(cached_storage_roots) = cached_storage_roots {
+                            cached_storage_roots.insert(hashed_address, storage_root);
+                        }
                         storage_root
                     }
                 };
@@ -212,7 +222,7 @@ where
 /// multiple accounts.
 pub(crate) struct AsyncAccountValueEncoder<TC, HC> {
     /// Storage proof jobs which were dispatched ahead of time.
-    dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
+    dispatched: B256Map<DispatchedStorageProof>,
     /// Storage roots which have already been computed. This can be used only if a storage proof
     /// wasn't dispatched for an account, otherwise we must consume the proof result.
     cached_storage_roots: Arc<DashMap<B256, B256>>,
@@ -235,7 +245,7 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
     /// - `cached_storage_roots`: Shared cache of already-computed storage roots
     /// - `storage_calculator`: Shared storage proof calculator for synchronous computation
     pub(crate) fn new(
-        dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
+        dispatched: B256Map<DispatchedStorageProof>,
         cached_storage_roots: Arc<DashMap<B256, B256>>,
         storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
     ) -> Self {
@@ -260,19 +270,22 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
     pub(crate) fn finalize(
         self,
     ) -> Result<(B256Map<Vec<ProofTrieNodeV2>>, ValueEncoderStats), StateProofError> {
-        let mut storage_proof_results = Rc::into_inner(self.storage_proof_results)
+        let Self { dispatched, storage_proof_results, stats, .. } = self;
+
+        let mut storage_proof_results = Rc::into_inner(storage_proof_results)
             .expect("no deferred encoders are still allocated")
             .into_inner();
 
-        let mut stats = Rc::into_inner(self.stats)
+        let mut stats = Rc::into_inner(stats)
             .expect("no deferred encoders are still allocated")
             .into_inner();
 
         // Any remaining dispatched proofs need to have their results collected.
         // These are proofs that were pre-dispatched but not consumed during proof calculation.
-        for (hashed_address, rx) in &self.dispatched {
+        for (hashed_address, dispatched) in dispatched {
             let wait_start = Instant::now();
-            let result = rx
+            let result = dispatched
+                .rx
                 .recv()
                 .map_err(|_| {
                     StateProofError::Database(DatabaseError::Other(format!(
@@ -282,7 +295,7 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
                 .result?;
             stats.storage_wait_time += wait_start.elapsed();
 
-            storage_proof_results.insert(*hashed_address, result.proof);
+            storage_proof_results.insert(hashed_address, result.proof);
         }
 
         Ok((storage_proof_results, stats))
@@ -304,16 +317,18 @@ where
     ) -> Self::DeferredEncoder {
         // If the proof job has already been dispatched for this account then it's not necessary to
         // dispatch another.
-        if let Some(rx) = self.dispatched.remove(&hashed_address) {
+        if let Some(dispatched) = self.dispatched.remove(&hashed_address) {
             self.stats.borrow_mut().dispatched_count += 1;
+            let cached_storage_roots =
+                dispatched.cache_missing_root.then(|| self.cached_storage_roots.clone());
             return AsyncAccountDeferredValueEncoder::Dispatched {
                 hashed_address,
                 account,
-                proof_result_rx: Some(Ok(rx)),
+                proof_result_rx: Some(Ok(dispatched)),
                 storage_proof_results: self.storage_proof_results.clone(),
                 stats: self.stats.clone(),
                 storage_calculator: self.storage_calculator.clone(),
-                cached_storage_roots: self.cached_storage_roots.clone(),
+                cached_storage_roots,
             }
         }
 
