@@ -96,9 +96,7 @@ pub trait PayloadAttributes:
     ///
     /// `Some` for payload attributes that specify the desired gas limit, `None` if the builder
     /// should use its configured target.
-    fn target_gas_limit(&self) -> Option<u64> {
-        None
-    }
+    fn target_gas_limit(&self) -> Option<u64>;
 }
 
 impl PayloadAttributes for EthPayloadAttributes {

@@ -3,8 +3,8 @@ use alloy_eips::{eip4844::BlobAndProofV1, eip7685::RequestsOrHash};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::{
-    ClientVersionV1, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
-    PayloadStatusEnum,
+    ssz_engine_types::BuiltPayloadPrague, ClientVersionV1, ForkchoiceState, ForkchoiceUpdated,
+    PayloadAttributes, PayloadStatus, PayloadStatusEnum,
 };
 use jsonrpsee_core::client::ClientT;
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, MAINNET};
@@ -19,6 +19,7 @@ use reth_node_core::{
     version::{version_metadata, CLIENT_CODE},
 };
 use reth_node_ethereum::{engine_ssz_proxy::EngineSszProxyLayer, EthereumAddOns, EthereumNode};
+use reth_payload_builder::PayloadStore;
 use reth_provider::BlockNumReader;
 use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_layer::secret_to_bearer_header;
@@ -304,6 +305,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
         .await?;
 
     ssz_handle.set_engine(node.add_ons_handle.beacon_engine_handle.clone()).await;
+    ssz_handle.set_payload_store(PayloadStore::new(node.payload_builder_handle.clone())).await;
     ssz_handle.set_blob_store(node.pool.blob_store().clone()).await;
     let node = NodeTestContext::new(node, eth_payload_attributes).await?;
 
@@ -323,7 +325,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
     let envelope = node
         .testing_build_block_v1(TestingBuildBlockRequestV1 {
             parent_block_hash: genesis_hash,
-            payload_attributes,
+            payload_attributes: payload_attributes.clone(),
             transactions: vec![raw_tx],
             extra_data: None,
         })
@@ -394,6 +396,44 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
             commit: version_metadata().vergen_git_sha.to_string(),
         }]
     );
+
+    let build_response = client
+        .post(format!("{auth_url}{ENGINE_PRAGUE_FORKCHOICE_ROUTE}"))
+        .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+        .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+        .header(reqwest::header::ACCEPT, "application/octet-stream")
+        .body(
+            (
+                ForkchoiceState {
+                    head_block_hash: genesis_hash,
+                    safe_block_hash: genesis_hash,
+                    finalized_block_hash: genesis_hash,
+                },
+                vec![payload_attributes.clone()],
+            )
+                .as_ssz_bytes(),
+        )
+        .send()
+        .await?;
+    assert_eq!(build_response.status(), reqwest::StatusCode::OK);
+
+    let build = ForkchoiceUpdated::from_ssz_bytes(&build_response.bytes().await?).unwrap();
+    let payload_id = build.payload_id.expect("payload id should be returned");
+    let get_payload_response = client
+        .get(format!("{auth_url}{ENGINE_PRAGUE_PAYLOADS_ROUTE}/{payload_id}"))
+        .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+        .header(reqwest::header::ACCEPT, "application/octet-stream")
+        .send()
+        .await?;
+    assert_eq!(get_payload_response.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        get_payload_response
+            .headers()
+            .get(reqwest::header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store")
+    );
+    BuiltPayloadPrague::from_ssz_bytes(&get_payload_response.bytes().await?).unwrap();
 
     let new_payload_response = client
         .post(format!("{auth_url}{ENGINE_PRAGUE_PAYLOADS_ROUTE}"))
