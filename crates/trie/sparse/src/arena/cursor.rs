@@ -1,7 +1,7 @@
 use super::{
     branch_child_idx::{BranchChildIdx, BranchChildIter},
-    ArenaParallelSparseTrie, ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeBranchChild,
-    ArenaSparseNodeState, Index, NodeArena,
+    ArenaParallelSparseTrie, ArenaSparseNode, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
+    Index, NodeArena,
 };
 use crate::{HashedCursor, TrieCursor};
 use alloc::{format, vec::Vec};
@@ -56,6 +56,21 @@ pub(super) enum NextResult {
     /// the caller should process it. The next call to [`ArenaCursor::next`] will pop it.
     Branch,
     /// The stack is empty — the traversal is complete.
+    Done,
+}
+
+/// Result of read-only sparse traversal for cursor-backed cached topology.
+#[derive(Debug)]
+enum CachedCursorEvent {
+    /// No user-visible item was produced; continue traversal.
+    Continue,
+    /// The current stack head is a non-branch node.
+    NonBranch,
+    /// The current stack head is a branch that should be emitted before its children.
+    Branch,
+    /// The current stack head has a blinded child at this nibble.
+    BlindChild { nibble: u8 },
+    /// The stack is empty.
     Done,
 }
 
@@ -291,6 +306,66 @@ impl ArenaCursor {
         self.next_inner(arena, should_descend)
     }
 
+    /// Advances a read-only cursor over cached topology, returning blinded children instead of
+    /// skipping them so overlay cursors can delegate only those ranges to the inner cursor.
+    #[instrument(level = "trace", target = TRACE_TARGET, skip_all, ret)]
+    fn next_cached_event(
+        &mut self,
+        arena: &NodeArena,
+        emit_branches: bool,
+        should_descend: impl Fn(usize, &ArenaSparseNode) -> bool,
+    ) -> Result<CachedCursorEvent, DatabaseError> {
+        debug_assert!(
+            !self.needs_pop,
+            "pending cached pop must be handled by the owner so it can update active arena state"
+        );
+
+        loop {
+            let Some(head) = self.stack.last_mut() else { return Ok(CachedCursorEvent::Done) };
+            let head_idx = head.index;
+
+            let ArenaSparseNode::Branch(branch) = &arena[head_idx] else {
+                self.needs_pop = true;
+                return Ok(CachedCursorEvent::NonBranch)
+            };
+            ensure_node_not_dirty(&branch.state, head.path)?;
+
+            if emit_branches && !head.branch_emitted {
+                head.branch_emitted = true;
+                return Ok(CachedCursorEvent::Branch)
+            }
+
+            let state_mask = branch.state_mask;
+            let start_nibble = head.next_child_nibble;
+            let child_depth = self.stack.len();
+
+            let mut descended = false;
+            for (branch_child_idx, nibble) in BranchChildIter::from_nibble(state_mask, start_nibble)
+            {
+                self.stack.last_mut().expect("head exists").next_child_nibble = nibble + 1;
+
+                let child_idx = match &arena[head_idx].branch_ref().children[branch_child_idx] {
+                    ArenaSparseNodeBranchChild::Blinded(_) => {
+                        return Ok(CachedCursorEvent::BlindChild { nibble })
+                    }
+                    ArenaSparseNodeBranchChild::Revealed(child_idx) => *child_idx,
+                };
+
+                if should_descend(child_depth, &arena[child_idx]) {
+                    let path = self.child_path(arena, nibble);
+                    self.push(arena, child_idx, path);
+                    descended = true;
+                    break;
+                }
+            }
+
+            if !descended {
+                self.needs_pop = true;
+                return Ok(CachedCursorEvent::Continue)
+            }
+        }
+    }
+
     fn next_inner(
         &mut self,
         arena: &NodeArena,
@@ -498,6 +573,25 @@ impl<'a, C, K, V> ArenaCachedCursor<'a, C, K, V> {
         self.cursor.needs_pop = false;
         self.active_subtrie = Some(subtrie);
     }
+
+    fn next_sparse_event(
+        &mut self,
+        emit_branches: bool,
+    ) -> Result<CachedCursorEvent, DatabaseError> {
+        loop {
+            if self.cursor.needs_pop {
+                self.pop_cached();
+                self.cursor.needs_pop = false;
+            }
+
+            let Some(arena) = self.active_arena() else { return Ok(CachedCursorEvent::Done) };
+
+            match self.cursor.next_cached_event(arena, emit_branches, |_, _| true)? {
+                CachedCursorEvent::Continue => continue,
+                event => return Ok(event),
+            }
+        }
+    }
 }
 
 /// Returns the logical path of a branch stack entry. The logical path is
@@ -527,97 +621,11 @@ fn arena_node_is_dirty(arena: &NodeArena, idx: Index) -> bool {
     })
 }
 
-enum CachedTopologyItem<'a> {
-    Leaf { path: Nibbles, value: &'a [u8] },
-    Branch { path: Nibbles, arena: &'a NodeArena, branch: &'a ArenaSparseNodeBranch },
-    Blind { path: Nibbles },
-}
-
 #[derive(Debug, Clone, Copy)]
 enum CursorMode<K> {
     Sparse,
     InnerRange { end: Option<K> },
     Exhausted,
-}
-
-impl<'a, C, K, V> ArenaCachedCursor<'a, C, K, V> {
-    fn next_topology_item(
-        &mut self,
-        emit_branches: bool,
-    ) -> Result<Option<CachedTopologyItem<'a>>, DatabaseError> {
-        loop {
-            if self.cursor.needs_pop {
-                self.pop_cached();
-                self.cursor.needs_pop = false;
-            }
-
-            let Some(head) = self.cursor.head().cloned() else { return Ok(None) };
-            let Some(arena) = self.active_arena() else { return Ok(None) };
-
-            match &arena[head.index] {
-                ArenaSparseNode::EmptyRoot => {
-                    self.cursor.needs_pop = true;
-                }
-                ArenaSparseNode::Leaf { state, value, key } => {
-                    ensure_node_not_dirty(state, head.path)?;
-                    let mut path = head.path;
-                    path.extend(key);
-                    self.cursor.needs_pop = true;
-                    return Ok(Some(CachedTopologyItem::Leaf { path, value }))
-                }
-                ArenaSparseNode::Branch(branch) => {
-                    ensure_node_not_dirty(&branch.state, head.path)?;
-
-                    let mut logical_path = head.path;
-                    logical_path.extend(&branch.short_key);
-
-                    if emit_branches && !head.branch_emitted {
-                        self.cursor.stack.last_mut().expect("head exists").branch_emitted = true;
-                        return Ok(Some(CachedTopologyItem::Branch {
-                            path: logical_path,
-                            arena,
-                            branch,
-                        }))
-                    }
-
-                    let state_mask = branch.state_mask;
-                    let start_nibble = head.next_child_nibble;
-                    let mut descended = false;
-                    for (branch_child_idx, nibble) in
-                        BranchChildIter::from_nibble(state_mask, start_nibble)
-                    {
-                        self.cursor.stack.last_mut().expect("head exists").next_child_nibble =
-                            nibble + 1;
-
-                        let mut child_path = logical_path;
-                        child_path.push_unchecked(nibble);
-                        match &branch.children[branch_child_idx] {
-                            ArenaSparseNodeBranchChild::Blinded(_) => {
-                                return Ok(Some(CachedTopologyItem::Blind { path: child_path }))
-                            }
-                            ArenaSparseNodeBranchChild::Revealed(child_idx) => {
-                                self.cursor.push(arena, *child_idx, child_path);
-                                descended = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    if !descended {
-                        self.cursor.needs_pop = true;
-                    }
-                }
-                ArenaSparseNode::Subtrie(subtrie) => {
-                    ensure_cached_subtrie(subtrie)?;
-                    self.enter_subtrie(subtrie);
-                }
-                ArenaSparseNode::TakenSubtrie => {
-                    self.cursor.needs_pop = true;
-                    return Ok(Some(CachedTopologyItem::Blind { path: head.path }))
-                }
-            }
-        }
-    }
 }
 
 impl<C, V> ArenaCachedCursor<'_, C, B256, V>
@@ -698,26 +706,28 @@ where
             return Ok(result)
         }
 
-        while let Some(item) = self.next_topology_item(false)? {
-            match item {
-                CachedTopologyItem::Leaf { path, value } => {
-                    if path.len() != B256::len_bytes() * 2 {
-                        continue
-                    }
-                    let key = nibbles_to_b256(&path);
-                    if seek_key.is_none_or(|seek_key| key >= seek_key) &&
-                        self.current_hashed_key().is_none_or(|current_key| key > current_key)
-                    {
-                        let value = V::decode(value)?;
-                        return Ok(Some(self.set_current_hashed(key, value)))
-                    }
+        loop {
+            match self.next_sparse_event(false)? {
+                CachedCursorEvent::Continue => continue,
+                CachedCursorEvent::Done => {
+                    self.mode = CursorMode::Exhausted;
+                    return Ok(None)
                 }
-                CachedTopologyItem::Blind { path } => {
-                    if path.len() > B256::len_bytes() * 2 {
+                CachedCursorEvent::Branch => {
+                    unreachable!("hashed sparse cursor never emits branch nodes")
+                }
+                CachedCursorEvent::BlindChild { nibble } => {
+                    let Some(arena) = self.active_arena() else {
+                        self.mode = CursorMode::Exhausted;
+                        return Ok(None)
+                    };
+                    let head = self.cursor.head().expect("blind child event requires a head");
+                    let branch = arena[head.index].branch_ref();
+                    let Some((start, end)) =
+                        hashed_child_prefix_range(&head.path, &branch.short_key, nibble)
+                    else {
                         continue
-                    }
-                    let start = prefix_start(&path);
-                    let end = prefix_end(&path);
+                    };
                     if seek_key.is_some_and(|seek_key| !key_is_before_end(seek_key, end)) {
                         continue
                     }
@@ -726,14 +736,51 @@ where
                         return Ok(Some(entry))
                     }
                 }
-                CachedTopologyItem::Branch { .. } => {
-                    unreachable!("hashed sparse cursor never emits branch nodes")
+                CachedCursorEvent::NonBranch => {
+                    let Some(arena) = self.active_arena() else {
+                        self.mode = CursorMode::Exhausted;
+                        return Ok(None)
+                    };
+                    let head = self.cursor.head().expect("non-branch event requires a head");
+                    match &arena[head.index] {
+                        ArenaSparseNode::EmptyRoot => {}
+                        ArenaSparseNode::Leaf { state, value, key } => {
+                            ensure_node_not_dirty(state, head.path)?;
+                            let Some(key) = hashed_leaf_key(&head.path, key) else { continue };
+                            if seek_key.is_none_or(|seek_key| key >= seek_key) &&
+                                self.current_hashed_key()
+                                    .is_none_or(|current_key| key > current_key)
+                            {
+                                let value = V::decode(value)?;
+                                return Ok(Some(self.set_current_hashed(key, value)))
+                            }
+                        }
+                        ArenaSparseNode::Subtrie(subtrie) => {
+                            ensure_cached_subtrie(subtrie)?;
+                            self.enter_subtrie(subtrie);
+                        }
+                        ArenaSparseNode::TakenSubtrie => {
+                            let Some((start, end)) = hashed_prefix_range(&head.path) else {
+                                continue
+                            };
+                            if seek_key.is_some_and(|seek_key| !key_is_before_end(seek_key, end)) {
+                                continue
+                            }
+                            let inner_seek_key =
+                                seek_key.map_or(start, |seek_key| start.max(seek_key));
+                            if let Some(entry) =
+                                self.seek_inner_hashed_range(inner_seek_key, end)?
+                            {
+                                return Ok(Some(entry))
+                            }
+                        }
+                        ArenaSparseNode::Branch(_) => {
+                            unreachable!("non-branch event cannot point at a branch")
+                        }
+                    }
                 }
             }
         }
-
-        self.mode = CursorMode::Exhausted;
-        Ok(None)
     }
 }
 
@@ -874,9 +921,21 @@ where
             return Ok(result)
         }
 
-        while let Some(item) = self.next_topology_item(true)? {
-            match item {
-                CachedTopologyItem::Branch { path, arena, branch } => {
+        loop {
+            match self.next_sparse_event(true)? {
+                CachedCursorEvent::Continue => continue,
+                CachedCursorEvent::Done => {
+                    self.mode = CursorMode::Exhausted;
+                    return Ok(None)
+                }
+                CachedCursorEvent::Branch => {
+                    let Some(arena) = self.active_arena() else {
+                        self.mode = CursorMode::Exhausted;
+                        return Ok(None)
+                    };
+                    let head = self.cursor.head().expect("branch event requires a head");
+                    let branch = arena[head.index].branch_ref();
+                    let path = logical_branch_path(arena, head);
                     if seek_key.as_ref().is_none_or(|seek_key| &path >= seek_key) &&
                         self.current_trie_key().is_none_or(|current_key| &path > current_key)
                     {
@@ -884,7 +943,12 @@ where
                         return Ok(Some(self.set_current_trie(path, node)))
                     }
                 }
-                CachedTopologyItem::Blind { path } => {
+                CachedCursorEvent::BlindChild { nibble } => {
+                    let Some(arena) = self.active_arena() else {
+                        self.mode = CursorMode::Exhausted;
+                        return Ok(None)
+                    };
+                    let path = self.cursor.child_path(arena, nibble);
                     let end = next_prefix(&path);
                     if seek_key
                         .as_ref()
@@ -897,12 +961,41 @@ where
                         return Ok(Some(entry))
                     }
                 }
-                CachedTopologyItem::Leaf { .. } => {}
+                CachedCursorEvent::NonBranch => {
+                    let Some(arena) = self.active_arena() else {
+                        self.mode = CursorMode::Exhausted;
+                        return Ok(None)
+                    };
+                    let head = self.cursor.head().expect("non-branch event requires a head");
+                    match &arena[head.index] {
+                        ArenaSparseNode::EmptyRoot | ArenaSparseNode::Leaf { .. } => {}
+                        ArenaSparseNode::Subtrie(subtrie) => {
+                            ensure_cached_subtrie(subtrie)?;
+                            self.enter_subtrie(subtrie);
+                        }
+                        ArenaSparseNode::TakenSubtrie => {
+                            let path = head.path;
+                            let end = next_prefix(&path);
+                            if seek_key.as_ref().is_some_and(|seek_key| {
+                                !trie_key_is_before_end(seek_key, end.as_ref())
+                            }) {
+                                continue
+                            }
+                            let inner_seek_key =
+                                seek_key.map_or(path, |seek_key| path.max(seek_key));
+                            if let Some(entry) =
+                                self.seek_inner_trie_range(inner_seek_key, end, false)?
+                            {
+                                return Ok(Some(entry))
+                            }
+                        }
+                        ArenaSparseNode::Branch(_) => {
+                            unreachable!("non-branch event cannot point at a branch")
+                        }
+                    }
+                }
             }
         }
-
-        self.mode = CursorMode::Exhausted;
-        Ok(None)
     }
 
     fn seek_exact_from_trie_topology(
@@ -921,9 +1014,21 @@ where
             return Ok(result)
         }
 
-        while let Some(item) = self.next_topology_item(true)? {
-            match item {
-                CachedTopologyItem::Branch { path, arena, branch } => {
+        loop {
+            match self.next_sparse_event(true)? {
+                CachedCursorEvent::Continue => continue,
+                CachedCursorEvent::Done => {
+                    self.mode = CursorMode::Exhausted;
+                    return Ok(None)
+                }
+                CachedCursorEvent::Branch => {
+                    let Some(arena) = self.active_arena() else {
+                        self.mode = CursorMode::Exhausted;
+                        return Ok(None)
+                    };
+                    let head = self.cursor.head().expect("branch event requires a head");
+                    let branch = arena[head.index].branch_ref();
+                    let path = logical_branch_path(arena, head);
                     if path == key {
                         let node = branch_node_compact_for_cursor(arena, branch, path)?;
                         return Ok(Some(self.set_current_trie(path, node)))
@@ -932,7 +1037,12 @@ where
                         return Ok(None)
                     }
                 }
-                CachedTopologyItem::Blind { path } => {
+                CachedCursorEvent::BlindChild { nibble } => {
+                    let Some(arena) = self.active_arena() else {
+                        self.mode = CursorMode::Exhausted;
+                        return Ok(None)
+                    };
+                    let path = self.cursor.child_path(arena, nibble);
                     let end = next_prefix(&path);
                     if key < path {
                         return Ok(None)
@@ -941,12 +1051,35 @@ where
                         return self.seek_inner_trie_range(key, end, true)
                     }
                 }
-                CachedTopologyItem::Leaf { .. } => {}
+                CachedCursorEvent::NonBranch => {
+                    let Some(arena) = self.active_arena() else {
+                        self.mode = CursorMode::Exhausted;
+                        return Ok(None)
+                    };
+                    let head = self.cursor.head().expect("non-branch event requires a head");
+                    match &arena[head.index] {
+                        ArenaSparseNode::EmptyRoot | ArenaSparseNode::Leaf { .. } => {}
+                        ArenaSparseNode::Subtrie(subtrie) => {
+                            ensure_cached_subtrie(subtrie)?;
+                            self.enter_subtrie(subtrie);
+                        }
+                        ArenaSparseNode::TakenSubtrie => {
+                            let path = head.path;
+                            let end = next_prefix(&path);
+                            if key < path {
+                                return Ok(None)
+                            }
+                            if trie_key_is_before_end(&key, end.as_ref()) {
+                                return self.seek_inner_trie_range(key, end, true)
+                            }
+                        }
+                        ArenaSparseNode::Branch(_) => {
+                            unreachable!("non-branch event cannot point at a branch")
+                        }
+                    }
+                }
             }
         }
-
-        self.mode = CursorMode::Exhausted;
-        Ok(None)
     }
 }
 
@@ -1173,12 +1306,80 @@ fn ensure_node_not_dirty(state: &ArenaSparseNodeState, path: Nibbles) -> Result<
     Ok(())
 }
 
-fn nibbles_to_b256(nibbles: &Nibbles) -> B256 {
-    let mut bytes = [0u8; 32];
-    for idx in 0..nibbles.len() {
-        set_packed_nibble(&mut bytes, idx, nibbles.get_unchecked(idx));
+fn hashed_leaf_key(path: &Nibbles, leaf_key: &Nibbles) -> Option<B256> {
+    if path.len() + leaf_key.len() != B256::len_bytes() * 2 {
+        return None
     }
-    B256::from(bytes)
+
+    let mut bytes = [0u8; 32];
+    let mut idx = 0;
+    pack_nibbles(&mut bytes, &mut idx, path);
+    pack_nibbles(&mut bytes, &mut idx, leaf_key);
+    Some(B256::from(bytes))
+}
+
+fn hashed_prefix_range(prefix: &Nibbles) -> Option<(B256, Option<B256>)> {
+    hashed_prefix_range_parts(prefix, None, None)
+}
+
+fn hashed_child_prefix_range(
+    path: &Nibbles,
+    short_key: &Nibbles,
+    child_nibble: u8,
+) -> Option<(B256, Option<B256>)> {
+    hashed_prefix_range_parts(path, Some(short_key), Some(child_nibble))
+}
+
+fn hashed_prefix_range_parts(
+    first: &Nibbles,
+    second: Option<&Nibbles>,
+    child_nibble: Option<u8>,
+) -> Option<(B256, Option<B256>)> {
+    let len = first.len() + second.map_or(0, Nibbles::len) + usize::from(child_nibble.is_some());
+    if len > B256::len_bytes() * 2 {
+        return None
+    }
+
+    let mut bytes = [0u8; 32];
+    let mut idx = 0;
+    let mut increment = None;
+    pack_prefix_part(&mut bytes, &mut idx, &mut increment, first);
+    if let Some(second) = second {
+        pack_prefix_part(&mut bytes, &mut idx, &mut increment, second);
+    }
+    if let Some(nibble) = child_nibble {
+        pack_prefix_nibble(&mut bytes, &mut idx, &mut increment, nibble);
+    }
+
+    let start = B256::from(bytes);
+    let end = increment.map(|(increment_idx, nibble)| {
+        let mut end = bytes;
+        set_packed_nibble(&mut end, increment_idx, nibble + 1);
+        for idx in increment_idx + 1..len {
+            set_packed_nibble(&mut end, idx, 0);
+        }
+        B256::from(end)
+    });
+
+    Some((start, end))
+}
+
+fn pack_nibbles(bytes: &mut [u8; 32], idx: &mut usize, nibbles: &Nibbles) {
+    for offset in 0..nibbles.len() {
+        set_packed_nibble(bytes, *idx, nibbles.get_unchecked(offset));
+        *idx += 1;
+    }
+}
+
+fn pack_prefix_part(
+    bytes: &mut [u8; 32],
+    idx: &mut usize,
+    increment: &mut Option<(usize, u8)>,
+    nibbles: &Nibbles,
+) {
+    for offset in 0..nibbles.len() {
+        pack_prefix_nibble(bytes, idx, increment, nibbles.get_unchecked(offset));
+    }
 }
 
 fn set_packed_nibble(bytes: &mut [u8; 32], idx: usize, nibble: u8) {
@@ -1190,29 +1391,17 @@ fn set_packed_nibble(bytes: &mut [u8; 32], idx: usize, nibble: u8) {
     }
 }
 
-fn prefix_start(prefix: &Nibbles) -> B256 {
-    nibbles_to_b256(prefix)
-}
-
-fn prefix_end(prefix: &Nibbles) -> Option<B256> {
-    let mut bytes = [0u8; 32];
-    let mut increment_idx = None;
-
-    for idx in 0..prefix.len() {
-        let nibble = prefix.get_unchecked(idx);
-        if nibble < 0x0f {
-            increment_idx = Some(idx);
-        }
-        set_packed_nibble(&mut bytes, idx, nibble);
+fn pack_prefix_nibble(
+    bytes: &mut [u8; 32],
+    idx: &mut usize,
+    increment: &mut Option<(usize, u8)>,
+    nibble: u8,
+) {
+    if nibble < 0x0f {
+        *increment = Some((*idx, nibble));
     }
-
-    let increment_idx = increment_idx?;
-    set_packed_nibble(&mut bytes, increment_idx, prefix.get_unchecked(increment_idx) + 1);
-    for idx in increment_idx + 1..prefix.len() {
-        set_packed_nibble(&mut bytes, idx, 0);
-    }
-
-    Some(B256::from(bytes))
+    set_packed_nibble(bytes, *idx, nibble);
+    *idx += 1;
 }
 
 fn next_prefix(prefix: &Nibbles) -> Option<Nibbles> {
