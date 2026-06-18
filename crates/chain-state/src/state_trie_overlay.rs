@@ -116,15 +116,20 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         }
 
         // Snapshot matching parent overlays before spawning so DashMap iteration guards are
-        // dropped.
-        let cached_parent_overlays = self
-            .overlays
-            .iter()
-            .filter_map(|entry| {
-                let key = *entry.key();
-                (key.tip_hash == parent_hash && entry.value().is_ready()).then_some(key.anchor_hash)
-            })
-            .collect::<Vec<_>>();
+        // dropped. Most inserts do not extend multiple cached overlays, so keep the first match
+        // inline and only allocate a tail when there is real fanout.
+        let mut first_cached_parent_overlay = None;
+        let mut additional_cached_parent_overlays = Vec::new();
+        for entry in self.overlays.iter() {
+            let key = *entry.key();
+            if key.tip_hash == parent_hash && entry.value().is_ready() {
+                if first_cached_parent_overlay.is_some() {
+                    additional_cached_parent_overlays.push(key.anchor_hash);
+                } else {
+                    first_cached_parent_overlay = Some(key.anchor_hash);
+                }
+            }
+        }
 
         debug!(
             target: "chain_state::state_trie_overlay",
@@ -132,9 +137,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
             %parent_hash,
             "inserted block into state trie overlay manager"
         );
-        if cached_parent_overlays.is_empty() {
-            return
-        }
+        let Some(first_cached_parent_overlay) = first_cached_parent_overlay else { return };
 
         #[cfg(feature = "rayon")]
         let Some(worker_pool) = self.worker_pool.clone() else {
@@ -142,12 +145,14 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         };
 
         #[cfg(not(feature = "rayon"))]
-        let _ = cached_parent_overlays;
+        let _ = (first_cached_parent_overlay, additional_cached_parent_overlays);
 
         #[cfg(feature = "rayon")]
         {
             let parent_span = span;
-            for anchor_hash in cached_parent_overlays {
+            for anchor_hash in std::iter::once(first_cached_parent_overlay)
+                .chain(additional_cached_parent_overlays)
+            {
                 let manager = <Self as Clone>::clone(self);
                 let parent_span = parent_span.clone();
                 worker_pool.spawn(move || {
