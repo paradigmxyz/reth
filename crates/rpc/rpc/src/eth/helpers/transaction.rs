@@ -147,7 +147,7 @@ mod tests {
     use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
     use reth_transaction_pool::{
         test_utils::{testing_pool, TestPool},
-        TransactionPool,
+        TransactionOrigin, TransactionPool,
     };
     use revm_primitives::Bytes;
 
@@ -213,6 +213,8 @@ mod tests {
 
         assert!(pool.get(&tx_1_result).is_some(), "tx1 not found in the pool");
         assert!(pool.get(&tx_2_result).is_some(), "tx2 not found in the pool");
+        assert_eq!(pool.get(&tx_1_result).unwrap().origin, TransactionOrigin::Local);
+        assert_eq!(pool.get(&tx_2_result).unwrap().origin, TransactionOrigin::Local);
     }
 
     #[tokio::test]

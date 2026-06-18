@@ -86,7 +86,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 <PoolTx<Self::Pool> as PoolTransaction>::recover_raw_transaction(&tx)
                     .map_err(Self::Error::from_eth_err)?;
             self.send_pool_transaction(
-                TransactionOrigin::External,
+                TransactionOrigin::Local,
                 WithEncoded::new(tx, pool_transaction),
             )
             .await
