@@ -20,8 +20,8 @@ use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
 use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::EngineApiValidator;
 use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_provider::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_rpc::EngineApi;
-use reth_storage_api::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 use ssz::Decode;
 use std::{
