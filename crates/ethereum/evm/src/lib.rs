@@ -57,7 +57,7 @@ impl Evm2Env for EthEvmEnv {
     }
 
     fn block_env(&self) -> evm2::env::BlockEnv {
-        self.block.clone()
+        self.block
     }
 }
 

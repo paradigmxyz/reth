@@ -227,7 +227,7 @@ where
         .accounts_sorted()
         .into_iter()
         .map(|(address, delta)| {
-            (KH::hash_key(&address), delta.current.as_ref().map(account_info_to_reth))
+            (KH::hash_key(address), delta.current.as_ref().map(account_info_to_reth))
         })
         .collect::<Vec<_>>();
     accounts.sort_unstable_by_key(|(address, _)| *address);
@@ -235,21 +235,21 @@ where
     let mut storages = B256Map::default();
     for address in state.storage_wipes_sorted() {
         storages.insert(
-            KH::hash_key(&address),
+            KH::hash_key(address),
             HashedStorageSorted { storage_slots: Vec::new(), wiped: true },
         );
     }
 
     for (key, delta) in state.storage_sorted() {
         let storage = storages
-            .entry(KH::hash_key(&key.address()))
+            .entry(KH::hash_key(key.address()))
             .or_insert_with(|| HashedStorageSorted { storage_slots: Vec::new(), wiped: false });
         if storage.wiped && delta.current.is_zero() {
             continue
         }
         storage
             .storage_slots
-            .push((KH::hash_key(&B256::new(key.key().to_be_bytes())), delta.current));
+            .push((KH::hash_key(B256::new(key.key().to_be_bytes())), delta.current));
     }
 
     for storage in storages.values_mut() {
@@ -378,7 +378,7 @@ where
     }
 
     fn account(&mut self, change: AccountChangeRef<'_>) -> Result<(), Self::Error> {
-        let hashed_address = KH::hash_key(&change.address);
+        let hashed_address = KH::hash_key(change.address);
         let was_created = self.created_accounts.contains(&hashed_address);
         let was_deleted_existing =
             !was_created && self.state.accounts.get(&hashed_address).is_some_and(Option::is_none);
@@ -410,7 +410,7 @@ where
     }
 
     fn storage_wipe(&mut self, address: alloy_primitives::Address) -> Result<(), Self::Error> {
-        let hashed_address = KH::hash_key(&address);
+        let hashed_address = KH::hash_key(address);
         if self.created_accounts.contains(&hashed_address) {
             self.state.storages.remove(&hashed_address);
         } else {
@@ -422,12 +422,12 @@ where
     }
 
     fn storage(&mut self, change: StorageChange) -> Result<(), Self::Error> {
-        let hashed_address = KH::hash_key(&change.address);
+        let hashed_address = KH::hash_key(change.address);
         let storage = self.state.storages.entry(hashed_address).or_default();
         if storage.wiped && change.current.is_zero() {
             return Ok(())
         }
-        storage.storage.insert(KH::hash_key(&B256::new(change.key.to_be_bytes())), change.current);
+        storage.storage.insert(KH::hash_key(B256::new(change.key.to_be_bytes())), change.current);
         Ok(())
     }
 }

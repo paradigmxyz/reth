@@ -290,6 +290,7 @@ where
 
 /// Executes a block worth of recovered Ethereum transactions with additional block-level context,
 /// invoking `on_transaction_executed` after each transaction is committed to the block state.
+#[expect(clippy::too_many_arguments)]
 fn execute_evm2_block_with_context_precompiles_and_hook<DB>(
     spec_id: SpecId,
     block_env: BlockEnv,
@@ -318,6 +319,7 @@ where
 /// Executes a block worth of evm2-native recovered transactions with additional block-level
 /// context, invoking `on_transaction_executed` after each transaction is committed to the block
 /// state.
+#[expect(clippy::too_many_arguments)]
 pub(crate) fn execute_evm2_block_with_context_precompiles_and_hook_envelopes<DB>(
     spec_id: SpecId,
     block_env: BlockEnv,
@@ -348,6 +350,7 @@ where
 /// Executes a block worth of evm2-native recovered transactions with additional block-level
 /// context, invoking `on_transaction_executed` after each transaction is committed to the block
 /// state and optionally producing hashed post-state according to `hashed_state_mode`.
+#[expect(clippy::too_many_arguments)]
 pub(crate) fn execute_evm2_block_with_context_precompiles_and_hooks_envelopes_with_hashed_state_mode<
     DB,
 >(
@@ -647,6 +650,7 @@ where
         .unwrap_or(Evm2ExecutionError::MissingDatabaseError(code))
 }
 
+#[expect(clippy::needless_option_as_deref, clippy::too_many_arguments)]
 fn pre_execution_system_call_state_changes<DB>(
     evm: &mut Evm<BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
@@ -756,6 +760,7 @@ where
     Ok(out)
 }
 
+#[expect(clippy::needless_option_as_deref, clippy::too_many_arguments)]
 fn post_execution_system_call_state_changes<DB>(
     evm: &mut Evm<BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
@@ -866,6 +871,7 @@ fn commit_state_changes<S: StateChangeSource>(
     }
 }
 
+#[expect(clippy::too_many_arguments)]
 fn post_block_balance_state_changes<DB>(
     evm: &mut Evm<BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
@@ -927,7 +933,7 @@ where
     Ok(())
 }
 
-fn base_block_reward(spec_id: SpecId) -> Option<u128> {
+const fn base_block_reward(spec_id: SpecId) -> Option<u128> {
     if spec_id.enables(SpecId::MERGE) {
         None
     } else if spec_id.enables(SpecId::PETERSBURG) {
@@ -948,7 +954,7 @@ fn ommer_reward(base_block_reward: u128, block_number: u64, ommer_block_number: 
     (u128::from(distance) * base_block_reward) >> 3
 }
 
-fn empty_account() -> AccountInfo {
+const fn empty_account() -> AccountInfo {
     AccountInfo {
         balance: U256::ZERO,
         nonce: 0,

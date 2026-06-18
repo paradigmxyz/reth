@@ -273,7 +273,7 @@ impl<'a> Evm2OverlayStateProvider<'a> {
 impl AccountReader for Evm2OverlayStateProvider<'_> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if let Some(account) = self.overlay.accounts.get(address) {
-            return Ok(account.clone())
+            return Ok(*account)
         }
 
         self.base.basic_account(address)

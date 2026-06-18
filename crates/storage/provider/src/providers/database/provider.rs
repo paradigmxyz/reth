@@ -210,7 +210,7 @@ struct PlainStateSink {
 }
 
 impl PlainStateSink {
-    fn new(is_value_known: OriginalValuesKnown) -> Self {
+    const fn new(is_value_known: OriginalValuesKnown) -> Self {
         Self {
             is_value_known,
             accounts: Vec::new(),
@@ -225,7 +225,7 @@ impl PlainStateSink {
         let storage = storage_by_address
             .into_iter()
             .filter_map(|(address, (wipe_storage, changed_storage))| {
-                (!changed_storage.is_empty() || wipe_storage).then(|| PlainStorageChangeset {
+                (!changed_storage.is_empty() || wipe_storage).then_some(PlainStorageChangeset {
                     address,
                     wipe_storage,
                     storage: changed_storage,
@@ -280,7 +280,7 @@ struct PlainStateAndRevertsSink {
 }
 
 impl PlainStateAndRevertsSink {
-    fn new(is_value_known: OriginalValuesKnown) -> Self {
+    const fn new(is_value_known: OriginalValuesKnown) -> Self {
         Self {
             is_value_known,
             accounts: Vec::new(),
@@ -299,7 +299,7 @@ impl PlainStateAndRevertsSink {
         let storage = storage_by_address
             .into_iter()
             .filter_map(|(address, (wipe_storage, changed_storage))| {
-                (!changed_storage.is_empty() || wipe_storage).then(|| PlainStorageChangeset {
+                (!changed_storage.is_empty() || wipe_storage).then_some(PlainStorageChangeset {
                     address,
                     wipe_storage,
                     storage: changed_storage,
@@ -2923,7 +2923,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             for (address, account) in changes.accounts {
                 if let Some(account) = account {
                     tracing::trace!(?address, "Updating plain state account");
-                    accounts_cursor.upsert(address, &account.into())?;
+                    accounts_cursor.upsert(address, &account)?;
                 } else if accounts_cursor.seek_exact(address)?.is_some() {
                     tracing::trace!(?address, "Deleting plain state account");
                     accounts_cursor.delete_current()?;
