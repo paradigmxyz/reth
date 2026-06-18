@@ -256,6 +256,51 @@ impl PrefixSet {
         false
     }
 
+    /// Returns whether any key has the given prefix, together with a bitmask of child nibbles that
+    /// have keys below that prefix.
+    ///
+    /// This is equivalent to calling [`Self::contains`] for `prefix` and then for each of its 16
+    /// direct children, but it scans the sorted key set once.
+    #[inline]
+    pub fn contains_child_mask(&mut self, prefix: &Nibbles) -> (bool, u16) {
+        if self.all {
+            return (true, u16::MAX)
+        }
+
+        while self.index > 0 && self.keys.get(self.index).is_none_or(|key| key > prefix) {
+            self.index -= 1;
+        }
+
+        let prefix_len = prefix.len();
+        let mut contains = false;
+        let mut child_mask = 0u16;
+        let mut next_index = None;
+
+        for (idx, key) in self.keys[self.index..].iter().enumerate() {
+            if key.starts_with(prefix) {
+                contains = true;
+                next_index.get_or_insert(idx);
+
+                if let Some(nibble) = key.get(prefix_len) {
+                    child_mask |= 1u16 << nibble;
+                }
+
+                continue
+            }
+
+            if key > prefix {
+                next_index.get_or_insert(idx);
+                break
+            }
+        }
+
+        if let Some(idx) = next_index {
+            self.index += idx;
+        }
+
+        (contains, child_mask)
+    }
+
     /// Returns an iterator over reference to _all_ nibbles regardless of cursor position.
     pub fn iter(&self) -> core::slice::Iter<'_, Nibbles> {
         self.keys.iter()
@@ -348,5 +393,41 @@ mod tests {
         let mut prefix_set_mut = PrefixSetMut::default();
         prefix_set_mut.extend(PrefixSetMut::all());
         assert!(prefix_set_mut.all);
+    }
+
+    #[test]
+    fn test_contains_child_mask() {
+        let prefix_set_mut = PrefixSetMut::from([
+            Nibbles::from_nibbles([1, 2]),
+            Nibbles::from_nibbles([1, 2, 3]),
+            Nibbles::from_nibbles([1, 2, 4, 5]),
+            Nibbles::from_nibbles([1, 3, 0]),
+            Nibbles::from_nibbles([7, 8]),
+        ]);
+
+        let mut prefix_set = prefix_set_mut.freeze();
+        let (contains, child_mask) =
+            prefix_set.contains_child_mask(&Nibbles::from_nibbles_unchecked([1, 2]));
+        assert!(contains);
+        assert_eq!(child_mask, (1u16 << 3) | (1u16 << 4));
+
+        let (contains, child_mask) =
+            prefix_set.contains_child_mask(&Nibbles::from_nibbles_unchecked([1]));
+        assert!(contains);
+        assert_eq!(child_mask, (1u16 << 2) | (1u16 << 3));
+
+        let (contains, child_mask) =
+            prefix_set.contains_child_mask(&Nibbles::from_nibbles_unchecked([9]));
+        assert!(!contains);
+        assert_eq!(child_mask, 0);
+    }
+
+    #[test]
+    fn test_contains_child_mask_all() {
+        let mut prefix_set = PrefixSetMut::all().freeze();
+        let (contains, child_mask) =
+            prefix_set.contains_child_mask(&Nibbles::from_nibbles_unchecked([1, 2]));
+        assert!(contains);
+        assert_eq!(child_mask, u16::MAX);
     }
 }
