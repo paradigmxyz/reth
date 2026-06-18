@@ -298,7 +298,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
                 .with_http_api(reth_rpc_server_types::RpcModuleSelection::All),
         );
 
-    let (ssz_layer, ssz_handle) = EngineSszProxyLayer::new(chain_spec.clone());
+    let (ssz_layer, ssz_handle) = EngineSszProxyLayer::new();
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
         .testing_node(runtime)
         .with_types::<EthereumNode>()
@@ -325,6 +325,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
         node.config.engine.accept_execution_requests_hash,
         node.network.clone(),
     );
+
     ssz_handle.set_engine_api(engine_api).await;
     let node = NodeTestContext::new(node, eth_payload_attributes).await?;
 

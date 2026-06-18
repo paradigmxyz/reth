@@ -55,17 +55,11 @@ type EthEngineApi<Provider, Pool, Validator, ChainSpec> =
 /// Shared handle used by [`EngineSszProxyLayer`].
 pub struct EngineSszProxyHandle<ChainSpec, Provider = (), Pool = (), Validator = ()> {
     engine_api: Arc<RwLock<Option<EthEngineApi<Provider, Pool, Validator, ChainSpec>>>>,
-    client_version: Arc<RwLock<Option<ClientVersionV1>>>,
-    chain_spec: Arc<ChainSpec>,
 }
 
 impl<C, Provider, Pool, Validator> Clone for EngineSszProxyHandle<C, Provider, Pool, Validator> {
     fn clone(&self) -> Self {
-        Self {
-            engine_api: self.engine_api.clone(),
-            client_version: self.client_version.clone(),
-            chain_spec: self.chain_spec.clone(),
-        }
+        Self { engine_api: self.engine_api.clone() }
     }
 }
 
@@ -80,23 +74,8 @@ impl<C, Provider, Pool, Validator> std::fmt::Debug
 impl<ChainSpec, Provider, Pool, Validator>
     EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>
 {
-    fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self {
-            engine_api: Default::default(),
-            client_version: Arc::new(RwLock::new(Some(default_client_version()))),
-            chain_spec,
-        }
-    }
-
-    fn with_engine_api(
-        chain_spec: Arc<ChainSpec>,
-        engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
-    ) -> Self {
-        Self {
-            engine_api: Arc::new(RwLock::new(Some(engine_api))),
-            client_version: Arc::new(RwLock::new(Some(default_client_version()))),
-            chain_spec,
-        }
+    fn with_engine_api(engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>) -> Self {
+        Self { engine_api: Arc::new(RwLock::new(Some(engine_api))) }
     }
 
     /// Sets the Engine API implementation used by the proxy.
@@ -105,15 +84,6 @@ impl<ChainSpec, Provider, Pool, Validator>
         engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
     ) {
         *self.engine_api.write().await = Some(engine_api);
-    }
-
-    /// Sets the client version returned by the identity endpoint.
-    pub async fn set_client_version(&self, client_version: ClientVersionV1) {
-        *self.client_version.write().await = Some(client_version);
-    }
-
-    async fn client_version(&self) -> Option<ClientVersionV1> {
-        self.client_version.read().await.clone()
     }
 }
 
@@ -136,19 +106,16 @@ impl<ChainSpec, Provider, Pool, Validator>
     EngineSszProxyLayer<ChainSpec, Provider, Pool, Validator>
 {
     /// Creates a new proxy layer and a handle for setting the engine after node launch.
-    pub fn new(
-        chain_spec: Arc<ChainSpec>,
-    ) -> (Self, EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>) {
-        let handle = EngineSszProxyHandle::new(chain_spec);
+    pub fn new() -> (Self, EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>) {
+        let handle = EngineSszProxyHandle::new();
         (Self { handle: handle.clone() }, handle)
     }
 
     /// Creates a new proxy layer with an Engine API implementation.
     pub fn with_engine_api(
-        chain_spec: Arc<ChainSpec>,
         engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
     ) -> (Self, EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>) {
-        let handle = EngineSszProxyHandle::with_engine_api(chain_spec, engine_api);
+        let handle = EngineSszProxyHandle::with_engine_api(engine_api);
         (Self { handle: handle.clone() }, handle)
     }
 }
@@ -347,15 +314,6 @@ impl std::str::FromStr for EngineSszFork {
 
 fn parse_method_version(version: &str) -> Option<u8> {
     version.strip_prefix('v')?.parse().ok().filter(|version| (1..=4).contains(version))
-}
-
-fn default_client_version() -> ClientVersionV1 {
-    ClientVersionV1 {
-        code: CLIENT_CODE,
-        name: version_metadata().name_client.to_string(),
-        version: version_metadata().cargo_pkg_version.to_string(),
-        commit: version_metadata().vergen_git_sha.to_string(),
-    }
 }
 
 fn handle_capabilities() -> HttpResponse {
