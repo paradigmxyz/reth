@@ -570,7 +570,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     ///
     /// Use [`SaveBlocksMode::Full`] for production (includes receipts, state, trie).
     /// Use [`SaveBlocksMode::BlocksOnly`] for block structure only (used by `insert_block`).
-    #[instrument(level = "debug", target = "providers::db", skip_all, fields(block_count = blocks.len()))]
+    #[instrument(level = "trace", target = "providers::db", skip_all, fields(block_count = blocks.len()))]
     pub fn save_blocks(
         &self,
         blocks: Vec<ExecutedBlock<N::Primitives>>,
@@ -586,7 +586,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let first_number = blocks.first().unwrap().recovered_block().number();
         let last_block_number = blocks.last().unwrap().recovered_block().number();
 
-        debug!(target: "providers::db", block_count, "Writing blocks and execution data to storage");
+        trace!(target: "providers::db", block_count, "Writing blocks and execution data to storage");
 
         // Compute tx_nums upfront (both threads need these)
         let first_tx_num = self
@@ -769,7 +769,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         timings.total = total_start.elapsed();
 
         self.metrics.record_save_blocks(&timings);
-        debug!(target: "providers::db", range = ?first_number..=last_block_number, "Appended block data");
+        trace!(target: "providers::db", range = ?first_number..=last_block_number, "Appended block data");
 
         Ok(())
     }
