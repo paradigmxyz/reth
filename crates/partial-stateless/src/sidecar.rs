@@ -146,6 +146,8 @@ pub struct PartialStatelessSidecar {
     pub serialized_multiproof: Vec<u8>,
     /// Missed contract bytecodes in bytes.
     pub missed_bytecodes: Vec<Bytes>,
+    /// RLP-encoded ancestor headers required for re-execution.
+    pub ancestor_headers: Vec<Bytes>,
     /// Summary stats about the witness.
     pub stats: WitnessResult,
 }

@@ -215,6 +215,7 @@ fn test_sidecar_serialization_and_targets() {
         raw_targets: raw_targets.clone(),
         serialized_multiproof,
         missed_bytecodes: vec![Bytes::from(vec![9, 8, 7])],
+        ancestor_headers: vec![],
         stats,
     };
 
@@ -285,6 +286,7 @@ fn test_sidecar_disk_write() {
         raw_targets,
         serialized_multiproof: vec![1, 2, 3, 4],
         missed_bytecodes: vec![alloy_primitives::Bytes::from(vec![9, 8, 7])],
+        ancestor_headers: vec![],
         stats,
     };
 
@@ -305,4 +307,3 @@ fn test_sidecar_disk_write() {
     // Clean up after test
     fs::remove_dir_all(&sidecar_dir).expect("cleanup sidecar dir");
 }
-
