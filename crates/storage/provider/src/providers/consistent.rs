@@ -1352,7 +1352,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                 .accounts
                 .into_iter()
                 .flatten()
-                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
+                .map(|(address, info)| AccountBeforeTx { address, info })
                 .collect();
             Ok(changesets)
         } else {
@@ -1397,7 +1397,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                 .into_iter()
                 .flatten()
                 .find(|(addr, _)| addr == &address)
-                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) });
+                .map(|(address, info)| AccountBeforeTx { address, info });
             Ok(changeset)
         } else {
             // Perform checks on whether or not changesets exist for the block.
@@ -1447,7 +1447,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                     .accounts
                     .into_iter()
                     .flatten()
-                    .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) });
+                    .map(|(address, info)| AccountBeforeTx { address, info });
 
                 for changeset in block_changesets {
                     changesets.push((state.number(), changeset));

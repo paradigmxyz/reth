@@ -113,8 +113,7 @@ impl<T> ExecutionOutcome<T> {
         first_block: BlockNumber,
         requests: Vec<Requests>,
     ) -> Self {
-        let block_states =
-            (block_reverts.len() <= 1).then(|| vec![state.clone()]).unwrap_or_default();
+        let block_states = if block_reverts.len() <= 1 { vec![state.clone()] } else { Vec::new() };
         Self::from_parts(state, block_states, block_reverts, receipts, first_block, requests)
     }
 
@@ -635,7 +634,7 @@ mod serde_state {
     use evm2::{bytecode::Bytecode as Evm2Bytecode, evm::StateChangeSource};
     use serde::{Deserialize, Serialize};
 
-    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
     pub(super) struct BlockStateSerde {
         accounts: AddressMap<TrackedSerde<Option<Evm2RevertAccount>>>,
         storage: AddressMap<StorageChangeSetSerde>,
@@ -667,7 +666,7 @@ mod serde_state {
 
     impl From<BlockStateSerde> for Evm2BlockState {
         fn from(value: BlockStateSerde) -> Self {
-            let mut accumulator = BlockStateAccumulator::new();
+            let mut accumulator = Self::new();
             for (code_hash, bytecode) in value.contracts {
                 accumulator
                     .bytecode(code_hash, &Evm2Bytecode::new_raw(bytecode))
@@ -710,16 +709,6 @@ mod serde_state {
         state: BlockStateSerde,
     }
 
-    impl Default for BlockStateSerde {
-        fn default() -> Self {
-            Self {
-                accounts: AddressMap::default(),
-                storage: AddressMap::default(),
-                contracts: B256Map::default(),
-            }
-        }
-    }
-
     impl StateChangeSink for BlockStateSerdeSink {
         type Error = core::convert::Infallible;
 
@@ -753,7 +742,7 @@ mod serde_state {
         }
     }
 
-    fn account_info_ref(info: &AccountInfo) -> AccountInfoRef<'_> {
+    const fn account_info_ref(info: &AccountInfo) -> AccountInfoRef<'_> {
         AccountInfoRef {
             balance: info.balance,
             nonce: info.nonce,
@@ -817,7 +806,7 @@ mod serde_impl {
             D: Deserializer<'de>,
         {
             let value = ExecutionOutcomeSerdeOwned::<T>::deserialize(deserializer)?;
-            Ok(ExecutionOutcome::from_state_and_reverts(
+            Ok(Self::from_state_and_reverts(
                 value.state.into(),
                 value.block_reverts,
                 value.receipts,

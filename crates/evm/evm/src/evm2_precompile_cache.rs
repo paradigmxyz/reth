@@ -279,7 +279,7 @@ struct GasSnapshot {
 }
 
 impl GasSnapshot {
-    fn new(gas: &GasTracker) -> Self {
+    const fn new(gas: &GasTracker) -> Self {
         Self {
             spent: gas.spent(),
             reservoir: gas.reservoir(),

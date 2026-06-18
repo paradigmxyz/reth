@@ -340,12 +340,11 @@ where
         changeset_cache: ChangesetCache,
         runtime: reth_tasks::Runtime,
     ) -> Self {
-        let precompile_cache_map = PrecompileCacheMap::default();
         let payload_processor = PayloadProcessor::new(
             runtime.clone(),
             evm_config.clone(),
             &config,
-            precompile_cache_map.clone(),
+            PrecompileCacheMap::default(),
         );
         Self {
             provider,
@@ -1120,8 +1119,9 @@ where
     /// 3. Executes transactions with metrics collection via state hooks
     /// 4. Merges state transitions and records execution metrics
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
+    #[expect(clippy::type_complexity)]
     fn execute_block<S, Err, T>(
-        &mut self,
+        &self,
         state_provider: S,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,

@@ -208,7 +208,7 @@ pub trait ExecutableTxParts<TxEnv, T> {
 
 impl<T: Clone, TxEnv> ExecutableTxParts<TxEnv, T> for Recovered<T>
 where
-    TxEnv: From<Recovered<T>>,
+    TxEnv: From<Self>,
 {
     type Recovered = Self;
 
