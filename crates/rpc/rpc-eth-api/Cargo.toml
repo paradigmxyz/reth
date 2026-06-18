@@ -61,5 +61,8 @@ serde_json.workspace = true
 tracing.workspace = true
 
 [features]
-js-tracer = ["reth-rpc-eth-types/js-tracer"]
+js-tracer = [
+	"reth-rpc-eth-types/js-tracer",
+	"evm2-inspectors/js-tracer"
+]
 client = ["jsonrpsee/client", "jsonrpsee/async-client"]
