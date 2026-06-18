@@ -1498,13 +1498,14 @@ impl RocksDBProvider {
             return Ok(vec![(last_key, last_shard)]);
         }
 
-        let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
-        let mut chunks_peekable = chunks.into_iter().peekable();
-        let mut shards = Vec::new();
+        let shard_count = (last_shard.len() as usize).div_ceil(NUM_OF_INDICES_IN_SHARD);
+        let mut shards = Vec::with_capacity(shard_count);
+        let mut entries = last_shard.iter();
 
-        while let Some(chunk) = chunks_peekable.next() {
+        for shard_idx in 0..shard_count {
+            let chunk = entries.by_ref().take(NUM_OF_INDICES_IN_SHARD);
             let shard = BlockNumberList::new_pre_sorted(chunk);
-            let highest_block_number = if chunks_peekable.peek().is_some() {
+            let highest_block_number = if shard_idx + 1 < shard_count {
                 shard.iter().next_back().expect("`chunks` does not return empty list")
             } else {
                 u64::MAX
