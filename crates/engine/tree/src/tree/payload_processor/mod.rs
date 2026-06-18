@@ -36,6 +36,7 @@ use reth_trie_parallel::{
 };
 use reth_trie_sparse::{
     ArenaParallelSparseTrie, ConfigurableSparseTrie, RevealableSparseTrie, SparseStateTrie,
+    SparseTrieRetainedPaths,
 };
 use std::{
     ops::Not,
@@ -139,7 +140,7 @@ where
     precompile_cache_disabled: bool,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
-    /// A pruned `SparseStateTrie`, kept around as a cache of already revealed trie nodes and to
+    /// A preserved `SparseStateTrie`, kept around as a cache of already revealed trie nodes and to
     /// re-use allocated memory. Stored with the block hash it was computed for to enable trie
     /// preservation across sequential payload validations.
     sparse_state_trie: SharedPreservedSparseTrie,
@@ -211,6 +212,45 @@ where
     }
 }
 
+impl<Evm> PayloadProcessor<Evm>
+where
+    Evm: ConfigureEvm,
+{
+    /// Prunes the preserved sparse trie cache after persisted blocks are removed from memory.
+    pub fn prune_sparse_trie_cache(&self, retained_paths: SparseTrieRetainedPaths) {
+        if self.disable_sparse_trie_cache_pruning {
+            return;
+        }
+
+        let sparse_trie = self.sparse_state_trie.clone();
+        let trie_metrics = self.trie_metrics.clone();
+        let max_hot_slots = self.sparse_trie_max_hot_slots;
+        let max_hot_accounts = self.sparse_trie_max_hot_accounts;
+        let executor = self.executor.clone();
+
+        self.executor.spawn_blocking_named("prune-sparse-trie", move || {
+            let start = Instant::now();
+            let outcome = sparse_trie.prune(
+                max_hot_slots,
+                max_hot_accounts,
+                SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
+                SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
+                retained_paths,
+            );
+            trie_metrics
+                .into_trie_for_reuse_duration_histogram
+                .record(start.elapsed().as_secs_f64());
+            if let Some(outcome) = outcome {
+                trie_metrics.sparse_trie_retained_memory_bytes.set(outcome.memory_size as f64);
+                trie_metrics
+                    .sparse_trie_retained_storage_tries
+                    .set(outcome.retained_storage_tries as f64);
+                executor.spawn_drop(outcome.deferred);
+            }
+        });
+    }
+}
+
 impl<Evm> WaitForCaches for PayloadProcessor<Evm>
 where
     Evm: ConfigureEvm,
@@ -248,6 +288,10 @@ where
             execution_cache: execution_cache_duration,
             sparse_trie: sparse_trie_duration,
         }
+    }
+
+    fn prune_sparse_trie_cache(&self, retained_paths: SparseTrieRetainedPaths) {
+        Self::prune_sparse_trie_cache(self, retained_paths);
     }
 }
 
@@ -639,7 +683,6 @@ where
         let trie_metrics = self.trie_metrics.clone();
         let max_hot_slots = self.sparse_trie_max_hot_slots;
         let max_hot_accounts = self.sparse_trie_max_hot_accounts;
-        let disable_cache_pruning = self.disable_sparse_trie_cache_pruning;
         let executor = self.executor.clone();
 
         let parent_span = Span::current();
@@ -651,7 +694,7 @@ where
 
             // Reuse a stored SparseStateTrie if available, applying continuation logic.
             // If this payload's parent state root matches the preserved trie's anchor,
-            // we can reuse the pruned trie structure. Otherwise, we clear the trie but
+            // we can reuse the preserved trie structure. Otherwise, we clear the trie but
             // keep allocations.
             let start = Instant::now();
             let preserved = preserved_sparse_trie.take();
@@ -721,14 +764,7 @@ where
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
             let deferred = if let Some(result) = task_result {
                 let start = Instant::now();
-                let (trie, deferred) = task.into_trie_for_reuse(
-                    max_hot_slots,
-                    max_hot_accounts,
-                    SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
-                    SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
-                    disable_cache_pruning,
-                    &result.trie_updates,
-                );
+                let (trie, deferred) = task.into_trie_for_reuse(&result.trie_updates);
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());

@@ -38,6 +38,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority, WorkerPool};
 use reth_trie_db::ChangesetCache;
+use reth_trie_sparse::SparseTrieRetainedPaths;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
@@ -2142,7 +2143,19 @@ where
             number: self.persistence_state.last_persisted_block.number,
             hash: self.persistence_state.last_persisted_block.hash,
         });
+        let retained_paths = self.sparse_trie_retained_paths_for_in_memory_blocks();
+        self.payload_validator.prune_sparse_trie_cache(retained_paths);
         Ok(())
+    }
+
+    /// Builds sparse trie retained paths from all blocks still present in the in-memory tree.
+    fn sparse_trie_retained_paths_for_in_memory_blocks(&self) -> SparseTrieRetainedPaths {
+        let mut retained_paths = SparseTrieRetainedPaths::default();
+        for block in self.state.tree_state.blocks_by_hash.values() {
+            let trie_data = block.trie_data();
+            retained_paths.extend_from_hashed_state(&trie_data.hashed_state);
+        }
+        retained_paths
     }
 
     /// Return an [`ExecutedBlock`] from database or in-memory state by hash.
@@ -3443,4 +3456,7 @@ pub trait WaitForCaches {
     ///
     /// Returns the time spent waiting for each cache separately.
     fn wait_for_caches(&self) -> CacheWaitDurations;
+
+    /// Prunes sparse trie cache state after persistence removes in-memory block overlays.
+    fn prune_sparse_trie_cache(&self, _retained_paths: SparseTrieRetainedPaths) {}
 }

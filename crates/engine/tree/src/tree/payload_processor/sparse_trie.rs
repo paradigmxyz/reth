@@ -216,28 +216,15 @@ where
         metrics.hashing_task_idle_time_seconds.record(total_idle_time.as_secs_f64());
     }
 
-    /// Prunes and shrinks the trie for reuse in the next payload built on top of this one.
+    /// Commits updates to the trie for reuse in the next payload built on top of this one.
     ///
     /// Should be called after the state root result has been sent.
-    ///
-    /// When `disable_pruning` is true, the trie is preserved without any node pruning,
-    /// storage trie eviction, or capacity shrinking, keeping the full cache intact for
-    /// benchmarking purposes.
     pub(super) fn into_trie_for_reuse(
         self,
-        max_hot_slots: usize,
-        max_hot_accounts: usize,
-        max_nodes_capacity: usize,
-        max_values_capacity: usize,
-        disable_pruning: bool,
         updates: &TrieUpdates,
     ) -> (SparseStateTrie<A, S>, DeferredDrops) {
         let Self { mut trie, .. } = self;
         trie.commit_updates(updates);
-        if !disable_pruning {
-            trie.prune(max_hot_slots, max_hot_accounts);
-            trie.shrink_to(max_nodes_capacity, max_values_capacity);
-        }
         let deferred = trie.take_deferred_drops();
         (trie, deferred)
     }

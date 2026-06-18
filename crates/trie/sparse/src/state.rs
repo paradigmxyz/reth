@@ -10,6 +10,8 @@ use alloy_rlp::{Decodable, Encodable};
 use either::Either;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
 use reth_primitives_traits::Account;
+#[cfg(feature = "std")]
+use reth_trie_common::HashedPostStateSorted;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
     DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2, TrieAccount, EMPTY_ROOT_HASH,
@@ -748,26 +750,48 @@ where
         fields(%max_hot_slots, %max_hot_accounts)
     )]
     pub fn prune(&mut self, max_hot_slots: usize, max_hot_accounts: usize) {
+        self.prune_with_retained_paths(
+            max_hot_slots,
+            max_hot_accounts,
+            SparseTrieRetainedPaths::default(),
+        );
+    }
+
+    /// Prunes account/storage tries according to global LFU retention and additional retained
+    /// paths.
+    ///
+    /// The additional retained paths are unioned with the LFU-selected account and storage paths.
+    /// This lets callers preserve paths that are still needed by an external in-memory overlay
+    /// while allowing cold persisted paths to be pruned.
+    #[cfg(feature = "std")]
+    #[instrument(
+        level = "debug",
+        name = "SparseStateTrie::prune_with_retained_paths",
+        target = "trie::sparse",
+        skip_all,
+        fields(%max_hot_slots, %max_hot_accounts)
+    )]
+    pub fn prune_with_retained_paths(
+        &mut self,
+        max_hot_slots: usize,
+        max_hot_accounts: usize,
+        mut retained_paths: SparseTrieRetainedPaths,
+    ) {
         self.hot_slots_lfu.decay_and_evict(max_hot_slots);
         self.hot_accounts_lfu.decay_and_evict(max_hot_accounts);
-        let retained = self.hot_slots_lfu.retained_slots_by_address();
+        retained_paths.extend_from_lfus(&self.hot_accounts_lfu, &self.hot_slots_lfu);
+        retained_paths.sort_and_dedup();
 
-        let retained_account_paths: Vec<Nibbles> =
-            self.hot_accounts_lfu.keys().map(|k| Nibbles::unpack(*k)).collect();
-
-        let retained_accounts = retained_account_paths.len();
-        let retained_storage_tries = retained.len();
+        let retained_accounts = retained_paths.account_paths.len();
+        let retained_storage_tries = retained_paths.storage_slots.len();
         let total_storage_tries_before = self.storage.tries.len();
 
-        // Prune account and storage tries in parallel using the same LFU-selected set.
+        let SparseTrieRetainedPaths { account_paths, storage_slots } = retained_paths;
+
+        // Prune account and storage tries in parallel using the same retained set.
         let (account_nodes_pruned, storage_tries_evicted) = rayon::join(
-            || {
-                self.state
-                    .as_revealed_mut()
-                    .map(|trie| trie.prune(&retained_account_paths))
-                    .unwrap_or(0)
-            },
-            || self.storage.prune_by_retained_slots(retained),
+            || self.state.as_revealed_mut().map(|trie| trie.prune(&account_paths)).unwrap_or(0),
+            || self.storage.prune_by_retained_slots(storage_slots),
         );
 
         debug!(
@@ -793,6 +817,63 @@ where
                 trie.commit_updates(&updates.storage_nodes, &updates.removed_nodes);
             }
         }
+    }
+}
+
+/// Account and storage paths that should survive sparse trie pruning.
+#[derive(Debug, Default)]
+#[cfg(feature = "std")]
+pub struct SparseTrieRetainedPaths {
+    account_paths: Vec<Nibbles>,
+    storage_slots: B256Map<Vec<Nibbles>>,
+}
+
+#[cfg(feature = "std")]
+impl SparseTrieRetainedPaths {
+    /// Retains the account path for the given hashed address.
+    pub fn retain_account(&mut self, hashed_address: B256) {
+        self.account_paths.push(Nibbles::unpack(hashed_address));
+    }
+
+    /// Retains the storage slot path for the given hashed address and hashed slot.
+    pub fn retain_storage_slot(&mut self, hashed_address: B256, hashed_slot: B256) {
+        self.storage_slots.entry(hashed_address).or_default().push(Nibbles::unpack(hashed_slot));
+    }
+
+    /// Extends the retained paths with every account and storage slot touched by the hashed state.
+    pub fn extend_from_hashed_state(&mut self, hashed_state: &HashedPostStateSorted) {
+        self.account_paths
+            .extend(hashed_state.accounts().iter().map(|(address, _)| Nibbles::unpack(*address)));
+
+        for (address, storage) in hashed_state.account_storages() {
+            self.retain_account(*address);
+            self.storage_slots
+                .entry(*address)
+                .or_default()
+                .extend(storage.storage_slots_ref().iter().map(|(slot, _)| Nibbles::unpack(*slot)));
+        }
+    }
+
+    fn extend_from_lfus(
+        &mut self,
+        hot_accounts: &BucketedLfu<B256>,
+        hot_slots: &BucketedLfu<HotSlotKey>,
+    ) {
+        self.account_paths.extend(hot_accounts.keys().map(|key| Nibbles::unpack(*key)));
+        for key in hot_slots.keys() {
+            self.retain_storage_slot(key.address, key.slot);
+        }
+    }
+
+    fn sort_and_dedup(&mut self) {
+        self.account_paths.sort_unstable();
+        self.account_paths.dedup();
+
+        self.storage_slots.retain(|_, slots| {
+            slots.sort_unstable();
+            slots.dedup();
+            !slots.is_empty()
+        });
     }
 }
 
@@ -902,26 +983,6 @@ struct HotSlotKey {
     slot: B256,
 }
 
-/// Slot-specific helpers for the `BucketedLfu<HotSlotKey>`.
-#[cfg(feature = "std")]
-impl BucketedLfu<HotSlotKey> {
-    /// Returns retained slots grouped by address.
-    fn retained_slots_by_address(&self) -> B256Map<Vec<Nibbles>> {
-        let mut grouped =
-            B256Map::<Vec<Nibbles>>::with_capacity_and_hasher(self.len(), Default::default());
-        for key in self.keys() {
-            grouped.entry(key.address).or_default().push(Nibbles::unpack(key.slot));
-        }
-
-        for slots in grouped.values_mut() {
-            slots.sort_unstable();
-            slots.dedup();
-        }
-
-        grouped
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -938,8 +999,8 @@ mod tests {
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
-        BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, LeafNode, RlpNode, StorageMultiProof,
-        TrieMask, TrieNodeV2,
+        BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, HashedStorageSorted, LeafNode, RlpNode,
+        StorageMultiProof, TrieMask, TrieNodeV2,
     };
 
     /// Create a leaf key (suffix) with given nibbles padded with zeros to reach `total_len`.
@@ -1091,6 +1152,98 @@ mod tests {
             sparse.hot_slots_lfu.keys().copied().collect::<Vec<_>>(),
             vec![HotSlotKey { address: account, slot }]
         );
+    }
+
+    #[test]
+    fn retained_paths_extend_from_hashed_state() {
+        let account = B256::with_last_byte(0x01);
+        let storage_account = B256::with_last_byte(0x02);
+        let slot = B256::with_last_byte(0x03);
+        let hashed_state = HashedPostStateSorted::new(
+            vec![(account, Some(Account::default()))],
+            B256Map::from_iter([(
+                storage_account,
+                HashedStorageSorted { storage_slots: vec![(slot, U256::from(1))], wiped: false },
+            )]),
+        );
+
+        let mut retained_paths = SparseTrieRetainedPaths::default();
+        retained_paths.extend_from_hashed_state(&hashed_state);
+        retained_paths.sort_and_dedup();
+
+        assert_eq!(
+            retained_paths.account_paths,
+            vec![Nibbles::unpack(account), Nibbles::unpack(storage_account)]
+        );
+        assert_eq!(retained_paths.storage_slots[&storage_account], vec![Nibbles::unpack(slot)]);
+    }
+
+    #[test]
+    fn prune_with_retained_paths_keeps_overlay_account_and_storage() {
+        let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
+
+        let account = B256::ZERO;
+        let slot = B256::ZERO;
+        let account_path = leaf_key([0x0], 64);
+        let storage_path = leaf_key([0x0], 64);
+
+        let leaf_value = alloy_rlp::encode(TrieAccount::default());
+        let leaf_0 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
+            leaf_key([], 63),
+            leaf_value.clone(),
+        )));
+        let leaf_1 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
+            leaf_key([], 63),
+            leaf_value.clone(),
+        )));
+
+        let subtree = || {
+            ProofNodes::from_iter([
+                (
+                    Nibbles::default(),
+                    alloy_rlp::encode(TrieNodeV2::Branch(BranchNodeV2 {
+                        key: Nibbles::default(),
+                        stack: vec![RlpNode::from_rlp(&leaf_0), RlpNode::from_rlp(&leaf_1)],
+                        state_mask: TrieMask::new(0b11),
+                        branch_rlp_node: None,
+                    }))
+                    .into(),
+                ),
+                (Nibbles::from_nibbles([0x0]), leaf_0.clone().into()),
+                (Nibbles::from_nibbles([0x1]), leaf_1.clone().into()),
+            ])
+        };
+
+        let multiproof = MultiProof {
+            account_subtree: subtree(),
+            storages: HashMap::from_iter([(
+                account,
+                StorageMultiProof {
+                    root: B256::ZERO,
+                    subtree: subtree(),
+                    branch_node_masks: Default::default(),
+                },
+            )]),
+            ..Default::default()
+        };
+
+        sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
+        sparse.update_account_storage_root(account).unwrap();
+        sparse.root().unwrap();
+
+        let mut retained_paths = SparseTrieRetainedPaths::default();
+        retained_paths.retain_account(account);
+        retained_paths.retain_storage_slot(account, slot);
+        sparse.prune_with_retained_paths(0, 0, retained_paths);
+
+        assert!(matches!(
+            sparse.state_trie_ref().unwrap().find_leaf(&account_path, None),
+            Ok(LeafLookup::Exists)
+        ));
+        assert!(matches!(
+            sparse.storage_trie_ref(&account).unwrap().find_leaf(&storage_path, None),
+            Ok(LeafLookup::Exists)
+        ));
     }
 
     #[test]

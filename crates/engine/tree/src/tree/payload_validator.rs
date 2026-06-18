@@ -56,6 +56,7 @@ use alloy_primitives::{map::B256Set, B256};
 use reth_tasks::LazyHandle;
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
+use reth_trie_sparse::SparseTrieRetainedPaths;
 
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
 use reth_chain_state::{
@@ -2269,6 +2270,10 @@ where
 {
     fn wait_for_caches(&self) -> CacheWaitDurations {
         self.payload_processor.wait_for_caches()
+    }
+
+    fn prune_sparse_trie_cache(&self, retained_paths: SparseTrieRetainedPaths) {
+        self.payload_processor.prune_sparse_trie_cache(retained_paths);
     }
 }
 
