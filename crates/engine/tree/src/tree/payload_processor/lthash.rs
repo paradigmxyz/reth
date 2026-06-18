@@ -23,6 +23,7 @@ use std::{
     collections::HashMap,
     sync::{mpsc, Arc},
 };
+use tracing::debug_span;
 
 const LTHASH_PARALLEL_EXPAND_THRESHOLD: usize = 64;
 const LTHASH_DIRTY_BATCH_SIZE: usize = 256;
@@ -297,16 +298,52 @@ impl LthashTask {
             if !did_work {
                 crossbeam_channel::select! {
                     recv(self.updates) -> message => {
-                        let message = message.map_err(|_| LthashError::UpdatesClosed)?;
+                        let message = match message {
+                            Ok(message) => message,
+                            Err(_) => {
+                                tracing::debug!(
+                                    target: "engine::tree::payload_processor::lthash",
+                                    pending_old_reads = self.state.pending_old_reads(),
+                                    "lthash update channel closed while blocked"
+                                );
+                                return Err(LthashError::UpdatesClosed)
+                            }
+                        };
+                        tracing::debug!(
+                            target: "engine::tree::payload_processor::lthash",
+                            kind = lthash_message_kind(&message),
+                            pending_old_reads = self.state.pending_old_reads(),
+                            "lthash blocked select received update"
+                        );
                         if self.handle_message(message)? {
                             finished = true;
                         }
                     }
                     recv(self.old_values) -> result => {
                         match result {
-                            Ok(result) => self.state.apply_old_result(result)?,
-                            Err(_) if self.state.pending_old_reads() == 0 => {}
+                            Ok(result) => {
+                                tracing::debug!(
+                                    target: "engine::tree::payload_processor::lthash",
+                                    kind = old_value_result_kind(&result),
+                                    error = old_value_result_is_error(&result),
+                                    pending_old_reads = self.state.pending_old_reads(),
+                                    "lthash blocked select received old value"
+                                );
+                                self.state.apply_old_result(result)?
+                            }
+                            Err(_) if self.state.pending_old_reads() == 0 => {
+                                tracing::debug!(
+                                    target: "engine::tree::payload_processor::lthash",
+                                    pending_old_reads = 0,
+                                    "lthash old-value channel closed while blocked"
+                                );
+                            }
                             Err(_) => {
+                                tracing::debug!(
+                                    target: "engine::tree::payload_processor::lthash",
+                                    pending_old_reads = self.state.pending_old_reads(),
+                                    "lthash old-value channel closed with pending reads"
+                                );
                                 return Err(LthashError::OldValuesClosed {
                                     pending: self.state.pending_old_reads(),
                                 });
@@ -372,6 +409,28 @@ impl LthashTask {
         }
 
         Ok(())
+    }
+}
+
+fn lthash_message_kind(message: &LthashMessage) -> &'static str {
+    match message {
+        LthashMessage::AccountTouched { .. } => "account",
+        LthashMessage::StorageTouched { .. } => "storage",
+        LthashMessage::FinishedUpdates => "finished",
+    }
+}
+
+fn old_value_result_kind(result: &StateIoReadResult) -> &'static str {
+    match result {
+        StateIoReadResult::Account { .. } => "account",
+        StateIoReadResult::Storage { .. } => "storage",
+    }
+}
+
+fn old_value_result_is_error(result: &StateIoReadResult) -> bool {
+    match result {
+        StateIoReadResult::Account { account, .. } => account.is_err(),
+        StateIoReadResult::Storage { value, .. } => value.is_err(),
     }
 }
 
@@ -554,6 +613,17 @@ impl LthashState {
             return 0
         }
 
+        let span = debug_span!(
+            target: "engine::tree::payload_processor::lthash",
+            "process_dirty_accounts",
+            max,
+            tracked = self.accounts.len(),
+            pending_old_reads = self.pending_old_reads,
+            dirty = tracing::field::Empty,
+            elements = tracing::field::Empty,
+        )
+        .entered();
+
         let mut dirty = Vec::new();
         for (&hashed_address, entry) in &mut self.accounts {
             if dirty.len() == max {
@@ -571,6 +641,8 @@ impl LthashState {
         }
 
         let elements = dirty.iter().filter_map(|(_, element)| *element).collect::<Vec<_>>();
+        span.record("dirty", dirty.len());
+        span.record("elements", elements.len());
         add_account_elements(&mut self.accumulator, &elements);
 
         for (hashed_address, element) in dirty.iter().copied() {
@@ -587,6 +659,17 @@ impl LthashState {
             return 0
         }
 
+        let span = debug_span!(
+            target: "engine::tree::payload_processor::lthash",
+            "process_dirty_storages",
+            max,
+            tracked = self.storages.len(),
+            pending_old_reads = self.pending_old_reads,
+            dirty = tracing::field::Empty,
+            elements = tracing::field::Empty,
+        )
+        .entered();
+
         let mut dirty = Vec::new();
         for (&(hashed_address, hashed_slot), entry) in &mut self.storages {
             if dirty.len() == max {
@@ -602,6 +685,8 @@ impl LthashState {
         }
 
         let elements = dirty.iter().filter_map(|(_, element)| *element).collect::<Vec<_>>();
+        span.record("dirty", dirty.len());
+        span.record("elements", elements.len());
         add_storage_elements(&mut self.accumulator, &elements);
 
         for ((hashed_address, hashed_slot), element) in dirty.iter().copied() {
@@ -647,6 +732,14 @@ fn add_account_elements(
     accumulator: &mut LthashAccumulator,
     elements: &[[u8; LTHASH_ACCOUNT_ELEMENT_LEN]],
 ) {
+    let _span = debug_span!(
+        target: "engine::tree::payload_processor::lthash",
+        "add_account_elements",
+        elements = elements.len(),
+        parallel = elements.len() >= LTHASH_PARALLEL_EXPAND_THRESHOLD,
+        threshold = LTHASH_PARALLEL_EXPAND_THRESHOLD,
+    )
+    .entered();
     add_elements(accumulator, elements);
 }
 
@@ -654,6 +747,14 @@ fn add_storage_elements(
     accumulator: &mut LthashAccumulator,
     elements: &[[u8; LTHASH_STORAGE_ELEMENT_LEN]],
 ) {
+    let _span = debug_span!(
+        target: "engine::tree::payload_processor::lthash",
+        "add_storage_elements",
+        elements = elements.len(),
+        parallel = elements.len() >= LTHASH_PARALLEL_EXPAND_THRESHOLD,
+        threshold = LTHASH_PARALLEL_EXPAND_THRESHOLD,
+    )
+    .entered();
     add_elements(accumulator, elements);
 }
 
