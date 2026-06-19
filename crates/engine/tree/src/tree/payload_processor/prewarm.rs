@@ -265,7 +265,7 @@ where
     ///
     /// Saves the warmed caches back into the shared slot after prewarming completes.
     ///
-    /// This consumes the `SavedCache` held by the task, which releases its usage guard and allows
+    /// This consumes the `SavedCache` held by the task, which releases its cache handle and allows
     /// the new, warmed cache to be inserted.
     ///
     /// This method is called from `run()` only after all execution tasks are complete.
@@ -287,8 +287,8 @@ where
         if let Some(saved_cache) = saved_cache {
             debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
             execution_cache.update_with_guard(|cached| {
-                // consumes the `SavedCache` held by the prewarming task, which releases its usage
-                // guard
+                // consumes the `SavedCache` held by the prewarming task, which releases its cache
+                // handle
                 let caches = saved_cache.cache().clone();
                 let new_cache = SavedCache::new(hash, caches);
 
