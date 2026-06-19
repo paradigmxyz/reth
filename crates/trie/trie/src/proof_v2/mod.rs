@@ -19,6 +19,7 @@ use reth_trie_common::{
     prefix_set::PrefixSet, BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2,
     ProofV2Target, RlpNode, TrieNodeV2,
 };
+use smallvec::SmallVec;
 use std::cmp::Ordering;
 use tracing::{error, instrument, trace};
 
@@ -84,7 +85,7 @@ pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
     /// We are generally able to re-use these buffers across different branch nodes for the
     /// duration of a proof calculation, but occasionally we will lose one when a branch
     /// node is returned as a `ProofTrieNode`.
-    rlp_nodes_bufs: Vec<Vec<RlpNode>>,
+    rlp_nodes_bufs: SmallVec<[Vec<RlpNode>; 8]>,
     /// Re-usable byte buffer, used for RLP encoding.
     rlp_encode_buf: Vec<u8>,
     /// Prefix set for tracking changed keys.
@@ -102,7 +103,7 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
             child_stack: Vec::<_>::with_capacity(64),
             cached_branch_stack: Vec::<_>::with_capacity(64),
             retained_proofs: Vec::<_>::with_capacity(32),
-            rlp_nodes_bufs: Vec::<_>::with_capacity(8),
+            rlp_nodes_bufs: SmallVec::new(),
             rlp_encode_buf: Vec::<_>::with_capacity(RLP_ENCODE_BUF_SIZE),
             prefix_set: PrefixSet::default(),
         }
