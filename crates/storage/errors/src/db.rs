@@ -115,6 +115,8 @@ pub enum DatabaseWriteOperation {
     CursorAppend,
     /// Upsert cursor.
     CursorUpsert,
+    /// Put current cursor.
+    CursorPutCurrent,
     /// Insert cursor.
     CursorInsert,
     /// Append duplicate cursor.

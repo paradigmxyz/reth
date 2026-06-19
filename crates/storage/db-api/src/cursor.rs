@@ -115,6 +115,11 @@ pub trait DbCursorRW<T: Table> {
     /// present, the operation will result in an error.
     fn insert(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError>;
 
+    /// Replace the value at the cursor's current position.
+    ///
+    /// The cursor must already be positioned at `key`.
+    fn put_current(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError>;
+
     /// Append value to next cursor item.
     ///
     /// This is efficient for pre-sorted data. If the data is not pre-sorted, use

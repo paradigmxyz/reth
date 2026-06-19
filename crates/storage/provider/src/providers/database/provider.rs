@@ -3082,6 +3082,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
+    const ACCOUNT_TRIE_SCAN_MIN_UPDATES: usize = 8;
+
     fn write_account_trie_updates<A: TrieTableAdapter>(
         tx: &TX,
         trie_updates: &TrieUpdatesSorted,
@@ -3091,8 +3093,48 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         TX: DbTxMut,
     {
         let mut account_trie_cursor = tx.cursor_write::<A::AccountTrieTable>()?;
+        let account_nodes = trie_updates.account_nodes_ref();
+
+        if account_nodes.len() >= Self::ACCOUNT_TRIE_SCAN_MIN_UPDATES {
+            let mut db_entry = if let Some((first_key, _)) = account_nodes.first() {
+                account_trie_cursor.seek(A::AccountKey::from(*first_key))?
+            } else {
+                None
+            };
+
+            for (key, updated_node) in account_nodes {
+                let nibbles = A::AccountKey::from(*key);
+                while db_entry.as_ref().is_some_and(|(db_key, _)| db_key < &nibbles) {
+                    db_entry = account_trie_cursor.next()?;
+                }
+
+                let exact = db_entry.as_ref().is_some_and(|(db_key, _)| db_key == &nibbles);
+                match updated_node {
+                    Some(node) => {
+                        if !key.is_empty() {
+                            *num_entries += 1;
+                            if exact {
+                                account_trie_cursor.put_current(nibbles, node)?;
+                            } else {
+                                account_trie_cursor.upsert(nibbles, node)?;
+                            }
+                            db_entry = account_trie_cursor.next()?;
+                        }
+                    }
+                    None => {
+                        *num_entries += 1;
+                        if exact {
+                            account_trie_cursor.delete_current()?;
+                            db_entry = account_trie_cursor.next()?;
+                        }
+                    }
+                }
+            }
+            return Ok(())
+        }
+
         // Process sorted account nodes
-        for (key, updated_node) in trie_updates.account_nodes_ref() {
+        for (key, updated_node) in account_nodes {
             let nibbles = A::AccountKey::from(*key);
             match updated_node {
                 Some(node) => {
@@ -4464,6 +4506,72 @@ mod tests {
         assert_eq!(storage_entries2.len(), 0, "Storage address2 should be empty after wipe");
 
         provider_rw.commit().unwrap();
+    }
+
+    #[test]
+    fn test_write_account_trie_updates_sorted_scan_path() {
+        use reth_trie::{updates::TrieUpdatesSorted, BranchNodeCompact};
+
+        fn node(mask: u16) -> BranchNodeCompact {
+            BranchNodeCompact::new(mask, 0, 0, vec![], None)
+        }
+
+        fn key(nibble: u8) -> Nibbles {
+            Nibbles::from_nibbles([nibble])
+        }
+
+        let factory = create_test_provider_factory();
+        let provider_rw = factory.provider_rw().unwrap();
+
+        {
+            let mut cursor = provider_rw.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
+            for (nibble, mask) in [
+                (0x1, 0x0011),
+                (0x3, 0x0033),
+                (0x5, 0x0055),
+                (0x7, 0x0077),
+                (0x9, 0x0099),
+                (0xb, 0x00bb),
+            ] {
+                cursor.upsert(StoredNibbles(key(nibble)), &node(mask)).unwrap();
+            }
+        }
+
+        let account_nodes = vec![
+            (key(0x1), Some(node(0x1011))),
+            (key(0x2), Some(node(0x1022))),
+            (key(0x3), None),
+            (key(0x4), Some(node(0x1044))),
+            (key(0x5), Some(node(0x1055))),
+            (key(0x6), Some(node(0x1066))),
+            (key(0x7), None),
+            (key(0x8), Some(node(0x1088))),
+            (key(0x9), Some(node(0x1099))),
+            (key(0xa), Some(node(0x10aa))),
+        ];
+        let trie_updates = TrieUpdatesSorted::new(account_nodes, B256Map::default());
+
+        let num_entries = provider_rw.write_trie_updates_sorted(&trie_updates).unwrap();
+        assert_eq!(num_entries, 10);
+
+        let mut cursor = provider_rw.tx_ref().cursor_read::<tables::AccountsTrie>().unwrap();
+        for (nibble, mask) in [
+            (0x1, 0x1011),
+            (0x2, 0x1022),
+            (0x4, 0x1044),
+            (0x5, 0x1055),
+            (0x6, 0x1066),
+            (0x8, 0x1088),
+            (0x9, 0x1099),
+            (0xa, 0x10aa),
+            (0xb, 0x00bb),
+        ] {
+            let entry = cursor.seek_exact(StoredNibbles(key(nibble))).unwrap().unwrap();
+            assert_eq!(entry.1.state_mask, reth_trie::TrieMask::new(mask), "key {nibble:x}");
+        }
+
+        assert!(cursor.seek_exact(StoredNibbles(key(0x3))).unwrap().is_none());
+        assert!(cursor.seek_exact(StoredNibbles(key(0x7))).unwrap().is_none());
     }
 
     #[test]
