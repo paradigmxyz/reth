@@ -56,7 +56,9 @@ pub mod prewarm;
 pub mod receipt_root_task;
 pub mod sparse_trie;
 
-use preserved_sparse_trie::{PreservedSparseTrie, SharedPreservedSparseTrie};
+use preserved_sparse_trie::{
+    PreservedSparseTrie, SharedPreservedSparseTrie, SparseTriePruneOutcome, SparseTriePruneRequest,
+};
 
 /// Default node capacity for shrinking the sparse trie. This is used to limit the number of trie
 /// nodes in allocated sparse tries.
@@ -224,30 +226,35 @@ where
 
         let sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
-        let max_hot_slots = self.sparse_trie_max_hot_slots;
-        let max_hot_accounts = self.sparse_trie_max_hot_accounts;
         let executor = self.executor.clone();
+        sparse_trie.queue_prune(SparseTriePruneRequest::new(
+            self.sparse_trie_max_hot_slots,
+            self.sparse_trie_max_hot_accounts,
+            SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
+            SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
+            retained_paths,
+        ));
 
         self.executor.spawn_blocking_named("prune-sparse-trie", move || {
             let start = Instant::now();
-            let outcome = sparse_trie.prune(
-                max_hot_slots,
-                max_hot_accounts,
-                SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
-                SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
-                retained_paths,
-            );
+            let outcome = sparse_trie.prune_pending();
             trie_metrics
                 .into_trie_for_reuse_duration_histogram
                 .record(start.elapsed().as_secs_f64());
-            if let Some(outcome) = outcome {
-                trie_metrics.sparse_trie_retained_memory_bytes.set(outcome.memory_size as f64);
-                trie_metrics
-                    .sparse_trie_retained_storage_tries
-                    .set(outcome.retained_storage_tries as f64);
-                executor.spawn_drop(outcome.deferred);
-            }
+            record_sparse_trie_prune_outcome(&trie_metrics, &executor, outcome);
         });
+    }
+}
+
+fn record_sparse_trie_prune_outcome(
+    trie_metrics: &MultiProofTaskMetrics,
+    executor: &Runtime,
+    outcome: Option<SparseTriePruneOutcome>,
+) {
+    if let Some(outcome) = outcome {
+        trie_metrics.sparse_trie_retained_memory_bytes.set(outcome.memory_size as f64);
+        trie_metrics.sparse_trie_retained_storage_tries.set(outcome.retained_storage_tries as f64);
+        executor.spawn_drop(outcome.deferred);
     }
 }
 
@@ -701,8 +708,14 @@ where
             trie_metrics
                 .sparse_trie_cache_wait_duration_histogram
                 .record(start.elapsed().as_secs_f64());
+            record_sparse_trie_prune_outcome(
+                &trie_metrics,
+                &executor,
+                preserved.prune_outcome,
+            );
 
             let mut sparse_state_trie = preserved
+                .trie
                 .map(|preserved| preserved.into_trie_for(parent_state_root))
                 .unwrap_or_else(|| {
                     debug!(
@@ -752,8 +765,9 @@ where
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
-                guard.store(PreservedSparseTrie::cleared(trie));
+                let prune_outcome = guard.store(PreservedSparseTrie::cleared(trie));
                 drop(guard);
+                record_sparse_trie_prune_outcome(&trie_metrics, &executor, prune_outcome);
                 executor.spawn_drop(deferred);
                 return;
             }
@@ -762,7 +776,7 @@ where
             // A failed computation may have left the trie in a partially updated state.
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
-            let deferred = if let Some(result) = task_result {
+            let (deferred, prune_outcome) = if let Some(result) = task_result {
                 let start = Instant::now();
                 let (trie, deferred) = task.into_trie_for_reuse(&result.trie_updates);
                 trie_metrics
@@ -774,8 +788,9 @@ where
                 trie_metrics
                     .sparse_trie_retained_storage_tries
                     .set(trie.retained_storage_tries_count() as f64);
-                guard.store(PreservedSparseTrie::anchored(trie, result.state_root));
-                deferred
+                let prune_outcome =
+                    guard.store(PreservedSparseTrie::anchored(trie, result.state_root));
+                (deferred, prune_outcome)
             } else {
                 debug!(
                     target: "engine::tree::payload_processor",
@@ -785,10 +800,11 @@ where
                     SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                     SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                 );
-                guard.store(PreservedSparseTrie::cleared(trie));
-                deferred
+                let prune_outcome = guard.store(PreservedSparseTrie::cleared(trie));
+                (deferred, prune_outcome)
             };
             drop(guard);
+            record_sparse_trie_prune_outcome(&trie_metrics, &executor, prune_outcome);
             executor.spawn_drop(deferred);
         });
     }
