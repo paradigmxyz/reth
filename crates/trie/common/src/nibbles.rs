@@ -206,8 +206,7 @@ impl reth_codecs::Compact for PackedStoredNibbles {
 
     fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let nibble_count = buf[32] as usize;
-        let packed_len = nibble_count.div_ceil(2);
-        (Self(Nibbles::unpack(&buf[..packed_len]).slice(..nibble_count)), &buf[33..])
+        (Self(unpack_packed_nibbles(buf, nibble_count)), &buf[33..])
     }
 }
 
@@ -290,13 +289,30 @@ impl reth_codecs::Compact for PackedStoredNibblesSubKey {
 
     fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let nibble_count = buf[32] as usize;
-        let packed_len = nibble_count.div_ceil(2);
-        (Self(Nibbles::unpack(&buf[..packed_len]).slice(..nibble_count)), &buf[33..])
+        (Self(unpack_packed_nibbles(buf, nibble_count)), &buf[33..])
     }
 }
 
 #[cfg(any(test, feature = "reth-codec"))]
 reth_codecs::impl_compression_for_compact!(PackedStoredNibblesSubKey);
+
+#[cfg(any(test, feature = "reth-codec"))]
+#[inline]
+fn unpack_packed_nibbles(buf: &[u8], nibble_count: usize) -> Nibbles {
+    debug_assert!(nibble_count <= 64);
+
+    let mut nibbles = Vec::with_capacity(nibble_count);
+    for &byte in &buf[..nibble_count / 2] {
+        nibbles.push(byte >> 4);
+        nibbles.push(byte & 0x0f);
+    }
+
+    if nibble_count % 2 != 0 {
+        nibbles.push(buf[nibble_count / 2] >> 4);
+    }
+
+    Nibbles::from_nibbles_unchecked(nibbles)
+}
 
 #[cfg(test)]
 mod tests {
