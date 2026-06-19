@@ -17,14 +17,12 @@ pub(super) type SparseTrie = SparseStateTrie<ConfigurableSparseTrie, Configurabl
 /// This is stored in [`PayloadProcessor`](super::PayloadProcessor) and cloned to pass to
 /// [`SparseTrieCacheTask`](super::sparse_trie::SparseTrieCacheTask) for trie reuse.
 #[derive(Debug, Default, Clone)]
-pub(super) struct SharedPreservedSparseTrie(Arc<Mutex<PreservedSparseTrieState>>);
+pub(super) struct SharedPreservedSparseTrie(Arc<Mutex<Option<PreservedSparseTrie>>>);
 
 impl SharedPreservedSparseTrie {
     /// Takes the preserved trie if present, leaving `None` in its place.
-    pub(super) fn take(&self) -> TakenPreservedSparseTrie {
-        let mut state = self.0.lock();
-        let prune_outcome = state.prune_pending();
-        TakenPreservedSparseTrie { trie: state.trie.take(), prune_outcome }
+    pub(super) fn take(&self) -> Option<PreservedSparseTrie> {
+        self.0.lock().take()
     }
 
     /// Acquires a guard that blocks `take()` until dropped.
@@ -55,81 +53,24 @@ impl SharedPreservedSparseTrie {
         elapsed
     }
 
-    /// Queues pruning for the preserved sparse trie.
-    ///
-    /// The request is recorded synchronously so the next `take()` or `store()` is guaranteed to
-    /// apply it if the background pruning task has not already done so.
-    pub(super) fn queue_prune(&self, request: SparseTriePruneRequest) {
-        self.0.lock().pending_prune = Some(request);
-    }
-
-    /// Applies any queued prune request to the currently stored trie.
-    pub(super) fn prune_pending(&self) -> Option<SparseTriePruneOutcome> {
-        self.0.lock().prune_pending()
-    }
-}
-
-#[derive(Debug, Default)]
-struct PreservedSparseTrieState {
-    trie: Option<PreservedSparseTrie>,
-    pending_prune: Option<SparseTriePruneRequest>,
-}
-
-impl PreservedSparseTrieState {
-    fn prune_pending(&mut self) -> Option<SparseTriePruneOutcome> {
-        let trie = self.trie.as_mut()?.trie_mut();
-        let request = self.pending_prune.take()?;
-        Some(request.apply(trie))
-    }
-}
-
-/// Result of taking a preserved sparse trie.
-pub(super) struct TakenPreservedSparseTrie {
-    /// The preserved trie, if one was available.
-    pub(super) trie: Option<PreservedSparseTrie>,
-    /// Outcome from applying pending pruning before the trie was taken.
-    pub(super) prune_outcome: Option<SparseTriePruneOutcome>,
-}
-
-/// Request to prune a preserved sparse trie.
-#[derive(Debug)]
-pub(super) struct SparseTriePruneRequest {
-    max_hot_slots: usize,
-    max_hot_accounts: usize,
-    max_nodes_capacity: usize,
-    max_values_capacity: usize,
-    retained_paths: SparseTrieRetainedPaths,
-}
-
-impl SparseTriePruneRequest {
-    pub(super) fn new(
+    /// Prunes the preserved sparse trie, retaining LFU-hot paths and the provided overlay paths.
+    pub(super) fn prune(
+        &self,
         max_hot_slots: usize,
         max_hot_accounts: usize,
         max_nodes_capacity: usize,
         max_values_capacity: usize,
         retained_paths: SparseTrieRetainedPaths,
-    ) -> Self {
-        Self {
-            max_hot_slots,
-            max_hot_accounts,
-            max_nodes_capacity,
-            max_values_capacity,
-            retained_paths,
-        }
-    }
-
-    fn apply(self, trie: &mut SparseTrie) -> SparseTriePruneOutcome {
-        trie.prune_with_retained_paths(
-            self.max_hot_slots,
-            self.max_hot_accounts,
-            self.retained_paths,
-        );
-        trie.shrink_to(self.max_nodes_capacity, self.max_values_capacity);
-        SparseTriePruneOutcome {
+    ) -> Option<SparseTriePruneOutcome> {
+        let mut guard = self.0.lock();
+        let trie = guard.as_mut()?.trie_mut();
+        trie.prune_with_retained_paths(max_hot_slots, max_hot_accounts, retained_paths);
+        trie.shrink_to(max_nodes_capacity, max_values_capacity);
+        Some(SparseTriePruneOutcome {
             memory_size: trie.memory_size(),
             retained_storage_tries: trie.retained_storage_tries_count(),
             deferred: trie.take_deferred_drops(),
-        }
+        })
     }
 }
 
@@ -145,13 +86,12 @@ pub(super) struct SparseTriePruneOutcome {
 
 /// Guard that holds the lock on the preserved trie.
 /// While held, `take()` will block. Call `store()` to save the trie before dropping.
-pub(super) struct PreservedTrieGuard<'a>(parking_lot::MutexGuard<'a, PreservedSparseTrieState>);
+pub(super) struct PreservedTrieGuard<'a>(parking_lot::MutexGuard<'a, Option<PreservedSparseTrie>>);
 
 impl PreservedTrieGuard<'_> {
     /// Stores a preserved trie for later reuse.
-    pub(super) fn store(&mut self, trie: PreservedSparseTrie) -> Option<SparseTriePruneOutcome> {
-        self.0.trie = Some(trie);
-        self.0.prune_pending()
+    pub(super) fn store(&mut self, trie: PreservedSparseTrie) {
+        self.0.replace(trie);
     }
 }
 
@@ -232,51 +172,5 @@ impl PreservedSparseTrie {
         match self {
             Self::Anchored { trie, .. } | Self::Cleared { trie } => trie,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn prune_request() -> SparseTriePruneRequest {
-        SparseTriePruneRequest::new(0, 0, 1, 1, SparseTrieRetainedPaths::default())
-    }
-
-    fn cleared_trie() -> PreservedSparseTrie {
-        PreservedSparseTrie::cleared(SparseTrie::default())
-    }
-
-    #[test]
-    fn queued_prune_applies_when_trie_is_stored() {
-        let shared = SharedPreservedSparseTrie::default();
-
-        shared.queue_prune(prune_request());
-        assert!(shared.prune_pending().is_none(), "missing trie should leave prune queued");
-
-        let mut guard = shared.lock();
-        let outcome = guard.store(cleared_trie());
-        drop(guard);
-
-        assert!(outcome.is_some(), "queued prune should apply while storing the trie");
-
-        let taken = shared.take();
-        assert!(taken.trie.is_some(), "stored trie should remain available");
-        assert!(taken.prune_outcome.is_none(), "queued prune should not apply twice");
-    }
-
-    #[test]
-    fn queued_prune_applies_before_taking_trie() {
-        let shared = SharedPreservedSparseTrie::default();
-
-        let mut guard = shared.lock();
-        assert!(guard.store(cleared_trie()).is_none());
-        drop(guard);
-
-        shared.queue_prune(prune_request());
-        let taken = shared.take();
-
-        assert!(taken.trie.is_some(), "stored trie should still be taken");
-        assert!(taken.prune_outcome.is_some(), "queued prune should apply before take");
     }
 }
