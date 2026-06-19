@@ -64,19 +64,6 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
         retain_updates: bool,
     ) -> SparseTrieResult<()>;
 
-    /// Configures the trie to have the given root node revealed.
-    ///
-    /// See [`Self::set_root`] for more details.
-    fn with_root(
-        mut self,
-        root: TrieNodeV2,
-        masks: Option<BranchNodeMasks>,
-        retain_updates: bool,
-    ) -> SparseTrieResult<Self> {
-        self.set_root(root, masks, retain_updates)?;
-        Ok(self)
-    }
-
     /// Configures the trie to retain information about updates.
     ///
     /// If `retain_updates` is true, the trie will record branch node updates
@@ -88,34 +75,12 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// * `retain_updates` - Whether to track updates
     fn set_updates(&mut self, retain_updates: bool);
 
-    /// Configures the trie to retain information about updates.
-    ///
-    /// See [`Self::set_updates`] for more details.
-    fn with_updates(mut self, retain_updates: bool) -> Self {
-        self.set_updates(retain_updates);
-        self
-    }
-
     /// Reserves capacity for additional trie nodes.
     ///
     /// # Arguments
     ///
     /// * `additional` - The number of additional trie nodes to reserve capacity for.
     fn reserve_nodes(&mut self, _additional: usize) {}
-
-    /// The single-node version of `reveal_nodes`.
-    ///
-    /// # Returns
-    ///
-    /// `Ok(())` if successful, or an error if the node was not revealed.
-    fn reveal_node(
-        &mut self,
-        path: Nibbles,
-        node: TrieNodeV2,
-        masks: Option<BranchNodeMasks>,
-    ) -> SparseTrieResult<()> {
-        self.reveal_nodes(&mut [ProofTrieNodeV2 { path, node, masks }])
-    }
 
     /// Reveals one or more trie nodes if they have not been revealed before.
     ///
@@ -231,14 +196,6 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// This is useful for reusing the trie without needing to reallocate memory.
     fn clear(&mut self);
 
-    /// Shrink the capacity of the sparse trie's node storage to the given size.
-    /// This will reduce memory usage if the current capacity is higher than the given size.
-    fn shrink_nodes_to(&mut self, size: usize);
-
-    /// Shrink the capacity of the sparse trie's value storage to the given size.
-    /// This will reduce memory usage if the current capacity is higher than the given size.
-    fn shrink_values_to(&mut self, size: usize);
-
     /// Returns a cheap O(1) size hint for the trie representing the count of revealed
     /// (non-Hash) nodes.
     ///
@@ -299,13 +256,6 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
         updates: &mut B256Map<LeafUpdate>,
         proof_required_fn: impl FnMut(B256, u8),
     ) -> SparseTrieResult<()>;
-
-    /// Commits the updated nodes to internal trie state.
-    fn commit_updates(
-        &mut self,
-        updated: &HashMap<Nibbles, BranchNodeCompact>,
-        removed: &HashSet<Nibbles>,
-    );
 }
 
 /// Tracks modifications to the sparse trie structure.

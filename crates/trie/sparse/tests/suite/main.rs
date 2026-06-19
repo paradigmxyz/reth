@@ -6,12 +6,11 @@
 //! Tests are organized into modules by which `SparseTrie` method is the most likely root cause
 //! of failure for each test case:
 //!
-//! - [`set_root`]: Tests for `set_root` / `with_root`
-//! - [`reveal_nodes`]: Tests for `reveal_nodes` / `reveal_node`
+//! - [`set_root`]: Tests for `set_root`
+//! - [`reveal_nodes`]: Tests for `reveal_nodes`
 //! - [`update_leaves`]: Tests for `update_leaves`, including insert, modify, and remove
 //! - [`root`]: Tests for `root()` hash computation
 //! - [`take_updates`]: Tests for `take_updates`
-//! - [`commit_updates`]: Tests for `commit_updates`
 //! - [`prune`]: Tests for `prune`
 //! - [`wipe_clear`]: Tests for `wipe` and `clear`
 //! - [`get_leaf_value`]: Tests for `get_leaf_value`
@@ -25,12 +24,8 @@ use alloy_trie::EMPTY_ROOT_HASH;
 use reth_trie::test_utils::TrieTestHarness;
 use reth_trie_common::{Nibbles, ProofV2Target, TrieNodeV2};
 use reth_trie_sparse::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie};
-use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    iter::once,
-};
+use std::{collections::BTreeMap, iter::once};
 
-mod commit_updates;
 mod find_leaf;
 mod get_leaf_value;
 mod lifecycle;
@@ -194,7 +189,6 @@ macro_rules! sparse_trie_tests {
 // Re-export test functions from submodules for the macro
 // ---------------------------------------------------------------------------
 
-use commit_updates::*;
 use find_leaf::*;
 use get_leaf_value::*;
 use lifecycle::*;
@@ -278,10 +272,6 @@ sparse_trie_tests! {
     test_take_updates_no_duplicate_updated_and_removed_nodes,
     test_take_updates_cross_cancellation_across_root_calls,
 
-    // commit_updates
-    test_commit_updates_syncs_branch_masks,
-    test_commit_updates_empty_is_noop,
-
     // prune
     test_prune_retains_specified_leaves,
     test_prune_reduces_node_count,
@@ -317,8 +307,8 @@ sparse_trie_tests! {
     test_size_hint_reflects_leaf_count,
 
     // lifecycle (integration tests)
-    test_full_lifecycle_update_root_take_commit,
-    test_multi_round_update_commit_prune_cycle,
+    test_full_lifecycle_update_root_take_updates,
+    test_multi_round_update_take_updates_prune_cycle,
     test_reveal_update_root_basic_lifecycle,
     test_incremental_reveal_and_update_with_retry,
     test_full_block_processing_lifecycle,

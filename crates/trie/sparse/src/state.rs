@@ -517,33 +517,6 @@ where
         self.storage.tries.len() + self.storage.cleared_tries.len()
     }
 
-    /// Shrinks the capacity of the sparse trie to the given node and value sizes.
-    ///
-    /// This helps reduce memory usage when the trie has excess capacity.
-    /// Distributes capacity equally among all tries (account + storage).
-    pub fn shrink_to(&mut self, max_nodes: usize, max_values: usize) {
-        // Count total number of storage tries (active + cleared)
-        let storage_tries_count = self.storage.tries.len() + self.storage.cleared_tries.len();
-
-        // Total tries = 1 account trie + all storage tries
-        let total_tries = 1 + storage_tries_count;
-
-        // Distribute capacity equally among all tries
-        let nodes_per_trie = max_nodes / total_tries;
-        let values_per_trie = max_values / total_tries;
-
-        // Shrink the account trie
-        self.state.shrink_nodes_to(nodes_per_trie);
-        self.state.shrink_values_to(values_per_trie);
-
-        // Give storage tries the remaining capacity after account trie allocation
-        let storage_nodes = max_nodes.saturating_sub(nodes_per_trie);
-        let storage_values = max_values.saturating_sub(values_per_trie);
-
-        // Shrink all storage tries (they will redistribute internally)
-        self.storage.shrink_to(storage_nodes, storage_values);
-    }
-
     /// Prunes account/storage tries according to global LFU retention.
     ///
     /// - Top LFU `(address, slot)` entries are retained up to `max_hot_slots`.
@@ -598,20 +571,6 @@ where
             storage_tries_after = total_storage_tries_before - storage_tries_evicted,
             "SparseStateTrie::prune completed"
         );
-    }
-
-    /// Commits the [`TrieUpdates`] to the sparse trie.
-    pub fn commit_updates(&mut self, updates: &TrieUpdates) {
-        if let Some(trie) = self.state.as_revealed_mut() {
-            trie.commit_updates(&updates.account_nodes, &updates.removed_nodes);
-        }
-        for (address, updates) in &updates.storage_tries {
-            if let Some(trie) =
-                self.storage.tries.get_mut(address).and_then(|t| t.as_revealed_mut())
-            {
-                trie.commit_updates(&updates.storage_nodes, &updates.removed_nodes);
-            }
-        }
     }
 }
 
@@ -676,32 +635,6 @@ impl<S: SparseTrieTrait> StorageTries<S> {
             trie.clear();
             trie
         }));
-    }
-
-    /// Shrinks the capacity of all storage tries to the given total sizes.
-    ///
-    /// Distributes capacity equally among all tries (active + cleared).
-    fn shrink_to(&mut self, max_nodes: usize, max_values: usize) {
-        let total_tries = self.tries.len() + self.cleared_tries.len();
-        if total_tries == 0 {
-            return;
-        }
-
-        // Distribute capacity equally among all tries
-        let nodes_per_trie = max_nodes / total_tries;
-        let values_per_trie = max_values / total_tries;
-
-        // Shrink active storage tries
-        for trie in self.tries.values_mut() {
-            trie.shrink_nodes_to(nodes_per_trie);
-            trie.shrink_values_to(values_per_trie);
-        }
-
-        // Shrink cleared storage tries
-        for trie in &mut self.cleared_tries {
-            trie.shrink_nodes_to(nodes_per_trie);
-            trie.shrink_values_to(values_per_trie);
-        }
     }
 }
 

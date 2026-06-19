@@ -55,26 +55,6 @@ pub mod sparse_trie;
 
 use preserved_sparse_trie::{PreservedSparseTrie, SharedPreservedSparseTrie};
 
-/// Default node capacity for shrinking the sparse trie. This is used to limit the number of trie
-/// nodes in allocated sparse tries.
-///
-/// If we have 1 million entries of 120 bytes each, this conservative estimate comes out at around
-/// 120MB.
-pub const SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY: usize = 1_000_000;
-
-/// Default value capacity for shrinking the sparse trie. This is used to limit the number of values
-/// in allocated sparse tries.
-///
-/// There are storage and account values, the largest of the two being account values, which are
-/// essentially `TrieAccount`s.
-///
-/// Account value maps have a key of `Nibbles` and value of `TrieAccount`.
-/// The `size_of::<Nibbles>` is 40, and `size_of::<TrieAccount>` is 104.
-///
-/// If we have 1 million entries of 144 bytes each, this conservative estimate comes out at around
-/// 144MB.
-pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
-
 /// Blocks with fewer transactions than this skip prewarming, since the fixed overhead of spawning
 /// prewarm workers exceeds the execution time saved.
 pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
@@ -699,10 +679,7 @@ where
                     target: "engine::tree::payload_processor",
                     "State root receiver dropped, clearing trie"
                 );
-                let (trie, deferred) = task.into_cleared_trie(
-                    SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
-                    SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
-                );
+                let (trie, deferred) = task.into_cleared_trie();
                 guard.store(PreservedSparseTrie::cleared(trie));
                 drop(guard);
                 executor.spawn_drop(deferred);
@@ -718,10 +695,7 @@ where
                 let (trie, deferred) = task.into_trie_for_reuse(
                     max_hot_slots,
                     max_hot_accounts,
-                    SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
-                    SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                     disable_cache_pruning,
-                    &result.trie_updates,
                 );
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
@@ -739,10 +713,7 @@ where
                     target: "engine::tree::payload_processor",
                     "State root computation failed, clearing trie"
                 );
-                let (trie, deferred) = task.into_cleared_trie(
-                    SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
-                    SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
-                );
+                let (trie, deferred) = task.into_cleared_trie();
                 guard.store(PreservedSparseTrie::cleared(trie));
                 deferred
             };

@@ -12,10 +12,10 @@ use crate::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdat
 use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
 use alloy_primitives::{
     keccak256,
-    map::{B256Map, HashMap, HashSet},
+    map::{B256Map, HashSet},
     B256,
 };
-use alloy_trie::{BranchNodeCompact, TrieMask};
+use alloy_trie::TrieMask;
 use core::{cmp::Reverse, mem};
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{
@@ -2595,14 +2595,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.buffers.clear();
     }
 
-    fn shrink_nodes_to(&mut self, _size: usize) {
-        // Subtries are recreated from scratch on each block, so there is nothing to shrink.
-    }
-
-    fn shrink_values_to(&mut self, _size: usize) {
-        // Values are stored inline in nodes; no separate value storage.
-    }
-
     fn size_hint(&self) -> usize {
         self.upper_arena
             .iter()
@@ -3103,14 +3095,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
     #[cfg(feature = "trie-debug")]
     fn take_debug_recorder(&mut self) -> TrieDebugRecorder {
         core::mem::take(&mut self.debug_recorder)
-    }
-
-    fn commit_updates(
-        &mut self,
-        _updated: &HashMap<Nibbles, BranchNodeCompact>,
-        _removed: &HashSet<Nibbles>,
-    ) {
-        // no-op for arena trie
     }
 }
 
