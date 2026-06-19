@@ -6,8 +6,9 @@ use crate::{
     tree::{error::InsertPayloadError, payload_validator::TreeCtx},
 };
 use alloy_consensus::BlockHeader;
+use alloy_eip7928::bal::RawBal;
 use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
-use alloy_primitives::{keccak256, map::B256Map, Bytes, Sealed, B256};
+use alloy_primitives::{map::B256Map, Bytes, B256};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
@@ -2477,7 +2478,7 @@ where
         let now = Instant::now();
         let block_count = blocks.len();
         for child in blocks {
-            let child_num_hash = child.block().num_hash();
+            let child_num_hash = child.num_hash();
             match self.insert_block(child) {
                 Ok(res) => {
                     debug!(target: "engine::tree", child =?child_num_hash, ?res, "connected buffered block");
@@ -2514,7 +2515,7 @@ where
         if let Err(err) = self.validate_block(&block) {
             return Err(InsertBlockError::consensus_error(err, block))
         }
-        self.state.buffer.insert_block(block);
+        self.state.buffer.insert_block(block.into());
         Ok(())
     }
 
@@ -2834,15 +2835,14 @@ where
     /// Returns an event with the appropriate action to take, such as:
     ///  - download more missing blocks
     ///  - try to canonicalize the target if the `block` is the tracked target (head) block.
-    #[instrument(level = "debug", target = "engine::tree", skip_all, fields(block_hash = %block.block().hash(), block_num = %block.block().number()))]
+    #[instrument(level = "debug", target = "engine::tree", skip_all, fields(block_hash = %block.hash(), block_num = %block.number()))]
     fn on_downloaded_block(
         &mut self,
         block: SealedBlockWithAccessList<N::Block>,
     ) -> Result<Option<TreeEvent>, InsertBlockFatalError> {
-        let block_num_hash = block.block().num_hash();
+        let block_num_hash = block.num_hash();
         let lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_num_hash.hash);
-        if self.check_invalid_ancestor_with_head(lowest_buffered_ancestor, block.block())?.is_some()
-        {
+        if self.check_invalid_ancestor_with_head(lowest_buffered_ancestor, &block)?.is_some() {
             return Ok(None)
         }
 
@@ -2910,7 +2910,7 @@ where
         block: SealedBlockWithAccessList<N::Block>,
     ) -> Result<InsertPayloadOk, InsertPayloadError<N::Block>> {
         self.insert_block_or_payload(
-            block.block().block_with_parent(),
+            block.block_with_parent(),
             block,
             |validator, block, ctx| validator.validate_block(block, ctx),
             |_, block| Ok(block),
@@ -2925,10 +2925,10 @@ where
     fn seal_access_list_for_block(
         block: &SealedBlock<N::Block>,
         access_list: Option<Bytes>,
-    ) -> Option<Sealed<Bytes>> {
+    ) -> Option<RawBal> {
         let expected = block.header().block_access_list_hash()?;
-        let raw = access_list?;
-        (keccak256(raw.as_ref()) == expected).then(|| Sealed::new_unchecked(raw, expected))
+        let raw = RawBal::new(access_list?);
+        raw.ensure_hash(expected).is_ok().then_some(raw)
     }
 
     /// Inserts a block or payload into the blockchain tree with full execution.
@@ -3001,9 +3001,9 @@ where
                 let missing_ancestor = self
                     .state
                     .buffer
-                    .lowest_ancestor(&block.block().parent_hash())
+                    .lowest_ancestor(&block.parent_hash())
                     .map(|block| block.parent_num_hash())
-                    .unwrap_or_else(|| block.block().parent_num_hash());
+                    .unwrap_or_else(|| block.parent_num_hash());
 
                 self.state.buffer.insert_block(block);
 

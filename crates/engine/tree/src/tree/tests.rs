@@ -708,7 +708,7 @@ fn test_validated_payload_bal_is_inserted_into_store() {
                         .with_raw_bal(Some(RawBal::from(raw_bal.clone()))),
                 )
             },
-            |_, executed| Ok(executed.recovered_block().clone_sealed_block()),
+            |_, executed| Ok(executed.recovered_block().clone_sealed_block().into()),
         )
         .unwrap();
 
@@ -2582,7 +2582,7 @@ async fn assert_post_backfill_recheck_retriggers_to_buffered_target(engine_kind:
 
     // Buffer the target block — the recheck looks up the helper's resolved hash in the buffer
     // to decide whether to retrigger.
-    test_harness.tree.state.buffer.insert_block(target_block.clone_sealed_block());
+    test_harness.tree.state.buffer.insert_block(target_block.clone_sealed_block().into());
 
     // Place the buffered hash in the FCU slot the helper picks for this chain type, and put
     // an unrelated hash (not in buffer) in the other slot to keep the two slots distinct.

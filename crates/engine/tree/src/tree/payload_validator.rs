@@ -322,7 +322,7 @@ where
     {
         match input {
             BlockOrPayload::Payload(payload) => Ok(self.evm_config.evm_env_for_payload(payload)?),
-            BlockOrPayload::Block(block) => Ok(self.evm_config.evm_env(block.block().header())?),
+            BlockOrPayload::Block(block) => Ok(self.evm_config.evm_env(block.header())?),
         }
     }
 
@@ -344,7 +344,7 @@ where
                 Either::Left(iter)
             }
             BlockOrPayload::Block(block) => {
-                let txs = block.block().body().clone_transactions();
+                let txs = block.body().clone_transactions();
                 let convert = |tx: N::SignedTx| tx.try_into_recovered();
                 Either::Right((txs, convert))
             }
@@ -362,7 +362,7 @@ where
     {
         match input {
             BlockOrPayload::Payload(payload) => Ok(self.evm_config.context_for_payload(payload)?),
-            BlockOrPayload::Block(block) => Ok(self.evm_config.context_for_block(block.block())?),
+            BlockOrPayload::Block(block) => Ok(self.evm_config.context_for_block(block)?),
         }
     }
 
@@ -2287,7 +2287,7 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     pub fn hash(&self) -> B256 {
         match self {
             Self::Payload(payload) => payload.block_hash(),
-            Self::Block(block) => block.block().hash(),
+            Self::Block(block) => block.hash(),
         }
     }
 
@@ -2295,7 +2295,7 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     pub fn num_hash(&self) -> NumHash {
         match self {
             Self::Payload(payload) => payload.num_hash(),
-            Self::Block(block) => block.block().num_hash(),
+            Self::Block(block) => block.num_hash(),
         }
     }
 
@@ -2303,7 +2303,7 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     pub fn parent_hash(&self) -> B256 {
         match self {
             Self::Payload(payload) => payload.parent_hash(),
-            Self::Block(block) => block.block().parent_hash(),
+            Self::Block(block) => block.parent_hash(),
         }
     }
 
@@ -2311,7 +2311,7 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     pub fn block_with_parent(&self) -> BlockWithParent {
         match self {
             Self::Payload(payload) => payload.block_with_parent(),
-            Self::Block(block) => block.block().block_with_parent(),
+            Self::Block(block) => block.block_with_parent(),
         }
     }
 
@@ -2340,11 +2340,9 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
                 .block_access_list()
                 .map(|block_access_list| DecodedBal::from_rlp_bytes(block_access_list.clone()))
                 .transpose(),
-            Self::Block(block) => block
-                .data()
-                .as_ref()
-                .map(|access_list| DecodedBal::from_rlp_bytes(access_list.inner().clone()))
-                .transpose(),
+            Self::Block(block) => {
+                block.data().as_ref().cloned().map(DecodedBal::from_raw_bal).transpose()
+            }
         }
     }
 
@@ -2355,7 +2353,7 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     {
         match self {
             Self::Payload(payload) => payload.transaction_count(),
-            Self::Block(block) => block.block().transaction_count(),
+            Self::Block(block) => block.transaction_count(),
         }
     }
 
@@ -2366,7 +2364,7 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     {
         match self {
             Self::Payload(payload) => payload.withdrawals().map(|w| w.as_slice()),
-            Self::Block(block) => block.block().body().withdrawals().map(|w| w.as_slice()),
+            Self::Block(block) => block.body().withdrawals().map(|w| w.as_slice()),
         }
     }
 
@@ -2377,7 +2375,7 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     {
         match self {
             Self::Payload(payload) => payload.gas_used(),
-            Self::Block(block) => block.block().gas_used(),
+            Self::Block(block) => block.gas_used(),
         }
     }
 
@@ -2388,7 +2386,7 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     {
         match self {
             Self::Payload(payload) => payload.gas_limit(),
-            Self::Block(block) => block.block().gas_limit(),
+            Self::Block(block) => block.gas_limit(),
         }
     }
 }

@@ -1290,7 +1290,7 @@ mod tests {
         let received = client.get_full_block_with_access_lists(header.hash()).await;
         let expected_raw_bal = RawBal::from(bal);
 
-        assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
+        assert_eq!(&*received, &SealedBlock::from_sealed_parts(header, body));
         assert_eq!(received.data().as_ref(), Some(&expected_raw_bal));
         assert_eq!(request_count.load(Ordering::SeqCst), 1);
     }
@@ -1314,7 +1314,7 @@ mod tests {
             .await;
 
         let expected_raw_bal = RawBal::from(bal);
-        assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
+        assert_eq!(&*received, &SealedBlock::from_sealed_parts(header, body));
         assert_eq!(received.data().as_ref(), Some(&expected_raw_bal));
         assert_eq!(*requirement.lock(), Some(BalRequirement::Mandatory));
     }
@@ -1338,7 +1338,7 @@ mod tests {
                 .expect("access list request should complete");
 
         let expected_raw_bal = RawBal::from(bal);
-        assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
+        assert_eq!(&*received, &SealedBlock::from_sealed_parts(header, body));
         assert_eq!(received.data().as_ref(), Some(&expected_raw_bal));
         assert_eq!(request_count.load(Ordering::SeqCst), 1);
     }
@@ -1360,7 +1360,7 @@ mod tests {
                 .await
                 .expect("block request should complete without access lists");
 
-        assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
+        assert_eq!(&*received, &SealedBlock::from_sealed_parts(header, body));
         assert!(received.data().is_none());
         assert_eq!(bad_messages.load(Ordering::SeqCst), 1);
     }
@@ -1381,7 +1381,7 @@ mod tests {
                 .await
                 .expect("block request should complete without access lists");
 
-        assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
+        assert_eq!(&*received, &SealedBlock::from_sealed_parts(header, body));
         assert!(received.data().is_none());
         assert_eq!(bad_messages.load(Ordering::SeqCst), 0);
     }
@@ -1403,7 +1403,7 @@ mod tests {
                 .await
                 .expect("block request should complete without access lists");
 
-        assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
+        assert_eq!(&*received, &SealedBlock::from_sealed_parts(header, body));
         assert!(received.data().is_none());
         assert_eq!(bad_messages.load(Ordering::SeqCst), 1);
     }
@@ -1427,7 +1427,7 @@ mod tests {
                 .await
                 .expect("block request should complete without access lists");
 
-        assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
+        assert_eq!(&*received, &SealedBlock::from_sealed_parts(header, body));
         assert!(received.data().is_none());
         assert_eq!(request_count.load(Ordering::SeqCst), 1);
         assert_eq!(bad_messages.load(Ordering::SeqCst), 0);
@@ -1452,7 +1452,7 @@ mod tests {
                 .await
                 .expect("block request should complete without access lists");
 
-        assert_eq!(received.block(), &SealedBlock::from_sealed_parts(header, body));
+        assert_eq!(&*received, &SealedBlock::from_sealed_parts(header, body));
         assert!(received.data().is_none());
         assert_eq!(request_count.load(Ordering::SeqCst), 1);
         assert_eq!(
@@ -1808,7 +1808,7 @@ mod tests {
             blocks
                 .iter()
                 .map(|block| {
-                    let bal = bals.get(&block.block().hash()).cloned().expect("access list exists");
+                    let bal = bals.get(&block.hash()).cloned().expect("access list exists");
                     Some(RawBal::from(bal))
                 })
                 .collect::<Vec<_>>()
@@ -1891,7 +1891,7 @@ mod tests {
                         return None
                     }
 
-                    let bal = bals.get(&block.block().hash()).cloned().expect("access list exists");
+                    let bal = bals.get(&block.hash()).cloned().expect("access list exists");
                     Some(RawBal::from(bal))
                 })
                 .collect::<Vec<_>>()
@@ -1923,11 +1923,11 @@ mod tests {
             blocks
                 .iter()
                 .map(|block| {
-                    if block.block().hash() == header.hash() {
+                    if block.hash() == header.hash() {
                         return None
                     }
 
-                    let bal = bals.get(&block.block().hash()).cloned().expect("access list exists");
+                    let bal = bals.get(&block.hash()).cloned().expect("access list exists");
                     Some(RawBal::from(bal))
                 })
                 .collect::<Vec<_>>()
@@ -2021,7 +2021,7 @@ mod tests {
         .expect("range request should complete without unvalidated access lists");
 
         assert_eq!(blocks.len(), 3);
-        assert_eq!(blocks[1].block().hash(), second_hash);
+        assert_eq!(blocks[1].hash(), second_hash);
         assert_eq!(range_access_lists(&blocks), vec![Some(RawBal::from(first_bal)), None, None]);
         assert_eq!(bad_messages.load(Ordering::SeqCst), 1);
     }

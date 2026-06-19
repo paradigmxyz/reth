@@ -237,7 +237,7 @@ where
         for idx in (0..self.inflight_full_block_requests.len()).rev() {
             let mut request = self.inflight_full_block_requests.swap_remove(idx);
             if let Poll::Ready(block) = request.poll(cx) {
-                trace!(target: "engine::download", block=?block.block().num_hash(), "Received single full block, buffering");
+                trace!(target: "engine::download", block=?block.num_hash(), "Received single full block, buffering");
                 self.set_buffered_blocks.push(Reverse(block.into()));
             } else {
                 // still pending
@@ -249,7 +249,7 @@ where
         for idx in (0..self.inflight_block_range_requests.len()).rev() {
             let mut request = self.inflight_block_range_requests.swap_remove(idx);
             if let Poll::Ready(blocks) = request.poll(cx) {
-                trace!(target: "engine::download", len=?blocks.len(), first=?blocks.first().map(|b| b.block().num_hash()), last=?blocks.last().map(|b| b.block().num_hash()), "Received full block range, buffering");
+                trace!(target: "engine::download", len=?blocks.len(), first=?blocks.first().map(|b| b.num_hash()), last=?blocks.last().map(|b| b.num_hash()), "Received full block range, buffering");
                 self.set_buffered_blocks
                     .extend(blocks.into_iter().map(OrderedDownloadedBlock).map(Reverse));
             } else {
@@ -270,7 +270,7 @@ where
             let mut block = block.0 .0;
             // peek ahead and pop duplicates, keeping the copy that includes access list data
             while let Some(peek) = self.set_buffered_blocks.peek_mut() {
-                if peek.0 .0.block().hash() == block.block().hash() {
+                if peek.0 .0.hash() == block.hash() {
                     let duplicate = PeekMut::pop(peek).0 .0;
                     if block.data().is_none() && duplicate.data().is_some() {
                         block = duplicate;
@@ -298,7 +298,7 @@ impl<B: Block> PartialOrd for OrderedDownloadedBlock<B> {
 
 impl<B: Block> Ord for OrderedDownloadedBlock<B> {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.0.block().number().cmp(&other.0.block().number())
+        self.0.number().cmp(&other.0.number())
     }
 }
 
@@ -488,7 +488,7 @@ mod tests {
 
             // ensure they are in ascending order
             for num in 1..=TOTAL_BLOCKS {
-                assert_eq!(blocks[num - 1].block().number(), num as u64);
+                assert_eq!(blocks[num - 1].number(), num as u64);
             }
         });
     }
@@ -526,7 +526,7 @@ mod tests {
 
             // ensure they are in ascending order
             for num in 1..=TOTAL_BLOCKS {
-                assert_eq!(blocks[num - 1].block().number(), num as u64);
+                assert_eq!(blocks[num - 1].number(), num as u64);
             }
         });
     }
