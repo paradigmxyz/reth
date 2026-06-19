@@ -101,7 +101,7 @@
 use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
-    multiproof::{StateRootComputeOutcome, StateRootHandle},
+    multiproof::{StateRootComputeOutcome, StateRootHandle, StateRootMessage},
     payload_processor::{PayloadProcessor, PayloadProcessorSpawnOptions},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     types::{InsertPayloadResult, ValidationOutput},
@@ -124,7 +124,8 @@ use reth_chain_state::{
 };
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
-    ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
+    AuxiliaryStateRoot, ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload,
+    InvalidBlockHook, PayloadValidator,
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
@@ -148,7 +149,17 @@ use reth_provider::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+<<<<<<< HEAD
+use reth_trie::{
+    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
+    HashedPostState,
+};
+=======
+use reth_trie::{
+    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
+    HashedPostState,
+};
+>>>>>>> f5115e1e8 (engine: support auxiliary sparse state roots)
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::{Address, KECCAK_EMPTY};
@@ -491,7 +502,7 @@ where
                     Ok(val) => val,
                     Err(e) => {
                         let block = validated_block.try_into_inner().expect("sole handle")?;
-                        return Err(InsertBlockError::new(block, e.into()).into())
+                        return Err(InsertBlockError::new(block, e.into()).into());
                     }
                 }
             };
@@ -519,7 +530,7 @@ where
                 return Err(validated_block
                     .try_into_inner()
                     .expect("sole handle")
-                    .expect_err("Err result checked"))
+                    .expect_err("Err result checked"));
             }
         }
 
@@ -534,7 +545,7 @@ where
                 validated_block.try_into_inner().expect("sole handle")?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
-            .into())
+            .into());
         };
         drop(_enter);
 
@@ -760,6 +771,19 @@ where
             block
         );
 
+        let auxiliary_state_root = ensure_ok_post_block!(
+            debug_span!(
+                target: "engine::tree::payload_validator",
+                "auxiliary_state_root_input"
+            )
+            .in_scope(|| {
+                self.validator.auxiliary_state_root(parent_block.header(), &block, &output.state)
+            }),
+            block
+        );
+        let auxiliary_provider_factory =
+            OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
+
         // Run the hashed state validation hook but don't propagate the error yet. If the state root
         // task fails, we might need to re-run this check against a fallback state.
         let mut hashed_state_validate_result = debug_span!(
@@ -825,8 +849,8 @@ where
                         if self.config.always_compare_trie_updates() {
                             let _has_diff = self.compare_trie_updates_with_serial(
                                 provider_builder.clone(),
-                                provider_factory,
-                                overlay_builder,
+                                provider_factory.clone(),
+                                overlay_builder.clone(),
                                 &output,
                                 trie_updates.as_ref().clone(),
                             );
@@ -883,8 +907,8 @@ where
             StateRootStrategy::Parallel => {
                 debug!(target: "engine::tree::payload_validator", "Using parallel state root algorithm");
                 match self.compute_state_root_parallel(
-                    provider_factory,
-                    overlay_builder,
+                    provider_factory.clone(),
+                    overlay_builder.clone(),
                     &hashed_state,
                 ) {
                     Ok(result) => {
@@ -950,7 +974,7 @@ where
         if let Err(err) = hashed_state_validate_result {
             // call post-block hook
             self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
-            return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into())
+            return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into());
         }
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
@@ -979,7 +1003,33 @@ where
                 )
                 .into(),
             )
-            .into())
+            .into());
+        }
+
+        if let Some(auxiliary_state_root) = auxiliary_state_root {
+            let expected_root = auxiliary_state_root.expected_root;
+            let auxiliary_start = Instant::now();
+            let auxiliary_outcome = ensure_ok_post_block!(
+                self.compute_auxiliary_state_root(auxiliary_provider_factory, auxiliary_state_root)
+                    .map_err(|err| InsertBlockErrorKind::Other(Box::new(err))),
+                block
+            );
+            let auxiliary_elapsed = auxiliary_start.elapsed();
+            debug!(
+                target: "engine::tree::payload_validator",
+                auxiliary_state_root = ?auxiliary_outcome.state_root,
+                ?auxiliary_elapsed,
+                "Auxiliary state root task finished"
+            );
+
+            if let Err(err) = self.validator.validate_auxiliary_state_root(
+                auxiliary_outcome.state_root,
+                expected_root,
+                &block,
+            ) {
+                self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
+                return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into());
+            }
         }
 
         let lthash_start = Instant::now();
@@ -1457,6 +1507,44 @@ where
             .incremental_root_with_updates()
     }
 
+    /// Computes an auxiliary state root through the sparse trie task.
+    fn compute_auxiliary_state_root<F>(
+        &self,
+        multiproof_provider_factory: F,
+        auxiliary_state_root: AuxiliaryStateRoot,
+    ) -> Result<StateRootComputeOutcome, ParallelStateRootError>
+    where
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
+        let AuxiliaryStateRoot { parent_root, expected_root: _, state_updates } =
+            auxiliary_state_root;
+        let mut handle = self.payload_processor.spawn_auxiliary_state_root(
+            multiproof_provider_factory,
+            parent_root,
+            false,
+            &self.config,
+        );
+
+        handle.updates_tx().send(StateRootMessage::HashedStateUpdate(state_updates)).map_err(
+            |_| {
+                ParallelStateRootError::Other(
+                    "auxiliary sparse trie task dropped update receiver".to_string(),
+                )
+            },
+        )?;
+        handle.updates_tx().send(StateRootMessage::FinishedStateUpdates).map_err(|_| {
+            ParallelStateRootError::Other(
+                "auxiliary sparse trie task dropped finish receiver".to_string(),
+            )
+        })?;
+
+        handle.state_root()
+    }
+
     /// Compute state root for the given hashed post state in serial.
     ///
     /// Uses the same provider construction path as main execution and computes the state root and
@@ -1736,7 +1824,7 @@ where
         ) {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
-            return Err(err.into())
+            return Err(err.into());
         }
         drop(_enter);
 
@@ -1813,10 +1901,10 @@ where
 
                 Ok(handle)
             }
-            StateRootStrategy::Skipped |
-            StateRootStrategy::Parallel |
-            StateRootStrategy::Synchronous |
-            StateRootStrategy::Custom(_) => {
+            StateRootStrategy::Skipped
+            | StateRootStrategy::Parallel
+            | StateRootStrategy::Synchronous
+            | StateRootStrategy::Custom(_) => {
                 let start = Instant::now();
                 let handle = self.payload_processor.spawn_cache_exclusive(
                     env,
@@ -1854,7 +1942,7 @@ where
                 self.provider.clone(),
                 historical,
                 Some(blocks),
-            )))
+            )));
         }
 
         // Check if the block is persisted
@@ -1862,7 +1950,7 @@ where
             debug!(target: "engine::tree::payload_validator", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
             // For persisted blocks, we create a builder that will fetch state directly from the
             // database
-            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)))
+            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)));
         }
 
         debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
@@ -1898,7 +1986,7 @@ where
     ) {
         if state.invalid_headers.get(&block.hash()).is_some() {
             // we already marked this block as invalid
-            return
+            return;
         }
         self.invalid_block_hook.on_invalid_block(parent_header, block, output, trie_updates);
     }
@@ -2038,9 +2126,9 @@ where
             .sum();
 
         // Total time spent fetching state during execution
-        let state_read_duration = provider_stats.total_account_fetch_latency() +
-            provider_stats.total_storage_fetch_latency() +
-            provider_stats.total_code_fetch_latency();
+        let state_read_duration = provider_stats.total_account_fetch_latency()
+            + provider_stats.total_storage_fetch_latency()
+            + provider_stats.total_code_fetch_latency();
 
         // EIP-7702 delegation tracking from bytecode changes
         // Count new EIP-7702 bytecodes as delegations set

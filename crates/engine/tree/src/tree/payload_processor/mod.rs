@@ -126,6 +126,9 @@ where
     /// re-use allocated memory. Stored with the block hash it was computed for to enable trie
     /// preservation across sequential payload validations.
     sparse_state_trie: SharedPreservedSparseTrie,
+    /// A separate sparse trie cache for auxiliary roots that are anchored independently from the
+    /// canonical state root, for example a chain-specific proof trie.
+    auxiliary_sparse_state_trie: SharedPreservedSparseTrie,
     /// LFU hot-slot capacity: max storage slots retained across prune cycles.
     sparse_trie_max_hot_slots: usize,
     /// LFU hot-account capacity: max account addresses retained across prune cycles.
@@ -195,6 +198,7 @@ where
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
             sparse_state_trie: SharedPreservedSparseTrie::default(),
+            auxiliary_sparse_state_trie: SharedPreservedSparseTrie::default(),
             sparse_trie_max_hot_slots: config.sparse_trie_max_hot_slots(),
             sparse_trie_max_hot_accounts: config.sparse_trie_max_hot_accounts(),
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
@@ -428,6 +432,8 @@ where
         let (hashed_state_tx, hashed_state_rx) = channel();
 
         self.spawn_sparse_trie_task(
+            self.sparse_state_trie.clone(),
+            "sparse-trie",
             proof_handle,
             state_root_tx,
             hashed_state_tx,
@@ -444,6 +450,49 @@ where
         );
 
         StateRootHandle::new(parent_state_root, updates_tx, state_root_rx, hashed_state_rx)
+    }
+
+    /// Spawns an auxiliary sparse state-root computation pipeline.
+    ///
+    /// This mirrors [`Self::spawn_state_root`] but uses a separate preserved sparse trie so the
+    /// auxiliary root can be anchored independently from the canonical state root.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
+    pub fn spawn_auxiliary_state_root<F>(
+        &self,
+        multiproof_provider_factory: F,
+        parent_root: B256,
+        halve_workers: bool,
+        config: &TreeConfig,
+    ) -> StateRootHandle
+    where
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
+        let (updates_tx, from_multi_proof) = crossbeam_channel::unbounded();
+
+        let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
+        #[cfg(feature = "trie-debug")]
+        let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
+        let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers);
+
+        let (state_root_tx, state_root_rx) = channel();
+        let (hashed_state_tx, hashed_state_rx) = channel();
+
+        self.spawn_sparse_trie_task(
+            self.auxiliary_sparse_state_trie.clone(),
+            "auxiliary-sparse-trie",
+            proof_handle,
+            state_root_tx,
+            hashed_state_tx,
+            from_multi_proof,
+            parent_root,
+            config.multiproof_chunk_size(),
+        );
+
+        StateRootHandle::new(parent_root, updates_tx, state_root_rx, hashed_state_rx)
     }
 
     /// Transaction count threshold below which proof workers are halved, since fewer transactions
@@ -585,8 +634,8 @@ where
             PrewarmMode::BlockAccessList(
                 env.decoded_bal.clone().expect("BAL dispatch implies decoded BAL"),
             )
-        } else if self.disable_transaction_prewarming ||
-            env.transaction_count < SMALL_BLOCK_TX_THRESHOLD
+        } else if self.disable_transaction_prewarming
+            || env.transaction_count < SMALL_BLOCK_TX_THRESHOLD
         {
             PrewarmMode::Skipped
         } else {
@@ -689,6 +738,8 @@ where
     /// The trie is preserved when the new payload is a child of the previous one.
     fn spawn_sparse_trie_task(
         &self,
+        preserved_sparse_trie: SharedPreservedSparseTrie,
+        task_name: &'static str,
         proof_worker_handle: ProofWorkerHandle,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
         hashed_state_tx: mpsc::Sender<HashedPostState>,
@@ -697,14 +748,13 @@ where
     ) {
         let SparseTrieTaskOptions { parent_state_root, chunk_size, pending_sparse_trie_prune } =
             options;
-        let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
         let max_hot_slots = self.sparse_trie_max_hot_slots;
         let max_hot_accounts = self.sparse_trie_max_hot_accounts;
         let executor = self.executor.clone();
 
         let parent_span = Span::current();
-        self.executor.spawn_blocking_named("sparse-trie", move || {
+        self.executor.spawn_blocking_named(task_name, move || {
             reth_tasks::once!(increase_thread_priority);
 
             let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "sparse_trie_task")
