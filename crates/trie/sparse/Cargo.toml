@@ -37,15 +37,11 @@ metrics = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
-reth-provider = { workspace = true, features = ["test-utils"] }
-reth-storage-api.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
-reth-trie-db = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 
 arbitrary.workspace = true
-assert_matches.workspace = true
 itertools.workspace = true
 pretty_assertions.workspace = true
 proptest-arbitrary-interop.workspace = true
@@ -64,7 +60,6 @@ std = [
     "reth-execution-errors/std",
     "reth-primitives-traits/std",
     "reth-primitives-traits/rayon",
-    "reth-storage-api/std",
     "reth-trie-common/std",
     "tracing/std",
     "serde?/std",
@@ -77,9 +72,7 @@ trie-debug = ["std", "dep:serde", "dep:serde_json", "alloy-primitives/serde", "a
 test-utils = [
     "std",
     "reth-primitives-traits/test-utils",
-    "reth-provider/test-utils",
     "reth-trie-common/test-utils",
-    "reth-trie-db/test-utils",
     "reth-trie/test-utils",
 ]
 arbitrary = [
