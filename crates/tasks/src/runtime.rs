@@ -901,7 +901,7 @@ impl RuntimeBuilder {
 
             let cpu_pool = build_pool_with_panic_handler(
                 rayon::ThreadPoolBuilder::new()
-                    .num_threads(default_threads)
+                    .num_threads(default_threads / 2)
                     .thread_name(|i| format!("cpu-{i:02}")),
             )?;
 
