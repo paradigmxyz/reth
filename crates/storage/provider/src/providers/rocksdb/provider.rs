@@ -145,6 +145,9 @@ const DEFAULT_WRITE_BUFFER_MANAGER_SIZE: usize = 4 * 1024 * 1024 * 1024;
 /// reducing the first few reallocations without over-allocating.
 const DEFAULT_COMPRESS_BUF_CAPACITY: usize = 4096;
 
+/// Estimated RocksDB write-batch bytes for one transaction-hash index put.
+const TX_HASH_BATCH_BYTES_PER_PUT: usize = 96;
+
 /// Default auto-commit threshold for batch writes (512 MiB).
 ///
 /// When a batch exceeds this size, it is automatically committed to prevent OOM
@@ -805,6 +808,20 @@ impl RocksDBProvider {
         }
     }
 
+    /// Creates a new batch with a preallocated RocksDB write buffer.
+    pub fn batch_with_capacity_bytes(&self, capacity_bytes: usize) -> RocksDBBatch<'_> {
+        if capacity_bytes == 0 {
+            return self.batch();
+        }
+
+        RocksDBBatch {
+            provider: self,
+            inner: WriteBatchWithTransaction::<true>::with_capacity_bytes(capacity_bytes),
+            buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
+            auto_commit_threshold: None,
+        }
+    }
+
     /// Creates a new batch with auto-commit enabled.
     ///
     /// When the batch size exceeds the threshold (4 GiB), the batch is automatically
@@ -1379,7 +1396,13 @@ impl RocksDBProvider {
         tx_nums: &[TxNumber],
         ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
-        let mut batch = self.batch();
+        let tx_count = blocks
+            .iter()
+            .map(|block| block.recovered_block().body().transaction_count())
+            .sum::<usize>();
+        let mut batch = self.batch_with_capacity_bytes(
+            tx_count.saturating_mul(TX_HASH_BATCH_BYTES_PER_PUT),
+        );
         for (block, &first_tx_num) in blocks.iter().zip(tx_nums) {
             let body = block.recovered_block().body();
             for (tx_num, transaction) in (first_tx_num..).zip(body.transactions_iter()) {
