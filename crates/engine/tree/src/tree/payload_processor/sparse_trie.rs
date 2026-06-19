@@ -34,6 +34,10 @@ use reth_trie_sparse::{
 use revm_primitives::{hash_map::Entry, B256Map};
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
+/// Number of streamed update messages to buffer before applying them to the sparse trie even if
+/// more updates are already waiting on the channel.
+const STREAMING_UPDATE_PROCESS_INTERVAL: usize = 128;
+
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = ConfigurableSparseTrie> {
     /// Sender for proof results.
@@ -355,6 +359,14 @@ where
                 }
             } else if self.updates.is_empty() {
                 // If we don't have any pending updates, apply them to the trie,
+                t = Instant::now();
+                self.process_new_updates()?;
+                self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
+                self.dispatch_pending_targets();
+            } else if self.pending_updates >= STREAMING_UPDATE_PROCESS_INTERVAL {
+                // During BAL and prewarm streams the update channel can stay non-empty for a long
+                // time. Process a bounded batch so proof fetching overlaps the rest of the stream
+                // instead of waiting for the channel to drain completely.
                 t = Instant::now();
                 self.process_new_updates()?;
                 self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
