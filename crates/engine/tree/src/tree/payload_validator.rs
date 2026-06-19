@@ -149,17 +149,10 @@ use reth_provider::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-<<<<<<< HEAD
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     HashedPostState,
 };
-=======
-use reth_trie::{
-    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
-    HashedPostState,
-};
->>>>>>> f5115e1e8 (engine: support auxiliary sparse state roots)
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::{Address, KECCAK_EMPTY};
@@ -783,6 +776,8 @@ where
         );
         let auxiliary_provider_factory =
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
+        let mut retained_auxiliary_trie_data: Option<(Arc<HashedPostState>, Arc<TrieUpdates>)> =
+            None;
 
         // Run the hashed state validation hook but don't propagate the error yet. If the state root
         // task fails, we might need to re-run this check against a fallback state.
@@ -1008,6 +1003,9 @@ where
 
         if let Some(auxiliary_state_root) = auxiliary_state_root {
             let expected_root = auxiliary_state_root.expected_root;
+            let retain_trie_data = auxiliary_state_root.retain_trie_data;
+            let retained_hashed_state =
+                retain_trie_data.then(|| Arc::new(auxiliary_state_root.state_updates.clone()));
             let auxiliary_start = Instant::now();
             let auxiliary_outcome = ensure_ok_post_block!(
                 self.compute_auxiliary_state_root(auxiliary_provider_factory, auxiliary_state_root)
@@ -1018,6 +1016,7 @@ where
             debug!(
                 target: "engine::tree::payload_validator",
                 auxiliary_state_root = ?auxiliary_outcome.state_root,
+                retained_trie_data = retain_trie_data,
                 ?auxiliary_elapsed,
                 "Auxiliary state root task finished"
             );
@@ -1029,6 +1028,11 @@ where
             ) {
                 self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
                 return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into());
+            }
+
+            if let Some(retained_hashed_state) = retained_hashed_state {
+                retained_auxiliary_trie_data =
+                    Some((retained_hashed_state, auxiliary_outcome.trie_updates));
             }
         }
 
@@ -1075,8 +1079,27 @@ where
             let _ = valid_block_tx.send(());
         }
 
-        let executed_block =
-            self.spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output);
+        let changeset_provider = ensure_ok_post_block!(
+            changeset_provider
+                .try_into_inner()
+                .ok()
+                .expect("changeset provider handle is not cloned"),
+            block
+        );
+
+        let (retained_hashed_state, retained_trie_output) =
+            if let Some((hashed_state, trie_updates)) = retained_auxiliary_trie_data {
+                (LazyHashedPostState::ready(hashed_state), trie_updates)
+            } else {
+                (hashed_state, trie_output)
+            };
+        let executed_block = self.spawn_deferred_trie_task(
+            Arc::new(block),
+            output,
+            retained_hashed_state,
+            retained_trie_output,
+            changeset_provider,
+        );
         let executed_block = if let Some(outcome) = lthash_outcome {
             executed_block.with_lthash_accumulator(outcome.accumulator)
         } else {
@@ -1520,8 +1543,12 @@ where
             + Sync
             + 'static,
     {
-        let AuxiliaryStateRoot { parent_root, expected_root: _, state_updates } =
-            auxiliary_state_root;
+        let AuxiliaryStateRoot {
+            parent_root,
+            expected_root: _,
+            state_updates,
+            retain_trie_data: _,
+        } = auxiliary_state_root;
         let mut handle = self.payload_processor.spawn_auxiliary_state_root(
             multiproof_provider_factory,
             parent_root,

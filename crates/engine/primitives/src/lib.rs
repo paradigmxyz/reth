@@ -60,6 +60,12 @@ pub struct AuxiliaryStateRoot {
     pub expected_root: B256,
     /// Hashed state updates to stream into the auxiliary sparse trie task.
     pub state_updates: HashedPostState,
+    /// Whether the auxiliary hashed state and trie updates should become this block's retained trie
+    /// data.
+    ///
+    /// Keep this disabled for chains that only need auxiliary root validation. Enable it when the
+    /// auxiliary trie is the trie data that should be cached and persisted for descendants.
+    pub retain_trie_data: bool,
 }
 
 /// This type defines the versioned types of the engine API based on the [ethereum engine API](https://github.com/ethereum/execution-apis/tree/main/src/engine).
