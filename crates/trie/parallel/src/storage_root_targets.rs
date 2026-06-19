@@ -16,13 +16,15 @@ impl StorageRootTargets {
         changed_accounts: impl IntoIterator<Item = B256>,
         storage_prefix_sets: impl IntoIterator<Item = (B256, PrefixSet)>,
     ) -> Self {
-        Self(
-            changed_accounts
-                .into_iter()
-                .map(|address| (address, PrefixSet::default()))
-                .chain(storage_prefix_sets)
-                .collect(),
-        )
+        let changed_accounts = changed_accounts.into_iter();
+        let storage_prefix_sets = storage_prefix_sets.into_iter();
+        let capacity =
+            changed_accounts.size_hint().0.saturating_add(storage_prefix_sets.size_hint().0);
+
+        let mut targets = B256Map::with_capacity_and_hasher(capacity, Default::default());
+        targets.extend(changed_accounts.map(|address| (address, PrefixSet::default())));
+        targets.extend(storage_prefix_sets);
+        Self(targets)
     }
 
     /// Returns the total number of unique storage root targets without allocating new maps.
