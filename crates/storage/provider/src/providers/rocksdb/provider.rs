@@ -27,7 +27,7 @@ use reth_storage_errors::{
 };
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
-    DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
+    DBRawIteratorWithThreadMode, FlushOptions, IteratorMode, OptimisticTransactionDB,
     OptimisticTransactionOptions, Options, SnapshotWithThreadMode, Transaction,
     WriteBatchWithTransaction, WriteBufferManager, WriteOptions, DB,
 };
@@ -1043,13 +1043,29 @@ impl RocksDBProvider {
     pub fn flush(&self, tables: &[&'static str]) -> ProviderResult<()> {
         let db = self.0.db_rw();
 
-        for cf_name in tables {
-            if let Some(cf) = db.cf_handle(cf_name) {
-                db.flush_cf(&cf).map_err(|e| {
+        let cfs = tables
+            .iter()
+            .filter_map(|cf_name| db.cf_handle(cf_name).map(|cf| (*cf_name, cf)))
+            .collect::<Vec<_>>();
+        match cfs.as_slice() {
+            [] => {}
+            [(cf_name, cf)] => {
+                db.flush_cf(cf).map_err(|e| {
                     ProviderError::Database(DatabaseError::Write(Box::new(DatabaseWriteError {
                         info: DatabaseErrorInfo { message: e.to_string().into(), code: -1 },
                         operation: DatabaseWriteOperation::Flush,
                         table_name: cf_name,
+                        key: Vec::new(),
+                    })))
+                })?;
+            }
+            cfs => {
+                let cf_refs = cfs.iter().map(|(_, cf)| cf).collect::<Vec<_>>();
+                db.flush_cfs_opt(&cf_refs, &FlushOptions::default()).map_err(|e| {
+                    ProviderError::Database(DatabaseError::Write(Box::new(DatabaseWriteError {
+                        info: DatabaseErrorInfo { message: e.to_string().into(), code: -1 },
+                        operation: DatabaseWriteOperation::Flush,
+                        table_name: "multiple column families",
                         key: Vec::new(),
                     })))
                 })?;
