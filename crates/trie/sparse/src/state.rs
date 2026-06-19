@@ -727,13 +727,14 @@ where
         self.storage.shrink_to(storage_nodes, storage_values);
     }
 
-    /// Prunes account/storage tries according to global LFU retention.
+    /// Prunes account/storage tries according to global LFU retention and retained paths.
     ///
     /// - Top LFU `(address, slot)` entries are retained up to `max_hot_slots`.
     ///
     /// - Top LFU `(address, slot)` entries are retained in storage tries.
     /// - Account trie retains only paths for accounts tracked by the account LFU.
     /// - Storage tries retain only paths needed for retained slots.
+    /// - Additional retained paths are unioned with LFU-selected paths.
     /// - All other revealed paths are pruned to hash stubs or fully evicted.
     ///
     /// # Preconditions
@@ -749,29 +750,7 @@ where
         skip_all,
         fields(%max_hot_slots, %max_hot_accounts)
     )]
-    pub fn prune(&mut self, max_hot_slots: usize, max_hot_accounts: usize) {
-        self.prune_with_retained_paths(
-            max_hot_slots,
-            max_hot_accounts,
-            SparseTrieRetainedPaths::default(),
-        );
-    }
-
-    /// Prunes account/storage tries according to global LFU retention and additional retained
-    /// paths.
-    ///
-    /// The additional retained paths are unioned with the LFU-selected account and storage paths.
-    /// This lets callers preserve paths that are still needed by an external in-memory overlay
-    /// while allowing cold persisted paths to be pruned.
-    #[cfg(feature = "std")]
-    #[instrument(
-        level = "debug",
-        name = "SparseStateTrie::prune_with_retained_paths",
-        target = "trie::sparse",
-        skip_all,
-        fields(%max_hot_slots, %max_hot_accounts)
-    )]
-    pub fn prune_with_retained_paths(
+    pub fn prune(
         &mut self,
         max_hot_slots: usize,
         max_hot_accounts: usize,
@@ -1145,7 +1124,7 @@ mod tests {
         sparse.set_hot_cache_capacities(1, 1);
         sparse.record_account_touch(account);
         sparse.record_slot_touch(account, slot);
-        sparse.prune(1, 1);
+        sparse.prune(1, 1, SparseTrieRetainedPaths::default());
 
         assert_eq!(sparse.hot_accounts_lfu.keys().copied().collect::<Vec<_>>(), vec![account]);
         assert_eq!(
@@ -1179,7 +1158,7 @@ mod tests {
     }
 
     #[test]
-    fn prune_with_retained_paths_keeps_overlay_account_and_storage() {
+    fn prune_keeps_retained_paths_overlay_account_and_storage() {
         let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
 
         let account = B256::ZERO;
@@ -1234,7 +1213,7 @@ mod tests {
         let mut retained_paths = SparseTrieRetainedPaths::default();
         retained_paths.retain_account(account);
         retained_paths.retain_storage_slot(account, slot);
-        sparse.prune_with_retained_paths(0, 0, retained_paths);
+        sparse.prune(0, 0, retained_paths);
 
         assert!(matches!(
             sparse.state_trie_ref().unwrap().find_leaf(&account_path, None),

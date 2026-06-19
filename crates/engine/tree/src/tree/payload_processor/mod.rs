@@ -728,11 +728,7 @@ where
                 let start = Instant::now();
                 let (mut trie, mut deferred) = task.into_trie_for_reuse(&result.trie_updates);
                 if let Some(retained_paths) = pending_sparse_trie_prune {
-                    trie.prune_with_retained_paths(
-                        max_hot_slots,
-                        max_hot_accounts,
-                        retained_paths,
-                    );
+                    trie.prune(max_hot_slots, max_hot_accounts, retained_paths);
                     trie.shrink_to(
                         SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                         SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
