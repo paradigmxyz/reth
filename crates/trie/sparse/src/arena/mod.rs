@@ -241,7 +241,7 @@ impl ArenaSparseSubtrie {
         // avoids most reallocations without over-allocating when pruning is heavy.
         let mut new_arena =
             SlotMap::with_capacity(retained_upper_bound.unwrap_or(retained_lower_bound) * 2);
-        let mut retained_leaves = RetainedLeaves::new(retained_leaves);
+        let mut retained_leaves = retained_leaves.peekable();
         let mut new_num_leaves = 0u64;
         let mut new_nodes_heap_size = 0usize;
 
@@ -279,8 +279,11 @@ impl ArenaSparseSubtrie {
             let mut child_prefix = child_path;
             child_prefix.extend(child_short_key);
 
-            retained_leaves.skip_before(&child_prefix);
-            if retained_leaves.has_current_prefix(&child_prefix) {
+            while retained_leaves.peek().is_some_and(|retained| *retained < &child_prefix) {
+                retained_leaves.next();
+            }
+
+            if retained_leaves.peek().is_some_and(|retained| retained.starts_with(&child_prefix)) {
                 // Retained — move child to new arena.
                 let child_node = self.arena.remove(old_child_idx).expect("child exists");
                 let new_child_idx = new_arena.insert(child_node);
@@ -312,9 +315,6 @@ impl ArenaSparseSubtrie {
             }
         }
 
-        #[cfg(debug_assertions)]
-        retained_leaves.drain();
-
         let pruned = old_count - new_arena.len();
         self.num_leaves = new_num_leaves;
         self.num_dirty_leaves = 0;
@@ -326,59 +326,6 @@ impl ArenaSparseSubtrie {
         #[cfg(debug_assertions)]
         self.debug_assert_counters();
         return pruned;
-
-        struct RetainedLeaves<'a, I>
-        where
-            I: Iterator<Item = &'a Nibbles>,
-        {
-            inner: core::iter::Peekable<I>,
-            #[cfg(debug_assertions)]
-            last: Option<&'a Nibbles>,
-        }
-
-        impl<'a, I> RetainedLeaves<'a, I>
-        where
-            I: Iterator<Item = &'a Nibbles>,
-        {
-            fn new(iter: I) -> Self {
-                Self {
-                    inner: iter.peekable(),
-                    #[cfg(debug_assertions)]
-                    last: None,
-                }
-            }
-
-            fn peek(&mut self) -> Option<&'a Nibbles> {
-                self.inner.peek().copied()
-            }
-
-            fn next(&mut self) -> Option<&'a Nibbles> {
-                let next = self.inner.next();
-                #[cfg(debug_assertions)]
-                if let Some(next) = next {
-                    if let Some(last) = self.last {
-                        debug_assert!(last <= next, "retained_leaves must be sorted");
-                    }
-                    self.last = Some(next);
-                }
-                next
-            }
-
-            fn skip_before(&mut self, prefix: &Nibbles) {
-                while self.peek().is_some_and(|retained| retained < prefix) {
-                    self.next();
-                }
-            }
-
-            fn has_current_prefix(&mut self, prefix: &Nibbles) -> bool {
-                self.peek().is_some_and(|retained| retained.starts_with(prefix))
-            }
-
-            #[cfg(debug_assertions)]
-            fn drain(&mut self) {
-                while self.next().is_some() {}
-            }
-        }
 
         struct CopyFrame {
             new_idx: Index,
