@@ -257,6 +257,16 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
         self.reader_txn_tracker = Some(Arc::new(reader_txn_tracker));
         self
     }
+
+    /// Takes queued `RocksDB` write batches while keeping the queue allocation warm for the next
+    /// persistence cycle.
+    fn take_pending_rocksdb_batches(
+        pending_rocksdb_batches: &PendingRocksDBBatches,
+    ) -> Vec<rocksdb::WriteBatchWithTransaction<true>> {
+        let mut pending_batches = pending_rocksdb_batches.lock();
+        let empty = Vec::with_capacity(pending_batches.capacity());
+        std::mem::replace(&mut *pending_batches, empty)
+    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
@@ -280,7 +290,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         }
 
         if storage_v2 {
-            let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
+            let batches = Self::take_pending_rocksdb_batches(&self.pending_rocksdb_batches);
             for batch in batches {
                 self.rocksdb_provider.commit_batch(batch)?;
             }
@@ -384,7 +394,7 @@ impl<TX, N: NodeTypes> RocksDBProviderFactory for DatabaseProvider<TX, N> {
     }
 
     fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()> {
-        let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
+        let batches = Self::take_pending_rocksdb_batches(&self.pending_rocksdb_batches);
         for batch in batches {
             self.rocksdb_provider.commit_batch(batch)?;
         }
@@ -3894,7 +3904,7 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
             timings.sf = start.elapsed();
 
             let start = Instant::now();
-            let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
+            let batches = Self::take_pending_rocksdb_batches(&self.pending_rocksdb_batches);
             for batch in batches {
                 self.rocksdb_provider.commit_batch(batch)?;
             }
