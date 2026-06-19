@@ -3,9 +3,7 @@
 use alloy_primitives::B256;
 use parking_lot::Mutex;
 use reth_primitives_traits::FastInstant as Instant;
-use reth_trie_sparse::{
-    ConfigurableSparseTrie, DeferredDrops, SparseStateTrie, SparseTrieRetainedPaths,
-};
+use reth_trie_sparse::{ConfigurableSparseTrie, SparseStateTrie};
 use std::sync::Arc;
 use tracing::debug;
 
@@ -52,36 +50,6 @@ impl SharedPreservedSparseTrie {
         }
         elapsed
     }
-
-    /// Prunes the preserved sparse trie, retaining LFU-hot paths and the provided overlay paths.
-    pub(super) fn prune(
-        &self,
-        max_hot_slots: usize,
-        max_hot_accounts: usize,
-        max_nodes_capacity: usize,
-        max_values_capacity: usize,
-        retained_paths: SparseTrieRetainedPaths,
-    ) -> Option<SparseTriePruneOutcome> {
-        let mut guard = self.0.lock();
-        let trie = guard.as_mut()?.trie_mut();
-        trie.prune_with_retained_paths(max_hot_slots, max_hot_accounts, retained_paths);
-        trie.shrink_to(max_nodes_capacity, max_values_capacity);
-        Some(SparseTriePruneOutcome {
-            memory_size: trie.memory_size(),
-            retained_storage_tries: trie.retained_storage_tries_count(),
-            deferred: trie.take_deferred_drops(),
-        })
-    }
-}
-
-/// Result of pruning a preserved sparse trie.
-pub(super) struct SparseTriePruneOutcome {
-    /// Deferred drops collected while the trie was preserved.
-    pub(super) deferred: DeferredDrops,
-    /// Memory retained by the sparse trie after pruning.
-    pub(super) memory_size: usize,
-    /// Storage tries retained after pruning.
-    pub(super) retained_storage_tries: usize,
 }
 
 /// Guard that holds the lock on the preserved trie.
@@ -165,12 +133,6 @@ impl PreservedSparseTrie {
                 );
                 trie
             }
-        }
-    }
-
-    fn trie_mut(&mut self) -> &mut SparseTrie {
-        match self {
-            Self::Anchored { trie, .. } | Self::Cleared { trie } => trie,
         }
     }
 }

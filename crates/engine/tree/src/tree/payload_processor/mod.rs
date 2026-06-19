@@ -212,45 +212,6 @@ where
     }
 }
 
-impl<Evm> PayloadProcessor<Evm>
-where
-    Evm: ConfigureEvm,
-{
-    /// Prunes the preserved sparse trie cache after persisted blocks are removed from memory.
-    pub fn prune_sparse_trie_cache(&self, retained_paths: SparseTrieRetainedPaths) {
-        if self.disable_sparse_trie_cache_pruning {
-            return;
-        }
-
-        let sparse_trie = self.sparse_state_trie.clone();
-        let trie_metrics = self.trie_metrics.clone();
-        let max_hot_slots = self.sparse_trie_max_hot_slots;
-        let max_hot_accounts = self.sparse_trie_max_hot_accounts;
-        let executor = self.executor.clone();
-
-        self.executor.spawn_blocking_named("prune-sparse-trie", move || {
-            let start = Instant::now();
-            let outcome = sparse_trie.prune(
-                max_hot_slots,
-                max_hot_accounts,
-                SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
-                SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
-                retained_paths,
-            );
-            trie_metrics
-                .into_trie_for_reuse_duration_histogram
-                .record(start.elapsed().as_secs_f64());
-            if let Some(outcome) = outcome {
-                trie_metrics.sparse_trie_retained_memory_bytes.set(outcome.memory_size as f64);
-                trie_metrics
-                    .sparse_trie_retained_storage_tries
-                    .set(outcome.retained_storage_tries as f64);
-                executor.spawn_drop(outcome.deferred);
-            }
-        });
-    }
-}
-
 impl<Evm> WaitForCaches for PayloadProcessor<Evm>
 where
     Evm: ConfigureEvm,
@@ -288,10 +249,6 @@ where
             execution_cache: execution_cache_duration,
             sparse_trie: sparse_trie_duration,
         }
-    }
-
-    fn prune_sparse_trie_cache(&self, retained_paths: SparseTrieRetainedPaths) {
-        Self::prune_sparse_trie_cache(self, retained_paths);
     }
 }
 
@@ -336,6 +293,7 @@ where
         multiproof_provider_factory: F,
         config: &TreeConfig,
         parallel_bal_execution: bool,
+        pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -357,6 +315,7 @@ where
             env.parent_state_root,
             halve_workers,
             config,
+            pending_sparse_trie_prune,
         );
         // BAL blocks only bypass the normal execution state hook when the validator decided that
         // the parallel BAL executor will consume this block. If not, treat the BAL as absent here
@@ -430,6 +389,7 @@ where
         parent_state_root: B256,
         halve_workers: bool,
         config: &TreeConfig,
+        pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
     ) -> StateRootHandle
     where
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -455,6 +415,7 @@ where
             from_multi_proof,
             parent_state_root,
             config.multiproof_chunk_size(),
+            if self.disable_sparse_trie_cache_pruning { None } else { pending_sparse_trie_prune },
         );
 
         StateRootHandle::new(parent_state_root, updates_tx, state_root_rx, hashed_state_rx)
@@ -678,6 +639,7 @@ where
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
         parent_state_root: B256,
         chunk_size: usize,
+        pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
     ) {
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
@@ -764,7 +726,20 @@ where
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
             let deferred = if let Some(result) = task_result {
                 let start = Instant::now();
-                let (trie, deferred) = task.into_trie_for_reuse(&result.trie_updates);
+                let (mut trie, mut deferred) = task.into_trie_for_reuse(&result.trie_updates);
+                if let Some(retained_paths) = pending_sparse_trie_prune {
+                    trie.prune_with_retained_paths(
+                        max_hot_slots,
+                        max_hot_accounts,
+                        retained_paths,
+                    );
+                    trie.shrink_to(
+                        SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
+                        SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
+                    );
+                    let mut prune_deferred = trie.take_deferred_drops();
+                    deferred.proof_nodes_bufs.append(&mut prune_deferred.proof_nodes_bufs);
+                }
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
@@ -1449,6 +1424,7 @@ mod tests {
             ),
             &TreeConfig::default(),
             false,
+            None,
         );
 
         let mut state_hook = handle.state_hook().expect("state hook is None");
