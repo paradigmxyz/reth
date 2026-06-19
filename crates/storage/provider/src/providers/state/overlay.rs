@@ -304,8 +304,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         // and we want to make sure both record metrics, so we do metrics recording after.
         let retrieve_trie_reverts_duration;
         let retrieve_hashed_state_reverts_duration;
-        let trie_updates_total_len;
-        let hashed_state_updates_total_len;
         let anchor_hash = match &self.overlay_source {
             Some(OverlaySource::Managed { manager, .. }) => {
                 let parent_is_persisted = provider
@@ -381,13 +379,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 Arc::new(hashed_state_reverts)
             };
 
-            trie_updates_total_len = trie_updates.total_len();
-            hashed_state_updates_total_len = hashed_state_updates.total_len();
-
             debug!(
                 target: "providers::state::overlay",
-                num_trie_updates = ?trie_updates_total_len,
-                num_state_updates = ?hashed_state_updates_total_len,
                 "Reverted to anchor block",
             );
 
@@ -398,8 +391,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
             retrieve_trie_reverts_duration = Duration::ZERO;
             retrieve_hashed_state_reverts_duration = Duration::ZERO;
-            trie_updates_total_len = trie_updates.total_len();
-            hashed_state_updates_total_len = hashed_state.total_len();
 
             (trie_updates, hashed_state)
         };
@@ -411,8 +402,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self.metrics
             .retrieve_hashed_state_reverts_duration
             .record(retrieve_hashed_state_reverts_duration.as_secs_f64());
-        self.metrics.trie_updates_size.record(trie_updates_total_len as f64);
-        self.metrics.hashed_state_size.record(hashed_state_updates_total_len as f64);
 
         Ok(Overlay { trie_updates, hashed_post_state })
     }
