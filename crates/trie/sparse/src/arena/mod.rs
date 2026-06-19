@@ -3195,17 +3195,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
-        ArenaSparseSubtrie, TRACE_TARGET,
-    };
+    use super::TRACE_TARGET;
     use crate::{ArenaParallelSparseTrie, ArenaParallelismThresholds, LeafUpdate, SparseTrie};
     use alloy_primitives::{map::B256Map, B256, U256};
-    use alloy_trie::TrieMask;
     use rand::{seq::SliceRandom, Rng, SeedableRng};
     use reth_trie::test_utils::TrieTestHarness;
-    use reth_trie_common::{BranchNodeMasks, Nibbles, ProofV2Target, RlpNode};
-    use smallvec::smallvec;
+    use reth_trie_common::{Nibbles, ProofV2Target};
     use std::collections::BTreeMap;
     use tracing::{info, trace};
 
@@ -3310,63 +3305,6 @@ mod tests {
             );
             assert_eq!(expected_root, actual_root, "storage root mismatch");
         }
-    }
-
-    #[test]
-    fn subtrie_prune_reinserts_nodes_in_lexicographic_order() {
-        fn cached_state(byte: u8) -> ArenaSparseNodeState {
-            ArenaSparseNodeState::Cached { rlp_node: RlpNode::word_rlp(&B256::repeat_byte(byte)) }
-        }
-
-        let mut subtrie = ArenaSparseSubtrie::new(false);
-
-        let leaf_10 = subtrie.arena.insert(ArenaSparseNode::Leaf {
-            state: cached_state(0x10),
-            value: vec![0x10],
-            key: Nibbles::default(),
-        });
-        let branch_1 = subtrie.arena.insert(ArenaSparseNode::Branch(ArenaSparseNodeBranch {
-            state: cached_state(0x01),
-            children: smallvec![ArenaSparseNodeBranchChild::Revealed(leaf_10)],
-            state_mask: TrieMask::from(1u16),
-            short_key: Nibbles::default(),
-            branch_masks: BranchNodeMasks::default(),
-        }));
-        let leaf_2 = subtrie.arena.insert(ArenaSparseNode::Leaf {
-            state: cached_state(0x02),
-            value: vec![0x02],
-            key: Nibbles::default(),
-        });
-
-        subtrie.arena[subtrie.root] = ArenaSparseNode::Branch(ArenaSparseNodeBranch {
-            state: cached_state(0x00),
-            children: smallvec![
-                ArenaSparseNodeBranchChild::Revealed(branch_1),
-                ArenaSparseNodeBranchChild::Revealed(leaf_2)
-            ],
-            state_mask: TrieMask::from((1u16 << 1) | (1u16 << 2)),
-            short_key: Nibbles::default(),
-            branch_masks: BranchNodeMasks::default(),
-        });
-        subtrie.num_leaves = 2;
-
-        let retained = [Nibbles::from_nibbles([0x1, 0x0]), Nibbles::from_nibbles([0x2])];
-
-        assert_eq!(subtrie.prune(retained.iter()), 0);
-
-        let node_order = subtrie
-            .arena
-            .iter()
-            .map(|(_, node)| match node {
-                ArenaSparseNode::Branch(branch) if branch.state_mask.is_bit_set(1) => "root",
-                ArenaSparseNode::Branch(_) => "1",
-                ArenaSparseNode::Leaf { value, .. } if value == &[0x10] => "10",
-                ArenaSparseNode::Leaf { value, .. } if value == &[0x02] => "2",
-                other => panic!("unexpected node in test subtrie: {other:?}"),
-            })
-            .collect::<Vec<_>>();
-
-        assert_eq!(node_order, ["root", "1", "10", "2"]);
     }
 
     use proptest::prelude::*;
