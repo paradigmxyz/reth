@@ -292,6 +292,8 @@ where
     config: TreeConfig,
     /// Payload processor for state root computation.
     payload_processor: PayloadProcessor<Evm>,
+    /// Shared evm2 precompile cache for prewarming and execution.
+    precompile_cache_map: PrecompileCacheMap<evm2::SpecId>,
     /// Hook to call when invalid blocks are encountered.
     #[debug(skip)]
     invalid_block_hook: Box<dyn InvalidBlockHook<Evm::Primitives>>,
@@ -340,17 +342,19 @@ where
         changeset_cache: ChangesetCache,
         runtime: reth_tasks::Runtime,
     ) -> Self {
+        let precompile_cache_map = PrecompileCacheMap::default();
         let payload_processor = PayloadProcessor::new(
             runtime.clone(),
             evm_config.clone(),
             &config,
-            PrecompileCacheMap::default(),
+            precompile_cache_map.clone(),
         );
         Self {
             provider,
             consensus,
             evm_config,
             payload_processor,
+            precompile_cache_map,
             config,
             invalid_block_hook,
             metrics: EngineApiMetrics::default(),
@@ -1183,16 +1187,19 @@ where
                 // SAFETY: The borrowed evm2 database is consumed by this synchronous block
                 // execution call and cannot outlive `state_provider`.
                 let db = unsafe { BorrowedEvm2StateProviderDatabase::new(&state_provider) };
-                self.evm_config.executor(db).execute_payload_with_hashed_state_hook(
-                    env.evm_env.clone(),
-                    transactions,
-                    context,
-                    |executed| {
-                        executed_tx_index.store(executed, Ordering::Relaxed);
-                    },
-                    &mut on_hashed_state_update,
-                    hashed_state_mode,
-                )
+                self.evm_config
+                    .executor(db)
+                    .with_precompile_cache_map(self.precompile_cache_map.clone())
+                    .execute_payload_with_hashed_state_hook(
+                        env.evm_env.clone(),
+                        transactions,
+                        context,
+                        |executed| {
+                            executed_tx_index.store(executed, Ordering::Relaxed);
+                        },
+                        &mut on_hashed_state_update,
+                        hashed_state_mode,
+                    )
             })
             .map_err(BlockExecutionError::other)?;
         drop(state_hook_sender);

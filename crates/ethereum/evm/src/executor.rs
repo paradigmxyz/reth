@@ -171,6 +171,14 @@ pub trait Evm2PayloadExecutor {
     /// Error returned by payload execution.
     type Error: core::error::Error + Send + Sync + 'static;
 
+    /// Returns this executor configured with the provided precompile cache.
+    fn with_precompile_cache_map(
+        self,
+        precompile_cache_map: PrecompileCacheMap<evm2::SpecId>,
+    ) -> Self
+    where
+        Self: Sized;
+
     /// Executes evm2-native transaction envelopes with progress and hashed-state hooks.
     fn execute_payload_with_hashed_state_hook<I, F, H, Env>(
         self,
@@ -195,6 +203,14 @@ where
     DB::Error: core::error::Error + Send + Sync + 'static,
 {
     type Error = Evm2ExecutionError<DB::Error>;
+
+    fn with_precompile_cache_map(
+        mut self,
+        precompile_cache_map: PrecompileCacheMap<evm2::SpecId>,
+    ) -> Self {
+        self.precompile_cache_map = precompile_cache_map;
+        self
+    }
 
     fn execute_payload_with_hashed_state_hook<I, F, H, Env>(
         self,
