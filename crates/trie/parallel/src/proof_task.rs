@@ -1072,7 +1072,9 @@ fn dispatch_v2_storage_proofs(
         B256Map::with_capacity_and_hasher(storage_targets.len(), Default::default());
 
     // Collect hashed addresses from account targets that need their storage roots computed
-    let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
+    let mut account_target_addresses =
+        B256Set::with_capacity_and_hasher(account_targets.len(), Default::default());
+    account_target_addresses.extend(account_targets.iter().map(|t| t.key()));
 
     // For storage targets with associated account proofs, ensure the first target has
     // min_len(0) so the root node is returned for storage root computation
@@ -1087,7 +1089,8 @@ fn dispatch_v2_storage_proofs(
     // Sort storage targets by address for optimal dispatch order.
     // Since trie walk processes accounts in lexicographical order, dispatching in the same order
     // reduces head-of-line blocking when consuming results.
-    let mut sorted_storage_targets: Vec<_> = storage_targets.into_iter().collect();
+    let mut sorted_storage_targets = Vec::with_capacity(storage_targets.len());
+    sorted_storage_targets.extend(storage_targets);
     sorted_storage_targets.sort_unstable_by_key(|(addr, _)| *addr);
 
     // Dispatch all proofs for targeted storage slots
