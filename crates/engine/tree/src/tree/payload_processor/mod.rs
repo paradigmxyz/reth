@@ -303,7 +303,7 @@ where
     {
         // start preparing transactions immediately
         let (prewarm_rx, execution_rx) =
-            self.spawn_tx_iterator(transactions, env.transaction_count);
+            self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
 
         let span = Span::current();
 
@@ -349,12 +349,13 @@ where
         env: ExecutionEnv<Evm>,
         transactions: I,
         provider_builder: StateProviderBuilder<N, P>,
+        parallel_bal_execution: bool,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
         let (prewarm_rx, execution_rx) =
-            self.spawn_tx_iterator(transactions, env.transaction_count);
+            self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
         let prewarm_handle =
             self.spawn_caching_with(env, prewarm_rx, provider_builder, None, false);
         PayloadHandle {
@@ -440,13 +441,16 @@ where
     ///
     /// For blocks with fewer than [`Self::SMALL_BLOCK_TX_THRESHOLD`] transactions, uses
     /// sequential iteration to avoid rayon overhead. For larger blocks, uses rayon parallel
-    /// iteration with [`ForEachOrdered`] to convert transactions in parallel while streaming
-    /// results to execution in the original transaction order.
+    /// iteration to convert transactions in parallel while streaming results to execution.
+    ///
+    /// When `parallel_bal_execution` is disabled, uses [`ForEachOrdered`] to preserve the
+    /// original transaction order. Otherwise, streams results as they become available.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_tx_iterator<I: ExecutableTxIterator<Evm>>(
         &self,
         transactions: I,
         transaction_count: usize,
+        parallel_bal_execution: bool,
     ) -> (IteratorPrewarmTxReceiver<Evm, I>, IteratorExecuteTxReceiver<Evm, I>) {
         let (prewarm_tx, prewarm_rx) = mpsc::sync_channel(transaction_count);
         let (execute_tx, execute_rx) = crossbeam_channel::bounded(transaction_count);
@@ -467,40 +471,63 @@ where
             });
         } else {
             // Parallel path — recover signatures in parallel on rayon, stream results
-            // to execution in order via `for_each_ordered`.
-            //
-            // To avoid a ~1ms stall waiting for rayon to schedule index 0, the first
-            // few transactions are recovered sequentially and sent immediately before
-            // entering the parallel iterator for the remainder.
-            let prefetch = Self::PARALLEL_PREFETCH_COUNT.min(transaction_count);
+            // to prewarming and execution.
             let executor = self.executor.clone();
             self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
-                let mut all: Vec<_> = transactions.into_iter().collect();
-                let rest = all.split_off(prefetch.min(all.len()));
+                if parallel_bal_execution {
+                    // With BALs, we don't care about the order of transactions in execution and
+                    // prewarming, so we don't have to use `for_each_ordered_in`.
+                    executor.cpu_pool().install(|| {
+                        transactions
+                            .into_par_iter()
+                            .enumerate()
+                            .map(|(i, tx)| {
+                                let tx = convert.convert(tx);
+                                (i, tx)
+                            })
+                            .for_each(|(idx, tx)| {
+                                let tx = tx.map(|tx| {
+                                    let tx = WithTxEnv::new(tx);
+                                    let _ = prewarm_tx.send((idx, tx.clone()));
+                                    tx
+                                });
+                                let _ = execute_tx.send((idx, tx));
+                                trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+                            });
+                    });
+                } else {
+                    // To avoid a ~1ms stall waiting for rayon to schedule index 0, the first
+                    // few transactions are recovered sequentially and sent immediately before
+                    // entering the parallel iterator for the remainder.
+                    let prefetch = Self::PARALLEL_PREFETCH_COUNT.min(transaction_count);
+                    let mut all: Vec<_> = transactions.into_iter().collect();
+                    let rest = all.split_off(prefetch);
 
-                // Convert the first few transactions sequentially so execution can
-                // start immediately without waiting for rayon work-stealing.
-                convert_serial(all.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                    // Convert the first few transactions sequentially so execution can
+                    // start immediately without waiting for rayon work-stealing.
+                    convert_serial(all.into_iter(), &convert, &prewarm_tx, &execute_tx);
 
-                // Convert the remaining transactions in parallel.
-                rest.into_par_iter()
-                    .enumerate()
-                    .map(|(i, tx)| {
-                        let idx = i + prefetch;
-                        let tx = convert.convert(tx);
-                        (idx, tx)
-                    })
-                    .for_each_ordered_in(executor.cpu_pool(), |(idx, tx)| {
-                        let tx = tx.map(|tx| {
-                            let tx = WithTxEnv::new(tx);
-                            let _ = prewarm_tx.send((idx, tx.clone()));
-                            tx
+                    // Without BALs, we need to preserve the initial order of transactions,
+                    // so we have to use `for_each_ordered_in`.
+                    rest.into_par_iter()
+                        .enumerate()
+                        .map(|(i, tx)| {
+                            let idx = i + prefetch;
+                            let tx = convert.convert(tx);
+                            (idx, tx)
+                        })
+                        .for_each_ordered_in(executor.cpu_pool(), |(idx, tx)| {
+                            let tx = tx.map(|tx| {
+                                let tx = WithTxEnv::new(tx);
+                                let _ = prewarm_tx.send((idx, tx.clone()));
+                                tx
+                            });
+                            let _ = execute_tx.send((idx, tx));
+                            trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
                         });
-                        let _ = execute_tx.send((idx, tx));
-                        trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
-                        });
-                        });
+                }
+            });
         }
 
         (prewarm_rx, execute_rx)
@@ -999,7 +1026,6 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     pub parent_state_root: B256,
     /// Number of transactions in the block.
     /// Used to determine parallel worker count for prewarming.
-    /// A value of 0 indicates the count is unknown.
     pub transaction_count: usize,
     /// Total gas used by all transactions in the block.
     /// Used to adaptively select multiproof chunk size for optimal throughput.
