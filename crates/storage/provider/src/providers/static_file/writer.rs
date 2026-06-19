@@ -1357,14 +1357,24 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         mut changeset: Vec<AccountBeforeTx>,
         block_number: u64,
     ) -> ProviderResult<()> {
+        changeset.sort_by_key(|change| change.address);
+        self.append_account_changeset_sorted(changeset, block_number)
+    }
+
+    /// Appends a sorted block account changeset to the static file.
+    ///
+    /// It **CALLS** `increment_block()`.
+    pub fn append_account_changeset_sorted(
+        &mut self,
+        changeset: Vec<AccountBeforeTx>,
+        block_number: u64,
+    ) -> ProviderResult<()> {
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::AccountChangeSets);
+        debug_assert!(changeset.windows(2).all(|w| w[0].address <= w[1].address));
         let start = Instant::now();
 
         self.increment_block(block_number)?;
         self.ensure_no_queued_prune()?;
-
-        // first sort the changeset by address
-        changeset.sort_by_key(|change| change.address);
 
         let mut count: u64 = 0;
 
@@ -1421,14 +1431,26 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         mut changeset: Vec<StorageBeforeTx>,
         block_number: u64,
     ) -> ProviderResult<()> {
+        changeset.sort_by_key(|change| (change.address, change.key));
+        self.append_storage_changeset_sorted(changeset, block_number)
+    }
+
+    /// Appends a sorted block storage changeset to the static file.
+    ///
+    /// It **CALLS** `increment_block()`.
+    pub fn append_storage_changeset_sorted(
+        &mut self,
+        changeset: Vec<StorageBeforeTx>,
+        block_number: u64,
+    ) -> ProviderResult<()> {
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::StorageChangeSets);
+        debug_assert!(changeset
+            .windows(2)
+            .all(|w| { (w[0].address, w[0].key) <= (w[1].address, w[1].key) }));
         let start = Instant::now();
 
         self.increment_block(block_number)?;
         self.ensure_no_queued_prune()?;
-
-        // sort by address + storage key
-        changeset.sort_by_key(|change| (change.address, change.key));
 
         let mut count: u64 = 0;
         for change in changeset {
