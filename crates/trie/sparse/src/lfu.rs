@@ -40,9 +40,23 @@ impl<K> BucketedLfu<K> {
     pub(crate) fn new(capacity: usize) -> Self {
         Self {
             capacity,
-            entries: HashMap::default(),
-            buckets: (0..=LFU_MAX_FREQ).map(|_| Vec::new()).collect(),
+            entries: if capacity == 0 {
+                HashMap::default()
+            } else {
+                HashMap::with_capacity_and_hasher(capacity, Default::default())
+            },
+            buckets: if capacity == 0 { Vec::new() } else { Self::new_buckets() },
             min_freq: 1,
+        }
+    }
+
+    fn new_buckets() -> Vec<Vec<K>> {
+        (0..=LFU_MAX_FREQ).map(|_| Vec::new()).collect()
+    }
+
+    fn ensure_buckets(&mut self) {
+        if self.buckets.is_empty() {
+            self.buckets = Self::new_buckets();
         }
     }
 }
@@ -57,11 +71,14 @@ impl<K: fmt::Debug + Copy + Eq + hash::Hash> BucketedLfu<K> {
 
         if self.capacity == 0 {
             self.entries.clear();
-            for b in &mut self.buckets {
-                b.clear();
-            }
+            self.buckets.clear();
             self.min_freq = 1;
             return;
+        }
+
+        self.ensure_buckets();
+        if self.capacity > self.entries.capacity() {
+            self.entries.reserve(self.capacity - self.entries.len());
         }
 
         while self.entries.len() > self.capacity {
@@ -108,6 +125,8 @@ impl<K: fmt::Debug + Copy + Eq + hash::Hash> BucketedLfu<K> {
         if self.capacity == 0 {
             return;
         }
+
+        self.ensure_buckets();
 
         if let Some(meta) = self.entries.get(&key).copied() {
             debug_assert_eq!(self.buckets[meta.freq as usize][meta.pos], key);
