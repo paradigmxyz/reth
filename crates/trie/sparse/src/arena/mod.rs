@@ -248,15 +248,70 @@ impl ArenaSparseSubtrie {
         // Root is always retained.
         let root_node = self.arena.remove(self.root).expect("root exists");
         let new_root = new_arena.insert(root_node);
-        copy_retained_subtree(
-            &mut self.arena,
-            &mut new_arena,
+        let mut stack = Vec::new();
+        if let Some(frame) = prepare_retained_node(
+            &new_arena,
             new_root,
             self.path,
-            &mut retained_leaves,
             &mut new_num_leaves,
             &mut new_nodes_heap_size,
-        );
+        ) {
+            stack.push(frame);
+        }
+
+        while let Some(frame) = stack.last_mut() {
+            let Some((child_pos, nibble, old_child_idx)) = frame.next_child() else {
+                stack.pop();
+                continue;
+            };
+
+            // Child's path in the trie (edges to reach it, excluding its own short_key).
+            let parent_new_idx = frame.new_idx;
+            let mut child_path = frame.branch_logical_path;
+            child_path.push(nibble);
+
+            // Child's full prefix for the retention check.
+            let child_short_key = match &self.arena[old_child_idx] {
+                ArenaSparseNode::Branch(b) => &b.short_key,
+                ArenaSparseNode::Leaf { key, .. } => key,
+                other => unreachable!("subtrie prune: unexpected child node kind: {other:?}"),
+            };
+            let mut child_prefix = child_path;
+            child_prefix.extend(child_short_key);
+
+            retained_leaves.skip_before(&child_prefix);
+            if retained_leaves.has_current_prefix(&child_prefix) {
+                // Retained — move child to new arena.
+                let child_node = self.arena.remove(old_child_idx).expect("child exists");
+                let new_child_idx = new_arena.insert(child_node);
+                let ArenaSparseNode::Branch(b) = &mut new_arena[parent_new_idx] else {
+                    unreachable!()
+                };
+                b.children[child_pos] = ArenaSparseNodeBranchChild::Revealed(new_child_idx);
+                if let Some(frame) = prepare_retained_node(
+                    &new_arena,
+                    new_child_idx,
+                    child_path,
+                    &mut new_num_leaves,
+                    &mut new_nodes_heap_size,
+                ) {
+                    stack.push(frame);
+                }
+            } else {
+                // Not retained — blind the child slot in the new arena.
+                let rlp_node = self.arena[old_child_idx]
+                    .state_ref()
+                    .expect("child must have state")
+                    .cached_rlp_node()
+                    .cloned()
+                    .expect("pruned child must have cached RLP (prune runs after hashing)");
+                let ArenaSparseNode::Branch(b) = &mut new_arena[parent_new_idx] else {
+                    unreachable!()
+                };
+                b.children[child_pos] = ArenaSparseNodeBranchChild::Blinded(rlp_node);
+            }
+        }
+
         #[cfg(debug_assertions)]
         retained_leaves.drain();
 
@@ -325,25 +380,37 @@ impl ArenaSparseSubtrie {
             }
         }
 
-        /// Copies retained nodes into `new_arena` in trie-path lexicographic order.
-        fn copy_retained_subtree<'a, I>(
-            old_arena: &mut NodeArena,
-            new_arena: &mut NodeArena,
+        struct CopyFrame {
+            new_idx: Index,
+            branch_logical_path: Nibbles,
+            children: SmallVec<[(usize, u8, Index); 16]>,
+            next_child_idx: usize,
+        }
+
+        impl CopyFrame {
+            fn next_child(&mut self) -> Option<(usize, u8, Index)> {
+                let child = self.children.get(self.next_child_idx).copied()?;
+                self.next_child_idx += 1;
+                Some(child)
+            }
+        }
+
+        /// Prepares a retained node for lexicographic copying, returning a stack frame when the
+        /// node has children to walk.
+        fn prepare_retained_node(
+            new_arena: &NodeArena,
             new_idx: Index,
             node_path: Nibbles,
-            retained_leaves: &mut RetainedLeaves<'a, I>,
             new_num_leaves: &mut u64,
             new_nodes_heap_size: &mut usize,
-        ) where
-            I: Iterator<Item = &'a Nibbles>,
-        {
+        ) -> Option<CopyFrame> {
             *new_nodes_heap_size += new_arena[new_idx].extra_heap_bytes();
 
             let ArenaSparseNode::Branch(b) = &new_arena[new_idx] else {
                 if matches!(&new_arena[new_idx], ArenaSparseNode::Leaf { .. }) {
                     *new_num_leaves += 1;
                 }
-                return;
+                return None;
             };
 
             // Logical path of this branch (path TO node + its extension/short_key).
@@ -359,53 +426,7 @@ impl ArenaSparseSubtrie {
                     _ => None,
                 })
                 .collect();
-
-            for (child_pos, nibble, old_child_idx) in children {
-                // Child's path in the trie (edges to reach it, excluding its own short_key).
-                let mut child_path = branch_logical_path;
-                child_path.push(nibble);
-
-                // Child's full prefix for the retention check.
-                let child_short_key = match &old_arena[old_child_idx] {
-                    ArenaSparseNode::Branch(b) => &b.short_key,
-                    ArenaSparseNode::Leaf { key, .. } => key,
-                    other => unreachable!("subtrie prune: unexpected child node kind: {other:?}"),
-                };
-                let mut child_prefix = child_path;
-                child_prefix.extend(child_short_key);
-
-                retained_leaves.skip_before(&child_prefix);
-                if retained_leaves.has_current_prefix(&child_prefix) {
-                    // Retained — move child to new arena.
-                    let child_node = old_arena.remove(old_child_idx).expect("child exists");
-                    let new_child_idx = new_arena.insert(child_node);
-                    let ArenaSparseNode::Branch(b) = &mut new_arena[new_idx] else {
-                        unreachable!()
-                    };
-                    b.children[child_pos] = ArenaSparseNodeBranchChild::Revealed(new_child_idx);
-                    copy_retained_subtree(
-                        old_arena,
-                        new_arena,
-                        new_child_idx,
-                        child_path,
-                        retained_leaves,
-                        new_num_leaves,
-                        new_nodes_heap_size,
-                    );
-                } else {
-                    // Not retained — blind the child slot in the new arena.
-                    let rlp_node = old_arena[old_child_idx]
-                        .state_ref()
-                        .expect("child must have state")
-                        .cached_rlp_node()
-                        .cloned()
-                        .expect("pruned child must have cached RLP (prune runs after hashing)");
-                    let ArenaSparseNode::Branch(b) = &mut new_arena[new_idx] else {
-                        unreachable!()
-                    };
-                    b.children[child_pos] = ArenaSparseNodeBranchChild::Blinded(rlp_node);
-                }
-            }
+            Some(CopyFrame { new_idx, branch_logical_path, children, next_child_idx: 0 })
         }
     }
 
