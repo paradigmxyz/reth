@@ -42,13 +42,13 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
         &self,
         tx: B256,
         data: BlobTransactionSidecarVariant,
-    ) -> Result<BlobCellAvailability, BlobStoreError>;
+    ) -> Result<Option<BlobCellAvailability>, BlobStoreError>;
 
     /// Inserts multiple blob sidecars into the store
     fn insert_all(
         &self,
         txs: Vec<(B256, BlobTransactionSidecarVariant)>,
-    ) -> Result<Vec<(B256, BlobCellAvailability)>, BlobStoreError>;
+    ) -> Result<Vec<(B256, Option<BlobCellAvailability>)>, BlobStoreError>;
 
     /// Deletes the blob sidecar from the store
     fn delete(&self, tx: B256) -> Result<(), BlobStoreError>;

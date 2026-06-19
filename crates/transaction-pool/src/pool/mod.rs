@@ -1307,7 +1307,7 @@ where
         match self.blob_store.insert(hash, blob) {
             Ok(availability) => {
                 self.update_blob_store_metrics();
-                Some(availability)
+                availability
             }
             Err(err) => {
                 warn!(target: "txpool", %err, "[{:?}] failed to insert blob", hash);

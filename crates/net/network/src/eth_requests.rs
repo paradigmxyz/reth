@@ -568,15 +568,15 @@ mod tests {
             &self,
             _tx: B256,
             _data: BlobTransactionSidecarVariant,
-        ) -> Result<BlobCellAvailability, BlobStoreError> {
-            Ok(FULL_BLOB_CELL_AVAILABILITY)
+        ) -> Result<Option<BlobCellAvailability>, BlobStoreError> {
+            Ok(Some(FULL_BLOB_CELL_AVAILABILITY))
         }
 
         fn insert_all(
             &self,
             txs: Vec<(B256, BlobTransactionSidecarVariant)>,
-        ) -> Result<Vec<(B256, BlobCellAvailability)>, BlobStoreError> {
-            Ok(txs.into_iter().map(|(tx, _)| (tx, FULL_BLOB_CELL_AVAILABILITY)).collect())
+        ) -> Result<Vec<(B256, Option<BlobCellAvailability>)>, BlobStoreError> {
+            Ok(txs.into_iter().map(|(tx, _)| (tx, Some(FULL_BLOB_CELL_AVAILABILITY))).collect())
         }
 
         fn delete(&self, _tx: B256) -> Result<(), BlobStoreError> {

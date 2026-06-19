@@ -211,19 +211,20 @@ impl BlobStore for DiskFileBlobStore {
         &self,
         tx: B256,
         data: BlobTransactionSidecarVariant,
-    ) -> Result<BlobCellAvailability, BlobStoreError> {
+    ) -> Result<Option<BlobCellAvailability>, BlobStoreError> {
         self.inner.insert_one(tx, data)?;
-        Ok(FULL_BLOB_CELL_AVAILABILITY)
+        Ok(Some(FULL_BLOB_CELL_AVAILABILITY))
     }
 
     fn insert_all(
         &self,
         txs: Vec<(B256, BlobTransactionSidecarVariant)>,
-    ) -> Result<Vec<(B256, BlobCellAvailability)>, BlobStoreError> {
+    ) -> Result<Vec<(B256, Option<BlobCellAvailability>)>, BlobStoreError> {
         if txs.is_empty() {
             return Ok(Vec::new())
         }
-        let availability = txs.iter().map(|(tx, _)| (*tx, FULL_BLOB_CELL_AVAILABILITY)).collect();
+        let availability =
+            txs.iter().map(|(tx, _)| (*tx, Some(FULL_BLOB_CELL_AVAILABILITY))).collect();
         self.inner.insert_many(txs).map(|()| availability)
     }
 
