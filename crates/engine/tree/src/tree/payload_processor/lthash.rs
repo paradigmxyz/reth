@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use crate::tree::payload_processor::{
-    multiproof::{StateHookSender, StateRootMessage},
+    multiproof::{evm_state_to_hashed_post_state, StateHookSender, StateRootMessage},
     state_io_pool::{StateIoPool, StateIoReadResult},
 };
 use alloy_consensus::constants::KECCAK_EMPTY;
@@ -103,19 +103,22 @@ impl LthashHandle {
 
 /// State hook used by the normal execution path.
 ///
-/// Sparse trie and Lthash consume the same per-transaction state stream. The sparse trie needs the
-/// owned [`EvmState`]; Lthash only needs to inspect it and emit its own compact messages.
+/// Sparse trie, streamed hashed post-state collection, and Lthash consume the same
+/// per-transaction state stream. Lthash only inspects the update and emits its own compact
+/// messages.
 pub(crate) struct PayloadStateHook {
     sparse: Option<StateHookSender>,
+    hashed_state: Option<CrossbeamSender<StateRootMessage>>,
     lthash: Option<CrossbeamSender<LthashMessage>>,
 }
 
 impl PayloadStateHook {
     pub(crate) const fn new(
         sparse: Option<StateHookSender>,
+        hashed_state: Option<CrossbeamSender<StateRootMessage>>,
         lthash: Option<CrossbeamSender<LthashMessage>>,
     ) -> Self {
-        Self { sparse, lthash }
+        Self { sparse, hashed_state, lthash }
     }
 }
 
@@ -125,8 +128,19 @@ impl OnStateHook for PayloadStateHook {
             send_evm_state_to_lthash(&state, lthash);
         }
 
-        if let Some(sparse) = self.sparse.as_ref() {
-            let _ = sparse.send(StateRootMessage::StateUpdate(state));
+        match (self.sparse.as_ref(), self.hashed_state.as_ref()) {
+            (Some(sparse), Some(hashed_state)) => {
+                let update = evm_state_to_hashed_post_state(state);
+                let _ = sparse.send(StateRootMessage::HashedStateUpdate(update.clone()));
+                let _ = hashed_state.send(StateRootMessage::HashedStateUpdate(update));
+            }
+            (Some(sparse), None) => {
+                let _ = sparse.send(StateRootMessage::StateUpdate(state));
+            }
+            (None, Some(hashed_state)) => {
+                let _ = hashed_state.send(StateRootMessage::StateUpdate(state));
+            }
+            (None, None) => {}
         }
     }
 }
@@ -135,6 +149,9 @@ impl Drop for PayloadStateHook {
     fn drop(&mut self) {
         if let Some(lthash) = self.lthash.take() {
             let _ = lthash.send(LthashMessage::FinishedUpdates);
+        }
+        if let Some(hashed_state) = self.hashed_state.take() {
+            let _ = hashed_state.send(StateRootMessage::FinishedStateUpdates);
         }
     }
 }

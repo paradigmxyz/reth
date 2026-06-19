@@ -75,6 +75,8 @@ where
     ctx: PrewarmContext<N, P, Evm>,
     /// Sender to emit evm state outcome messages to the sparse trie task, if any.
     to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
+    /// Sender to emit hashed post-state updates needed by persistence, if any.
+    to_hashed_state_task: Option<CrossbeamSender<StateRootMessage>>,
     /// Sender to emit BAL-derived account/storage updates to the Lthash task, if any.
     to_lthash_task: Option<CrossbeamSender<LthashMessage>>,
     /// Receiver for events produced by tx execution
@@ -95,6 +97,7 @@ where
         execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
         to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
+        to_hashed_state_task: Option<CrossbeamSender<StateRootMessage>>,
         to_lthash_task: Option<CrossbeamSender<LthashMessage>>,
     ) -> (Self, Sender<PrewarmTaskEvent<N::Receipt>>) {
         let (actions_tx, actions_rx) = channel();
@@ -112,6 +115,7 @@ where
                 execution_cache,
                 ctx,
                 to_sparse_trie_task,
+                to_hashed_state_task,
                 to_lthash_task,
                 actions_rx,
                 parent_span: Span::current(),
@@ -347,6 +351,9 @@ where
             if let Some(to_sparse_trie_task) = self.to_sparse_trie_task.as_ref() {
                 let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
             }
+            if let Some(to_hashed_state_task) = self.to_hashed_state_task.as_ref() {
+                let _ = to_hashed_state_task.send(StateRootMessage::FinishedStateUpdates);
+            }
             if let Some(to_lthash_task) = self.to_lthash_task.as_ref() {
                 let _ = to_lthash_task.send(LthashMessage::FinishedUpdates);
             }
@@ -363,6 +370,7 @@ where
 
         let ctx = self.ctx.clone();
         let to_sparse_trie_task = self.to_sparse_trie_task.clone();
+        let to_hashed_state_task = self.to_hashed_state_task.clone();
         let to_lthash_task = self.to_lthash_task.clone();
         let finish_lthash_task = to_lthash_task.clone();
         let lthash_warms_storage_changes = to_lthash_task.is_some();
@@ -374,7 +382,10 @@ where
         let (prefetch_tx, prefetch_rx) = oneshot::channel();
         let (stream_tx, stream_rx) = oneshot::channel();
 
-        if to_sparse_trie_task.is_some() || to_lthash_task.is_some() {
+        if to_sparse_trie_task.is_some() ||
+            to_hashed_state_task.is_some() ||
+            to_lthash_task.is_some()
+        {
             let ctx = ctx.clone();
             executor.bal_streaming_pool().spawn(move || {
                 let branch_span = debug_span!(
@@ -395,6 +406,7 @@ where
                             provider,
                             account_changes,
                             to_sparse_trie_task.as_ref(),
+                            to_hashed_state_task.as_ref(),
                             to_lthash_task.as_ref(),
                         );
                     });
@@ -402,6 +414,9 @@ where
 
                 if let Some(to_sparse_trie_task) = to_sparse_trie_task {
                     let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
+                }
+                if let Some(to_hashed_state_task) = to_hashed_state_task {
+                    let _ = to_hashed_state_task.send(StateRootMessage::FinishedStateUpdates);
                 }
                 let _ = stream_tx.send(());
             });
@@ -674,18 +689,20 @@ where
         provider: &mut Option<Box<dyn AccountReader>>,
         account_changes: &alloy_eip7928::AccountChanges,
         to_sparse_trie_task: Option<&CrossbeamSender<StateRootMessage>>,
+        to_hashed_state_task: Option<&CrossbeamSender<StateRootMessage>>,
         to_lthash_task: Option<&CrossbeamSender<LthashMessage>>,
     ) {
         let address = account_changes.address;
         let mut hashed_address = None;
         let account_fields = BalAccountStateFields::from_changes(account_changes);
         let sparse_enabled = to_sparse_trie_task.is_some() && !self.disable_bal_parallel_state_root;
+        let hashed_state_enabled = to_hashed_state_task.is_some();
 
         if let Some(to_lthash_task) = to_lthash_task {
             send_bal_storage_to_lthash(account_changes, to_lthash_task);
         }
 
-        if sparse_enabled && !account_changes.storage_changes.is_empty() {
+        if (sparse_enabled || hashed_state_enabled) && !account_changes.storage_changes.is_empty() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
             let mut storage_map = reth_trie::HashedStorage::new(false);
 
@@ -698,17 +715,23 @@ where
 
             let mut hashed_state = reth_trie::HashedPostState::default();
             hashed_state.storages.insert(hashed_address, storage_map);
-            if let Some(to_sparse_trie_task) = to_sparse_trie_task {
-                let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
+            if sparse_enabled && let Some(to_sparse_trie_task) = to_sparse_trie_task {
+                let message = StateRootMessage::HashedStateUpdate(hashed_state.clone());
+                let _ = to_sparse_trie_task.send(message);
+            }
+            if let Some(to_hashed_state_task) = to_hashed_state_task {
+                let _ =
+                    to_hashed_state_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
             }
         }
 
         let account_fields_changed = !account_fields.is_empty();
         let sparse_needs_account =
             sparse_enabled && bal_account_changes_state_root(account_changes, account_fields);
+        let hashed_state_needs_account = hashed_state_enabled && account_fields_changed;
         let lthash_needs_account = to_lthash_task.is_some() && account_fields_changed;
 
-        if !sparse_needs_account && !lthash_needs_account {
+        if !sparse_needs_account && !hashed_state_needs_account && !lthash_needs_account {
             return;
         }
 
@@ -765,10 +788,21 @@ where
         if sparse_needs_account {
             let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
             let mut hashed_state = reth_trie::HashedPostState::default();
-            hashed_state.accounts.insert(hashed_address, Some(account));
+            hashed_state.accounts.insert(hashed_address, Some(account.clone()));
 
             if let Some(to_sparse_trie_task) = to_sparse_trie_task {
                 let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
+            }
+        }
+
+        if hashed_state_needs_account {
+            let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
+            let mut hashed_state = reth_trie::HashedPostState::default();
+            hashed_state.accounts.insert(hashed_address, Some(account));
+
+            if let Some(to_hashed_state_task) = to_hashed_state_task {
+                let _ =
+                    to_hashed_state_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
             }
         }
     }

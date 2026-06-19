@@ -3,6 +3,7 @@
 use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     payload_processor::{
+        hashed_state::{spawn_streaming_hashed_state_task, StreamingHashedStateHandle},
         lthash::{spawn_lthash_task, LthashHandle, LthashOutcome, PayloadStateHook},
         prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
     },
@@ -18,7 +19,7 @@ use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender
 use multiproof::*;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
-use reth_chain_state::LthashAccumulator;
+use reth_chain_state::{DeferredTrieData, LthashAccumulator};
 use reth_evm::{
     block::ExecutableTxParts,
     execute::{ExecutableTxFor, WithTxEnv},
@@ -53,6 +54,7 @@ use std::{
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
 pub mod bal;
+pub(crate) mod hashed_state;
 pub(crate) mod lthash;
 pub mod multiproof;
 mod preserved_sparse_trie;
@@ -334,6 +336,7 @@ where
             prewarm_rx,
             provider_builder,
             Some(state_root_handle.updates_tx().clone()),
+            None,
             parallel_bal_execution,
             true,
         );
@@ -341,6 +344,7 @@ where
 
         PayloadHandle {
             state_root_handle: Some(state_root_handle),
+            hashed_state_handle: None,
             lthash_handle,
             install_state_hook,
             prewarm_handle,
@@ -359,25 +363,29 @@ where
         transactions: I,
         provider_builder: StateProviderBuilder<N, P>,
         parallel_bal_execution: bool,
-        enable_lthash: bool,
+        skip_state_root: bool,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count);
+        let hashed_state_handle =
+            skip_state_root.then(|| spawn_streaming_hashed_state_task(&self.executor));
         let (prewarm_handle, lthash_handle) = self.spawn_caching_with(
             env,
             prewarm_rx,
             provider_builder,
             None,
+            hashed_state_handle.as_ref().map(|handle| handle.updates_tx()),
             parallel_bal_execution,
-            enable_lthash,
+            skip_state_root,
         );
         PayloadHandle {
             state_root_handle: None,
+            hashed_state_handle,
             lthash_handle,
-            install_state_hook: enable_lthash && !parallel_bal_execution,
+            install_state_hook: skip_state_root && !parallel_bal_execution,
             prewarm_handle,
             transactions: execution_rx,
             _span: Span::current(),
@@ -536,6 +544,7 @@ where
         transactions: mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
         provider_builder: StateProviderBuilder<N, P>,
         to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
+        to_hashed_state_task: Option<CrossbeamSender<StateRootMessage>>,
         parallel_bal_execution: bool,
         enable_lthash: bool,
     ) -> (CacheTaskHandle<N::Receipt>, Option<LthashHandle>)
@@ -605,6 +614,7 @@ where
             self.execution_cache.clone(),
             prewarm_ctx,
             to_sparse_trie_task,
+            to_hashed_state_task,
             lthash_handle.as_ref().map(|handle| handle.updates_tx()),
         );
         {
@@ -864,6 +874,8 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
 pub struct PayloadHandle<Tx, Err, R> {
     /// Handle to the background state root computation, if spawned.
     state_root_handle: Option<StateRootHandle>,
+    /// Handle to the streamed hashed post-state collector, if spawned.
+    hashed_state_handle: Option<StreamingHashedStateHandle>,
     /// Handle to the background Lthash computation, if spawned.
     lthash_handle: Option<LthashHandle>,
     /// Whether main execution should stream per-tx state updates into the sparse trie task.
@@ -916,14 +928,21 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
             .state_root_handle
             .as_ref()
             .map(|handle| StateHookSender::new(handle.updates_tx().clone()));
+        let hashed_state = self.hashed_state_handle.as_ref().map(|handle| handle.updates_tx());
         let lthash = self.lthash_handle.as_ref().map(|handle| handle.updates_tx());
 
-        (sparse.is_some() || lthash.is_some()).then(|| PayloadStateHook::new(sparse, lthash))
+        (sparse.is_some() || hashed_state.is_some() || lthash.is_some())
+            .then(|| PayloadStateHook::new(sparse, hashed_state, lthash))
     }
 
     /// Awaits the Lthash task if one was spawned.
     pub(crate) fn lthash_outcome(&mut self) -> Result<Option<LthashOutcome>, lthash::LthashError> {
         self.lthash_handle.take().map(LthashHandle::outcome).transpose()
+    }
+
+    /// Takes the deferred trie data produced by the streamed hashed post-state collector.
+    pub(crate) fn take_deferred_trie_data(&mut self) -> Option<DeferredTrieData> {
+        self.hashed_state_handle.take().map(StreamingHashedStateHandle::deferred_trie_data)
     }
 
     /// Returns a clone of the sender that streams updates into the sparse-trie task. The BAL

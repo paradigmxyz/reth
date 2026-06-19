@@ -87,9 +87,7 @@ use reth_provider::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_trie::{
-    trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState, KeccakKeyHasher,
-};
+use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::{Address, KECCAK_EMPTY};
@@ -625,18 +623,9 @@ where
         handle.stop_prewarming_execution();
 
         // Create ExecutionOutcome early so we can terminate caching before validation and state
-        // root computation. Using Arc allows sharing with both the caching task and the deferred
-        // trie task without cloning the expensive BundleState.
+        // root computation. Using Arc allows sharing with the caching task without cloning the
+        // expensive BundleState.
         let output = Arc::new(output);
-        let skip_state_root_trie_data = if skip_state_root {
-            debug!(
-                target: "engine::tree::payload_validator",
-                "Deferring hashed trie data computation"
-            );
-            Some(self.spawn_skip_state_root_trie_task(input.hash(), output.clone()))
-        } else {
-            None
-        };
 
         // Terminate caching task early since execution is complete and caching is no longer
         // needed. This frees up resources while state root computation continues.
@@ -981,8 +970,9 @@ where
             ExecutedBlock::with_deferred_trie_data(
                 Arc::new(block),
                 output,
-                skip_state_root_trie_data
-                    .expect("skip-state-root trie data is started when state root is skipped"),
+                handle
+                    .take_deferred_trie_data()
+                    .expect("skip-state-root starts streamed hashed trie data collection"),
             )
         } else {
             let changeset_provider = ensure_ok_post_block!(
@@ -2018,60 +2008,6 @@ where
             .spawn_blocking_named(DEFERRED_TRIE_WORKER_NAME, compute_trie_input_task);
 
         ExecutedBlock::with_deferred_trie_data(block, execution_outcome, deferred_trie_data)
-    }
-
-    /// Spawns a background task that computes the hashed post-state needed by persistence when
-    /// trie state-root computation is disabled.
-    fn spawn_skip_state_root_trie_task(
-        &self,
-        block_hash: B256,
-        execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
-    ) -> DeferredTrieData {
-        let (deferred_trie_data, publisher) = DeferredTrieData::pending_uncomputed();
-        let block_validation_metrics = self.metrics.block_validation.clone();
-        let output = execution_outcome;
-
-        let compute_trie_input_task = move || {
-            let _span = debug_span!(
-                target: "engine::tree::payload_validator",
-                "compute_skip_state_root_trie_data",
-                %block_hash
-            )
-            .entered();
-
-            let result = panic::catch_unwind(AssertUnwindSafe(|| {
-                let compute_start = Instant::now();
-                let hashed_state = Arc::new(HashedPostState::from_bundle_state::<KeccakKeyHasher>(
-                    output.state.state(),
-                ));
-                let computed =
-                    DeferredTrieData::sort(hashed_state, Arc::new(TrieUpdates::default()));
-                let computed = publisher.publish(computed);
-
-                block_validation_metrics
-                    .deferred_trie_compute_duration
-                    .record(compute_start.elapsed().as_secs_f64());
-                block_validation_metrics
-                    .hashed_post_state_size
-                    .record(computed.hashed_state.total_len() as f64);
-                block_validation_metrics
-                    .trie_updates_sorted_size
-                    .record(computed.trie_updates.total_len() as f64);
-            }));
-
-            if result.is_err() {
-                error!(
-                    target: "engine::tree::payload_validator",
-                    "Skip-state-root trie data task panicked"
-                );
-            }
-        };
-
-        self.payload_processor
-            .executor()
-            .spawn_blocking_named(DEFERRED_TRIE_WORKER_NAME, compute_trie_input_task);
-
-        deferred_trie_data
     }
 
     fn calculate_timing_stats(
