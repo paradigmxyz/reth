@@ -11,18 +11,19 @@ use reth_trie_db::ChangesetCache;
 
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::{
+    keccak256,
     map::{B256Map, B256Set},
     Bytes, B256,
 };
 use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::{
-    ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
+    ExecutionData, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
 };
 use assert_matches::assert_matches;
 use reth_chain_state::{
     test_utils::TestBlockBuilder, BlockState, ComputedTrieData, StateTrieOverlayManager,
 };
-use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
+use reth_chainspec::{ChainSpec, ChainSpecBuilder, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::EthEngineTypes;
@@ -62,7 +63,8 @@ impl reth_engine_primitives::PayloadValidator<EthEngineTypes> for MockEngineVali
         reth_primitives_traits::SealedBlock<Self::Block>,
         reth_payload_primitives::NewPayloadError,
     > {
-        let block = reth_ethereum_primitives::Block::try_from(payload.payload).map_err(|e| {
+        let ExecutionData { payload, sidecar } = payload;
+        let block = payload.try_into_block_with_sidecar(&sidecar).map_err(|e| {
             reth_payload_primitives::NewPayloadError::Other(format!("{e:?}").into())
         })?;
         Ok(block.seal_slow())
@@ -1840,6 +1842,43 @@ mod payload_execution_tests {
             status.is_syncing() || status.is_invalid(),
             "Should return syncing or invalid status for payload"
         );
+    }
+
+    /// Test `try_buffer_payload` preserves valid block access list data.
+    #[test]
+    fn test_buffer_payload_preserves_access_list() {
+        reth_tracing::init_test_tracing();
+
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(MAINNET.genesis.clone())
+                .cancun_activated()
+                .with_amsterdam_at(0)
+                .build(),
+        );
+        let mut test_harness = TestHarness::new(chain_spec);
+
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let mut block = test_block_builder.generate_random_block(1, B256::ZERO).unseal();
+        let access_list = Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]);
+        block.header.block_access_list_hash = Some(keccak256(access_list.as_ref()));
+        block.header.slot_number = Some(0);
+        block.header.parent_beacon_block_root = Some(B256::ZERO);
+        let block_hash = block.hash_slow();
+
+        let (payload, sidecar) = ExecutionPayload::from_block_unchecked_with_bal(
+            block_hash,
+            &block,
+            access_list.clone(),
+        );
+        let payload = ExecutionData { payload, sidecar };
+
+        let status = test_harness.tree.try_buffer_payload(payload).unwrap();
+        assert!(status.is_syncing(), "Should return syncing status for buffered payload");
+
+        let buffered = test_harness.tree.state.buffer.blocks.get(&block_hash).unwrap();
+        assert_eq!(buffered.data().as_ref(), Some(&RawBal::from(access_list)));
     }
 
     /// Helper function to create a malformed payload

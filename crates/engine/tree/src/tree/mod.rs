@@ -850,10 +850,13 @@ where
     ) -> Result<PayloadStatus, InsertBlockFatalError> {
         let parent_hash = payload.parent_hash();
         let num_hash = payload.num_hash();
+        let access_list = payload.block_access_list().cloned();
 
         match self.payload_validator.convert_payload_to_block(payload) {
             // if the block is well-formed, buffer it for later
             Ok(block) => {
+                let access_list = Self::seal_access_list_for_block(&block, access_list);
+                let block = SealedBlockWithAccessList::new(block, access_list);
                 if let Err(error) = self.buffer_block(block) {
                     Ok(self.on_insert_block_error(error)?)
                 } else {
@@ -2253,6 +2256,9 @@ where
     ///
     /// This is the case once amsterdam is active at the current canonical head, indicated by the
     /// head header carrying a block access list hash.
+    ///
+    /// The head-based gate is deliberately conservative: range downloads that cross Amsterdam may
+    /// skip BALs for the activating block, and later validation remains per-header best effort.
     fn should_download_access_lists(&self) -> bool {
         self.canonical_in_memory_state.get_canonical_head().block_access_list_hash().is_some()
     }
@@ -2510,12 +2516,13 @@ where
     /// Pre-validates the block and inserts it into the buffer.
     fn buffer_block(
         &mut self,
-        block: SealedBlock<N::Block>,
+        block: SealedBlockWithAccessList<N::Block>,
     ) -> Result<(), InsertBlockError<N::Block>> {
         if let Err(err) = self.validate_block(&block) {
+            let (block, _) = block.split();
             return Err(InsertBlockError::consensus_error(err, block))
         }
-        self.state.buffer.insert_block(block.into());
+        self.state.buffer.insert_block(block);
         Ok(())
     }
 
@@ -2927,7 +2934,7 @@ where
         access_list: Option<Bytes>,
     ) -> Option<RawBal> {
         let expected = block.header().block_access_list_hash()?;
-        let raw = RawBal::new(access_list?);
+        let raw = RawBal::from(access_list?);
         raw.ensure_hash(expected).is_ok().then_some(raw)
     }
 
