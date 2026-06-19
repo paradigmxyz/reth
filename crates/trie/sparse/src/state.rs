@@ -844,7 +844,7 @@ impl SparseTrieRetainedPaths {
     ) {
         self.account_paths.extend(hot_accounts.keys().map(|key| Nibbles::unpack(*key)));
         for key in hot_slots.keys() {
-            self.retain_storage_slots(key.address, [Nibbles::unpack(key.slot)]);
+            self.storage_slots.entry(key.address).or_default().push(Nibbles::unpack(key.slot));
         }
     }
 
