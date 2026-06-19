@@ -2169,7 +2169,6 @@ pub trait EngineValidator<
         parent_hash: B256,
         parent_state_root: B256,
         state: &EngineApiTreeState<N>,
-        pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
     ) -> Option<StateRootHandle>;
 }
 
@@ -2266,7 +2265,6 @@ where
         parent_hash: B256,
         parent_state_root: B256,
         state: &EngineApiTreeState<N>,
-        pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
     ) -> Option<StateRootHandle> {
         let overlay_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
@@ -2279,7 +2277,7 @@ where
             // Full proof workers — tx count unknown at FCU time (block built incrementally)
             false,
             &self.config,
-            pending_sparse_trie_prune,
+            None,
         ))
     }
 }

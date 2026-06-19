@@ -1200,7 +1200,7 @@ where
     /// processing is complete. Returns `None` if the head is not canonical and processing
     /// should continue.
     fn handle_canonical_head(
-        &mut self,
+        &self,
         state: ForkchoiceState,
         attrs: &Option<T::PayloadAttributes>, // Changed to reference
     ) -> ProviderResult<Option<TreeOutcome<OnForkChoiceUpdated>>> {
@@ -3270,7 +3270,7 @@ where
     /// Note: At this point, the fork choice update is considered to be VALID, however, we can still
     /// return an error if the payload attributes are invalid.
     fn process_payload_attributes(
-        &mut self,
+        &self,
         attributes: T::PayloadAttributes,
         head: &N::BlockHeader,
         state: ForkchoiceState,
@@ -3298,7 +3298,6 @@ where
                 state.head_block_hash,
                 head.state_root(),
                 &self.state,
-                self.pending_sparse_trie_prune.take(),
             )
         } else {
             None
