@@ -1549,10 +1549,7 @@ mod tests {
         assert!(res.is_ok());
         let tx = pool.get(transaction.hash());
         let tx = tx.unwrap();
-        assert_eq!(
-            tx.transaction.blob_cell_availability(),
-            Some(FULL_BLOB_CELL_AVAILABILITY)
-        );
+        assert_eq!(tx.transaction.blob_cell_availability(), Some(FULL_BLOB_CELL_AVAILABILITY));
     }
 
     // <https://github.com/paradigmxyz/reth/issues/8550>

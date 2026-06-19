@@ -170,6 +170,7 @@ where
 impl<V, T, S> PoolInner<V, T, S>
 where
     V: TransactionValidator,
+    <V as TransactionValidator>::Transaction: EthPoolTransaction,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
     S: BlobStore,
 {

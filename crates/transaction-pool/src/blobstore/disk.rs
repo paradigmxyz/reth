@@ -223,10 +223,8 @@ impl BlobStore for DiskFileBlobStore {
         if txs.is_empty() {
             return Ok(Vec::new())
         }
-        let availability =
-            txs.iter().map(|(tx, _)| (*tx, FULL_BLOB_CELL_AVAILABILITY)).collect();
-        self.inner.insert_many(txs)
-            .map(|()| availability)
+        let availability = txs.iter().map(|(tx, _)| (*tx, FULL_BLOB_CELL_AVAILABILITY)).collect();
+        self.inner.insert_many(txs).map(|()| availability)
     }
 
     fn delete(&self, tx: B256) -> Result<(), BlobStoreError> {
