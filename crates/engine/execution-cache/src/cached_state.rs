@@ -1126,7 +1126,7 @@ pub struct SavedCache {
 
 impl SavedCache {
     /// Creates a new instance with the internals
-    pub fn new(hash: B256, caches: ExecutionCache) -> Self {
+    pub const fn new(hash: B256, caches: ExecutionCache) -> Self {
         Self { hash, caches }
     }
 
