@@ -1480,9 +1480,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
 mod tests {
     use super::*;
     use crate::{
-        blobstore::{BlobCellAvailability, InMemoryBlobStore},
-        error::PoolErrorKind,
-        traits::PoolTransaction,
+        blobstore::InMemoryBlobStore, error::PoolErrorKind, traits::PoolTransaction,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
     };
     use alloy_consensus::Transaction;
@@ -1549,7 +1547,7 @@ mod tests {
         assert!(res.is_ok());
         let tx = pool.get(transaction.hash());
         let tx = tx.unwrap();
-        assert_eq!(tx.transaction.blob_cell_availability(), Some(BlobCellAvailability::full()));
+        assert_eq!(tx.transaction.blob_cell_availability(), None);
     }
 
     // <https://github.com/paradigmxyz/reth/issues/8550>
