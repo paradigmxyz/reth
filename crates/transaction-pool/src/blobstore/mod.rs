@@ -25,10 +25,34 @@ mod noop;
 mod tracker;
 
 /// Blob cell availability stored for a transaction.
-pub type BlobCellAvailability = B128;
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct BlobCellAvailability(B128);
 
-/// Full availability for all blob cells in a stored full sidecar.
-pub const FULL_BLOB_CELL_AVAILABILITY: BlobCellAvailability = B128::new([0xff; 16]);
+impl BlobCellAvailability {
+    /// Full availability for all blob cells in a stored full sidecar.
+    pub const FULL: Self = Self(B128::new([0xff; 16]));
+
+    /// Creates a new availability mask from the raw cell bitmask.
+    pub const fn new(mask: B128) -> Self {
+        Self(mask)
+    }
+
+    /// Returns full availability for all blob cells.
+    pub const fn full() -> Self {
+        Self::FULL
+    }
+
+    /// Returns the raw cell bitmask.
+    pub const fn mask(self) -> B128 {
+        self.0
+    }
+
+    /// Returns true if all blob cells are available.
+    pub fn is_full(self) -> bool {
+        self == Self::FULL
+    }
+}
 
 /// A blob store that can be used to store blob data of EIP4844 transactions.
 ///
@@ -42,7 +66,7 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
         &self,
         _data: &BlobTransactionSidecarVariant,
     ) -> Option<BlobCellAvailability> {
-        Some(FULL_BLOB_CELL_AVAILABILITY)
+        Some(BlobCellAvailability::full())
     }
 
     /// Inserts the blob sidecar into the store

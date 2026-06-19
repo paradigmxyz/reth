@@ -1934,7 +1934,7 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blobstore::FULL_BLOB_CELL_AVAILABILITY;
+    use crate::blobstore::BlobCellAvailability;
     use alloy_consensus::{
         EthereumTxEnvelope, SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702,
         TxEnvelope, TxLegacy,
@@ -2093,8 +2093,8 @@ mod tests {
 
         assert_eq!(pooled_tx.blob_cell_availability(), None);
 
-        pooled_tx.set_blob_cell_availability(Some(FULL_BLOB_CELL_AVAILABILITY));
-        assert_eq!(pooled_tx.blob_cell_availability(), Some(FULL_BLOB_CELL_AVAILABILITY));
+        pooled_tx.set_blob_cell_availability(Some(BlobCellAvailability::full()));
+        assert_eq!(pooled_tx.blob_cell_availability(), Some(BlobCellAvailability::full()));
 
         pooled_tx.set_blob_cell_availability(None);
         assert_eq!(pooled_tx.blob_cell_availability(), None);

@@ -2,7 +2,6 @@
 
 use crate::blobstore::{
     BlobCellAvailability, BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize,
-    FULL_BLOB_CELL_AVAILABILITY,
 };
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
@@ -213,7 +212,7 @@ impl BlobStore for DiskFileBlobStore {
         data: BlobTransactionSidecarVariant,
     ) -> Result<Option<BlobCellAvailability>, BlobStoreError> {
         self.inner.insert_one(tx, data)?;
-        Ok(Some(FULL_BLOB_CELL_AVAILABILITY))
+        Ok(Some(BlobCellAvailability::full()))
     }
 
     fn insert_all(
@@ -224,7 +223,7 @@ impl BlobStore for DiskFileBlobStore {
             return Ok(Vec::new())
         }
         let availability =
-            txs.iter().map(|(tx, _)| (*tx, Some(FULL_BLOB_CELL_AVAILABILITY))).collect();
+            txs.iter().map(|(tx, _)| (*tx, Some(BlobCellAvailability::full()))).collect();
         self.inner.insert_many(txs).map(|()| availability)
     }
 

@@ -550,7 +550,7 @@ mod tests {
     use reth_network_api::test_utils::PeersHandle;
     use reth_storage_api::noop::NoopProvider;
     use reth_transaction_pool::blobstore::{
-        BlobCellAvailability, BlobStoreCleanupStat, BlobStoreError, FULL_BLOB_CELL_AVAILABILITY,
+        BlobCellAvailability, BlobStoreCleanupStat, BlobStoreError,
     };
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
@@ -569,14 +569,14 @@ mod tests {
             _tx: B256,
             _data: BlobTransactionSidecarVariant,
         ) -> Result<Option<BlobCellAvailability>, BlobStoreError> {
-            Ok(Some(FULL_BLOB_CELL_AVAILABILITY))
+            Ok(Some(BlobCellAvailability::full()))
         }
 
         fn insert_all(
             &self,
             txs: Vec<(B256, BlobTransactionSidecarVariant)>,
         ) -> Result<Vec<(B256, Option<BlobCellAvailability>)>, BlobStoreError> {
-            Ok(txs.into_iter().map(|(tx, _)| (tx, Some(FULL_BLOB_CELL_AVAILABILITY))).collect())
+            Ok(txs.into_iter().map(|(tx, _)| (tx, Some(BlobCellAvailability::full()))).collect())
         }
 
         fn delete(&self, _tx: B256) -> Result<(), BlobStoreError> {
