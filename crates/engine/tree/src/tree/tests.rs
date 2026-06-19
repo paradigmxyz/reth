@@ -837,6 +837,14 @@ async fn test_tree_state_on_new_head_reorg() {
     test_harness.tree.state.tree_state.insert_executed(fork_block_4.clone());
     test_harness.tree.state.tree_state.insert_executed(fork_block_5.clone());
 
+    // direct extension of the current canonical head
+    let result = test_harness.tree.on_new_head(blocks[3].recovered_block().hash()).unwrap();
+    assert!(matches!(result, Some(NewCanonicalChain::Commit { .. })));
+    if let Some(NewCanonicalChain::Commit { new }) = result {
+        assert_eq!(new.len(), 1);
+        assert_eq!(new[0].recovered_block().hash(), blocks[3].recovered_block().hash());
+    }
+
     // normal (non-reorg) case
     let result = test_harness.tree.on_new_head(blocks[4].recovered_block().hash()).unwrap();
     assert!(matches!(result, Some(NewCanonicalChain::Commit { .. })));

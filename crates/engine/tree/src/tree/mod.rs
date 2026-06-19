@@ -877,7 +877,13 @@ where
         };
 
         let new_head_number = new_head_block.recovered_block().number();
-        let mut current_canonical_number = self.state.tree_state.current_canonical_head.number;
+        let current_canonical_head = self.state.tree_state.current_canonical_head;
+
+        if new_head_block.recovered_block().parent_hash() == current_canonical_head.hash {
+            return Ok(Some(NewCanonicalChain::Commit { new: vec![new_head_block.clone()] }))
+        }
+
+        let mut current_canonical_number = current_canonical_head.number;
 
         let mut new_chain = vec![new_head_block.clone()];
         let mut current_hash = new_head_block.recovered_block().parent_hash();
