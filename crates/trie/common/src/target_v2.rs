@@ -194,8 +194,8 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
                 } else {
                     // We need to split the storage slots
                     let mut storage_iter = storage_slots.into_iter();
-                    let slots_in_chunk: Vec<_> =
-                        storage_iter.by_ref().take(remaining_capacity).collect();
+                    let take = remaining_capacity.max(1);
+                    let slots_in_chunk: Vec<_> = storage_iter.by_ref().take(take).collect();
                     count += slots_in_chunk.len();
 
                     chunk.storage_targets.insert(account_addr, slots_in_chunk);
@@ -244,5 +244,36 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
         } else {
             Some(chunk)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn account_chunk_keeps_first_storage_slot_when_capacity_is_exhausted() {
+        let account = B256::with_last_byte(1);
+        let slots = vec![
+            ProofV2Target::from(B256::with_last_byte(2)),
+            ProofV2Target::from(B256::with_last_byte(3)),
+        ];
+        let mut storage_targets = B256Map::default();
+        storage_targets.insert(account, slots);
+
+        let targets = MultiProofTargetsV2 {
+            account_targets: vec![ProofV2Target::from(account)],
+            storage_targets,
+        };
+
+        let mut chunks = targets.chunks(1);
+        let first = chunks.next().expect("first chunk");
+        assert_eq!(first.account_targets.len(), 1);
+        assert_eq!(first.storage_targets.get(&account).map(Vec::len), Some(1));
+
+        let second = chunks.next().expect("second chunk");
+        assert!(second.account_targets.is_empty());
+        assert_eq!(second.storage_targets.get(&account).map(Vec::len), Some(1));
+        assert!(chunks.next().is_none());
     }
 }
