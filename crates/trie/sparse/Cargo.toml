@@ -59,6 +59,7 @@ std = [
     "dep:slotmap",
     "dep:tracing",
     "alloy-primitives/std",
+    "alloy-rlp/std",
     "alloy-trie/std",
     "reth-execution-errors/std",
     "reth-primitives-traits/std",
