@@ -165,11 +165,9 @@ where
 
                         let mut calculator = storage_calculator.borrow_mut();
                         let root_node = calculator.storage_root_node(hashed_address)?;
-                        let storage_root = calculator
+                        calculator
                             .compute_root_hash(&[root_node])?
-                            .expect("storage_root_node returns a node at empty path");
-
-                        storage_root
+                            .expect("storage_root_node returns a node at empty path")
                     }
                 };
 
