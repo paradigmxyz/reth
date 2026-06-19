@@ -1,9 +1,14 @@
 //! V2 proof targets and chunking.
 
 use crate::Nibbles;
-use alloc::vec::Vec;
+use alloc::vec::{IntoIter, Vec};
 use alloy_primitives::{keccak256, map::B256Map, B256};
+use core::iter::Peekable;
 use revm_state::EvmState;
+
+/// Account-only proof chunks pay the fixed account multiproof setup cost without feeding storage
+/// proof workers. Let them grow larger while mixed chunks keep the configured cap.
+const ACCOUNT_ONLY_CHUNK_MULTIPLIER: usize = 4;
 
 /// Target describes a proof target. For every proof target given, a proof calculator will calculate
 /// and return all nodes whose path is a prefix of the target's `key_nibbles`.
@@ -130,7 +135,7 @@ impl MultiProofTargetsV2 {
 #[derive(Debug)]
 pub struct ChunkedMultiProofTargetsV2 {
     /// Remaining account targets to process
-    account_targets: alloc::vec::IntoIter<ProofV2Target>,
+    account_targets: Peekable<IntoIter<ProofV2Target>>,
     /// Storage targets by account address
     storage_targets: B256Map<Vec<ProofV2Target>>,
     /// Current account being processed (if any storage slots remain)
@@ -143,7 +148,7 @@ impl ChunkedMultiProofTargetsV2 {
     /// Creates a new chunked iterator for the given targets.
     pub fn new(targets: MultiProofTargetsV2, size: usize) -> Self {
         Self {
-            account_targets: targets.account_targets.into_iter(),
+            account_targets: targets.account_targets.into_iter().peekable(),
             storage_targets: targets.storage_targets,
             current_account_storage: None,
             size,
@@ -172,18 +177,29 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
             }
         }
 
-        // Process account targets and their storage
-        while count < self.size {
-            let Some(account_target) = self.account_targets.next() else {
+        let account_only_limit =
+            self.size.saturating_mul(ACCOUNT_ONLY_CHUNK_MULTIPLIER).max(self.size);
+
+        // Process account targets and their storage. If a chunk has stayed account-only, allow it
+        // to grow past the mixed account/storage cap so account-only multiproof work amortizes
+        // cursor setup over more targets.
+        while count < self.size ||
+            (chunk.storage_targets.is_empty() && count < account_only_limit)
+        {
+            let Some(&account_target) = self.account_targets.peek() else {
                 break;
             };
+            let account_addr = account_target.key();
+            if count >= self.size && self.storage_targets.contains_key(&account_addr) {
+                break;
+            }
+            let account_target = self.account_targets.next().expect("peeked target exists");
 
             // Add the account target
             chunk.account_targets.push(account_target);
             count += 1;
 
             // Check if this account has storage targets
-            let account_addr = account_target.key();
             if let Some(storage_slots) = self.storage_targets.remove(&account_addr) {
                 let remaining_capacity = self.size - count;
 
@@ -244,5 +260,54 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
         } else {
             Some(chunk)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn target(byte: u8) -> ProofV2Target {
+        ProofV2Target::from(B256::with_last_byte(byte))
+    }
+
+    #[test]
+    fn account_only_chunks_use_wider_limit() {
+        let targets = MultiProofTargetsV2 {
+            account_targets: (0u8..10).map(target).collect(),
+            storage_targets: B256Map::default(),
+        };
+
+        let mut chunks = targets.chunks(3);
+        let first = chunks.next().expect("first chunk");
+        assert_eq!(first.account_targets.len(), 10);
+        assert!(first.storage_targets.is_empty());
+        assert!(chunks.next().is_none());
+    }
+
+    #[test]
+    fn wider_account_only_chunks_stop_before_storage_target() {
+        let storage_account = B256::with_last_byte(9);
+        let mut storage_targets = B256Map::default();
+        storage_targets.insert(storage_account, vec![target(99)]);
+        let targets = MultiProofTargetsV2 {
+            account_targets: vec![
+                target(1),
+                target(2),
+                target(3),
+                ProofV2Target::from(storage_account),
+            ],
+            storage_targets,
+        };
+
+        let mut chunks = targets.chunks(3);
+        let first = chunks.next().expect("first chunk");
+        assert_eq!(first.account_targets.len(), 3);
+        assert!(first.storage_targets.is_empty());
+
+        let second = chunks.next().expect("second chunk");
+        assert_eq!(second.account_targets.len(), 1);
+        assert_eq!(second.storage_targets.get(&storage_account).map(Vec::len), Some(1));
+        assert!(chunks.next().is_none());
     }
 }
