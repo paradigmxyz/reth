@@ -502,7 +502,7 @@ where
                     // entering the parallel iterator for the remainder.
                     let prefetch = Self::PARALLEL_PREFETCH_COUNT.min(transaction_count);
                     let mut all: Vec<_> = transactions.into_iter().collect();
-                    let rest = all.split_off(prefetch.min(all.len()));
+                    let rest = all.split_off(prefetch);
 
                     // Convert the first few transactions sequentially so execution can
                     // start immediately without waiting for rayon work-stealing.
@@ -1026,7 +1026,6 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     pub parent_state_root: B256,
     /// Number of transactions in the block.
     /// Used to determine parallel worker count for prewarming.
-    /// A value of 0 indicates the count is unknown.
     pub transaction_count: usize,
     /// Total gas used by all transactions in the block.
     /// Used to adaptively select multiproof chunk size for optimal throughput.
