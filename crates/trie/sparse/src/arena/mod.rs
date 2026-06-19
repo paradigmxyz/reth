@@ -219,29 +219,29 @@ impl ArenaSparseSubtrie {
     /// Prunes revealed subtrees that are not ancestors of any retained leaf, compacting the arena
     /// in lexicographic order.
     ///
-    /// `retained_leaves` must be sorted and scoped to this subtrie's key range. Builds a fresh
-    /// arena by copying only retained nodes from the root, blinding non-retained children
-    /// at the boundary. Non-retained subtrees are never visited — they are dropped with the
-    /// old arena.
+    /// `retained_leaves` must yield leaves in sorted order and be scoped to this subtrie's key
+    /// range. Builds a fresh arena by copying only retained nodes from the root, blinding
+    /// non-retained children at the boundary. Non-retained subtrees are never visited — they
+    /// are dropped with the old arena.
     ///
     /// Expects that all nodes have computed hashes (i.e. `prune` is called after hashing).
-    fn prune(&mut self, retained_leaves: &[Nibbles]) -> usize {
+    fn prune<'a>(&mut self, retained_leaves: impl IntoIterator<Item = &'a Nibbles>) -> usize {
         // Only branches can have pruneable children.
         if !matches!(&self.arena[self.root], ArenaSparseNode::Branch(_)) {
             return 0;
         }
 
-        debug_assert!(
-            retained_leaves.windows(2).all(|w| w[0] <= w[1]),
-            "retained_leaves must be sorted"
-        );
         debug_assert_eq!(self.num_dirty_leaves, 0, "prune must run after hashing");
 
+        let retained_leaves = retained_leaves.into_iter();
+        let (retained_lower_bound, retained_upper_bound) = retained_leaves.size_hint();
         let old_count = self.arena.len();
         // In a tree where every branch has ≥2 children, #branches ≤ #leaves − 1, so
         // total nodes ≤ 2N − 1. This is a reasonable upper-bound capacity hint that
         // avoids most reallocations without over-allocating when pruning is heavy.
-        let mut new_arena = SlotMap::with_capacity(retained_leaves.len() * 2);
+        let mut new_arena =
+            SlotMap::with_capacity(retained_upper_bound.unwrap_or(retained_lower_bound) * 2);
+        let mut retained_leaves = RetainedLeaves::new(retained_leaves);
         let mut new_num_leaves = 0u64;
         let mut new_nodes_heap_size = 0usize;
 
@@ -253,10 +253,12 @@ impl ArenaSparseSubtrie {
             &mut new_arena,
             new_root,
             self.path,
-            retained_leaves,
+            &mut retained_leaves,
             &mut new_num_leaves,
             &mut new_nodes_heap_size,
         );
+        #[cfg(debug_assertions)]
+        retained_leaves.drain();
 
         let pruned = old_count - new_arena.len();
         self.num_leaves = new_num_leaves;
@@ -270,22 +272,71 @@ impl ArenaSparseSubtrie {
         self.debug_assert_counters();
         return pruned;
 
-        /// Returns `true` if any entry in `sorted_keys` starts with `prefix`.
-        fn has_prefix(sorted_keys: &[Nibbles], prefix: &Nibbles) -> bool {
-            let idx = sorted_keys.binary_search(prefix).unwrap_or_else(|i| i);
-            sorted_keys.get(idx).is_some_and(|p| p.starts_with(prefix))
+        struct RetainedLeaves<'a, I>
+        where
+            I: Iterator<Item = &'a Nibbles>,
+        {
+            inner: core::iter::Peekable<I>,
+            #[cfg(debug_assertions)]
+            last: Option<&'a Nibbles>,
+        }
+
+        impl<'a, I> RetainedLeaves<'a, I>
+        where
+            I: Iterator<Item = &'a Nibbles>,
+        {
+            fn new(iter: I) -> Self {
+                Self {
+                    inner: iter.peekable(),
+                    #[cfg(debug_assertions)]
+                    last: None,
+                }
+            }
+
+            fn peek(&mut self) -> Option<&'a Nibbles> {
+                self.inner.peek().copied()
+            }
+
+            fn next(&mut self) -> Option<&'a Nibbles> {
+                let next = self.inner.next();
+                #[cfg(debug_assertions)]
+                if let Some(next) = next {
+                    if let Some(last) = self.last {
+                        debug_assert!(last <= next, "retained_leaves must be sorted");
+                    }
+                    self.last = Some(next);
+                }
+                next
+            }
+
+            fn skip_before(&mut self, prefix: &Nibbles) {
+                while self.peek().is_some_and(|retained| retained < prefix) {
+                    self.next();
+                }
+            }
+
+            fn has_current_prefix(&mut self, prefix: &Nibbles) -> bool {
+                self.peek().is_some_and(|retained| retained.starts_with(prefix))
+            }
+
+            #[cfg(debug_assertions)]
+            fn drain(&mut self) {
+                while self.next().is_some() {}
+            }
         }
 
         /// Copies retained nodes into `new_arena` in trie-path lexicographic order.
-        fn copy_retained_subtree(
+        fn copy_retained_subtree<'a, I>(
             old_arena: &mut NodeArena,
             new_arena: &mut NodeArena,
             new_idx: Index,
             node_path: Nibbles,
-            retained_leaves: &[Nibbles],
+            retained_leaves: &mut RetainedLeaves<'a, I>,
             new_num_leaves: &mut u64,
             new_nodes_heap_size: &mut usize,
-        ) {
+        ) where
+            I: Iterator<Item = &'a Nibbles>,
+        {
             *new_nodes_heap_size += new_arena[new_idx].extra_heap_bytes();
 
             let ArenaSparseNode::Branch(b) = &new_arena[new_idx] else {
@@ -323,7 +374,8 @@ impl ArenaSparseSubtrie {
                 let mut child_prefix = child_path;
                 child_prefix.extend(child_short_key);
 
-                if has_prefix(retained_leaves, &child_prefix) {
+                retained_leaves.skip_before(&child_prefix);
+                if retained_leaves.has_current_prefix(&child_prefix) {
                     // Retained — move child to new arena.
                     let child_node = old_arena.remove(old_child_idx).expect("child exists");
                     let new_child_idx = new_arena.insert(child_node);
@@ -2765,7 +2817,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         else {
                             unreachable!()
                         };
-                        pruned += subtrie.prune(&retained_leaves[subtrie_range]);
+                        pruned += subtrie.prune(retained_leaves[subtrie_range].iter());
                     }
                 }
                 _ => unreachable!("NonBranch in prune walk must be Subtrie, Leaf, or Branch"),
@@ -2778,13 +2830,13 @@ impl SparseTrie for ArenaParallelSparseTrie {
             // Prune taken subtries, in parallel if more than one.
             if taken.len() == 1 {
                 let (_, ref mut subtrie, ref range) = taken[0];
-                pruned += subtrie.prune(&retained_leaves[range.clone()]);
+                pruned += subtrie.prune(retained_leaves[range.clone()].iter());
             } else {
                 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
                 pruned += taken
                     .par_iter_mut()
-                    .map(|(_, subtrie, range)| subtrie.prune(&retained_leaves[range.clone()]))
+                    .map(|(_, subtrie, range)| subtrie.prune(retained_leaves[range.clone()].iter()))
                     .sum::<usize>();
             }
 
@@ -3298,7 +3350,7 @@ mod tests {
 
         let retained = [Nibbles::from_nibbles([0x1, 0x0]), Nibbles::from_nibbles([0x2])];
 
-        assert_eq!(subtrie.prune(&retained), 0);
+        assert_eq!(subtrie.prune(retained.iter()), 0);
 
         let node_order = subtrie
             .arena
