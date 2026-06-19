@@ -653,6 +653,8 @@ where
         let address = account_changes.address;
         let mut hashed_address = None;
         let account_fields = BalAccountStateFields::from_changes(account_changes);
+        let needs_parent_account = account_fields.needs_parent_account();
+        let mut complete_account_update = None;
 
         if !bal_account_changes_state_root(account_changes, account_fields) {
             return;
@@ -669,12 +671,18 @@ where
                 }
             }
 
-            let mut hashed_state = reth_trie::HashedPostState::default();
-            hashed_state.storages.insert(hashed_address, storage_map);
-            let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
+            if needs_parent_account {
+                let mut hashed_state = reth_trie::HashedPostState::default();
+                hashed_state.storages.insert(hashed_address, storage_map);
+                let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
+            } else {
+                let mut hashed_state = reth_trie::HashedPostState::default();
+                hashed_state.storages.insert(hashed_address, storage_map);
+                complete_account_update = Some(hashed_state);
+            }
         }
 
-        let existing_account = if account_fields.needs_parent_account() {
+        let existing_account = if needs_parent_account {
             if provider.is_none() {
                 let _span = debug_span!(
                     target: "engine::tree::payload_processor::prewarm",
@@ -714,7 +722,7 @@ where
         let account = account_fields.into_account(existing_account);
 
         let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
-        let mut hashed_state = reth_trie::HashedPostState::default();
+        let mut hashed_state = complete_account_update.unwrap_or_default();
         hashed_state.accounts.insert(hashed_address, Some(account));
 
         let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
