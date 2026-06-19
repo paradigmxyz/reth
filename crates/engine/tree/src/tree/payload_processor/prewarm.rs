@@ -358,7 +358,6 @@ where
         let stream_parent_span = parent_span;
         let prefetch_bal = Arc::clone(&decoded_bal);
         let stream_bal = Arc::clone(&decoded_bal);
-        let (prefetch_tx, prefetch_rx) = oneshot::channel();
         let (stream_tx, stream_rx) = oneshot::channel();
 
         if let Some(to_sparse_trie_task) = to_sparse_trie_task {
@@ -424,14 +423,8 @@ where
                 }
             }
             pool.end_block();
-            let _ = prefetch_tx.send(());
-        } else {
-            let _ = prefetch_tx.send(());
         }
 
-        prefetch_rx
-            .blocking_recv()
-            .expect("BAL prefetch task dropped without signaling completion");
         stream_rx
             .blocking_recv()
             .expect("BAL hashed-state streaming task dropped without signaling completion");
