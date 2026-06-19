@@ -28,7 +28,6 @@ reth-network-api.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-revm = { workspace = true, features = ["witness"] }
 reth-tasks = { workspace = true, features = ["rayon"] }
-reth-tracing.workspace = true
 reth-rpc-convert.workspace = true
 revm-inspectors.workspace = true
 reth-network-peers = { workspace = true, features = ["secp256k1"] }
@@ -42,6 +41,7 @@ reth-consensus-common.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-node-api.workspace = true
+reth-payload-primitives.workspace = true
 reth-trie-common.workspace = true
 
 # ethereum
@@ -49,6 +49,7 @@ alloy-evm = { workspace = true, features = ["overrides"] }
 alloy-consensus.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local = { workspace = true, features = ["mnemonic"] }
+alloy-eip7928 = { workspace = true, features = ["rlp"] }
 alloy-eips = { workspace = true, features = ["kzg"] }
 alloy-dyn-abi.workspace = true
 alloy-genesis.workspace = true

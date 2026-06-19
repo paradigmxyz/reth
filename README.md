@@ -28,7 +28,7 @@ Reth (short for Rust Ethereum, [pronunciation](https://x.com/kelvinfichter/statu
 
 1. **Modularity**: Every component is built to be used as a library: well-tested, documented and benchmarked. Import crates, mix and match, and innovate on top of them. Learn more about the project's components [here](./docs/repo/layout.md).
 2. **Performance**: Built with Rust, [Alloy](https://github.com/alloy-rs/alloy/), [revm](https://github.com/bluealloy/revm/), and [Foundry](https://github.com/foundry-rs/foundry/) — battle-tested and optimized for speed. Check the [ethPandaOps Lab Dashboard](https://lab.ethpandaops.io/ethereum/execution/timings) for a third-party comparison against other Ethereum clients.
-Here's what that looks like in practice, measured with [reth-bench](https://github.com/paradigmxyz/reth/tree/main/bin/reth-bench) on Ethereum Mainnet:
+Here's what that looks like in practice on Ethereum Mainnet:
 
 ![](./assets/reth-perf.png)
 
@@ -85,7 +85,7 @@ When updating this, also update:
 - .github/workflows/lint.yml
 -->
 
-The Minimum Supported Rust Version (MSRV) of this project is [1.93.0](https://blog.rust-lang.org/2026/01/22/Rust-1.93.0/).
+The Minimum Supported Rust Version (MSRV) of this project is 1.95.
 
 See the docs for detailed instructions on how to [build from source](https://reth.rs/installation/source/).
 

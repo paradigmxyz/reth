@@ -2,9 +2,12 @@
 
 use crate::ExecutionOutcome;
 use alloc::{borrow::Cow, collections::BTreeMap, vec::Vec};
-use alloy_consensus::{transaction::Recovered, BlockHeader, TxReceipt};
-use alloy_eips::{eip1898::ForkBlock, eip2718::Encodable2718, BlockNumHash};
-use alloy_primitives::{Address, BlockHash, BlockNumber, Log, TxHash};
+use alloy_consensus::{
+    transaction::{Recovered, TxHashRef},
+    BlockHeader, TxReceipt,
+};
+use alloy_eips::{eip1898::ForkBlock, BlockNumHash};
+use alloy_primitives::{map::HashSet, Address, BlockHash, BlockNumber, Log, TxHash};
 use core::{fmt, ops::RangeInclusive};
 use reth_primitives_traits::{
     transaction::signed::SignedTransaction, Block, BlockBody, IndexedTx, NodePrimitives,
@@ -207,6 +210,11 @@ impl<N: NodePrimitives> Chain<N> {
         self.blocks_iter().flat_map(|block| block.body().transactions())
     }
 
+    /// Returns an iterator over all transaction hashes in the chain.
+    pub fn transaction_hashes(&self) -> impl Iterator<Item = &TxHash> + '_ {
+        self.transactions_iter().map(|tx| tx.tx_hash())
+    }
+
     /// Returns an iterator over all [`Recovered`] transaction references in the chain.
     pub fn transactions_recovered_iter(
         &self,
@@ -291,10 +299,7 @@ impl<N: NodePrimitives> Chain<N> {
     /// Get all receipts with attachment.
     ///
     /// Attachment includes block number, block hash, transaction hash and transaction index.
-    pub fn receipts_with_attachment(&self) -> Vec<BlockReceipts<N::Receipt>>
-    where
-        N::SignedTx: Encodable2718,
-    {
+    pub fn receipts_with_attachment(&self) -> Vec<BlockReceipts<N::Receipt>> {
         let mut receipt_attach = Vec::with_capacity(self.blocks().len());
 
         self.blocks_and_receipts().for_each(|(block, receipts)| {
@@ -305,7 +310,7 @@ impl<N: NodePrimitives> Chain<N> {
                 .transactions()
                 .iter()
                 .zip(receipts)
-                .map(|(tx, receipt)| (tx.trie_hash(), receipt.clone()))
+                .map(|(tx, receipt)| (*tx.tx_hash(), receipt.clone()))
                 .collect();
 
             receipt_attach.push(BlockReceipts {
@@ -445,7 +450,27 @@ impl<B: Block<Body: BlockBody<Transaction: SignedTransaction>>> ChainBlocks<'_, 
     pub fn transaction_hashes(&self) -> impl Iterator<Item = TxHash> + '_ {
         self.blocks
             .values()
-            .flat_map(|block| block.body().transactions_iter().map(|tx| tx.trie_hash()))
+            .flat_map(|block| block.body().transactions_iter().map(|tx| *tx.tx_hash()))
+    }
+
+    /// Returns all transaction hashes in a pre-allocated vector.
+    #[inline]
+    pub fn transaction_hashes_vec(&self) -> Vec<TxHash> {
+        let capacity = self.blocks.values().map(|block| block.body().transactions().len()).sum();
+
+        let mut hashes = Vec::with_capacity(capacity);
+        hashes.extend(self.transaction_hashes());
+        hashes
+    }
+
+    /// Returns all transaction hashes in a pre-allocated set.
+    #[inline]
+    pub fn transaction_hashes_set(&self) -> HashSet<TxHash> {
+        let capacity = self.blocks.values().map(|block| block.body().transactions().len()).sum();
+
+        let mut hashes = HashSet::with_capacity_and_hasher(capacity, Default::default());
+        hashes.extend(self.transaction_hashes());
+        hashes
     }
 }
 

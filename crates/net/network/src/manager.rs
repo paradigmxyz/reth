@@ -714,6 +714,11 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             NetworkHandleMessage::AddTrustedPeerId(peer_id) => {
                 self.swarm.state_mut().add_trusted_peer_id(peer_id);
             }
+            NetworkHandleMessage::AddTrustedPeerNode(trusted_peer) => {
+                if !self.swarm.is_shutting_down() {
+                    self.swarm.state_mut().add_trusted_peer_node(trusted_peer);
+                }
+            }
             NetworkHandleMessage::AddPeerAddress(peer, kind, addr) => {
                 // only add peer if we are not shutting down
                 if !self.swarm.is_shutting_down() {
@@ -725,6 +730,12 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             }
             NetworkHandleMessage::DisconnectPeer(peer_id, reason) => {
                 self.swarm.sessions_mut().disconnect(peer_id, reason);
+            }
+            NetworkHandleMessage::BanPeer(peer_id) => {
+                self.swarm.peers_mut().ban_peer_by_admin(peer_id);
+            }
+            NetworkHandleMessage::UnbanPeer(peer_id) => {
+                self.swarm.peers_mut().unban_peer_by_admin(peer_id);
             }
             NetworkHandleMessage::ConnectPeer(peer_id, kind, addr) => {
                 self.swarm.state_mut().add_and_connect(peer_id, kind, addr);

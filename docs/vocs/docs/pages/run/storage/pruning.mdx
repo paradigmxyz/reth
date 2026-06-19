@@ -1,0 +1,330 @@
+---
+description: Pruning and node modes in Reth.
+---
+
+# Pruning & Node Modes
+
+Reth supports archive, full, minimal, and custom-pruned nodes. Archive mode is
+the default when no pruning profile or pruning configuration is set.
+
+For new databases, these modes run on the default [storage V2 layout](/run/storage).
+Storage V2 controls where data is stored; pruning controls how much historical
+data is retained.
+
+## Basic concepts
+
+-   Archive node - retains all historical data from genesis.
+-   Full node - keeps current state and a 10,064-block historical state window,
+    while pruning selected historical data.
+-   Minimal node - uses the most aggressive built-in pruning profile for small
+    disk usage.
+-   Custom-pruned node - uses [custom pruning configuration](/run/configuration#the-prune-section)
+    or individual `--prune.*` flags.
+
+Pruning is destructive. Once historical data has been pruned, Reth cannot serve
+that data again unless you restore it from a snapshot or resync with a mode that
+retains it.
+
+## Modes
+
+### Archive Node
+
+Archive mode is the default. Follow the steps from
+[Running Reth on Ethereum Mainnet or testnets](/run/ethereum) and start Reth
+without a pruning profile:
+
+```bash
+reth node
+```
+
+### Full Node
+
+Use `--full` to run the default full-node pruning profile:
+
+```bash
+reth node \
+    --full \
+    --authrpc.jwtsecret /path/to/secret \
+    --authrpc.addr 127.0.0.1 \
+    --authrpc.port 8551
+```
+
+Full mode configures:
+
+-   sender recovery pruning: full
+-   transaction lookup pruning: disabled
+-   receipts pruning: retain the last 10,064 blocks
+-   account history pruning: retain the last 10,064 blocks
+-   storage history pruning: retain the last 10,064 blocks
+-   bodies pruning: prune pre-Merge bodies on chains with a Paris activation
+
+### Minimal Storage Mode
+
+Use [`--minimal`](/run/storage/minimal) to run the most aggressive built-in
+pruning profile:
+
+```bash
+reth node \
+    --minimal \
+    --authrpc.jwtsecret /path/to/secret \
+    --authrpc.addr 127.0.0.1 \
+    --authrpc.port 8551
+```
+
+Minimal mode configures:
+
+-   sender recovery pruning: full
+-   transaction lookup pruning: full
+-   receipts pruning: retain the last 64 blocks
+-   account history pruning: retain the last 10,064 blocks
+-   storage history pruning: retain the last 10,064 blocks
+-   bodies pruning: retain the last 10,064 blocks
+-   static file segments: 10,000 blocks per file
+
+### Custom Pruned Node
+
+Use `reth.toml` or individual `--prune.*` flags to configure each pruning
+segment yourself. See the [pruning configuration](/run/configuration#the-prune-section)
+reference for the TOML format.
+
+## Disk usage
+
+Disk usage changes as networks grow and depends on the selected node mode. For
+current storage V2 measurements, see [Storage V2](/run/storage#disk-savings).
+
+## RPC support
+
+The [pruning configuration](/run/configuration#the-prune-section) can prune
+several independent data segments:
+
+-   Sender Recovery
+-   Transaction Lookup
+-   Receipts
+-   Account History
+-   Storage History
+
+Pruning a segment limits RPC methods that need the removed historical data or
+lookup indexes.
+
+### Full Node
+
+The following tables describe RPC methods available in the full node.
+
+#### `debug` namespace
+
+| RPC                                 | Note                                                       |
+| ----------------------------------- | ---------------------------------------------------------- |
+| `debug_accountAt`                   | Only for the last 10064 blocks                             |
+| `debug_accountInfoAt`               | Only for the last 10064 blocks                             |
+| `debug_chainConfig`                 |                                                            |
+| `debug_codeByHash`                  | Only for the last 10064 blocks                             |
+| `debug_dbGet`                       |                                                            |
+| `debug_executionWitness`            | Only for the last 10064 blocks                             |
+| `debug_executionWitnessByBlockHash` | Only for the last 10064 blocks                             |
+| `debug_getBadBlocks`                |                                                            |
+| `debug_getRawBlock`                 |                                                            |
+| `debug_getRawHeader`                |                                                            |
+| `debug_getRawReceipts`              | Only for the last 10064 blocks                             |
+| `debug_getRawTransaction`           |                                                            |
+| `debug_getRawTransactions`          |                                                            |
+| `debug_stateRootWithUpdates`        | Only for the last 10064 blocks                             |
+| `debug_traceBlock`                  | Only for the last 10064 blocks                             |
+| `debug_traceBlockByHash`            | Only for the last 10064 blocks                             |
+| `debug_traceBlockByNumber`          | Only for the last 10064 blocks                             |
+| `debug_traceCall`                   | Only for the last 10064 blocks                             |
+| `debug_traceCallMany`               | Only for the last 10064 blocks                             |
+| `debug_traceTransaction`            | Only for the last 10064 blocks                             |
+
+#### `eth` namespace
+
+| RPC / Segment                             | Note                                                       |
+| ----------------------------------------- | ---------------------------------------------------------- |
+| `eth_accounts`                            |                                                            |
+| `eth_blockNumber`                         |                                                            |
+| `eth_call`                                | Only for the last 10064 blocks                             |
+| `eth_chainId`                             |                                                            |
+| `eth_createAccessList`                    | Only for the last 10064 blocks                             |
+| `eth_estimateGas`                         | Only for the last 10064 blocks                             |
+| `eth_feeHistory`                          |                                                            |
+| `eth_gasPrice`                            |                                                            |
+| `eth_getBalance`                          | Only for the last 10064 blocks                             |
+| `eth_getBlockByHash`                      |                                                            |
+| `eth_getBlockByNumber`                    |                                                            |
+| `eth_getBlockReceipts`                    | Only for the last 10064 blocks                             |
+| `eth_getBlockTransactionCountByHash`      |                                                            |
+| `eth_getBlockTransactionCountByNumber`    |                                                            |
+| `eth_getCode`                             |                                                            |
+| `eth_getFilterChanges`                    |                                                            |
+| `eth_getFilterLogs`                       | Only for the last 10064 blocks                             |
+| `eth_getLogs`                             | Only for the last 10064 blocks                             |
+| `eth_getStorageAt`                        | Only for the last 10064 blocks                             |
+| `eth_getTransactionByBlockHashAndIndex`   |                                                            |
+| `eth_getTransactionByBlockNumberAndIndex` |                                                            |
+| `eth_getTransactionByHash`                |                                                            |
+| `eth_getTransactionCount`                 | Only for the last 10064 blocks                             |
+| `eth_getTransactionReceipt`               | Only for the last 10064 blocks                             |
+| `eth_getUncleByBlockHashAndIndex`         |                                                            |
+| `eth_getUncleByBlockNumberAndIndex`       |                                                            |
+| `eth_getUncleCountByBlockHash`            |                                                            |
+| `eth_getUncleCountByBlockNumber`          |                                                            |
+| `eth_maxPriorityFeePerGas`                |                                                            |
+| `eth_mining`                              |                                                            |
+| `eth_newBlockFilter`                      |                                                            |
+| `eth_newFilter`                           |                                                            |
+| `eth_newPendingTransactionFilter`         |                                                            |
+| `eth_protocolVersion`                     |                                                            |
+| `eth_sendRawTransaction`                  |                                                            |
+| `eth_sendTransaction`                     |                                                            |
+| `eth_sign`                                |                                                            |
+| `eth_signTransaction`                     |                                                            |
+| `eth_signTypedData`                       |                                                            |
+| `eth_subscribe`                           |                                                            |
+| `eth_syncing`                             |                                                            |
+| `eth_uninstallFilter`                     |                                                            |
+| `eth_unsubscribe`                         |                                                            |
+
+#### `net` namespace
+
+| RPC / Segment   |
+| --------------- |
+| `net_listening` |
+| `net_peerCount` |
+| `net_version`   |
+
+#### `trace` namespace
+
+| RPC / Segment                   | Note                           |
+| ------------------------------- | ------------------------------ |
+| `trace_block`                   | Only for the last 10064 blocks |
+| `trace_blockOpcodeGas`          | Only for the last 10064 blocks |
+| `trace_call`                    | Only for the last 10064 blocks |
+| `trace_callMany`                | Only for the last 10064 blocks |
+| `trace_filter`                  | Only for the last 10064 blocks |
+| `trace_get`                     | Only for the last 10064 blocks |
+| `trace_rawTransaction`          | Only for the last 10064 blocks |
+| `trace_replayBlockTransactions` | Only for the last 10064 blocks |
+| `trace_replayTransaction`       | Only for the last 10064 blocks |
+| `trace_transaction`             | Only for the last 10064 blocks |
+| `trace_transactionOpcodeGas`    | Only for the last 10064 blocks |
+
+#### `txpool` namespace
+
+| RPC / Segment        |
+| -------------------- |
+| `txpool_content`     |
+| `txpool_contentFrom` |
+| `txpool_inspect`     |
+| `txpool_status`      |
+
+### Pruned Node
+
+The following tables describe the requirements for prune segments, per RPC method:
+
+-   ✅ – if the segment is pruned, the RPC method still works
+-   ❌ - if the segment is pruned, the RPC method doesn't work anymore
+
+#### `debug` namespace
+
+| RPC / Segment                       | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
+| ----------------------------------- | --------------- | ------------------ | -------- | --------------- | --------------- |
+| `debug_accountAt`                   | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_accountInfoAt`               | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_chainConfig`                 | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `debug_codeByHash`                  | ✅              | ✅                 | ✅       | ❌              | ✅              |
+| `debug_dbGet`                       | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `debug_executionWitness`            | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_executionWitnessByBlockHash` | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_getBadBlocks`                | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `debug_getRawBlock`                 | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `debug_getRawHeader`                | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `debug_getRawReceipts`              | ✅              | ✅                 | ❌       | ✅              | ✅              |
+| `debug_getRawTransaction`           | ✅              | ❌                 | ✅       | ✅              | ✅              |
+| `debug_getRawTransactions`          | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `debug_stateRootWithUpdates`        | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_traceBlock`                  | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_traceBlockByHash`            | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_traceBlockByNumber`          | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_traceCall`                   | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_traceCallMany`               | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_traceTransaction`            | ✅              | ✅                 | ✅       | ❌              | ❌              |
+
+#### `eth` namespace
+
+| RPC / Segment                             | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
+| ----------------------------------------- | --------------- | ------------------ | -------- | --------------- | --------------- |
+| `eth_accounts`                            | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_blockNumber`                         | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_call`                                | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `eth_chainId`                             | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_createAccessList`                    | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `eth_estimateGas`                         | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `eth_feeHistory`                          | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_gasPrice`                            | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_getBalance`                          | ✅              | ✅                 | ✅       | ❌              | ✅              |
+| `eth_getBlockByHash`                      | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_getBlockByNumber`                    | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_getBlockReceipts`                    | ✅              | ✅                 | ❌       | ✅              | ✅              |
+| `eth_getBlockTransactionCountByHash`      | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_getBlockTransactionCountByNumber`    | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_getCode`                             | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_getFilterChanges`                    | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_getFilterLogs`                       | ✅              | ✅                 | ❌       | ✅              | ✅              |
+| `eth_getLogs`                             | ✅              | ✅                 | ❌       | ✅              | ✅              |
+| `eth_getStorageAt`                        | ✅              | ✅                 | ✅       | ✅              | ❌              |
+| `eth_getTransactionByBlockHashAndIndex`   | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_getTransactionByBlockNumberAndIndex` | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_getTransactionByHash`                | ✅              | ❌                 | ✅       | ✅              | ✅              |
+| `eth_getTransactionCount`                 | ✅              | ✅                 | ✅       | ❌              | ✅              |
+| `eth_getTransactionReceipt`               | ✅              | ❌                 | ❌       | ✅              | ✅              |
+| `eth_getUncleByBlockHashAndIndex`         | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_getUncleByBlockNumberAndIndex`       | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_getUncleCountByBlockHash`            | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_getUncleCountByBlockNumber`          | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_maxPriorityFeePerGas`                | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_mining`                              | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_newBlockFilter`                      | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_newFilter`                           | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_newPendingTransactionFilter`         | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_protocolVersion`                     | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_sendRawTransaction`                  | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_sendTransaction`                     | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_sign`                                | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_signTransaction`                     | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_signTypedData`                       | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_subscribe`                           | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_syncing`                             | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_uninstallFilter`                     | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `eth_unsubscribe`                         | ✅              | ✅                 | ✅       | ✅              | ✅              |
+
+#### `net` namespace
+
+| RPC / Segment   | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
+| --------------- | --------------- | ------------------ | -------- | --------------- | --------------- |
+| `net_listening` | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `net_peerCount` | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `net_version`   | ✅              | ✅                 | ✅       | ✅              | ✅              |
+
+#### `trace` namespace
+
+| RPC / Segment                   | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
+| ------------------------------- | --------------- | ------------------ | -------- | --------------- | --------------- |
+| `trace_block`                   | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `trace_blockOpcodeGas`          | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `trace_call`                    | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `trace_callMany`                | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `trace_filter`                  | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `trace_get`                     | ✅              | ❌                 | ✅       | ❌              | ❌              |
+| `trace_rawTransaction`          | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `trace_replayBlockTransactions` | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `trace_replayTransaction`       | ✅              | ❌                 | ✅       | ❌              | ❌              |
+| `trace_transaction`             | ✅              | ❌                 | ✅       | ❌              | ❌              |
+| `trace_transactionOpcodeGas`    | ✅              | ❌                 | ✅       | ❌              | ❌              |
+
+#### `txpool` namespace
+
+| RPC / Segment        | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
+| -------------------- | --------------- | ------------------ | -------- | --------------- | --------------- |
+| `txpool_content`     | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `txpool_contentFrom` | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `txpool_inspect`     | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `txpool_status`      | ✅              | ✅                 | ✅       | ✅              | ✅              |

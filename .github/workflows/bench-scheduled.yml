@@ -290,7 +290,7 @@ jobs:
       actions: read
     timeout-minutes: 120
     env:
-      BENCH_RPC_URL: https://ethereum.reth.rs/rpc
+      BENCH_RPC_URL: http://ethereum-mainnet-stable-reth-greedy-goose:8545
       SCHELK_MOUNT: /reth-bench
       RETH_SCOPE: reth-bench.scope
       BENCH_WORK_DIR: ${{ github.workspace }}/bench-work
@@ -305,21 +305,23 @@ jobs:
       BENCH_WAIT_TIME: ""
       BENCH_BASELINE_ARGS: ""
       BENCH_FEATURE_ARGS: ""
-      BENCH_ABBA: "true"
+      BENCH_RUN_PAIRS: "2"
       BENCH_COMMENT_ID: ""
       BENCH_SLACK: ${{ github.event_name == 'workflow_dispatch' && inputs.slack || 'always' }}
-      BENCH_DRIVER: txgen
+      BENCH_TARGET_METRICS_CONFIG: .github/config/bench-metrics-targets.json
       BENCH_NODE_BIN: reth
-      BENCH_DRIVER_REASON: ""
       BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
-      TXGEN_REV: 5b04a80d557cc6658573db6ccf49ce04cbf07ea3
-      BENCH_OTLP_DISABLED: "true"
+      BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS: "200"
+      BENCH_OTLP_DISABLED: ${{ needs.resolve-refs.outputs.mode == 'release' && 'true' || 'false' }}
+      BENCH_OTLP_TRACES_ENDPOINT: ${{ needs.resolve-refs.outputs.mode != 'release' && secrets.BENCH_OTLP_TRACES_ENDPOINT || '' }}
+      BENCH_OTLP_LOGS_ENDPOINT: ${{ needs.resolve-refs.outputs.mode != 'release' && secrets.BENCH_OTLP_LOGS_ENDPOINT || '' }}
       BASELINE_REF: ${{ needs.resolve-refs.outputs.baseline-ref }}
       FEATURE_REF: ${{ needs.resolve-refs.outputs.feature-ref }}
       CLICKHOUSE_URL: ${{ secrets.CLICKHOUSE_URL }}
       CLICKHOUSE_USER: ${{ secrets.CLICKHOUSE_USER }}
       CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
+      BENCH_VICTORIAMETRICS_URL: ${{ secrets.BENCH_VICTORIAMETRICS_URL }}
     steps:
       - name: Clean up previous bench-work
         run: sudo rm -rf "$BENCH_WORK_DIR" 2>/dev/null || true
@@ -345,10 +347,11 @@ jobs:
             const jobUrl = job ? job.html_url : `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             core.exportVariable('BENCH_JOB_URL', jobUrl);
 
+      - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
         continue-on-error: true
-      - uses: astral-sh/setup-uv@bd01e18f51369d5a26f1651c3cb451d3417e3bba # v6.3.1
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
 
       - name: Install dependencies
         env:
@@ -368,6 +371,9 @@ jobs:
             curl -sSfL https://dl.min.io/client/mc/release/linux-amd64/mc -o "$HOME/.local/bin/mc"
             chmod +x "$HOME/.local/bin/mc"
           fi
+
+          # llvm
+          .github/scripts/install_llvm.sh ubuntu
 
           # uv (Python package manager)
           if ! command -v uv &>/dev/null; then
@@ -457,12 +463,8 @@ jobs:
           BASELINE_DIR="$(cd ../reth-baseline && pwd)"
           FEATURE_DIR="$(cd ../reth-feature && pwd)"
 
-          if [ "$BENCH_DRIVER" = "txgen" ]; then
-            .github/scripts/bench-txgen-install.sh
-            BUILD_SCRIPT=.github/scripts/bench-txgen-build.sh
-          else
-            BUILD_SCRIPT=.github/scripts/bench-reth-build.sh
-          fi
+          .github/scripts/bench-txgen-install.sh
+          BUILD_SCRIPT=.github/scripts/bench-txgen-build.sh
 
           "$BUILD_SCRIPT" baseline "${BASELINE_DIR}" "$BASELINE_REF" &
           PID_BASELINE=$!
@@ -539,8 +541,12 @@ jobs:
           rm -rf "$BENCH_WORK_DIR"
           mkdir -p "$BENCH_WORK_DIR"
 
-      - name: Start metrics proxy
+      - name: Initialize benchmark metrics labels
         run: |
+          if [ -n "${BENCH_VICTORIAMETRICS_URL:-}" ]; then
+            echo "::add-mask::$BENCH_VICTORIAMETRICS_URL"
+          fi
+
           BENCH_ID="${BENCH_MODE}-${{ github.run_id }}"
           BENCH_REFERENCE_EPOCH=$(date +%s)
           echo "BENCH_ID=${BENCH_ID}" >> "$GITHUB_ENV"
@@ -550,19 +556,9 @@ jobs:
           echo '{}' > "$LABELS_FILE"
           echo "BENCH_LABELS_FILE=${LABELS_FILE}" >> "$GITHUB_ENV"
 
-          python3 .github/scripts/bench-metrics-proxy.py \
-            --labels "$LABELS_FILE" \
-            --upstream "http://${BENCH_METRICS_ADDR}/" \
-            --subnet 10.10.0.0/24 \
-            --port 9090 &
-          PROXY_PID=$!
-          echo "BENCH_METRICS_PROXY_PID=${PROXY_PID}" >> "$GITHUB_ENV"
-          echo "Metrics proxy started (PID $PROXY_PID)"
-
       # Extract txgen payloads once so they are reused across all benchmark
-      # runs instead of re-fetching from the remote RPC four times.
+      # runs instead of re-fetching from the remote RPC for every run.
       - name: Extract txgen payloads
-        if: env.BENCH_DRIVER == 'txgen'
         run: |
           PAYLOADS_DIR="$BENCH_WORK_DIR/txgen-payloads"
           .github/scripts/bench-txgen-extract.sh \
@@ -577,11 +573,7 @@ jobs:
           cat > "$BENCH_LABELS_FILE" <<LABELS
           {"benchmark_run":"baseline-1","run_type":"baseline","git_ref":"${BASELINE_REF}","bench_sha":"${BASELINE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"$(date +%s)","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
           LABELS
-          RUN_SCRIPT=.github/scripts/bench-reth-run.sh
-          if [ "$BENCH_DRIVER" = "txgen" ]; then
-            RUN_SCRIPT=.github/scripts/bench-txgen-run.sh
-          fi
-          taskset -c 0 "$RUN_SCRIPT" baseline "../reth-baseline/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/baseline-1"
+          taskset -c 0 .github/scripts/bench-txgen-run.sh baseline "../reth-baseline/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/baseline-1"
 
       - name: "Run benchmark: feature (1/2)"
         id: run-feature-1
@@ -589,11 +581,7 @@ jobs:
           cat > "$BENCH_LABELS_FILE" <<LABELS
           {"benchmark_run":"feature-1","run_type":"feature","git_ref":"${FEATURE_REF}","bench_sha":"${FEATURE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"$(date +%s)","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
           LABELS
-          RUN_SCRIPT=.github/scripts/bench-reth-run.sh
-          if [ "$BENCH_DRIVER" = "txgen" ]; then
-            RUN_SCRIPT=.github/scripts/bench-txgen-run.sh
-          fi
-          taskset -c 0 "$RUN_SCRIPT" feature "../reth-feature/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/feature-1"
+          taskset -c 0 .github/scripts/bench-txgen-run.sh feature "../reth-feature/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/feature-1"
 
       - name: "Run benchmark: feature (2/2)"
         id: run-feature-2
@@ -601,11 +589,7 @@ jobs:
           cat > "$BENCH_LABELS_FILE" <<LABELS
           {"benchmark_run":"feature-2","run_type":"feature","git_ref":"${FEATURE_REF}","bench_sha":"${FEATURE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"$(date +%s)","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
           LABELS
-          RUN_SCRIPT=.github/scripts/bench-reth-run.sh
-          if [ "$BENCH_DRIVER" = "txgen" ]; then
-            RUN_SCRIPT=.github/scripts/bench-txgen-run.sh
-          fi
-          taskset -c 0 "$RUN_SCRIPT" feature "../reth-feature/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/feature-2"
+          taskset -c 0 .github/scripts/bench-txgen-run.sh feature "../reth-feature/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/feature-2"
 
       - name: "Run benchmark: baseline (2/2)"
         id: run-baseline-2
@@ -615,22 +599,15 @@ jobs:
           cat > "$BENCH_LABELS_FILE" <<LABELS
           {"benchmark_run":"baseline-2","run_type":"baseline","git_ref":"${BASELINE_REF}","bench_sha":"${BASELINE_REF}","benchmark_id":"${BENCH_ID}","run_start_epoch":"${LAST_RUN_START}","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
           LABELS
-          RUN_SCRIPT=.github/scripts/bench-reth-run.sh
-          if [ "$BENCH_DRIVER" = "txgen" ]; then
-            RUN_SCRIPT=.github/scripts/bench-txgen-run.sh
-          fi
-          taskset -c 0 "$RUN_SCRIPT" baseline "../reth-baseline/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/baseline-2"
+          taskset -c 0 .github/scripts/bench-txgen-run.sh baseline "../reth-baseline/target/profiling/${BENCH_NODE_BIN}" "$BENCH_WORK_DIR/baseline-2"
 
-      - name: Stop metrics proxy & generate Grafana URL
+      - name: Generate Grafana URL
         id: metrics
         if: "!cancelled()"
         run: |
-          kill "$BENCH_METRICS_PROXY_PID" 2>/dev/null || true
-
-          LAST_RUN_DURATION=$(( $(date +%s) - BENCH_LAST_RUN_START ))
           FROM_MS=$(( BENCH_REFERENCE_EPOCH * 1000 ))
-          TO_MS=$(( (BENCH_REFERENCE_EPOCH + LAST_RUN_DURATION) * 1000 ))
-          GRAFANA_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr?orgId=1&from=${FROM_MS}&to=${TO_MS}&timezone=browser&var-datasource=efk1hcn87dnnkd&var-job=reth-bench&var-benchmark_id=${BENCH_ID}&var-benchmark_run=\$__all"
+          TO_MS=$(( $(date +%s) * 1000 ))
+          GRAFANA_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr?orgId=1&from=${FROM_MS}&to=${TO_MS}&timezone=browser&var-datasource=efk1hcn87dnnkd&var-job=github-reth-bench&var-benchmark_id=${BENCH_ID}&var-benchmark_run=\$__all"
           echo "grafana-url=${GRAFANA_URL}" >> "$GITHUB_OUTPUT"
           echo "Grafana URL: ${GRAFANA_URL}"
 
@@ -688,17 +665,14 @@ jobs:
           FEATURE_CSVS="$FEATURE_CSVS $BENCH_WORK_DIR/feature-2/combined_latency.csv"
           SUMMARY_ARGS="$SUMMARY_ARGS --baseline-csv $BASELINE_CSVS"
           SUMMARY_ARGS="$SUMMARY_ARGS --feature-csv $FEATURE_CSVS"
-          SUMMARY_ARGS="$SUMMARY_ARGS --gas-csv $BENCH_WORK_DIR/feature-1/total_gas.csv"
+          SUMMARY_ARGS="$SUMMARY_ARGS --run-pairs $BENCH_RUN_PAIRS"
 
           GRAFANA_URL='${{ steps.metrics.outputs.grafana-url }}'
           if [ -n "$GRAFANA_URL" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --grafana-url $GRAFANA_URL"
           fi
-          if [ -n "${BENCH_DRIVER:-}" ]; then
-            SUMMARY_ARGS="$SUMMARY_ARGS --driver $BENCH_DRIVER"
-          fi
-          if [ -n "${BENCH_DRIVER_REASON:-}" ]; then
-            SUMMARY_ARGS="$SUMMARY_ARGS --driver-reason $BENCH_DRIVER_REASON"
+          if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --target-metrics-config $BENCH_TARGET_METRICS_CONFIG"
           fi
           # shellcheck disable=SC2086
           python3 .github/scripts/bench-reth-summary.py $SUMMARY_ARGS
@@ -762,20 +736,39 @@ jobs:
           CHART_DIR="${BENCH_MODE}/${RUN_ID}"
           CHARTS_REPO="https://x-access-token:${DEREK_TOKEN}@github.com/decofe/reth-bench-charts.git"
 
-          TMP_DIR=$(mktemp -d)
-          if git clone --depth 1 "${CHARTS_REPO}" "${TMP_DIR}" 2>/dev/null; then
-            true
-          else
-            git init "${TMP_DIR}"
-            git -C "${TMP_DIR}" remote add origin "${CHARTS_REPO}"
-          fi
-          .github/scripts/configure-git-token-user.sh "${TMP_DIR}" "${DEREK_TOKEN}"
+          TMP_DIR=""
+          prepare_charts() {
+            if [ -n "${TMP_DIR}" ]; then
+              rm -rf "${TMP_DIR}"
+            fi
 
-          mkdir -p "${TMP_DIR}/${CHART_DIR}"
-          cp "$BENCH_WORK_DIR"/charts/*.png "${TMP_DIR}/${CHART_DIR}/"
-          git -C "${TMP_DIR}" add "${CHART_DIR}"
-          git -C "${TMP_DIR}" commit -m "nightly bench charts for run ${RUN_ID}"
-          git -C "${TMP_DIR}" push origin HEAD:main
+            TMP_DIR=$(mktemp -d)
+            if git clone --depth 1 "${CHARTS_REPO}" "${TMP_DIR}" 2>/dev/null; then
+              true
+            else
+              git init "${TMP_DIR}"
+              git -C "${TMP_DIR}" remote add origin "${CHARTS_REPO}"
+            fi
+            .github/scripts/configure-git-token-user.sh "${TMP_DIR}" "${DEREK_TOKEN}"
+
+            mkdir -p "${TMP_DIR}/${CHART_DIR}"
+            cp "$BENCH_WORK_DIR"/charts/*.png "${TMP_DIR}/${CHART_DIR}/"
+            git -C "${TMP_DIR}" add "${CHART_DIR}"
+          }
+
+          for attempt in 1 2 3 4 5; do
+            prepare_charts
+            git -C "${TMP_DIR}" commit -m "nightly bench charts for run ${RUN_ID}"
+            if git -C "${TMP_DIR}" push origin HEAD:main; then
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "::error::Failed to push charts after ${attempt} attempts"
+              rm -rf "${TMP_DIR}"
+              exit 1
+            fi
+            sleep "$attempt"
+          done
           echo "sha=$(git -C "${TMP_DIR}" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           rm -rf "${TMP_DIR}"
 
@@ -867,7 +860,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const { verdict, fmtChange, fmtMs, metricRows, waitTimeRows, blocksLabel } = require('./.github/scripts/bench-utils');
+            const { verdict, fmtChange, fmtMs, metricRows, waitTimeRows, blocksLabel, isWin } = require('./.github/scripts/bench-utils');
 
             const token = process.env.SLACK_BENCH_BOT_TOKEN;
             const channel = process.env.SLACK_BENCH_CHANNEL;
@@ -889,11 +882,10 @@ jobs:
             const mode = process.env.BENCH_MODE || 'nightly';
             const slackMode = process.env.BENCH_SLACK || 'always';
             const hasRegression = Object.values(changes).some(c => c.sig === 'bad');
-            const hasImprovement = Object.values(changes).some(c => c.sig === 'good');
 
-            // on-win mode: only notify on improvements
-            if (slackMode === 'on-win' && !hasImprovement) {
-              core.info('on-win mode: no improvement detected, skipping Slack notification');
+            // on-win mode: only notify on unambiguous improvements. Mixed results are not wins.
+            if (slackMode === 'on-win' && !isWin(changes)) {
+              core.info('on-win mode: no unambiguous improvement detected, skipping Slack notification');
               return;
             }
 
@@ -916,6 +908,7 @@ jobs:
             const { emoji, label } = verdict(changes);
             const headerEmoji = SLACK_VERDICT[emoji] || emoji;
             const commitUrl = `https://github.com/${repo}/commit`;
+            const repoLink = `<https://github.com/${repo}|Reth>`;
             const baselineLink = `<${commitUrl}/${summary.baseline.ref}|${summary.baseline.name}>`;
             const featureLink = `<${commitUrl}/${summary.feature.ref}|${summary.feature.name}>`;
             const diffUrl = `https://github.com/${repo}/compare/${summary.baseline.ref}...${summary.feature.ref}`;
@@ -926,6 +919,7 @@ jobs:
             const modeLabel = mode === 'release' ? 'Release Regression' : mode === 'hourly' ? 'Hourly Regression' : 'Nightly Regression';
             const sectionText = [
               `*${modeLabel}*`,
+              `*Repo:* ${repoLink}`,
               '',
               `*Baseline:* ${baselineLink}`,
               `*Feature:* ${featureLink}`,

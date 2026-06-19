@@ -2,7 +2,6 @@
 
 use crate::root::ParallelStateRootError;
 use alloy_eip7928::BlockAccessList;
-use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{keccak256, B256};
 use derive_more::derive::Deref;
 use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2};
@@ -10,37 +9,13 @@ use revm_state::EvmState;
 use std::sync::Arc;
 use tracing::trace;
 
-/// Source of state changes, either from EVM execution or from a Block Access List.
-#[derive(Clone, Copy)]
-pub enum Source {
-    /// State changes from EVM execution.
-    Evm(StateChangeSource),
-    /// State changes from Block Access List (EIP-7928).
-    BlockAccessList,
-}
-
-impl std::fmt::Debug for Source {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Evm(source) => source.fmt(f),
-            Self::BlockAccessList => f.write_str("BlockAccessList"),
-        }
-    }
-}
-
-impl From<StateChangeSource> for Source {
-    fn from(source: StateChangeSource) -> Self {
-        Self::Evm(source)
-    }
-}
-
 /// Messages used internally by the multi proof task.
 #[derive(Debug)]
 pub enum StateRootMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargetsV2),
     /// New state update from transaction execution with its source
-    StateUpdate(Source, EvmState),
+    StateUpdate(EvmState),
     /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
     HashedStateUpdate(HashedPostState),
     /// Block Access List (EIP-7928; BAL) containing complete state changes for the block.
@@ -85,6 +60,8 @@ pub struct StateRootHandle {
     /// Receiver for the final state root result.
     state_root_rx:
         Option<std::sync::mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
+    /// Receiver for the hashed post state.
+    hashed_state_rx: Option<std::sync::mpsc::Receiver<HashedPostState>>,
 }
 
 impl StateRootHandle {
@@ -95,8 +72,14 @@ impl StateRootHandle {
         state_root_rx: std::sync::mpsc::Receiver<
             Result<StateRootComputeOutcome, ParallelStateRootError>,
         >,
+        hashed_state_rx: std::sync::mpsc::Receiver<HashedPostState>,
     ) -> Self {
-        Self { cached_trie_state_root, updates_tx, state_root_rx: Some(state_root_rx) }
+        Self {
+            cached_trie_state_root,
+            updates_tx,
+            state_root_rx: Some(state_root_rx),
+            hashed_state_rx: Some(hashed_state_rx),
+        }
     }
 
     /// Returns the state root that the cached sparse trie is anchored at.
@@ -115,8 +98,8 @@ impl StateRootHandle {
     pub fn state_hook(&self) -> impl alloy_evm::block::OnStateHook {
         let sender = StateHookSender::new(self.updates_tx.clone());
 
-        move |source: StateChangeSource, state: &EvmState| {
-            let _ = sender.send(StateRootMessage::StateUpdate(source.into(), state.clone()));
+        move |state: EvmState| {
+            let _ = sender.send(StateRootMessage::StateUpdate(state));
         }
     }
 
@@ -142,6 +125,15 @@ impl StateRootHandle {
         &mut self,
     ) -> std::sync::mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>> {
         self.state_root_rx.take().expect("state_root already taken")
+    }
+
+    /// Takes the hashed state receiver
+    ///
+    /// # Panics
+    ///
+    /// If called more than once.
+    pub const fn take_hashed_state_rx(&mut self) -> std::sync::mpsc::Receiver<HashedPostState> {
+        self.hashed_state_rx.take().expect("hashed_state already taken")
     }
 }
 
@@ -177,8 +169,10 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
             trace!(target: "trie::parallel::sparse", ?address, ?hashed_address, "Adding account to state update");
 
             let destroyed = account.is_selfdestructed();
-            let info = if destroyed { None } else { Some(account.info.into()) };
-            hashed_state.accounts.insert(hashed_address, info);
+            if account.info != account.original_info() {
+                let info = if destroyed { None } else { Some(account.info.into()) };
+                hashed_state.accounts.insert(hashed_address, info);
+            }
 
             let mut changed_storage_iter = account
                 .storage

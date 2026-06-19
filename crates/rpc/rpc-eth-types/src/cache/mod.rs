@@ -3,7 +3,8 @@
 use super::{EthStateCacheConfig, MultiConsumerLruCache};
 use crate::block::CachedTransaction;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
-use alloy_eips::{eip7928::bal::DecodedBal, BlockHashOrNumber};
+use alloy_eip7928::bal::DecodedBal;
+use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, TxHash, B256};
 use futures::{stream::FuturesOrdered, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
@@ -279,7 +280,7 @@ impl<N: NodePrimitives> EthStateCache<N> {
     pub async fn get_bal(
         &self,
         block_hash: B256,
-    ) -> ProviderResult<Option<Arc<DecodedBal<RevmBal>>>> {
+    ) -> ProviderResult<Option<Arc<DecodedBal<Arc<RevmBal>>>>> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetBal { block_hash, response_tx });
         rx.await
@@ -924,12 +925,12 @@ pub async fn cache_new_blocks_task<St, N: NodePrimitives>(
 
 /// Cached decoded revm BAL.
 #[derive(Clone, Debug)]
-pub(crate) struct CachedRevmBal(Arc<DecodedBal<RevmBal>>);
+pub(crate) struct CachedRevmBal(Arc<DecodedBal<Arc<RevmBal>>>);
 
 impl CachedRevmBal {
     /// Creates a cached revm BAL from an owned decoded BAL.
     #[inline]
-    fn new(bal: DecodedBal<RevmBal>) -> Self {
+    fn new(bal: DecodedBal<Arc<RevmBal>>) -> Self {
         Self(Arc::new(bal))
     }
 }
@@ -940,11 +941,13 @@ impl InMemorySize for CachedRevmBal {
     }
 }
 
-fn decoded_revm_bal_size(bal: &DecodedBal<RevmBal>) -> usize {
-    core::mem::size_of::<DecodedBal<RevmBal>>() + bal.as_raw().len() + revm_bal_size(bal.as_bal())
+fn decoded_revm_bal_size(bal: &DecodedBal<Arc<RevmBal>>) -> usize {
+    core::mem::size_of::<DecodedBal<Arc<RevmBal>>>() +
+        bal.as_raw().len() +
+        revm_bal_size(bal.as_bal())
 }
 
-fn revm_bal_size(bal: &RevmBal) -> usize {
+fn revm_bal_size(bal: &Arc<RevmBal>) -> usize {
     core::mem::size_of::<RevmBal>() +
         bal.accounts.capacity() * core::mem::size_of::<(Address, RevmAccountBal)>() +
         bal.accounts.values().map(revm_account_bal_heap_size).sum::<usize>()
@@ -987,6 +990,7 @@ fn revm_code_write_heap_size((_, bytecode): &(B256, Bytecode)) -> usize {
 mod tests {
     use super::*;
     use alloy_consensus::{transaction::TransactionMeta, Header};
+    use alloy_eip7928::BlockAccessIndex;
     use alloy_eips::{BlockHashOrNumber, NumHash};
     use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, Signature, TxHash, TxNumber};
     use core::ops::{RangeBounds, RangeInclusive};
@@ -1018,8 +1022,8 @@ mod tests {
         service
     }
 
-    fn test_decoded_revm_bal() -> DecodedBal<RevmBal> {
-        DecodedBal::new(RevmBal::default(), Bytes::from_static(&[0xc0]))
+    fn test_decoded_revm_bal() -> DecodedBal<Arc<RevmBal>> {
+        DecodedBal::new(Arc::new(RevmBal::default()), Bytes::from_static(&[0xc0]))
     }
 
     fn test_block() -> RecoveredBlock<Block> {
@@ -1115,15 +1119,19 @@ mod tests {
     #[test]
     fn cached_revm_bal_size_accounts_for_nested_allocations() {
         let mut account = RevmAccountBal::default();
-        account.account_info.nonce.writes.push((1, 1));
-        account.account_info.balance.writes.push((2, StorageValue::from(1u64)));
+        account.account_info.nonce.writes.push((BlockAccessIndex::new(1), 1));
+        account
+            .account_info
+            .balance
+            .writes
+            .push((BlockAccessIndex::new(2), StorageValue::from(1u64)));
         account.account_info.code.writes.push((
-            3,
+            BlockAccessIndex::new(3),
             (B256::repeat_byte(0xaa), Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]))),
         ));
         account.storage.storage.insert(
             StorageKey::from(1u64),
-            RevmBalWrites::new(vec![(4, StorageValue::from(2u64))]),
+            RevmBalWrites::new(vec![(BlockAccessIndex::new(4), StorageValue::from(2u64))]),
         );
 
         let mut bal = RevmBal::default();
@@ -1131,10 +1139,10 @@ mod tests {
 
         let raw = Bytes::from_static(&[0xc0, 0x01, 0x02]);
         let previous_estimate = core::mem::size_of::<CachedRevmBal>() +
-            core::mem::size_of::<DecodedBal<RevmBal>>() +
+            core::mem::size_of::<DecodedBal<Arc<RevmBal>>>() +
             raw.len() +
             core::mem::size_of::<RevmBal>();
-        assert!(CachedRevmBal::new(DecodedBal::new(bal, raw)).size() > previous_estimate);
+        assert!(CachedRevmBal::new(DecodedBal::new(Arc::new(bal), raw)).size() > previous_estimate);
     }
 
     #[tokio::test]
@@ -1209,11 +1217,7 @@ mod tests {
     }
 
     impl BalStore for TestBalStore {
-        fn insert(
-            &self,
-            _num_hash: NumHash,
-            _bal: reth_storage_api::SealedBal,
-        ) -> ProviderResult<()> {
+        fn insert(&self, _num_hash: NumHash, _bal: reth_storage_api::RawBal) -> ProviderResult<()> {
             Ok(())
         }
 
@@ -1228,7 +1232,7 @@ mod tests {
         fn revm_bal_by_hash(
             &self,
             _block_hash: BlockHash,
-        ) -> ProviderResult<Option<DecodedBal<RevmBal>>> {
+        ) -> ProviderResult<Option<DecodedBal<Arc<RevmBal>>>> {
             self.fetches.fetch_add(1, Ordering::SeqCst);
             Ok(Some(test_decoded_revm_bal()))
         }

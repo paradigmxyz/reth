@@ -56,16 +56,36 @@ where
 
     /// Handler for `admin_addTrustedPeer`
     fn add_trusted_peer(&self, record: AnyNode) -> RpcResult<bool> {
-        if let Some(record) = record.node_record() {
-            self.network.add_trusted_peer_with_udp(record.id, record.tcp_addr(), record.udp_addr())
+        if let Some(trusted) = record.trusted_peer().cloned() {
+            self.network.add_trusted_peer_node(trusted);
+        } else {
+            if let Some(record) = record.node_record() {
+                self.network.add_trusted_peer_with_udp(
+                    record.id,
+                    record.tcp_addr(),
+                    record.udp_addr(),
+                )
+            }
+            self.network.add_trusted_peer_id(record.peer_id());
         }
-        self.network.add_trusted_peer_id(record.peer_id());
         Ok(true)
     }
 
     /// Handler for `admin_removeTrustedPeer`
     fn remove_trusted_peer(&self, record: AnyNode) -> RpcResult<bool> {
         self.network.remove_peer(record.peer_id(), PeerKind::Trusted);
+        Ok(true)
+    }
+
+    /// Handler for `admin_banPeer`
+    fn ban_peer(&self, record: AnyNode) -> RpcResult<bool> {
+        self.network.ban_peer(record.peer_id());
+        Ok(true)
+    }
+
+    /// Handler for `admin_unbanPeer`
+    fn unban_peer(&self, record: AnyNode) -> RpcResult<bool> {
+        self.network.unban_peer(record.peer_id());
         Ok(true)
     }
 

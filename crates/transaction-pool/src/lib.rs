@@ -288,7 +288,7 @@ pub use crate::{
         REPLACE_BLOB_PRICE_BUMP, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
         TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
     },
-    error::PoolResult,
+    error::{PoolResult, RawPoolTransactionError},
     ordering::{CoinbaseTipOrdering, Priority, TransactionOrdering},
     pool::{
         blob_tx_priority, fee_delta, state::SubPool, AddedTransactionOutcome,
@@ -297,8 +297,9 @@ pub use crate::{
     },
     traits::*,
     validate::{
-        EthTransactionValidator, TransactionValidationOutcome, TransactionValidationTaskExecutor,
-        TransactionValidator, ValidPoolTransaction,
+        EthTransactionValidator, StatefulValidationFn, StatelessValidationFn,
+        TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
+        ValidPoolTransaction,
     },
 };
 use crate::{identifier::TransactionId, pool::PoolInner};
@@ -470,7 +471,7 @@ where
     V: TransactionValidator,
     <V as TransactionValidator>::Transaction: EthPoolTransaction,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
-    S: BlobStore,
+    S: BlobStore + Clone,
 {
     type Transaction = T::Transaction;
 
@@ -682,6 +683,13 @@ where
         self.pool.retain_unknown(announcement)
     }
 
+    fn retain_contains<A>(&self, announcement: &mut A)
+    where
+        A: HandleMempoolData,
+    {
+        self.pool.retain_contains(announcement)
+    }
+
     fn get(&self, tx_hash: &TxHash) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.inner().get(tx_hash)
     }
@@ -816,6 +824,10 @@ where
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError> {
         self.pool.blob_store().get_by_versioned_hashes_v4(versioned_hashes, indices_bitarray)
     }
+
+    fn blob_store(&self) -> Box<dyn BlobStore> {
+        Box::new(self.pool.blob_store().clone())
+    }
 }
 
 impl<V, T, S> TransactionPoolExt for Pool<V, T, S>
@@ -823,7 +835,7 @@ where
     V: TransactionValidator,
     <V as TransactionValidator>::Transaction: EthPoolTransaction,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
-    S: BlobStore,
+    S: BlobStore + Clone,
 {
     type Block = V::Block;
 
@@ -851,6 +863,20 @@ where
 
     fn cleanup_blobs(&self) {
         self.pool.cleanup_blobs()
+    }
+}
+
+impl<V, T, S> ValidatingPool for Pool<V, T, S>
+where
+    V: TransactionValidator,
+    <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
+    S: BlobStore + Clone,
+{
+    type Validator = V;
+
+    fn validator(&self) -> &Self::Validator {
+        self.inner().validator()
     }
 }
 

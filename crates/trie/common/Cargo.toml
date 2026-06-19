@@ -31,6 +31,7 @@ nybbles = { workspace = true, features = ["rlp"] }
 
 # reth
 revm-database.workspace = true
+revm-state.workspace = true
 
 # `serde` feature
 serde = { workspace = true, optional = true }
@@ -48,6 +49,7 @@ rayon = { workspace = true, optional = true }
 [dev-dependencies]
 reth-primitives-traits = { workspace = true, features = ["serde"] }
 reth-codecs.workspace = true
+alloy-eips.workspace = true
 alloy-genesis.workspace = true
 
 alloy-primitives = { workspace = true, features = ["getrandom"] }
@@ -86,6 +88,7 @@ std = [
     "revm-database/std",
     "revm-state/std",
     "reth-codecs?/std",
+    "alloy-eips/std",
 ]
 eip1186 = ["alloy-rpc-types-eth/serde", "dep:alloy-serde"]
 serde = [
@@ -101,6 +104,7 @@ serde = [
     "reth-codecs?/serde",
     "revm-database/serde",
     "revm-state/serde",
+    "alloy-eips/serde",
 ]
 reth-codec = ["dep:reth-codecs", "dep:bytes", "dep:arrayvec"]
 serde-bincode-compat = [
@@ -109,6 +113,7 @@ serde-bincode-compat = [
     "dep:serde_with",
     "alloy-genesis/serde-bincode-compat",
     "alloy-rpc-types-eth?/serde-bincode-compat",
+    "alloy-eips/serde-bincode-compat",
 ]
 test-utils = [
     "dep:plain_hasher",
@@ -129,5 +134,6 @@ arbitrary = [
     "nybbles/arbitrary",
     "reth-codecs/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
+    "alloy-eips/arbitrary",
 ]
 rayon = ["dep:rayon"]

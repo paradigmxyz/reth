@@ -91,6 +91,7 @@ const fn test_attributes_generator(timestamp: u64) -> PayloadAttributes {
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
         slot_number: None,
+        target_gas_limit: None,
     }
 }
 

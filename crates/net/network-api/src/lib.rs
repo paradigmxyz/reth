@@ -13,6 +13,8 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+/// Shared blob cell custody state.
+pub mod custody;
 pub mod downloaders;
 /// Network Error
 pub mod error;
@@ -27,6 +29,7 @@ pub use alloy_rpc_types_admin::EthProtocolInfo;
 pub use reth_network_p2p::{BlockClient, HeadersClient};
 pub use reth_network_types::{PeerKind, Reputation, ReputationChangeKind};
 
+pub use custody::CellCustody;
 pub use downloaders::BlockDownloaderProvider;
 pub use error::NetworkError;
 pub use events::{
@@ -86,6 +89,14 @@ pub trait NetworkInfo: Send + Sync {
     /// Returns the chain id
     fn chain_id(&self) -> u64;
 
+    /// Returns shared blob cell custody state for [EIP-8070] sparse blobpool sampling.
+    ///
+    /// This is updated from non-null `custodyColumns` values received through
+    /// `engine_forkchoiceUpdatedV4` and should be treated as a lightweight sampling hint.
+    ///
+    /// [EIP-8070]: https://eips.ethereum.org/EIPS/eip-8070
+    fn cell_custody(&self) -> &CellCustody;
+
     /// Returns `true` if the network is undergoing sync.
     fn is_syncing(&self) -> bool;
 
@@ -139,6 +150,13 @@ pub trait Peers: PeersInfo {
     fn add_trusted_peer_with_udp(&self, peer: PeerId, tcp_addr: SocketAddr, udp_addr: SocketAddr) {
         self.add_peer_kind(peer, Some(PeerKind::Trusted), tcp_addr, Some(udp_addr));
     }
+
+    /// Registers a trusted peer that may use a hostname instead of an IP address.
+    ///
+    /// Resolution is performed asynchronously by the periodic DNS resolver; the peer is
+    /// added to the peer set on first successful resolution and re-resolved periodically
+    /// so address changes are picked up automatically.
+    fn add_trusted_peer_node(&self, _peer: reth_network_peers::TrustedPeer) {}
 
     /// Adds a peer to the known peer set, with the given kind.
     ///
@@ -197,6 +215,12 @@ pub trait Peers: PeersInfo {
 
     /// Disconnect an existing connection to the given peer using the provided reason
     fn disconnect_peer_with_reason(&self, peer: PeerId, reason: DisconnectReason);
+
+    /// Bans the given peer and disconnects an active non-trusted session if one exists.
+    fn ban_peer(&self, peer: PeerId);
+
+    /// Unbans the given peer.
+    fn unban_peer(&self, peer: PeerId);
 
     /// Connect to the given peer. NOTE: if the maximum number of outbound sessions is reached,
     /// this won't do anything. See `reth_network::SessionManager::dial_outbound`.

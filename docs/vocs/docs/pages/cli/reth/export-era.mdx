@@ -100,6 +100,9 @@ Database:
       --db.balstore-cache-size <BALSTORE_CACHE_SIZE>
           Number of recent blocks to keep in the in-memory BAL store cache
 
+      --db.disable-metrics
+          Disable built-in database metrics
+
 Static Files:
       --static-files.blocks-per-file.headers <BLOCKS_PER_FILE_HEADERS>
           Number of blocks per file for the headers segment
@@ -128,6 +131,15 @@ Storage:
           [default: true]
           [possible values: true, false]
 
+      --file-type <FILE_TYPE>
+          The ERA file format to export: `era1` writes `.era1` files, `ere` writes `.ere` files.
+
+          Possible values:
+          - era1: Execution blocks written in the `.era1` format
+          - ere:  Execution blocks written in the `.ere` format
+
+          [default: era1]
+
       --first-block-number <first-block-number>
           Optional first block number to export from the db.
           It is by default 0.
@@ -140,9 +152,9 @@ Storage:
           The maximum number of blocks per file, it can help you to decrease the size of the files.
           Must be less than or equal to 8192.
 
-      --path <EXPORT_ERA1_PATH>
-          The directory path where to export era1 files.
-          The block data are read from the database.
+      --path <EXPORT_PATH>
+          The directory where the exported ERA files are written.
+          Defaults to `<data-dir>/<chain>/<format>-export/`, where `<format>` is `era1` or `ere`.
 
 Logging:
       --log.stdout.format <FORMAT>

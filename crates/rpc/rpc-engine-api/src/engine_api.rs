@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
 use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTypes};
-use reth_network_api::NetworkInfo;
+use reth_network_api::{CellCustody, NetworkInfo};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, MessageValidationKind,
@@ -72,6 +72,11 @@ impl<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSpec>
     pub fn chain_spec(&self) -> &Arc<ChainSpec> {
         &self.inner.chain_spec
     }
+
+    /// Returns the configured client version.
+    pub fn client_version(&self) -> &ClientVersionV1 {
+        &self.inner.client
+    }
 }
 
 impl<Provider, PayloadT, Pool, Validator, ChainSpec>
@@ -98,6 +103,7 @@ where
         accept_execution_requests_hash: bool,
         network: impl NetworkInfo + 'static,
     ) -> Self {
+        let cell_custody = network.cell_custody().clone();
         let is_syncing = Arc::new(move || network.is_syncing());
         let inner = Arc::new(EngineApiInner {
             provider,
@@ -111,6 +117,7 @@ where
             tx_pool,
             validator,
             accept_execution_requests_hash,
+            cell_custody,
             is_syncing,
         });
         Self { inner }
@@ -385,7 +392,11 @@ where
         &self,
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
+        custody_columns: Option<B128>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
+        if let Some(custody_columns) = custody_columns {
+            self.inner.cell_custody.set(custody_columns);
+        }
         self.validate_and_execute_forkchoice(EngineApiMessageVersion::V4, state, payload_attrs)
             .await
     }
@@ -395,9 +406,10 @@ where
         &self,
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
+        custody_columns: Option<B128>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         let start = Instant::now();
-        let res = Self::fork_choice_updated_v4(self, state, payload_attrs).await;
+        let res = Self::fork_choice_updated_v4(self, state, payload_attrs, custody_columns).await;
         self.inner.metrics.latency.fork_choice_updated_v4.record(start.elapsed());
         res
     }
@@ -1277,9 +1289,12 @@ where
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<EngineT::PayloadAttributes>,
+        custody_columns: Option<B128>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV4");
-        Ok(self.fork_choice_updated_v4_metered(fork_choice_state, payload_attributes).await?)
+        Ok(self
+            .fork_choice_updated_v4_metered(fork_choice_state, payload_attributes, custody_columns)
+            .await?)
     }
 
     /// Handler for `engine_getPayloadV1`
@@ -1554,6 +1569,8 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
     /// Engine validator.
     validator: Validator,
     accept_execution_requests_hash: bool,
+    /// Shared blob cell custody bitmap.
+    cell_custody: CellCustody,
     /// Returns `true` if the node is currently syncing.
     is_syncing: Arc<dyn Fn() -> bool + Send + Sync>,
 }
@@ -1562,7 +1579,7 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
 mod tests {
     use super::*;
     use alloy_eips::{eip7685::Requests, NumHash};
-    use alloy_primitives::{keccak256, Address, Bytes, Sealed, B256};
+    use alloy_primitives::{Address, Bytes, B256};
     use alloy_rpc_types_engine::{
         ClientCode, ClientVersionV1, ExecutionPayloadV2, PayloadAttributes, PayloadStatusEnum,
     };
@@ -1576,7 +1593,7 @@ mod tests {
     };
     use reth_node_ethereum::EthereumEngineValidator;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
-    use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore};
+    use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
     use reth_tasks::Runtime;
     use reth_transaction_pool::noop::NoopTransactionPool;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
@@ -1674,8 +1691,7 @@ mod tests {
         provider.add_block(block_without_bal_hash, block_without_bal);
 
         let raw_bal = Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]);
-        let sealed_bal = Sealed::new_unchecked(raw_bal.clone(), keccak256(&raw_bal));
-        bal_store.insert(NumHash::new(1, block_hash), sealed_bal).unwrap();
+        bal_store.insert(NumHash::new(1, block_hash), RawBal::new(raw_bal.clone())).unwrap();
 
         let missing_hash = B256::with_last_byte(3);
         let response = api
@@ -1730,8 +1746,7 @@ mod tests {
         provider.add_block(block_without_bal_hash, block_without_bal);
 
         let raw_bal = Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]);
-        let sealed_bal = Sealed::new_unchecked(raw_bal.clone(), keccak256(&raw_bal));
-        bal_store.insert(NumHash::new(1, block_hash), sealed_bal).unwrap();
+        bal_store.insert(NumHash::new(1, block_hash), RawBal::new(raw_bal.clone())).unwrap();
 
         let response = api.get_payload_bodies_by_range_v2(1, 3).await.unwrap();
 
@@ -1851,6 +1866,11 @@ mod tests {
             1
         }
 
+        fn cell_custody(&self) -> &CellCustody {
+            static CELL_CUSTODY: std::sync::OnceLock<CellCustody> = std::sync::OnceLock::new();
+            CELL_CUSTODY.get_or_init(CellCustody::default)
+        }
+
         fn is_syncing(&self) -> bool {
             self.syncing
         }
@@ -1923,6 +1943,152 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fcu_v4_updates_shared_cell_custody_before_forkchoice_result() {
+        let chain_spec: Arc<ChainSpec> =
+            Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+        let provider = Arc::new(MockEthProvider::default());
+        let payload_store = spawn_test_payload_service::<EthEngineTypes>();
+        let (to_engine, mut engine_rx) = unbounded_channel();
+        let network = NoopNetwork::default();
+        let cell_custody = network.cell_custody().clone();
+
+        let api = EngineApi::new(
+            provider,
+            chain_spec.clone(),
+            ConsensusEngineHandle::new(to_engine),
+            payload_store.into(),
+            NoopTransactionPool::default(),
+            Runtime::test(),
+            ClientVersionV1 {
+                code: ClientCode::RH,
+                name: "Reth".to_string(),
+                version: "v0.0.0-test".to_string(),
+                commit: "test".to_string(),
+            },
+            EngineCapabilities::default(),
+            EthereumEngineValidator::new(chain_spec),
+            false,
+            network,
+        );
+
+        let state = ForkchoiceState {
+            head_block_hash: B256::from([0x33; 32]),
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+        let custody_columns = B128::from(0b1010u128);
+
+        let api_task = tokio::spawn(async move {
+            api.fork_choice_updated_v4(state, None, Some(custody_columns)).await
+        });
+
+        let request = tokio::time::timeout(std::time::Duration::from_secs(1), engine_rx.recv())
+            .await
+            .expect("timed out waiting for forkchoiceUpdated request")
+            .expect("expected forkchoiceUpdated request");
+        let response_tx = match request {
+            BeaconEngineMessage::ForkchoiceUpdated { payload_attrs, tx, .. } => {
+                assert!(payload_attrs.is_none());
+                tx
+            }
+            other => panic!("unexpected engine message: {other:?}"),
+        };
+        assert_eq!(cell_custody.get(), custody_columns);
+
+        response_tx
+            .send(Ok(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
+                PayloadStatusEnum::Valid,
+            ))))
+            .expect("send valid response");
+
+        api_task
+            .await
+            .expect("api task should not panic")
+            .expect("forkchoiceUpdatedV4 should succeed");
+        assert_eq!(cell_custody.get(), custody_columns);
+    }
+
+    #[tokio::test]
+    async fn fcu_v4_updates_shared_cell_custody_when_payload_attrs_invalid() {
+        let chain_spec: Arc<ChainSpec> =
+            Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+        let provider = Arc::new(MockEthProvider::default());
+        let payload_store = spawn_test_payload_service::<EthEngineTypes>();
+        let (to_engine, mut engine_rx) = unbounded_channel();
+        let network = NoopNetwork::default();
+        let cell_custody = network.cell_custody().clone();
+
+        let api = EngineApi::new(
+            provider,
+            chain_spec.clone(),
+            ConsensusEngineHandle::new(to_engine),
+            payload_store.into(),
+            NoopTransactionPool::default(),
+            Runtime::test(),
+            ClientVersionV1 {
+                code: ClientCode::RH,
+                name: "Reth".to_string(),
+                version: "v0.0.0-test".to_string(),
+                commit: "test".to_string(),
+            },
+            EngineCapabilities::default(),
+            EthereumEngineValidator::new(chain_spec),
+            false,
+            network,
+        );
+
+        let state = ForkchoiceState {
+            head_block_hash: B256::from([0x44; 32]),
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+        let payload_attributes = PayloadAttributes {
+            timestamp: 1,
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: Address::ZERO,
+            withdrawals: Some(vec![]),
+            parent_beacon_block_root: None,
+            slot_number: None,
+            target_gas_limit: None,
+        };
+        let custody_columns = B128::from(0b1010u128);
+
+        let api_task = tokio::spawn(async move {
+            api.fork_choice_updated_v4(state, Some(payload_attributes), Some(custody_columns)).await
+        });
+
+        let request = tokio::time::timeout(std::time::Duration::from_secs(1), engine_rx.recv())
+            .await
+            .expect("timed out waiting for forkchoiceUpdated request")
+            .expect("expected forkchoiceUpdated request");
+        let response_tx = match request {
+            BeaconEngineMessage::ForkchoiceUpdated { payload_attrs, tx, .. } => {
+                assert!(
+                    payload_attrs.is_none(),
+                    "when attrs are invalid, API should first evaluate forkchoice without attrs"
+                );
+                tx
+            }
+            other => panic!("unexpected engine message: {other:?}"),
+        };
+        assert_eq!(cell_custody.get(), custody_columns);
+
+        response_tx
+            .send(Ok(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
+                PayloadStatusEnum::Valid,
+            ))))
+            .expect("send valid response");
+
+        let response = api_task.await.expect("api task should not panic");
+        assert_matches!(
+            response,
+            Err(EngineApiError::EngineObjectValidationError(
+                reth_payload_primitives::EngineObjectValidationError::PayloadAttributes(_)
+            ))
+        );
+    }
+
+    #[tokio::test]
     async fn fcu_v3_syncing_precedes_invalid_payload_attributes_validation() {
         let (mut handle, api) = setup_engine_api();
 
@@ -1939,6 +2105,7 @@ mod tests {
             // Invalid for V3/Cancun, but should be ignored if forkchoice is SYNCING.
             parent_beacon_block_root: None,
             slot_number: None,
+            target_gas_limit: None,
         };
 
         let api_task = tokio::spawn(async move {
@@ -1987,6 +2154,7 @@ mod tests {
             withdrawals: Some(vec![]),
             parent_beacon_block_root: None,
             slot_number: None,
+            target_gas_limit: None,
         };
 
         let api_task = tokio::spawn(async move {

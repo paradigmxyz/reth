@@ -7,18 +7,20 @@ use crate::{
     StageCheckpointReader, StateReader, StaticFileProviderFactory, TransactionVariant,
     TransactionsProvider,
 };
-use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
-use alloy_eips::{
-    eip2718::Encodable2718, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
-    HashOrNumber,
+use alloy_consensus::{
+    transaction::{TransactionMeta, TxHashRef},
+    BlockHeader,
 };
+use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
-use reth_primitives_traits::{Account, BlockBody, RecoveredBlock, SealedHeader, StorageEntry};
+use reth_primitives_traits::{
+    Account, BlockBody, RecoveredBlock, SealedHeader, SealedOrRecoveredBlock, StorageEntry,
+};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -399,7 +401,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             for tx_index in 0..block.body().transactions().len() {
                 match id {
                     HashOrNumber::Hash(tx_hash) => {
-                        if tx_hash == block.body().transactions()[tx_index].trie_hash() {
+                        if tx_hash == *block.body().transactions()[tx_index].tx_hash() {
                             return fetch_from_block_state(tx_index, in_memory_tx_num, block_state)
                         }
                     }
@@ -665,6 +667,39 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         Ok(None)
     }
 
+    fn find_sealed_or_recovered_block(
+        &self,
+        hash: B256,
+        source: BlockSource,
+    ) -> ProviderResult<Option<SealedOrRecoveredBlock<Self::Block>>> {
+        if matches!(source, BlockSource::Canonical | BlockSource::Any) &&
+            let Some(block) = self.get_in_memory_or_storage_by_block(
+                hash.into(),
+                |db_provider| {
+                    db_provider.find_sealed_or_recovered_block(hash, BlockSource::Canonical)
+                },
+                |block_state| {
+                    Ok(Some(SealedOrRecoveredBlock::recovered_arc(Arc::clone(
+                        &block_state.block_ref().recovered_block,
+                    ))))
+                },
+            )?
+        {
+            return Ok(Some(block))
+        }
+
+        if matches!(source, BlockSource::Pending | BlockSource::Any) &&
+            let Some(block_state) = self.canonical_in_memory_state.pending_state()
+        {
+            let recovered_block = Arc::clone(&block_state.block_ref().recovered_block);
+            if recovered_block.hash() == hash {
+                return Ok(Some(SealedOrRecoveredBlock::recovered_arc(recovered_block)))
+            }
+        }
+
+        Ok(None)
+    }
+
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         self.get_in_memory_or_storage_by_block(
             id,
@@ -914,7 +949,7 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ConsistentProvider<N> {
             );
 
             if let Some(tx_index) =
-                block.body().transactions_iter().position(|tx| tx.trie_hash() == hash)
+                block.body().transactions_iter().position(|tx| *tx.tx_hash() == hash)
             {
                 // safe to use tx_index for receipts due to 1:1 correspondence
                 return Ok(receipts.get(tx_index).cloned());
@@ -1587,6 +1622,9 @@ mod tests {
             consistent_provider.find_block_by_hash(first_in_mem_block.hash(), BlockSource::Any)?,
             None
         );
+        assert!(consistent_provider
+            .find_sealed_or_recovered_block(first_in_mem_block.hash(), BlockSource::Any)?
+            .is_none());
         assert_eq!(
             consistent_provider
                 .find_block_by_hash(first_in_mem_block.hash(), BlockSource::Canonical)?,
@@ -1619,28 +1657,53 @@ mod tests {
             consistent_provider.find_block_by_hash(first_in_mem_block.hash(), BlockSource::Any)?,
             Some(first_in_mem_block.clone().into_block())
         );
+        let block = consistent_provider
+            .find_sealed_or_recovered_block(first_in_mem_block.hash(), BlockSource::Any)?
+            .expect("in-memory block should be found");
+        assert_eq!(block.sealed_block(), first_in_mem_block);
+        assert!(block.recovered_block().is_some());
+
         assert_eq!(
             consistent_provider
                 .find_block_by_hash(first_in_mem_block.hash(), BlockSource::Canonical)?,
             Some(first_in_mem_block.clone().into_block())
         );
+        let block = consistent_provider
+            .find_sealed_or_recovered_block(first_in_mem_block.hash(), BlockSource::Canonical)?
+            .expect("canonical in-memory block should be found");
+        assert_eq!(block.sealed_block(), first_in_mem_block);
+        assert!(block.recovered_block().is_some());
 
         // Find the first block in database by hash
         assert_eq!(
             consistent_provider.find_block_by_hash(first_db_block.hash(), BlockSource::Any)?,
             Some(first_db_block.clone().into_block())
         );
+        let block = consistent_provider
+            .find_sealed_or_recovered_block(first_db_block.hash(), BlockSource::Any)?
+            .expect("database block should be found");
+        assert_eq!(block.sealed_block(), first_db_block);
+        assert!(block.recovered_block().is_none());
+
         assert_eq!(
             consistent_provider
                 .find_block_by_hash(first_db_block.hash(), BlockSource::Canonical)?,
             Some(first_db_block.clone().into_block())
         );
+        let block = consistent_provider
+            .find_sealed_or_recovered_block(first_db_block.hash(), BlockSource::Canonical)?
+            .expect("canonical database block should be found");
+        assert_eq!(block.sealed_block(), first_db_block);
+        assert!(block.recovered_block().is_none());
 
         // No pending block in database
         assert_eq!(
             consistent_provider.find_block_by_hash(first_db_block.hash(), BlockSource::Pending)?,
             None
         );
+        assert!(consistent_provider
+            .find_sealed_or_recovered_block(first_db_block.hash(), BlockSource::Pending)?
+            .is_none());
 
         // Insert the last block into the pending state
         provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
@@ -1657,6 +1720,11 @@ mod tests {
                 .find_block_by_hash(last_in_mem_block.hash(), BlockSource::Pending)?,
             Some(last_in_mem_block.clone_block())
         );
+        let block = consistent_provider
+            .find_sealed_or_recovered_block(last_in_mem_block.hash(), BlockSource::Pending)?
+            .expect("pending block should be found");
+        assert_eq!(block.sealed_block(), last_in_mem_block);
+        assert!(block.recovered_block().is_some());
 
         Ok(())
     }

@@ -7,7 +7,7 @@ use alloy_consensus::BlobTransactionValidationError;
 use alloy_eips::{eip7594::BlobTransactionSidecarVariant, BlockId, Typed2718};
 use alloy_primitives::{hex, B256};
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_primitives_traits::{AlloyBlockHeader, Recovered, WithEncoded};
+use reth_primitives_traits::{AlloyBlockHeader, WithEncoded};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
     helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction},
@@ -17,7 +17,7 @@ use reth_rpc_eth_types::{error::RpcPoolError, EthApiError};
 use reth_storage_api::BlockReaderIdExt;
 use reth_transaction_pool::{
     error::Eip4844PoolTransactionError, AddedTransactionOutcome, EthBlobTransactionSidecar,
-    EthPoolTransaction, PoolPooledTx, PoolTransaction, TransactionPool,
+    EthPoolTransaction, PoolTransaction, PoolTx,
 };
 
 impl<N, Rpc> EthTransactions for EthApi<N, Rpc>
@@ -36,14 +36,12 @@ where
         self.inner.send_raw_transaction_sync_timeout()
     }
 
-    async fn send_transaction(
+    async fn send_pool_transaction(
         &self,
         origin: reth_transaction_pool::TransactionOrigin,
-        tx: WithEncoded<Recovered<PoolPooledTx<Self::Pool>>>,
+        tx: WithEncoded<PoolTx<Self::Pool>>,
     ) -> Result<B256, Self::Error> {
-        let (tx, recovered) = tx.split();
-        let mut pool_transaction =
-            <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
+        let (tx, mut pool_transaction) = tx.split();
 
         // Optionally convert legacy blob sidecars to EIP-7594 format when Osaka is active
         // This is opt-in via --rpc.force-blob-sidecar-upcasting
@@ -147,7 +145,10 @@ mod tests {
         ChainSpecProvider,
     };
     use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
-    use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use reth_transaction_pool::{
+        test_utils::{testing_pool, TestPool},
+        TransactionOrigin, TransactionPool,
+    };
     use revm_primitives::Bytes;
 
     fn mock_eth_api(
@@ -212,6 +213,8 @@ mod tests {
 
         assert!(pool.get(&tx_1_result).is_some(), "tx1 not found in the pool");
         assert!(pool.get(&tx_2_result).is_some(), "tx2 not found in the pool");
+        assert_eq!(pool.get(&tx_1_result).unwrap().origin, TransactionOrigin::Local);
+        assert_eq!(pool.get(&tx_2_result).unwrap().origin, TransactionOrigin::Local);
     }
 
     #[tokio::test]

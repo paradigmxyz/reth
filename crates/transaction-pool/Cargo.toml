@@ -76,6 +76,8 @@ assert_matches.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 futures.workspace = true
+criterion.workspace = true
+reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 
 [features]
 serde = [
@@ -96,6 +98,7 @@ serde = [
     "reth-chain-state/serde",
     "reth-storage-api/serde",
     "revm/serde",
+    "reth-transaction-pool/serde",
 ]
 test-utils = [
     "rand",
@@ -110,6 +113,7 @@ test-utils = [
     "reth-evm/test-utils",
     "reth-evm-ethereum/test-utils",
     "reth-tasks/test-utils",
+    "reth-transaction-pool/test-utils",
 ]
 arbitrary = [
     "proptest",
@@ -128,4 +132,10 @@ arbitrary = [
     "revm-primitives/arbitrary",
     "revm/arbitrary",
     "imbl/arbitrary",
+    "reth-transaction-pool/arbitrary",
 ]
+
+[[bench]]
+name = "saturated_pool"
+harness = false
+required-features = ["test-utils"]

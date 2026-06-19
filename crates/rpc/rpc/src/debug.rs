@@ -1,4 +1,4 @@
-use alloy_consensus::{transaction::TxHashRef, BlockHeader};
+use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TxHashRef, BlockHeader};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
@@ -6,7 +6,9 @@ use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U64};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::BlockTransactionsKind;
 use alloy_rpc_types_debug::ExecutionWitness;
-use alloy_rpc_types_eth::{state::EvmOverrides, BlockError, Bundle, StateContext};
+use alloy_rpc_types_eth::{
+    state::EvmOverrides, Account, AccountInfo, BlockError, Bundle, Index, StateContext,
+};
 use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
@@ -17,7 +19,7 @@ use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::RethError;
-use reth_evm::{execute::Executor, ConfigureEvm, EvmEnvFor};
+use reth_evm::{block::BlockExecutor, execute::Executor, ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
 };
@@ -28,15 +30,18 @@ use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
     FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
-use reth_rpc_eth_types::EthApiError;
+use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
-    ReceiptProviderIdExt, StateProviderFactory, StateRootProvider, TransactionVariant,
+    ReceiptProviderIdExt, StateProviderFactory, StateRootProvider, StorageRootProvider,
+    TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
-use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostState};
-use revm::{database::states::bundle_state::BundleRetention, DatabaseCommit};
+use reth_trie_common::{
+    updates::TrieUpdates, ExecutionWitnessMode, HashedPostState, HashedStorage,
+};
+use revm::{database::states::bundle_state::BundleRetention, Database, DatabaseCommit};
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, sync::Arc};
@@ -553,6 +558,118 @@ where
             .await
     }
 
+    /// Returns account information, including the storage root, after replaying the block through
+    /// the transaction at the given index.
+    pub async fn debug_account_at(
+        &self,
+        block_id: BlockId,
+        tx_index: Index,
+        address: Address,
+    ) -> Result<Option<Account>, Eth::Error> {
+        self.replay_block_until(block_id, tx_index, move |db| Self::account(db, address))
+            .await
+            .map(Option::flatten)
+    }
+
+    /// Returns account information after replaying the block through the transaction at the given
+    /// index.
+    pub async fn debug_account_info_at(
+        &self,
+        block_id: BlockId,
+        tx_index: Index,
+        address: Address,
+    ) -> Result<Option<AccountInfo>, Eth::Error> {
+        self.replay_block_until(block_id, tx_index, move |db| Self::account_info(db, address)).await
+    }
+
+    /// Replays a block through the transaction at the given index and calls `f` with the resulting
+    /// state.
+    async fn replay_block_until<F, R>(
+        &self,
+        block_id: BlockId,
+        tx_index: Index,
+        f: F,
+    ) -> Result<Option<R>, Eth::Error>
+    where
+        F: FnOnce(&mut StateCacheDb) -> Result<R, Eth::Error> + Send + 'static,
+        R: Send + 'static,
+    {
+        let block = self
+            .eth_api()
+            .recovered_block(block_id)
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+        let tx_index = usize::from(tx_index);
+        let transaction_count = block.transaction_count();
+        if tx_index >= transaction_count {
+            return Err(EthApiError::InvalidParams(format!(
+                "tx_index {tx_index} out of bounds for block with {transaction_count} transactions"
+            ))
+            .into())
+        }
+
+        self.eth_api()
+            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                let mut executor = eth_api
+                    .evm_config()
+                    .executor_for_block(&mut db, block.sealed_block())
+                    .map_err(RethError::other)
+                    .map_err(Eth::Error::from_eth_err)?;
+                executor.apply_pre_execution_changes().map_err(Eth::Error::from_eth_err)?;
+
+                for tx in block.transactions_recovered().take(tx_index + 1) {
+                    executor.execute_transaction(tx).map_err(Eth::Error::from_eth_err)?;
+                }
+                drop(executor);
+
+                f(&mut db)
+            })
+            .await
+            .map(Some)
+    }
+
+    /// Retrieves the account's balance, nonce, code hash, and storage root from the given state.
+    fn account(db: &mut StateCacheDb, address: Address) -> Result<Option<Account>, Eth::Error> {
+        let account = db.basic(address).map_err(Eth::Error::from_eth_err)?;
+        let Some(account) = account else { return Ok(None) };
+
+        let balance = account.balance;
+        let nonce = account.nonce;
+        let code_hash = account.code_hash;
+        let hashed_storage = db
+            .cache
+            .accounts
+            .get(&address)
+            .and_then(|account| {
+                account.account.as_ref().map(|plain_account| {
+                    HashedStorage::from_plain_storage(account.status, plain_account.storage.iter())
+                })
+            })
+            .unwrap_or_default();
+        let storage_root =
+            db.database.storage_root(address, hashed_storage).map_err(Eth::Error::from_eth_err)?;
+
+        Ok(Some(Account { balance, nonce, code_hash, storage_root }))
+    }
+
+    /// Retrieves the account's balance, nonce, and code from the given state.
+    fn account_info<DB>(db: &mut DB, address: Address) -> Result<AccountInfo, Eth::Error>
+    where
+        DB: Database,
+        EthApiError: From<DB::Error>,
+    {
+        let account = db.basic(address).map_err(Eth::Error::from_eth_err)?.unwrap_or_default();
+        let code = if account.code_hash == KECCAK_EMPTY {
+            Default::default()
+        } else if let Some(code) = account.code {
+            code.original_bytes()
+        } else {
+            db.code_by_hash(account.code_hash).map_err(Eth::Error::from_eth_err)?.original_bytes()
+        };
+
+        Ok(AccountInfo { balance: account.balance, nonce: account.nonce, code })
+    }
+
     /// Returns the code associated with a given hash at the specified block ID. If no code is
     /// found, it returns None. If no block ID is provided, it defaults to the latest block.
     pub async fn debug_code_by_hash(
@@ -831,8 +948,26 @@ where
         Self::debug_execution_witness_by_block_hash(self, hash, mode).await.map_err(Into::into)
     }
 
-    async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {
-        Ok(())
+    /// Handler for `debug_accountAt`
+    async fn debug_account_at(
+        &self,
+        block_id: BlockId,
+        tx_index: Index,
+        address: Address,
+    ) -> RpcResult<Option<Account>> {
+        let _permit = self.acquire_trace_permit().await;
+        Self::debug_account_at(self, block_id, tx_index, address).await.map_err(Into::into)
+    }
+
+    /// Handler for `debug_accountInfoAt`
+    async fn debug_account_info_at(
+        &self,
+        block_id: BlockId,
+        tx_index: Index,
+        address: Address,
+    ) -> RpcResult<Option<AccountInfo>> {
+        let _permit = self.acquire_trace_permit().await;
+        Self::debug_account_info_at(self, block_id, tx_index, address).await.map_err(Into::into)
     }
 
     async fn debug_account_range(
@@ -844,10 +979,6 @@ where
         _nostorage: bool,
         _incompletes: bool,
     ) -> RpcResult<()> {
-        Ok(())
-    }
-
-    async fn debug_block_profile(&self, _file: String, _seconds: u64) -> RpcResult<()> {
         Ok(())
     }
 
@@ -869,10 +1000,6 @@ where
         block_id: Option<BlockId>,
     ) -> RpcResult<Option<Bytes>> {
         Self::debug_code_by_hash(self, hash, block_id).await.map_err(Into::into)
-    }
-
-    async fn debug_cpu_profile(&self, _file: String, _seconds: u64) -> RpcResult<()> {
-        Ok(())
     }
 
     async fn debug_db_ancient(&self, _kind: String, _number: u64) -> RpcResult<()> {
@@ -925,10 +1052,6 @@ where
         Ok(())
     }
 
-    async fn debug_freeze_client(&self, _node: String) -> RpcResult<()> {
-        Ok(())
-    }
-
     async fn debug_gc_stats(&self) -> RpcResult<()> {
         Ok(())
     }
@@ -957,10 +1080,6 @@ where
         Ok(())
     }
 
-    async fn debug_go_trace(&self, _file: String, _seconds: u64) -> RpcResult<()> {
-        Ok(())
-    }
-
     async fn debug_intermediate_roots(
         &self,
         block_hash: B256,
@@ -971,10 +1090,6 @@ where
     }
 
     async fn debug_mem_stats(&self) -> RpcResult<()> {
-        Ok(())
-    }
-
-    async fn debug_mutex_profile(&self, _file: String, _nsec: u64) -> RpcResult<()> {
         Ok(())
     }
 
@@ -990,10 +1105,6 @@ where
         Ok(Default::default())
     }
 
-    async fn debug_set_block_profile_rate(&self, _rate: u64) -> RpcResult<()> {
-        Ok(())
-    }
-
     async fn debug_set_gc_percent(&self, _v: i32) -> RpcResult<()> {
         Ok(())
     }
@@ -1002,15 +1113,7 @@ where
         Ok(())
     }
 
-    async fn debug_set_mutex_profile_fraction(&self, _rate: i32) -> RpcResult<()> {
-        Ok(())
-    }
-
     async fn debug_set_trie_flush_interval(&self, _interval: String) -> RpcResult<()> {
-        Ok(())
-    }
-
-    async fn debug_stacks(&self) -> RpcResult<()> {
         Ok(())
     }
 
@@ -1030,28 +1133,12 @@ where
         Ok(())
     }
 
-    async fn debug_start_cpu_profile(&self, _file: String) -> RpcResult<()> {
-        Ok(())
-    }
-
-    async fn debug_start_go_trace(&self, _file: String) -> RpcResult<()> {
-        Ok(())
-    }
-
     async fn debug_state_root_with_updates(
         &self,
         hashed_state: HashedPostState,
         block_id: Option<BlockId>,
     ) -> RpcResult<(B256, TrieUpdates)> {
         Self::debug_state_root_with_updates(self, hashed_state, block_id).await.map_err(Into::into)
-    }
-
-    async fn debug_stop_cpu_profile(&self) -> RpcResult<()> {
-        Ok(())
-    }
-
-    async fn debug_stop_go_trace(&self) -> RpcResult<()> {
-        Ok(())
     }
 
     async fn debug_storage_range_at(
@@ -1086,26 +1173,6 @@ where
 
         let opts = opts.map(|o| o.tracing_options).unwrap_or_default();
         self.trace_block(entry.block.clone(), evm_env, opts).await.map_err(Into::into)
-    }
-
-    async fn debug_verbosity(&self, level: usize) -> RpcResult<()> {
-        reth_tracing::set_log_verbosity(level).map_err(internal_rpc_err)
-    }
-
-    async fn debug_vmodule(&self, pattern: String) -> RpcResult<()> {
-        reth_tracing::set_log_vmodule(&pattern).map_err(internal_rpc_err)
-    }
-
-    async fn debug_write_block_profile(&self, _file: String) -> RpcResult<()> {
-        Ok(())
-    }
-
-    async fn debug_write_mem_profile(&self, _file: String) -> RpcResult<()> {
-        Ok(())
-    }
-
-    async fn debug_write_mutex_profile(&self, _file: String) -> RpcResult<()> {
-        Ok(())
     }
 }
 

@@ -164,6 +164,7 @@ jemalloc-symbols = [
     "jemalloc-prof",
     "reth-ethereum-cli?/jemalloc-symbols",
 ]
+jit = ["reth-node-ethereum?/jit"]
 js-tracer = [
     "rpc",
     "reth-rpc/js-tracer",

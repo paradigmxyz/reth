@@ -211,11 +211,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         self.queued_outgoing.shrink_to(MAX_QUEUED_OUTGOING_RESPONSES);
     }
 
-    /// Returns how many responses we've currently queued up.
-    fn queued_response_count(&self) -> usize {
-        self.queued_outgoing.messages.iter().filter(|m| m.is_response()).count()
-    }
-
     /// Handle a message read from the connection.
     ///
     /// Returns an error if the message is considered to be in violation of the protocol.
@@ -292,6 +287,9 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
             }
             EthMessage::NewPooledTransactionHashes68(msg) => {
+                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
+            }
+            EthMessage::NewPooledTransactionHashes72(msg) => {
                 self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
             }
             EthMessage::GetBlockHeaders(req) => {
@@ -786,9 +784,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 }
 
                 // we also need to check if we have multiple responses queued up
-                if this.queued_outgoing.messages.len() > MAX_QUEUED_OUTGOING_RESPONSES &&
-                    this.queued_response_count() > MAX_QUEUED_OUTGOING_RESPONSES
-                {
+                if this.queued_outgoing.response_count() > MAX_QUEUED_OUTGOING_RESPONSES {
                     // if we've queued up more responses than allowed, we don't poll for new
                     // messages and break the receive loop early
                     //
@@ -989,6 +985,7 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
                 EthMessage::NewBlockHashes(h) => h.len(),
                 EthMessage::NewPooledTransactionHashes66(h) => h.len(),
                 EthMessage::NewPooledTransactionHashes68(h) => h.hashes.len(),
+                EthMessage::NewPooledTransactionHashes72(h) => h.hashes.len(),
                 _ => 0,
             },
             Self::Broadcast(msg) => match msg {
@@ -1017,6 +1014,15 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
             (
                 EthMessage::NewPooledTransactionHashes68(existing),
                 NewPooledTransactionHashes::Eth68(inc),
+            ) => {
+                existing.hashes.extend(inc.hashes);
+                existing.sizes.extend(inc.sizes);
+                existing.types.extend(inc.types);
+                None
+            }
+            (
+                EthMessage::NewPooledTransactionHashes72(existing),
+                NewPooledTransactionHashes::Eth72(inc),
             ) => {
                 existing.hashes.extend(inc.hashes);
                 existing.sizes.extend(inc.sizes);
@@ -1059,6 +1065,9 @@ fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> 
 /// [`SessionManager`](super::SessionManager) can apply size-based backpressure.
 pub(crate) struct QueuedOutgoingMessages<N: NetworkPrimitives> {
     messages: VecDeque<OutgoingMessage<N>>,
+    /// Number of queued response messages, tracked separately so the session can apply
+    /// backpressure on incoming requests without scanning the whole queue.
+    queued_responses: usize,
     count: Gauge,
     /// Shared counter of buffered broadcast items for size-based backpressure.
     broadcast_items: BroadcastItemCounter,
@@ -1066,10 +1075,16 @@ pub(crate) struct QueuedOutgoingMessages<N: NetworkPrimitives> {
 
 impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
     pub(crate) const fn new(metric: Gauge, broadcast_items: BroadcastItemCounter) -> Self {
-        Self { messages: VecDeque::new(), count: metric, broadcast_items }
+        Self { messages: VecDeque::new(), queued_responses: 0, count: metric, broadcast_items }
+    }
+
+    /// Returns the number of queued response messages.
+    pub(crate) const fn response_count(&self) -> usize {
+        self.queued_responses
     }
 
     pub(crate) fn push_back(&mut self, message: OutgoingMessage<N>) {
+        self.queued_responses += message.is_response() as usize;
         self.messages.push_back(message);
         self.count.increment(1);
     }
@@ -1077,6 +1092,7 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
     pub(crate) fn pop_front(&mut self) -> Option<OutgoingMessage<N>> {
         self.messages.pop_front().inspect(|msg| {
             self.count.decrement(1);
+            self.queued_responses -= msg.is_response() as usize;
             let items = msg.broadcast_item_count();
             if items > 0 {
                 self.broadcast_items.sub(items);
@@ -1085,7 +1101,7 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
     }
 
     /// Pushes a pooled transaction hash announcement, merging into the last queued message if
-    /// it is the same variant (eth66 or eth68).
+    /// it is the same variant (eth66, eth68, or eth72).
     pub(crate) fn push_pooled_hashes(&mut self, msg: NewPooledTransactionHashes) {
         let msg = if let Some(last) = self.messages.back_mut() {
             match last.try_merge_hashes(msg) {
@@ -1126,7 +1142,9 @@ mod tests {
         GetBlockBodies, HelloMessageWithProtocols, P2PStream, StatusBuilder, UnauthedEthStream,
         UnauthedP2PStream, UnifiedStatus,
     };
-    use reth_eth_wire_types::{message::MAX_MESSAGE_SIZE, EthMessageID, RawCapabilityMessage};
+    use reth_eth_wire_types::{
+        message::MAX_MESSAGE_SIZE, EthMessageID, NewPooledTransactionHashes72, RawCapabilityMessage,
+    };
     use reth_ethereum_forks::EthereumHardfork;
     use reth_network_peers::pk2id;
     use reth_network_types::session::config::PROTOCOL_BREACH_REQUEST_TIMEOUT;
@@ -1464,6 +1482,22 @@ mod tests {
             ActiveSessionMessage::ProtocolBreach { .. } => {}
             ev => unreachable!("{ev:?}"),
         }
+    }
+
+    #[test]
+    fn eth72_pooled_hashes_count_broadcast_items() {
+        let hashes =
+            vec![alloy_primitives::B256::repeat_byte(1), alloy_primitives::B256::repeat_byte(2)];
+        let msg: OutgoingMessage<EthNetworkPrimitives> =
+            EthMessage::NewPooledTransactionHashes72(NewPooledTransactionHashes72 {
+                types: vec![0; hashes.len()],
+                sizes: vec![1; hashes.len()],
+                hashes,
+                cell_mask: None,
+            })
+            .into();
+
+        assert_eq!(2, msg.broadcast_item_count());
     }
 
     #[test]
