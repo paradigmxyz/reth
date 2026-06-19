@@ -814,9 +814,13 @@ impl SparseTrieRetainedPaths {
         self.account_paths.push(Nibbles::unpack(hashed_address));
     }
 
-    /// Retains the storage slot path for the given hashed address and hashed slot.
-    pub fn retain_storage_slot(&mut self, hashed_address: B256, hashed_slot: B256) {
-        self.storage_slots.entry(hashed_address).or_default().push(Nibbles::unpack(hashed_slot));
+    /// Retains the storage slot paths for the given hashed address.
+    pub fn retain_storage_slots(
+        &mut self,
+        hashed_address: B256,
+        slots: impl IntoIterator<Item = Nibbles>,
+    ) {
+        self.storage_slots.entry(hashed_address).or_default().extend(slots);
     }
 
     /// Extends the retained paths with every account and storage slot touched by the hashed state.
@@ -826,10 +830,10 @@ impl SparseTrieRetainedPaths {
 
         for (address, storage) in hashed_state.account_storages() {
             self.retain_account(*address);
-            self.storage_slots
-                .entry(*address)
-                .or_default()
-                .extend(storage.storage_slots_ref().iter().map(|(slot, _)| Nibbles::unpack(*slot)));
+            self.retain_storage_slots(
+                *address,
+                storage.storage_slots_ref().iter().map(|(slot, _)| Nibbles::unpack(*slot)),
+            );
         }
     }
 
@@ -840,7 +844,7 @@ impl SparseTrieRetainedPaths {
     ) {
         self.account_paths.extend(hot_accounts.keys().map(|key| Nibbles::unpack(*key)));
         for key in hot_slots.keys() {
-            self.retain_storage_slot(key.address, key.slot);
+            self.retain_storage_slots(key.address, [Nibbles::unpack(key.slot)]);
         }
     }
 
@@ -1212,7 +1216,7 @@ mod tests {
 
         let mut retained_paths = SparseTrieRetainedPaths::default();
         retained_paths.retain_account(account);
-        retained_paths.retain_storage_slot(account, slot);
+        retained_paths.retain_storage_slots(account, [Nibbles::unpack(slot)]);
         sparse.prune(0, 0, retained_paths);
 
         assert!(matches!(
