@@ -87,7 +87,9 @@ use reth_provider::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
+use reth_trie::{
+    trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState, KeccakKeyHasher,
+};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::{Address, KECCAK_EMPTY};
@@ -516,7 +518,12 @@ where
         );
         let overlay_factory =
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
-        let changeset_provider = self.spawn_changeset_provider_task(overlay_factory.clone());
+        let skip_state_root = self.config.skip_state_root();
+        let changeset_provider = if skip_state_root {
+            None
+        } else {
+            Some(self.spawn_changeset_provider_task(overlay_factory.clone()))
+        };
 
         let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
 
@@ -621,18 +628,33 @@ where
         // root computation. Using Arc allows sharing with both the caching task and the deferred
         // trie task without cloning the expensive BundleState.
         let output = Arc::new(output);
+        let skip_state_root_trie_data = if skip_state_root {
+            debug!(
+                target: "engine::tree::payload_validator",
+                "Deferring hashed trie data computation"
+            );
+            Some(self.spawn_skip_state_root_trie_task(input.hash(), output.clone()))
+        } else {
+            None
+        };
 
         // Terminate caching task early since execution is complete and caching is no longer
         // needed. This frees up resources while state root computation continues.
         let valid_block_tx = handle.terminate_caching(Some(output.clone()));
 
-        // Spawn hashed post state computation in background so it runs concurrently with
-        // block conversion and receipt root computation. This is a pure CPU-bound task
-        // (keccak256 hashing of all changed addresses and storage slots).
-        let hashed_state_output = output.clone();
-        let hashed_state_provider = self.provider.clone();
-        let mut hashed_state_rx = handle.take_hashed_state_rx();
-        let mut hashed_state: LazyHashedPostState =
+        let mut hashed_state: LazyHashedPostState = if skip_state_root {
+            debug!(
+                target: "engine::tree::payload_validator",
+                "Skipping hashed post-state computation"
+            );
+            LazyHandle::ready(Arc::new(HashedPostState::default()))
+        } else {
+            // Spawn hashed post state computation in background so it runs concurrently with
+            // block conversion and receipt root computation. This is a pure CPU-bound task
+            // (keccak256 hashing of all changed addresses and storage slots).
+            let hashed_state_output = output.clone();
+            let hashed_state_provider = self.provider.clone();
+            let mut hashed_state_rx = handle.take_hashed_state_rx();
             self.payload_processor.executor().spawn_blocking_named("hash-post-state", move || {
                 let _span = debug_span!(
                     target: "engine::tree::payload_validator",
@@ -645,7 +667,8 @@ where
                     hashed_state_provider.hashed_post_state(&hashed_state_output.state)
                 };
                 Arc::new(state)
-            });
+            })
+        };
 
         let block = validated_block.try_into_inner().expect("sole handle")?;
         let block = block.with_senders(senders);
@@ -683,15 +706,19 @@ where
 
         // Run the hashed state validation hook but don't propagate the error yet. If the state root
         // task fails, we might need to re-run this check against a fallback state.
-        let mut hashed_state_validate_result = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").in_scope(|| {
-            // Wait for the background keccak256 hashing task to complete. This blocks until
-            // all changed addresses and storage slots have been hashed.
-            let hashed_state_ref =
-                debug_span!(target: "engine::tree::payload_validator", "wait_hashed_post_state")
-                    .in_scope(|| hashed_state.get());
+        let mut hashed_state_validate_result = if skip_state_root {
+            Ok(())
+        } else {
+            debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").in_scope(|| {
+                // Wait for the background keccak256 hashing task to complete. This blocks until
+                // all changed addresses and storage slots have been hashed.
+                let hashed_state_ref =
+                    debug_span!(target: "engine::tree::payload_validator", "wait_hashed_post_state")
+                        .in_scope(|| hashed_state.get());
 
-            self.validator.validate_block_post_execution_with_hashed_state(hashed_state_ref, &block)
-        });
+                self.validator.validate_block_post_execution_with_hashed_state(hashed_state_ref, &block)
+            })
+        };
 
         let root_time = Instant::now();
         let mut maybe_state_root = None;
@@ -699,7 +726,7 @@ where
         #[cfg(feature = "trie-debug")]
         let mut trie_debug_recorders = Vec::new();
 
-        if self.config.skip_state_root() {
+        if skip_state_root {
             info!(
                 target: "engine::tree::payload_validator",
                 state_root = ?block.header().state_root(),
@@ -914,7 +941,7 @@ where
         );
         if let Some(outcome) = lthash_outcome.as_ref() {
             let elapsed = lthash_start.elapsed();
-            if self.config.skip_state_root() {
+            if skip_state_root {
                 info!(
                     target: "engine::tree::payload_validator",
                     root = %outcome.root,
@@ -950,21 +977,31 @@ where
             let _ = valid_block_tx.send(());
         }
 
-        let changeset_provider = ensure_ok_post_block!(
-            changeset_provider
-                .try_into_inner()
-                .ok()
-                .expect("changeset provider handle is not cloned"),
-            block
-        );
+        let executed_block = if skip_state_root {
+            ExecutedBlock::with_deferred_trie_data(
+                Arc::new(block),
+                output,
+                skip_state_root_trie_data
+                    .expect("skip-state-root trie data is started when state root is skipped"),
+            )
+        } else {
+            let changeset_provider = ensure_ok_post_block!(
+                changeset_provider
+                    .expect("changeset provider is disabled only when state root is skipped")
+                    .try_into_inner()
+                    .ok()
+                    .expect("changeset provider handle is not cloned"),
+                block
+            );
 
-        let executed_block = self.spawn_deferred_trie_task(
-            Arc::new(block),
-            output,
-            hashed_state,
-            trie_output,
-            changeset_provider,
-        );
+            self.spawn_deferred_trie_task(
+                Arc::new(block),
+                output,
+                hashed_state,
+                trie_output,
+                changeset_provider,
+            )
+        };
         let executed_block = if let Some(outcome) = lthash_outcome {
             executed_block.with_lthash_accumulator(outcome.accumulator)
         } else {
@@ -1981,6 +2018,60 @@ where
             .spawn_blocking_named(DEFERRED_TRIE_WORKER_NAME, compute_trie_input_task);
 
         ExecutedBlock::with_deferred_trie_data(block, execution_outcome, deferred_trie_data)
+    }
+
+    /// Spawns a background task that computes the hashed post-state needed by persistence when
+    /// trie state-root computation is disabled.
+    fn spawn_skip_state_root_trie_task(
+        &self,
+        block_hash: B256,
+        execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
+    ) -> DeferredTrieData {
+        let (deferred_trie_data, publisher) = DeferredTrieData::pending_uncomputed();
+        let block_validation_metrics = self.metrics.block_validation.clone();
+        let output = execution_outcome;
+
+        let compute_trie_input_task = move || {
+            let _span = debug_span!(
+                target: "engine::tree::payload_validator",
+                "compute_skip_state_root_trie_data",
+                %block_hash
+            )
+            .entered();
+
+            let result = panic::catch_unwind(AssertUnwindSafe(|| {
+                let compute_start = Instant::now();
+                let hashed_state = Arc::new(HashedPostState::from_bundle_state::<KeccakKeyHasher>(
+                    output.state.state(),
+                ));
+                let computed =
+                    DeferredTrieData::sort(hashed_state, Arc::new(TrieUpdates::default()));
+                let computed = publisher.publish(computed);
+
+                block_validation_metrics
+                    .deferred_trie_compute_duration
+                    .record(compute_start.elapsed().as_secs_f64());
+                block_validation_metrics
+                    .hashed_post_state_size
+                    .record(computed.hashed_state.total_len() as f64);
+                block_validation_metrics
+                    .trie_updates_sorted_size
+                    .record(computed.trie_updates.total_len() as f64);
+            }));
+
+            if result.is_err() {
+                error!(
+                    target: "engine::tree::payload_validator",
+                    "Skip-state-root trie data task panicked"
+                );
+            }
+        };
+
+        self.payload_processor
+            .executor()
+            .spawn_blocking_named(DEFERRED_TRIE_WORKER_NAME, compute_trie_input_task);
+
+        deferred_trie_data
     }
 
     fn calculate_timing_stats(

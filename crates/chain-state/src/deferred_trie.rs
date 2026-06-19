@@ -30,6 +30,14 @@ pub struct DeferredTrieDataProducer {
     inputs: PendingInputs,
 }
 
+/// Publisher for deferred trie data whose inputs are computed by the task itself.
+#[derive(Debug)]
+#[must_use = "DeferredTrieDataPublisher must publish computed trie data to wake waiters"]
+pub struct DeferredTrieDataPublisher {
+    /// Shared result initialized exactly once by this publisher.
+    value: Arc<OnceLock<ComputedTrieData>>,
+}
+
 impl fmt::Debug for DeferredTrieDataProducer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DeferredTrieDataProducer")
@@ -44,6 +52,14 @@ impl DeferredTrieDataProducer {
         let Self { value, inputs } = self;
         let computed = DeferredTrieData::sort(inputs.hashed_state, inputs.trie_updates);
         let _ = value.set(computed.clone());
+        computed
+    }
+}
+
+impl DeferredTrieDataPublisher {
+    /// Publishes computed trie data to all waiters and returns the same value for local use.
+    pub fn publish(self, computed: ComputedTrieData) -> ComputedTrieData {
+        let _ = self.value.set(computed.clone());
         computed
     }
 }
@@ -104,6 +120,12 @@ impl DeferredTrieData {
                 inputs: PendingInputs { hashed_state, trie_updates },
             },
         )
+    }
+
+    /// Create a pending handle whose producer computes its own inputs before publishing.
+    pub fn pending_uncomputed() -> (Self, DeferredTrieDataPublisher) {
+        let value = Arc::new(OnceLock::new());
+        (Self { value: Arc::clone(&value) }, DeferredTrieDataPublisher { value })
     }
 
     /// Create a handle that is already populated with the given [`ComputedTrieData`].
