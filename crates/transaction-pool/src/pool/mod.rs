@@ -170,7 +170,6 @@ where
 impl<V, T, S> PoolInner<V, T, S>
 where
     V: TransactionValidator,
-    <V as TransactionValidator>::Transaction: EthPoolTransaction,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
     S: BlobStore,
 {
@@ -581,7 +580,10 @@ where
         pool: &mut RwLockWriteGuard<'_, TxPool<T>>,
         origin: TransactionOrigin,
         tx: TransactionValidationOutcome<T::Transaction>,
-    ) -> (PoolResult<AddedTransactionOutcome>, Option<AddedTransactionMeta<T::Transaction>>) {
+    ) -> (PoolResult<AddedTransactionOutcome>, Option<AddedTransactionMeta<T::Transaction>>)
+    where
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    {
         match tx {
             TransactionValidationOutcome::Valid {
                 balance,
@@ -646,7 +648,10 @@ where
         &self,
         origin: TransactionOrigin,
         tx: TransactionValidationOutcome<T::Transaction>,
-    ) -> PoolResult<TransactionEvents> {
+    ) -> PoolResult<TransactionEvents>
+    where
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    {
         let listener = {
             let mut listener = self.event_listener.write();
             let events = listener.subscribe(tx.tx_hash());
@@ -666,7 +671,10 @@ where
         &self,
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = TransactionValidationOutcome<T::Transaction>>,
-    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
+    ) -> Vec<PoolResult<AddedTransactionOutcome>>
+    where
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    {
         self.add_transactions_with_origins(transactions.into_iter().map(|tx| (origin, tx)))
     }
 
@@ -677,7 +685,10 @@ where
         transactions: impl IntoIterator<
             Item = (TransactionOrigin, TransactionValidationOutcome<T::Transaction>),
         >,
-    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
+    ) -> Vec<PoolResult<AddedTransactionOutcome>>
+    where
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    {
         // Collect results and metadata while holding the pool write lock
         let (mut results, added_metas, discarded) = {
             let mut pool = self.pool.write();
