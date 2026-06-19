@@ -172,41 +172,55 @@ impl DatabaseProviderMetrics {
 
     /// Records all `save_blocks` timings.
     pub(crate) fn record_save_blocks(&self, timings: &SaveBlocksTimings) {
-        self.save_blocks_total.record(timings.total);
-        self.save_blocks_mdbx.record(timings.mdbx);
-        self.save_blocks_sf.record(timings.sf);
-        self.save_blocks_rocksdb.record(timings.rocksdb);
-        self.save_blocks_insert_block.record(timings.insert_block);
-        self.save_blocks_write_state.record(timings.write_state);
-        self.save_blocks_write_hashed_state.record(timings.write_hashed_state);
-        self.save_blocks_write_trie_updates.record(timings.write_trie_updates);
-        self.save_blocks_update_history_indices.record(timings.update_history_indices);
-        self.save_blocks_update_pipeline_stages.record(timings.update_pipeline_stages);
-        self.save_blocks_batch_size.record(timings.batch_size as f64);
+        let total = timings.total.as_secs_f64();
+        let mdbx = timings.mdbx.as_secs_f64();
+        let sf = timings.sf.as_secs_f64();
+        let rocksdb = timings.rocksdb.as_secs_f64();
+        let insert_block = timings.insert_block.as_secs_f64();
+        let write_state = timings.write_state.as_secs_f64();
+        let write_hashed_state = timings.write_hashed_state.as_secs_f64();
+        let write_trie_updates = timings.write_trie_updates.as_secs_f64();
+        let update_history_indices = timings.update_history_indices.as_secs_f64();
+        let update_pipeline_stages = timings.update_pipeline_stages.as_secs_f64();
+        let batch_size = timings.batch_size as f64;
 
-        self.save_blocks_total_last.set(timings.total.as_secs_f64());
-        self.save_blocks_mdbx_last.set(timings.mdbx.as_secs_f64());
-        self.save_blocks_sf_last.set(timings.sf.as_secs_f64());
-        self.save_blocks_rocksdb_last.set(timings.rocksdb.as_secs_f64());
-        self.save_blocks_insert_block_last.set(timings.insert_block.as_secs_f64());
-        self.save_blocks_write_state_last.set(timings.write_state.as_secs_f64());
-        self.save_blocks_write_hashed_state_last.set(timings.write_hashed_state.as_secs_f64());
-        self.save_blocks_write_trie_updates_last.set(timings.write_trie_updates.as_secs_f64());
-        self.save_blocks_update_history_indices_last
-            .set(timings.update_history_indices.as_secs_f64());
-        self.save_blocks_update_pipeline_stages_last
-            .set(timings.update_pipeline_stages.as_secs_f64());
-        self.save_blocks_batch_size_last.set(timings.batch_size as f64);
+        self.save_blocks_total.record(total);
+        self.save_blocks_mdbx.record(mdbx);
+        self.save_blocks_sf.record(sf);
+        self.save_blocks_rocksdb.record(rocksdb);
+        self.save_blocks_insert_block.record(insert_block);
+        self.save_blocks_write_state.record(write_state);
+        self.save_blocks_write_hashed_state.record(write_hashed_state);
+        self.save_blocks_write_trie_updates.record(write_trie_updates);
+        self.save_blocks_update_history_indices.record(update_history_indices);
+        self.save_blocks_update_pipeline_stages.record(update_pipeline_stages);
+        self.save_blocks_batch_size.record(batch_size);
+
+        self.save_blocks_total_last.set(total);
+        self.save_blocks_mdbx_last.set(mdbx);
+        self.save_blocks_sf_last.set(sf);
+        self.save_blocks_rocksdb_last.set(rocksdb);
+        self.save_blocks_insert_block_last.set(insert_block);
+        self.save_blocks_write_state_last.set(write_state);
+        self.save_blocks_write_hashed_state_last.set(write_hashed_state);
+        self.save_blocks_write_trie_updates_last.set(write_trie_updates);
+        self.save_blocks_update_history_indices_last.set(update_history_indices);
+        self.save_blocks_update_pipeline_stages_last.set(update_pipeline_stages);
+        self.save_blocks_batch_size_last.set(batch_size);
     }
 
     /// Records all commit timings.
     pub(crate) fn record_commit(&self, timings: &CommitTimings) {
-        self.save_blocks_commit_mdbx.record(timings.mdbx);
-        self.save_blocks_commit_sf.record(timings.sf);
-        self.save_blocks_commit_rocksdb.record(timings.rocksdb);
+        let mdbx = timings.mdbx.as_secs_f64();
+        let sf = timings.sf.as_secs_f64();
+        let rocksdb = timings.rocksdb.as_secs_f64();
 
-        self.save_blocks_commit_mdbx_last.set(timings.mdbx.as_secs_f64());
-        self.save_blocks_commit_sf_last.set(timings.sf.as_secs_f64());
-        self.save_blocks_commit_rocksdb_last.set(timings.rocksdb.as_secs_f64());
+        self.save_blocks_commit_mdbx.record(mdbx);
+        self.save_blocks_commit_sf.record(sf);
+        self.save_blocks_commit_rocksdb.record(rocksdb);
+
+        self.save_blocks_commit_mdbx_last.set(mdbx);
+        self.save_blocks_commit_sf_last.set(sf);
+        self.save_blocks_commit_rocksdb_last.set(rocksdb);
     }
 }
