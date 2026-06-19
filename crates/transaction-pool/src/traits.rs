@@ -51,7 +51,7 @@
 //! - Conversion from consensus to pooled always fails
 
 use crate::{
-    blobstore::{BlobStore, BlobStoreError},
+    blobstore::{BlobCellAvailability, BlobStore, BlobStoreError},
     error::{InvalidPoolTransactionError, PoolError, PoolResult, RawPoolTransactionError},
     pool::{
         state::SubPool, BestTransactionFilter, NewTransactionEvent, TransactionEvents,
@@ -1452,6 +1452,14 @@ pub trait EthPoolTransaction: PoolTransaction {
     /// Extracts the blob sidecar from the transaction.
     fn take_blob(&mut self) -> EthBlobTransactionSidecar;
 
+    /// Returns the blob cell availability currently cached for this transaction.
+    fn blob_cell_availability(&self) -> Option<BlobCellAvailability> {
+        None
+    }
+
+    /// Updates the blob cell availability cached for this transaction.
+    fn set_blob_cell_availability(&mut self, _availability: Option<BlobCellAvailability>) {}
+
     /// A specialization for the EIP-4844 transaction type.
     /// Tries to reattach the blob sidecar to the transaction.
     ///
@@ -1486,6 +1494,7 @@ pub trait EthPoolTransaction: PoolTransaction {
 /// - `cost`: Pre-calculated max cost (gas * price + value + blob costs)
 /// - `encoded_length`: Cached RLP encoding length for size limits
 /// - `blob_sidecar`: Blob data state (None/Missing/Present)
+/// - `blob_cell_availability`: Cached blob cell availability for eth/72 announcements
 ///
 /// This avoids recalculating these values repeatedly during pool operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1505,6 +1514,9 @@ pub struct EthPooledTransaction<T = TransactionSigned> {
 
     /// The blob side car for this transaction
     pub blob_sidecar: EthBlobTransactionSidecar,
+
+    /// Cached blob cell availability for this transaction.
+    pub blob_cell_availability: Option<BlobCellAvailability>,
 }
 
 impl<T: SignedTransaction> EthPooledTransaction<T> {
@@ -1533,7 +1545,7 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
             blob_sidecar = EthBlobTransactionSidecar::Missing;
         }
 
-        Self { transaction, cost, encoded_length, blob_sidecar }
+        Self { transaction, cost, encoded_length, blob_sidecar, blob_cell_availability: None }
     }
 
     /// Return the reference to the underlying transaction.
@@ -1704,6 +1716,14 @@ impl EthPoolTransaction for EthPooledTransaction {
         } else {
             EthBlobTransactionSidecar::None
         }
+    }
+
+    fn blob_cell_availability(&self) -> Option<BlobCellAvailability> {
+        self.blob_cell_availability
+    }
+
+    fn set_blob_cell_availability(&mut self, availability: Option<BlobCellAvailability>) {
+        self.blob_cell_availability = availability;
     }
 
     fn try_into_pooled_eip4844(
@@ -1904,6 +1924,7 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blobstore::FULL_BLOB_CELL_AVAILABILITY;
     use alloy_consensus::{
         EthereumTxEnvelope, SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702,
         TxEnvelope, TxLegacy,
@@ -1967,6 +1988,7 @@ mod tests {
         assert_eq!(pooled_tx.transaction, transaction);
         assert_eq!(pooled_tx.encoded_length, 200);
         assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
+        assert_eq!(pooled_tx.blob_cell_availability(), None);
         assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
     }
 
@@ -1989,6 +2011,7 @@ mod tests {
         assert_eq!(pooled_tx.transaction, transaction);
         assert_eq!(pooled_tx.encoded_length, 200);
         assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
+        assert_eq!(pooled_tx.blob_cell_availability(), None);
         assert_eq!(pooled_tx.cost, expected_cost);
     }
 
@@ -2011,6 +2034,7 @@ mod tests {
         assert_eq!(pooled_tx.transaction, transaction);
         assert_eq!(pooled_tx.encoded_length, 200);
         assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
+        assert_eq!(pooled_tx.blob_cell_availability(), None);
         assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
     }
 
@@ -2035,9 +2059,35 @@ mod tests {
         assert_eq!(pooled_tx.transaction, transaction);
         assert_eq!(pooled_tx.encoded_length, 300);
         assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::Missing);
+        assert_eq!(pooled_tx.blob_cell_availability(), None);
         let expected_cost =
             U256::from(100) + U256::from(10 * 1000) + U256::from(5 * DATA_GAS_PER_BLOB);
         assert_eq!(pooled_tx.cost, expected_cost);
+    }
+
+    #[test]
+    fn test_eth_pooled_transaction_blob_cell_availability_cache() {
+        let tx = EthereumTxEnvelope::Eip4844(
+            TxEip4844 {
+                max_fee_per_gas: 10,
+                gas_limit: 1000,
+                value: U256::from(100),
+                max_fee_per_blob_gas: 5,
+                blob_versioned_hashes: vec![B256::default()],
+                ..Default::default()
+            }
+            .into_signed(Signature::test_signature()),
+        );
+        let transaction = Recovered::new_unchecked(tx, Default::default());
+        let mut pooled_tx = EthPooledTransaction::new(transaction, 300);
+
+        assert_eq!(pooled_tx.blob_cell_availability(), None);
+
+        pooled_tx.set_blob_cell_availability(Some(FULL_BLOB_CELL_AVAILABILITY));
+        assert_eq!(pooled_tx.blob_cell_availability(), Some(FULL_BLOB_CELL_AVAILABILITY));
+
+        pooled_tx.set_blob_cell_availability(None);
+        assert_eq!(pooled_tx.blob_cell_availability(), None);
     }
 
     #[test]
@@ -2059,6 +2109,7 @@ mod tests {
         assert_eq!(pooled_tx.transaction, transaction);
         assert_eq!(pooled_tx.encoded_length, 200);
         assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
+        assert_eq!(pooled_tx.blob_cell_availability(), None);
         assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
     }
 

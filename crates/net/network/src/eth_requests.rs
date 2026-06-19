@@ -549,7 +549,9 @@ mod tests {
     use alloy_primitives::{TxHash, B128, B256};
     use reth_network_api::test_utils::PeersHandle;
     use reth_storage_api::noop::NoopProvider;
-    use reth_transaction_pool::blobstore::{BlobStoreCleanupStat, BlobStoreError};
+    use reth_transaction_pool::blobstore::{
+        BlobCellAvailability, BlobStoreCleanupStat, BlobStoreError, FULL_BLOB_CELL_AVAILABILITY,
+    };
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -566,15 +568,15 @@ mod tests {
             &self,
             _tx: B256,
             _data: BlobTransactionSidecarVariant,
-        ) -> Result<(), BlobStoreError> {
-            Ok(())
+        ) -> Result<BlobCellAvailability, BlobStoreError> {
+            Ok(FULL_BLOB_CELL_AVAILABILITY)
         }
 
         fn insert_all(
             &self,
-            _txs: Vec<(B256, BlobTransactionSidecarVariant)>,
-        ) -> Result<(), BlobStoreError> {
-            Ok(())
+            txs: Vec<(B256, BlobTransactionSidecarVariant)>,
+        ) -> Result<Vec<(B256, BlobCellAvailability)>, BlobStoreError> {
+            Ok(txs.into_iter().map(|(tx, _)| (tx, FULL_BLOB_CELL_AVAILABILITY)).collect())
         }
 
         fn delete(&self, _tx: B256) -> Result<(), BlobStoreError> {

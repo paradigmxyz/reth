@@ -1,6 +1,9 @@
 //! A simple diskstore for blobs
 
-use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize};
+use crate::blobstore::{
+    BlobCellAvailability, BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize,
+    FULL_BLOB_CELL_AVAILABILITY,
+};
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
@@ -204,18 +207,26 @@ impl DiskFileBlobStore {
 }
 
 impl BlobStore for DiskFileBlobStore {
-    fn insert(&self, tx: B256, data: BlobTransactionSidecarVariant) -> Result<(), BlobStoreError> {
-        self.inner.insert_one(tx, data)
+    fn insert(
+        &self,
+        tx: B256,
+        data: BlobTransactionSidecarVariant,
+    ) -> Result<BlobCellAvailability, BlobStoreError> {
+        self.inner.insert_one(tx, data)?;
+        Ok(FULL_BLOB_CELL_AVAILABILITY)
     }
 
     fn insert_all(
         &self,
         txs: Vec<(B256, BlobTransactionSidecarVariant)>,
-    ) -> Result<(), BlobStoreError> {
+    ) -> Result<Vec<(B256, BlobCellAvailability)>, BlobStoreError> {
         if txs.is_empty() {
-            return Ok(())
+            return Ok(Vec::new())
         }
+        let availability =
+            txs.iter().map(|(tx, _)| (*tx, FULL_BLOB_CELL_AVAILABILITY)).collect();
         self.inner.insert_many(txs)
+            .map(|()| availability)
     }
 
     fn delete(&self, tx: B256) -> Result<(), BlobStoreError> {

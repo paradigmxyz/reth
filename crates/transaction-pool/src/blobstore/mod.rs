@@ -24,6 +24,12 @@ mod mem;
 mod noop;
 mod tracker;
 
+/// Blob cell availability stored for a transaction.
+pub type BlobCellAvailability = B128;
+
+/// Full availability for all blob cells in a stored full sidecar.
+pub const FULL_BLOB_CELL_AVAILABILITY: BlobCellAvailability = B128::new([0xff; 16]);
+
 /// A blob store that can be used to store blob data of EIP4844 transactions.
 ///
 /// This type is responsible for keeping track of blob data until it is no longer needed (after
@@ -32,13 +38,17 @@ mod tracker;
 /// Note: this is Clone because it is expected to be wrapped in an Arc.
 pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     /// Inserts the blob sidecar into the store
-    fn insert(&self, tx: B256, data: BlobTransactionSidecarVariant) -> Result<(), BlobStoreError>;
+    fn insert(
+        &self,
+        tx: B256,
+        data: BlobTransactionSidecarVariant,
+    ) -> Result<BlobCellAvailability, BlobStoreError>;
 
     /// Inserts multiple blob sidecars into the store
     fn insert_all(
         &self,
         txs: Vec<(B256, BlobTransactionSidecarVariant)>,
-    ) -> Result<(), BlobStoreError>;
+    ) -> Result<Vec<(B256, BlobCellAvailability)>, BlobStoreError>;
 
     /// Deletes the blob sidecar from the store
     fn delete(&self, tx: B256) -> Result<(), BlobStoreError>;
