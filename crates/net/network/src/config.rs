@@ -66,9 +66,9 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     pub discovery_v5_config: Option<reth_discv5::Config>,
     /// Address to listen for incoming connections
     pub listener_addr: SocketAddr,
-    /// A pre-bound TCP listener used by [`NetworkManager::new`] in place of binding
-    /// `listener_addr`. Keeping the socket open avoids a TOCTOU race.
-    /// Set via [`NetworkConfigBuilder::with_tcp_listener`], which also sets `listener_addr`.
+    /// A pre-bound TCP listener for [`NetworkManager::new`] to use directly instead of
+    /// binding [`Self::listener_addr`]. Set via [`NetworkConfigBuilder::with_tcp_listener`].
+    /// When present, the manager skips its internal bind and uses this socket as-is.
     pub tcp_listener: Option<TcpListener>,
     /// How to instantiate peer manager.
     pub peers_config: PeersConfig,
@@ -437,8 +437,11 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
 
     /// Provides a pre-bound TCP listener for the RLPx connection server.
     ///
-    /// Keeps the port held open between configuration and [`NetworkManager`] startup, avoiding
-    /// the TOCTOU race that occurs when briefly binding a port to discover it then releasing it.
+    /// Use this when you need to know the bound port before constructing the [`NetworkManager`]
+    /// — for example, after binding to port `0` to receive an OS-assigned port. Passing the
+    /// already-bound listener here keeps the port reserved until the manager takes ownership,
+    /// with no risk of another process claiming it between releasing and re-binding.
+    ///
     /// The listener's local address is automatically stored as [`Self::listener_addr`].
     ///
     /// The listener must be in non-blocking mode (`set_nonblocking(true)`) before passing it here.
