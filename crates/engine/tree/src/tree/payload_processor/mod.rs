@@ -726,15 +726,13 @@ where
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
             let deferred = if let Some(result) = task_result {
                 let start = Instant::now();
-                let (mut trie, mut deferred) = task.into_trie_for_reuse(&result.trie_updates);
+                let (mut trie, deferred) = task.into_trie_for_reuse(&result.trie_updates);
                 if let Some(retained_paths) = pending_sparse_trie_prune {
                     trie.prune(max_hot_slots, max_hot_accounts, retained_paths);
                     trie.shrink_to(
                         SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
                         SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                     );
-                    let mut prune_deferred = trie.take_deferred_drops();
-                    deferred.proof_nodes_bufs.append(&mut prune_deferred.proof_nodes_bufs);
                 }
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
