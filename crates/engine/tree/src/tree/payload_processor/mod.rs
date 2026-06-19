@@ -641,8 +641,8 @@ where
                         target: "engine::tree::payload_processor",
                         "Creating new sparse trie - no preserved trie available"
                     );
-                    let default_trie =
-                        RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+                    let default_trie: RevealableSparseTrie<ArenaParallelSparseTrie> =
+                        RevealableSparseTrie::blind();
                     SparseStateTrie::default()
                         .with_accounts_trie(default_trie.clone())
                         .with_default_storage_trie(default_trie)
