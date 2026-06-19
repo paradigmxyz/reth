@@ -2,7 +2,7 @@ use crate::proof_task::StorageProofResultMessage;
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rlp::Encodable;
 use core::cell::RefCell;
-use crossbeam_channel::Receiver as CrossbeamReceiver;
+use crossbeam_channel::{Receiver as CrossbeamReceiver, TryRecvError};
 use reth_execution_errors::trie::StateProofError;
 use reth_primitives_traits::{dashmap::DashMap, Account};
 use reth_storage_errors::db::DatabaseError;
@@ -44,6 +44,27 @@ impl ValueEncoderStats {
         self.from_cache_count += other.from_cache_count;
         self.sync_count += other.sync_count;
         self.dispatched_missing_root_count += other.dispatched_missing_root_count;
+    }
+}
+
+fn recv_storage_proof_result(
+    hashed_address: B256,
+    rx: &CrossbeamReceiver<StorageProofResultMessage>,
+) -> Result<(StorageProofResultMessage, Duration), StateProofError> {
+    match rx.try_recv() {
+        Ok(msg) => Ok((msg, Duration::ZERO)),
+        Err(TryRecvError::Empty) => {
+            let wait_start = Instant::now();
+            let msg = rx.recv().map_err(|_| {
+                StateProofError::Database(DatabaseError::Other(format!(
+                    "Storage proof channel closed for {hashed_address:?}",
+                )))
+            })?;
+            Ok((msg, wait_start.elapsed()))
+        }
+        Err(TryRecvError::Disconnected) => Err(StateProofError::Database(DatabaseError::Other(
+            format!("Storage proof channel closed for {hashed_address:?}"),
+        ))),
     }
 }
 
@@ -99,15 +120,10 @@ impl<TC, HC> Drop for AsyncAccountDeferredValueEncoder<TC, HC> {
             (|| -> Result<(), StateProofError> {
                 let rx = proof_result_rx?;
 
-                let wait_start = Instant::now();
-                let msg = rx.recv().map_err(|_| {
-                    StateProofError::Database(DatabaseError::Other(format!(
-                        "Storage proof channel closed for {hashed_address:?}",
-                    )))
-                })?;
+                let (msg, wait_time) = recv_storage_proof_result(*hashed_address, &rx)?;
                 let result = msg.result?;
 
-                stats.borrow_mut().storage_wait_time += wait_start.elapsed();
+                stats.borrow_mut().storage_wait_time += wait_time;
 
                 storage_proof_results.borrow_mut().insert(*hashed_address, result.proof);
                 Ok(())
@@ -144,16 +160,10 @@ where
                 let proof_result_rx = proof_result_rx
                     .take()
                     .expect("encode called on already-consumed Dispatched encoder");
-                let wait_start = Instant::now();
-                let result = proof_result_rx?
-                    .recv()
-                    .map_err(|_| {
-                        StateProofError::Database(DatabaseError::Other(format!(
-                            "Storage proof channel closed for {hashed_address:?}",
-                        )))
-                    })?
-                    .result?;
-                stats.borrow_mut().storage_wait_time += wait_start.elapsed();
+                let rx = proof_result_rx?;
+                let (msg, wait_time) = recv_storage_proof_result(hashed_address, &rx)?;
+                let result = msg.result?;
+                stats.borrow_mut().storage_wait_time += wait_time;
 
                 storage_proof_results.borrow_mut().insert(hashed_address, result.proof);
 
@@ -271,16 +281,9 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
         // Any remaining dispatched proofs need to have their results collected.
         // These are proofs that were pre-dispatched but not consumed during proof calculation.
         for (hashed_address, rx) in &self.dispatched {
-            let wait_start = Instant::now();
-            let result = rx
-                .recv()
-                .map_err(|_| {
-                    StateProofError::Database(DatabaseError::Other(format!(
-                        "Storage proof channel closed for {hashed_address:?}",
-                    )))
-                })?
-                .result?;
-            stats.storage_wait_time += wait_start.elapsed();
+            let (msg, wait_time) = recv_storage_proof_result(*hashed_address, rx)?;
+            let result = msg.result?;
+            stats.storage_wait_time += wait_time;
 
             storage_proof_results.insert(*hashed_address, result.proof);
         }
