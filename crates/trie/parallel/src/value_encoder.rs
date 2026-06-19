@@ -1,8 +1,11 @@
-use crate::proof_task::StorageProofResultMessage;
-use alloy_primitives::{map::B256Map, B256};
+use crate::proof_task::{StorageProofInput, StorageProofResultMessage, StorageWorkerJob};
+use alloy_primitives::{
+    map::{B256Map, B256Set},
+    B256,
+};
 use alloy_rlp::Encodable;
 use core::cell::RefCell;
-use crossbeam_channel::Receiver as CrossbeamReceiver;
+use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_execution_errors::trie::StateProofError;
 use reth_primitives_traits::{dashmap::DashMap, Account};
 use reth_storage_errors::db::DatabaseError;
@@ -60,6 +63,8 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
             Option<Result<CrossbeamReceiver<StorageProofResultMessage>, DatabaseError>>,
         /// Shared storage proof results.
         storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNodeV2>>>>,
+        /// Whether the proof nodes from this result need to be returned to the caller.
+        collect_proof: bool,
         /// Shared stats for tracking wait time and counts.
         stats: Rc<RefCell<ValueEncoderStats>>,
         /// Shared storage proof calculator for synchronous fallback when dispatched proof has no
@@ -89,6 +94,7 @@ impl<TC, HC> Drop for AsyncAccountDeferredValueEncoder<TC, HC> {
             hashed_address,
             proof_result_rx,
             storage_proof_results,
+            collect_proof,
             stats,
             ..
         } = self
@@ -109,7 +115,9 @@ impl<TC, HC> Drop for AsyncAccountDeferredValueEncoder<TC, HC> {
 
                 stats.borrow_mut().storage_wait_time += wait_start.elapsed();
 
-                storage_proof_results.borrow_mut().insert(*hashed_address, result.proof);
+                if *collect_proof {
+                    storage_proof_results.borrow_mut().insert(*hashed_address, result.proof);
+                }
                 Ok(())
             })()
         } else {
@@ -134,6 +142,7 @@ where
                 account,
                 proof_result_rx,
                 storage_proof_results,
+                collect_proof,
                 stats,
                 storage_calculator,
                 cached_storage_roots,
@@ -155,7 +164,9 @@ where
                     .result?;
                 stats.borrow_mut().storage_wait_time += wait_start.elapsed();
 
-                storage_proof_results.borrow_mut().insert(hashed_address, result.proof);
+                if *collect_proof {
+                    storage_proof_results.borrow_mut().insert(hashed_address, result.proof);
+                }
 
                 let root = match result.root {
                     Some(root) => root,
@@ -213,6 +224,11 @@ where
 pub(crate) struct AsyncAccountValueEncoder<TC, HC> {
     /// Storage proof jobs which were dispatched ahead of time.
     dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
+    /// Storage proof worker queue used for root-only jobs discovered during account traversal.
+    storage_work_tx: CrossbeamSender<StorageWorkerJob>,
+    /// Account proof targets for this multiproof. These are intentionally left on the
+    /// pre-dispatch/synchronous paths unless they already have a storage target.
+    account_targets: B256Set,
     /// Storage roots which have already been computed. This can be used only if a storage proof
     /// wasn't dispatched for an account, otherwise we must consume the proof result.
     cached_storage_roots: Arc<DashMap<B256, B256>>,
@@ -238,14 +254,34 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
         dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
         cached_storage_roots: Arc<DashMap<B256, B256>>,
         storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
+        storage_work_tx: CrossbeamSender<StorageWorkerJob>,
+        account_targets: B256Set,
     ) -> Self {
         Self {
             dispatched,
+            storage_work_tx,
+            account_targets,
             cached_storage_roots,
             storage_proof_results: Default::default(),
             storage_calculator,
             stats: Default::default(),
         }
+    }
+
+    /// Dispatches a root-only storage proof for an account discovered during account trie
+    /// traversal.
+    fn dispatch_root_only_storage_proof(
+        &self,
+        hashed_address: B256,
+    ) -> Result<CrossbeamReceiver<StorageProofResultMessage>, DatabaseError> {
+        let (result_tx, result_rx) = crossbeam_channel::unbounded();
+        let input = StorageProofInput::new(hashed_address, Vec::new());
+
+        self.storage_work_tx
+            .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
+            .map_err(|_| DatabaseError::Other("storage workers unavailable".to_string()))?;
+
+        Ok(result_rx)
     }
 
     /// Consume [`Self`] and return all collected storage proofs along with accumulated stats.
@@ -311,6 +347,7 @@ where
                 account,
                 proof_result_rx: Some(Ok(rx)),
                 storage_proof_results: self.storage_proof_results.clone(),
+                collect_proof: true,
                 stats: self.stats.clone(),
                 storage_calculator: self.storage_calculator.clone(),
                 cached_storage_roots: self.cached_storage_roots.clone(),
@@ -324,6 +361,23 @@ where
         if let Some(root) = self.cached_storage_roots.get(&hashed_address) {
             self.stats.borrow_mut().from_cache_count += 1;
             return AsyncAccountDeferredValueEncoder::FromCache { account, root: *root }
+        }
+
+        // Account trie traversal also encounters non-target leaves whose storage roots still need
+        // encoding. Dispatch those root-only computations to storage workers so account proof
+        // traversal can continue instead of doing the storage lookup synchronously.
+        if !self.account_targets.contains(&hashed_address) {
+            self.stats.borrow_mut().dispatched_count += 1;
+            return AsyncAccountDeferredValueEncoder::Dispatched {
+                hashed_address,
+                account,
+                proof_result_rx: Some(self.dispatch_root_only_storage_proof(hashed_address)),
+                storage_proof_results: self.storage_proof_results.clone(),
+                collect_proof: false,
+                stats: self.stats.clone(),
+                storage_calculator: self.storage_calculator.clone(),
+                cached_storage_roots: self.cached_storage_roots.clone(),
+            }
         }
 
         // Compute storage root synchronously using the shared calculator

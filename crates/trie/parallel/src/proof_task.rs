@@ -979,6 +979,9 @@ where
 
         trace!(target: "trie::proof_task", "Processing V2 account multiproof");
 
+        let account_target_addresses: B256Set =
+            account_targets.iter().map(|target| target.key()).collect();
+
         let storage_proof_receivers =
             dispatch_v2_storage_proofs(&self.storage_work_tx, &account_targets, storage_targets)?;
 
@@ -986,6 +989,8 @@ where
             storage_proof_receivers,
             self.cached_storage_roots.clone(),
             v2_storage_calculator,
+            self.storage_work_tx.clone(),
+            account_target_addresses,
         );
 
         let account_proofs =
