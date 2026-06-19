@@ -332,16 +332,39 @@ impl ProofWorkerHandle {
         self.storage_work_tx
             .send(StorageWorkerJob::StorageProof { input, proof_result_sender })
             .map_err(|err| {
-                let StorageWorkerJob::StorageProof { proof_result_sender, .. } = err.0;
-                let _ = proof_result_sender.send(StorageProofResultMessage {
-                    hashed_address,
-                    result: Err(
-                        DatabaseError::Other("storage workers unavailable".to_string()).into()
-                    ),
-                });
+                match err.0 {
+                    StorageWorkerJob::StorageProof { proof_result_sender, .. } => {
+                        let _ = proof_result_sender.send(StorageProofResultMessage {
+                            hashed_address,
+                            result: Err(DatabaseError::Other(
+                                "storage workers unavailable".to_string(),
+                            )
+                            .into()),
+                        });
+                    }
+                    StorageWorkerJob::StorageMultiproof { .. } => {
+                        unreachable!("sent storage proof job returned a storage multiproof job")
+                    }
+                }
 
                 ProviderError::other(std::io::Error::other("storage workers unavailable"))
             })
+    }
+
+    /// Dispatch a storage proof computation whose result can be revealed directly by the sparse
+    /// trie task as a storage-only multiproof.
+    pub fn dispatch_storage_multiproof(
+        &self,
+        input: StorageProofInput,
+        proof_result_sender: ProofResultSender,
+    ) -> Result<(), ProviderError> {
+        self.storage_work_tx
+            .send(StorageWorkerJob::StorageMultiproof {
+                input,
+                proof_result_sender,
+                start_time: Instant::now(),
+            })
+            .map_err(|_| ProviderError::other(std::io::Error::other("storage workers unavailable")))
     }
 
     /// Dispatch an account multiproof computation
@@ -546,6 +569,16 @@ pub(crate) enum StorageWorkerJob {
         /// Context for sending the proof result.
         proof_result_sender: CrossbeamSender<StorageProofResultMessage>,
     },
+    /// Storage proof computation request that returns a storage-only multiproof directly to the
+    /// sparse trie task.
+    StorageMultiproof {
+        /// Storage proof input parameters
+        input: StorageProofInput,
+        /// Context for sending the proof result.
+        proof_result_sender: ProofResultSender,
+        /// Time at which the proof was queued.
+        start_time: Instant,
+    },
 }
 
 /// Worker for storage trie operations.
@@ -676,6 +709,16 @@ where
                         &mut storage_proofs_processed,
                     );
                 }
+                StorageWorkerJob::StorageMultiproof { input, proof_result_sender, start_time } => {
+                    self.process_storage_multiproof(
+                        &proof_tx,
+                        &mut v2_calculator,
+                        input,
+                        proof_result_sender,
+                        start_time,
+                        &mut storage_proofs_processed,
+                    );
+                }
             }
 
             // Mark worker as available again.
@@ -757,6 +800,78 @@ where
             total_processed = storage_proofs_processed,
             ?root,
             "Storage proof completed"
+        );
+    }
+
+    /// Processes a storage proof request and sends the result as a storage-only multiproof.
+    fn process_storage_multiproof<Provider, TC, HC>(
+        &self,
+        proof_tx: &ProofTaskTx<Provider>,
+        v2_calculator: &mut proof_v2::StorageProofCalculator<TC, HC>,
+        input: StorageProofInput,
+        proof_result_sender: ProofResultSender,
+        start_time: Instant,
+        storage_proofs_processed: &mut u64,
+    ) where
+        Provider: TrieCursorFactory + HashedCursorFactory,
+        TC: TrieStorageCursor,
+        HC: HashedStorageCursor<Value = U256>,
+    {
+        let hashed_address = input.hashed_address;
+        let proof_start = Instant::now();
+
+        trace!(
+            target: "trie::proof_task",
+            worker_id = self.worker_id,
+            hashed_address = ?hashed_address,
+            targets_len = input.targets.len(),
+            "Processing V2 storage-only multiproof"
+        );
+
+        let result = proof_tx.compute_v2_storage_proof(input, v2_calculator).map(|result| {
+            let root = result.root();
+            let proof = DecodedMultiProofV2 {
+                account_proofs: Vec::new(),
+                storage_proofs: B256Map::from_iter([(hashed_address, result.proof)]),
+            };
+            (proof, root)
+        });
+
+        let proof_elapsed = proof_start.elapsed();
+        *storage_proofs_processed += 1;
+
+        let root = result.as_ref().ok().and_then(|(_, root)| *root);
+        let result = result.map(|(proof, _)| proof).map_err(Into::into);
+
+        if proof_result_sender
+            .send(ProofResultMessage {
+                result,
+                elapsed: start_time.elapsed(),
+                state: HashedPostState::default(),
+            })
+            .is_err()
+        {
+            trace!(
+                target: "trie::proof_task",
+                worker_id = self.worker_id,
+                hashed_address = ?hashed_address,
+                storage_proofs_processed,
+                "Proof result receiver dropped, discarding storage-only result"
+            );
+        }
+
+        if let Some(root) = root {
+            self.cached_storage_roots.insert(hashed_address, root);
+        }
+
+        trace!(
+            target: "trie::proof_task",
+            worker_id = self.worker_id,
+            hashed_address = ?hashed_address,
+            proof_time_us = proof_elapsed.as_micros(),
+            total_processed = storage_proofs_processed,
+            ?root,
+            "Storage-only multiproof completed"
         );
     }
 }
