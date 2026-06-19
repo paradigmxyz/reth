@@ -23,6 +23,8 @@ reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
 
 # ethereum
+alloy-eip7928 = { workspace = true, features = ["serde"] }
+alloy-eips = { workspace = true, features = ["serde"] }
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 
@@ -79,5 +81,7 @@ arbitrary = [
     "reth-prune-types/arbitrary",
     "reth-stages-types/arbitrary",
     "alloy-consensus/arbitrary",
+    "alloy-eips/arbitrary",
     "reth-ethereum-primitives/arbitrary",
+    "alloy-eip7928/arbitrary",
 ]

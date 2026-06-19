@@ -13,6 +13,9 @@ use std::{
     sync::Arc,
 };
 
+mod rocksdb;
+pub use rocksdb::{RocksDBBalStore, RocksDBBalStoreConfig};
+
 /// Basic in-memory BAL store keyed by block hash.
 #[derive(Debug, Clone)]
 pub struct InMemoryBalStore {
@@ -161,7 +164,7 @@ impl BalStore for InMemoryBalStore {
         Ok(())
     }
 
-    fn flush(&self) -> ProviderResult<()> {
+    fn flush(&self, _to_block: BlockNumber) -> ProviderResult<()> {
         Ok(())
     }
 
@@ -175,6 +178,23 @@ impl BalStore for InMemoryBalStore {
 
         for hash in block_hashes {
             result.push(inner.entries.get(hash).map(|entry| entry.bal.clone()));
+        }
+
+        Ok(result)
+    }
+
+    fn get_by_block_num_hashes(&self, blocks: &[NumHash]) -> ProviderResult<Vec<Option<Bytes>>> {
+        let inner = self.inner.read();
+        let mut result = Vec::with_capacity(blocks.len());
+
+        for block in blocks {
+            result.push(
+                inner
+                    .entries
+                    .get(&block.hash)
+                    .filter(|entry| entry.block_number == block.number)
+                    .map(|entry| entry.bal.clone()),
+            );
         }
 
         Ok(result)
@@ -202,6 +222,48 @@ impl BalStore for InMemoryBalStore {
         Ok(())
     }
 
+    fn append_by_block_num_hashes_with_limit(
+        &self,
+        blocks: &[NumHash],
+        limit: GetBlockAccessListLimit,
+        out: &mut Vec<Option<Bytes>>,
+    ) -> ProviderResult<()> {
+        let inner = self.inner.read();
+        let mut size = 0;
+
+        for block in blocks {
+            let bal = inner
+                .entries
+                .get(&block.hash)
+                .filter(|entry| entry.block_number == block.number)
+                .map(|entry| entry.bal.clone());
+            size += bal.as_ref().map_or(1, |bytes| bytes.len());
+            out.push(bal);
+
+            if limit.exceeds(size) {
+                break
+            }
+        }
+
+        Ok(())
+    }
+
+    fn delete_range_by_number(&self, to_block: BlockNumber) -> ProviderResult<usize> {
+        let mut inner = self.inner.write();
+        let mut deleted = 0;
+        while let Some((&block_number, _)) = inner.hashes_by_number.first_key_value() {
+            if block_number > to_block {
+                break
+            }
+
+            let Some((_, hashes)) = inner.hashes_by_number.pop_first() else { break };
+            for hash in hashes {
+                deleted += usize::from(inner.entries.remove(&hash).is_some());
+            }
+        }
+        Ok(deleted)
+    }
+
     fn bal_stream(&self) -> BalNotificationStream {
         self.notifications.new_listener()
     }
@@ -223,6 +285,20 @@ mod tests {
         store.insert(NumHash::new(1, hash), RawBal::from(bal.clone())).unwrap();
 
         assert_eq!(store.get_by_hashes(&[hash, missing]).unwrap(), vec![Some(bal), None]);
+    }
+
+    #[test]
+    fn lookup_by_block_num_hash_requires_matching_number() {
+        let store = InMemoryBalStore::default();
+        let hash = B256::random();
+        let bal = Bytes::from_static(b"bal");
+
+        store.insert(NumHash::new(1, hash), RawBal::from(bal.clone())).unwrap();
+
+        assert_eq!(
+            store.get_by_block_num_hashes(&[NumHash::new(1, hash), NumHash::new(2, hash)]).unwrap(),
+            vec![Some(bal), None]
+        );
     }
 
     #[test]
@@ -250,7 +326,7 @@ mod tests {
     fn flush_is_noop() {
         let store = InMemoryBalStore::default();
 
-        store.flush().unwrap();
+        store.flush(1).unwrap();
     }
 
     #[test]
