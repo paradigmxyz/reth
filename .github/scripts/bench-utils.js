@@ -10,6 +10,21 @@ const SIG_EMOJI = { good: '✅', bad: '❌', neutral: '⚪' };
 function fmtMs(v) { return v.toFixed(2) + 'ms'; }
 function fmtMgas(v) { return v.toFixed(2); }
 function fmtS(v) { return v.toFixed(2) + 's'; }
+function fmtBytes(v) {
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  let value = Number(v || 0);
+  for (const unit of units) {
+    if (Math.abs(value) < 1024 || unit === units[units.length - 1]) {
+      return unit === 'B' ? value.toFixed(0) + unit : value.toFixed(2) + unit;
+    }
+    value /= 1024;
+  }
+  return value.toFixed(2) + 'TiB';
+}
+
+function pctChange(base, feature) {
+  return base > 0 ? (feature - base) / base * 100 : 0;
+}
 
 function fmtChange(ch) {
   if (!ch || (!ch.pct && !ch.ci_pct)) return '';
@@ -116,6 +131,12 @@ function metricRows(summary) {
     { label: 'P99',        baseline: fmtMs(b.p99_ms),        feature: fmtMs(f.p99_ms),        change: fmtChange(c.p99) },
     { label: 'Mgas/s',     baseline: fmtMgas(b.mean_mgas_s), feature: fmtMgas(f.mean_mgas_s), change: fmtChange(c.mgas_s) },
     { label: 'Wall Clock', baseline: fmtS(b.wall_clock_s),   feature: fmtS(f.wall_clock_s),   change: fmtChange(c.wall_clock) },
+    ...(b.max_rss_bytes != null && f.max_rss_bytes != null ? [{
+      label: 'Max RSS',
+      baseline: fmtBytes(b.max_rss_bytes),
+      feature: fmtBytes(f.max_rss_bytes),
+      change: `${pctChange(b.max_rss_bytes, f.max_rss_bytes) >= 0 ? '+' : ''}${pctChange(b.max_rss_bytes, f.max_rss_bytes).toFixed(2)}%`,
+    }] : []),
     { label: 'Persist Wait', baseline: fmtMs(b.mean_persist_ms || 0), feature: fmtMs(f.mean_persist_ms || 0), change: fmtChange(c.persist_wait) },
   ];
 }
