@@ -375,6 +375,18 @@ where
         any_err
     }
 
+    /// Reveals V2 proof nodes for a single storage trie.
+    pub fn reveal_storage_v2_proof_nodes(
+        &mut self,
+        account: B256,
+        proof_nodes: Vec<ProofTrieNodeV2>,
+    ) -> SparseStateTrieResult<()> {
+        self.reveal_decoded_multiproof_v2(reth_trie_common::DecodedMultiProofV2 {
+            storage_proofs: B256Map::from_iter([(account, proof_nodes)]),
+            ..Default::default()
+        })
+    }
+
     /// Wipe the storage trie at the provided address.
     pub fn wipe_storage(&mut self, address: B256) -> SparseStateTrieResult<()> {
         if let Some(trie) = self.storage.tries.get_mut(&address) {

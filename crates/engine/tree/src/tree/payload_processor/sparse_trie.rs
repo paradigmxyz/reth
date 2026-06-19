@@ -1,6 +1,6 @@
 //! Sparse Trie task related functionality.
 
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 
 use crate::tree::{
     multiproof::{
@@ -16,10 +16,10 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_primitives_traits::{Account, FastInstant as Instant};
 use reth_tasks::Runtime;
 use reth_trie::{
-    updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
-    TRIE_ACCOUNT_RLP_MAX_SIZE,
+    updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, ProofTrieNodeV2, ProofV2Target,
+    TrieAccount, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
+use reth_trie_common::MultiProofTargetsV2;
 use reth_trie_parallel::{
     proof_task::{
         AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
@@ -31,7 +31,7 @@ use reth_trie_sparse::{
     ConfigurableSparseTrie, DeferredDrops, LeafUpdate, RevealableSparseTrie, SparseStateTrie,
     SparseTrie,
 };
-use revm_primitives::{hash_map::Entry, B256Map};
+use revm_primitives::{hash_map::Entry, map::B256Set, B256Map};
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
@@ -44,6 +44,10 @@ pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = Configurab
     updates: CrossbeamReceiver<SparseTrieTaskMessage>,
     /// Sender half for the channel to send final hashed state to.
     final_hashed_state_tx: Option<std::sync::mpsc::Sender<HashedPostState>>,
+    /// Sender for storage roots.
+    storage_roots_tx: mpsc::Sender<Vec<(B256, RevealableSparseTrie<S>)>>,
+    /// Receiver for storage roots.
+    storage_roots_rx: CrossbeamReceiver<(B256, RevealableSparseTrie<S>)>,
     /// `SparseStateTrie` used for computing the state root.
     trie: SparseStateTrie<A, S>,
     /// The parent block's state root.
@@ -111,6 +115,11 @@ pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = Configurab
     /// final [`HashedPostState`] and share it with main engine thread without requiring any extra
     /// hashing work.
     final_hashed_state: HashedPostState,
+    /// Tries that are awaiting storage root calculation.
+    pending_storage_roots: B256Set,
+    /// Storage proofs that arrived while the trie was taken for root computation.
+    /// Replayed after the trie is reinserted.
+    buffered_storage_proofs: B256Map<Vec<ProofTrieNodeV2>>,
 
     /// Metrics for the sparse trie.
     metrics: MultiProofTaskMetrics,
@@ -119,7 +128,7 @@ pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = Configurab
 impl<A, S> SparseTrieCacheTask<A, S>
 where
     A: SparseTrie + Default,
-    S: SparseTrie + Default + Clone,
+    S: SparseTrie + Default + Clone + 'static,
 {
     /// Creates a new sparse trie, pre-populating with an existing [`SparseStateTrie`].
     #[expect(clippy::too_many_arguments)]
@@ -143,9 +152,20 @@ where
             Self::run_hashing_task(updates, hashed_state_tx, hashing_metrics)
         });
 
+        let (storage_roots_tx, storage_roots_task_rx) = mpsc::channel();
+        let (root_result_tx, storage_roots_rx) = crossbeam_channel::unbounded();
+
+        let parent_span = tracing::Span::current();
+        executor.spawn_blocking_named("trie-storage-roots", move || {
+            let _span = debug_span!(parent: parent_span, "run_storage_roots_task").entered();
+            Self::run_storage_roots_task(storage_roots_task_rx, root_result_tx)
+        });
+
         Self {
             proof_result_tx,
             proof_result_rx,
+            storage_roots_tx,
+            storage_roots_rx,
             updates: hashed_state_rx,
             proof_worker_handle,
             final_hashed_state_tx: Some(final_hashed_state_tx),
@@ -169,6 +189,8 @@ where
             pending_targets: Default::default(),
             pending_updates: Default::default(),
             final_hashed_state: Default::default(),
+            pending_storage_roots: Default::default(),
+            buffered_storage_proofs: Default::default(),
             metrics,
         }
     }
@@ -214,6 +236,30 @@ where
         }
 
         metrics.hashing_task_idle_time_seconds.record(total_idle_time.as_secs_f64());
+    }
+
+    fn run_storage_roots_task(
+        tries: mpsc::Receiver<Vec<(B256, RevealableSparseTrie<S>)>>,
+        roots_tx: CrossbeamSender<(B256, RevealableSparseTrie<S>)>,
+    ) {
+        while let Ok(tries) = tries.recv() {
+            let roots_tx = roots_tx.clone();
+            let parent_span = tracing::Span::current();
+            rayon::spawn(move || {
+                tries.into_par_iter().for_each(|(address, mut trie)| {
+                    let _enter = debug_span!(
+                        target: "engine::tree::payload_processor::sparse_trie",
+                        parent: &parent_span,
+                        "storage_root",
+                        ?address,
+                        prefix_set_len = trie.prefix_set_len()
+                    )
+                    .entered();
+                    trie.root().expect("all tries should have been revealed");
+                    roots_tx.send((address, trie)).unwrap();
+                })
+            })
+        }
     }
 
     /// Prunes and shrinks the trie for reuse in the next payload built on top of this one.
@@ -299,6 +345,15 @@ where
                     self.on_message(update);
                     self.pending_updates += 1;
                 }
+                recv(self.storage_roots_rx) -> message => {
+                    let Ok((address, trie)) = message else {
+                        return Err(ParallelStateRootError::Other("storage roots task failed".to_string()));
+                    };
+                    self.on_storage_root_result(address, trie)?;
+                    if !self.pending_storage_roots.is_empty() {
+                        continue;
+                    }
+                }
                 recv(self.proof_result_rx) -> message => {
                     let phase_end = Instant::now();
                     total_idle_time += phase_end.duration_since(idle_start);
@@ -336,12 +391,15 @@ where
                 self.dispatch_pending_targets();
                 t = Instant::now();
                 self.process_new_updates()?;
-                self.promote_pending_account_updates()?;
+                if self.promote_pending_account_updates()? {
+                    self.trie.trie_mut().update_subtrie_hashes();
+                }
                 self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
 
-                if self.finished_state_updates &&
-                    self.account_updates.is_empty() &&
-                    self.storage_updates.iter().all(|(_, updates)| updates.is_empty())
+                if self.finished_state_updates
+                    && self.pending_storage_roots.is_empty()
+                    && self.account_updates.is_empty()
+                    && self.storage_updates.iter().all(|(_, updates)| updates.is_empty())
                 {
                     break;
                 }
@@ -461,6 +519,30 @@ where
         }
     }
 
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::sparse_trie",
+        skip_all
+    )]
+    fn on_storage_root_result(
+        &mut self,
+        address: B256,
+        trie: RevealableSparseTrie<S>,
+    ) -> Result<(), ParallelStateRootError> {
+        self.trie.insert_storage_trie(address, trie);
+        self.pending_storage_roots.remove(&address);
+        // Replay any storage proofs that arrived while the trie was out.
+        if let Some(proofs) = self.buffered_storage_proofs.remove(&address) {
+            self.trie.reveal_storage_v2_proof_nodes(address, proofs).map_err(|e| {
+                ParallelStateRootError::Other(format!(
+                    "could not reveal buffered storage proofs: {e:?}"
+                ))
+            })?;
+        }
+
+        Ok(())
+    }
+
     /// Processes a hashed state update and encodes all state changes as trie updates.
     #[instrument(
         level = "trace",
@@ -519,8 +601,20 @@ where
 
     fn on_proof_result(
         &mut self,
-        result: DecodedMultiProofV2,
+        mut result: DecodedMultiProofV2,
     ) -> Result<(), ParallelStateRootError> {
+        // Buffer storage proofs for tries currently out for root computation.
+        // They'll be replayed after the trie is reinserted.
+        if !self.pending_storage_roots.is_empty() {
+            result.storage_proofs.retain(|address, proofs| {
+                if self.pending_storage_roots.contains(address) {
+                    self.buffered_storage_proofs.entry(*address).or_default().append(proofs);
+                    false
+                } else {
+                    true
+                }
+            });
+        }
         self.trie.reveal_decoded_multiproof_v2(result).map_err(|e| {
             ParallelStateRootError::Other(format!("could not reveal multiproof: {e:?}"))
         })
@@ -591,6 +685,10 @@ where
         let span = trace_span!("process_storage_leaf_updates").entered();
         for (address, updates) in storage_updates {
             if updates.is_empty() {
+                continue;
+            }
+            // Skip tries that are currently being processed by the storage roots task.
+            if self.pending_storage_roots.contains(address) {
                 continue;
             }
             let _enter = trace_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_trie_leaf_updates", a=%address).entered();
@@ -675,58 +773,44 @@ where
     /// 3. but the storage root hasn't been updated yet,
     ///
     /// we trigger state root computation on a rayon pool.
-    fn compute_drained_storage_roots(&mut self) {
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor::sparse_trie",
+        skip_all
+    )]
+    fn compute_drained_storage_roots(&mut self) -> bool {
         let addresses_to_compute_roots: Vec<_> = self
             .storage_updates
             .iter()
-            .filter_map(|(address, updates)| updates.is_empty().then_some(*address))
+            .filter_map(|(address, updates)| updates.is_empty().then_some(address))
             .collect();
 
-        struct SendStorageTriePtr<S>(*mut RevealableSparseTrie<S>);
-        // SAFETY: this wrapper only forwards the pointer across rayon; deref invariants are
-        // documented at the use site below.
-        unsafe impl<S: Send> Send for SendStorageTriePtr<S> {}
-
-        let mut tries_to_compute_roots: Vec<(B256, SendStorageTriePtr<S>)> =
-            Vec::with_capacity(addresses_to_compute_roots.len());
+        let mut tries_to_compute_roots = Vec::with_capacity(addresses_to_compute_roots.len());
+        let mut has_large_storage_trie = false;
         for address in addresses_to_compute_roots {
-            if let Some(trie) = self.trie.storage_tries_mut().get_mut(&address) &&
-                !trie.is_root_cached()
-            {
-                tries_to_compute_roots.push((address, SendStorageTriePtr(trie)));
-            }
-        }
-
-        if tries_to_compute_roots.is_empty() {
-            return;
-        }
-
-        let parent_span =
-            debug_span!("compute_drained_storage_roots", n = tries_to_compute_roots.len());
-        tries_to_compute_roots.into_par_iter().for_each(|(address, SendStorageTriePtr(trie))| {
-            let span = if tracing::enabled!(tracing::Level::TRACE) {
-                debug_span!(
-                    target: "engine::tree::payload_processor::sparse_trie",
-                    parent: &parent_span,
-                    "storage_root",
-                    ?address
-                )
-            } else {
-                debug_span!(
-                    target: "engine::tree::payload_processor::sparse_trie",
-                    parent: &parent_span,
-                    "storage_root",
-                )
+            let Some(trie) = self.trie.storage_tries_mut().get(address) else {
+                continue;
             };
-            let _enter = span.entered();
-            // SAFETY:
-            // - pointers are created from `storage_tries_mut().get_mut(address)` above;
-            // - `addresses_to_compute_roots` comes from map iteration, so addresses are unique;
-            // - we do not insert/remove entries between pointer collection and use, so pointers
-            //   stay valid and map reallocation cannot occur;
-            // - each pointer is consumed by at most one rayon task, so no aliasing mutable access.
-            unsafe { (*trie).root().expect("updates are drained, trie should be revealed by now") };
-        });
+            if trie.is_root_cached() {
+                continue;
+            }
+
+            if trie.prefix_set_len() > 50 {
+                has_large_storage_trie = true;
+            }
+
+            tries_to_compute_roots.push((
+                *address,
+                self.trie.take_storage_trie(address).expect("trie was created above"),
+            ));
+            self.pending_storage_roots.insert(*address);
+        }
+
+        if !tries_to_compute_roots.is_empty() {
+            let _ = self.storage_roots_tx.send(tries_to_compute_roots);
+        }
+
+        has_large_storage_trie
     }
 
     /// Iterates through all storage tries for which all updates were processed, computes their
@@ -737,14 +821,14 @@ where
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
-    fn promote_pending_account_updates(&mut self) -> SparseTrieResult<()> {
+    fn promote_pending_account_updates(&mut self) -> SparseTrieResult<bool> {
         self.process_leaf_updates(false)?;
 
         if self.pending_account_updates.is_empty() {
-            return Ok(());
+            return Ok(false);
         }
 
-        self.compute_drained_storage_roots();
+        let has_large_storage_trie = self.compute_drained_storage_roots();
 
         loop {
             let span = trace_span!("promote_updates", promoted = tracing::field::Empty).entered();
@@ -753,8 +837,8 @@ where
             let mut num_promoted = 0;
             self.pending_account_updates.retain(|addr, account| {
                 if let Some(updates) = self.storage_updates.get(addr) {
-                    if !updates.is_empty() {
-                        // If account has pending storage updates, it is still pending.
+                    if !updates.is_empty() || self.pending_storage_roots.contains(addr) {
+                        // If account has pending storage updates, or its trie root is not yet computed, it is still pending.
                         return true;
                     } else if let Some(account) = account.take() {
                         let storage_root = self.trie.storage_root(addr).expect("updates are drained, storage trie should be revealed by now");
@@ -803,11 +887,11 @@ where
             // We need to keep iterating if any updates are being drained because that might
             // indicate that more pending account updates can be promoted.
             if num_promoted == 0 || !self.process_account_leaf_updates(false)? {
-                break
+                break;
             }
         }
 
-        Ok(())
+        Ok(has_large_storage_trie)
     }
 
     fn dispatch_pending_targets(&mut self) {

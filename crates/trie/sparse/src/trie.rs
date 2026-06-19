@@ -207,6 +207,11 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
         self.as_revealed_ref().is_some_and(|trie| trie.is_root_cached())
     }
 
+    /// Returns the number of entries in the prefix set.
+    pub fn prefix_set_len(&self) -> usize {
+        self.as_revealed_ref().map_or(0, |trie| trie.prefix_set_len())
+    }
+
     /// Returns the root hash along with any accumulated update information.
     ///
     /// This is useful for when you need both the root hash and information about
@@ -222,6 +227,13 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     pub fn root_with_updates(&mut self) -> Option<(B256, SparseTrieUpdates)> {
         let revealed = self.as_revealed_mut()?;
         Some((revealed.root(), revealed.take_updates()))
+    }
+
+    /// Updates the hashes of the subtries.
+    pub fn update_subtrie_hashes(&mut self) {
+        if let Some(trie) = self.as_revealed_mut() {
+            trie.update_subtrie_hashes();
+        }
     }
 
     /// Clears this trie, setting it to a blind state.
@@ -435,9 +447,9 @@ impl SparseNode {
     pub fn cached_rlp_node(&self) -> Option<Cow<'_, RlpNode>> {
         match &self {
             Self::Empty => None,
-            Self::Leaf { state, .. } |
-            Self::Extension { state, .. } |
-            Self::Branch { state, .. } => state.cached_rlp_node().map(Cow::Borrowed),
+            Self::Leaf { state, .. }
+            | Self::Extension { state, .. }
+            | Self::Branch { state, .. } => state.cached_rlp_node().map(Cow::Borrowed),
         }
     }
 
@@ -445,9 +457,9 @@ impl SparseNode {
     pub fn cached_hash(&self) -> Option<B256> {
         match &self {
             Self::Empty => None,
-            Self::Leaf { state, .. } |
-            Self::Extension { state, .. } |
-            Self::Branch { state, .. } => state.cached_hash(),
+            Self::Leaf { state, .. }
+            | Self::Extension { state, .. }
+            | Self::Branch { state, .. } => state.cached_hash(),
         }
     }
 
@@ -460,9 +472,9 @@ impl SparseNode {
             Self::Empty => {
                 panic!("Cannot set hash for Empty or Hash nodes")
             }
-            Self::Leaf { state, .. } |
-            Self::Extension { state, .. } |
-            Self::Branch { state, .. } => {
+            Self::Leaf { state, .. }
+            | Self::Extension { state, .. }
+            | Self::Branch { state, .. } => {
                 *state = new_state;
             }
         }
