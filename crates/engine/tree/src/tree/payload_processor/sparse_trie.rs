@@ -23,6 +23,7 @@ use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use reth_trie_parallel::{
     proof_task::{
         AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
+        ProofWorkerResultMessage,
     },
     root::ParallelStateRootError,
 };
@@ -32,14 +33,15 @@ use reth_trie_sparse::{
     SparseTrie,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
+use tokio::sync::mpsc as tokio_mpsc;
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = ConfigurableSparseTrie> {
-    /// Sender for proof results.
-    proof_result_tx: CrossbeamSender<ProofResultMessage>,
     /// Receiver for proof results directly from workers.
     proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
+    /// Sender for proof requests to the proof orchestrator.
+    proof_request_tx: tokio_mpsc::UnboundedSender<ProofRequest>,
     /// Receives updates from execution and prewarming.
     updates: CrossbeamReceiver<SparseTrieTaskMessage>,
     /// Sender half for the channel to send final hashed state to.
@@ -48,9 +50,6 @@ pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = Configurab
     trie: SparseStateTrie<A, S>,
     /// The parent block's state root.
     parent_state_root: B256,
-    /// Handle to the proof worker pools (storage and account).
-    proof_worker_handle: ProofWorkerHandle,
-
     /// The size of proof targets chunk to spawn in one calculation.
     /// If None, chunking is disabled and all targets are processed in a single proof.
     chunk_size: usize,
@@ -134,6 +133,8 @@ where
         chunk_size: usize,
     ) -> Self {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let (worker_result_tx, worker_result_rx) = tokio_mpsc::unbounded_channel();
+        let (proof_request_tx, proof_request_rx) = tokio_mpsc::unbounded_channel();
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
 
         let parent_span = tracing::Span::current();
@@ -143,11 +144,20 @@ where
             Self::run_hashing_task(updates, hashed_state_tx, hashing_metrics)
         });
 
-        Self {
-            proof_result_tx,
-            proof_result_rx,
-            updates: hashed_state_rx,
+        ProofOrchestrator {
+            executor: executor.clone(),
             proof_worker_handle,
+            proof_request_rx,
+            worker_result_tx,
+            worker_result_rx,
+            sparse_trie_result_tx: proof_result_tx.clone(),
+        }
+        .spawn(executor);
+
+        Self {
+            proof_result_rx,
+            proof_request_tx,
+            updates: hashed_state_rx,
             final_hashed_state_tx: Some(final_hashed_state_tx),
             trie,
             parent_state_root,
@@ -339,9 +349,9 @@ where
                 self.promote_pending_account_updates()?;
                 self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
 
-                if self.finished_state_updates &&
-                    self.account_updates.is_empty() &&
-                    self.storage_updates.iter().all(|(_, updates)| updates.is_empty())
+                if self.finished_state_updates
+                    && self.account_updates.is_empty()
+                    && self.storage_updates.iter().all(|(_, updates)| updates.is_empty())
                 {
                     break;
                 }
@@ -690,8 +700,8 @@ where
         let mut tries_to_compute_roots: Vec<(B256, SendStorageTriePtr<S>)> =
             Vec::with_capacity(addresses_to_compute_roots.len());
         for address in addresses_to_compute_roots {
-            if let Some(trie) = self.trie.storage_tries_mut().get_mut(&address) &&
-                !trie.is_root_cached()
+            if let Some(trie) = self.trie.storage_tries_mut().get_mut(&address)
+                && !trie.is_root_cached()
             {
                 tries_to_compute_roots.push((address, SendStorageTriePtr(trie)));
             }
@@ -803,7 +813,7 @@ where
             // We need to keep iterating if any updates are being drained because that might
             // indicate that more pending account updates can be promoted.
             if num_promoted == 0 || !self.process_account_leaf_updates(false)? {
-                break
+                break;
             }
         }
 
@@ -817,29 +827,146 @@ where
 
         let _span = trace_span!("dispatch_pending_targets").entered();
         let (targets, chunking_length) = self.pending_targets.take();
+        if self
+            .proof_request_tx
+            .send(ProofRequest {
+                targets,
+                chunking_length,
+                chunk_size: self.chunk_size,
+                max_targets_for_chunking: self.max_targets_for_chunking,
+            })
+            .is_err()
+        {
+            error!("failed to send proof request to orchestrator");
+        }
+    }
+}
+
+/// Request from the sparse trie task to the proof orchestrator.
+struct ProofRequest {
+    /// Multiproof targets that need to be calculated from the database.
+    targets: MultiProofTargetsV2,
+    /// Number of account + storage proof targets included in the request.
+    chunking_length: usize,
+    /// The configured proof target chunk size.
+    chunk_size: usize,
+    /// Target count that forces chunking even when worker availability is low.
+    max_targets_for_chunking: usize,
+}
+
+/// Single coordinator for proof requests emitted by the sparse trie task.
+///
+/// The sparse trie task only decides which proofs are needed. This orchestrator owns the proof
+/// worker handle, dispatches requests to the database-backed proof workers, and relays completed
+/// worker responses back to the sparse trie task.
+struct ProofOrchestrator {
+    /// Runtime used to spawn proof join tasks.
+    executor: Runtime,
+    /// Handle to the database-backed proof worker pools.
+    proof_worker_handle: ProofWorkerHandle,
+    /// Proof requests from the sparse trie task.
+    proof_request_rx: tokio_mpsc::UnboundedReceiver<ProofRequest>,
+    /// Sender handed to proof workers.
+    worker_result_tx: tokio_mpsc::UnboundedSender<ProofWorkerResultMessage>,
+    /// Receiver for completed proof worker responses.
+    worker_result_rx: tokio_mpsc::UnboundedReceiver<ProofWorkerResultMessage>,
+    /// Sender used to return proof results to the sparse trie task.
+    sparse_trie_result_tx: CrossbeamSender<ProofResultMessage>,
+}
+
+impl ProofOrchestrator {
+    /// Spawns the orchestrator as a background task.
+    fn spawn(self, executor: &Runtime) {
+        executor.spawn_with_signal(|_| self.run());
+    }
+
+    /// Runs the orchestrator until sparse trie proof requests are closed and all in-flight worker
+    /// responses have been relayed.
+    async fn run(self) {
+        let Self {
+            executor,
+            proof_worker_handle,
+            mut proof_request_rx,
+            worker_result_tx,
+            mut worker_result_rx,
+            sparse_trie_result_tx,
+        } = self;
+
+        let mut proof_requests_closed = false;
+        let mut in_flight = 0usize;
+
+        loop {
+            tokio::select! {
+                biased;
+
+                message = proof_request_rx.recv(), if !proof_requests_closed => {
+                    if let Some(request) = message {
+                        Self::dispatch_request(
+                            &proof_worker_handle,
+                            &worker_result_tx,
+                            request,
+                            &mut in_flight,
+                        );
+                    } else {
+                        proof_requests_closed = true;
+                        if in_flight == 0 {
+                            break;
+                        }
+                    }
+                }
+                message = worker_result_rx.recv() => {
+                    let Some(result) = message else { break };
+                    in_flight = in_flight.saturating_sub(1);
+                    Self::spawn_join_task(&executor, sparse_trie_result_tx.clone(), result);
+
+                    if proof_requests_closed && in_flight == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    fn dispatch_request(
+        proof_worker_handle: &ProofWorkerHandle,
+        worker_result_tx: &tokio_mpsc::UnboundedSender<ProofWorkerResultMessage>,
+        request: ProofRequest,
+        in_flight: &mut usize,
+    ) {
         dispatch_with_chunking(
-            targets,
-            chunking_length,
-            self.chunk_size,
-            self.max_targets_for_chunking,
-            self.proof_worker_handle.has_multiple_idle_account_workers(),
-            self.proof_worker_handle.has_multiple_idle_storage_workers(),
+            request.targets,
+            request.chunking_length,
+            request.chunk_size,
+            request.max_targets_for_chunking,
+            proof_worker_handle.has_multiple_idle_account_workers(),
+            proof_worker_handle.has_multiple_idle_storage_workers(),
             MultiProofTargetsV2::chunks,
             |proof_targets| {
-                if let Err(e) =
-                    self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput {
+                *in_flight += 1;
+                if let Err(error) =
+                    proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput {
                         targets: proof_targets,
                         proof_result_sender: ProofResultContext::new(
-                            self.proof_result_tx.clone(),
+                            worker_result_tx.clone(),
                             HashedPostState::default(),
                             Instant::now(),
                         ),
                     })
                 {
-                    error!("failed to dispatch account multiproof: {e:?}");
+                    error!("failed to dispatch account multiproof: {error:?}");
                 }
             },
         );
+    }
+
+    fn spawn_join_task(
+        executor: &Runtime,
+        sparse_trie_result_tx: CrossbeamSender<ProofResultMessage>,
+        result: ProofWorkerResultMessage,
+    ) {
+        executor.spawn_with_signal(|_| async move {
+            let _ = sparse_trie_result_tx.send(result.finalize().await);
+        });
     }
 }
 
