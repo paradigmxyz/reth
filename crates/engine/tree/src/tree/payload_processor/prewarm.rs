@@ -42,6 +42,10 @@ use std::sync::{
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
+/// Consecutive storage slots for one BAL account to keep on the same prewarm worker before
+/// rotating. This preserves per-account DB locality without serializing very hot accounts.
+const BAL_PREWARM_STORAGE_LOCALITY_CHUNK: usize = 32;
+
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 #[derive(Debug)]
 pub enum PrewarmMode<Tx> {
@@ -414,12 +418,25 @@ where
 
             pool.begin_block(build, caches);
             for account in prefetch_bal.as_bal() {
-                pool.warm_account(account.address);
+                let mut worker = pool.next_worker();
+                let mut slots_on_worker = 0;
+
+                pool.warm_account_on(worker, account.address);
                 for change in &account.storage_changes {
-                    pool.warm_storage(account.address, change.slot.into());
+                    if slots_on_worker == BAL_PREWARM_STORAGE_LOCALITY_CHUNK {
+                        worker = pool.next_worker();
+                        slots_on_worker = 0;
+                    }
+                    pool.warm_storage_on(worker, account.address, change.slot.into());
+                    slots_on_worker += 1;
                 }
                 for &slot in &account.storage_reads {
-                    pool.warm_storage(account.address, slot.into());
+                    if slots_on_worker == BAL_PREWARM_STORAGE_LOCALITY_CHUNK {
+                        worker = pool.next_worker();
+                        slots_on_worker = 0;
+                    }
+                    pool.warm_storage_on(worker, account.address, slot.into());
+                    slots_on_worker += 1;
                 }
             }
             pool.end_block();

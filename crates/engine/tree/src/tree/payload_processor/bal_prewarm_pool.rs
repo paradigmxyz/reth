@@ -37,7 +37,8 @@ enum PrewarmMsg {
 /// Long-lived pool of blocking threads that warm the BAL read-set into the shared execution cache.
 #[derive(Debug)]
 pub(crate) struct BalPrewarmPool {
-    /// One queue per worker. `BeginBlock`/`EndBlock` are broadcast to all; `Warm`s round-robin.
+    /// One queue per worker. `BeginBlock`/`EndBlock` are broadcast to all; `Warm`s are assigned by
+    /// the caller so related reads can stay on the same provider.
     workers: Vec<crossbeam_channel::Sender<PrewarmMsg>>,
     /// Round-robin cursor for distributing warm requests across workers.
     next: AtomicUsize,
@@ -73,14 +74,19 @@ impl BalPrewarmPool {
         }
     }
 
-    /// Fire-and-forget: warm an account (basic account + bytecode) on some worker.
-    pub(crate) fn warm_account(&self, addr: Address) {
-        self.send_warm(PrewarmTarget::Account(addr));
+    /// Returns the next worker index for caller-controlled warm request placement.
+    pub(crate) fn next_worker(&self) -> usize {
+        self.next.fetch_add(1, Ordering::Relaxed) % self.workers.len()
     }
 
-    /// Fire-and-forget: warm one storage slot on some worker.
-    pub(crate) fn warm_storage(&self, addr: Address, slot: StorageKey) {
-        self.send_warm(PrewarmTarget::Storage(addr, slot));
+    /// Fire-and-forget: warm an account (basic account + bytecode) on a specific worker.
+    pub(crate) fn warm_account_on(&self, worker: usize, addr: Address) {
+        self.send_warm_to(worker, PrewarmTarget::Account(addr));
+    }
+
+    /// Fire-and-forget: warm one storage slot on a specific worker.
+    pub(crate) fn warm_storage_on(&self, worker: usize, addr: Address, slot: StorageKey) {
+        self.send_warm_to(worker, PrewarmTarget::Storage(addr, slot));
     }
 
     /// Ends the block: every worker drops its provider (and read txn) once it has drained the warm
@@ -99,9 +105,8 @@ impl BalPrewarmPool {
         rx.blocking_recv().expect("BAL prewarm pool dropped without signaling completion");
     }
 
-    fn send_warm(&self, target: PrewarmTarget) {
-        let i = self.next.fetch_add(1, Ordering::Relaxed) % self.workers.len();
-        let _ = self.workers[i].send(PrewarmMsg::Warm(target));
+    fn send_warm_to(&self, worker: usize, target: PrewarmTarget) {
+        let _ = self.workers[worker % self.workers.len()].send(PrewarmMsg::Warm(target));
     }
 }
 
