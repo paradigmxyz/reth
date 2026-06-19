@@ -607,8 +607,8 @@ where
                         (transaction, Some(sidecar))
                     }
                 };
-                if let Some(sidecar) = blob_sidecar.clone() {
-                    let availability = self.insert_blob(*transaction.hash(), sidecar);
+                if let Some(sidecar) = &blob_sidecar {
+                    let availability = self.blob_store.availability_for_insert(sidecar);
                     transaction.set_blob_cell_availability(availability);
                 }
 
@@ -757,6 +757,7 @@ where
         if let Some(sidecar) = meta.blob_sidecar {
             let hash = *meta.added.hash();
             self.on_new_blob_sidecar(&hash, &sidecar);
+            self.insert_blob(hash, sidecar);
         }
 
         // Delete replaced blob sidecar if any

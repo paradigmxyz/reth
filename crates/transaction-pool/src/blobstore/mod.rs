@@ -37,6 +37,14 @@ pub const FULL_BLOB_CELL_AVAILABILITY: BlobCellAvailability = B128::new([0xff; 1
 ///
 /// Note: this is Clone because it is expected to be wrapped in an Arc.
 pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
+    /// Returns the availability that would be stored for this full sidecar.
+    fn availability_for_insert(
+        &self,
+        _data: &BlobTransactionSidecarVariant,
+    ) -> Option<BlobCellAvailability> {
+        Some(FULL_BLOB_CELL_AVAILABILITY)
+    }
+
     /// Inserts the blob sidecar into the store
     fn insert(
         &self,

@@ -1552,6 +1552,16 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
     pub const fn transaction(&self) -> &Recovered<T> {
         &self.transaction
     }
+
+    /// Returns the blob cell availability currently cached for this transaction.
+    pub const fn blob_cell_availability(&self) -> Option<BlobCellAvailability> {
+        self.blob_cell_availability
+    }
+
+    /// Updates the blob cell availability cached for this transaction.
+    pub const fn set_blob_cell_availability(&mut self, availability: Option<BlobCellAvailability>) {
+        self.blob_cell_availability = availability;
+    }
 }
 
 impl PoolTransaction for EthPooledTransaction {
@@ -1719,11 +1729,11 @@ impl EthPoolTransaction for EthPooledTransaction {
     }
 
     fn blob_cell_availability(&self) -> Option<BlobCellAvailability> {
-        self.blob_cell_availability
+        EthPooledTransaction::blob_cell_availability(self)
     }
 
     fn set_blob_cell_availability(&mut self, availability: Option<BlobCellAvailability>) {
-        self.blob_cell_availability = availability;
+        EthPooledTransaction::set_blob_cell_availability(self, availability);
     }
 
     fn try_into_pooled_eip4844(

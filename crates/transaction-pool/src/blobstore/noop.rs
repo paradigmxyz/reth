@@ -12,6 +12,13 @@ use std::sync::Arc;
 pub struct NoopBlobStore;
 
 impl BlobStore for NoopBlobStore {
+    fn availability_for_insert(
+        &self,
+        _data: &BlobTransactionSidecarVariant,
+    ) -> Option<BlobCellAvailability> {
+        None
+    }
+
     fn insert(
         &self,
         _tx: B256,
