@@ -75,13 +75,6 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// * `retain_updates` - Whether to track updates
     fn set_updates(&mut self, retain_updates: bool);
 
-    /// Reserves capacity for additional trie nodes.
-    ///
-    /// # Arguments
-    ///
-    /// * `additional` - The number of additional trie nodes to reserve capacity for.
-    fn reserve_nodes(&mut self, _additional: usize) {}
-
     /// Reveals one or more trie nodes if they have not been revealed before.
     ///
     /// This function decodes trie nodes and inserts them into the trie structure. It handles

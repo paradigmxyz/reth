@@ -2282,10 +2282,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
         }
     }
 
-    fn reserve_nodes(&mut self, additional: usize) {
-        self.upper_arena.reserve(additional);
-    }
-
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all, fields(num_nodes = nodes.len()))]
     fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNodeV2]) -> SparseTrieResult<()> {
         if nodes.is_empty() {
