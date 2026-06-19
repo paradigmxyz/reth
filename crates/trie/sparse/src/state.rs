@@ -6,18 +6,15 @@ use crate::{
 };
 use alloc::vec::Vec;
 use alloy_primitives::{map::B256Map, B256};
-use alloy_rlp::{Decodable, Encodable};
 use either::Either;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
-use reth_primitives_traits::Account;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
-    DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2, TrieAccount, EMPTY_ROOT_HASH,
-    TRIE_ACCOUNT_RLP_MAX_SIZE,
+    DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2,
 };
 #[cfg(feature = "std")]
 use tracing::debug;
-use tracing::{instrument, trace};
+use tracing::instrument;
 
 /// Holds data that should be dropped after any locks are released.
 ///
@@ -41,8 +38,6 @@ pub struct SparseStateTrie<
     storage: StorageTries<S>,
     /// Flag indicating whether trie updates should be retained.
     retain_updates: bool,
-    /// Reusable buffer for RLP encoding of trie accounts.
-    account_rlp_buf: Vec<u8>,
     /// Holds data that should be dropped after final state root is calculated.
     deferred_drops: DeferredDrops,
     /// Global LFU tracker for hot `(address, slot)` storage entries.
@@ -64,7 +59,6 @@ where
             state: Default::default(),
             storage: Default::default(),
             retain_updates: false,
-            account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
             deferred_drops: DeferredDrops::default(),
             hot_slots_lfu: BucketedLfu::default(),
             hot_accounts_lfu: BucketedLfu::default(),
@@ -470,152 +464,6 @@ where
     }
 }
 
-impl SparseStateTrie {
-    /// Update the account leaf node.
-    pub fn update_account_leaf(
-        &mut self,
-        path: Nibbles,
-        value: Vec<u8>,
-    ) -> SparseStateTrieResult<()> {
-        self.state.update_leaf(path, value)?;
-        Ok(())
-    }
-
-    /// Update or remove trie account based on new account info. This method will either recompute
-    /// the storage root based on update storage trie or look it up from existing leaf value.
-    ///
-    /// Returns false if the new account info and storage trie are empty, indicating the account
-    /// leaf should be removed.
-    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
-    pub fn update_account(
-        &mut self,
-        address: B256,
-        account: Account,
-    ) -> SparseStateTrieResult<bool> {
-        let storage_root = if let Some(storage_trie) = self.storage.tries.get_mut(&address) {
-            trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
-            storage_trie.root().ok_or(SparseTrieErrorKind::Blind)?
-        } else if self.is_account_revealed(address) {
-            trace!(target: "trie::sparse", ?address, "Retrieving storage root from account leaf to update account");
-            // The account path was revealed already, so either...
-            if let Some(value) = self.get_account_value(&address) {
-                // ...the account leaf exists and we should reuse its current storage root, or...
-                TrieAccount::decode(&mut &value[..])?.storage_root
-            } else {
-                // ...the account is newly created and its storage trie is still empty.
-                EMPTY_ROOT_HASH
-            }
-        } else {
-            return Err(SparseTrieErrorKind::Blind.into())
-        };
-
-        if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
-            return Ok(false);
-        }
-
-        trace!(target: "trie::sparse", ?address, "Updating account");
-        let nibbles = Nibbles::unpack(address);
-        self.account_rlp_buf.clear();
-        account.into_trie_account(storage_root).encode(&mut self.account_rlp_buf);
-        self.update_account_leaf(nibbles, self.account_rlp_buf.clone())?;
-
-        Ok(true)
-    }
-
-    /// Update or remove a trie account for stateless validation.
-    ///
-    /// Unlike [`Self::update_account`], this method:
-    /// - Accepts `Option<Account>` — `None` removes the account leaf.
-    /// - Falls back to [`EMPTY_ROOT_HASH`] for unrevealed accounts instead of returning
-    ///   [`SparseTrieErrorKind::Blind`], since stateless validation operates with a sparse witness
-    ///   where not all accounts are revealed.
-    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
-    pub fn update_account_stateless(
-        &mut self,
-        address: B256,
-        account: Option<Account>,
-    ) -> SparseStateTrieResult<()> {
-        let nibbles = Nibbles::unpack(address);
-
-        let Some(account) = account else {
-            trace!(target: "trie::sparse", ?address, "Removing account");
-            return self.remove_account_leaf(&nibbles);
-        };
-
-        let storage_root = if let Some(storage_trie) = self.storage.tries.get_mut(&address) {
-            trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
-            storage_trie.root().ok_or(SparseTrieErrorKind::Blind)?
-        } else if let Some(value) = self.get_account_value(&address) {
-            trace!(target: "trie::sparse", ?address, "Retrieving storage root from account leaf to update account");
-            TrieAccount::decode(&mut &value[..])?.storage_root
-        } else {
-            EMPTY_ROOT_HASH
-        };
-
-        trace!(target: "trie::sparse", ?address, "Updating account");
-        self.account_rlp_buf.clear();
-        account.into_trie_account(storage_root).encode(&mut self.account_rlp_buf);
-        self.update_account_leaf(nibbles, self.account_rlp_buf.clone())?;
-
-        Ok(())
-    }
-
-    /// Update the storage root of a revealed account.
-    ///
-    /// If the account doesn't exist in the trie, the function is a no-op.
-    ///
-    /// Returns false if the new storage root is empty, and the account info was already empty,
-    /// indicating the account leaf should be removed.
-    #[instrument(level = "debug", target = "trie::sparse", skip_all)]
-    pub fn update_account_storage_root(&mut self, address: B256) -> SparseStateTrieResult<bool> {
-        if !self.is_account_revealed(address) {
-            return Err(SparseTrieErrorKind::Blind.into())
-        }
-
-        // Nothing to update if the account doesn't exist in the trie.
-        let Some(mut trie_account) = self
-            .get_account_value(&address)
-            .map(|v| TrieAccount::decode(&mut &v[..]))
-            .transpose()?
-        else {
-            trace!(target: "trie::sparse", ?address, "Account not found in trie, skipping storage root update");
-            return Ok(true)
-        };
-
-        // If the storage trie doesn't exist, the new storage root is empty.
-        let storage_root = if let Some(storage_trie) = self.storage.tries.get_mut(&address) {
-            trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
-            storage_trie.root().ok_or(SparseTrieErrorKind::Blind)?
-        } else {
-            EMPTY_ROOT_HASH
-        };
-
-        // Update the account with the new storage root.
-        trie_account.storage_root = storage_root;
-
-        // If the account is now empty, indicate that its leaf should be removed.
-        if trie_account == TrieAccount::default() {
-            return Ok(false)
-        }
-
-        // Otherwise, rewrite the account leaf with the updated storage root.
-        trace!(target: "trie::sparse", ?address, "Updating account with the new storage root");
-        let nibbles = Nibbles::unpack(address);
-        self.account_rlp_buf.clear();
-        trie_account.encode(&mut self.account_rlp_buf);
-        self.update_account_leaf(nibbles, self.account_rlp_buf.clone())?;
-
-        Ok(true)
-    }
-
-    /// Remove the account leaf node.
-    #[instrument(level = "debug", target = "trie::sparse", skip_all)]
-    pub fn remove_account_leaf(&mut self, path: &Nibbles) -> SparseStateTrieResult<()> {
-        self.state.remove_leaf(path)?;
-        Ok(())
-    }
-}
-
 impl<A, S> SparseStateTrie<A, S>
 where
     A: SparseTrieTrait + Default,
@@ -628,7 +476,6 @@ where
     pub fn clear(&mut self) {
         self.state.clear();
         self.storage.clear();
-        self.account_rlp_buf.clear();
     }
 
     /// Returns a heuristic for the total in-memory size of this state trie in bytes.
@@ -911,7 +758,7 @@ mod tests {
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
         BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, LeafNode, RlpNode, StorageMultiProof,
-        TrieMask, TrieNodeV2,
+        TrieAccount, TrieMask, TrieNodeV2,
     };
 
     /// Create a leaf key (suffix) with given nibbles padded with zeros to reach `total_len`.
@@ -920,6 +767,12 @@ mod tests {
         let mut nibbles = Nibbles::from_nibbles(suffix);
         nibbles.extend(&Nibbles::from_nibbles_unchecked(vec![0; total_len - suffix.len()]));
         nibbles
+    }
+
+    fn apply_account_update(sparse: &mut SparseStateTrie, address: B256, update: LeafUpdate) {
+        let mut updates = B256Map::from_iter([(address, update)]);
+        sparse.trie_mut().update_leaves(&mut updates, |_, _| {}).unwrap();
+        assert!(updates.is_empty());
     }
 
     #[test]
@@ -972,7 +825,7 @@ mod tests {
 
         // Remove the leaf node and check that the state trie does not contain the leaf node and
         // value
-        sparse.remove_account_leaf(&full_path_0).unwrap();
+        apply_account_update(&mut sparse, B256::ZERO, LeafUpdate::Changed(Vec::new()));
         assert!(matches!(
             sparse.state_trie_ref().unwrap().find_leaf(&full_path_0, None),
             Ok(LeafLookup::NonExistent)
@@ -1125,7 +978,7 @@ mod tests {
         );
 
         // Remove the leaf node
-        sparse.remove_account_leaf(&full_path_0).unwrap();
+        apply_account_update(&mut sparse, B256::ZERO, LeafUpdate::Changed(Vec::new()));
         assert!(sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0).is_none());
     }
 
@@ -1290,11 +1143,14 @@ mod tests {
         assert_eq!(sparse.root().unwrap(), root);
 
         let address_3 = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
-        let address_path_3 = Nibbles::unpack(address_3);
         let account_3 = Account { nonce: account_1.nonce + 1, ..account_1 };
         let trie_account_3 = account_3.into_trie_account(EMPTY_ROOT_HASH);
 
-        sparse.update_account_leaf(address_path_3, alloy_rlp::encode(trie_account_3)).unwrap();
+        apply_account_update(
+            &mut sparse,
+            address_3,
+            LeafUpdate::Changed(alloy_rlp::encode(trie_account_3)),
+        );
 
         let mut updates =
             B256Map::from_iter([(slot_3, LeafUpdate::Changed(alloy_rlp::encode(value_3)))]);
@@ -1305,11 +1161,19 @@ mod tests {
             .unwrap();
         assert!(updates.is_empty());
         trie_account_1.storage_root = sparse.storage_root(&address_1).unwrap();
-        sparse.update_account_leaf(address_path_1, alloy_rlp::encode(trie_account_1)).unwrap();
+        apply_account_update(
+            &mut sparse,
+            address_1,
+            LeafUpdate::Changed(alloy_rlp::encode(trie_account_1)),
+        );
 
         sparse.wipe_storage(address_2).unwrap();
         trie_account_2.storage_root = sparse.storage_root(&address_2).unwrap();
-        sparse.update_account_leaf(address_path_2, alloy_rlp::encode(trie_account_2)).unwrap();
+        apply_account_update(
+            &mut sparse,
+            address_2,
+            LeafUpdate::Changed(alloy_rlp::encode(trie_account_2)),
+        );
 
         sparse.root().unwrap();
 
