@@ -892,7 +892,14 @@ impl PendingTargets {
     /// Extends storage targets for the given address.
     fn extend_storage_targets(&mut self, address: &B256, targets: Vec<ProofV2Target>) {
         self.len += targets.len();
-        self.targets.storage_targets.entry(*address).or_default().extend(targets);
+        match self.targets.storage_targets.entry(*address) {
+            Entry::Occupied(mut entry) => {
+                entry.get_mut().extend(targets);
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(targets);
+            }
+        }
     }
 }
 
