@@ -481,21 +481,6 @@ impl SparseStateTrie {
         Ok(())
     }
 
-    /// Update the leaf node of a revealed storage trie at the provided address.
-    pub fn update_storage_leaf(
-        &mut self,
-        address: B256,
-        slot: Nibbles,
-        value: Vec<u8>,
-    ) -> SparseStateTrieResult<()> {
-        self.storage
-            .tries
-            .get_mut(&address)
-            .ok_or(SparseTrieErrorKind::Blind)?
-            .update_leaf(slot, value)?;
-        Ok(())
-    }
-
     /// Update or remove trie account based on new account info. This method will either recompute
     /// the storage root based on update storage trie or look it up from existing leaf value.
     ///
@@ -627,19 +612,6 @@ impl SparseStateTrie {
     #[instrument(level = "debug", target = "trie::sparse", skip_all)]
     pub fn remove_account_leaf(&mut self, path: &Nibbles) -> SparseStateTrieResult<()> {
         self.state.remove_leaf(path)?;
-        Ok(())
-    }
-
-    /// Update the leaf node of a storage trie at the provided address.
-    pub fn remove_storage_leaf(
-        &mut self,
-        address: B256,
-        slot: &Nibbles,
-    ) -> SparseStateTrieResult<()> {
-        let storage_trie =
-            self.storage.tries.get_mut(&address).ok_or(SparseTrieErrorKind::Blind)?;
-
-        storage_trie.remove_leaf(slot)?;
         Ok(())
     }
 }
@@ -925,7 +897,7 @@ impl BucketedLfu<HotSlotKey> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArenaParallelSparseTrie, LeafLookup};
+    use crate::{ArenaParallelSparseTrie, LeafLookup, LeafUpdate};
     use alloy_primitives::{
         b256,
         map::{HashMap, HashSet},
@@ -1063,7 +1035,13 @@ mod tests {
 
         // Remove the leaf node and check that the storage trie does not contain the leaf node and
         // value
-        sparse.remove_storage_leaf(B256::ZERO, &full_path_0).unwrap();
+        let mut updates = B256Map::from_iter([(B256::ZERO, LeafUpdate::Changed(Vec::new()))]);
+        sparse
+            .storage_trie_mut(&B256::ZERO)
+            .unwrap()
+            .update_leaves(&mut updates, |_, _| {})
+            .unwrap();
+        assert!(updates.is_empty());
         assert!(matches!(
             sparse.storage_trie_ref(&B256::ZERO).unwrap().find_leaf(&full_path_0, None),
             Ok(LeafLookup::NonExistent)
@@ -1197,7 +1175,13 @@ mod tests {
         );
 
         // Remove the leaf node
-        sparse.remove_storage_leaf(B256::ZERO, &full_path_0).unwrap();
+        let mut updates = B256Map::from_iter([(B256::ZERO, LeafUpdate::Changed(Vec::new()))]);
+        sparse
+            .storage_trie_mut(&B256::ZERO)
+            .unwrap()
+            .update_leaves(&mut updates, |_, _| {})
+            .unwrap();
+        assert!(updates.is_empty());
         assert!(sparse
             .storage_trie_ref(&B256::ZERO)
             .unwrap()
@@ -1231,7 +1215,6 @@ mod tests {
         let slot_path_2 = Nibbles::unpack(slot_2);
         let value_2 = U256::from(rng.random::<u64>());
         let slot_3 = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
-        let slot_path_3 = Nibbles::unpack(slot_3);
         let value_3 = U256::from(rng.random::<u64>());
 
         let mut storage_hash_builder = HashBuilder::default()
@@ -1313,7 +1296,14 @@ mod tests {
 
         sparse.update_account_leaf(address_path_3, alloy_rlp::encode(trie_account_3)).unwrap();
 
-        sparse.update_storage_leaf(address_1, slot_path_3, alloy_rlp::encode(value_3)).unwrap();
+        let mut updates =
+            B256Map::from_iter([(slot_3, LeafUpdate::Changed(alloy_rlp::encode(value_3)))]);
+        sparse
+            .storage_trie_mut(&address_1)
+            .unwrap()
+            .update_leaves(&mut updates, |_, _| {})
+            .unwrap();
+        assert!(updates.is_empty());
         trie_account_1.storage_root = sparse.storage_root(&address_1).unwrap();
         sparse.update_account_leaf(address_path_1, alloy_rlp::encode(trie_account_1)).unwrap();
 
