@@ -2726,8 +2726,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return 0;
         }
 
-        let mut retained_leaves = retained_leaves.to_vec();
-        retained_leaves.sort_unstable();
+        debug_assert!(
+            retained_leaves.windows(2).all(|w| w[0] <= w[1]),
+            "retained_leaves must be sorted"
+        );
 
         let threshold = self.parallelism_thresholds.min_leaves_for_prune;
 
@@ -2771,7 +2773,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     let mut node_prefix = head_path;
                     node_prefix.extend(short_key);
 
-                    let range = prefix_range(&retained_leaves, 0, &node_prefix);
+                    let range = prefix_range(retained_leaves, 0, &node_prefix);
                     if !range.is_empty() {
                         continue;
                     }
@@ -2785,7 +2787,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     pruned += 1;
                 }
                 ArenaSparseNode::Subtrie(_) => {
-                    let subtrie_range = prefix_range(&retained_leaves, retained_idx, &head_path);
+                    let subtrie_range = prefix_range(retained_leaves, retained_idx, &head_path);
                     retained_idx = subtrie_range.end;
 
                     if subtrie_range.is_empty() {
@@ -3452,7 +3454,8 @@ mod tests {
             let num_retain = if all_storage_keys.is_empty() { 0 } else {
                 rng.random_range(0..=all_storage_keys.len())
             };
-            let retained: Vec<Nibbles> = all_storage_keys[..num_retain].to_vec();
+            let mut retained: Vec<Nibbles> = all_storage_keys[..num_retain].to_vec();
+            retained.sort_unstable();
             apst.prune(&retained);
 
             let changeset2 = build_changeset(harness.storage(), changeset2_new_keys, overlap_pct, delete_pct, &mut rng);

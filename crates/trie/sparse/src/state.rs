@@ -752,8 +752,9 @@ where
         self.hot_accounts_lfu.decay_and_evict(max_hot_accounts);
         let retained = self.hot_slots_lfu.retained_slots_by_address();
 
-        let retained_account_paths: Vec<Nibbles> =
+        let mut retained_account_paths: Vec<Nibbles> =
             self.hot_accounts_lfu.keys().map(|k| Nibbles::unpack(*k)).collect();
+        retained_account_paths.sort_unstable();
 
         let retained_accounts = retained_account_paths.len();
         let retained_storage_tries = retained.len();
