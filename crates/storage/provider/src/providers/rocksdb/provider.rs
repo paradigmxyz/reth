@@ -145,6 +145,12 @@ const DEFAULT_WRITE_BUFFER_MANAGER_SIZE: usize = 4 * 1024 * 1024 * 1024;
 /// reducing the first few reallocations without over-allocating.
 const DEFAULT_COMPRESS_BUF_CAPACITY: usize = 4096;
 
+/// Estimated RocksDB write-batch bytes for one history-shard put.
+///
+/// History keys are fixed-width and values are usually small compressed block lists. This is only a
+/// preallocation hint; `WriteBatchWithTransaction` still grows if a batch has larger values.
+const HISTORY_BATCH_BYTES_PER_PUT: usize = 160;
+
 /// Default auto-commit threshold for batch writes (512 MiB).
 ///
 /// When a batch exceeds this size, it is automatically committed to prevent OOM
@@ -805,6 +811,16 @@ impl RocksDBProvider {
         }
     }
 
+    /// Creates a new batch with a preallocated RocksDB write buffer.
+    pub fn batch_with_capacity_bytes(&self, capacity_bytes: usize) -> RocksDBBatch<'_> {
+        RocksDBBatch {
+            provider: self,
+            inner: WriteBatchWithTransaction::<true>::with_capacity_bytes(capacity_bytes),
+            buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
+            auto_commit_threshold: None,
+        }
+    }
+
     /// Creates a new batch with auto-commit enabled.
     ///
     /// When the batch size exceeds the threshold (4 GiB), the batch is automatically
@@ -1399,7 +1415,6 @@ impl RocksDBProvider {
         blocks: &[ExecutedBlock<N>],
         ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
-        let mut batch = self.batch();
         let mut account_history: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
 
         for (block_idx, block) in blocks.iter().enumerate() {
@@ -1416,6 +1431,9 @@ impl RocksDBProvider {
         }
 
         // Write account history using proper shard append logic
+        let mut batch = self.batch_with_capacity_bytes(
+            account_history.len().saturating_mul(HISTORY_BATCH_BYTES_PER_PUT),
+        );
         for (address, indices) in account_history {
             batch.append_account_history_shard(address, indices)?;
         }
@@ -1460,7 +1478,9 @@ impl RocksDBProvider {
             })
             .collect::<ProviderResult<Vec<_>>>()?;
 
-        let mut batch = self.batch();
+        let put_count = shard_puts.iter().map(Vec::len).sum::<usize>();
+        let mut batch =
+            self.batch_with_capacity_bytes(put_count.saturating_mul(HISTORY_BATCH_BYTES_PER_PUT));
         for shards in shard_puts {
             for (key, shard) in shards {
                 batch.put::<tables::StoragesHistory>(key, &shard)?;
