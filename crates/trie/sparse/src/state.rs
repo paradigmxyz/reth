@@ -1175,10 +1175,8 @@ mod tests {
             leaf_key([], 63),
             leaf_value.clone(),
         )));
-        let leaf_1 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
-            leaf_key([], 63),
-            leaf_value.clone(),
-        )));
+        let leaf_1 =
+            alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value)));
 
         let subtree = || {
             ProofNodes::from_iter([

@@ -160,6 +160,31 @@ where
     bal_prewarm_pool: OnceLock<Arc<bal_prewarm_pool::BalPrewarmPool>>,
 }
 
+/// Options for spawning payload processor tasks.
+#[derive(Debug, Default)]
+pub struct PayloadProcessorSpawnOptions {
+    /// Whether to execute BAL blocks through the parallel BAL path.
+    pub parallel_bal_execution: bool,
+    /// Pending sparse trie prune request to run after successful state root computation.
+    pub pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
+}
+
+impl PayloadProcessorSpawnOptions {
+    /// Creates new payload processor spawn options.
+    pub const fn new(
+        parallel_bal_execution: bool,
+        pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
+    ) -> Self {
+        Self { parallel_bal_execution, pending_sparse_trie_prune }
+    }
+}
+
+struct SparseTrieTaskOptions {
+    parent_state_root: B256,
+    chunk_size: usize,
+    pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
+}
+
 impl<N, Evm> PayloadProcessor<Evm>
 where
     N: NodePrimitives,
@@ -292,8 +317,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         multiproof_provider_factory: F,
         config: &TreeConfig,
-        parallel_bal_execution: bool,
-        pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
+        options: PayloadProcessorSpawnOptions,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -303,6 +327,8 @@ where
             + Sync
             + 'static,
     {
+        let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
+            options;
         // start preparing transactions immediately
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
@@ -413,9 +439,15 @@ where
             state_root_tx,
             hashed_state_tx,
             from_multi_proof,
-            parent_state_root,
-            config.multiproof_chunk_size(),
-            if self.disable_sparse_trie_cache_pruning { None } else { pending_sparse_trie_prune },
+            SparseTrieTaskOptions {
+                parent_state_root,
+                chunk_size: config.multiproof_chunk_size(),
+                pending_sparse_trie_prune: if self.disable_sparse_trie_cache_pruning {
+                    None
+                } else {
+                    pending_sparse_trie_prune
+                },
+            },
         );
 
         StateRootHandle::new(parent_state_root, updates_tx, state_root_rx, hashed_state_rx)
@@ -637,10 +669,10 @@ where
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
         hashed_state_tx: mpsc::Sender<HashedPostState>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
-        parent_state_root: B256,
-        chunk_size: usize,
-        pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
+        options: SparseTrieTaskOptions,
     ) {
+        let SparseTrieTaskOptions { parent_state_root, chunk_size, pending_sparse_trie_prune } =
+            options;
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
         let max_hot_slots = self.sparse_trie_max_hot_slots;
@@ -1066,7 +1098,10 @@ where
 #[cfg(test)]
 mod tests {
     use crate::tree::{
-        payload_processor::{evm_state_to_hashed_post_state, ExecutionEnv, PayloadProcessor},
+        payload_processor::{
+            evm_state_to_hashed_post_state, ExecutionEnv, PayloadProcessor,
+            PayloadProcessorSpawnOptions,
+        },
         precompile_cache::PrecompileCacheMap,
         ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
     };
@@ -1417,8 +1452,7 @@ mod tests {
                 OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
             ),
             &TreeConfig::default(),
-            false,
-            None,
+            PayloadProcessorSpawnOptions::default(),
         );
 
         let mut state_hook = handle.state_hook().expect("state hook is None");

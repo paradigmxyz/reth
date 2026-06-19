@@ -42,7 +42,7 @@ use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     multiproof::{StateRootComputeOutcome, StateRootHandle},
-    payload_processor::PayloadProcessor,
+    payload_processor::{PayloadProcessor, PayloadProcessorSpawnOptions},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
@@ -172,7 +172,7 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     }
 
     /// Takes the pending sparse trie prune request, if any.
-    pub fn take_sparse_trie_prune(&mut self) -> Option<SparseTrieRetainedPaths> {
+    pub const fn take_sparse_trie_prune(&mut self) -> Option<SparseTrieRetainedPaths> {
         self.pending_sparse_trie_prune.take()
     }
 }
@@ -536,14 +536,15 @@ where
         } else {
             None
         };
+        let processor_options =
+            PayloadProcessorSpawnOptions::new(parallel_bal_execution, pending_sparse_trie_prune);
         let mut handle = ensure_ok!(self.spawn_payload_processor(
             env.clone(),
             txs,
             provider_builder.clone(),
             overlay_factory,
             &strategy,
-            parallel_bal_execution,
-            pending_sparse_trie_prune,
+            processor_options,
         ));
 
         // Create optional cache stats for detailed block logging
@@ -1704,7 +1705,7 @@ where
         level = "debug",
         target = "engine::tree::payload_validator",
         skip_all,
-        fields(?strategy, parallel_bal_execution)
+        fields(?strategy, parallel_bal_execution = options.parallel_bal_execution)
     )]
     fn spawn_payload_processor<T: ExecutableTxIterator<Evm>>(
         &mut self,
@@ -1713,8 +1714,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         overlay_factory: OverlayStateProviderFactory<P, N>,
         strategy: &StateRootStrategy<N>,
-        parallel_bal_execution: bool,
-        pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
+        options: PayloadProcessorSpawnOptions,
     ) -> Result<
         PayloadHandle<
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
@@ -1723,6 +1723,8 @@ where
         >,
         InsertBlockErrorKind,
     > {
+        let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
+            options;
         match strategy {
             StateRootStrategy::StateRootTask => {
                 let spawn_start = Instant::now();
@@ -1734,8 +1736,10 @@ where
                     provider_builder,
                     overlay_factory,
                     &self.config,
-                    parallel_bal_execution,
-                    pending_sparse_trie_prune,
+                    PayloadProcessorSpawnOptions::new(
+                        parallel_bal_execution,
+                        pending_sparse_trie_prune,
+                    ),
                 );
 
                 // record prewarming initialization duration
