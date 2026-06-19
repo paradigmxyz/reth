@@ -14,7 +14,7 @@ use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_tasks::spawn_os_thread;
 use std::{
     sync::{
-        mpsc::{Receiver, SendError, Sender},
+        mpsc::{Receiver, RecvTimeoutError, SendError, Sender},
         Arc,
     },
     thread::JoinHandle,
@@ -22,6 +22,12 @@ use std::{
 };
 use thiserror::Error;
 use tracing::{debug, error, instrument, warn};
+
+/// How long the persistence service waits for more work before running a pending prune.
+///
+/// Pruning can lag safely, but save/remove requests should stay ahead of it when the service is
+/// under continuous replay load.
+const PRUNE_IDLE_GRACE: Duration = Duration::from_millis(100);
 
 /// Unified result of any persistence operation.
 #[derive(Debug)]
@@ -92,38 +98,76 @@ where
     /// This is the main loop, that will listen to database events and perform the requested
     /// database actions
     pub fn run(mut self) -> Result<(), PersistenceError> {
-        // If the receiver errors then senders have disconnected, so the loop should then end.
-        while let Ok(action) = self.incoming.recv() {
-            match action {
-                PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
-                    let last_block = self.on_remove_blocks_above(new_tip_num)?;
-                    // send new sync metrics based on removed blocks
-                    let _ =
-                        self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
-                    let _ = sender.send(PersistenceResult { last_block, commit_duration: None });
-                }
-                PersistenceAction::SaveBlocks(blocks, sender) => {
-                    let result = self.on_save_blocks(blocks)?;
-                    let result_number = result.last_block.map(|b| b.number);
+        let mut pending_prune_block = None;
 
-                    let _ = sender.send(result);
-
-                    if let Some(block_number) = result_number {
-                        // send new sync metrics based on saved blocks
-                        let _ = self
-                            .sync_metrics_tx
-                            .send(MetricEvent::SyncHeight { height: block_number });
-                        self.maybe_run_pruner(block_number)?;
+        loop {
+            let action = if pending_prune_block.is_some() {
+                match self.incoming.recv_timeout(PRUNE_IDLE_GRACE) {
+                    Ok(action) => action,
+                    Err(RecvTimeoutError::Timeout) => {
+                        if let Some(block_number) = pending_prune_block.take() {
+                            self.maybe_run_pruner(block_number)?;
+                        }
+                        continue
                     }
+                    Err(RecvTimeoutError::Disconnected) => break,
                 }
-                PersistenceAction::SaveFinalizedBlock(finalized_block) => {
-                    self.pending_finalized_block = Some(finalized_block);
+            } else {
+                match self.incoming.recv() {
+                    Ok(action) => action,
+                    Err(_) => break,
                 }
-                PersistenceAction::SaveSafeBlock(safe_block) => {
-                    self.pending_safe_block = Some(safe_block);
-                }
+            };
+
+            self.on_action(action, &mut pending_prune_block)?;
+
+            while let Ok(action) = self.incoming.try_recv() {
+                self.on_action(action, &mut pending_prune_block)?;
             }
         }
+
+        if let Some(block_number) = pending_prune_block {
+            self.maybe_run_pruner(block_number)?;
+        }
+
+        Ok(())
+    }
+
+    fn on_action(
+        &mut self,
+        action: PersistenceAction<N::Primitives>,
+        pending_prune_block: &mut Option<u64>,
+    ) -> Result<(), PersistenceError> {
+        match action {
+            PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
+                *pending_prune_block = None;
+
+                let last_block = self.on_remove_blocks_above(new_tip_num)?;
+                // send new sync metrics based on removed blocks
+                let _ = self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
+                let _ = sender.send(PersistenceResult { last_block, commit_duration: None });
+            }
+            PersistenceAction::SaveBlocks(blocks, sender) => {
+                let result = self.on_save_blocks(blocks)?;
+                let result_number = result.last_block.map(|b| b.number);
+
+                let _ = sender.send(result);
+
+                if let Some(block_number) = result_number {
+                    // send new sync metrics based on saved blocks
+                    let _ =
+                        self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: block_number });
+                    *pending_prune_block = Some(block_number);
+                }
+            }
+            PersistenceAction::SaveFinalizedBlock(finalized_block) => {
+                self.pending_finalized_block = Some(finalized_block);
+            }
+            PersistenceAction::SaveSafeBlock(safe_block) => {
+                self.pending_safe_block = Some(safe_block);
+            }
+        }
+
         Ok(())
     }
 
