@@ -157,17 +157,6 @@ impl SuiteTestHarness {
 /// for every concrete `SparseTrie` implementation.
 macro_rules! sparse_trie_tests {
     ( $( $test_fn:ident ),* $(,)? ) => {
-        mod parallel_sparse_trie {
-            use reth_trie_sparse::ParallelSparseTrie;
-
-            $(
-                #[test]
-                fn $test_fn() {
-                    super::$test_fn(ParallelSparseTrie::default);
-                }
-            )*
-        }
-
         mod arena_parallel_sparse_trie {
             use reth_trie_sparse::ArenaParallelSparseTrie;
 

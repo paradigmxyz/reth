@@ -1,7 +1,7 @@
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::TrieDebugRecorder;
 use crate::{
-    lfu::BucketedLfu, traits::SparseTrie as SparseTrieTrait, ParallelSparseTrie,
+    lfu::BucketedLfu, traits::SparseTrie as SparseTrieTrait, ArenaParallelSparseTrie,
     RevealableSparseTrie,
 };
 use alloc::vec::Vec;
@@ -32,8 +32,8 @@ pub struct DeferredDrops {
 #[derive(Debug)]
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 pub struct SparseStateTrie<
-    A = ParallelSparseTrie, // Account trie implementation
-    S = ParallelSparseTrie, // Storage trie implementation
+    A = ArenaParallelSparseTrie, // Account trie implementation
+    S = ArenaParallelSparseTrie, // Storage trie implementation
 > {
     /// Sparse account trie.
     state: RevealableSparseTrie<A>,
@@ -799,7 +799,7 @@ where
 /// The fields of [`SparseStateTrie`] related to storage tries. This is kept separate from the rest
 /// of [`SparseStateTrie`] to help enforce allocation re-use.
 #[derive(Debug, Default)]
-struct StorageTries<S = ParallelSparseTrie> {
+struct StorageTries<S = ArenaParallelSparseTrie> {
     /// Sparse storage tries.
     tries: B256Map<RevealableSparseTrie<S>>,
     /// Cleared storage tries, kept for re-use.
@@ -925,7 +925,7 @@ impl BucketedLfu<HotSlotKey> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{LeafLookup, ParallelSparseTrie};
+    use crate::{ArenaParallelSparseTrie, LeafLookup};
     use alloy_primitives::{
         b256,
         map::{HashMap, HashSet},
@@ -952,7 +952,7 @@ mod tests {
 
     #[test]
     fn reveal_account_path_twice() {
-        let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
+        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
 
         // Full 64-nibble paths
         let full_path_0 = leaf_key([0x0], 64);
@@ -1010,7 +1010,7 @@ mod tests {
 
     #[test]
     fn reveal_storage_path_twice() {
-        let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
+        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
 
         // Full 64-nibble path
         let full_path_0 = leaf_key([0x0], 64);
@@ -1079,7 +1079,7 @@ mod tests {
     fn seeded_hot_cache_capacities_preserve_first_cycle_touches() {
         let account = b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
         let slot = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
-        let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
+        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
 
         sparse.set_hot_cache_capacities(1, 1);
         sparse.record_account_touch(account);
@@ -1095,7 +1095,7 @@ mod tests {
 
     #[test]
     fn reveal_v2_proof_nodes() {
-        let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
+        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
 
         // Full 64-nibble path
         let full_path_0 = leaf_key([0x0], 64);
@@ -1153,7 +1153,7 @@ mod tests {
 
     #[test]
     fn reveal_storage_v2_proof_nodes() {
-        let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
+        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
 
         // Full 64-nibble path
         let full_path_0 = leaf_key([0x0], 64);
@@ -1207,7 +1207,7 @@ mod tests {
 
     #[test]
     fn root_on_blind_trie_returns_blind_error() {
-        let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default();
+        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
 
         let err = sparse.root().unwrap_err();
 
@@ -1268,7 +1268,7 @@ mod tests {
 
         let root = hash_builder.root();
         let proof_nodes = hash_builder.take_proof_nodes();
-        let mut sparse = SparseStateTrie::<ParallelSparseTrie>::default().with_updates(true);
+        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default().with_updates(true);
         sparse
             .reveal_decoded_multiproof(
                 MultiProof {
@@ -1329,14 +1329,24 @@ mod tests {
             sparse_updates,
             TrieUpdates {
                 account_nodes: HashMap::default(),
-                storage_tries: HashMap::from_iter([(
-                    b256!("0x1100000000000000000000000000000000000000000000000000000000000000"),
-                    StorageTrieUpdates {
-                        is_deleted: true,
-                        storage_nodes: HashMap::default(),
-                        removed_nodes: HashSet::default()
-                    }
-                )]),
+                storage_tries: HashMap::from_iter([
+                    (
+                        b256!("0x1000000000000000000000000000000000000000000000000000000000000000"),
+                        StorageTrieUpdates {
+                            is_deleted: false,
+                            storage_nodes: HashMap::default(),
+                            removed_nodes: HashSet::from_iter([Nibbles::from_nibbles([0x1])])
+                        }
+                    ),
+                    (
+                        b256!("0x1100000000000000000000000000000000000000000000000000000000000000"),
+                        StorageTrieUpdates {
+                            is_deleted: true,
+                            storage_nodes: HashMap::default(),
+                            removed_nodes: HashSet::default()
+                        }
+                    )
+                ]),
                 removed_nodes: HashSet::default()
             }
         );

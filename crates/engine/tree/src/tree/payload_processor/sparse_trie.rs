@@ -28,14 +28,14 @@ use reth_trie_parallel::{
 };
 use reth_trie_sparse::{
     errors::{SparseStateTrieErrorKind, SparseTrieErrorKind, SparseTrieResult},
-    ConfigurableSparseTrie, DeferredDrops, LeafUpdate, RevealableSparseTrie, SparseStateTrie,
+    ArenaParallelSparseTrie, DeferredDrops, LeafUpdate, RevealableSparseTrie, SparseStateTrie,
     SparseTrie,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
-pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = ConfigurableSparseTrie> {
+pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaParallelSparseTrie> {
     /// Sender for proof results.
     proof_result_tx: CrossbeamSender<ProofResultMessage>,
     /// Receiver for proof results directly from workers.
@@ -1013,9 +1013,7 @@ mod tests {
         let proof_worker_handle =
             ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
 
-        let default_trie = RevealableSparseTrie::blind_from(ConfigurableSparseTrie::Arena(
-            ArenaParallelSparseTrie::default(),
-        ));
+        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
         let trie = SparseStateTrie::default()
             .with_accounts_trie(default_trie.clone())
             .with_default_storage_trie(default_trie)

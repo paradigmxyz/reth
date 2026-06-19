@@ -1,4 +1,6 @@
-use crate::{LeafUpdate, ParallelSparseTrie, SparseTrie as SparseTrieTrait, SparseTrieUpdates};
+use crate::{
+    ArenaParallelSparseTrie, LeafUpdate, SparseTrie as SparseTrieTrait, SparseTrieUpdates,
+};
 use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{map::B256Map, B256};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
@@ -18,7 +20,7 @@ use tracing::instrument;
 /// 3. Incremental operations - nodes can be revealed as needed without loading the entire trie.
 ///    This is what gives rise to the notion of a "sparse" trie.
 #[derive(PartialEq, Eq, Debug, Clone)]
-pub enum RevealableSparseTrie<T = ParallelSparseTrie> {
+pub enum RevealableSparseTrie<T = ArenaParallelSparseTrie> {
     /// The trie is blind -- no nodes have been revealed
     ///
     /// This is the default state. In this state, the trie cannot be directly queried or modified
@@ -42,7 +44,7 @@ impl<T: Default> Default for RevealableSparseTrie<T> {
 }
 
 impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
-    /// Creates a new revealed but empty sparse trie with `SparseNode::Empty` as root node.
+    /// Creates a new revealed but empty sparse trie.
     pub fn revealed_empty() -> Self {
         Self::Revealed(Box::default())
     }
@@ -272,7 +274,12 @@ impl RevealableSparseTrie {
     #[instrument(level = "trace", target = "trie::sparse", skip_all)]
     pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
-        revealed.update_leaf(path, value)?;
+        let mut updates =
+            B256Map::from_iter([(nibbles_to_padded_b256(&path), LeafUpdate::Changed(value))]);
+        revealed.update_leaves(&mut updates, |_, _| {})?;
+        if !updates.is_empty() {
+            return Err(SparseTrieErrorKind::BlindedNode(path).into())
+        }
         Ok(())
     }
 
@@ -284,9 +291,21 @@ impl RevealableSparseTrie {
     #[instrument(level = "trace", target = "trie::sparse", skip_all)]
     pub fn remove_leaf(&mut self, path: &Nibbles) -> SparseTrieResult<()> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
-        revealed.remove_leaf(path)?;
+        let mut updates =
+            B256Map::from_iter([(nibbles_to_padded_b256(path), LeafUpdate::Changed(Vec::new()))]);
+        revealed.update_leaves(&mut updates, |_, _| {})?;
+        if !updates.is_empty() {
+            return Err(SparseTrieErrorKind::BlindedNode(*path).into())
+        }
         Ok(())
     }
+}
+
+/// Right-pads a nibble path with zeros and packs it into a [`B256`].
+fn nibbles_to_padded_b256(path: &Nibbles) -> B256 {
+    let mut bytes = [0u8; 32];
+    path.pack_to(&mut bytes);
+    B256::from(bytes)
 }
 
 impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {

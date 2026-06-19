@@ -5,12 +5,28 @@
 
 extern crate alloc;
 
+#[cfg(not(feature = "std"))]
+use alloy_rlp as _;
+#[cfg(not(feature = "std"))]
+use either as _;
+#[cfg(not(feature = "std"))]
+use reth_primitives_traits as _;
+#[cfg(not(feature = "std"))]
+use smallvec as _;
+#[cfg(not(feature = "std"))]
+use tracing as _;
+
+#[cfg(feature = "std")]
 mod state;
+#[cfg(feature = "std")]
 pub use state::*;
 
+#[cfg(feature = "std")]
 mod lfu;
 
+#[cfg(feature = "std")]
 mod trie;
+#[cfg(feature = "std")]
 pub use trie::*;
 
 mod traits;
@@ -20,11 +36,6 @@ pub use traits::*;
 mod arena;
 #[cfg(feature = "std")]
 pub use arena::*;
-
-mod parallel;
-pub use parallel::*;
-
-mod lower;
 
 #[cfg(feature = "metrics")]
 mod metrics;

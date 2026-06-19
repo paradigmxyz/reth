@@ -2466,8 +2466,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return;
         }
 
-        // Count total dirty leaves across all subtries to make a global parallelism
-        // decision, matching the approach in ParallelSparseTrie.
+        // Count total dirty leaves across all subtries to make one global parallelism decision.
         let mut total_dirty_leaves: u64 = 0;
         let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>)> = Vec::new();
         for (idx, node) in &mut self.upper_arena {
@@ -2484,8 +2483,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             taken.push((idx, subtrie));
         }
 
-        // Hash taken subtries: in parallel if total dirty leaves meet the threshold,
-        // otherwise serially. This mirrors ParallelSparseTrie's all-or-nothing approach.
+        // Hash taken subtries in parallel if total dirty leaves meet the threshold.
         if !taken.is_empty() {
             if taken.len() == 1 || total_dirty_leaves < self.parallelism_thresholds.min_dirty_leaves
             {
