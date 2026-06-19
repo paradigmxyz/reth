@@ -216,11 +216,11 @@ impl ArenaSparseSubtrie {
         );
     }
 
-    /// Prunes revealed subtrees that are not ancestors of any retained leaf, compacting the
-    /// arena in a single BFS pass.
+    /// Prunes revealed subtrees that are not ancestors of any retained leaf, compacting the arena
+    /// in lexicographic order.
     ///
     /// `retained_leaves` must be sorted and scoped to this subtrie's key range. Builds a fresh
-    /// arena by BFS-copying only retained nodes from the root, blinding non-retained children
+    /// arena by copying only retained nodes from the root, blinding non-retained children
     /// at the boundary. Non-retained subtrees are never visited — they are dropped with the
     /// old arena.
     ///
@@ -242,24 +242,57 @@ impl ArenaSparseSubtrie {
         // total nodes ≤ 2N − 1. This is a reasonable upper-bound capacity hint that
         // avoids most reallocations without over-allocating when pruning is heavy.
         let mut new_arena = SlotMap::with_capacity(retained_leaves.len() * 2);
-        // Queue: (new_idx, path TO the node — excluding its own short_key)
-        let mut queue: VecDeque<(Index, Nibbles)> = VecDeque::new();
         let mut new_num_leaves = 0u64;
         let mut new_nodes_heap_size = 0usize;
 
         // Root is always retained.
         let root_node = self.arena.remove(self.root).expect("root exists");
         let new_root = new_arena.insert(root_node);
-        queue.push_back((new_root, self.path));
+        copy_retained_subtree(
+            &mut self.arena,
+            &mut new_arena,
+            new_root,
+            self.path,
+            retained_leaves,
+            &mut new_num_leaves,
+            &mut new_nodes_heap_size,
+        );
 
-        while let Some((new_idx, node_path)) = queue.pop_front() {
-            new_nodes_heap_size += new_arena[new_idx].extra_heap_bytes();
+        let pruned = old_count - new_arena.len();
+        self.num_leaves = new_num_leaves;
+        self.num_dirty_leaves = 0;
+        self.arena = new_arena;
+        self.root = new_root;
+        self.cached_memory_size =
+            self.arena.capacity() * slotmap_slot_size::<ArenaSparseNode>() + new_nodes_heap_size;
+
+        #[cfg(debug_assertions)]
+        self.debug_assert_counters();
+        return pruned;
+
+        /// Returns `true` if any entry in `sorted_keys` starts with `prefix`.
+        fn has_prefix(sorted_keys: &[Nibbles], prefix: &Nibbles) -> bool {
+            let idx = sorted_keys.binary_search(prefix).unwrap_or_else(|i| i);
+            sorted_keys.get(idx).is_some_and(|p| p.starts_with(prefix))
+        }
+
+        /// Copies retained nodes into `new_arena` in trie-path lexicographic order.
+        fn copy_retained_subtree(
+            old_arena: &mut NodeArena,
+            new_arena: &mut NodeArena,
+            new_idx: Index,
+            node_path: Nibbles,
+            retained_leaves: &[Nibbles],
+            new_num_leaves: &mut u64,
+            new_nodes_heap_size: &mut usize,
+        ) {
+            *new_nodes_heap_size += new_arena[new_idx].extra_heap_bytes();
 
             let ArenaSparseNode::Branch(b) = &new_arena[new_idx] else {
                 if matches!(&new_arena[new_idx], ArenaSparseNode::Leaf { .. }) {
-                    new_num_leaves += 1;
+                    *new_num_leaves += 1;
                 }
-                continue;
+                return;
             };
 
             // Logical path of this branch (path TO node + its extension/short_key).
@@ -282,7 +315,7 @@ impl ArenaSparseSubtrie {
                 child_path.push(nibble);
 
                 // Child's full prefix for the retention check.
-                let child_short_key = match &self.arena[old_child_idx] {
+                let child_short_key = match &old_arena[old_child_idx] {
                     ArenaSparseNode::Branch(b) => &b.short_key,
                     ArenaSparseNode::Leaf { key, .. } => key,
                     other => unreachable!("subtrie prune: unexpected child node kind: {other:?}"),
@@ -292,16 +325,24 @@ impl ArenaSparseSubtrie {
 
                 if has_prefix(retained_leaves, &child_prefix) {
                     // Retained — move child to new arena.
-                    let child_node = self.arena.remove(old_child_idx).expect("child exists");
+                    let child_node = old_arena.remove(old_child_idx).expect("child exists");
                     let new_child_idx = new_arena.insert(child_node);
                     let ArenaSparseNode::Branch(b) = &mut new_arena[new_idx] else {
                         unreachable!()
                     };
                     b.children[child_pos] = ArenaSparseNodeBranchChild::Revealed(new_child_idx);
-                    queue.push_back((new_child_idx, child_path));
+                    copy_retained_subtree(
+                        old_arena,
+                        new_arena,
+                        new_child_idx,
+                        child_path,
+                        retained_leaves,
+                        new_num_leaves,
+                        new_nodes_heap_size,
+                    );
                 } else {
                     // Not retained — blind the child slot in the new arena.
-                    let rlp_node = self.arena[old_child_idx]
+                    let rlp_node = old_arena[old_child_idx]
                         .state_ref()
                         .expect("child must have state")
                         .cached_rlp_node()
@@ -313,24 +354,6 @@ impl ArenaSparseSubtrie {
                     b.children[child_pos] = ArenaSparseNodeBranchChild::Blinded(rlp_node);
                 }
             }
-        }
-
-        let pruned = old_count - new_arena.len();
-        self.num_leaves = new_num_leaves;
-        self.num_dirty_leaves = 0;
-        self.arena = new_arena;
-        self.root = new_root;
-        self.cached_memory_size =
-            self.arena.capacity() * slotmap_slot_size::<ArenaSparseNode>() + new_nodes_heap_size;
-
-        #[cfg(debug_assertions)]
-        self.debug_assert_counters();
-        return pruned;
-
-        /// Returns `true` if any entry in `sorted_keys` starts with `prefix`.
-        fn has_prefix(sorted_keys: &[Nibbles], prefix: &Nibbles) -> bool {
-            let idx = sorted_keys.binary_search(prefix).unwrap_or_else(|i| i);
-            sorted_keys.get(idx).is_some_and(|p| p.starts_with(prefix))
         }
     }
 
@@ -3118,12 +3141,17 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
 #[cfg(test)]
 mod tests {
-    use super::TRACE_TARGET;
+    use super::{
+        ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
+        ArenaSparseSubtrie, TRACE_TARGET,
+    };
     use crate::{ArenaParallelSparseTrie, ArenaParallelismThresholds, LeafUpdate, SparseTrie};
     use alloy_primitives::{map::B256Map, B256, U256};
+    use alloy_trie::TrieMask;
     use rand::{seq::SliceRandom, Rng, SeedableRng};
     use reth_trie::test_utils::TrieTestHarness;
-    use reth_trie_common::{Nibbles, ProofV2Target};
+    use reth_trie_common::{BranchNodeMasks, Nibbles, ProofV2Target, RlpNode};
+    use smallvec::smallvec;
     use std::collections::BTreeMap;
     use tracing::{info, trace};
 
@@ -3228,6 +3256,63 @@ mod tests {
             );
             assert_eq!(expected_root, actual_root, "storage root mismatch");
         }
+    }
+
+    #[test]
+    fn subtrie_prune_reinserts_nodes_in_lexicographic_order() {
+        fn cached_state(byte: u8) -> ArenaSparseNodeState {
+            ArenaSparseNodeState::Cached { rlp_node: RlpNode::word_rlp(&B256::repeat_byte(byte)) }
+        }
+
+        let mut subtrie = ArenaSparseSubtrie::new(false);
+
+        let leaf_10 = subtrie.arena.insert(ArenaSparseNode::Leaf {
+            state: cached_state(0x10),
+            value: vec![0x10],
+            key: Nibbles::default(),
+        });
+        let branch_1 = subtrie.arena.insert(ArenaSparseNode::Branch(ArenaSparseNodeBranch {
+            state: cached_state(0x01),
+            children: smallvec![ArenaSparseNodeBranchChild::Revealed(leaf_10)],
+            state_mask: TrieMask::from(1u16),
+            short_key: Nibbles::default(),
+            branch_masks: BranchNodeMasks::default(),
+        }));
+        let leaf_2 = subtrie.arena.insert(ArenaSparseNode::Leaf {
+            state: cached_state(0x02),
+            value: vec![0x02],
+            key: Nibbles::default(),
+        });
+
+        subtrie.arena[subtrie.root] = ArenaSparseNode::Branch(ArenaSparseNodeBranch {
+            state: cached_state(0x00),
+            children: smallvec![
+                ArenaSparseNodeBranchChild::Revealed(branch_1),
+                ArenaSparseNodeBranchChild::Revealed(leaf_2)
+            ],
+            state_mask: TrieMask::from((1u16 << 1) | (1u16 << 2)),
+            short_key: Nibbles::default(),
+            branch_masks: BranchNodeMasks::default(),
+        });
+        subtrie.num_leaves = 2;
+
+        let retained = [Nibbles::from_nibbles([0x1, 0x0]), Nibbles::from_nibbles([0x2])];
+
+        assert_eq!(subtrie.prune(&retained), 0);
+
+        let node_order = subtrie
+            .arena
+            .iter()
+            .map(|(_, node)| match node {
+                ArenaSparseNode::Branch(branch) if branch.state_mask.is_bit_set(1) => "root",
+                ArenaSparseNode::Branch(_) => "1",
+                ArenaSparseNode::Leaf { value, .. } if value == &[0x10] => "10",
+                ArenaSparseNode::Leaf { value, .. } if value == &[0x02] => "2",
+                other => panic!("unexpected node in test subtrie: {other:?}"),
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(node_order, ["root", "1", "10", "2"]);
     }
 
     use proptest::prelude::*;
