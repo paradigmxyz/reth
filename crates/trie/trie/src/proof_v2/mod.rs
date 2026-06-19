@@ -1702,8 +1702,12 @@ impl<'a> TargetsCursor<'a> {
     }
 
     /// Returns the current and next [`ProofV2Target`] that the cursor is pointed at.
+    #[inline]
     fn current(&self) -> (&'a ProofV2Target, Option<&'a ProofV2Target>) {
-        (&self.targets[self.i], self.targets.get(self.i + 1))
+        debug_assert!(self.i < self.targets.len());
+        // SAFETY: `TargetsCursor` is only constructed from a non-empty slice, and `next`
+        // maintains `self.i < self.targets.len()`.
+        unsafe { (self.targets.get_unchecked(self.i), self.targets.get(self.i + 1)) }
     }
 
     /// Iterates the cursor forward.
@@ -1711,6 +1715,7 @@ impl<'a> TargetsCursor<'a> {
     /// # Panics
     ///
     /// Will panic if the cursor is exhausted.
+    #[inline]
     fn next(&mut self) -> (&'a ProofV2Target, Option<&'a ProofV2Target>) {
         self.i += 1;
         debug_assert!(self.i < self.targets.len());
