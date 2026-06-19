@@ -100,8 +100,12 @@ impl BalPrewarmPool {
     }
 
     fn send_warm(&self, target: PrewarmTarget) {
-        let i = self.next.fetch_add(1, Ordering::Relaxed) % self.workers.len();
-        let _ = self.workers[i].send(PrewarmMsg::Warm(target));
+        let worker_count = self.workers.len();
+        debug_assert!(worker_count > 0);
+        let i = self.next.fetch_add(1, Ordering::Relaxed) % worker_count;
+        // SAFETY: `i` is reduced modulo `worker_count`, and `worker_count` is the vector length.
+        let worker = unsafe { self.workers.get_unchecked(i) };
+        let _ = worker.send(PrewarmMsg::Warm(target));
     }
 }
 
