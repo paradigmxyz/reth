@@ -1,42 +1,102 @@
 //! Types and traits for validating blocks and payloads.
 //!
-//! # Validation pipeline
+//! # Payload validation flow
 //!
-//! When the engine processes a new payload (`engine_newPayload`), validation happens in phases:
+//! [`BasicEngineValidator::validate_block_with_state`] is the engine-side entry point for an
+//! inserted block or an `engine_newPayload` payload. It overlaps payload conversion, transaction
+//! preparation, cache prewarming, receipt-root computation, state-root computation, and deferred
+//! trie input construction wherever those tasks do not depend on each other.
 //!
-//! ## Phase 1 – Payload conversion
-//! [`PayloadValidator::convert_payload_to_block`] decodes the execution payload (RLP, hashing)
-//! into a [`SealedBlock`]. This runs on a background thread concurrently with state setup.
+//! ## Validation phases
 //!
-//! ## Phase 2 – Pre-execution consensus
-//! - [`HeaderValidator::validate_header`] — standalone header checks (hash, gas, base fee,
-//!   fork-specific fields)
-//! - [`Consensus::validate_block_pre_execution`] — body vs header (tx root, ommer hash, withdrawals
-//!   root)
-//! - [`HeaderValidator::validate_header_against_parent`] — sequential checks (block number,
-//!   timestamp, gas limit, base fee vs parent)
+//! 1. Fetch the parent header and spawn `payload-convert`, which converts payloads into sealed
+//!    blocks and runs header, parent-header, and pre-execution consensus validation.
+//! 2. Build the parent state provider, EVM environment, transaction iterator, lazy ancestor
+//!    overlay, and optional decoded EIP-7928 block access list (BAL).
+//! 3. Choose the state-root strategy: `StateRootTask`, `Parallel`, `Synchronous`, or `Custom`.
+//! 4. Spawn the payload processor. This always prepares transaction conversion and prewarming; the
+//!    `StateRootTask` strategy also starts proof workers and the sparse trie task.
+//! 5. Execute the block. BAL payloads use the parallel BAL execute path only when state caching and
+//!    BAL parallel execution are enabled. Otherwise the regular executor still builds and validates
+//!    the BAL before post-execution consensus uses the decoded BAL hash.
+//! 6. Stop prewarming, terminate execution caching, spawn `hash-post-state`, await
+//!    `payload-convert` and `receipt-root`, then run post-execution consensus validation.
+//! 7. Resolve the state root from the selected strategy and fall back to serial computation when a
+//!    non-custom parallel path fails to produce a usable root.
+//! 8. Verify the header state root, spawn deferred trie input computation, and return the executed
+//!    block without waiting for that deferred trie task on the hot path.
 //!
-//! ## Phase 3 – Execution
-//! Block transactions are executed via the EVM. Receipt roots are computed incrementally.
+//! ## Spawned background work
 //!
-//! ## Phase 4 – Post-execution consensus
-//! - [`FullConsensus::validate_block_post_execution`] — gas used, receipt root, logs bloom,
-//!   requests hash
-//! - [`PayloadValidator::validate_block_post_execution_with_hashed_state`] — network-specific
-//!   (no-op on L1, used by OP Stack)
+//! | Work | Spawned when | Role | Completion point |
+//! | --- | --- | --- | --- |
+//! | `payload-convert` | parent is known | convert payloads, validate header and body roots | after execution, unless the gas sanity check awaits it earlier |
+//! | `tx-iterator` | payload processor setup | convert transactions, using rayon for larger blocks | consumed by regular and BAL execution |
+//! | `prewarm` | payload processor setup | warm execution caches; in BAL mode, stream BAL-derived trie targets | stopped after execution, then caching is terminated |
+//! | proof workers | `StateRootTask` setup | fetch trie proofs for sparse trie updates | consumed by the sparse trie task |
+//! | `sparse-trie` | `StateRootTask` setup | apply execution or BAL updates and compute the state root | awaited by `await_state_root_with_timeout` |
+//! | `receipt-root` | execution start | compute receipt root and logs bloom incrementally | awaited before post-execution consensus |
+//! | `hash-post-state` | after execution | hash changed accounts and storage from `BundleState` | awaited by post-execution validation and root computation |
+//! | `serial-root` | sparse trie timeout fallback | race serial state-root computation against the sparse trie task | polled by `await_state_root_with_timeout` |
+//! | deferred trie task | after root verification | sort trie data, merge overlays, and cache changesets | not awaited by the validation hot path |
 //!
-//! ## Payload attributes validation (`engine_forkchoiceUpdated`)
-//! When the CL provides payload attributes to start building a block:
-//! - [`PayloadValidator::validate_payload_attributes_against_header`] — ensures timestamp ordering
+//! ```mermaid
+//! sequenceDiagram
+//!     autonumber
+//!     participant Main as validate_block_with_state
+//!     participant Convert as payload-convert
+//!     participant Tx as tx-iterator
+//!     participant Prewarm as prewarm
+//!     participant Exec as EVM execution
+//!     participant Receipt as receipt-root
+//!     participant Trie as sparse trie and proofs
+//!     participant Hash as hash-post-state
+//!     participant Deferred as deferred trie task
 //!
-//! If validation passes, a payload build job is started. If it fails,
-//! `INVALID_PAYLOAD_ATTRIBUTES` is returned without rolling back the forkchoice update.
+//!     Main->>Convert: spawn convert and pre-execution validation
+//!     Main->>Main: parent provider, EVM env, optional BAL decode
+//!     Main->>Tx: spawn transaction conversion
+//!     alt StateRootTask
+//!         Main->>Trie: spawn proof workers and sparse trie
+//!     end
+//!     Main->>Prewarm: spawn transaction, BAL, or skipped prewarm
+//!     Main->>Receipt: spawn receipt root task
+//!     alt BAL path eligible
+//!         Main->>Exec: execute_block_bal
+//!         Prewarm->>Trie: BAL-derived sparse trie updates
+//!     else regular execution
+//!         Tx-->>Exec: recovered transactions in block order
+//!         Main->>Exec: execute_block
+//!         Exec->>Receipt: stream receipts
+//!         Exec->>Trie: stream state hook updates
+//!         Exec->>Exec: rebuild and validate BAL when present
+//!     end
+//!     Main->>Prewarm: stop prewarming and terminate cache
+//!     Main->>Hash: spawn changed-state hashing
+//!     Convert-->>Main: sealed block
+//!     Receipt-->>Main: receipt root and logs bloom
+//!     Main->>Main: post-execution consensus and BAL hash check
+//!     Hash-->>Main: hashed post state
+//!     alt StateRootTask
+//!         Trie-->>Main: state root and trie updates
+//!     else Parallel
+//!         Main->>Main: compute ParallelStateRoot
+//!     else Custom
+//!         Main->>Main: call custom root function
+//!     else Synchronous or fallback
+//!         Main->>Main: compute serial StateRoot
+//!     end
+//!     Main->>Main: verify header state root
+//!     Main->>Deferred: spawn trie input sorting and cache update
+//!     Main-->>Main: return ValidationOutput
+//! ```
 //!
-//! [`HeaderValidator::validate_header`]: reth_consensus::HeaderValidator::validate_header
-//! [`Consensus::validate_block_pre_execution`]: reth_consensus::Consensus::validate_block_pre_execution
-//! [`HeaderValidator::validate_header_against_parent`]: reth_consensus::HeaderValidator::validate_header_against_parent
-//! [`FullConsensus::validate_block_post_execution`]: reth_consensus::FullConsensus::validate_block_post_execution
-//! [`SealedBlock`]: reth_primitives_traits::SealedBlock
+//! ## Payload attributes validation
+//!
+//! During `engine_forkchoiceUpdated`,
+//! [`PayloadValidator::validate_payload_attributes_against_header`] checks payload attributes
+//! before a payload build job starts. On failure, the engine returns
+//! `INVALID_PAYLOAD_ATTRIBUTES` without rolling back the forkchoice update.
 
 use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
@@ -1732,8 +1792,12 @@ where
             StateRootStrategy::Synchronous |
             StateRootStrategy::Custom(_) => {
                 let start = Instant::now();
-                let handle =
-                    self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder);
+                let handle = self.payload_processor.spawn_cache_exclusive(
+                    env,
+                    txs,
+                    provider_builder,
+                    parallel_bal_execution,
+                );
 
                 // Record prewarming initialization duration
                 self.metrics
