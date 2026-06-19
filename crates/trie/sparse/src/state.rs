@@ -973,8 +973,10 @@ mod tests {
         };
 
         sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
-        let mut trie_account = TrieAccount::default();
-        trie_account.storage_root = sparse.storage_root(&account).unwrap();
+        let trie_account = TrieAccount {
+            storage_root: sparse.storage_root(&account).unwrap(),
+            ..Default::default()
+        };
         apply_account_update(
             &mut sparse,
             account,

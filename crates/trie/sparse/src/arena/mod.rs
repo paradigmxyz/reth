@@ -10,11 +10,7 @@ use nodes::{
 
 use crate::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates};
 use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
-use alloy_primitives::{
-    keccak256,
-    map::{B256Map, HashSet},
-    B256,
-};
+use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_trie::TrieMask;
 use core::{cmp::Reverse, mem};
 use reth_execution_errors::SparseTrieResult;
@@ -28,6 +24,8 @@ use tracing::{instrument, trace};
 
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::{LeafUpdateRecord, ProofTrieNodeRecord, RecordedOp, TrieDebugRecorder};
+#[cfg(debug_assertions)]
+use alloy_primitives::map::HashSet;
 
 /// Alias for the slotmap key type used as node references throughout the arena trie.
 type Index = DefaultKey;
