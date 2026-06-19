@@ -1729,11 +1729,11 @@ impl EthPoolTransaction for EthPooledTransaction {
     }
 
     fn blob_cell_availability(&self) -> Option<BlobCellAvailability> {
-        EthPooledTransaction::blob_cell_availability(self)
+        Self::blob_cell_availability(self)
     }
 
     fn set_blob_cell_availability(&mut self, availability: Option<BlobCellAvailability>) {
-        EthPooledTransaction::set_blob_cell_availability(self, availability);
+        Self::set_blob_cell_availability(self, availability);
     }
 
     fn try_into_pooled_eip4844(
