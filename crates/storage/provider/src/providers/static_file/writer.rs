@@ -1222,6 +1222,41 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         Ok(())
     }
 
+    /// Appends multiple transactions to the static file.
+    pub fn append_transactions<I, T>(&mut self, transactions: I) -> ProviderResult<()>
+    where
+        I: Iterator<Item = (TxNumber, T)>,
+        T: Borrow<N::SignedTx>,
+        N::SignedTx: Compact,
+    {
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Transactions);
+
+        let mut transactions_iter = transactions.into_iter().peekable();
+        if transactions_iter.peek().is_none() {
+            return Ok(())
+        }
+
+        let start = Instant::now();
+        self.ensure_no_queued_prune()?;
+
+        let mut count: u64 = 0;
+        for (tx_num, tx) in transactions_iter {
+            self.append_with_tx_number(tx_num, tx.borrow())?;
+            count += 1;
+        }
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_segment_operations(
+                StaticFileSegment::Transactions,
+                StaticFileProviderOperation::Append,
+                count,
+                Some(start.elapsed()),
+            );
+        }
+
+        Ok(())
+    }
+
     /// Appends receipt to static file.
     ///
     /// It **DOES NOT** call `increment_block()`, it should be handled elsewhere. There might be
