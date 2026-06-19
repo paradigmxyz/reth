@@ -1,11 +1,10 @@
 use crate::{
     ArenaParallelSparseTrie, LeafUpdate, SparseTrie as SparseTrieTrait, SparseTrieUpdates,
 };
-use alloc::{borrow::Cow, boxed::Box, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box};
 use alloy_primitives::{map::B256Map, B256};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieMask, TrieNodeV2};
-use tracing::instrument;
 
 /// A sparse trie that is either in a "blind" state (no nodes are revealed, root node hash is
 /// unknown) or in a "revealed" state (root node has been revealed and the trie can be updated).
@@ -263,49 +262,6 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
             _ => {}
         }
     }
-}
-
-impl RevealableSparseTrie {
-    /// Updates (or inserts) a leaf at the given key path with the specified RLP-encoded value.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the trie is still blind, or if the update fails.
-    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
-    pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
-        let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
-        let mut updates =
-            B256Map::from_iter([(nibbles_to_padded_b256(&path), LeafUpdate::Changed(value))]);
-        revealed.update_leaves(&mut updates, |_, _| {})?;
-        if !updates.is_empty() {
-            return Err(SparseTrieErrorKind::BlindedNode(path).into())
-        }
-        Ok(())
-    }
-
-    /// Removes a leaf node at the specified key path.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the trie is still blind, or if the leaf cannot be removed.
-    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
-    pub fn remove_leaf(&mut self, path: &Nibbles) -> SparseTrieResult<()> {
-        let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
-        let mut updates =
-            B256Map::from_iter([(nibbles_to_padded_b256(path), LeafUpdate::Changed(Vec::new()))]);
-        revealed.update_leaves(&mut updates, |_, _| {})?;
-        if !updates.is_empty() {
-            return Err(SparseTrieErrorKind::BlindedNode(*path).into())
-        }
-        Ok(())
-    }
-}
-
-/// Right-pads a nibble path with zeros and packs it into a [`B256`].
-fn nibbles_to_padded_b256(path: &Nibbles) -> B256 {
-    let mut bytes = [0u8; 32];
-    path.pack_to(&mut bytes);
-    B256::from(bytes)
 }
 
 impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
