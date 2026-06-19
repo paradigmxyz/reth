@@ -11,6 +11,11 @@ use alloy_eips::{
 };
 use alloy_primitives::{Bytes, B128, B256};
 use alloy_rpc_types_engine::{
+    ssz_engine_types::{
+        BodiesByHashRequest, BodiesResponse, BodiesResponseCancun, BodiesResponseOsaka,
+        BodiesResponsePrague, BodyEntry, ExecutionPayloadBodyAmsterdam, ExecutionPayloadBodyParis,
+        ExecutionPayloadBodyShanghai,
+    },
     CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
     ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ExecutionPayloadV4,
     ForkchoiceState, PayloadAttributes, PraguePayloadFields,
@@ -250,26 +255,114 @@ where
             };
             handle_get_blobs(engine_api, version, &body).await
         }
+        EngineSszEndpoint::PayloadBodiesByHash(fork) => {
+            if method != "POST" {
+                return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
+            }
+            let request = match request.into_body().collect().await.map(|body| body.to_bytes()) {
+                Ok(body) => match BodiesByHashRequest::from_ssz_bytes(&body) {
+                    Ok(request) => {
+                        PayloadBodiesRequest::Hash(request.block_hashes.into_iter().collect())
+                    }
+                    Err(_) => return text_response(STATUS_BAD_REQUEST, "invalid ssz"),
+                },
+                Err(_) => return text_response(STATUS_BAD_REQUEST, "failed to read request body"),
+            };
+            let Some(engine_api) = handle.engine_api().await else {
+                return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
+            };
+            handle_get_payload_bodies(engine_api, fork, request).await
+        }
+        EngineSszEndpoint::PayloadBodiesByRange(fork) => {
+            if method != "GET" {
+                return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
+            }
+
+            let Some(query) = request.uri().query() else {
+                return text_response(STATUS_BAD_REQUEST, "missing payload bodies query")
+            };
+            let mut start = None;
+            let mut count = None;
+            for pair in query.split('&') {
+                let Some((key, value)) = pair.split_once('=') else {
+                    return text_response(STATUS_BAD_REQUEST, "invalid payload bodies query")
+                };
+                match key {
+                    "from" => {
+                        start = match value.parse::<u64>() {
+                            Ok(value) => Some(value),
+                            Err(_) => {
+                                return text_response(
+                                    STATUS_BAD_REQUEST,
+                                    "invalid payload bodies from query",
+                                )
+                            }
+                        };
+                    }
+                    "count" => {
+                        count = match value.parse::<u64>() {
+                            Ok(value) => Some(value),
+                            Err(_) => {
+                                return text_response(
+                                    STATUS_BAD_REQUEST,
+                                    "invalid payload bodies count query",
+                                )
+                            }
+                        };
+                    }
+                    _ => return text_response(STATUS_BAD_REQUEST, "unknown payload bodies query"),
+                }
+            }
+            let Some(start) = start else {
+                return text_response(STATUS_BAD_REQUEST, "missing payload bodies from query")
+            };
+            let Some(count) = count else {
+                return text_response(STATUS_BAD_REQUEST, "missing payload bodies count query")
+            };
+
+            let Some(engine_api) = handle.engine_api().await else {
+                return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
+            };
+            handle_get_payload_bodies(
+                engine_api,
+                fork,
+                PayloadBodiesRequest::Range { start, count },
+            )
+            .await
+        }
     }
 }
 
 fn parse_engine_path(path: &str) -> Option<EngineSszEndpoint> {
     let mut segments = path.trim_start_matches('/').split('/');
-    match (segments.next(), segments.next(), segments.next(), segments.next(), segments.next()) {
-        (Some("engine"), Some("v2"), Some("capabilities"), None, None) => {
+    match (
+        segments.next(),
+        segments.next(),
+        segments.next(),
+        segments.next(),
+        segments.next(),
+        segments.next(),
+    ) {
+        (Some("engine"), Some("v2"), Some("capabilities"), None, None, None) => {
             Some(EngineSszEndpoint::Capabilities)
         }
-        (Some("engine"), Some("v2"), Some("identity"), None, None) => {
+        (Some("engine"), Some("v2"), Some("identity"), None, None, None) => {
             Some(EngineSszEndpoint::Identity)
         }
-        (Some("engine"), Some("v2"), Some(fork), Some("payloads"), None) => {
+        (Some("engine"), Some("v2"), Some(fork), Some("payloads"), None, None) => {
             Some(EngineSszEndpoint::Payloads(fork.parse().ok()?))
         }
-        (Some("engine"), Some("v2"), Some(fork), Some("forkchoice"), None) => {
+        (Some("engine"), Some("v2"), Some(fork), Some("forkchoice"), None, None) => {
             Some(EngineSszEndpoint::Forkchoice(fork.parse().ok()?))
         }
-        (Some("engine"), Some("v2"), Some("blobs"), version, None) => {
+        (Some("engine"), Some("v2"), Some("blobs"), version, None, None) => {
             Some(EngineSszEndpoint::Blobs(parse_method_version(version?)?))
+        }
+        (Some("engine"), Some("v2"), Some(fork), Some("bodies"), Some("hash"), None) => {
+            Some(EngineSszEndpoint::PayloadBodiesByHash(fork.parse().ok()?))
+        }
+        (Some("engine"), Some("v2"), Some(fork), Some("bodies"), None, None) => {
+            Some(EngineSszEndpoint::PayloadBodiesByRange(fork.parse().ok()?))
         }
         _ => None,
     }
@@ -282,6 +375,8 @@ enum EngineSszEndpoint {
     Payloads(EngineSszFork),
     Forkchoice(EngineSszFork),
     Blobs(u8),
+    PayloadBodiesByHash(EngineSszFork),
+    PayloadBodiesByRange(EngineSszFork),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -422,6 +517,169 @@ where
         Ok(updated) => ssz_response(updated),
         Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
     }
+}
+
+enum PayloadBodiesRequest {
+    Hash(Vec<B256>),
+    Range { start: u64, count: u64 },
+}
+
+async fn handle_get_payload_bodies<Provider, Pool, Validator, ChainSpec>(
+    engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
+    fork: EngineSszFork,
+    request: PayloadBodiesRequest,
+) -> HttpResponse
+where
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
+    Pool: TransactionPool + 'static,
+    Validator: EngineApiValidator<EthEngineTypes>,
+    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+{
+    match fork {
+        EngineSszFork::Paris => {
+            let response = match request {
+                PayloadBodiesRequest::Hash(hashes) => {
+                    engine_api.get_payload_bodies_by_hash_v1_metered(hashes).await
+                }
+                PayloadBodiesRequest::Range { start, count } => {
+                    engine_api.get_payload_bodies_by_range_v1_metered(start, count).await
+                }
+            };
+            match response {
+                Ok(bodies) => match payload_bodies_response(bodies, |body| {
+                    ExecutionPayloadBodyParis::try_from(body).ok()
+                }) {
+                    Ok(response) => ssz_response(response),
+                    Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err),
+                },
+                Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+            }
+        }
+        EngineSszFork::Shanghai => {
+            let response = match request {
+                PayloadBodiesRequest::Hash(hashes) => {
+                    engine_api.get_payload_bodies_by_hash_v1_metered(hashes).await
+                }
+                PayloadBodiesRequest::Range { start, count } => {
+                    engine_api.get_payload_bodies_by_range_v1_metered(start, count).await
+                }
+            };
+            match response {
+                Ok(bodies) => match payload_bodies_response(bodies, |body| {
+                    ExecutionPayloadBodyShanghai::try_from(body).ok()
+                }) {
+                    Ok(response) => ssz_response(response),
+                    Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err),
+                },
+                Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+            }
+        }
+        EngineSszFork::Cancun => {
+            let response = match request {
+                PayloadBodiesRequest::Hash(hashes) => {
+                    engine_api.get_payload_bodies_by_hash_v1_metered(hashes).await
+                }
+                PayloadBodiesRequest::Range { start, count } => {
+                    engine_api.get_payload_bodies_by_range_v1_metered(start, count).await
+                }
+            };
+            match response {
+                Ok(bodies) => match payload_bodies_response(bodies, |body| {
+                    ExecutionPayloadBodyShanghai::try_from(body).ok()
+                }) {
+                    Ok(response) => {
+                        let response: BodiesResponseCancun = response;
+                        ssz_response(response)
+                    }
+                    Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err),
+                },
+                Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+            }
+        }
+        EngineSszFork::Prague => {
+            let response = match request {
+                PayloadBodiesRequest::Hash(hashes) => {
+                    engine_api.get_payload_bodies_by_hash_v1_metered(hashes).await
+                }
+                PayloadBodiesRequest::Range { start, count } => {
+                    engine_api.get_payload_bodies_by_range_v1_metered(start, count).await
+                }
+            };
+            match response {
+                Ok(bodies) => match payload_bodies_response(bodies, |body| {
+                    ExecutionPayloadBodyShanghai::try_from(body).ok()
+                }) {
+                    Ok(response) => {
+                        let response: BodiesResponsePrague = response;
+                        ssz_response(response)
+                    }
+                    Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err),
+                },
+                Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+            }
+        }
+        EngineSszFork::Osaka => {
+            let response = match request {
+                PayloadBodiesRequest::Hash(hashes) => {
+                    engine_api.get_payload_bodies_by_hash_v1_metered(hashes).await
+                }
+                PayloadBodiesRequest::Range { start, count } => {
+                    engine_api.get_payload_bodies_by_range_v1_metered(start, count).await
+                }
+            };
+            match response {
+                Ok(bodies) => match payload_bodies_response(bodies, |body| {
+                    ExecutionPayloadBodyShanghai::try_from(body).ok()
+                }) {
+                    Ok(response) => {
+                        let response: BodiesResponseOsaka = response;
+                        ssz_response(response)
+                    }
+                    Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err),
+                },
+                Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+            }
+        }
+        EngineSszFork::Amsterdam => {
+            let response = match request {
+                PayloadBodiesRequest::Hash(hashes) => {
+                    engine_api.get_payload_bodies_by_hash_v2_metered(hashes).await
+                }
+                PayloadBodiesRequest::Range { start, count } => {
+                    engine_api.get_payload_bodies_by_range_v2_metered(start, count).await
+                }
+            };
+            match response {
+                Ok(bodies) => match payload_bodies_response(bodies, |body| {
+                    ExecutionPayloadBodyAmsterdam::try_from(body).ok()
+                }) {
+                    Ok(response) => ssz_response(response),
+                    Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err),
+                },
+                Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+            }
+        }
+    }
+}
+
+fn payload_bodies_response<LegacyBody, ForkBody>(
+    bodies: Vec<Option<LegacyBody>>,
+    convert: impl Fn(LegacyBody) -> Option<ForkBody>,
+) -> Result<BodiesResponse<ForkBody>, String>
+where
+    ForkBody: Default,
+{
+    let entries = bodies
+        .into_iter()
+        .map(|body| match body.and_then(|body| convert(body)) {
+            Some(body) => BodyEntry { available: true, body },
+            None => BodyEntry { available: false, body: ForkBody::default() },
+        })
+        .collect::<Vec<_>>()
+        .try_into()
+        .map_err(|_| "too many payload body entries".to_string())?;
+
+    Ok(BodiesResponse { entries })
 }
 
 /// Handles SSZ `engine_getBlobsV*` requests with the node's blob store.
@@ -686,6 +944,10 @@ fn text_response(status: u16, body: impl Into<String>) -> HttpResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_rpc_types_engine::{
+        ssz_engine_types::{BodiesResponseAmsterdam, BodiesResponseParis},
+        ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
+    };
     use ssz::Encode;
 
     #[test]
@@ -713,6 +975,18 @@ mod tests {
     }
 
     #[test]
+    fn parses_fork_scoped_payload_bodies_by_hash_endpoint() {
+        let endpoint = parse_engine_path("/engine/v2/prague/bodies/hash").unwrap();
+        assert_eq!(endpoint, EngineSszEndpoint::PayloadBodiesByHash(EngineSszFork::Prague));
+    }
+
+    #[test]
+    fn parses_fork_scoped_payload_bodies_by_range_endpoint() {
+        let endpoint = parse_engine_path("/engine/v2/osaka/bodies").unwrap();
+        assert_eq!(endpoint, EngineSszEndpoint::PayloadBodiesByRange(EngineSszFork::Osaka));
+    }
+
+    #[test]
     fn rejects_legacy_version_scoped_endpoint() {
         assert!(parse_engine_path("/engine/v4/payloads").is_none());
     }
@@ -722,6 +996,45 @@ mod tests {
         let hashes = vec![B256::ZERO, B256::with_last_byte(1)];
         let decoded = decode_blob_hashes_request(&hashes.as_ssz_bytes()).unwrap();
         assert_eq!(decoded, hashes);
+    }
+
+    #[test]
+    fn encodes_payload_body_availability_for_selected_fork() {
+        let response: BodiesResponseParis = payload_bodies_response(
+            vec![
+                Some(ExecutionPayloadBodyV1 { transactions: vec![], withdrawals: None }),
+                Some(ExecutionPayloadBodyV1 { transactions: vec![], withdrawals: Some(vec![]) }),
+                None,
+            ],
+            |body| ExecutionPayloadBodyParis::try_from(body).ok(),
+        )
+        .unwrap();
+
+        assert_eq!(response.entries.len(), 3);
+        assert!(response.entries[0].available);
+        assert!(!response.entries[1].available);
+        assert!(!response.entries[2].available);
+
+        let response: BodiesResponseAmsterdam = payload_bodies_response(
+            vec![
+                Some(ExecutionPayloadBodyV2 {
+                    transactions: vec![],
+                    withdrawals: Some(vec![]),
+                    block_access_list: Some(Bytes::new()),
+                }),
+                Some(ExecutionPayloadBodyV2 {
+                    transactions: vec![],
+                    withdrawals: Some(vec![]),
+                    block_access_list: None,
+                }),
+            ],
+            |body| ExecutionPayloadBodyAmsterdam::try_from(body).ok(),
+        )
+        .unwrap();
+
+        assert_eq!(response.entries.len(), 2);
+        assert!(response.entries[0].available);
+        assert!(!response.entries[1].available);
     }
 
     #[test]
