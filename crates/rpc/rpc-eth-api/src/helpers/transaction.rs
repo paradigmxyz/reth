@@ -86,7 +86,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 <PoolTx<Self::Pool> as PoolTransaction>::recover_raw_transaction(&tx)
                     .map_err(Self::Error::from_eth_err)?;
             self.send_pool_transaction(
-                TransactionOrigin::External,
+                TransactionOrigin::Local,
                 WithEncoded::new(tx, pool_transaction),
             )
             .await
@@ -583,7 +583,13 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     let header =
                         self.provider().latest_header().map_err(Self::Error::from_eth_err)?;
                     let base_fee = header.and_then(|h| h.base_fee_per_gas()).unwrap_or_default();
-                    request.as_mut().set_max_fee_per_gas(base_fee as u128 + tip);
+                    // Use `2 * base_fee` as headroom, matching go-ethereum's
+                    // `setLondonFeeDefaults`, so the transaction does not
+                    // become invalid if the base fee rises before it is
+                    // included. This does not increase the effective price the sender pays:
+                    // `max_fee_per_gas` is only an upper bound and the sender still pays
+                    // `base_fee + min(tip, max_fee_per_gas - base_fee)`.
+                    request.as_mut().set_max_fee_per_gas(base_fee as u128 * 2 + tip);
                 }
             }
 
