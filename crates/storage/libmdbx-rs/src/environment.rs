@@ -273,7 +273,7 @@ impl Drop for EnvironmentInner {
 unsafe impl Send for EnvironmentInner {}
 unsafe impl Sync for EnvironmentInner {}
 
-/// Determines how data is mapped into memory
+/// Determines whether the environment requests writable memory mapping.
 ///
 /// It only takes effect when the environment is opened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -281,16 +281,10 @@ pub enum EnvironmentKind {
     /// Open the environment in default mode, without WRITEMAP.
     #[default]
     Default,
-    /// Open the environment as mdbx-WRITEMAP.
-    /// Use a writable memory map unless the environment is opened as `MDBX_RDONLY`
-    /// ([`crate::Mode::ReadOnly`]).
+    /// Request MDBX WRITEMAP mode.
     ///
-    /// All data will be mapped into memory in the read-write mode [`crate::Mode::ReadWrite`]. This
-    /// offers a significant performance benefit, since the data will be modified directly in
-    /// mapped memory and then flushed to disk by single system call, without any memory
-    /// management nor copying.
-    ///
-    /// This mode is incompatible with nested transactions.
+    /// The bundled libmdbx fork does not support this mode and opening an environment with it
+    /// returns [`Error::Incompatible`].
     WriteMap,
 }
 
@@ -644,6 +638,10 @@ impl EnvironmentBuilder {
         path: &Path,
         mode: ffi::mdbx_mode_t,
     ) -> Result<Environment> {
+        if self.kind.is_write_map() {
+            return Err(Error::Incompatible)
+        }
+
         let mut env: *mut ffi::MDBX_env = ptr::null_mut();
         unsafe {
             if let Some(log_level) = self.log_level {
@@ -790,7 +788,9 @@ impl EnvironmentBuilder {
         self
     }
 
-    /// Opens the environment with mdbx WRITEMAP
+    /// Requests mdbx WRITEMAP mode.
+    ///
+    /// The bundled libmdbx fork rejects this mode when the environment is opened.
     ///
     /// See also [`EnvironmentKind`]
     pub const fn write_map(&mut self) -> &mut Self {
@@ -953,6 +953,15 @@ mod tests {
         ops::RangeInclusive,
         sync::atomic::{AtomicBool, Ordering},
     };
+
+    #[test]
+    fn write_map_is_rejected() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let mut builder = Environment::builder();
+        builder.write_map();
+
+        assert!(matches!(builder.open(tempdir.path()), Err(Error::Incompatible)));
+    }
 
     #[test]
     fn test_handle_slow_readers_callback() {

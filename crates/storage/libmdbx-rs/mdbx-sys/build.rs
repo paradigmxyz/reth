@@ -60,7 +60,9 @@ fn generate_bindings(mdbx: &Path, out_file: &Path) {
         fn int_macro(&self, name: &str, _value: i64) -> Option<IntKind> {
             match name {
                 "MDBX_SUCCESS" |
+                "MDBX_RESULT_FALSE" |
                 "MDBX_KEYEXIST" |
+                "MDBX_FIRST_LMDB_ERRCODE" |
                 "MDBX_NOTFOUND" |
                 "MDBX_PAGE_NOTFOUND" |
                 "MDBX_CORRUPTED" |
@@ -87,6 +89,7 @@ fn generate_bindings(mdbx: &Path, out_file: &Path) {
                 "MDBX_PROBLEM" |
                 "MDBX_LAST_LMDB_ERRCODE" |
                 "MDBX_BUSY" |
+                "MDBX_FIRST_ADDED_ERRCODE" |
                 "MDBX_EMULTIVAL" |
                 "MDBX_EBADSIGN" |
                 "MDBX_WANNA_RECOVERY" |
@@ -94,6 +97,16 @@ fn generate_bindings(mdbx: &Path, out_file: &Path) {
                 "MDBX_TOO_LARGE" |
                 "MDBX_THREAD_MISMATCH" |
                 "MDBX_TXN_OVERLAPPING" |
+                "MDBX_BACKLOG_DEPLETED" |
+                "MDBX_DUPLICATED_CLK" |
+                "MDBX_DANGLING_DBI" |
+                "MDBX_OUSTED" |
+                "MDBX_MVCC_RETARDED" |
+                "MDBX_LAGGARD_READER" |
+                "MDBX_LAST_ADDED_ERRCODE" |
+                "MDBX_CACHE_ERROR" |
+                "MDBX_CACHE_BEHIND" |
+                "MDBX_CACHE_UNABLE" |
                 "MDBX_LAST_ERRCODE" => Some(IntKind::Int),
                 _ => Some(IntKind::UInt),
             }

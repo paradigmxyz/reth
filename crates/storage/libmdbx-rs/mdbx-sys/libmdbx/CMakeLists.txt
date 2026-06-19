@@ -1,21 +1,22 @@
 # Copyright (c) 2020-2026 Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> ###############################################
 # SPDX-License-Identifier: Apache-2.0
 #
-# Donations are welcome to ETH `0xD104d8f8B2dC312aaD74899F83EBf3EEBDC1EA3A`,
+# libmdbx (aka MDBX) is an extremely fast, compact, powerful, embeddedable, transactional key-value storage engine with
+# open-source code. MDBX has a specific set of properties and capabilities, focused on creating unique lightweight
+# solutions.  Please visit https://libmdbx.dqdkfa.ru for more information, changelog, documentation, C++ API description
+# and links to the original git repo with the source code.  Questions, feedback and suggestions are welcome to the
+# Telegram' group https://t.me/libmdbx, MAX' chat https://max.ru/join/dKckvyuARxp1vRK-wnPur8zYCEkbR3OUOmpPWkWxp78.
+#
+# The libmdbx code will forever remain open and with high-quality free support, as far as the life circumstances of the
+# project participants allow. Donations are welcome to ETH `0xD104d8f8B2dC312aaD74899F83EBf3EEBDC1EA3A`,
 # BTC `bc1qzvl9uegf2ea6cwlytnanrscyv8snwsvrc0xfsu`, SOL `FTCTgbHajoLVZGr8aEFWMzx3NDMyS5wXJgfeMTmJznRi`.
 # Всё будет хорошо!
-
-# libmdbx = { Revised and extended descendant of Symas LMDB. }
-# Please see README.md at https://sourcecraft.dev/dqdkfa/libmdbx
-#
-# Libmdbx is superior to LMDB in terms of features and reliability, not inferior in performance. libmdbx works on Linux,
-# FreeBSD, MacOS X and other systems compliant with POSIX.1-2008, but also support Windows as a complementary platform.
 #
 # The next version is under active non-public development and will be released as MithrilDB and libmithrildb for
 # libraries & packages. Admittedly mythical Mithril is resembling silver but being stronger and lighter than steel.
-# Therefore MithrilDB is rightly relevant name.
-# MithrilDB will be radically different from libmdbx by the new database format and API based on C++20.
-# The goal of this revolution is to provide a clearer and robust API, add more features and new valuable properties.
+# Therefore MithrilDB is rightly relevant name. MithrilDB will be radically different from libmdbx by the new database
+# format and API based on C++20. The goal of this revolution is to provide a clearer and robust API, add more features
+# and new valuable properties.
 
 if(CMAKE_VERSION VERSION_LESS 3.8.2)
   cmake_minimum_required(VERSION 3.0.2)
@@ -54,23 +55,25 @@ endif()
 cmake_policy(SET CMP0054 NEW)
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION.json"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/COPYRIGHT"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/NOTICE"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/GNUmakefile"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx.c"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx.c++"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx.h"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx.h++"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_chk.c"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_copy.c"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_dump.c"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_load.c"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_stat.c"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_drop.c"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ntdll.def"
-  AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/config.h.in")
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/COPYRIGHT"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/NOTICE"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/GNUmakefile"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx.c"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx.c++"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx.h"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx-internals.h"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx.h++"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_chk.c"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_copy.c"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_dump.c"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_load.c"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_stat.c"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_drop.c"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/mdbx_defrag.c"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ntdll.def"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/config.h.in")
   set(MDBX_AMALGAMATED_SOURCE TRUE)
   set(MDBX_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 else()
@@ -118,6 +121,10 @@ else()
   project(libmdbx C)
 endif()
 
+if(NOT CMAKE_VERSION VERSION_LESS 3.8.2)
+  source_group("markdown" FILES REGULAR_EXPRESSION ".*[.]md")
+endif()
+
 if(NOT ((DEFINED BUILD_TESTING AND NOT BUILD_TESTING) OR (DEFINED MDBX_ENABLE_TESTS AND NOT MDBX_ENABLE_TESTS)))
   include(CTest)
   option(MDBX_ENABLE_TESTS "Build MDBX tests" ${BUILD_TESTING})
@@ -126,8 +133,7 @@ endif()
 # Try to find a C++ compiler unless sure that this is unnecessary.
 if(NOT CMAKE_CXX_COMPILER_LOADED)
   include(CheckLanguage)
-  if(NOT (DEFINED MDBX_BUILD_CXX AND NOT MDBX_BUILD_CXX)
-     OR NOT (DEFINED MDBX_ENABLE_TESTS AND NOT MDBX_ENABLE_TESTS))
+  if(NOT (DEFINED MDBX_BUILD_CXX AND NOT MDBX_BUILD_CXX) OR NOT (DEFINED MDBX_ENABLE_TESTS AND NOT MDBX_ENABLE_TESTS))
     check_language(CXX)
     if(CMAKE_CXX_COMPILER)
       enable_language(CXX)
@@ -208,19 +214,6 @@ if(NOT APPLE
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -pthread")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -pthread")
     set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -pthread")
-  endif()
-endif()
-
-check_function_exists(pow NOT_NEED_LIBM)
-if(NOT_NEED_LIBM)
-  set(LIB_MATH "")
-else()
-  set(CMAKE_REQUIRED_LIBRARIES m)
-  check_function_exists(pow HAVE_LIBM)
-  if(HAVE_LIBM)
-    set(LIB_MATH m)
-  else()
-    message(FATAL_ERROR "No libm found for math support")
   endif()
 endif()
 
@@ -357,7 +350,8 @@ if(NOT DEFINED MDBX_CXX_STANDARD)
   elseif(CXX_FALLBACK_GNU11 OR CXX_FALLBACK_11)
     set(MDBX_CXX_STANDARD 11)
   else()
-    message(NOTICE "The C++ example will be skipped, since C++20 standard is unavailable or C++ API of libmdbx was disabled.")
+    message(NOTICE
+            "The C++ example will be skipped, since C++20 standard is unavailable or C++ API of libmdbx was disabled.")
     set(MDBX_CXX_STANDARD 0)
   endif()
 endif()
@@ -454,7 +448,7 @@ endif()
 # ~~~
 # ######################################################################################################################
 
-set(MDBX_BUILD_OPTIONS ENABLE_UBSAN ENABLE_ASAN ENABLE_MEMCHECK ENABLE_GPROF ENABLE_GCOV)
+set(MDBX_BUILD_OPTIONS ENABLE_UBSAN ENABLE_ASAN ENABLE_MEMCHECK ENABLE_GPROF ENABLE_GCOV MDBX_DEBUG MDBX_CHECKING)
 
 if(IOS)
   set(MDBX_BUILD_TOOLS_DEFAULT OFF)
@@ -468,8 +462,8 @@ endif()
 
 add_option(MDBX INSTALL_STATIC "Build and install libmdbx for static linking" OFF)
 add_option(MDBX BUILD_SHARED_LIBRARY "Build libmdbx as shared library (DLL)" ${BUILD_SHARED_LIBS})
-add_option(MDBX BUILD_TOOLS "Build MDBX tools (mdbx_chk/stat/dump/load/copy/drop)" ${MDBX_BUILD_TOOLS_DEFAULT})
-cmake_dependent_option(MDBX_INSTALL_MANPAGES "Install man-pages for MDBX tools (mdbx_chk/stat/dump/load/copy)" ON
+add_option(MDBX BUILD_TOOLS "Build MDBX tools (mdbx_chk/stat/dump/load/copy/defrag/drop)" ${MDBX_BUILD_TOOLS_DEFAULT})
+cmake_dependent_option(MDBX_INSTALL_MANPAGES "Install man-pages for MDBX tools (mdbx_chk/stat/dump/load/copy/defrag/drop)" ON
                        MDBX_BUILD_TOOLS OFF)
 add_option(MDBX TXN_CHECKOWNER "Checking transaction matches the calling thread inside libmdbx's API" ON)
 add_option(MDBX ENV_CHECKPID "Checking PID inside libmdbx's API against reuse DB environment after the fork()" AUTO)
@@ -486,25 +480,16 @@ if(WIN32)
   if(MDBX_NTDLL_EXTRA_IMPLIB)
     add_option(MDBX WITHOUT_MSVC_CRT "Avoid dependence from MSVC CRT and use ntdll.dll instead" OFF)
   endif()
-  set(MDBX_AVOID_MSYNC_DEFAULT ON)
 else()
   add_option(MDBX USE_OFDLOCKS "Use Open file description locks (aka OFD locks, non-POSIX)" AUTO)
   mark_as_advanced(MDBX_USE_OFDLOCKS)
-  add_option(MDBX USE_MINCORE "Use Unix' mincore() to determine whether DB-pages are resident in memory" ON)
-  mark_as_advanced(MDBX_USE_MINCORE)
-  set(MDBX_AVOID_MSYNC_DEFAULT OFF)
 endif()
-add_option(
-  MDBX AVOID_MSYNC
-  "Disable in-memory database updating with consequent flush-to-disk/msync syscall in `MDBX_WRITEMAP` mode"
-  ${MDBX_AVOID_MSYNC_DEFAULT})
 add_option(MDBX MMAP_NEEDS_JOLT "Assume system needs explicit syscall to sync/flush/write modified mapped memory" AUTO)
 mark_as_advanced(MDBX_MMAP_NEEDS_JOLT)
 add_option(MDBX LOCKING "Locking method (Windows=-1, SystemV=5, POSIX=1988, POSIX=2001, POSIX=2008)" AUTO)
 mark_as_advanced(MDBX_LOCKING)
 add_option(MDBX TRUST_RTC "Does a system have battery-backed Real-Time Clock or just a fake" AUTO)
 mark_as_advanced(MDBX_TRUST_RTC)
-add_option(MDBX FORCE_ASSERTIONS "Force enable assertion checking" OFF)
 add_option(
   MDBX DISABLE_VALIDATION
   "Disable some checks to reduce an overhead and detection probability of database corruption to a values closer to the LMDB"
@@ -513,14 +498,62 @@ mark_as_advanced(MDBX_DISABLE_VALIDATION)
 add_option(MDBX ENABLE_REFUND "Zerocost auto-compactification during write-transactions" ON)
 add_option(MDBX ENABLE_BIGFOOT
            "Chunking long list of retired pages during huge transactions commit to avoid use sequences of pages" ON)
-add_option(MDBX ENABLE_PGOP_STAT "Gathering statistics for page operations" ON)
+add_option(MDBX ENABLE_PGOP_STAT "Gathering statistics on pages modification operations" ON)
 add_option(MDBX ENABLE_PROFGC "Profiling of GC search and updates" OFF)
-mark_as_advanced(MDBX_ENABLE_PROFGC)
+add_option(MDBX ENABLE_PGET_STAT "Gathering the number of page get operations for each transaction" ON)
 add_option(MDBX ENABLE_DBI_SPARSE
            "Support for sparse sets of DBI handles to reduce overhead when starting and processing transactions" ON)
 add_option(MDBX ENABLE_DBI_LOCKFREE "Support for deferred releasing and a lockfree path to quickly open DBI handles" ON)
+add_option(MDBX ENABLE_DXB_FAULT_INJECTION "Enable test-only DXB I/O fault injection hooks" OFF)
+mark_as_advanced(MDBX_ENABLE_DXB_FAULT_INJECTION)
 add_option(MDBX USE_FALLOCATE "Using posix_fallocate() or fcntl(F_PREALLOCATE) on OSX" AUTO)
 mark_as_advanced(MDBX_USE_FALLOCATE)
+add_option(MDBX ENABLE_FAKE_NESTED_READONLY_TRANSACTIONS "Enables fake nested read-only transactions, which are much cheaper but do not restore the state of cursors in case of transaction abortion." OFF)
+mark_as_advanced(MDBX_ENABLE_FAKE_NESTED_READONLY_TRANSACTIONS)
+
+if(DEFINED MDBX_FORCE_ASSERTIONS)
+  message(WARNING "The `MDBX_FORCE_ASSERTIONS` is obsolete, please use `MDBX_CHECKING=2` instead")
+  if(DEFINED MDBX_CHECKING)
+    message(
+      WARNING
+        "The `MDBX_FORCE_ASSERTIONS=${MDBX_FORCE_ASSERTIONS}` option was ignored in favour of `MDBX_CHECKING=${MDBX_CHECKING}`"
+    )
+  elseif(MDBX_FORCE_ASSERTIONS)
+    set(MDBX_CHECKING 2)
+  endif()
+endif()
+
+if(NOT DEFINED MDBX_CHECKING)
+  if(CMAKE_BUILD_TYPE_UPPERCASE STREQUAL "DEBUG")
+    set(MDBX_CHECKING 2)
+  else()
+    set(MDBX_CHECKING 0)
+  endif()
+elseif(MDBX_CHECKING STREQUAL "OFF")
+  set(MDBX_CHECKING 0)
+elseif(MDBX_CHECKING STREQUAL "ON")
+  set(MDBX_CHECKING 2)
+elseif(NOT MDBX_CHECKING MATCHES "^(-1|0|1|2|3)$")
+  message(
+    FATAL_ERROR
+      "The `MDBX_CHECKING` should defined as an integer number in range -1..3, the given value `MDBX_CHECKING=${MDBX_CHECKING}` is invalid."
+  )
+endif()
+
+if(NOT DEFINED MDBX_DEBUG OR MDBX_DEBUG STREQUAL "OFF")
+  if(CMAKE_BUILD_TYPE_UPPERCASE STREQUAL "DEBUG")
+    set(MDBX_DEBUG 1)
+  else()
+    set(MDBX_DEBUG 0)
+  endif()
+elseif(MDBX_DEBUG STREQUAL "ON")
+  set(MDBX_DEBUG 2)
+elseif(NOT MDBX_DEBUG MATCHES "^(-1|0|1|2|3)$")
+  message(
+    FATAL_ERROR
+      "The `MDBX_DEBUG` should defined as an integer number in range -1..3, the given value `MDBX_DEBUG=${MDBX_DEBUG}` is invalid."
+  )
+endif()
 
 if((MDBX_BUILD_TOOLS OR MDBX_ENABLE_TESTS) AND MDBX_BUILD_SHARED_LIBRARY)
   add_option(MDBX LINK_TOOLS_NONSTATIC "Link MDBX tools with non-static libmdbx" OFF)
@@ -529,8 +562,7 @@ else()
 endif()
 
 set(MDBX_CXX_AVAILABLE FALSE)
-if(CMAKE_CXX_COMPILER_LOADED
-   AND NOT MDBX_CXX_STANDARD LESS 11)
+if(CMAKE_CXX_COMPILER_LOADED AND NOT MDBX_CXX_STANDARD LESS 11)
   if(NOT MDBX_WITHOUT_MSVC_CRT
      AND NOT (CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 4.8)
      AND NOT (CMAKE_COMPILER_IS_CLANG AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 3.9)
@@ -582,7 +614,10 @@ else()
   if(NOT CMAKE_CURRENT_LIST_FILE)
     set(CMAKE_CURRENT_LIST_FILE "CMakeLists.txt")
   endif()
-  message(FATAL_ERROR "This \"${CMAKE_CURRENT_LIST_FILE}\" has been trimmed and is therefore intended only for build from an amalgamated form of the source code.")
+  message(
+    FATAL_ERROR
+      "This \"${CMAKE_CURRENT_LIST_FILE}\" has been trimmed and is therefore intended only for build from an amalgamated form of the source code."
+  )
 endif(MDBX_AMALGAMATED_SOURCE)
 
 if(MDBX_BUILD_CXX)
@@ -679,6 +714,12 @@ target_include_directories(mdbx-static INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
 
 # build shared library
 if(MDBX_BUILD_SHARED_LIBRARY)
+  if((MINGW OR MINGW64) AND MDBX_BUILD_CXX)
+    message(
+      WARNING
+        "Most MinGW versions have various problems with exporting and/or importing C++ template symbols instantiated in a DLL."
+    )
+  endif()
   add_library(mdbx SHARED ${LIBMDBX_SOURCES})
   set_target_properties(mdbx PROPERTIES PUBLIC_HEADER "${LIBMDBX_PUBLIC_HEADERS}")
   target_compile_definitions(
@@ -692,6 +733,24 @@ if(MDBX_BUILD_SHARED_LIBRARY)
       set_property(TARGET mdbx PROPERTY LINKER_FLAGS "/NODEFAULTLIB")
     else()
       set_property(TARGET mdbx PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    endif()
+  else()
+    include(CheckLinkerFlag)
+    check_linker_flag(C "LINKER:-z,combreloc" HAVE_LINKER_COMBRELOC)
+    check_linker_flag(C "LINKER:--gc-sections" HAVE_LINKER_GC_SECTIONS)
+    check_linker_flag(C "LINKER:-z,relro" HAVE_LINKER_Z_RELRO)
+    check_linker_flag(C "LINKER:-O1" HAVE_LINKER_O1)
+    if(HAVE_LINKER_COMBRELOC)
+      target_link_options(mdbx PRIVATE "LINKER:-z,combreloc")
+    endif()
+    if(HAVE_LINKER_GC_SECTIONS)
+      target_link_options(mdbx PRIVATE "LINKER:--gc-sections")
+    endif()
+    if(HAVE_LINKER_Z_RELRO)
+      target_link_options(mdbx PRIVATE "LINKER:-z,relro")
+    endif()
+    if(HAVE_LINKER_O1)
+      target_link_options(mdbx PRIVATE "LINKER:-O1")
     endif()
   endif()
   if(CC_HAS_VISIBILITY AND (LTO_ENABLED OR INTERPROCEDURAL_OPTIMIZATION))
@@ -741,14 +800,18 @@ endif()
 
 # build mdbx-tools
 if(MDBX_BUILD_TOOLS)
-  set(WINGETOPT_SRC "")
-  if(WIN32)
+  if(MDBX_AMALGAMATED_SOURCE)
+    set(WINGETOPT_SRC ${MDBX_SOURCE_DIR}/mdbx-wingetopt.h)
+  else()
     set(WINGETOPT_SRC ${MDBX_SOURCE_DIR}/tools/wingetopt.c ${MDBX_SOURCE_DIR}/tools/wingetopt.h)
   endif()
+  if(NOT WIN32)
+    set(WINGETOPT_SRC "")
+  endif()
 
-  foreach(TOOL chk copy stat dump load drop)
+  foreach(TOOL chk copy stat dump load drop defrag)
     if(MDBX_AMALGAMATED_SOURCE)
-      add_executable(mdbx_${TOOL} mdbx.h ${MDBX_SOURCE_DIR}/mdbx_${TOOL}.c)
+      add_executable(mdbx_${TOOL} mdbx.h ${MDBX_SOURCE_DIR}/mdbx_${TOOL}.c ${WINGETOPT_SRC})
     else()
       add_executable(mdbx_${TOOL} mdbx.h ${MDBX_SOURCE_DIR}/tools/${TOOL}.c ${WINGETOPT_SRC})
     endif()
@@ -758,10 +821,6 @@ if(MDBX_BUILD_TOOLS)
     target_setup_options(mdbx_${TOOL})
     target_link_libraries(mdbx_${TOOL} ${TOOL_MDBX_LIB})
   endforeach()
-  if(LIB_MATH)
-    target_link_libraries(mdbx_chk ${LIB_MATH})
-    target_link_libraries(mdbx_stat ${LIB_MATH})
-  endif()
 endif()
 
 # ######################################################################################################################
@@ -806,7 +865,7 @@ if(MDBX_BUILD_TOOLS)
   if(NOT DEFINED MDBX_TOOLS_INSTALL_DESTINATION)
     set(MDBX_TOOLS_INSTALL_DESTINATION ${CMAKE_INSTALL_BINDIR})
   endif()
-  install(TARGETS mdbx_chk mdbx_stat mdbx_copy mdbx_dump mdbx_load mdbx_drop
+  install(TARGETS mdbx_chk mdbx_stat mdbx_copy mdbx_dump mdbx_load mdbx_drop mdbx_defrag
           RUNTIME DESTINATION ${MDBX_TOOLS_INSTALL_DESTINATION} COMPONENT runtime)
   if(MDBX_INSTALL_MANPAGES)
     if(NOT DEFINED MDBX_MAN_INSTALL_DESTINATION)

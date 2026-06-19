@@ -215,7 +215,7 @@ where
     ///
     /// The database name may not contain the null character.
     pub fn open_db(&self, name: Option<&str>) -> Result<Database> {
-        Database::new(self, name, 0)
+        Database::new(self, name, DatabaseFlags::ACCEDE.bits())
     }
 
     /// Gets the option flags for the given database in the transaction.

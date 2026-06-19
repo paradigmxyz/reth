@@ -1,4 +1,5 @@
-/* This is CMake-template for libmdbx's config.h
+/* This file is part of the libmdbx amalgamated source code (v0.14.2-8-gcfb319f8 at 2026-06-08T23:38:47+03:00),
+ * it is the template for libmdbx's config.h
  ******************************************************************************/
 
 /* *INDENT-OFF* */
@@ -8,16 +9,19 @@
 #cmakedefine ENABLE_MEMCHECK
 #cmakedefine ENABLE_GPROF
 #cmakedefine ENABLE_GCOV
+#cmakedefine ENABLE_DTRACE
+#cmakedefine ENABLE_SYSTEMTAP
 #cmakedefine ENABLE_ASAN
 #cmakedefine ENABLE_UBSAN
-#cmakedefine01 MDBX_FORCE_ASSERTIONS
 
 /* allowing override MDBX_BUILD_CXX=OFF to build the C++ API in "private" mode only for tests */
 #if !defined(MDBX_BUILD_TEST) && !defined(MDBX_BUILD_CXX)
 #cmakedefine01 MDBX_BUILD_CXX /* using MDBX_BUILD_CXX CMake's option */
 #endif
 
-/* Common */
+#cmakedefine MDBX_DEBUG @MDBX_DEBUG@
+#cmakedefine MDBX_CHECKING @MDBX_CHECKING@
+
 #cmakedefine01 MDBX_TXN_CHECKOWNER
 #cmakedefine MDBX_ENV_CHECKPID_AUTO
 #ifndef MDBX_ENV_CHECKPID_AUTO
@@ -32,13 +36,15 @@
 #cmakedefine01 MDBX_TRUST_RTC
 #endif
 #cmakedefine01 MDBX_DISABLE_VALIDATION
-#cmakedefine01 MDBX_AVOID_MSYNC
 #cmakedefine01 MDBX_ENABLE_REFUND
 #cmakedefine01 MDBX_ENABLE_BIGFOOT
 #cmakedefine01 MDBX_ENABLE_PGOP_STAT
+#cmakedefine01 MDBX_ENABLE_PGET_STAT
 #cmakedefine01 MDBX_ENABLE_PROFGC
 #cmakedefine01 MDBX_ENABLE_DBI_SPARSE
 #cmakedefine01 MDBX_ENABLE_DBI_LOCKFREE
+#cmakedefine01 MDBX_ENABLE_DXB_FAULT_INJECTION
+#cmakedefine01 MDBX_ENABLE_FAKE_NESTED_READONLY_TRANSACTIONS
 
 /* Windows */
 /* allowing override MDBX_WITHOUT_MSVC_CRT=ON to build the C++ API in "private" mode only for tests */
@@ -63,8 +69,6 @@
 #ifndef MDBX_MMAP_NEEDS_JOLT_AUTO
 #cmakedefine01 MDBX_MMAP_NEEDS_JOLT
 #endif /* MDBX_MMAP_NEEDS_JOLT */
-
-#cmakedefine01 MDBX_USE_MINCORE
 
 #cmakedefine MDBX_USE_FALLOCATE_AUTO
 #ifndef MDBX_USE_FALLOCATE_AUTO

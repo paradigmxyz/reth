@@ -37,6 +37,8 @@ option(ENABLE_GCOV "Enable integration with gcov, a code coverage program" OFF)
 
 option(ENABLE_GPROF "Enable integration with gprof, a performance analyzing tool" OFF)
 
+option(ENABLE_DTRACE "Enable using DTrace dynamic tracing framework" OFF)
+
 option(ENABLE_ASAN "Enable AddressSanitizer, a fast memory error detector based on compiler instrumentation" OFF)
 
 option(ENABLE_UBSAN
