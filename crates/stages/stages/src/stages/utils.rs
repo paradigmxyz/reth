@@ -265,7 +265,7 @@ where
         let address = sharded_key.key;
 
         // When address changes, flush the previous address's shards and start fresh.
-        if current_address != Some(address) {
+        if current_address.is_none_or(|current| current != address) {
             // Flush all remaining shards for the previous address (uses u64::MAX for last shard).
             if let Some(prev_addr) = current_address {
                 flush_account_history_shards(prev_addr, &mut current_list, append_only, writer)?;
@@ -473,7 +473,7 @@ where
         let partial_key = (sharded_key.address, sharded_key.sharded_key.key);
 
         // When (address, storage_key) changes, flush the previous key's shards and start fresh.
-        if current_key != Some(partial_key) {
+        if current_key.is_none_or(|current| current != partial_key) {
             // Flush all remaining shards for the previous key (uses u64::MAX for last shard).
             if let Some((prev_addr, prev_storage_key)) = current_key {
                 flush_storage_history_shards(
