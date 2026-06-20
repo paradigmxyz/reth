@@ -4371,6 +4371,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gmp-mpfr-sys"
+version = "1.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7db155b537cb791b133341f99f68371d86ee7fa4c79aacfbc376d72d23c70531"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "group"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10924,6 +10934,7 @@ dependencies = [
  "blst",
  "c-kzg",
  "cfg-if",
+ "gmp-mpfr-sys",
  "k256",
  "p256",
  "revm-context-interface",

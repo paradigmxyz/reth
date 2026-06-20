@@ -7,7 +7,7 @@ ARG VERSION
 RUN sed -i '/^# http/{N;s|^# \(http[^ ]*\)\nURIs: .*|# \1\nURIs: \1|}' /etc/apt/sources.list.d/debian.sources
 COPY .github/scripts/install_llvm_ubuntu.sh /tmp/install_llvm.sh
 RUN apt-get -o Acquire::Check-Valid-Until=false update && \
-    apt-get install -y libjemalloc-dev libclang-dev mold pkg-config && \
+    apt-get install -y libjemalloc-dev libclang-dev m4 mold pkg-config && \
     /tmp/install_llvm.sh && rm /tmp/install_llvm.sh
 WORKDIR /app
 COPY . .

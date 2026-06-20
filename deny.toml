@@ -78,7 +78,10 @@ allow = [
 
 # Allow 1 or more licenses on a per-crate basis, so that particular licenses
 # aren't accepted for every possible crate as with the normal allow list
-exceptions = []
+exceptions = [
+    # GMP bindings for the optional faster modexp precompile.
+    { allow = ["LGPL-3.0+"], name = "gmp-mpfr-sys" },
+]
 
 [[licenses.clarify]]
 name = "rustls-webpki"

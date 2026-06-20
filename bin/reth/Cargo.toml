@@ -91,12 +91,18 @@ default = [
     "jit",
     "keccak-cache-global",
     "asm-keccak",
+    "gmp",
     "min-trace-logs",
 ]
 
 jit = [
     "reth-ethereum-cli/jit",
     "reth-node-ethereum/jit",
+]
+gmp = [
+    "reth-ethereum-cli/gmp",
+    "reth-node-ethereum/gmp",
+    "reth-revm/gmp",
 ]
 
 otlp = [
