@@ -131,8 +131,10 @@ impl MultiProofTargetsV2 {
 pub struct ChunkedMultiProofTargetsV2 {
     /// Remaining account targets to process
     account_targets: alloc::vec::IntoIter<ProofV2Target>,
-    /// Storage targets by account address
+    /// Storage targets for account targets, keyed by account address.
     storage_targets: B256Map<Vec<ProofV2Target>>,
+    /// Storage-only targets, sorted by account address for cursor locality.
+    storage_only_targets: alloc::vec::IntoIter<(B256, Vec<ProofV2Target>)>,
     /// Current account being processed (if any storage slots remain)
     current_account_storage: Option<(B256, alloc::vec::IntoIter<ProofV2Target>)>,
     /// Chunk size
@@ -141,10 +143,30 @@ pub struct ChunkedMultiProofTargetsV2 {
 
 impl ChunkedMultiProofTargetsV2 {
     /// Creates a new chunked iterator for the given targets.
-    pub fn new(targets: MultiProofTargetsV2, size: usize) -> Self {
+    pub fn new(mut targets: MultiProofTargetsV2, size: usize) -> Self {
+        let mut account_target_addresses =
+            targets.account_targets.iter().map(ProofV2Target::key).collect::<Vec<_>>();
+        account_target_addresses.sort_unstable();
+
+        let mut storage_targets = B256Map::with_capacity_and_hasher(
+            account_target_addresses.len().min(targets.storage_targets.len()),
+            Default::default(),
+        );
+        let mut storage_only_targets = Vec::new();
+
+        for (address, slots) in targets.storage_targets.drain() {
+            if account_target_addresses.binary_search(&address).is_ok() {
+                storage_targets.insert(address, slots);
+            } else {
+                storage_only_targets.push((address, slots));
+            }
+        }
+        storage_only_targets.sort_unstable_by_key(|(address, _)| *address);
+
         Self {
             account_targets: targets.account_targets.into_iter(),
-            storage_targets: targets.storage_targets,
+            storage_targets,
+            storage_only_targets: storage_only_targets.into_iter(),
             current_account_storage: None,
             size,
         }
@@ -208,16 +230,11 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
         }
 
         // Process any remaining storage-only entries (accounts not in account_targets)
-        while let Some((account_addr, storage_slots)) = self.storage_targets.iter_mut().next() &&
-            count < self.size
-        {
-            let account_addr = *account_addr;
-            let storage_slots = core::mem::take(storage_slots);
+        while count < self.size {
+            let Some((account_addr, storage_slots)) = self.storage_only_targets.next() else {
+                break;
+            };
             let remaining_capacity = self.size - count;
-
-            // Always remove from the map - if there are remaining slots they go to
-            // current_account_storage
-            self.storage_targets.remove(&account_addr);
 
             if storage_slots.len() <= remaining_capacity {
                 // Optimization: We can take all slots, just move the vec
@@ -244,5 +261,68 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
         } else {
             Some(chunk)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(byte: u8) -> B256 {
+        B256::from([byte; 32])
+    }
+
+    fn target(byte: u8) -> ProofV2Target {
+        ProofV2Target::from(key(byte))
+    }
+
+    fn only_storage_address(chunk: &MultiProofTargetsV2) -> B256 {
+        let mut keys = chunk.storage_targets.keys();
+        let key = *keys.next().expect("chunk has storage target");
+        assert!(keys.next().is_none(), "chunk has exactly one storage target");
+        key
+    }
+
+    #[test]
+    fn storage_only_chunks_are_sorted_by_account_address() {
+        let mut targets = MultiProofTargetsV2::default();
+        targets.storage_targets.insert(key(0x30), vec![target(0x03)]);
+        targets.storage_targets.insert(key(0x10), vec![target(0x01)]);
+        targets.storage_targets.insert(key(0x20), vec![target(0x02)]);
+
+        let chunks = targets.chunks(1).collect::<Vec<_>>();
+        let addresses = chunks.iter().map(only_storage_address).collect::<Vec<_>>();
+
+        assert_eq!(addresses, vec![key(0x10), key(0x20), key(0x30)]);
+    }
+
+    #[test]
+    fn account_associated_storage_stays_with_account_chunk() {
+        let mut targets = MultiProofTargetsV2::default();
+        targets.account_targets.push(target(0x30));
+        targets.storage_targets.insert(key(0x10), vec![target(0x01)]);
+        targets.storage_targets.insert(key(0x30), vec![target(0x03)]);
+
+        let chunks = targets.chunks(2).collect::<Vec<_>>();
+
+        assert_eq!(chunks[0].account_targets.len(), 1);
+        assert_eq!(chunks[0].account_targets[0].key(), key(0x30));
+        assert_eq!(only_storage_address(&chunks[0]), key(0x30));
+        assert_eq!(only_storage_address(&chunks[1]), key(0x10));
+    }
+
+    #[test]
+    fn split_storage_only_account_keeps_remaining_slots_before_next_account() {
+        let mut targets = MultiProofTargetsV2::default();
+        targets.storage_targets.insert(key(0x20), vec![target(0x01), target(0x02), target(0x03)]);
+        targets.storage_targets.insert(key(0x10), vec![target(0x04)]);
+
+        let chunks = targets.chunks(2).collect::<Vec<_>>();
+
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].storage_targets[&key(0x10)].len(), 1);
+        assert_eq!(chunks[0].storage_targets[&key(0x20)].len(), 1);
+        assert_eq!(only_storage_address(&chunks[1]), key(0x20));
+        assert_eq!(chunks[1].storage_targets[&key(0x20)].len(), 2);
     }
 }
