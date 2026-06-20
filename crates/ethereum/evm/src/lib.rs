@@ -198,11 +198,12 @@ where
     }
 
     fn evm_env(&self, header: &Header) -> Result<EvmEnv<SpecId>, Self::Error> {
+        let chain_spec = self.chain_spec();
         Ok(EvmEnv::for_eth_block(
             header,
-            self.chain_spec(),
-            self.chain_spec().chain().id(),
-            self.chain_spec().blob_params_at_timestamp(header.timestamp),
+            chain_spec,
+            chain_spec.chain().id(),
+            chain_spec.blob_params_at_timestamp(header.timestamp),
         ))
     }
 
@@ -211,6 +212,7 @@ where
         parent: &Header,
         attributes: &NextBlockEnvAttributes,
     ) -> Result<EvmEnv, Self::Error> {
+        let chain_spec = self.chain_spec();
         Ok(EvmEnv::for_eth_next_block(
             parent,
             NextEvmEnvAttributes {
@@ -220,10 +222,10 @@ where
                 gas_limit: attributes.gas_limit,
                 slot_number: attributes.slot_number,
             },
-            self.chain_spec().next_block_base_fee(parent, attributes.timestamp).unwrap_or_default(),
-            self.chain_spec(),
-            self.chain_spec().chain().id(),
-            self.chain_spec().blob_params_at_timestamp(attributes.timestamp),
+            chain_spec.next_block_base_fee(parent, attributes.timestamp).unwrap_or_default(),
+            chain_spec,
+            chain_spec.chain().id(),
+            chain_spec.blob_params_at_timestamp(attributes.timestamp),
         ))
     }
 
