@@ -16,7 +16,6 @@ use multiproof::*;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_evm::{
-    block::ExecutableTxParts,
     execute::{ExecutableTxFor, WithTxEnv},
     ConfigureEvm, ConvertTx, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook,
     SpecFor, TxEnvFor,
@@ -462,13 +461,12 @@ where
                                 (i, tx)
                             })
                             .for_each(|(idx, tx)| {
-                                let tx = tx.map(|tx| {
-                                    let tx = WithTxEnv::new(tx);
-                                    let _ = prewarm_tx.send((idx, tx.clone()));
-                                    tx
-                                });
-                                let _ = execute_tx.send((idx, tx));
-                                trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+                                send_converted_tx::<Evm, _, _, _>(
+                                    idx,
+                                    tx,
+                                    &prewarm_tx,
+                                    &execute_tx,
+                                );
                             });
                     });
                 } else {
@@ -493,13 +491,12 @@ where
                             (idx, tx)
                         })
                         .for_each_ordered_in(executor.cpu_pool(), |(idx, tx)| {
-                            let tx = tx.map(|tx| {
-                                let tx = WithTxEnv::new(tx);
-                                let _ = prewarm_tx.send((idx, tx.clone()));
-                                tx
-                            });
-                            let _ = execute_tx.send((idx, tx));
-                            trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+                            send_converted_tx::<Evm, _, _, _>(
+                                idx,
+                                tx,
+                                &prewarm_tx,
+                                &execute_tx,
+                            );
                         });
                 }
             });
@@ -778,25 +775,48 @@ where
 }
 
 /// Converts transactions sequentially and sends them to the prewarm and execute channels.
-fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
+fn convert_serial<Evm, RawTx, Tx, Recovered, Err, C>(
     iter: impl Iterator<Item = RawTx>,
     convert: &C,
-    prewarm_tx: &mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>,
-    execute_tx: &ExecuteTxSender<TxEnv, Recovered, Err>,
+    prewarm_tx: &mpsc::SyncSender<(usize, WithTxEnv<TxEnvFor<Evm>, Recovered>)>,
+    execute_tx: &ExecuteTxSender<TxEnvFor<Evm>, Recovered, Err>,
 ) where
-    Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = Recovered>,
-    TxEnv: Clone,
+    Evm: ConfigureEvm,
+    Tx: ExecutableTxFor<Evm, Recovered = Recovered>,
+    TxEnvFor<Evm>: Clone,
     C: ConvertTx<RawTx, Tx = Tx, Error = Err>,
 {
     for (idx, raw_tx) in iter.enumerate() {
-        let tx = convert.convert(raw_tx);
-        let tx = tx.map(|tx| WithTxEnv::new(tx));
-        if let Ok(tx) = &tx {
-            let _ = prewarm_tx.send((idx, tx.clone()));
-        }
-        let _ = execute_tx.send((idx, tx));
-        trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+        send_converted_tx::<Evm, _, _, _>(
+            idx,
+            convert.convert(raw_tx),
+            prewarm_tx,
+            execute_tx,
+        );
     }
+}
+
+fn send_converted_tx<Evm, Tx, Recovered, Err>(
+    idx: usize,
+    tx: Result<Tx, Err>,
+    prewarm_tx: &mpsc::SyncSender<(usize, WithTxEnv<TxEnvFor<Evm>, Recovered>)>,
+    execute_tx: &ExecuteTxSender<TxEnvFor<Evm>, Recovered, Err>,
+) where
+    Evm: ConfigureEvm,
+    Tx: ExecutableTxFor<Evm, Recovered = Recovered>,
+    TxEnvFor<Evm>: Clone,
+{
+    match tx {
+        Ok(tx) => {
+            let tx = WithTxEnv::new(tx);
+            let _ = prewarm_tx.send((idx, tx.clone()));
+            let _ = execute_tx.send((idx, Ok(tx)));
+        }
+        Err(err) => {
+            let _ = execute_tx.send((idx, Err(err)));
+        }
+    }
+    trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
 }
 
 /// Handle to all the spawned tasks.
