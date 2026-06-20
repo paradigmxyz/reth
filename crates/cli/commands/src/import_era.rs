@@ -133,8 +133,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
 
             fs::create_dir_all(&folder)?;
 
-            let config = EraStreamConfig::default().start_from(next_block);
-            let client = EraClient::new(Client::new(), url, folder);
+            let mut config = EraStreamConfig::default();
+            // `start_from` maps a block number to a file index as `block / BLOCKS_PER_FILE`, valid
+            // only for execution-layer files (era1/ere). Consensus `.era` files are slot-indexed,
+            // so stream from 0 and let the pipeline skip already-imported blocks.
+            if !matches!(era_type, EraFileType::Era) {
+                config = config.start_from(next_block);
+            }
+            let client = EraClient::new(Client::new(), url, folder).with_era_type(era_type);
             let stream = EraStream::new(client, config);
 
             match era_type {
@@ -144,7 +150,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
                     &mut hash_collector,
                     self.to_block,
                 )?,
-                _ => era::import::<era::Era1, _, _, _, _, _, _>(
+                EraFileType::Era1 => era::import::<era::Era1, _, _, _, _, _, _>(
+                    stream,
+                    &provider_factory,
+                    &mut hash_collector,
+                    self.to_block,
+                )?,
+                EraFileType::Era => era::import::<era::Era, _, _, _, _, _, _>(
                     stream,
                     &provider_factory,
                     &mut hash_collector,
