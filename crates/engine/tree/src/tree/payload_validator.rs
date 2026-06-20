@@ -1009,7 +1009,22 @@ where
             trie_output,
             changeset_provider,
         );
-        let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
+
+        // Here we need to provide the original raw BAL into the validation output if it was
+        // provided to us in the first place.
+        //
+        // This is also a place where decoded BAL becomes no longer needed. It's a big structure
+        // consisting of lots of small allocations. Dropping it takes a significant amount of time.
+        // Therefore, we drop it in background task to avoid blocking block return.
+        let raw_bal = match decoded_bal {
+            None => None,
+            Some(decoded_bal) => {
+                let raw_bal = decoded_bal.as_raw_bal().clone();
+                self.runtime.spawn_drop(decoded_bal);
+                Some(raw_bal)
+            }
+        };
+
         Ok(ValidationOutput::new(executed_block, timing_stats).with_raw_bal(raw_bal))
     }
 
