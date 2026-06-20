@@ -502,9 +502,11 @@ where
             };
         }
 
+        let input_gas_used = input.gas_used();
+
         // If the gas usage is suspiciously high (multiple times higher than parent's gas limit), be
         // cautious and block on pre-execution checks of the block.
-        if input.gas_used() > parent_block.gas_limit() * MAX_EXPECTED_GAS_USAGE_MULTIPLIER {
+        if input_gas_used > parent_block.gas_limit() * MAX_EXPECTED_GAS_USAGE_MULTIPLIER {
             // Call `.get()` to await the pre-execution checks and exit early if they fail.
             if validated_block.get().is_err() {
                 return Err(validated_block
@@ -549,7 +551,7 @@ where
             parent_hash: input.parent_hash(),
             parent_state_root: parent_block.state_root(),
             transaction_count: input.transaction_count(),
-            gas_used: input.gas_used(),
+            gas_used: input_gas_used,
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
             decoded_bal: decoded_bal.as_ref().map(Arc::clone),
         };
@@ -1121,6 +1123,7 @@ where
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
         let has_bal = env.decoded_bal.is_some();
+        let transaction_count = env.transaction_count;
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
@@ -1160,7 +1163,6 @@ where
             );
         }
 
-        let transaction_count = input.transaction_count();
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
         executor.evm_mut().db_mut().set_state_hook(
