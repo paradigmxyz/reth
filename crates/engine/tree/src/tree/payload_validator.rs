@@ -175,6 +175,8 @@ const MAX_EXPECTED_GAS_USAGE_MULTIPLIER: u64 = 2;
 
 /// Worker name for deferred trie data and changeset provider preparation.
 const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
+/// Worker name for deferred trie changeset cache population.
+const DEFERRED_CHANGESET_WORKER_NAME: &str = "deferred-changeset";
 
 type ReceiptRootSender<N> =
     crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
@@ -1922,9 +1924,11 @@ where
         // this computation to finish rather than falling back to the expensive DB path.
         // The guard ensures the pending entry is cancelled if the task panics.
         let pending_changeset_guard = self.changeset_cache.register_pending(block_hash);
+        let executor = self.payload_processor.executor().clone();
 
         // Spawn background task to compute trie data. The task publishes the sorted result before
-        // computing changesets, so trie data waiters do not block on changeset computation.
+        // handing changeset caching to a separate worker, so trie data waiters do not block on
+        // changeset computation.
         let compute_trie_input_task = move || {
             let _span = debug_span!(
                 target: "engine::tree::payload_validator",
@@ -1947,34 +1951,58 @@ where
                 block_validation_metrics
                     .trie_updates_sorted_size
                     .record(computed.trie_updates.total_len() as f64);
-                // Compute and cache changesets using the computed trie_updates.
-                // Use the pre-created provider to avoid races with changeset cache
-                // eviction that can happen between task spawn and execution.
-                let changeset_start = Instant::now();
 
-                match reth_trie::changesets::compute_trie_changesets(
-                    &changeset_provider,
-                    &computed.trie_updates,
-                ) {
-                    Ok(changesets) => {
-                        debug!(
-                            target: "engine::tree::changeset",
-                            ?block_number,
-                            elapsed = ?changeset_start.elapsed(),
-                            "Computed and caching changesets"
-                        );
+                let trie_updates = computed.trie_updates;
+                let changeset_task = move || {
+                    let _span = debug_span!(
+                        target: "engine::tree::changeset",
+                        "compute_trie_changesets",
+                        block_number
+                    )
+                    .entered();
 
-                        pending_changeset_guard.resolve(block_number, Arc::new(changesets));
-                    }
-                    Err(e) => {
-                        warn!(
+                    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+                        // Compute and cache changesets using the computed trie_updates.
+                        // Use the pre-created provider to avoid races with changeset cache
+                        // eviction that can happen between task spawn and execution.
+                        let changeset_start = Instant::now();
+
+                        match reth_trie::changesets::compute_trie_changesets(
+                            &changeset_provider,
+                            &trie_updates,
+                        ) {
+                            Ok(changesets) => {
+                                debug!(
+                                    target: "engine::tree::changeset",
+                                    ?block_number,
+                                    elapsed = ?changeset_start.elapsed(),
+                                    "Computed and caching changesets"
+                                );
+
+                                pending_changeset_guard
+                                    .resolve(block_number, Arc::new(changesets));
+                            }
+                            Err(e) => {
+                                warn!(
+                                    target: "engine::tree::changeset",
+                                    ?block_number,
+                                    ?e,
+                                    "Failed to compute changesets for deferred trie producer"
+                                );
+                            }
+                        }
+                    }));
+
+                    if result.is_err() {
+                        error!(
                             target: "engine::tree::changeset",
-                            ?block_number,
-                            ?e,
-                            "Failed to compute changesets for deferred trie producer"
+                            "Deferred changeset task panicked"
                         );
                     }
-                }
+                };
+
+                let _ =
+                    executor.spawn_blocking_named(DEFERRED_CHANGESET_WORKER_NAME, changeset_task);
             }));
 
             if result.is_err() {
