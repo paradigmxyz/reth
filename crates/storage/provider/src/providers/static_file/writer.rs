@@ -197,7 +197,9 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
             &self.storage_change_sets,
         ] {
             let mut writer = writer_lock.write();
-            if let Some(writer) = writer.as_mut() {
+            if let Some(writer) = writer.as_mut() &&
+                writer.needs_finalize()
+            {
                 writer.finalize()?;
             }
         }
@@ -379,6 +381,11 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Returns `true` if the writer will prune on commit.
     pub const fn will_prune_on_commit(&self) -> bool {
         self.prune_on_commit.is_some()
+    }
+
+    /// Returns `true` if [`Self::finalize`] has work to do or must report queued prune work.
+    fn needs_finalize(&self) -> bool {
+        self.prune_on_commit.is_some() || self.synced || self.writer.is_dirty()
     }
 
     /// Heals the changeset offset sidecar after `NippyJar` healing.
