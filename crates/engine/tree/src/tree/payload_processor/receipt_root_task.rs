@@ -16,6 +16,18 @@ use tracing::debug_span;
 
 const RECEIPT_ENCODE_BUF_INITIAL_CAPACITY: usize = 512;
 
+fn remove_pending_receipt<R>(
+    pending: &mut Option<HashMap<usize, R>>,
+    index: usize,
+) -> Option<R> {
+    let map = pending.as_mut()?;
+    let receipt = map.remove(&index);
+    if map.is_empty() {
+        *pending = None;
+    }
+    receipt
+}
+
 /// Receipt with index, ready to be sent to the background task for encoding and trie building.
 #[derive(Debug, Clone)]
 pub struct IndexedReceipt<R> {
@@ -81,7 +93,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
         let mut aggregated_bloom = Bloom::ZERO;
         let mut encode_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
         let mut next = 0usize;
-        let mut pending = HashMap::new();
+        let mut pending = None;
 
         let mut push = |receipt: R| {
             let receipt_with_bloom = receipt.with_bloom_ref();
@@ -98,12 +110,14 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
                 push(indexed_receipt.receipt);
                 next += 1;
 
-                while let Some(receipt) = pending.remove(&next) {
+                while let Some(receipt) = remove_pending_receipt(&mut pending, next) {
                     push(receipt);
                     next += 1;
                 }
             } else {
-                pending.insert(indexed_receipt.index, indexed_receipt.receipt);
+                pending
+                    .get_or_insert_with(Default::default)
+                    .insert(indexed_receipt.index, indexed_receipt.receipt);
             }
         }
 
@@ -117,7 +131,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
             return;
         }
 
-        if !pending.is_empty() {
+        if let Some(pending) = pending.as_ref().filter(|pending| !pending.is_empty()) {
             tracing::error!(
                 target: "engine::tree::payload_processor",
                 received = next,
