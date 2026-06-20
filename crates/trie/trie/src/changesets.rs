@@ -101,6 +101,10 @@ fn compute_account_changesets<Factory>(
 where
     Factory: TrieCursorFactory,
 {
+    if trie_updates.account_nodes_ref().is_empty() {
+        return Ok(Vec::new());
+    }
+
     let mut cursor = factory.account_trie_cursor()?;
     let mut account_changesets = Vec::with_capacity(trie_updates.account_nodes_ref().len());
 
