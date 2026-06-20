@@ -82,7 +82,9 @@ impl TrieUpdates {
     }
 
     fn extend_common(&mut self, other: &Self) {
-        self.account_nodes.retain(|nibbles, _| !other.removed_nodes.contains(nibbles));
+        if !other.removed_nodes.is_empty() {
+            self.account_nodes.retain(|nibbles, _| !other.removed_nodes.contains(nibbles));
+        }
     }
 
     /// Extend trie updates with sorted data, converting directly into the unsorted `HashMap`
@@ -315,7 +317,9 @@ impl StorageTrieUpdates {
             self.removed_nodes.clear();
         }
         self.is_deleted |= other.is_deleted;
-        self.storage_nodes.retain(|nibbles, _| !other.removed_nodes.contains(nibbles));
+        if !other.removed_nodes.is_empty() {
+            self.storage_nodes.retain(|nibbles, _| !other.removed_nodes.contains(nibbles));
+        }
     }
 
     /// Extend storage trie updates with sorted data, converting directly into the unsorted
