@@ -35,6 +35,11 @@ impl<T: Clone + Send + Sync + 'static> EventSender<T> {
 
     /// Broadcasts an event to all listeners.
     pub fn notify(&self, event: T) {
+        if self.sender.receiver_count() == 0 {
+            trace!("no receivers for broadcast events");
+            return;
+        }
+
         if self.sender.send(event).is_err() {
             trace!("no receivers for broadcast events");
         }
