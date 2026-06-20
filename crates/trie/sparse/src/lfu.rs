@@ -41,13 +41,24 @@ impl<K> BucketedLfu<K> {
         Self {
             capacity,
             entries: HashMap::default(),
-            buckets: (0..=LFU_MAX_FREQ).map(|_| Vec::new()).collect(),
+            buckets: if capacity == 0 { Vec::new() } else { Self::empty_buckets() },
             min_freq: 1,
         }
+    }
+
+    fn empty_buckets() -> Vec<Vec<K>> {
+        (0..=LFU_MAX_FREQ).map(|_| Vec::new()).collect()
     }
 }
 
 impl<K: fmt::Debug + Copy + Eq + hash::Hash> BucketedLfu<K> {
+    #[inline]
+    fn ensure_buckets(&mut self) {
+        if self.buckets.is_empty() {
+            self.buckets = Self::empty_buckets();
+        }
+    }
+
     /// Updates the capacity and evicts the least-frequently-used entries that exceed it.
     ///
     /// Entries accumulate via [`Self::touch`] over time. This method trims the cache
@@ -63,6 +74,8 @@ impl<K: fmt::Debug + Copy + Eq + hash::Hash> BucketedLfu<K> {
             self.min_freq = 1;
             return;
         }
+
+        self.ensure_buckets();
 
         while self.entries.len() > self.capacity {
             self.evict_one();
@@ -108,6 +121,8 @@ impl<K: fmt::Debug + Copy + Eq + hash::Hash> BucketedLfu<K> {
         if self.capacity == 0 {
             return;
         }
+
+        self.ensure_buckets();
 
         if let Some(meta) = self.entries.get(&key).copied() {
             debug_assert_eq!(self.buckets[meta.freq as usize][meta.pos], key);
