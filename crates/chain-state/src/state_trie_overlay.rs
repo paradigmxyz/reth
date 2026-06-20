@@ -547,9 +547,7 @@ fn compute_overlay<N: NodePrimitives>(
                 "extending cached parent state trie overlay"
             );
 
-            let mut overlay = parent_input.as_ref().clone();
-            extend_overlay(&mut overlay, &trie_data.hashed_state, &trie_data.trie_updates);
-            overlay
+            extend_overlay(parent_input.as_ref(), &trie_data.hashed_state, &trie_data.trie_updates)
         }
         ComputeOverlayInput::MergeBlocks(blocks) => merge_blocks(blocks),
     };
@@ -598,34 +596,48 @@ fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSo
 }
 
 fn extend_overlay(
-    overlay: &mut TrieInputSorted,
-    hashed_state: &HashedPostStateSorted,
-    trie_updates: &TrieUpdatesSorted,
-) {
+    parent: &TrieInputSorted,
+    hashed_state: &Arc<HashedPostStateSorted>,
+    trie_updates: &Arc<TrieUpdatesSorted>,
+) -> TrieInputSorted {
     #[cfg(feature = "rayon")]
-    {
-        rayon::join(
-            || {
-                if !hashed_state.is_empty() {
-                    Arc::make_mut(&mut overlay.state).extend_ref_and_sort(hashed_state);
-                }
-            },
-            || {
-                if !trie_updates.is_empty() {
-                    Arc::make_mut(&mut overlay.nodes).extend_ref_and_sort(trie_updates);
-                }
-            },
-        );
-    }
+    let (state, nodes) = rayon::join(
+        || extend_overlay_state(&parent.state, hashed_state),
+        || extend_overlay_nodes(&parent.nodes, trie_updates),
+    );
 
     #[cfg(not(feature = "rayon"))]
-    {
-        if !hashed_state.is_empty() {
-            Arc::make_mut(&mut overlay.state).extend_ref_and_sort(hashed_state);
-        }
-        if !trie_updates.is_empty() {
-            Arc::make_mut(&mut overlay.nodes).extend_ref_and_sort(trie_updates);
-        }
+    let (state, nodes) = (
+        extend_overlay_state(&parent.state, hashed_state),
+        extend_overlay_nodes(&parent.nodes, trie_updates),
+    );
+
+    TrieInputSorted::new(nodes, state, parent.prefix_sets.clone())
+}
+
+fn extend_overlay_state(
+    parent: &Arc<HashedPostStateSorted>,
+    child: &Arc<HashedPostStateSorted>,
+) -> Arc<HashedPostStateSorted> {
+    if child.is_empty() {
+        Arc::clone(parent)
+    } else if parent.is_empty() {
+        Arc::clone(child)
+    } else {
+        Arc::new(HashedPostStateSorted::merge_newer_with_older(child.as_ref(), parent.as_ref()))
+    }
+}
+
+fn extend_overlay_nodes(
+    parent: &Arc<TrieUpdatesSorted>,
+    child: &Arc<TrieUpdatesSorted>,
+) -> Arc<TrieUpdatesSorted> {
+    if child.is_empty() {
+        Arc::clone(parent)
+    } else if parent.is_empty() {
+        Arc::clone(child)
+    } else {
+        Arc::new(TrieUpdatesSorted::merge_newer_with_older(child.as_ref(), parent.as_ref()))
     }
 }
 

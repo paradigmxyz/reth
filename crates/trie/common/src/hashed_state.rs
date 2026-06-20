@@ -609,6 +609,42 @@ impl HashedPostStateSorted {
         }
     }
 
+    /// Merges a newer sorted hashed state with an older one.
+    ///
+    /// This has the same semantics as cloning `older` and extending it with `newer`, but builds
+    /// the merged sorted vectors directly from references.
+    pub fn merge_newer_with_older(newer: &Self, older: &Self) -> Self {
+        if newer.is_empty() {
+            return older.clone()
+        }
+        if older.is_empty() {
+            return newer.clone()
+        }
+
+        let accounts = kway_merge_sorted([newer.accounts.as_slice(), older.accounts.as_slice()]);
+        let mut storages = B256Map::with_capacity_and_hasher(
+            newer.storages.len() + older.storages.len(),
+            Default::default(),
+        );
+
+        for (hashed_address, storage) in &older.storages {
+            if !newer.storages.contains_key(hashed_address) {
+                storages.insert(*hashed_address, storage.clone());
+            }
+        }
+
+        for (hashed_address, newer_storage) in &newer.storages {
+            if let Some(older_storage) = older.storages.get(hashed_address) {
+                let merged = HashedStorageSorted::merge_batch([newer_storage, older_storage]);
+                storages.insert(*hashed_address, merged);
+            } else {
+                storages.insert(*hashed_address, newer_storage.clone());
+            }
+        }
+
+        Self { accounts, storages }
+    }
+
     /// Batch-merge sorted hashed post states. Iterator yields **newest to oldest**.
     ///
     /// For small batches, uses `extend_ref_and_sort` loop.
@@ -981,6 +1017,49 @@ mod tests {
             Some(&updated_slot_value)
         );
         assert_eq!(account_storage.map(|st| st.wiped), Some(true));
+    }
+
+    #[test]
+    fn sorted_hashed_state_merge_newer_with_older_matches_extend_ref() {
+        let address1 = B256::with_last_byte(1);
+        let address2 = B256::with_last_byte(2);
+        let slot1 = B256::with_last_byte(10);
+        let slot2 = B256::with_last_byte(11);
+
+        let older = HashedPostStateSorted {
+            accounts: vec![(address1, Some(Account::default()))],
+            storages: B256Map::from_iter([(
+                address1,
+                HashedStorageSorted {
+                    wiped: false,
+                    storage_slots: vec![(slot1, U256::from(1)), (slot2, U256::from(2))],
+                },
+            )]),
+        };
+        let newer = HashedPostStateSorted {
+            accounts: vec![(address1, None), (address2, Some(Account::default()))],
+            storages: B256Map::from_iter([
+                (
+                    address1,
+                    HashedStorageSorted {
+                        wiped: true,
+                        storage_slots: vec![(slot2, U256::from(3))],
+                    },
+                ),
+                (
+                    address2,
+                    HashedStorageSorted {
+                        wiped: false,
+                        storage_slots: vec![(slot1, U256::from(4))],
+                    },
+                ),
+            ]),
+        };
+
+        let mut expected = older.clone();
+        expected.extend_ref_and_sort(&newer);
+
+        assert_eq!(HashedPostStateSorted::merge_newer_with_older(&newer, &older), expected);
     }
 
     #[test]

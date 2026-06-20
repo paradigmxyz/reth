@@ -621,6 +621,44 @@ impl TrieUpdatesSorted {
         }
     }
 
+    /// Merges a newer sorted trie update set with an older one.
+    ///
+    /// This has the same semantics as cloning `older` and extending it with `newer`, but builds
+    /// the merged sorted vectors directly from references.
+    pub fn merge_newer_with_older(newer: &Self, older: &Self) -> Self {
+        if newer.is_empty() {
+            return older.clone()
+        }
+        if older.is_empty() {
+            return newer.clone()
+        }
+
+        let account_nodes =
+            kway_merge_sorted([newer.account_nodes.as_slice(), older.account_nodes.as_slice()]);
+        let mut storage_tries = B256Map::with_capacity_and_hasher(
+            newer.storage_tries.len() + older.storage_tries.len(),
+            Default::default(),
+        );
+
+        for (hashed_address, storage_trie) in &older.storage_tries {
+            if !newer.storage_tries.contains_key(hashed_address) {
+                storage_tries.insert(*hashed_address, storage_trie.clone());
+            }
+        }
+
+        for (hashed_address, newer_storage_trie) in &newer.storage_tries {
+            if let Some(older_storage_trie) = older.storage_tries.get(hashed_address) {
+                let merged =
+                    StorageTrieUpdatesSorted::merge_batch([newer_storage_trie, older_storage_trie]);
+                storage_tries.insert(*hashed_address, merged);
+            } else {
+                storage_tries.insert(*hashed_address, newer_storage_trie.clone());
+            }
+        }
+
+        Self { account_nodes, storage_tries }
+    }
+
     /// Clears all account nodes and storage tries.
     pub fn clear(&mut self) {
         self.account_nodes.clear();
@@ -920,6 +958,65 @@ mod tests {
         // Check that storage trie for hashed_address1 was extended
         let merged_storage = &updates1.storage_tries[&hashed_address1];
         assert_eq!(merged_storage.storage_nodes.len(), 2);
+    }
+
+    #[test]
+    fn test_trie_updates_sorted_merge_newer_with_older_matches_extend_ref() {
+        let hashed_address1 = B256::from([1; 32]);
+        let hashed_address2 = B256::from([2; 32]);
+
+        let older = TrieUpdatesSorted {
+            account_nodes: vec![
+                (Nibbles::from_nibbles_unchecked([0x01]), Some(BranchNodeCompact::default())),
+                (Nibbles::from_nibbles_unchecked([0x03]), None),
+            ],
+            storage_tries: B256Map::from_iter([(
+                hashed_address1,
+                StorageTrieUpdatesSorted {
+                    is_deleted: false,
+                    storage_nodes: vec![
+                        (
+                            Nibbles::from_nibbles_unchecked([0x01]),
+                            Some(BranchNodeCompact::default()),
+                        ),
+                        (Nibbles::from_nibbles_unchecked([0x03]), None),
+                    ],
+                },
+            )]),
+        };
+        let newer = TrieUpdatesSorted {
+            account_nodes: vec![
+                (Nibbles::from_nibbles_unchecked([0x02]), Some(BranchNodeCompact::default())),
+                (Nibbles::from_nibbles_unchecked([0x03]), Some(BranchNodeCompact::default())),
+            ],
+            storage_tries: B256Map::from_iter([
+                (
+                    hashed_address1,
+                    StorageTrieUpdatesSorted {
+                        is_deleted: true,
+                        storage_nodes: vec![(
+                            Nibbles::from_nibbles_unchecked([0x02]),
+                            Some(BranchNodeCompact::default()),
+                        )],
+                    },
+                ),
+                (
+                    hashed_address2,
+                    StorageTrieUpdatesSorted {
+                        is_deleted: false,
+                        storage_nodes: vec![(
+                            Nibbles::from_nibbles_unchecked([0x04]),
+                            Some(BranchNodeCompact::default()),
+                        )],
+                    },
+                ),
+            ]),
+        };
+
+        let mut expected = older.clone();
+        expected.extend_ref_and_sort(&newer);
+
+        assert_eq!(TrieUpdatesSorted::merge_newer_with_older(&newer, &older), expected);
     }
 
     #[test]
