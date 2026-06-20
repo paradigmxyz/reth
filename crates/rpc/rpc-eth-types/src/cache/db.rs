@@ -79,6 +79,18 @@ impl reth_storage_api::StorageRootProvider for StateProviderTraitObjWrapper {
     }
 }
 
+impl reth_storage_api::StorageRangeProvider for StateProviderTraitObjWrapper {
+    fn storage_range(
+        &self,
+        address: Address,
+        start: B256,
+        limit: usize,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<reth_storage_api::StorageRangeResult> {
+        self.0.storage_range(address, start, limit, hashed_storage)
+    }
+}
+
 impl reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper {
     fn proof(
         &self,

@@ -8,7 +8,8 @@ use crate::{
     ChangeSetReader, HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider,
     PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
     StateProofProvider, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StateRootProvider, StorageRootProvider, TransactionVariant, TransactionsProvider,
+    StateRootProvider, StorageRangeProvider, StorageRangeResult, StorageRootProvider,
+    TransactionVariant, TransactionsProvider,
 };
 
 #[cfg(feature = "db-api")]
@@ -495,6 +496,18 @@ impl<C: Send + Sync, N: NodePrimitives> StorageRootProvider for NoopProvider<C, 
         _hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
         Ok(StorageMultiProof::empty())
+    }
+}
+
+impl<C: Send + Sync, N: NodePrimitives> StorageRangeProvider for NoopProvider<C, N> {
+    fn storage_range(
+        &self,
+        _address: Address,
+        _start: B256,
+        _limit: usize,
+        _hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageRangeResult> {
+        Ok(StorageRangeResult::default())
     }
 }
 

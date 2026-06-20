@@ -56,6 +56,9 @@ macro_rules! delegate_provider_impls {
                 fn storage_proof(&self, address: alloy_primitives::Address, slot: alloy_primitives::B256, storage: reth_trie::HashedStorage) -> reth_storage_api::errors::provider::ProviderResult<reth_trie::StorageProof>;
                 fn storage_multiproof(&self, address: alloy_primitives::Address, slots: &[alloy_primitives::B256], storage: reth_trie::HashedStorage) -> reth_storage_api::errors::provider::ProviderResult<reth_trie::StorageMultiProof>;
             }
+            StorageRangeProvider $(where [$($generics)*])? {
+                fn storage_range(&self, address: alloy_primitives::Address, start: alloy_primitives::B256, limit: usize, hashed_storage: reth_trie::HashedStorage) -> reth_storage_api::errors::provider::ProviderResult<reth_storage_api::StorageRangeResult>;
+            }
             StateProofProvider $(where [$($generics)*])? {
                 fn proof(&self, input: reth_trie::TrieInput, address: alloy_primitives::Address, slots: &[alloy_primitives::B256]) -> reth_storage_api::errors::provider::ProviderResult<reth_trie::AccountProof>;
                 fn multiproof(&self, input: reth_trie::TrieInput, targets: reth_trie::MultiProofTargets) -> reth_storage_api::errors::provider::ProviderResult<reth_trie::MultiProof>;

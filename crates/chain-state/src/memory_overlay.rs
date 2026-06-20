@@ -5,7 +5,8 @@ use reth_errors::ProviderResult;
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
     AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
-    StateProvider, StateProviderBox, StateRootProvider, StorageRootProvider,
+    StateProvider, StateProviderBox, StateRootProvider, StorageRangeProvider, StorageRangeResult,
+    StorageRootProvider,
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
@@ -205,6 +206,19 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
     ) -> ProviderResult<Vec<Bytes>> {
         input.prepend_self(self.trie_input().clone());
         self.historical.witness(input, target, mode)
+    }
+}
+
+impl<N: NodePrimitives> StorageRangeProvider for MemoryOverlayStateProviderRef<'_, N> {
+    fn storage_range(
+        &self,
+        address: Address,
+        start: B256,
+        limit: usize,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageRangeResult> {
+        let merged = self.merged_hashed_storage(address, hashed_storage);
+        self.historical.storage_range(address, start, limit, merged)
     }
 }
 
