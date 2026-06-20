@@ -491,7 +491,7 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
             dashmap::Entry::Occupied(entry) => entry.get().clone(),
             dashmap::Entry::Vacant(entry) => {
                 self.overlay_builder.metrics.overlay_cache_misses.increment(1);
-                let overlay = self.overlay_builder.build_overlay(provider)?;
+                let overlay = self.overlay_builder.calculate_overlay(provider, db_tip_block)?;
                 entry.insert(overlay.clone());
                 overlay
             }
