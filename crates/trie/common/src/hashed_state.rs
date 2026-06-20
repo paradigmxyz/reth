@@ -314,9 +314,7 @@ impl HashedPostState {
         for (hashed_address, sorted_storage) in &sorted.storages {
             match self.storages.entry(*hashed_address) {
                 hash_map::Entry::Vacant(entry) => {
-                    let mut new_storage = HashedStorage::new(false);
-                    new_storage.extend_from_sorted(sorted_storage);
-                    entry.insert(new_storage);
+                    entry.insert(HashedStorage::from_sorted(sorted_storage));
                 }
                 hash_map::Entry::Occupied(mut entry) => {
                     entry.get_mut().extend_from_sorted(sorted_storage);
@@ -493,6 +491,14 @@ impl HashedStorage {
         for (slot, value) in &sorted.storage_slots {
             self.storage.insert(*slot, *value);
         }
+    }
+
+    /// Create hashed storage directly from sorted storage slots.
+    pub fn from_sorted(sorted: &HashedStorageSorted) -> Self {
+        let mut storage =
+            B256Map::with_capacity_and_hasher(sorted.storage_slots.len(), Default::default());
+        storage.extend(sorted.storage_slots.iter().copied());
+        Self { wiped: sorted.wiped, storage }
     }
 
     /// Converts hashed storage into [`HashedStorageSorted`].
