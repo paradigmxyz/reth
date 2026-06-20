@@ -161,7 +161,7 @@ use std::{
     },
     time::Duration,
 };
-use tracing::{debug, debug_span, error, info, instrument, trace, warn, Level, Span};
+use tracing::{debug, debug_span, error, info, instrument, trace, trace_span, warn, Level, Span};
 
 pub use crate::tree::types::ValidationOutcome;
 
@@ -1684,7 +1684,7 @@ where
     /// and logs bloom from the receipts.
     ///
     /// The `hashed_state` handle wraps the background hashed post state computation.
-    #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
+    #[instrument(level = "trace", target = "engine::tree::payload_validator", skip_all)]
     fn validate_post_execution<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         block: &RecoveredBlock<N::Block>,
@@ -1703,7 +1703,7 @@ where
 
         // Validate block post-execution rules
         let _enter =
-            debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
+            trace_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
         let block_access_list_hash =
             built_bal.as_ref().map(|bal| compute_block_access_list_hash(bal));
