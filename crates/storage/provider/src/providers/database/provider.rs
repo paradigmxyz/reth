@@ -27,7 +27,7 @@ use alloy_consensus::{
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
-    map::{hash_map, AddressSet, B256Map, HashMap},
+    map::{hash_map, AddressSet, B256Map, B256Set, HashMap},
     Address, BlockHash, BlockNumber, StorageKey, StorageValue, TxHash, TxNumber, B256,
 };
 use itertools::Itertools;
@@ -403,6 +403,116 @@ impl<TX: Debug + Send, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> ChainSpe
 }
 
 impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
+    fn hashed_zero_reset_delete_filter<'a, R: 'a>(
+        &self,
+        execution_outputs: impl IntoIterator<Item = &'a BlockExecutionOutput<R>>,
+        merged_hashed_state: &HashedPostStateSorted,
+    ) -> B256Map<B256Set> {
+        let mut candidates = B256Map::<B256Set>::default();
+        for (hashed_address, storage) in merged_hashed_state.account_storages() {
+            if storage.is_wiped() {
+                continue;
+            }
+
+            let zero_slots = storage
+                .storage_slots_ref()
+                .iter()
+                .filter_map(|(hashed_slot, value)| value.is_zero().then_some(*hashed_slot))
+                .collect::<B256Set>();
+            if !zero_slots.is_empty() {
+                candidates.insert(*hashed_address, zero_slots);
+            }
+        }
+
+        if candidates.is_empty() {
+            return B256Map::default()
+        }
+
+        let mut eligible = B256Map::<B256Set>::default();
+        for output in execution_outputs {
+            if candidates.is_empty() {
+                break;
+            }
+
+            for (address, account) in output.state.state() {
+                let hashed_address = keccak256(address);
+                let Some(candidate_slots) = candidates.get_mut(&hashed_address) else {
+                    continue;
+                };
+
+                let mut seen = Vec::new();
+                for (slot, value) in &account.storage {
+                    let hashed_slot = keccak256(B256::from(*slot));
+                    if candidate_slots.contains(&hashed_slot) {
+                        if value.original_value().is_zero() {
+                            eligible.entry(hashed_address).or_default().insert(hashed_slot);
+                        }
+                        seen.push(hashed_slot);
+                    }
+                }
+
+                for hashed_slot in seen {
+                    candidate_slots.remove(&hashed_slot);
+                }
+            }
+
+            candidates.retain(|_, slots| !slots.is_empty());
+        }
+
+        eligible
+    }
+
+    fn write_hashed_state_with_zero_delete_filter(
+        &self,
+        hashed_state: &HashedPostStateSorted,
+        zero_delete_filter: Option<&B256Map<B256Set>>,
+    ) -> ProviderResult<()> {
+        // Write hashed account updates.
+        let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
+        for (hashed_address, account) in hashed_state.accounts() {
+            if let Some(account) = account {
+                hashed_accounts_cursor.upsert(*hashed_address, account)?;
+            } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
+                hashed_accounts_cursor.delete_current()?;
+            }
+        }
+
+        // Write hashed storage changes.
+        let sorted_storages = hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
+        let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
+        for (hashed_address, storage) in sorted_storages {
+            if storage.is_wiped() && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
+                hashed_storage_cursor.delete_current_duplicates()?;
+            }
+
+            let zero_delete_slots = (!storage.is_wiped())
+                .then(|| zero_delete_filter.and_then(|filter| filter.get(hashed_address)))
+                .flatten();
+            for (hashed_slot, value) in storage.storage_slots_ref() {
+                let entry = StorageEntry { key: *hashed_slot, value: *value };
+
+                if entry.value.is_zero() &&
+                    zero_delete_slots.is_some_and(|slots| slots.contains(&entry.key))
+                {
+                    continue;
+                }
+
+                if let Some(db_entry) =
+                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
+                    db_entry.key == entry.key
+                {
+                    hashed_storage_cursor.delete_current()?;
+                }
+
+                if !entry.value.is_zero() {
+                    hashed_storage_cursor.upsert(*hashed_address, &entry)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Creates a provider with an inner read-write transaction.
     #[expect(clippy::too_many_arguments)]
     fn new_rw_inner(
@@ -725,7 +835,14 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     blocks.iter().rev().map(|b| b.trie_data().hashed_state),
                 );
                 if !merged_hashed_state.is_empty() {
-                    self.write_hashed_state(&merged_hashed_state)?;
+                    let zero_delete_filter = self.hashed_zero_reset_delete_filter(
+                        blocks.iter().map(|b| b.execution_outcome()),
+                        &merged_hashed_state,
+                    );
+                    self.write_hashed_state_with_zero_delete_filter(
+                        &merged_hashed_state,
+                        Some(&zero_delete_filter),
+                    )?;
                 }
                 timings.write_hashed_state += start.elapsed();
 
@@ -2691,42 +2808,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
-        // Write hashed account updates.
-        let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
-        for (hashed_address, account) in hashed_state.accounts() {
-            if let Some(account) = account {
-                hashed_accounts_cursor.upsert(*hashed_address, account)?;
-            } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
-                hashed_accounts_cursor.delete_current()?;
-            }
-        }
-
-        // Write hashed storage changes.
-        let sorted_storages = hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
-        let mut hashed_storage_cursor =
-            self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
-        for (hashed_address, storage) in sorted_storages {
-            if storage.is_wiped() && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
-                hashed_storage_cursor.delete_current_duplicates()?;
-            }
-
-            for (hashed_slot, value) in storage.storage_slots_ref() {
-                let entry = StorageEntry { key: *hashed_slot, value: *value };
-
-                if let Some(db_entry) =
-                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
-                    db_entry.key == entry.key
-                {
-                    hashed_storage_cursor.delete_current()?;
-                }
-
-                if !entry.value.is_zero() {
-                    hashed_storage_cursor.upsert(*hashed_address, &entry)?;
-                }
-            }
-        }
-
-        Ok(())
+        self.write_hashed_state_with_zero_delete_filter(hashed_state, None)
     }
 
     /// Remove the last N blocks of state.
@@ -3959,7 +4041,8 @@ mod tests {
     use reth_storage_api::MetadataWriter;
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
-        HashedPostState, KeccakKeyHasher, Nibbles, StoredNibbles, StoredNibblesSubKey,
+        HashedPostState, HashedStorage, KeccakKeyHasher, Nibbles, StoredNibbles,
+        StoredNibblesSubKey,
     };
     use revm_database::BundleState;
     use revm_state::AccountInfo;
@@ -4000,6 +4083,66 @@ mod tests {
 
         done_rx.recv_timeout(Duration::from_secs(1)).unwrap().unwrap();
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn hashed_zero_reset_filter_only_marks_slots_that_started_zero() {
+        let factory = create_test_provider_factory();
+        let provider_rw = factory.provider_rw().unwrap();
+
+        let address = Address::with_last_byte(42);
+        let hashed_address = keccak256(address);
+        let zero_started_slot = U256::from(1);
+        let nonzero_started_slot = U256::from(2);
+        let hashed_zero_started_slot = keccak256(B256::from(zero_started_slot));
+        let hashed_nonzero_started_slot = keccak256(B256::from(nonzero_started_slot));
+
+        let merged_hashed_state = HashedPostState::default()
+            .with_storages([(
+                hashed_address,
+                HashedStorage::from_iter(
+                    false,
+                    [
+                        (hashed_zero_started_slot, U256::ZERO),
+                        (hashed_nonzero_started_slot, U256::ZERO),
+                    ],
+                ),
+            )])
+            .into_sorted();
+
+        let state_init = AddressMap::from_iter([(
+            address,
+            (
+                None,
+                None,
+                B256Map::from_iter([
+                    (B256::from(zero_started_slot), (U256::ZERO, U256::from(7))),
+                    (B256::from(nonzero_started_slot), (U256::from(9), U256::from(8))),
+                ]),
+            ),
+        )]);
+        let execution_outcome: ExecutionOutcome<Receipt> = ExecutionOutcome::new_init(
+            state_init,
+            RevertsInit::default(),
+            [],
+            vec![vec![]],
+            1,
+            vec![],
+        );
+        let output = BlockExecutionOutput {
+            result: BlockExecutionResult {
+                receipts: Vec::<Receipt>::new(),
+                requests: Default::default(),
+                gas_used: 0,
+                blob_gas_used: 0,
+            },
+            state: execution_outcome.bundle,
+        };
+
+        let filter = provider_rw.hashed_zero_reset_delete_filter([&output], &merged_hashed_state);
+        let filtered_slots = filter.get(&hashed_address).expect("address should be filtered");
+        assert!(filtered_slots.contains(&hashed_zero_started_slot));
+        assert!(!filtered_slots.contains(&hashed_nonzero_started_slot));
     }
 
     #[test]
