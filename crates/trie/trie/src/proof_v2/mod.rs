@@ -152,6 +152,19 @@ where
         !self.branch_stack.is_empty() as usize
     }
 
+    /// Converts a hashed cursor entry into the nibble key and deferred value used by the proof
+    /// builder.
+    #[inline]
+    fn map_hashed_cursor_entry(
+        value_encoder: &mut VE,
+        (key_b256, val): (B256, VE::Value),
+    ) -> (Nibbles, VE::DeferredEncoder) {
+        debug_assert_eq!(key_b256.len(), 32);
+        let key = Nibbles::unpack_array(key_b256.as_ref());
+        let val = value_encoder.deferred_encoder(key_b256, val);
+        (key, val)
+    }
+
     /// Returns true if the proof of a node at the given path should be retained. A node is retained
     /// if its path is a prefix of any target.
     ///
@@ -691,16 +704,6 @@ where
         lower_bound: Nibbles,
         upper_bound: Option<Nibbles>,
     ) -> Result<(), StateProofError> {
-        // A helper closure for mapping entries returned from the `hashed_cursor`, converting the
-        // key to Nibbles and immediately creating the DeferredValueEncoder so that encoding of the
-        // leaf value can begin ASAP.
-        let mut map_hashed_cursor_entry = |(key_b256, val): (B256, _)| {
-            debug_assert_eq!(key_b256.len(), 32);
-            let key = Nibbles::unpack_array(key_b256.as_ref());
-            let val = value_encoder.deferred_encoder(key_b256, val);
-            (key, val)
-        };
-
         // If the cursor hasn't been used, or the last iterated key is prior to this range's
         // key range, then seek forward to at least the first key.
         if hashed_cursor_current.as_ref().is_none_or(|(key, _)| key < &lower_bound) {
@@ -711,8 +714,10 @@ where
             );
 
             let lower_key = B256::right_padding_from(&lower_bound.pack());
-            *hashed_cursor_current =
-                self.hashed_cursor.seek(lower_key)?.map(&mut map_hashed_cursor_entry);
+            *hashed_cursor_current = self
+                .hashed_cursor
+                .seek(lower_key)?
+                .map(|entry| Self::map_hashed_cursor_entry(value_encoder, entry));
         }
 
         // Loop over all keys in the range, calling `push_leaf` on each.
@@ -722,7 +727,10 @@ where
             let (key, val) =
                 core::mem::take(hashed_cursor_current).expect("while-let checks for Some");
             self.push_leaf(targets, key, val)?;
-            *hashed_cursor_current = self.hashed_cursor.next()?.map(&mut map_hashed_cursor_entry);
+            *hashed_cursor_current = self
+                .hashed_cursor
+                .next()?
+                .map(|entry| Self::map_hashed_cursor_entry(value_encoder, entry));
         }
 
         trace!(target: TRACE_TARGET, "No further keys within range");
@@ -1475,6 +1483,17 @@ where
         value_encoder: &mut VE,
         targets: &mut [ProofV2Target],
     ) -> Result<Vec<ProofTrieNodeV2>, StateProofError> {
+        self.proof_inner_with_hashed_current(value_encoder, targets, None)
+    }
+
+    /// Internal implementation of proof calculation with an optional already-positioned hashed
+    /// cursor entry.
+    fn proof_inner_with_hashed_current(
+        &mut self,
+        value_encoder: &mut VE,
+        targets: &mut [ProofV2Target],
+        mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)>,
+    ) -> Result<Vec<ProofTrieNodeV2>, StateProofError> {
         // If there are no targets then nothing could be returned, return early.
         if targets.is_empty() {
             trace!(target: TRACE_TARGET, "Empty targets, returning");
@@ -1484,7 +1503,6 @@ where
         // Initialize the variables which track the state of the two cursors. Both indicate the
         // cursors are unseeked.
         let mut trie_cursor_state = TrieCursorState::unseeked();
-        let mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)> = None;
 
         // Divide targets into chunks, each chunk corresponding to a different sub-trie within the
         // overall trie, and handle all proofs within that sub-trie.
@@ -1561,10 +1579,18 @@ where
         &mut self,
         value_encoder: &mut VE,
     ) -> Result<ProofTrieNodeV2, StateProofError> {
+        self.root_node_with_hashed_current(value_encoder, None)
+    }
+
+    /// Calculates the root node with an optional already-positioned hashed cursor entry.
+    fn root_node_with_hashed_current(
+        &mut self,
+        value_encoder: &mut VE,
+        mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)>,
+    ) -> Result<ProofTrieNodeV2, StateProofError> {
         // Initialize the variables which track the state of the two cursors. Both indicate the
         // cursors are unseeked.
         let mut trie_cursor_state = TrieCursorState::unseeked();
-        let mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)> = None;
 
         static EMPTY_TARGETS: [ProofV2Target; 0] = [];
         let sub_trie_targets =
@@ -1631,9 +1657,14 @@ where
         targets: &mut [ProofV2Target],
     ) -> Result<Vec<ProofTrieNodeV2>, StateProofError> {
         self.hashed_cursor.set_hashed_address(hashed_address);
+        let mut storage_value_encoder = StorageValueEncoder;
+        let hashed_cursor_current = self
+            .hashed_cursor
+            .seek(B256::ZERO)?
+            .map(|entry| Self::map_hashed_cursor_entry(&mut storage_value_encoder, entry));
 
-        // Shortcut: check if storage is empty
-        if self.hashed_cursor.is_storage_empty()? {
+        // Shortcut: the first storage seek doubles as the empty-storage check.
+        if hashed_cursor_current.is_none() {
             // Return a single EmptyRoot node at the root path
             return Ok(vec![ProofTrieNodeV2 {
                 path: Nibbles::default(),
@@ -1646,9 +1677,11 @@ where
         // been checked.
         self.trie_cursor.set_hashed_address(hashed_address);
 
-        // Create a mutable storage value encoder
-        let mut storage_value_encoder = StorageValueEncoder;
-        self.proof_inner(&mut storage_value_encoder, targets)
+        self.proof_inner_with_hashed_current(
+            &mut storage_value_encoder,
+            targets,
+            hashed_cursor_current,
+        )
     }
 
     /// Calculates the root node of a storage trie.
@@ -1661,8 +1694,13 @@ where
         hashed_address: B256,
     ) -> Result<ProofTrieNodeV2, StateProofError> {
         self.hashed_cursor.set_hashed_address(hashed_address);
+        let mut storage_value_encoder = StorageValueEncoder;
+        let hashed_cursor_current = self
+            .hashed_cursor
+            .seek(B256::ZERO)?
+            .map(|entry| Self::map_hashed_cursor_entry(&mut storage_value_encoder, entry));
 
-        if self.hashed_cursor.is_storage_empty()? {
+        if hashed_cursor_current.is_none() {
             return Ok(ProofTrieNodeV2 {
                 path: Nibbles::default(),
                 node: TrieNodeV2::EmptyRoot,
@@ -1674,9 +1712,7 @@ where
         // been checked.
         self.trie_cursor.set_hashed_address(hashed_address);
 
-        // Create a mutable storage value encoder
-        let mut storage_value_encoder = StorageValueEncoder;
-        self.root_node(&mut storage_value_encoder)
+        self.root_node_with_hashed_current(&mut storage_value_encoder, hashed_cursor_current)
     }
 }
 
