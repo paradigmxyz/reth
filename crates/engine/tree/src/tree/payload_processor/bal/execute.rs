@@ -68,6 +68,7 @@ where
     worker_pool.in_place_scope(|scope| {
         execute_block_inner(
             scope,
+            runtime,
             evm_config,
             make_db,
             input_bal,
@@ -84,6 +85,7 @@ where
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
 fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     scope: &rayon::Scope<'scope>,
+    runtime: &Runtime,
     evm_config: &'scope Evm,
     make_db: &'scope MakeDb,
     input_bal: Arc<DecodedBal>,
@@ -171,6 +173,10 @@ where
     };
 
     let built_bal = take_built_bal_and_log_divergence(&mut canonical_state, bal);
+
+    // Dropping the BAL takes considerable time. It would've happened at the end of this scope.
+    // But we drop it preventively to avoid the issues.
+    runtime.spawn_drop(input_bal);
 
     canonical_state.merge_transitions(BundleRetention::Reverts);
     Ok((
