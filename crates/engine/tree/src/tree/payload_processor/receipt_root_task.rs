@@ -81,7 +81,8 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
         let mut aggregated_bloom = Bloom::ZERO;
         let mut encode_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
         let mut next = 0usize;
-        let mut pending = HashMap::new();
+        let mut pending_single = None;
+        let mut pending: Option<HashMap<usize, R>> = None;
 
         let mut push = |receipt: R| {
             let receipt_with_bloom = receipt.with_bloom_ref();
@@ -98,12 +99,41 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
                 push(indexed_receipt.receipt);
                 next += 1;
 
-                while let Some(receipt) = pending.remove(&next) {
-                    push(receipt);
-                    next += 1;
+                loop {
+                    if let Some((index, receipt)) = pending_single.take() {
+                        if index == next {
+                            push(receipt);
+                            next += 1;
+                            continue;
+                        }
+                        pending_single = Some((index, receipt));
+                    }
+
+                    if let Some(pending) = pending.as_mut() &&
+                        let Some(receipt) = pending.remove(&next)
+                    {
+                        push(receipt);
+                        next += 1;
+                        continue;
+                    }
+
+                    break
                 }
             } else {
-                pending.insert(indexed_receipt.index, indexed_receipt.receipt);
+                let IndexedReceipt { index, receipt } = indexed_receipt;
+                if let Some(pending) = pending.as_mut() {
+                    pending.insert(index, receipt);
+                } else if let Some((pending_index, pending_receipt)) = pending_single.take() {
+                    if pending_index == index {
+                        pending_single = Some((index, receipt));
+                    } else {
+                        let pending_map = pending.get_or_insert_with(Default::default);
+                        pending_map.insert(pending_index, pending_receipt);
+                        pending_map.insert(index, receipt);
+                    }
+                } else {
+                    pending_single = Some((index, receipt));
+                }
             }
         }
 
@@ -117,11 +147,13 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
             return;
         }
 
-        if !pending.is_empty() {
+        let pending_len = pending_single.is_some() as usize +
+            pending.as_ref().map_or(0, |pending| pending.len());
+        if pending_len != 0 {
             tracing::error!(
                 target: "engine::tree::payload_processor",
                 received = next,
-                pending = pending.len(),
+                pending = pending_len,
                 "Receipt root task received gapped receipts"
             );
             return;
