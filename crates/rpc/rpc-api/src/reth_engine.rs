@@ -99,9 +99,9 @@ where
 /// (payload + sidecar) or an RLP-encoded block, optionally alongside a block access list and
 /// waiting for persistence and cache locks before processing.
 ///
-/// By default, the endpoint waits for both in-flight persistence and cache updates to complete
-/// before executing the payload, providing unbiased timing measurements. Each can be independently
-/// disabled via `wait_for_persistence` and `wait_for_caches`.
+/// By default, the endpoint waits for cache updates but lets in-flight persistence continue in the
+/// background before executing the payload. Persistence waiting can be explicitly enabled with
+/// `wait_for_persistence`, and cache waiting can be disabled with `wait_for_caches`.
 ///
 /// Responses include timing breakdowns with server-measured execution latency.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "reth"))]
@@ -110,7 +110,7 @@ pub trait RethEngineApi<ExecutionData> {
     /// Reth-specific newPayload that accepts either `ExecutionData` directly or an RLP-encoded
     /// block.
     ///
-    /// `wait_for_persistence` (default `true`): waits for in-flight persistence to complete.
+    /// `wait_for_persistence` (default `false`): waits for in-flight persistence to complete.
     /// `wait_for_caches` (default `true`): waits for execution cache and sparse trie locks.
     #[method(name = "newPayload")]
     async fn reth_new_payload(

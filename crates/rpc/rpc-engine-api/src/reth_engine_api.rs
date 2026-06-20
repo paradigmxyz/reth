@@ -34,7 +34,7 @@ impl<Payload: PayloadTypes> RethEngineApiServer<Payload::ExecutionData> for Reth
         wait_for_persistence: Option<bool>,
         wait_for_caches: Option<bool>,
     ) -> RpcResult<RethPayloadStatus> {
-        let wait_for_persistence = wait_for_persistence.unwrap_or(true);
+        let wait_for_persistence = wait_for_persistence.unwrap_or(false);
         let wait_for_caches = wait_for_caches.unwrap_or(true);
         trace!(target: "rpc::engine", wait_for_persistence, wait_for_caches, "Serving reth_newPayload");
 
