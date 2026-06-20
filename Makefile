@@ -133,9 +133,10 @@ build-deb-%:
 define tarball_release_binary
 	cp $(CARGO_TARGET_DIR)/$(1)/$(PROFILE)/$(2) $(BIN_DIR)/$(2)
 	cp -R LICENSES $(BIN_DIR)/LICENSES
+	cp README.md $(BIN_DIR)/README.md
 	cd $(BIN_DIR) && \
-		tar -czf reth-$(GIT_TAG)-$(1)$(3).tar.gz $(2) LICENSES && \
-		rm -r $(2) LICENSES
+		tar -czf reth-$(GIT_TAG)-$(1)$(3).tar.gz $(2) LICENSES README.md && \
+		rm -r $(2) LICENSES README.md
 endef
 
 # The current git tag will be used as the version in the output file names. You

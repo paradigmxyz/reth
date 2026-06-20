@@ -57,6 +57,7 @@ ARG CARGO_BIN
 COPY --from=builder /app/target/hivetests/$CARGO_BIN /usr/local/bin/reth
 COPY LICENSE-* ./
 COPY LICENSES ./LICENSES
+COPY README.md ./README.md
 
 EXPOSE 30303 30303/udp 9001 8545 8546
 ENV RUST_LOG=debug
