@@ -120,6 +120,7 @@ where
             Default::default(),
             Default::default(),
             None,
+            false,
             config,
             Default::default(),
             None,
@@ -162,6 +163,7 @@ where
         mut cached_reads,
         execution_cache,
         trie_handle,
+        skip_state_root,
         config,
         cancel,
         best_payload,
@@ -448,10 +450,20 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let BlockBuilderOutcome { execution_result, block, block_access_list, .. } = if let Some(
-        mut handle,
-    ) = trie_handle
+    let BlockBuilderOutcome { execution_result, block, block_access_list, .. } = if skip_state_root
     {
+        if trie_handle.is_some() {
+            builder.evm_mut().db_mut().set_state_hook(None);
+        }
+        debug!(
+            target: "payload_builder",
+            id = %payload_id,
+            state_root = ?parent_header.state_root,
+            "skipping payload builder trie state-root computation"
+        );
+        builder
+            .finish(state_provider.as_ref(), Some((parent_header.state_root, Default::default())))?
+    } else if let Some(mut handle) = trie_handle {
         // Drop the state hook, which drops the StateHookSender and triggers
         // FinishedStateUpdates via its Drop impl, signaling the trie task to finalize.
         builder.evm_mut().db_mut().set_state_hook(None);

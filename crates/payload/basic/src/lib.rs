@@ -199,6 +199,7 @@ where
             cached_reads,
             execution_cache: input.cache,
             trie_handle: input.trie_handle,
+            skip_state_root: input.skip_state_root,
             payload_task_guard: self.payload_task_guard.clone(),
             metrics: Default::default(),
             builder: self.builder.clone(),
@@ -389,6 +390,8 @@ where
     execution_cache: Option<SavedCache>,
     /// Optional state root task handle, shared with the engine.
     trie_handle: Option<StateRootHandle>,
+    /// Skip trie state-root computation for payload builds.
+    skip_state_root: bool,
     /// metrics for this type
     metrics: PayloadBuilderMetrics,
     /// The type responsible for building payloads.
@@ -416,6 +419,7 @@ where
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let execution_cache = self.execution_cache.clone();
         let trie_handle = self.trie_handle.take();
+        let skip_state_root = self.skip_state_root;
         let builder = self.builder.clone();
         let executor = self.executor.clone();
         self.executor.spawn_task(async move {
@@ -427,6 +431,7 @@ where
                     cached_reads,
                     execution_cache,
                     trie_handle,
+                    skip_state_root,
                     config: payload_config,
                     cancel,
                     best_payload,
@@ -563,6 +568,7 @@ where
                 cached_reads: self.cached_reads.take().unwrap_or_default(),
                 execution_cache: self.execution_cache.clone(),
                 trie_handle: None,
+                skip_state_root: self.skip_state_root,
                 config: self.config.clone(),
                 cancel: CancelOnDrop::default(),
                 best_payload: None,
@@ -923,6 +929,8 @@ pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
     /// root, so if the next `newPayload` is not on top of that block, the trie cache is
     /// invalidated and cleared.
     pub trie_handle: Option<StateRootHandle>,
+    /// Skip trie state-root computation for this payload build.
+    pub skip_state_root: bool,
     /// How to configure the payload.
     pub config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
     /// A marker that can be used to cancel the job.
@@ -937,11 +945,20 @@ impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
         cached_reads: CachedReads,
         execution_cache: Option<SavedCache>,
         trie_handle: Option<StateRootHandle>,
+        skip_state_root: bool,
         config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
         cancel: CancelOnDrop,
         best_payload: Option<Payload>,
     ) -> Self {
-        Self { cached_reads, execution_cache, trie_handle, config, cancel, best_payload }
+        Self {
+            cached_reads,
+            execution_cache,
+            trie_handle,
+            skip_state_root,
+            config,
+            cancel,
+            best_payload,
+        }
     }
 }
 

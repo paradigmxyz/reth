@@ -556,6 +556,8 @@ pub struct BuildNewPayload<T> {
     pub cache: Option<SavedCache>,
     /// Optional handle to a background sparse trie task.
     pub trie_handle: Option<StateRootHandle>,
+    /// Skip trie state-root computation for this payload build.
+    pub skip_state_root: bool,
 }
 
 impl<T: PayloadAttributes> BuildNewPayload<T> {

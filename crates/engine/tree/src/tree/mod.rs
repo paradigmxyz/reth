@@ -3277,15 +3277,17 @@ where
             None
         };
 
-        let trie_handle = if self.config.share_sparse_trie_with_payload_builder() {
-            self.payload_validator.sparse_trie_handle_for(
-                state.head_block_hash,
-                head.state_root(),
-                &self.state,
-            )
-        } else {
-            None
-        };
+        let skip_state_root = self.config.skip_state_root();
+        let trie_handle =
+            if self.config.share_sparse_trie_with_payload_builder() && !skip_state_root {
+                self.payload_validator.sparse_trie_handle_for(
+                    state.head_block_hash,
+                    head.state_root(),
+                    &self.state,
+                )
+            } else {
+                None
+            };
 
         // send the payload to the builder and return the receiver for the pending payload
         // id, initiating payload job is handled asynchronously
@@ -3294,6 +3296,7 @@ where
             attributes,
             cache,
             trie_handle,
+            skip_state_root,
         });
 
         // Client software MUST respond to this method call in the following way:

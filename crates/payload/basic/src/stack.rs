@@ -171,6 +171,7 @@ where
             cached_reads,
             execution_cache,
             trie_handle,
+            skip_state_root,
             config,
             cancel,
             best_payload,
@@ -183,6 +184,7 @@ where
                     cached_reads,
                     execution_cache,
                     trie_handle,
+                    skip_state_root,
                     config: PayloadConfig {
                         parent_header,
                         parent_block_info,
@@ -205,6 +207,7 @@ where
                     cached_reads,
                     execution_cache,
                     trie_handle,
+                    skip_state_root,
                     config: PayloadConfig {
                         parent_header,
                         parent_block_info,
