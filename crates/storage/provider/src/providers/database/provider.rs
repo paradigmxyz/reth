@@ -2468,11 +2468,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let tip = self.last_block_number()?.max(last_block);
 
         // Fetch the first transaction number for each block in the range
-        let block_indices: Vec<_> = self
-            .block_body_indices_range(block_range)?
-            .into_iter()
-            .map(|b| b.first_tx_num)
-            .collect();
+        let block_indices = self.block_body_indices_range(block_range)?;
 
         // Ensure all expected blocks are present.
         if block_indices.len() < block_count as usize {
@@ -2484,8 +2480,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
         let mut receipts_writer = EitherWriter::new_receipts(self, first_block)?;
 
-        let has_contract_log_filter = !self.prune_modes.receipts_log_filter.is_empty();
-        let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
+        let contract_log_pruner = (!self.prune_modes.receipts_log_filter.is_empty())
+            .then(|| self.prune_modes.receipts_log_filter.group_by_block(tip, None))
+            .transpose()?;
 
         // All receipts from the last 128 blocks are required for blockchain tree, even with
         // [`PruneSegment::ContractLogs`].
@@ -2502,14 +2499,17 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
         // Prepare set of addresses which logs should not be pruned.
         let mut allowed_addresses: AddressSet = AddressSet::default();
-        for (_, addresses) in contract_log_pruner.range(..first_block) {
-            allowed_addresses.extend(addresses.iter().copied());
+        if let Some(contract_log_pruner) = contract_log_pruner.as_ref() {
+            for (_, addresses) in contract_log_pruner.range(..first_block) {
+                allowed_addresses.extend(addresses.iter().copied());
+            }
         }
 
-        for (idx, (receipts, first_tx_index)) in
-            execution_outcome.receipts().zip(block_indices).enumerate()
+        for (idx, (receipts, block_indices)) in
+            execution_outcome.receipts().zip(&block_indices).enumerate()
         {
             let block_number = first_block + idx as u64;
+            let first_tx_index = block_indices.first_tx_num;
 
             // Increment block number for receipts static file writer
             receipts_writer.increment_block(block_number)?;
@@ -2524,7 +2524,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             }
 
             // If there are new addresses to retain after this block number, track them
-            if let Some(new_addresses) = contract_log_pruner.get(&block_number) {
+            if let Some(contract_log_pruner) = contract_log_pruner.as_ref() &&
+                let Some(new_addresses) = contract_log_pruner.get(&block_number)
+            {
                 allowed_addresses.extend(new_addresses.iter().copied());
             }
 
@@ -2533,7 +2535,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 // Skip writing receipt if log filter is active and it does not have any logs to
                 // retain
                 if prunable_receipts &&
-                    has_contract_log_filter &&
+                    contract_log_pruner.is_some() &&
                     !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
                 {
                     continue
