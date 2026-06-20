@@ -311,11 +311,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         let parent_input = blocks.first().and_then(|block| {
             let parent_hash = block.recovered_block().parent_hash();
             (parent_hash != anchor_hash)
-                .then(|| {
-                    self.overlays
-                        .get(&OverlayCacheKey { anchor_hash, tip_hash: parent_hash })
-                        .and_then(|entry| entry.value().ready())
-                })
+                .then(|| self.cached_parent_overlay(parent_hash, anchor_hash, mode))
                 .flatten()
         });
         span.record("parent_overlay_reused", parent_input.is_some());
@@ -380,6 +376,24 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
 
                 Ok(Some(input))
             }
+        }
+    }
+
+    fn cached_parent_overlay(
+        &self,
+        tip_hash: B256,
+        anchor_hash: B256,
+        mode: OverlayLookupMode,
+    ) -> Option<Arc<TrieInputSorted>> {
+        let key = OverlayCacheKey { anchor_hash, tip_hash };
+        let entry = self.overlays.get(&key).map(|entry| entry.value().clone())?;
+
+        match entry {
+            OverlayCacheEntry::Ready(input) => Some(input),
+            OverlayCacheEntry::Computing(waiter) if mode == OverlayLookupMode::Required => {
+                Some(waiter.wait())
+            }
+            OverlayCacheEntry::Computing(_) => None,
         }
     }
 
@@ -472,13 +486,6 @@ enum OverlayCacheEntry {
 impl OverlayCacheEntry {
     const fn is_ready(&self) -> bool {
         matches!(self, Self::Ready(_))
-    }
-
-    fn ready(&self) -> Option<Arc<TrieInputSorted>> {
-        match self {
-            Self::Ready(input) => Some(Arc::clone(input)),
-            Self::Computing(_) => None,
-        }
     }
 }
 
@@ -772,6 +779,40 @@ mod tests {
 
         let state = rx.recv_timeout(Duration::from_secs(1)).unwrap().unwrap();
         assert!(state.is_empty());
+    }
+
+    #[test]
+    fn required_child_lookup_extends_in_progress_parent_overlay() {
+        let manager = StateTrieOverlayManager::default();
+        let blocks = test_blocks();
+        manager.insert_block(blocks[0].clone());
+        manager.insert_block(blocks[1].clone());
+
+        let anchor_hash = blocks[0].recovered_block().parent_hash();
+        let parent_hash = blocks[0].recovered_block().hash();
+        let child_hash = blocks[1].recovered_block().hash();
+
+        let waiter = Arc::new(OverlayWaiter::new());
+        manager.overlays.insert(
+            OverlayCacheKey { anchor_hash, tip_hash: parent_hash },
+            OverlayCacheEntry::Computing(Arc::clone(&waiter)),
+        );
+
+        let sentinel_parent = with_unique_state(&blocks[0], 99);
+        let sentinel_parent_data = sentinel_parent.trie_data();
+        waiter.finish(Arc::new(TrieInputSorted::new(
+            Arc::new(TrieUpdatesSorted::default()),
+            Arc::clone(&sentinel_parent_data.hashed_state),
+            Default::default(),
+        )));
+
+        let (_, state) = manager.overlay_for_parent(child_hash, anchor_hash).unwrap();
+
+        let has_account =
+            |id| state.accounts.iter().any(|(address, _)| *address == B256::with_last_byte(id));
+        assert!(has_account(99));
+        assert!(has_account(2));
+        assert!(!has_account(1));
     }
 
     #[cfg(feature = "rayon")]
