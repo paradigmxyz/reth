@@ -40,6 +40,11 @@ impl<T: Clone + Send + Sync + 'static> EventSender<T> {
         }
     }
 
+    /// Returns true if there is at least one active listener.
+    pub fn has_listeners(&self) -> bool {
+        self.sender.receiver_count() != 0
+    }
+
     /// Creates a new event stream with a subscriber to the sender as the
     /// receiver.
     pub fn new_listener(&self) -> EventStream<T> {

@@ -130,19 +130,42 @@ struct BalEntry {
 
 impl BalStore for InMemoryBalStore {
     fn insert(&self, num_hash: NumHash, bal: RawBal) -> ProviderResult<()> {
-        let mut inner = self.inner.write();
-        inner.insert(num_hash.hash, num_hash.number, bal.as_raw().clone());
-        if let Some(highest_block_number) = inner.highest_block_number {
-            // This preserves insert-time cleanup based on the highest inserted BAL block.
-            inner.prune(self.config.in_memory_retention, highest_block_number);
+        if self.notifications.has_listeners() {
+            let mut inner = self.inner.write();
+            inner.insert(num_hash.hash, num_hash.number, bal.as_raw().clone());
+            if let Some(highest_block_number) = inner.highest_block_number {
+                // This preserves insert-time cleanup based on the highest inserted BAL block.
+                inner.prune(self.config.in_memory_retention, highest_block_number);
+            }
+            drop(inner);
+
+            self.notifications.notify(BalNotification::new(num_hash, bal));
+        } else {
+            let mut inner = self.inner.write();
+            inner.insert(num_hash.hash, num_hash.number, bal.into_raw());
+            if let Some(highest_block_number) = inner.highest_block_number {
+                // This preserves insert-time cleanup based on the highest inserted BAL block.
+                inner.prune(self.config.in_memory_retention, highest_block_number);
+            }
         }
-        self.notifications.notify(BalNotification::new(num_hash, bal));
         Ok(())
     }
 
     fn insert_many(&self, entries: Vec<(NumHash, RawBal)>) -> ProviderResult<()> {
         if entries.is_empty() {
             return Ok(())
+        }
+
+        if !self.notifications.has_listeners() {
+            let mut inner = self.inner.write();
+            inner.entries.reserve(entries.len());
+            for (num_hash, bal) in entries {
+                inner.insert(num_hash.hash, num_hash.number, bal.into_raw());
+            }
+            if let Some(highest_block_number) = inner.highest_block_number {
+                inner.prune(self.config.in_memory_retention, highest_block_number);
+            }
+            return Ok(());
         }
 
         let mut inner = self.inner.write();
