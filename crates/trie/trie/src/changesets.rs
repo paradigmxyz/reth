@@ -30,6 +30,13 @@ use std::cmp::Ordering;
 
 use crate::trie_cursor::{TrieCursor, TrieCursorFactory, TrieStorageCursor};
 
+/// Maximum number of forward cursor steps to try before falling back to a range seek.
+///
+/// Changeset paths are sorted, and trie update paths are commonly clustered around the same
+/// account/storage branches. A short bounded scan avoids repeated MDBX random seeks for adjacent
+/// nodes without turning sparse update paths into long table walks.
+const CHANGESET_FORWARD_SCAN_LIMIT: usize = 16;
+
 /// Result type for changeset operations.
 pub type ChangesetResult<T> = Result<T, DatabaseError>;
 
@@ -103,11 +110,11 @@ where
 {
     let mut cursor = factory.account_trie_cursor()?;
     let mut account_changesets = Vec::with_capacity(trie_updates.account_nodes_ref().len());
+    let mut cursor_state = ChangesetCursorState::NotStarted;
 
-    // For each changed account node, look up its current value
-    // The input is already sorted, so the output will be sorted
+    // The input is already sorted, so reuse the cursor position between lookups.
     for (path, _new_node) in trie_updates.account_nodes_ref() {
-        let old_node = cursor.seek_exact(*path)?.map(|(_path, node)| node);
+        let old_node = changeset_old_node_at(&mut cursor, *path, &mut cursor_state)?;
         account_changesets.push((*path, old_node));
     }
 
@@ -130,15 +137,55 @@ fn compute_storage_changesets(
     storage_updates: &StorageTrieUpdatesSorted,
 ) -> ChangesetResult<Vec<(Nibbles, Option<BranchNodeCompact>)>> {
     let mut storage_changesets = Vec::with_capacity(storage_updates.storage_nodes.len());
+    let mut cursor_state = ChangesetCursorState::NotStarted;
 
-    // For each changed storage node, look up its current value
-    // The input is already sorted, so the output will be sorted
+    // The input is already sorted, so reuse the cursor position between lookups.
     for (path, _new_node) in &storage_updates.storage_nodes {
-        let old_node = cursor.seek_exact(*path)?.map(|(_path, node)| node);
+        let old_node = changeset_old_node_at(cursor, *path, &mut cursor_state)?;
         storage_changesets.push((*path, old_node));
     }
 
     Ok(storage_changesets)
+}
+
+/// Forward scan state for sorted changeset lookups.
+#[derive(Debug)]
+enum ChangesetCursorState {
+    /// No lookup has positioned the cursor yet.
+    NotStarted,
+    /// Cursor is positioned at this entry, or exhausted.
+    Positioned(Option<(Nibbles, BranchNodeCompact)>),
+}
+
+/// Looks up the previous trie node at `path` while reusing cursor position across sorted paths.
+fn changeset_old_node_at(
+    cursor: &mut impl TrieCursor,
+    path: Nibbles,
+    state: &mut ChangesetCursorState,
+) -> ChangesetResult<Option<BranchNodeCompact>> {
+    if matches!(state, ChangesetCursorState::NotStarted) {
+        *state = ChangesetCursorState::Positioned(cursor.seek(path)?);
+    }
+
+    let ChangesetCursorState::Positioned(current) = state else { unreachable!() };
+
+    if matches!(current, Some((current_path, _)) if *current_path < path) {
+        let mut steps = 0;
+        while matches!(current, Some((current_path, _)) if *current_path < path) {
+            if steps >= CHANGESET_FORWARD_SCAN_LIMIT {
+                *current = cursor.seek(path)?;
+                break;
+            }
+
+            *current = cursor.next()?;
+            steps += 1;
+        }
+    }
+
+    Ok(match current {
+        Some((current_path, node)) if *current_path == path => Some(node.clone()),
+        _ => None,
+    })
 }
 
 /// Handles wiped storage trie changeset computation.
@@ -237,10 +284,14 @@ pub fn storage_trie_wiped_changeset_iter(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trie_cursor::mock::MockTrieCursorFactory;
+    use crate::{mock::KeyVisitType, trie_cursor::mock::MockTrieCursorFactory};
     use alloy_primitives::map::B256Map;
     use reth_trie_common::updates::StorageTrieUpdatesSorted;
     use std::collections::BTreeMap;
+
+    fn test_path(index: u8) -> Nibbles {
+        Nibbles::from_nibbles([index >> 4, index & 0x0f])
+    }
 
     #[test]
     fn test_empty_updates() {
@@ -303,6 +354,98 @@ mod tests {
         // path3 should have None (it didn't exist before)
         assert_eq!(changesets.account_nodes_ref()[1].0, path3);
         assert_eq!(changesets.account_nodes_ref()[1].1, None);
+    }
+
+    #[test]
+    fn test_account_changesets_scan_sorted_paths() {
+        let path1 = test_path(1);
+        let path2 = test_path(2);
+        let path3 = test_path(3);
+        let path4 = test_path(4);
+
+        let node1 = BranchNodeCompact::new(0b1111, 0b0001, 0, vec![], None);
+        let node2 = BranchNodeCompact::new(0b1111, 0b0010, 0, vec![], None);
+        let node3 = BranchNodeCompact::new(0b1111, 0b0011, 0, vec![], None);
+        let new_node = BranchNodeCompact::new(0b1111, 0b0100, 0, vec![], None);
+
+        let mut account_nodes = BTreeMap::new();
+        account_nodes.insert(path1, node1.clone());
+        account_nodes.insert(path2, node2.clone());
+        account_nodes.insert(path3, node3);
+
+        let mut storage_tries = B256Map::default();
+        storage_tries.insert(B256::default(), BTreeMap::new());
+        let factory = MockTrieCursorFactory::new(account_nodes, storage_tries);
+
+        let updates = TrieUpdatesSorted::new(
+            vec![
+                (path1, Some(new_node.clone())),
+                (path2, Some(new_node.clone())),
+                (path4, Some(new_node)),
+            ],
+            B256Map::default(),
+        );
+
+        let changesets = compute_trie_changesets(&factory, &updates).unwrap();
+
+        assert_eq!(
+            changesets.account_nodes_ref(),
+            &[(path1, Some(node1)), (path2, Some(node2)), (path4, None)]
+        );
+
+        let visits = factory.visited_account_keys();
+        assert_eq!(visits[0].visit_type, KeyVisitType::SeekNonExact(path1));
+        assert!(visits.iter().all(|visit| !matches!(visit.visit_type, KeyVisitType::SeekExact(_))));
+        assert_eq!(
+            visits
+                .iter()
+                .filter(|visit| matches!(visit.visit_type, KeyVisitType::SeekNonExact(_)))
+                .count(),
+            1
+        );
+        assert!(visits.iter().any(|visit| matches!(&visit.visit_type, KeyVisitType::Next)));
+    }
+
+    #[test]
+    fn test_account_changesets_scan_falls_back_for_sparse_paths() {
+        let node = BranchNodeCompact::new(0b1111, 0b0001, 0, vec![], None);
+        let new_node = BranchNodeCompact::new(0b1111, 0b0010, 0, vec![], None);
+        let first = test_path(0);
+        let far = test_path(25);
+
+        let mut account_nodes = BTreeMap::new();
+        for index in 0..=25 {
+            account_nodes.insert(test_path(index), node.clone());
+        }
+
+        let mut storage_tries = B256Map::default();
+        storage_tries.insert(B256::default(), BTreeMap::new());
+        let factory = MockTrieCursorFactory::new(account_nodes, storage_tries);
+
+        let updates = TrieUpdatesSorted::new(
+            vec![(first, Some(new_node.clone())), (far, Some(new_node))],
+            B256Map::default(),
+        );
+
+        let changesets = compute_trie_changesets(&factory, &updates).unwrap();
+
+        assert_eq!(changesets.account_nodes_ref().len(), 2);
+        assert_eq!(changesets.account_nodes_ref()[0], (first, Some(node.clone())));
+        assert_eq!(changesets.account_nodes_ref()[1], (far, Some(node)));
+
+        let visits = factory.visited_account_keys();
+        let seek_non_exact: Vec<_> = visits
+            .iter()
+            .filter_map(|visit| match &visit.visit_type {
+                KeyVisitType::SeekNonExact(path) => Some(*path),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(seek_non_exact, vec![first, far]);
+        assert_eq!(
+            visits.iter().filter(|visit| matches!(&visit.visit_type, KeyVisitType::Next)).count(),
+            CHANGESET_FORWARD_SCAN_LIMIT
+        );
     }
 
     #[test]
