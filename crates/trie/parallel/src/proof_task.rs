@@ -31,7 +31,7 @@
 
 use crate::{
     root::ParallelStateRootError,
-    value_encoder::{AsyncAccountValueEncoder, ValueEncoderStats},
+    value_encoder::{AsyncAccountValueEncoder, DispatchedStorageProofs, ValueEncoderStats},
 };
 use alloy_primitives::{
     map::{B256Map, B256Set},
@@ -1063,13 +1063,14 @@ fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
     account_targets: &[ProofV2Target],
     mut storage_targets: B256Map<Vec<ProofV2Target>>,
-) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
+) -> Result<Option<DispatchedStorageProofs>, ParallelStateRootError> {
     if storage_targets.is_empty() {
-        return Ok(B256Map::default())
+        return Ok(None);
     }
 
-    let mut storage_proof_receivers =
-        B256Map::with_capacity_and_hasher(storage_targets.len(), Default::default());
+    let mut dispatched_addresses =
+        B256Set::with_capacity_and_hasher(storage_targets.len(), Default::default());
+    let (result_tx, result_rx) = crossbeam_channel::unbounded();
 
     // Collect hashed addresses from account targets that need their storage roots computed
     let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
@@ -1077,8 +1078,8 @@ fn dispatch_v2_storage_proofs(
     // For storage targets with associated account proofs, ensure the first target has
     // min_len(0) so the root node is returned for storage root computation
     for (hashed_address, targets) in &mut storage_targets {
-        if account_target_addresses.contains(hashed_address) &&
-            let Some(first) = targets.first_mut()
+        if account_target_addresses.contains(hashed_address)
+            && let Some(first) = targets.first_mut()
         {
             *first = first.with_min_len(0);
         }
@@ -1092,22 +1093,23 @@ fn dispatch_v2_storage_proofs(
 
     // Dispatch all proofs for targeted storage slots
     for (hashed_address, targets) in sorted_storage_targets {
-        // Create channel for receiving StorageProofResultMessage
-        let (result_tx, result_rx) = crossbeam_channel::unbounded();
         let input = StorageProofInput::new(hashed_address, targets);
 
         storage_work_tx
-            .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
+            .send(StorageWorkerJob::StorageProof {
+                input,
+                proof_result_sender: result_tx.clone(),
+            })
             .map_err(|_| {
                 ParallelStateRootError::Other(format!(
                     "Failed to queue storage proof for {hashed_address:?}: storage worker pool unavailable",
                 ))
             })?;
 
-        storage_proof_receivers.insert(hashed_address, result_rx);
+        dispatched_addresses.insert(hashed_address);
     }
 
-    Ok(storage_proof_receivers)
+    Ok(Some(DispatchedStorageProofs::new(dispatched_addresses, result_rx)))
 }
 
 /// Input parameters for storage proof computation.
