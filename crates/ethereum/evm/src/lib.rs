@@ -280,21 +280,21 @@ where
     fn evm_env_for_payload(&self, payload: &ExecutionData) -> Result<EvmEnvFor<Self>, Self::Error> {
         let timestamp = payload.payload.timestamp();
         let block_number = payload.payload.block_number();
+        let chain_spec = self.chain_spec();
 
-        let blob_params = self.chain_spec().blob_params_at_timestamp(timestamp);
-        let spec =
-            revm_spec_by_timestamp_and_block_number(self.chain_spec(), timestamp, block_number);
+        let blob_params = chain_spec.blob_params_at_timestamp(timestamp);
+        let spec = revm_spec_by_timestamp_and_block_number(chain_spec, timestamp, block_number);
 
         // configure evm env based on parent block
         let mut cfg_env = CfgEnv::new()
-            .with_chain_id(self.chain_spec().chain().id())
+            .with_chain_id(chain_spec.chain().id())
             .with_spec_and_mainnet_gas_params(spec);
 
         if let Some(blob_params) = &blob_params {
             cfg_env.set_max_blobs_per_tx(blob_params.max_blobs_per_tx);
         }
 
-        if self.chain_spec().is_osaka_active_at_timestamp(timestamp) {
+        if chain_spec.is_osaka_active_at_timestamp(timestamp) {
             cfg_env.tx_gas_limit_cap = Some(MAX_TX_GAS_LIMIT_OSAKA);
         }
 
@@ -329,13 +329,14 @@ where
         &self,
         payload: &'a ExecutionData,
     ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
+        let payload_v1 = payload.payload.as_v1();
         Ok(EthBlockExecutionCtx {
             tx_count_hint: Some(payload.payload.transactions().len()),
             parent_hash: payload.parent_hash(),
             parent_beacon_block_root: payload.sidecar.parent_beacon_block_root(),
             ommers: &[],
             withdrawals: payload.payload.withdrawals().map(|w| Cow::Borrowed(w.as_slice())),
-            extra_data: payload.payload.as_v1().extra_data.clone(),
+            extra_data: payload_v1.extra_data.clone(),
             slot_number: payload.payload.as_v4().map(|v4| v4.slot_number),
         })
     }
