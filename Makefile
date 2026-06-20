@@ -132,9 +132,10 @@ build-deb-%:
 # Create a `.tar.gz` containing a binary for a specific target.
 define tarball_release_binary
 	cp $(CARGO_TARGET_DIR)/$(1)/$(PROFILE)/$(2) $(BIN_DIR)/$(2)
+	cp -R LICENSES $(BIN_DIR)/LICENSES
 	cd $(BIN_DIR) && \
-		tar -czf reth-$(GIT_TAG)-$(1)$(3).tar.gz $(2) && \
-		rm $(2)
+		tar -czf reth-$(GIT_TAG)-$(1)$(3).tar.gz $(2) LICENSES && \
+		rm -r $(2) LICENSES
 endef
 
 # The current git tag will be used as the version in the output file names. You
