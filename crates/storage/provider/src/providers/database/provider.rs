@@ -3889,16 +3889,44 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
             // Normal path: finalize() will call sync_all() if not already synced
             let mut timings = metrics::CommitTimings::default();
 
-            let start = Instant::now();
-            self.static_file_provider.finalize()?;
-            timings.sf = start.elapsed();
-
-            let start = Instant::now();
             let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
-            for batch in batches {
-                self.rocksdb_provider.commit_batch(batch)?;
+            if batches.is_empty() {
+                let start = Instant::now();
+                self.static_file_provider.finalize()?;
+                timings.sf = start.elapsed();
+            } else {
+                let span = tracing::Span::current();
+                let mut sf_result = None;
+                let mut rocksdb_result = None;
+                let sf_provider = &self.static_file_provider;
+                let rocksdb_provider = &self.rocksdb_provider;
+
+                self.runtime.storage_pool().in_place_scope(|s| {
+                    s.spawn(|_| {
+                        let _guard = span.enter();
+                        let start = Instant::now();
+                        sf_result = Some(sf_provider.finalize().map(|()| start.elapsed()));
+                    });
+
+                    s.spawn(|_| {
+                        let _guard = span.enter();
+                        let start = Instant::now();
+                        rocksdb_result = Some(
+                            batches
+                                .into_iter()
+                                .try_for_each(|batch| rocksdb_provider.commit_batch(batch))
+                                .map(|()| start.elapsed()),
+                        );
+                    });
+                });
+
+                timings.sf = sf_result.ok_or(StaticFileWriterError::ThreadPanic("static file"))??;
+                timings.rocksdb = rocksdb_result.ok_or_else(|| {
+                    ProviderError::Database(reth_db_api::DatabaseError::Other(
+                        "RocksDB commit thread panicked".into(),
+                    ))
+                })??;
             }
-            timings.rocksdb = start.elapsed();
 
             let start = Instant::now();
             self.tx.commit()?;
