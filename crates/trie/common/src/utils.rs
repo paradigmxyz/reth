@@ -48,6 +48,18 @@ where
         return;
     }
 
+    if let [(other_key, other_value)] = other {
+        match target.binary_search_by(|(key, _)| key.cmp(other_key)) {
+            Ok(index) => {
+                target[index].1 = other_value.clone();
+            }
+            Err(index) => {
+                target.insert(index, (other_key.clone(), other_value.clone()));
+            }
+        }
+        return;
+    }
+
     // Move ownership of target to avoid cloning owned elements
     let left = core::mem::take(target);
     let mut out = Vec::with_capacity(left.len() + other.len());
@@ -137,6 +149,22 @@ mod tests {
         let other = vec![(5, "e"), (6, "f")];
         extend_sorted_vec(&mut target, &other);
         assert_eq!(target, vec![(1, "a"), (2, "b"), (5, "e"), (6, "f")]);
+    }
+
+    #[test]
+    fn test_extend_sorted_vec_single_insert() {
+        let mut target = vec![(1, "a"), (3, "c")];
+        let other = vec![(2, "b")];
+        extend_sorted_vec(&mut target, &other);
+        assert_eq!(target, vec![(1, "a"), (2, "b"), (3, "c")]);
+    }
+
+    #[test]
+    fn test_extend_sorted_vec_single_replace() {
+        let mut target = vec![(1, "a"), (2, "old"), (3, "c")];
+        let other = vec![(2, "new")];
+        extend_sorted_vec(&mut target, &other);
+        assert_eq!(target, vec![(1, "a"), (2, "new"), (3, "c")]);
     }
 
     #[test]
