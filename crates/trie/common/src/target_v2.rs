@@ -26,7 +26,13 @@ impl ProofV2Target {
 
     /// Returns the key the target was initialized with.
     pub fn key(&self) -> B256 {
-        B256::from_slice(&self.key_nibbles.pack())
+        assert_eq!(self.key_nibbles.len(), 64, "proof target key must contain 64 nibbles");
+
+        let mut key = [0u8; 32];
+        // SAFETY: proof targets are constructed from B256 values, so after the length assertion
+        // above the fixed 32-byte buffer is exactly the packed key length.
+        unsafe { self.key_nibbles.pack_to_unchecked(key.as_mut_ptr()) };
+        B256::new(key)
     }
 
     /// Only match trie nodes whose path is at least this long.
@@ -244,5 +250,18 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
         } else {
             Some(chunk)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn proof_v2_target_key_roundtrip() {
+        let key = B256::with_last_byte(0x42);
+        let target = ProofV2Target::new(key).with_min_len(17);
+
+        assert_eq!(target.key(), key);
     }
 }

@@ -1,3 +1,4 @@
+use core::cmp::Ordering;
 use reth_trie_common::{Nibbles, ProofV2Target};
 
 // A helper function for getting the largest prefix of the sub-trie which contains a particular
@@ -21,8 +22,38 @@ use reth_trie_common::{Nibbles, ProofV2Target};
 #[inline]
 pub(crate) fn sub_trie_prefix(target: &ProofV2Target) -> Nibbles {
     let mut sub_trie_prefix = target.key_nibbles;
-    sub_trie_prefix.truncate(target.min_len.saturating_sub(1) as usize);
+    sub_trie_prefix.truncate(sub_trie_prefix_len(target));
     sub_trie_prefix
+}
+
+#[inline]
+fn sub_trie_prefix_len(target: &ProofV2Target) -> usize {
+    (target.min_len.saturating_sub(1) as usize).min(target.key_nibbles.len())
+}
+
+#[inline]
+fn cmp_nibbles_prefix(a: &Nibbles, a_len: usize, b: &Nibbles, b_len: usize) -> Ordering {
+    let common_prefix_len = a.common_prefix_length(b).min(a_len.min(b_len));
+    if common_prefix_len == a_len || common_prefix_len == b_len {
+        return a_len.cmp(&b_len)
+    }
+
+    a.get_unchecked(common_prefix_len).cmp(&b.get_unchecked(common_prefix_len))
+}
+
+#[inline]
+fn cmp_sub_trie_prefix(a: &ProofV2Target, b: &ProofV2Target) -> Ordering {
+    cmp_nibbles_prefix(
+        &a.key_nibbles,
+        sub_trie_prefix_len(a),
+        &b.key_nibbles,
+        sub_trie_prefix_len(b),
+    )
+}
+
+#[inline]
+fn cmp_sub_trie_prefix_to_nibbles(target: &ProofV2Target, prefix: &Nibbles) -> Ordering {
+    cmp_nibbles_prefix(&target.key_nibbles, sub_trie_prefix_len(target), prefix, prefix.len())
 }
 
 // A helper function which returns the first path following a sub-trie in lexicographical order.
@@ -62,9 +93,8 @@ pub(crate) fn iter_sub_trie_targets(
     // First sort by the sub-trie prefix of each target, falling back to the `min_len` in cases
     // where the sub-trie prefixes are equal (to differentiate targets which match the root node and
     // those which don't).
-    targets.sort_unstable_by(|a, b| {
-        sub_trie_prefix(a).cmp(&sub_trie_prefix(b)).then_with(|| a.min_len.cmp(&b.min_len))
-    });
+    targets
+        .sort_unstable_by(|a, b| cmp_sub_trie_prefix(a, b).then_with(|| a.min_len.cmp(&b.min_len)));
 
     // We now chunk targets, such that each chunk contains all targets belonging to the same
     // sub-trie. We are taking advantage of the following properties:
@@ -87,9 +117,10 @@ pub(crate) fn iter_sub_trie_targets(
     let mut upper_bound = targets.first().and_then(|t| sub_trie_upper_bound(&sub_trie_prefix(t)));
     let target_chunks = targets.chunk_by_mut(move |_, next| {
         if let Some(some_upper_bound) = upper_bound {
-            let prefix = sub_trie_prefix(next);
-            let same_chunk = prefix < some_upper_bound;
+            let same_chunk =
+                cmp_sub_trie_prefix_to_nibbles(next, &some_upper_bound) == Ordering::Less;
             if !same_chunk {
+                let prefix = sub_trie_prefix(next);
                 upper_bound = sub_trie_upper_bound(&prefix);
             }
             same_chunk
@@ -296,6 +327,45 @@ mod tests {
                         test_case, j, k
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn prefix_comparator_matches_materialized_prefix_order() {
+        let nibbles = |hex: &str| -> Nibbles {
+            if hex.is_empty() {
+                return Nibbles::new();
+            }
+            format!("0x{}", hex).parse().expect("valid nibbles hex string")
+        };
+        let materialized_prefix = |target: &ProofV2Target| {
+            let mut prefix = target.key_nibbles;
+            prefix.truncate(target.min_len.saturating_sub(1) as usize);
+            prefix
+        };
+
+        let targets = vec![
+            ProofV2Target::new(B256::repeat_byte(0x20)),
+            ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(1),
+            ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(2),
+            ProofV2Target::new(B256::repeat_byte(0x2f)).with_min_len(4),
+            ProofV2Target::new(B256::repeat_byte(0x40)).with_min_len(2),
+        ];
+        let upper_bounds = [nibbles(""), nibbles("3"), nibbles("2fb"), nibbles("5")];
+
+        for left in &targets {
+            for right in &targets {
+                assert_eq!(
+                    cmp_sub_trie_prefix(left, right),
+                    materialized_prefix(left).cmp(&materialized_prefix(right))
+                );
+            }
+            for upper_bound in &upper_bounds {
+                assert_eq!(
+                    cmp_sub_trie_prefix_to_nibbles(left, upper_bound),
+                    materialized_prefix(left).cmp(upper_bound)
+                );
             }
         }
     }
