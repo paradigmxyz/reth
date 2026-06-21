@@ -36,6 +36,8 @@ static TRACE_TARGET: &str = "trie::proof_v2";
 
 /// Number of bytes to pre-allocate for [`ProofCalculator`]'s `rlp_encode_buf` field.
 const RLP_ENCODE_BUF_SIZE: usize = 1024;
+/// Number of nibbles in a hashed account or storage key.
+const HASHED_KEY_NIBBLES: usize = 32 * 2;
 
 /// A proof calculator that generates merkle proofs using only leaf data.
 ///
@@ -602,6 +604,8 @@ where
         key: Nibbles,
         val: VE::DeferredEncoder,
     ) -> Result<(), StateProofError> {
+        debug_assert_eq!(key.len(), HASHED_KEY_NIBBLES);
+
         loop {
             trace!(
                 target: TRACE_TARGET,
@@ -663,7 +667,8 @@ where
                 // Push the new leaf onto the new branch.
                 self.push_new_leaf(targets, nibble, short_key, val)?;
             } else {
-                let short_key = key.slice_unchecked(common_prefix_len + 1, key.len());
+                let short_key =
+                    key.slice_unchecked(common_prefix_len + 1, HASHED_KEY_NIBBLES);
                 self.push_new_leaf(targets, nibble, short_key, val)?;
             }
 
