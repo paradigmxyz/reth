@@ -3130,6 +3130,23 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         }
         Ok(())
     }
+
+    fn write_single_storage_trie<A: TrieTableAdapter>(
+        tx: &TX,
+        hashed_address: B256,
+        storage_trie_updates: &StorageTrieUpdatesSorted,
+        num_entries: &mut usize,
+    ) -> ProviderResult<()>
+    where
+        TX: DbTxMut,
+    {
+        let cursor = tx.cursor_dup_write::<A::StorageTrieTable>()?;
+        let mut db_storage_trie_cursor: DatabaseStorageTrieCursor<_, A> =
+            DatabaseStorageTrieCursor::new(cursor, hashed_address);
+        *num_entries +=
+            db_storage_trie_cursor.write_storage_trie_updates_sorted(storage_trie_updates)?;
+        Ok(())
+    }
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider<TX, N> {
@@ -3167,7 +3184,27 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdatesSorted)>,
     ) -> ProviderResult<usize> {
         let mut num_entries = 0;
-        let mut storage_tries = storage_tries.collect::<Vec<_>>();
+
+        let mut storage_tries = storage_tries.peekable();
+        let Some((hashed_address, storage_trie_updates)) = storage_tries.next() else {
+            return Ok(0)
+        };
+
+        if storage_tries.peek().is_none() {
+            reth_trie_db::with_adapter!(self, |A| {
+                Self::write_single_storage_trie::<A>(
+                    self.tx_ref(),
+                    *hashed_address,
+                    storage_trie_updates,
+                    &mut num_entries,
+                )?;
+            });
+            return Ok(num_entries)
+        }
+
+        let mut storage_tries = core::iter::once((hashed_address, storage_trie_updates))
+            .chain(storage_tries)
+            .collect::<Vec<_>>();
         storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
         reth_trie_db::with_adapter!(self, |A| {
             Self::write_storage_tries::<A>(self.tx_ref(), storage_tries, &mut num_entries)?;
