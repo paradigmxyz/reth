@@ -1088,14 +1088,27 @@ where
             // under-construction branch.
             let mut next_child_nibbles = curr_state_mask ^ cached_state_mask;
 
+            let lower_bound_child_nibble =
+                if uncalculated_lower_bound_ref.starts_with(&self.branch_path) &&
+                    uncalculated_lower_bound_ref.len() > self.branch_path.len()
+                {
+                    Some(uncalculated_lower_bound_ref.get_unchecked(self.branch_path.len()))
+                } else {
+                    None
+                };
+            let lower_bound_after_branch =
+                !uncalculated_lower_bound_ref.starts_with(&self.branch_path) &&
+                    uncalculated_lower_bound_ref > &self.branch_path;
+
             // Also include child nibbles indicated by the prefix set. The prefix set can
             // indicate children that need recalculation from leaves (e.g. new keys inserted
             // under this branch). Skip nibbles already set in `curr_state_mask` since those
-            // children have already been constructed.
-            if self.prefix_set.contains(&self.branch_path) {
+            // children have already been constructed. If the lower bound already advanced into or
+            // past this branch, skip probes for children that cannot be selected anymore.
+            if !lower_bound_after_branch && self.prefix_set.contains(&self.branch_path) {
                 let branch_path_len = self.branch_path.len();
                 let mut child_path = self.branch_path;
-                for nibble in 0u8..16 {
+                for nibble in lower_bound_child_nibble.unwrap_or(0)..16 {
                     if !curr_state_mask.is_bit_set(nibble) {
                         child_path.truncate(branch_path_len);
                         child_path.push_unchecked(nibble);
@@ -1112,11 +1125,7 @@ where
             // This can happen when `calculate_key_range` finds no keys for a child's range,
             // leaving the child's bit unset in `state_mask`. Without this, re-entering this
             // function would select the same child again.
-            if uncalculated_lower_bound_ref.starts_with(&self.branch_path) &&
-                uncalculated_lower_bound_ref.len() > self.branch_path.len()
-            {
-                let lower_nibble =
-                    uncalculated_lower_bound_ref.get_unchecked(self.branch_path.len());
+            if let Some(lower_nibble) = lower_bound_child_nibble {
                 // Clear all nibbles strictly below `lower_nibble` since they've been processed.
                 let already_processed_mask = TrieMask::new((1u16 << lower_nibble) - 1);
                 next_child_nibbles &= !already_processed_mask;
@@ -1128,9 +1137,7 @@ where
                     ?next_child_nibbles,
                     "Unset already processed key nibbles from next_child_nibbles",
                 );
-            } else if !uncalculated_lower_bound_ref.starts_with(&self.branch_path) &&
-                uncalculated_lower_bound_ref > &self.branch_path
-            {
+            } else if lower_bound_after_branch {
                 // The lower bound has moved entirely past this branch (e.g. branch is 0x6 but
                 // lower is 0x7). All remaining children have been processed.
                 next_child_nibbles = TrieMask::default();
