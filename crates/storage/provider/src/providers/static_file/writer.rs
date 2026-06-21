@@ -303,7 +303,6 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
         let static_file_provider = Self::upgrade_provider_to_strong_reference(&reader);
 
-        let genesis = static_file_provider.genesis_block_number();
         let block_range = static_file_provider.find_fixed_range(segment, block);
 
         let (jar, path) = match static_file_provider
@@ -314,6 +313,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 provider.data_path().into(),
             ),
             Err(ProviderError::MissingStaticFileBlock(_, _)) => {
+                let genesis = static_file_provider.genesis_block_number();
                 let block_range = if block_range.start() < genesis {
                     SegmentRangeInclusive::new(genesis, block_range.end())
                 } else {
