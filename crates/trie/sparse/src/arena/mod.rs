@@ -2789,10 +2789,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
         #[cfg(feature = "trie-debug")]
         let mut recorded_proof_targets: Vec<(B256, u8)> = Vec::new();
 
-        // Drain and sort updates lexicographically by nibbles path.
+        // Drain and sort updates lexicographically by hashed key. For fixed 32-byte keys, this
+        // matches the ordering of the unpacked nibble path without comparing `Nibbles` during sort.
         let mut sorted: Vec<_> =
             updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
-        sorted.sort_unstable_by_key(|entry| entry.1);
+        sorted.sort_unstable_by_key(|entry| entry.0);
 
         let threshold = self.parallelism_thresholds.min_updates;
         let parallelize_distributed_updates = sorted.len() >= threshold.saturating_mul(4);
@@ -3207,6 +3208,35 @@ mod tests {
             );
             assert_eq!(expected_root, actual_root, "storage root mismatch");
         }
+    }
+
+    #[test]
+    fn raw_key_order_matches_unpacked_nibble_path_order() {
+        let mut keys = Vec::with_capacity(1028);
+        keys.extend([
+            B256::from([0; 32]),
+            B256::from([0x0f; 32]),
+            B256::from([0xf0; 32]),
+            B256::from([0xff; 32]),
+        ]);
+
+        for i in 0..1024u16 {
+            let mut bytes = [0u8; 32];
+            bytes[0..2].copy_from_slice(&i.to_be_bytes());
+            bytes[7] = (i as u8).wrapping_mul(37);
+            bytes[13] = (i >> 8) as u8 ^ (i as u8).rotate_left(3);
+            bytes[21] = (i as u8).reverse_bits();
+            bytes[30..32].copy_from_slice(&(!i).to_be_bytes());
+            keys.push(B256::from(bytes));
+        }
+
+        let mut by_key = keys.clone();
+        by_key.sort_unstable();
+
+        let mut by_nibbles = keys;
+        by_nibbles.sort_unstable_by_key(|key| Nibbles::unpack(*key));
+
+        assert_eq!(by_key, by_nibbles);
     }
 
     use proptest::prelude::*;
