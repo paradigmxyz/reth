@@ -1,6 +1,9 @@
 //! Ethereum Node types config.
 
-use crate::{engine_ssz_proxy::EngineSszProxyLayer, EthEngineTypes, EthEvmConfig};
+use crate::{
+    engine_ssz_proxy::{EngineSszApi, EngineSszProxyLayer},
+    EthEngineTypes, EthEvmConfig,
+};
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
 use alloy_network::Ethereum;
 use alloy_rpc_types_engine::ExecutionData;
@@ -216,29 +219,6 @@ where
     }
 }
 
-/// Default Ethereum node add-ons with optional SSZ Engine API support.
-#[derive(Debug)]
-pub struct EthereumNodeAddOns<N: FullNodeComponents> {
-    inner: EthereumAddOns<N, EthereumEthApiBuilder, EthereumEngineValidatorBuilder>,
-}
-
-impl<N> Default for EthereumNodeAddOns<N>
-where
-    N: FullNodeComponents<
-        Types: NodeTypes<
-            ChainSpec: EthereumHardforks + Clone + 'static,
-            Payload: EngineTypes<ExecutionData = ExecutionData>
-                         + PayloadTypes<PayloadAttributes = EthPayloadAttributes>,
-            Primitives = EthPrimitives,
-        >,
-    >,
-    EthereumEthApiBuilder: EthApiBuilder<N>,
-{
-    fn default() -> Self {
-        Self { inner: EthereumAddOns::default() }
-    }
-}
-
 impl<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
     EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
 where
@@ -255,6 +235,15 @@ where
     {
         let Self { inner } = self;
         EthereumAddOns::new(inner.with_engine_api(engine_api_builder))
+    }
+
+    /// Maps the configured engine API builder.
+    pub fn map_engine_api<T>(
+        self,
+        f: impl FnOnce(EB) -> T,
+    ) -> EthereumAddOns<N, EthB, PVB, T, EVB, RpcMiddleware, AuthHttpMiddleware> {
+        let Self { inner } = self;
+        EthereumAddOns::new(inner.map_engine_api(f))
     }
 
     /// Replace the payload validator builder.
@@ -340,11 +329,14 @@ where
     EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
+    EB::EngineApi: EngineSszApi,
     EVB: EngineValidatorBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
     RpcMiddleware: RethRpcMiddleware,
     AuthHttpMiddleware: RethAuthHttpMiddleware<Identity>,
+    Stack<AuthHttpMiddleware, Either<EngineSszProxyLayer<EB::EngineApi>, Identity>>:
+        RethAuthHttpMiddleware<Identity>,
 {
     type Handle = RpcHandle<N, EthB::EthApi>;
 
@@ -352,6 +344,10 @@ where
         self,
         ctx: reth_node_api::AddOnsContext<'_, N>,
     ) -> eyre::Result<Self::Handle> {
+        let (ssz_proxy_layer, ssz_proxy_handle) = EngineSszProxyLayer::new();
+        let ssz_proxy_enabled = ctx.config.engine.enable_ssz_proxy;
+        let ssz_proxy_layer = ssz_proxy_enabled.then_some(ssz_proxy_layer);
+
         let validation_api = ValidationApi::<_, _, <N::Types as NodeTypes>::Payload>::new(
             ctx.node.provider().clone(),
             Arc::new(ctx.node.consensus().clone()),
@@ -370,6 +366,14 @@ where
         let testing_engine_handle = ctx.beacon_engine_handle.clone();
 
         self.inner
+            .map_engine_api(|engine_api_builder| {
+                EngineApiExt::new(engine_api_builder, move |engine_api| {
+                    if ssz_proxy_enabled {
+                        ssz_proxy_handle.set_engine_api_sync(engine_api);
+                    }
+                })
+            })
+            .option_layer_auth_http_middleware(ssz_proxy_layer)
             .launch_add_ons_with(ctx, move |container| {
                 container.modules.merge_if_module_configured(
                     RethRpcModule::Flashbots,
@@ -458,85 +462,6 @@ where
     }
 }
 
-impl<N> NodeAddOns<N> for EthereumNodeAddOns<N>
-where
-    N: FullNodeComponents<
-        Types: NodeTypes<
-            ChainSpec: EthChainSpec + Hardforks + EthereumHardforks,
-            Primitives = EthPrimitives,
-            Payload = EthEngineTypes,
-        >,
-        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
-    >,
-    EthereumEthApiBuilder: EthApiBuilder<N>,
-    EthereumEngineValidatorBuilder: PayloadValidatorBuilder<N>,
-    BasicEngineApiBuilder<EthereumEngineValidatorBuilder>: EngineApiBuilder<N>,
-    BasicEngineValidatorBuilder<EthereumEngineValidatorBuilder>: EngineValidatorBuilder<N>,
-    EthApiError: FromEvmError<N::Evm>,
-    EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
-    Stack<
-        Identity,
-        EngineSszProxyLayer<
-            <BasicEngineApiBuilder<EthereumEngineValidatorBuilder> as EngineApiBuilder<N>>::EngineApi,
-        >,
-    >: RethAuthHttpMiddleware<Identity>,
-{
-    type Handle = RpcHandle<N, <EthereumEthApiBuilder as EthApiBuilder<N>>::EthApi>;
-
-    async fn launch_add_ons(
-        self,
-        ctx: reth_node_api::AddOnsContext<'_, N>,
-    ) -> eyre::Result<Self::Handle> {
-        if !ctx.config.engine.enable_ssz_proxy {
-            return self.inner.launch_add_ons(ctx).await
-        }
-
-        let (ssz_proxy_layer, ssz_proxy_handle) = EngineSszProxyLayer::new();
-        let inner = self
-            .inner
-            .inner
-            .map_engine_api(|engine_api_builder| {
-                EngineApiExt::new(engine_api_builder, move |engine_api| {
-                    ssz_proxy_handle.set_engine_api_sync(engine_api);
-                })
-            })
-            .layer_auth_http_middleware(ssz_proxy_layer);
-
-        EthereumAddOns::new(inner).launch_add_ons(ctx).await
-    }
-}
-
-impl<N> RethRpcAddOns<N> for EthereumNodeAddOns<N>
-where
-    N: FullNodeComponents,
-    EthereumEthApiBuilder: EthApiBuilder<N>,
-    Self: NodeAddOns<N, Handle = RpcHandle<N, <EthereumEthApiBuilder as EthApiBuilder<N>>::EthApi>>,
-    EthereumAddOns<N, EthereumEthApiBuilder, EthereumEngineValidatorBuilder>:
-        RethRpcAddOns<N, EthApi = <EthereumEthApiBuilder as EthApiBuilder<N>>::EthApi>,
-{
-    type EthApi = <EthereumEthApiBuilder as EthApiBuilder<N>>::EthApi;
-
-    fn hooks_mut(&mut self) -> &mut reth_node_builder::rpc::RpcHooks<N, Self::EthApi> {
-        self.inner.hooks_mut()
-    }
-}
-
-impl<N> EngineValidatorAddOn<N> for EthereumNodeAddOns<N>
-where
-    N: FullNodeComponents,
-    EthereumEthApiBuilder: EthApiBuilder<N>,
-    EthereumAddOns<N, EthereumEthApiBuilder, EthereumEngineValidatorBuilder>: EngineValidatorAddOn<
-        N,
-        ValidatorBuilder = BasicEngineValidatorBuilder<EthereumEngineValidatorBuilder>,
-    >,
-{
-    type ValidatorBuilder = BasicEngineValidatorBuilder<EthereumEngineValidatorBuilder>;
-
-    fn engine_validator_builder(&self) -> Self::ValidatorBuilder {
-        self.inner.engine_validator_builder()
-    }
-}
-
 impl<N> Node<N> for EthereumNode
 where
     N: FullNodeTypes<Types = Self>,
@@ -550,14 +475,15 @@ where
         EthereumConsensusBuilder,
     >;
 
-    type AddOns = EthereumNodeAddOns<NodeAdapter<N>>;
+    type AddOns =
+        EthereumAddOns<NodeAdapter<N>, EthereumEthApiBuilder, EthereumEngineValidatorBuilder>;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         Self::components()
     }
 
     fn add_ons(&self) -> Self::AddOns {
-        EthereumNodeAddOns::default()
+        EthereumAddOns::default()
     }
 }
 
