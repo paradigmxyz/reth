@@ -80,7 +80,7 @@ use std::{
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     path::PathBuf,
-    sync::Arc,
+    sync::{mpsc, Arc},
 };
 use tracing::{debug, instrument, trace};
 
@@ -625,6 +625,38 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // and RocksDB write spans appear as children of save_blocks in traces.
         let span = tracing::Span::current();
         runtime.storage_pool().in_place_scope(|s| {
+            let merged_state_rx = if save_mode.with_state() && blocks.len() > 1 {
+                let (tx, rx) = mpsc::sync_channel(1);
+                let blocks_ref = &blocks;
+                let merge_span = span.clone();
+                s.spawn(move |_| {
+                    let _guard = merge_span.enter();
+
+                    // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
+                    let start = Instant::now();
+                    let merged_hashed_state = HashedPostStateSorted::merge_batch(
+                        blocks_ref.iter().rev().map(|b| b.trie_data().hashed_state),
+                    );
+                    let hashed_merge_elapsed = start.elapsed();
+
+                    let start = Instant::now();
+                    let merged_trie = TrieUpdatesSorted::merge_batch(
+                        blocks_ref.iter().rev().map(|b| b.trie_updates()),
+                    );
+                    let trie_merge_elapsed = start.elapsed();
+
+                    let _ = tx.send((
+                        merged_hashed_state,
+                        hashed_merge_elapsed,
+                        merged_trie,
+                        trie_merge_elapsed,
+                    ));
+                });
+                Some(rx)
+            } else {
+                None
+            };
+
             // SF writes
             s.spawn(|_| {
                 let _guard = span.enter();
@@ -719,23 +751,51 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Write all hashed state and trie updates in single batches.
             // This reduces cursor open/close overhead from N calls to 1.
             if save_mode.with_state() {
-                // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
-                let start = Instant::now();
-                let merged_hashed_state = HashedPostStateSorted::merge_batch(
-                    blocks.iter().rev().map(|b| b.trie_data().hashed_state),
-                );
-                if !merged_hashed_state.is_empty() {
-                    self.write_hashed_state(&merged_hashed_state)?;
-                }
-                timings.write_hashed_state += start.elapsed();
+                if let Some(merged_state_rx) = merged_state_rx {
+                    let (
+                        merged_hashed_state,
+                        hashed_merge_elapsed,
+                        merged_trie,
+                        trie_merge_elapsed,
+                    ) = merged_state_rx.recv().map_err(|_| {
+                        ProviderError::Database(reth_db_api::DatabaseError::Other(
+                            "state merge thread panicked".into(),
+                        ))
+                    })?;
 
-                let start = Instant::now();
-                let merged_trie =
-                    TrieUpdatesSorted::merge_batch(blocks.iter().rev().map(|b| b.trie_updates()));
-                if !merged_trie.is_empty() {
-                    self.write_trie_updates_sorted(&merged_trie)?;
+                    timings.write_hashed_state += hashed_merge_elapsed;
+                    let start = Instant::now();
+                    if !merged_hashed_state.is_empty() {
+                        self.write_hashed_state(&merged_hashed_state)?;
+                    }
+                    timings.write_hashed_state += start.elapsed();
+
+                    timings.write_trie_updates += trie_merge_elapsed;
+                    let start = Instant::now();
+                    if !merged_trie.is_empty() {
+                        self.write_trie_updates_sorted(&merged_trie)?;
+                    }
+                    timings.write_trie_updates += start.elapsed();
+                } else {
+                    // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
+                    let start = Instant::now();
+                    let merged_hashed_state = HashedPostStateSorted::merge_batch(
+                        blocks.iter().rev().map(|b| b.trie_data().hashed_state),
+                    );
+                    if !merged_hashed_state.is_empty() {
+                        self.write_hashed_state(&merged_hashed_state)?;
+                    }
+                    timings.write_hashed_state += start.elapsed();
+
+                    let start = Instant::now();
+                    let merged_trie = TrieUpdatesSorted::merge_batch(
+                        blocks.iter().rev().map(|b| b.trie_updates()),
+                    );
+                    if !merged_trie.is_empty() {
+                        self.write_trie_updates_sorted(&merged_trie)?;
+                    }
+                    timings.write_trie_updates += start.elapsed();
                 }
-                timings.write_trie_updates += start.elapsed();
             }
 
             // Full mode: update history indices
