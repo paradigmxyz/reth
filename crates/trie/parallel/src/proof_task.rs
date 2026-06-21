@@ -1071,8 +1071,10 @@ fn dispatch_v2_storage_proofs(
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(storage_targets.len(), Default::default());
 
-    // Collect hashed addresses from account targets that need their storage roots computed
-    let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
+    // Collect hashed addresses from account targets that need their storage roots computed.
+    let mut account_target_addresses =
+        B256Set::with_capacity_and_hasher(account_targets.len(), Default::default());
+    account_target_addresses.extend(account_targets.iter().map(|t| t.key()));
 
     // For storage targets with associated account proofs, ensure the first target has
     // min_len(0) so the root node is returned for storage root computation
