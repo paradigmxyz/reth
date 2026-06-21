@@ -1,6 +1,5 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation, ROCKSDB_TABLES};
 use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
-use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::{
     map::{AddressMap, HashMap},
     Address, BlockNumber, TxNumber, B256,
@@ -1382,8 +1381,8 @@ impl RocksDBProvider {
         let mut batch = self.batch();
         for (block, &first_tx_num) in blocks.iter().zip(tx_nums) {
             let body = block.recovered_block().body();
-            for (tx_num, transaction) in (first_tx_num..).zip(body.transactions_iter()) {
-                batch.put::<tables::TransactionHashNumbers>(*transaction.tx_hash(), &tx_num)?;
+            for (tx_num, tx_hash) in (first_tx_num..).zip(body.transaction_hashes_iter().copied()) {
+                batch.put::<tables::TransactionHashNumbers>(tx_hash, &tx_num)?;
             }
         }
         ctx.pending_batches.lock().push(batch.into_inner());

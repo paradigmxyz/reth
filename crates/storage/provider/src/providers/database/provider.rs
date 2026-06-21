@@ -21,7 +21,7 @@ use crate::{
     TransactionsProvider, TransactionsProviderExt, TrieWriter,
 };
 use alloy_consensus::{
-    transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
+    transaction::{SignerRecoverable, TransactionMeta},
     BlockHeader, TxReceipt,
 };
 use alloy_eips::BlockHashOrNumber;
@@ -662,10 +662,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 let mut all_tx_hashes = Vec::with_capacity(total_tx_count);
                 for (i, block) in blocks.iter().enumerate() {
                     let recovered_block = block.recovered_block();
-                    for (tx_num, transaction) in
-                        (tx_nums[i]..).zip(recovered_block.body().transactions_iter())
+                    for (tx_num, tx_hash) in
+                        (tx_nums[i]..).zip(recovered_block.body().transaction_hashes_iter().copied())
                     {
-                        all_tx_hashes.push((*transaction.tx_hash(), tx_num));
+                        all_tx_hashes.push((tx_hash, tx_num));
                     }
                 }
 
