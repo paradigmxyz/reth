@@ -42,6 +42,7 @@
 use crate::{HashBuilder, Nibbles, EMPTY_ROOT_HASH};
 use alloc::vec::Vec;
 use alloy_primitives::B256;
+use reth_primitives_traits::sync::LazyLock;
 
 /// First index whose RLP-encoded key sorts after index 0.
 ///
@@ -49,6 +50,15 @@ use alloy_primitives::B256;
 /// index 0 (`0x80`). Index `0x80` and larger use long-form RLP integer encoding and sort after
 /// index 0, so index 0 must be flushed before inserting this index.
 const ZERO_KEY_FLUSH_INDEX: usize = 0x80;
+
+/// Cached RLP(index) nibble keys for dense ordered roots.
+///
+/// Receipt and transaction roots reuse the same small integer keys for every block. The big-block
+/// benchmark currently stays below this bound, and larger blocks fall back to the uncached path.
+const ORDERED_ROOT_KEY_CACHE_LEN: usize = 16 * 1024;
+
+static ORDERED_ROOT_KEY_CACHE: LazyLock<Vec<Nibbles>> =
+    LazyLock::new(|| (0..ORDERED_ROOT_KEY_CACHE_LEN).map(encoded_index_nibbles).collect());
 
 /// A builder for computing ordered trie roots from an append-only stream of pre-encoded items.
 ///
@@ -58,7 +68,7 @@ const ZERO_KEY_FLUSH_INDEX: usize = 0x80;
 /// This builder is intended for transaction and receipt root computation while a block is still
 /// being built. It buffers only index `0`, then streams all other leaves directly into the
 /// [`HashBuilder`] in the same order as `alloy_trie::root::ordered_trie_root_encoded`.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct OrderedTrieRootEncodedBuilder {
     /// Number of items pushed so far. This is also the next append-only index.
     len: usize,
@@ -67,6 +77,19 @@ pub struct OrderedTrieRootEncodedBuilder {
     zero: Option<Vec<u8>>,
     /// The underlying hash builder.
     hb: HashBuilder,
+    /// Shared RLP(index) nibble keys for the common dense index range.
+    key_cache: &'static [Nibbles],
+}
+
+impl Default for OrderedTrieRootEncodedBuilder {
+    fn default() -> Self {
+        Self {
+            len: 0,
+            zero: None,
+            hb: HashBuilder::default(),
+            key_cache: ORDERED_ROOT_KEY_CACHE.as_slice(),
+        }
+    }
 }
 
 impl OrderedTrieRootEncodedBuilder {
@@ -136,9 +159,16 @@ impl OrderedTrieRootEncodedBuilder {
     }
 
     fn add_leaf(&mut self, index: usize, bytes: &[u8]) {
-        let index_buffer = alloy_rlp::encode_fixed_size(&index);
-        self.hb.add_leaf(Nibbles::unpack(&index_buffer), bytes);
+        let key =
+            self.key_cache.get(index).copied().unwrap_or_else(|| encoded_index_nibbles(index));
+        self.hb.add_leaf_unchecked(key, bytes);
     }
+}
+
+#[inline]
+fn encoded_index_nibbles(index: usize) -> Nibbles {
+    let index_buffer = alloy_rlp::encode_fixed_size(&index);
+    Nibbles::unpack(&index_buffer)
 }
 
 #[cfg(test)]
@@ -161,6 +191,25 @@ mod tests {
             builder.push_next(item);
         }
         builder.finalize()
+    }
+
+    #[test]
+    fn cached_ordered_index_keys_match_uncached_rlp_keys() {
+        let cache = ORDERED_ROOT_KEY_CACHE.as_slice();
+
+        for index in [0, 1, 2, 126, 127, 128, 129, 255, 256, 1024, ORDERED_ROOT_KEY_CACHE_LEN - 1]
+        {
+            assert_eq!(cache[index], encoded_index_nibbles(index), "cache mismatch for {index}");
+        }
+
+        assert_eq!(
+            encoded_index_nibbles(ORDERED_ROOT_KEY_CACHE_LEN),
+            {
+                let index_buffer = alloy_rlp::encode_fixed_size(&ORDERED_ROOT_KEY_CACHE_LEN);
+                Nibbles::unpack(&index_buffer)
+            },
+            "uncached fallback must keep using the same RLP key encoding",
+        );
     }
 
     #[test]
