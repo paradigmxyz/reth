@@ -296,12 +296,12 @@ impl Default for GasBucketMetrics {
 }
 
 impl GasBucketMetrics {
-    fn record(&self, gas_used: u64, elapsed: Duration) {
+    fn record(&self, gas_used: u64, elapsed: Duration, gas_per_second: f64) {
         let idx = Self::bucket_index(gas_used);
         self.buckets[idx].new_payload_gas_bucket_latency.record(elapsed);
         self.buckets[idx]
             .new_payload_gas_bucket_gas_per_second
-            .record(gas_used as f64 / elapsed.as_secs_f64());
+            .record(gas_per_second);
     }
 
     /// Returns the bucket index for a given gas value.
@@ -461,7 +461,7 @@ impl NewPayloadStatusMetrics {
 
                         self.new_payload_latency.record(elapsed);
                         self.new_payload_last.set(elapsed);
-                        self.gas_bucket.record(gas_used, elapsed);
+                        self.gas_bucket.record(gas_used, elapsed, gas_per_second);
                     }
                 }
                 PayloadStatusEnum::Syncing => self.new_payload_syncing.increment(1),
