@@ -138,6 +138,20 @@ impl<P> StaticFileStorageChangesetWalker<P> {
             changeset_index: 0,
         }
     }
+
+    /// Yields the next changeset from the currently loaded block.
+    fn next_loaded_changeset(&mut self) -> Option<(BlockNumberAddress, StorageEntry)> {
+        let changeset = self.current_changesets.get(self.changeset_index).copied()?;
+        self.changeset_index += 1;
+
+        if self.changeset_index == self.current_changesets.len() {
+            self.current_changesets.clear();
+            self.changeset_index = 0;
+            self.current_block += 1;
+        }
+
+        Some(changeset)
+    }
 }
 
 impl<P> Iterator for StaticFileStorageChangesetWalker<P>
@@ -147,21 +161,15 @@ where
     type Item = ProviderResult<(BlockNumberAddress, StorageEntry)>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(changeset) = self.current_changesets.get(self.changeset_index).copied() {
-            self.changeset_index += 1;
+        if let Some(changeset) = self.next_loaded_changeset() {
             return Some(Ok(changeset));
-        }
-
-        if !self.current_changesets.is_empty() {
-            self.current_block += 1;
         }
 
         while self.end_block.is_none_or(|end| self.current_block < end) {
             match self.provider.storage_changeset(self.current_block) {
                 Ok(changesets) if !changesets.is_empty() => {
                     self.current_changesets = changesets;
-                    self.changeset_index = 1;
-                    return Some(Ok(self.current_changesets[0]));
+                    return self.next_loaded_changeset().map(Ok);
                 }
                 Ok(_) => self.current_block += 1,
                 Err(e) => {
