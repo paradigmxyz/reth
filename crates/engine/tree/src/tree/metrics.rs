@@ -41,6 +41,17 @@ pub struct EngineApiMetrics {
 }
 
 impl EngineApiMetrics {
+    /// Records execution time and gas metrics without inspecting the block state.
+    pub fn record_block_execution_gas(&self, gas_used: u64, execution_duration: Duration) {
+        let execution_secs = execution_duration.as_secs_f64();
+
+        self.executor.gas_processed_total.increment(gas_used);
+        self.executor.gas_per_second.set(gas_used as f64 / execution_secs);
+        self.executor.gas_used_histogram.record(gas_used as f64);
+        self.executor.execution_histogram.record(execution_secs);
+        self.executor.execution_duration.set(execution_secs);
+    }
+
     /// Records metrics for block execution.
     ///
     /// This method updates metrics for execution time, gas usage, and the number
@@ -50,15 +61,9 @@ impl EngineApiMetrics {
         output: &BlockExecutionOutput<R>,
         execution_duration: Duration,
     ) {
-        let execution_secs = execution_duration.as_secs_f64();
         let gas_used = output.result.gas_used;
 
-        // Update gas metrics
-        self.executor.gas_processed_total.increment(gas_used);
-        self.executor.gas_per_second.set(gas_used as f64 / execution_secs);
-        self.executor.gas_used_histogram.record(gas_used as f64);
-        self.executor.execution_histogram.record(execution_secs);
-        self.executor.execution_duration.set(execution_secs);
+        self.record_block_execution_gas(gas_used, execution_duration);
 
         // Update the metrics for the number of accounts, storage slots and bytecodes
         let accounts = output.state.state.len();
