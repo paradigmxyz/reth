@@ -201,16 +201,20 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
         match column {
             Some(Ok(value)) => {
-                if self.offsets.is_empty() {
+                let previous_offset = if let Some(offset) = self.offsets.last().copied() {
+                    offset
+                } else {
                     // Represents the offset of the soon to be appended data column
-                    self.offsets.push(self.data_file.stream_position()?);
-                }
+                    let offset = self.data_file.stream_position()?;
+                    self.offsets.push(offset);
+                    offset
+                };
 
                 let written = self.write_column(value.as_ref())?;
 
                 // Last offset represents the size of the data file if no more data is to be
                 // appended. Otherwise, represents the offset of the next data item.
-                self.offsets.push(self.offsets.last().expect("qed") + written as u64);
+                self.offsets.push(previous_offset + written as u64);
             }
             None => {
                 return Err(NippyJarError::UnexpectedMissingValue(
