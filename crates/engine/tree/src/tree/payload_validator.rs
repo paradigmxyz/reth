@@ -1357,7 +1357,7 @@ where
         // In that case, invoking the callback on every transaction would resend the previous
         // receipt with the same index and can panic the ordered root builder.
         let mut last_sent_len = 0usize;
-        loop {
+        while senders.len() < transaction_count {
             // Measure time spent waiting for next transaction from iterator
             // (e.g., parallel signature recovery)
             let wait_start = Instant::now();
