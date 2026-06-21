@@ -217,7 +217,7 @@ where
             let Some(engine_api) = handle.engine_api().await else {
                 return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
             };
-            engine_api.new_payload(fork.payloads_version(), body).await
+            engine_api.new_payload(fork.payloads_version(), body.into()).await
         }
         EngineSszEndpoint::Forkchoice(fork) => {
             if method != "POST" {
@@ -229,7 +229,7 @@ where
             let Some(engine_api) = handle.engine_api().await else {
                 return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
             };
-            engine_api.forkchoice_updated(fork.forkchoice_version(), body).await
+            engine_api.forkchoice_updated(fork.forkchoice_version(), body.into()).await
         }
         EngineSszEndpoint::Blobs(version) => {
             if method != "POST" {
@@ -241,7 +241,7 @@ where
             let Some(engine_api) = handle.engine_api().await else {
                 return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
             };
-            engine_api.get_blobs(version, body).await
+            engine_api.get_blobs(version, body.into()).await
         }
     }
 }
