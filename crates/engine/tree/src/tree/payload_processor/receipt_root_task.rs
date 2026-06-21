@@ -7,7 +7,7 @@
 //! computed root.
 
 use alloy_eips::Encodable2718;
-use alloy_primitives::{map::HashMap, Bloom, B256};
+use alloy_primitives::{Bloom, B256};
 use crossbeam_channel::Receiver;
 use reth_primitives_traits::Receipt;
 use reth_trie_common::ordered_root::OrderedTrieRootEncodedBuilder;
@@ -15,6 +15,49 @@ use tokio::sync::oneshot;
 use tracing::debug_span;
 
 const RECEIPT_ENCODE_BUF_INITIAL_CAPACITY: usize = 512;
+
+#[derive(Debug)]
+struct PendingReceipts<R> {
+    receipts: Vec<Option<R>>,
+    len: usize,
+}
+
+impl<R> PendingReceipts<R> {
+    fn new(receipts_len: Option<usize>) -> Self {
+        let mut receipts = Vec::new();
+        if let Some(receipts_len) = receipts_len {
+            receipts.resize_with(receipts_len, || None);
+        }
+
+        Self { receipts, len: 0 }
+    }
+
+    fn insert(&mut self, index: usize, receipt: R) {
+        if index >= self.receipts.len() {
+            self.receipts.resize_with(index + 1, || None);
+        }
+
+        if self.receipts[index].replace(receipt).is_none() {
+            self.len += 1;
+        }
+    }
+
+    fn take(&mut self, index: usize) -> Option<R> {
+        let receipt = self.receipts.get_mut(index)?.take();
+        if receipt.is_some() {
+            self.len -= 1;
+        }
+        receipt
+    }
+
+    const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    const fn len(&self) -> usize {
+        self.len
+    }
+}
 
 /// Receipt with index, ready to be sent to the background task for encoding and trie building.
 #[derive(Debug, Clone)]
@@ -81,7 +124,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
         let mut aggregated_bloom = Bloom::ZERO;
         let mut encode_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
         let mut next = 0usize;
-        let mut pending = HashMap::new();
+        let mut pending: Option<PendingReceipts<R>> = None;
 
         let mut push = |receipt: R| {
             let receipt_with_bloom = receipt.with_bloom_ref();
@@ -98,12 +141,22 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
                 push(indexed_receipt.receipt);
                 next += 1;
 
-                while let Some(receipt) = pending.remove(&next) {
-                    push(receipt);
-                    next += 1;
+                let mut clear_pending = false;
+                if let Some(pending_receipts) = pending.as_mut() {
+                    while let Some(receipt) = pending_receipts.take(next) {
+                        push(receipt);
+                        next += 1;
+                    }
+                    clear_pending = pending_receipts.is_empty();
+                }
+
+                if clear_pending {
+                    pending = None;
                 }
             } else {
-                pending.insert(indexed_receipt.index, indexed_receipt.receipt);
+                pending
+                    .get_or_insert_with(|| PendingReceipts::new(receipts_len))
+                    .insert(indexed_receipt.index, indexed_receipt.receipt);
             }
         }
 
@@ -117,7 +170,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
             return;
         }
 
-        if !pending.is_empty() {
+        if let Some(pending) = pending.as_ref().filter(|pending| !pending.is_empty()) {
             tracing::error!(
                 target: "engine::tree::payload_processor",
                 received = next,
@@ -138,6 +191,21 @@ mod tests {
     use alloy_primitives::{b256, hex, Address, Bytes, Log};
     use crossbeam_channel::bounded;
     use reth_ethereum_primitives::{Receipt, TxType};
+
+    #[test]
+    fn pending_receipts_tracks_sparse_indices() {
+        let mut pending = PendingReceipts::new(Some(5));
+
+        pending.insert(3, "three");
+        pending.insert(1, "one");
+
+        assert_eq!(pending.take(0), None);
+        assert_eq!(pending.take(1), Some("one"));
+        assert_eq!(pending.take(1), None);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending.take(3), Some("three"));
+        assert!(pending.is_empty());
+    }
 
     #[tokio::test]
     async fn test_receipt_root_task_empty() {
