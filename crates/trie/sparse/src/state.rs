@@ -387,6 +387,11 @@ where
         }
     }
 
+    /// Returns whether the revealed account trie root is already cached.
+    pub fn is_root_cached(&self) -> bool {
+        self.state.is_root_cached()
+    }
+
     /// Returns storage sparse trie root if the trie has been revealed.
     pub fn storage_root(&mut self, account: &B256) -> Option<B256> {
         self.storage.tries.get_mut(account).and_then(|trie| trie.root())

@@ -339,7 +339,7 @@ where
 
                 // If there's still no pending updates spend some time pre-computing the account
                 // trie upper hashes
-                if self.proof_result_rx.is_empty() {
+                if self.proof_result_rx.is_empty() && !self.trie.is_root_cached() {
                     self.trie.calculate_subtries();
                 }
             } else if self.updates.is_empty() {
