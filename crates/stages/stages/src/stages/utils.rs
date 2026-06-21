@@ -1,11 +1,14 @@
 //! Utils for `stages`.
-use alloy_primitives::{map::AddressMap, Address, BlockNumber, TxNumber, B256};
+use alloy_primitives::{
+    map::{AddressMap, B256Map},
+    Address, BlockNumber, TxNumber, B256,
+};
 use reth_config::config::EtlConfig;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     models::{
         sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey,
-        AccountBeforeTx, AddressStorageKey, BlockNumberAddress, ShardedKey,
+        AccountBeforeTx, BlockNumberAddress, ShardedKey,
     },
     table::{Decode, Decompress, Table},
     transaction::DbTx,
@@ -179,14 +182,23 @@ where
     Provider: DBProvider + StorageChangeSetReader + StaticFileProviderFactory,
 {
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
-    let mut cache: HashMap<AddressStorageKey, Vec<u64>> = HashMap::default();
+    let mut cache: AddressMap<B256Map<Vec<u64>>> = AddressMap::default();
 
-    let mut insert_fn = |key: AddressStorageKey, indices: Vec<u64>| {
+    let mut insert_fn = |address: Address, storage_key: B256, indices: Vec<u64>| {
         let last = indices.last().expect("qed");
         collector.insert(
-            StorageShardedKey::new(key.0 .0, key.0 .1, *last),
+            StorageShardedKey::new(address, storage_key, *last),
             BlockNumberList::new_pre_sorted(indices),
         )?;
+        Ok::<(), StageError>(())
+    };
+
+    let mut collect = |cache: &mut AddressMap<B256Map<Vec<u64>>>| {
+        for (address, storage_slots) in cache.drain() {
+            for (storage_key, indices) in storage_slots {
+                insert_fn(address, storage_key, indices)?;
+            }
+        }
         Ok::<(), StageError>(())
     };
 
@@ -201,7 +213,7 @@ where
 
     for changeset_result in walker {
         let (BlockNumberAddress((block_number, address)), storage) = changeset_result?;
-        cache.entry(AddressStorageKey((address, storage.key))).or_default().push(block_number);
+        cache.entry(address).or_default().entry(storage.key).or_default().push(block_number);
 
         if block_number != current_block_number {
             current_block_number = block_number;
@@ -215,12 +227,12 @@ where
                 current_block = current_block_number,
                 "Collecting indices"
             );
-            collect_indices(cache.drain(), &mut insert_fn)?;
+            collect(&mut cache)?;
             flush_counter = 0;
         }
     }
 
-    collect_indices(cache.into_iter(), insert_fn)?;
+    collect(&mut cache)?;
 
     Ok(collector)
 }
