@@ -10,7 +10,10 @@ pub use reth_trie_parallel::state_root_task::{
 
 /// The default max targets, for limiting the number of account and storage proof targets to be
 /// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
-pub(crate) const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
+pub(crate) const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 64;
+
+/// Minimum chunk size used when a target batch is forced to split.
+const MIN_FORCED_CHUNK_SIZE: usize = 32;
 
 #[derive(Metrics, Clone)]
 #[metrics(scope = "tree.root")]
@@ -69,11 +72,19 @@ pub(crate) fn dispatch_with_chunking<T, I>(
     I: IntoIterator<Item = T>,
 {
     let has_full_chunks = chunking_len >= chunk_size.saturating_mul(2);
-    let should_chunk = chunking_len > max_targets_for_chunking ||
-        (has_full_chunks &&
-            (has_multiple_idle_account_workers || has_multiple_idle_storage_workers));
+    let force_chunk = chunking_len > max_targets_for_chunking;
+    let should_chunk_for_idle =
+        has_full_chunks && (has_multiple_idle_account_workers || has_multiple_idle_storage_workers);
 
-    if should_chunk && chunking_len > chunk_size {
+    if force_chunk && chunking_len > chunk_size {
+        let forced_chunk_size = chunk_size.max(MIN_FORCED_CHUNK_SIZE);
+        for chunk in chunker(items, forced_chunk_size) {
+            dispatch(chunk);
+        }
+        return;
+    }
+
+    if should_chunk_for_idle && chunking_len > chunk_size {
         for chunk in chunker(items, chunk_size) {
             dispatch(chunk);
         }
@@ -81,4 +92,93 @@ pub(crate) fn dispatch_with_chunking<T, I>(
     }
 
     dispatch(items);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vec_chunks(items: Vec<usize>, chunk_size: usize) -> Vec<Vec<usize>> {
+        items.chunks(chunk_size).map(<[usize]>::to_vec).collect()
+    }
+
+    #[test]
+    fn dispatches_single_batch_below_forced_limit_without_idle_workers() {
+        let items: Vec<_> = (0..60).collect();
+        let mut dispatched = Vec::new();
+
+        dispatch_with_chunking(
+            items,
+            60,
+            5,
+            DEFAULT_MAX_TARGETS_FOR_CHUNKING,
+            false,
+            false,
+            vec_chunks,
+            |chunk| dispatched.push(chunk),
+        );
+
+        assert_eq!(dispatched.len(), 1);
+        assert_eq!(dispatched[0].len(), 60);
+    }
+
+    #[test]
+    fn idle_workers_use_configured_small_chunks() {
+        let items: Vec<_> = (0..12).collect();
+        let mut dispatched = Vec::new();
+
+        dispatch_with_chunking(
+            items,
+            12,
+            5,
+            DEFAULT_MAX_TARGETS_FOR_CHUNKING,
+            true,
+            false,
+            vec_chunks,
+            |chunk| dispatched.push(chunk),
+        );
+
+        let lengths: Vec<_> = dispatched.iter().map(Vec::len).collect();
+        assert_eq!(lengths, vec![5, 5, 2]);
+    }
+
+    #[test]
+    fn forced_large_batches_use_medium_chunks() {
+        let items: Vec<_> = (0..96).collect();
+        let mut dispatched = Vec::new();
+
+        dispatch_with_chunking(
+            items,
+            96,
+            5,
+            DEFAULT_MAX_TARGETS_FOR_CHUNKING,
+            false,
+            false,
+            vec_chunks,
+            |chunk| dispatched.push(chunk),
+        );
+
+        let lengths: Vec<_> = dispatched.iter().map(Vec::len).collect();
+        assert_eq!(lengths, vec![32, 32, 32]);
+    }
+
+    #[test]
+    fn forced_large_batches_honor_larger_configured_chunks() {
+        let items: Vec<_> = (0..96).collect();
+        let mut dispatched = Vec::new();
+
+        dispatch_with_chunking(
+            items,
+            96,
+            40,
+            DEFAULT_MAX_TARGETS_FOR_CHUNKING,
+            false,
+            false,
+            vec_chunks,
+            |chunk| dispatched.push(chunk),
+        );
+
+        let lengths: Vec<_> = dispatched.iter().map(Vec::len).collect();
+        assert_eq!(lengths, vec![40, 40, 16]);
+    }
 }
