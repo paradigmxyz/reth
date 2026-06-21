@@ -161,7 +161,7 @@ impl Drop for StateHookSender {
 
 /// Converts [`EvmState`] to [`HashedPostState`] by keccak256-hashing addresses and storage slots.
 pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
-    let mut hashed_state = HashedPostState::with_capacity(update.len());
+    let mut hashed_state = HashedPostState::with_account_capacity(update.len());
 
     for (address, account) in update {
         if account.is_touched() {

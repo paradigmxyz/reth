@@ -42,6 +42,14 @@ impl HashedPostState {
         }
     }
 
+    /// Create new instance with capacity reserved for account updates only.
+    pub fn with_account_capacity(capacity: usize) -> Self {
+        Self {
+            accounts: B256Map::with_capacity_and_hasher(capacity, Default::default()),
+            storages: B256Map::default(),
+        }
+    }
+
     /// Initialize [`HashedPostState`] from bundle state.
     /// Hashes all changed accounts and storage entries that are currently stored in the bundle
     /// state.
