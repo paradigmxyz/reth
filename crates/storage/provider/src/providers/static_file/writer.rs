@@ -256,6 +256,15 @@ pub struct StaticFileProviderRW<N> {
 }
 
 impl<N: NodePrimitives> StaticFileProviderRW<N> {
+    const fn append_buffer_capacity(segment: StaticFileSegment) -> usize {
+        match segment {
+            StaticFileSegment::Headers => 256,
+            StaticFileSegment::Transactions | StaticFileSegment::Receipts => 512,
+            StaticFileSegment::TransactionSenders => 32,
+            StaticFileSegment::AccountChangeSets | StaticFileSegment::StorageChangeSets => 128,
+        }
+    }
+
     /// Creates a new [`StaticFileProviderRW`] for a [`StaticFileSegment`].
     ///
     /// Before use, transaction based segments should ensure the block end range is the expected
@@ -272,7 +281,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         let mut writer = Self {
             writer,
             data_path,
-            buf: Vec::with_capacity(100),
+            buf: Vec::with_capacity(Self::append_buffer_capacity(segment)),
             reader,
             metrics,
             prune_on_commit: None,
