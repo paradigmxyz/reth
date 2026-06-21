@@ -938,9 +938,9 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
     ///
     /// Note: This does not terminate the task yet.
     pub fn stop_prewarming_execution(&self) {
-        self.to_prewarm_task
-            .as_ref()
-            .map(|tx| tx.send(PrewarmTaskEvent::TerminateTransactionExecution).ok());
+        if let Some(tx) = self.to_prewarm_task.as_ref() {
+            let _ = tx.send(PrewarmTaskEvent::TerminateTransactionExecution);
+        }
     }
 
     /// Terminates the entire pre-warming task.
