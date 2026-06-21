@@ -432,13 +432,6 @@ where
     {
         let StorageProofInput { hashed_address, mut targets } = input;
 
-        let span = debug_span!(
-            target: "trie::proof_task",
-            "V2 Storage proof calculation",
-            n = %targets.len(),
-        );
-        let _span_guard = span.enter();
-
         let proof_start = Instant::now();
 
         // If targets is empty it means the caller only wants the root node.
@@ -968,14 +961,6 @@ where
         Provider: TrieCursorFactory + HashedCursorFactory + 'a,
     {
         let MultiProofTargetsV2 { mut account_targets, storage_targets } = targets;
-
-        let span = debug_span!(
-            target: "trie::proof_task",
-            "Account V2 multiproof calculation",
-            account_targets = account_targets.len(),
-            storage_targets = storage_targets.values().map(|t| t.len()).sum::<usize>(),
-        );
-        let _span_guard = span.enter();
 
         trace!(target: "trie::proof_task", "Processing V2 account multiproof");
 
