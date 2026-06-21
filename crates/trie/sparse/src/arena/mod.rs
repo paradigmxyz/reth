@@ -60,6 +60,31 @@ fn prefix_range(
     begin..end
 }
 
+/// Returns whether `path[start..start + expected.len()]` equals `expected`.
+#[inline]
+fn nibbles_range_eq(path: &Nibbles, start: usize, expected: &Nibbles) -> bool {
+    let Some(end) = start.checked_add(expected.len()) else { return false };
+    if end > path.len() {
+        return false;
+    }
+
+    let mut idx = 0;
+    while idx < expected.len() {
+        if path.get_unchecked(start + idx) != expected.get_unchecked(idx) {
+            return false;
+        }
+        idx += 1;
+    }
+    true
+}
+
+/// Returns whether `path[start..]` equals `expected`.
+#[inline]
+fn nibbles_suffix_eq(path: &Nibbles, start: usize, expected: &Nibbles) -> bool {
+    start.checked_add(expected.len()) == Some(path.len()) &&
+        nibbles_range_eq(path, start, expected)
+}
+
 /// Returns the per-slot byte size used by `SlotMap<_, T>`. `SlotMap` wraps each value in a
 /// `Slot<T>` containing the value union + a 4-byte version field, with struct alignment.
 const fn slotmap_slot_size<T>() -> usize {
@@ -1310,14 +1335,13 @@ impl ArenaParallelSparseTrie {
             match &arena[current] {
                 ArenaSparseNode::EmptyRoot | ArenaSparseNode::TakenSubtrie => return None,
                 ArenaSparseNode::Leaf { key, value, .. } => {
-                    let remaining = full_path.slice(path_offset..);
-                    return (remaining == *key).then_some(value);
+                    return nibbles_suffix_eq(full_path, path_offset, key).then_some(value);
                 }
                 ArenaSparseNode::Branch(b) => {
                     let short_key = &b.short_key;
                     let logical_end = path_offset + short_key.len();
                     if full_path.len() <= logical_end ||
-                        full_path.slice(path_offset..logical_end) != *short_key
+                        !nibbles_range_eq(full_path, path_offset, short_key)
                     {
                         return None;
                     }
@@ -1360,8 +1384,7 @@ impl ArenaParallelSparseTrie {
                     return Ok(LeafLookup::NonExistent);
                 }
                 ArenaSparseNode::Leaf { key, value, .. } => {
-                    let remaining = full_path.slice(path_offset..);
-                    if remaining != *key {
+                    if !nibbles_suffix_eq(full_path, path_offset, key) {
                         return Ok(LeafLookup::NonExistent);
                     }
                     if let Some(expected) = expected_value &&
@@ -1383,7 +1406,7 @@ impl ArenaParallelSparseTrie {
                         return Ok(LeafLookup::NonExistent);
                     }
 
-                    if full_path.slice(path_offset..logical_end) != *short_key {
+                    if !nibbles_range_eq(full_path, path_offset, short_key) {
                         return Ok(LeafLookup::NonExistent);
                     }
 
