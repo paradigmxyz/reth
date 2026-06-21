@@ -229,6 +229,7 @@ pub(crate) struct ForkchoiceUpdatedMetrics {
 
 impl ForkchoiceUpdatedMetrics {
     /// Increment the forkchoiceUpdated counter based on the given result
+    #[inline]
     pub(crate) fn update_response_metrics(
         &mut self,
         start: Instant,
