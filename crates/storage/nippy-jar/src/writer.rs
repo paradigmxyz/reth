@@ -228,9 +228,9 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     fn write_column(&mut self, value: &[u8]) -> Result<usize, NippyJarError> {
         self.uncompressed_row_size += value.len();
         let len = if let Some(compression) = &self.jar.compressor {
-            let before = self.tmp_buf.len();
+            self.tmp_buf.clear();
             let len = compression.compress_to(value, &mut self.tmp_buf)?;
-            self.data_file.write_all(&self.tmp_buf[before..before + len])?;
+            self.data_file.write_all(&self.tmp_buf[..len])?;
             len
         } else {
             self.data_file.write_all(value)?;
