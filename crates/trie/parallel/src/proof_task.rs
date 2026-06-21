@@ -984,7 +984,7 @@ where
 
         let mut value_encoder = AsyncAccountValueEncoder::new(
             storage_proof_receivers,
-            self.cached_storage_roots.clone(),
+            &self.cached_storage_roots,
             v2_storage_calculator,
         );
 

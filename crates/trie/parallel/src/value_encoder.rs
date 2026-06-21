@@ -14,7 +14,6 @@ use reth_trie::{
 };
 use std::{
     rc::Rc,
-    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -66,7 +65,7 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
         /// root.
         storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
         /// Cache to store computed storage roots for future reuse.
-        cached_storage_roots: Arc<DashMap<B256, B256>>,
+        cached_storage_roots: *const DashMap<B256, B256>,
     },
     /// The storage root was found in cache.
     FromCache { account: Account, root: B256 },
@@ -77,7 +76,7 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
         hashed_address: B256,
         account: Account,
         /// Cache to store computed storage roots for future reuse.
-        cached_storage_roots: Arc<DashMap<B256, B256>>,
+        cached_storage_roots: *const DashMap<B256, B256>,
     },
 }
 
@@ -174,7 +173,8 @@ where
                             .compute_root_hash(&[root_node])?
                             .expect("storage_root_node returns a node at empty path");
 
-                        cached_storage_roots.insert(hashed_address, storage_root);
+                        storage_root_cache(*cached_storage_roots)
+                            .insert(hashed_address, storage_root);
                         storage_root
                     }
                 };
@@ -191,7 +191,7 @@ where
                     .compute_root_hash(&[root_node])?
                     .expect("storage_root_node returns a node at empty path");
 
-                cached_storage_roots.insert(hashed_address, storage_root);
+                storage_root_cache(*cached_storage_roots).insert(hashed_address, storage_root);
                 (account, storage_root)
             }
         };
@@ -215,7 +215,7 @@ pub(crate) struct AsyncAccountValueEncoder<TC, HC> {
     dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
     /// Storage roots which have already been computed. This can be used only if a storage proof
     /// wasn't dispatched for an account, otherwise we must consume the proof result.
-    cached_storage_roots: Arc<DashMap<B256, B256>>,
+    cached_storage_roots: *const DashMap<B256, B256>,
     /// Tracks storage proof results received from the storage workers. [`Rc`] + [`RefCell`] is
     /// required because [`DeferredValueEncoder`] cannot have a lifetime.
     storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNodeV2>>>>,
@@ -236,12 +236,12 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
     /// - `storage_calculator`: Shared storage proof calculator for synchronous computation
     pub(crate) fn new(
         dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
-        cached_storage_roots: Arc<DashMap<B256, B256>>,
+        cached_storage_roots: &DashMap<B256, B256>,
         storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
     ) -> Self {
         Self {
             dispatched,
-            cached_storage_roots,
+            cached_storage_roots: cached_storage_roots as *const _,
             storage_proof_results: Default::default(),
             storage_calculator,
             stats: Default::default(),
@@ -313,7 +313,7 @@ where
                 storage_proof_results: self.storage_proof_results.clone(),
                 stats: self.stats.clone(),
                 storage_calculator: self.storage_calculator.clone(),
-                cached_storage_roots: self.cached_storage_roots.clone(),
+                cached_storage_roots: self.cached_storage_roots,
             }
         }
 
@@ -321,7 +321,7 @@ where
         // and we only need its root.
 
         // If the root is already calculated then just use it directly
-        if let Some(root) = self.cached_storage_roots.get(&hashed_address) {
+        if let Some(root) = storage_root_cache(self.cached_storage_roots).get(&hashed_address) {
             self.stats.borrow_mut().from_cache_count += 1;
             return AsyncAccountDeferredValueEncoder::FromCache { account, root: *root }
         }
@@ -332,7 +332,15 @@ where
             storage_calculator: self.storage_calculator.clone(),
             hashed_address,
             account,
-            cached_storage_roots: self.cached_storage_roots.clone(),
+            cached_storage_roots: self.cached_storage_roots,
         }
     }
+}
+
+#[inline]
+fn storage_root_cache(cache: *const DashMap<B256, B256>) -> &'static DashMap<B256, B256> {
+    // SAFETY: `AsyncAccountValueEncoder::new` receives this pointer from an `Arc<DashMap<..>>`
+    // stored on the owning proof worker. The encoder and all deferred encoders are created and
+    // consumed inside that worker's proof calculation before the worker can be dropped.
+    unsafe { &*cache }
 }
