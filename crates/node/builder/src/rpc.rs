@@ -627,7 +627,7 @@ where
     /// Maps the configured engine API builder.
     pub fn map_engine_api<T>(
         self,
-        f: impl FnOnce(EngineApiB) -> T,
+        f: impl FnOnce(EB) -> T,
     ) -> RpcAddOns<Node, EthB, PVB, T, EVB, RpcMiddleware, AuthHttpMiddleware> {
         let Self {
             hooks,
