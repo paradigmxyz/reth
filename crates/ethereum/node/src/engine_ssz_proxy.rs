@@ -52,6 +52,25 @@ type EthEngineApi<Provider, Pool, Validator, ChainSpec> =
     EngineApi<Provider, EthEngineTypes, Pool, Validator, ChainSpec>;
 type SharedEngineApi<Api> = Arc<RwLock<Option<Api>>>;
 
+/// Engine API operations required by the SSZ transport.
+pub trait EngineSszApi: Clone + Send + Sync + 'static {
+    /// Returns the Engine API client identity response.
+    fn identity(&self) -> HttpResponse;
+
+    /// Handles a decoded SSZ new-payload request body.
+    fn new_payload(&self, version: u8, body: Bytes) -> impl Future<Output = HttpResponse> + Send;
+
+    /// Handles a decoded SSZ forkchoice-updated request body.
+    fn forkchoice_updated(
+        &self,
+        version: u8,
+        body: Bytes,
+    ) -> impl Future<Output = HttpResponse> + Send;
+
+    /// Handles a decoded SSZ get-blobs request body.
+    fn get_blobs(&self, version: u8, body: Bytes) -> impl Future<Output = HttpResponse> + Send;
+}
+
 /// Shared handle used by [`EngineSszProxyLayer`].
 pub struct EngineSszProxyHandle<Api = ()> {
     engine_api: SharedEngineApi<Api>,
@@ -132,25 +151,6 @@ impl<S, Api> Layer<S> for EngineSszProxyLayer<Api> {
 pub struct EngineSszProxyService<S, Api = ()> {
     inner: S,
     handle: EngineSszProxyHandle<Api>,
-}
-
-/// Engine API operations required by the SSZ transport.
-pub trait EngineSszApi: Clone + Send + Sync + 'static {
-    /// Returns the Engine API client identity response.
-    fn identity(&self) -> HttpResponse;
-
-    /// Handles a decoded SSZ new-payload request body.
-    fn new_payload(&self, version: u8, body: Bytes) -> impl Future<Output = HttpResponse> + Send;
-
-    /// Handles a decoded SSZ forkchoice-updated request body.
-    fn forkchoice_updated(
-        &self,
-        version: u8,
-        body: Bytes,
-    ) -> impl Future<Output = HttpResponse> + Send;
-
-    /// Handles a decoded SSZ get-blobs request body.
-    fn get_blobs(&self, version: u8, body: Bytes) -> impl Future<Output = HttpResponse> + Send;
 }
 
 impl<S, Api> Service<HttpRequest> for EngineSszProxyService<S, Api>
