@@ -1443,7 +1443,7 @@ impl RocksDBProvider {
             for storage_block_reverts in reverts.storage {
                 for revert in storage_block_reverts {
                     for (slot, _) in revert.storage_revert {
-                        let plain_key = B256::new(slot.to_be_bytes());
+                        let plain_key = B256::from(slot);
                         storage_history
                             .entry((revert.address, plain_key))
                             .or_default()
