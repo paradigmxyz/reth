@@ -1,6 +1,9 @@
 //! Ethereum Node types config.
 
-use crate::{EthEngineTypes, EthEvmConfig};
+use crate::{
+    engine_ssz_proxy::{EngineSszApi, EngineSszProxyLayer},
+    EthEngineTypes, EthEvmConfig,
+};
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
 use alloy_network::Ethereum;
 use alloy_rpc_types_engine::ExecutionData;
@@ -33,7 +36,7 @@ use reth_node_builder::{
         PayloadValidatorBuilder, RethAuthHttpMiddleware, RethRpcAddOns, RethRpcMiddleware,
         RpcAddOns, RpcHandle, Stack,
     },
-    BuilderContext, DebugNode, Node, NodeAdapter, PayloadBuilderConfig,
+    BuilderContext, DebugNode, EngineApiExt, Node, NodeAdapter, PayloadBuilderConfig,
 };
 use reth_node_core::args::JitArgs;
 use reth_payload_primitives::PayloadTypes;
@@ -234,6 +237,15 @@ where
         EthereumAddOns::new(inner.with_engine_api(engine_api_builder))
     }
 
+    /// Maps the configured engine API builder.
+    pub fn map_engine_api<T>(
+        self,
+        f: impl FnOnce(EB) -> T,
+    ) -> EthereumAddOns<N, EthB, PVB, T, EVB, RpcMiddleware, AuthHttpMiddleware> {
+        let Self { inner } = self;
+        EthereumAddOns::new(inner.map_engine_api(f))
+    }
+
     /// Replace the payload validator builder.
     pub fn with_payload_validator<V, T>(
         self,
@@ -317,11 +329,14 @@ where
     EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
+    EB::EngineApi: EngineSszApi,
     EVB: EngineValidatorBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
     RpcMiddleware: RethRpcMiddleware,
     AuthHttpMiddleware: RethAuthHttpMiddleware<Identity>,
+    Stack<AuthHttpMiddleware, Either<EngineSszProxyLayer<EB::EngineApi>, Identity>>:
+        RethAuthHttpMiddleware<Identity>,
 {
     type Handle = RpcHandle<N, EthB::EthApi>;
 
@@ -329,6 +344,10 @@ where
         self,
         ctx: reth_node_api::AddOnsContext<'_, N>,
     ) -> eyre::Result<Self::Handle> {
+        let (ssz_proxy_layer, ssz_proxy_handle) = EngineSszProxyLayer::new();
+        let ssz_proxy_enabled = ctx.config.engine.enable_ssz_proxy;
+        let ssz_proxy_layer = ssz_proxy_enabled.then_some(ssz_proxy_layer);
+
         let validation_api = ValidationApi::<_, _, <N::Types as NodeTypes>::Payload>::new(
             ctx.node.provider().clone(),
             Arc::new(ctx.node.consensus().clone()),
@@ -347,6 +366,14 @@ where
         let testing_engine_handle = ctx.beacon_engine_handle.clone();
 
         self.inner
+            .map_engine_api(|engine_api_builder| {
+                EngineApiExt::new(engine_api_builder, move |engine_api| {
+                    if ssz_proxy_enabled {
+                        ssz_proxy_handle.set_engine_api_sync(engine_api);
+                    }
+                })
+            })
+            .option_layer_auth_http_middleware(ssz_proxy_layer)
             .launch_add_ons_with(ctx, move |container| {
                 container.modules.merge_if_module_configured(
                     RethRpcModule::Flashbots,
