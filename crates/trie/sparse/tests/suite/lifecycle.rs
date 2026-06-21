@@ -1,11 +1,11 @@
 use super::*;
 
-/// Standard production lifecycle — update, root, `take_updates`, `commit_updates`.
+/// Standard production lifecycle: update, root, and `take_updates`.
 ///
 /// Build a trie with enough leaves to produce hashed branch children (≥16 per subtrie),
-/// insert 1 new leaf + modify 1 existing, compute root, take updates, commit, then verify
-/// root is unchanged (cache hit) and updates are non-empty.
-pub(super) fn test_full_lifecycle_update_root_take_commit<T: SparseTrie>(new_trie: fn() -> T) {
+/// insert 1 new leaf + modify 1 existing, compute root, take updates, then verify root is
+/// unchanged and updates are non-empty.
+pub(super) fn test_full_lifecycle_update_root_take_updates<T: SparseTrie>(new_trie: fn() -> T) {
     // 16 leaves sharing prefix [1,0] to produce hashed branch children.
     let mut storage: BTreeMap<B256, U256> = BTreeMap::new();
     for i in 0u8..16 {
@@ -56,17 +56,14 @@ pub(super) fn test_full_lifecycle_update_root_take_commit<T: SparseTrie>(new_tri
         "updates should be non-empty after mutations"
     );
 
-    // Commit updates.
-    trie.commit_updates(&updates.updated_nodes, &updates.removed_nodes);
-
-    // Post-commit root should still be hash1 (cache hit).
+    // Taking updates should not affect the cached root.
     let hash2 = trie.root();
-    assert_eq!(hash1, hash2, "root should be unchanged after commit_updates");
+    assert_eq!(hash1, hash2, "root should be unchanged after take_updates");
 }
 
-/// Multiple rounds of (update → root → `take_updates` → `commit_updates`), followed by
-/// a prune, simulating block processing.
-pub(super) fn test_multi_round_update_commit_prune_cycle<T: SparseTrie>(new_trie: fn() -> T) {
+/// Multiple rounds of (update → root → `take_updates`), followed by a prune, simulating block
+/// processing.
+pub(super) fn test_multi_round_update_take_updates_prune_cycle<T: SparseTrie>(new_trie: fn() -> T) {
     // Build a trie with 10 leaves.
     let mut storage: BTreeMap<B256, U256> = BTreeMap::new();
     let mut keys = Vec::new();
@@ -95,8 +92,7 @@ pub(super) fn test_multi_round_update_commit_prune_cycle<T: SparseTrie>(new_trie
     harness.apply_changeset(changeset1);
     assert_eq!(root1, harness.original_root(), "round 1 root should match reference");
 
-    let updates1 = trie.take_updates();
-    trie.commit_updates(&updates1.updated_nodes, &updates1.removed_nodes);
+    let _ = trie.take_updates();
 
     // --- Round 2: Update leaves C (keys[2]) and D (keys[3]) ---
     let mut changeset2: BTreeMap<B256, U256> = BTreeMap::new();
@@ -110,8 +106,7 @@ pub(super) fn test_multi_round_update_commit_prune_cycle<T: SparseTrie>(new_trie
     harness.apply_changeset(changeset2);
     assert_eq!(root2, harness.original_root(), "round 2 root should match reference");
 
-    let updates2 = trie.take_updates();
-    trie.commit_updates(&updates2.updated_nodes, &updates2.removed_nodes);
+    let _ = trie.take_updates();
 
     // --- Prune: retain only keys A,B,C,D ---
     let retained: Vec<Nibbles> = keys[0..4].iter().map(|k| Nibbles::unpack(*k)).collect();
@@ -379,18 +374,9 @@ pub(super) fn test_full_block_processing_lifecycle<T: SparseTrie>(new_trie: fn()
     assert_eq!(state_root, acct_harness.original_root(), "state root should match reference");
 
     // --- Finalize: take_updates ---
-    let acct_updates = acct_trie.take_updates();
-    let a1_updates = a1_trie.take_updates();
-    let a2_updates = a2_trie.take_updates();
-
-    // --- Reuse: commit + prune ---
-    acct_trie.commit_updates(&acct_updates.updated_nodes, &acct_updates.removed_nodes);
-    a1_trie.commit_updates(&a1_updates.updated_nodes, &a1_updates.removed_nodes);
-    a2_trie.commit_updates(&a2_updates.updated_nodes, &a2_updates.removed_nodes);
-
-    // Post-commit root should still be state_root.
-    let post_commit_root = acct_trie.root();
-    assert_eq!(post_commit_root, state_root, "root should be unchanged after commit_updates");
+    let _ = acct_trie.take_updates();
+    let _ = a1_trie.take_updates();
+    let _ = a2_trie.take_updates();
 
     // Prune account trie, retaining only A1 and A2 paths.
     let retained: Vec<Nibbles> = acct_keys[0..2].iter().map(|k| Nibbles::unpack(*k)).collect();
@@ -679,8 +665,7 @@ pub(super) fn test_prune_then_reuse_for_next_block<T: SparseTrie>(new_trie: fn()
     harness.apply_changeset(changeset1);
     assert_eq!(root1, harness.original_root(), "block 1 root should match reference");
 
-    let updates1 = trie.take_updates();
-    trie.commit_updates(&updates1.updated_nodes, &updates1.removed_nodes);
+    let _ = trie.take_updates();
 
     // --- Prune: retain only K1 and K2 as "hot" ---
     let retained: Vec<Nibbles> = [keys[0], keys[1]].iter().map(|k| Nibbles::unpack(*k)).collect();

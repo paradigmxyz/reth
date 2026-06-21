@@ -10,6 +10,7 @@ use std::{
     },
     thread::JoinHandle,
 };
+use tokio::sync::oneshot;
 use tracing::trace;
 
 /// Builds a fresh `StateProviderBox` over the block's parent state. Type-erased so the pool is not
@@ -30,7 +31,7 @@ enum PrewarmMsg {
     /// Warm one target into the held provider's cache. Ignored if no provider is held.
     Warm(PrewarmTarget),
     /// Drop the held provider (and its read txn).
-    EndBlock,
+    EndBlock(Arc<SendOnDrop>),
 }
 
 /// Long-lived pool of blocking threads that warm the BAL read-set into the shared execution cache.
@@ -84,10 +85,18 @@ impl BalPrewarmPool {
 
     /// Ends the block: every worker drops its provider (and read txn) once it has drained the warm
     /// requests queued ahead of this message.
+    ///
+    /// Blocks until all workers processed the end block message.
     pub(crate) fn end_block(&self) {
+        let (tx, rx) = oneshot::channel();
+        let tx = Arc::new(SendOnDrop { sender: Some(tx) });
+
         for worker in &self.workers {
-            let _ = worker.send(PrewarmMsg::EndBlock);
+            let _ = worker.send(PrewarmMsg::EndBlock(tx.clone()));
         }
+
+        drop(tx);
+        rx.blocking_recv().expect("BAL prewarm pool dropped without signaling completion");
     }
 
     fn send_warm(&self, target: PrewarmTarget) {
@@ -151,9 +160,22 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                     }
                 }
             }
-            PrewarmMsg::EndBlock => {
+            PrewarmMsg::EndBlock(end_tx) => {
                 provider = None;
+                drop(end_tx);
             }
+        }
+    }
+}
+
+struct SendOnDrop {
+    sender: Option<oneshot::Sender<()>>,
+}
+
+impl Drop for SendOnDrop {
+    fn drop(&mut self) {
+        if let Some(sender) = self.sender.take() {
+            let _ = sender.send(());
         }
     }
 }

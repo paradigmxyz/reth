@@ -34,9 +34,7 @@ use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
 };
-use reth_trie_sparse::{
-    ArenaParallelSparseTrie, ConfigurableSparseTrie, RevealableSparseTrie, SparseStateTrie,
-};
+use reth_trie_sparse::{ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie};
 use std::{
     ops::Not,
     sync::{
@@ -56,29 +54,6 @@ pub mod receipt_root_task;
 pub mod sparse_trie;
 
 use preserved_sparse_trie::{PreservedSparseTrie, SharedPreservedSparseTrie};
-
-/// Default node capacity for shrinking the sparse trie. This is used to limit the number of trie
-/// nodes in allocated sparse tries.
-///
-/// Node maps have a key of `Nibbles` and value of `SparseNode`.
-/// The `size_of::<Nibbles>` is 40, and `size_of::<SparseNode>` is 80.
-///
-/// If we have 1 million entries of 120 bytes each, this conservative estimate comes out at around
-/// 120MB.
-pub const SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY: usize = 1_000_000;
-
-/// Default value capacity for shrinking the sparse trie. This is used to limit the number of values
-/// in allocated sparse tries.
-///
-/// There are storage and account values, the largest of the two being account values, which are
-/// essentially `TrieAccount`s.
-///
-/// Account value maps have a key of `Nibbles` and value of `TrieAccount`.
-/// The `size_of::<Nibbles>` is 40, and `size_of::<TrieAccount>` is 104.
-///
-/// If we have 1 million entries of 144 bytes each, this conservative estimate comes out at around
-/// 144MB.
-pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 
 /// Blocks with fewer transactions than this skip prewarming, since the fixed overhead of spawning
 /// prewarm workers exceeds the execution time saved.
@@ -666,9 +641,8 @@ where
                         target: "engine::tree::payload_processor",
                         "Creating new sparse trie - no preserved trie available"
                     );
-                    let default_trie = RevealableSparseTrie::blind_from(
-                        ConfigurableSparseTrie::Arena(ArenaParallelSparseTrie::default()),
-                    );
+                    let default_trie =
+                        RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
                     SparseStateTrie::default()
                         .with_accounts_trie(default_trie.clone())
                         .with_default_storage_trie(default_trie)
@@ -705,10 +679,7 @@ where
                     target: "engine::tree::payload_processor",
                     "State root receiver dropped, clearing trie"
                 );
-                let (trie, deferred) = task.into_cleared_trie(
-                    SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
-                    SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
-                );
+                let (trie, deferred) = task.into_cleared_trie();
                 guard.store(PreservedSparseTrie::cleared(trie));
                 drop(guard);
                 executor.spawn_drop(deferred);
@@ -724,10 +695,7 @@ where
                 let (trie, deferred) = task.into_trie_for_reuse(
                     max_hot_slots,
                     max_hot_accounts,
-                    SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
-                    SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
                     disable_cache_pruning,
-                    &result.trie_updates,
                 );
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
@@ -745,10 +713,7 @@ where
                     target: "engine::tree::payload_processor",
                     "State root computation failed, clearing trie"
                 );
-                let (trie, deferred) = task.into_cleared_trie(
-                    SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY,
-                    SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY,
-                );
+                let (trie, deferred) = task.into_cleared_trie();
                 guard.store(PreservedSparseTrie::cleared(trie));
                 deferred
             };
@@ -1246,7 +1211,7 @@ mod tests {
             .execution_cache
             .update_with_guard(|slot| *slot = Some(make_saved_cache(parent_hash)));
 
-        // Checking out the cache bumps its usage_guard refcount, marking the slot as in-use.
+        // Checking out the cache bumps its `ExecutionCache` refcount, marking the slot as in-use.
         // The returned SavedCache shares the same underlying ExecutionCache Arc as the slot,
         // so any writes through the slot are observable here
         let checked_out = payload_processor
@@ -1437,7 +1402,7 @@ mod tests {
     /// 2. Fork block (parent = block 2) checks out the cache via `get_cache_for`, simulating what
     ///    `PrewarmCacheTask` does when it receives a `SavedCache`.
     /// 3. Prewarm populates the shared cache with fork-specific state.
-    /// 4. While the prewarm clone is alive, the cache is unavailable (`usage_guard` > 1).
+    /// 4. While the prewarm clone is alive, the cache is unavailable (`usage_count` > 1).
     /// 5. Prewarm drops without calling `save_cache` (fork block was invalid).
     /// 6. Canonical block 5 (parent = block 4) must get a cache with correct hash and no stale fork
     ///    data.
@@ -1463,7 +1428,7 @@ mod tests {
         let fork_key = B256::from([0xCC; 32]);
         prewarm_cache.cache().insert_storage(fork_addr, fork_key, Some(U256::from(999)));
 
-        // While prewarm holds the clone, the usage_guard count > 1 → cache is in use.
+        // While prewarm holds the clone, the cache handle count > 1 so the cache is in use.
         let during_prewarm = execution_cache.get_cache_for(block4_hash);
         assert!(
             during_prewarm.is_none(),

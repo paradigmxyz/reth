@@ -910,6 +910,11 @@ impl ExecutionCache {
         }))
     }
 
+    /// Returns the number of active handles to the shared cache.
+    fn usage_count(&self) -> usize {
+        Arc::strong_count(&self.0)
+    }
+
     /// Gets code from cache, or inserts using the provided function.
     pub fn get_or_try_insert_code_with<E>(
         &self,
@@ -1117,16 +1122,12 @@ pub struct SavedCache {
 
     /// The caches used for the provider.
     caches: ExecutionCache,
-
-    /// A guard to track in-flight usage of this cache.
-    /// The cache is considered available if the strong count is 1.
-    usage_guard: Arc<()>,
 }
 
 impl SavedCache {
     /// Creates a new instance with the internals
-    pub fn new(hash: B256, caches: ExecutionCache) -> Self {
-        Self { hash, caches, usage_guard: Arc::new(()) }
+    pub const fn new(hash: B256, caches: ExecutionCache) -> Self {
+        Self { hash, caches }
     }
 
     /// Returns the hash for this cache
@@ -1136,12 +1137,12 @@ impl SavedCache {
 
     /// Returns true if the cache is available for use (no other tasks are currently using it).
     pub fn is_available(&self) -> bool {
-        Arc::strong_count(&self.usage_guard) == 1
+        self.caches.usage_count() == 1
     }
 
-    /// Returns the current strong count of the usage guard.
+    /// Returns the current number of active handles to the shared cache.
     pub fn usage_count(&self) -> usize {
-        Arc::strong_count(&self.usage_guard)
+        self.caches.usage_count()
     }
 
     /// Returns the [`ExecutionCache`] belonging to the tracked hash.
@@ -1166,9 +1167,9 @@ impl SavedCache {
 
 #[cfg(any(test, feature = "test-utils"))]
 impl SavedCache {
-    /// Clones the usage guard for testing availability tracking.
-    pub fn clone_guard_for_test(&self) -> Arc<()> {
-        self.usage_guard.clone()
+    /// Clones the cache handle that acts as the availability guard.
+    pub fn clone_guard_for_test(&self) -> ExecutionCache {
+        self.caches.clone()
     }
 }
 
@@ -1258,9 +1259,9 @@ mod tests {
 
         assert!(cache.is_available(), "Cache should be available initially");
 
-        let _guard = cache.clone_guard_for_test();
+        let _cache = cache.clone_guard_for_test();
 
-        assert!(!cache.is_available(), "Cache should not be available with active guard");
+        assert!(!cache.is_available(), "Cache should not be available with active handle");
     }
 
     #[test]
@@ -1268,19 +1269,19 @@ mod tests {
         let execution_cache = ExecutionCache::new(1000);
         let cache = SavedCache::new(B256::from([2u8; 32]), execution_cache);
 
-        let guard1 = cache.clone_guard_for_test();
-        let guard2 = cache.clone_guard_for_test();
-        let guard3 = guard1.clone();
+        let cache1 = cache.clone_guard_for_test();
+        let cache2 = cache.clone_guard_for_test();
+        let cache3 = cache1.clone();
 
         assert!(!cache.is_available());
 
-        drop(guard1);
+        drop(cache1);
         assert!(!cache.is_available());
 
-        drop(guard2);
+        drop(cache2);
         assert!(!cache.is_available());
 
-        drop(guard3);
+        drop(cache3);
         assert!(cache.is_available());
     }
 
