@@ -173,8 +173,10 @@ type LazyHashedPostState = reth_tasks::LazyHandle<Arc<HashedPostState>>;
 /// without entering execution.
 const MAX_EXPECTED_GAS_USAGE_MULTIPLIER: u64 = 2;
 
-/// Worker name for deferred trie data and changeset provider preparation.
+/// Worker name for deferred trie data preparation.
 const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
+/// Worker name for changeset provider preparation.
+const CHANGESET_PROVIDER_WORKER_NAME: &str = "changeset-provider";
 
 type ReceiptRootSender<N> =
     crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
@@ -1044,14 +1046,15 @@ where
     /// producer.
     ///
     /// This is started before execution so overlay construction can run concurrently with payload
-    /// validation, then awaited before the deferred trie producer is spawned.
+    /// validation, then awaited before the deferred trie producer is spawned. It uses a separate
+    /// named worker so provider warmup is not queued behind previous deferred-trie computation.
     fn spawn_changeset_provider_task(
         &self,
         overlay_factory: OverlayStateProviderFactory<P, N>,
     ) -> LazyHandle<ProviderResult<OverlayStateProvider<P::Provider>>> {
         let parent_span = Span::current();
         self.payload_processor.executor().spawn_blocking_named(
-            DEFERRED_TRIE_WORKER_NAME,
+            CHANGESET_PROVIDER_WORKER_NAME,
             move || {
                 let _span = debug_span!(
                     target: "engine::tree::payload_validator",

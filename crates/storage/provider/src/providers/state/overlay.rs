@@ -29,7 +29,7 @@ use reth_trie_db::{
 };
 use std::{
     ops::RangeInclusive,
-    sync::Arc,
+    sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
 use tracing::{debug, debug_span, instrument};
@@ -446,7 +446,32 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     overlay_builder: OverlayBuilder<N>,
     /// A cache which maps `db_tip -> Overlay`. If the db tip changes during usage of the factory
     /// then a new entry will get added to this, but in most cases only one entry is present.
-    overlay_cache: Arc<DashMap<BlockHash, Overlay>>,
+    overlay_cache: Arc<DashMap<BlockHash, OverlayCacheEntry>>,
+}
+
+#[derive(Debug, Clone)]
+enum OverlayCacheEntry {
+    Ready(Overlay),
+    Computing(Arc<OverlayCacheWaiter>),
+}
+
+#[derive(Debug)]
+struct OverlayCacheWaiter {
+    result: OnceLock<ProviderResult<Overlay>>,
+}
+
+impl OverlayCacheWaiter {
+    const fn new() -> Self {
+        Self { result: OnceLock::new() }
+    }
+
+    fn wait(&self) -> ProviderResult<Overlay> {
+        self.result.wait().clone()
+    }
+
+    fn finish(&self, result: ProviderResult<Overlay>) {
+        let _ = self.result.set(result);
+    }
 }
 
 impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
@@ -487,17 +512,68 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     {
         let db_tip_block = self.overlay_builder.get_db_tip_block(provider)?;
 
-        let overlay = match self.overlay_cache.entry(db_tip_block.hash) {
-            dashmap::Entry::Occupied(entry) => entry.get().clone(),
+        enum CacheAction {
+            Ready(Overlay),
+            Wait(Arc<OverlayCacheWaiter>),
+            Compute(Arc<OverlayCacheWaiter>),
+        }
+
+        let action = match self.overlay_cache.entry(db_tip_block.hash) {
+            dashmap::Entry::Occupied(entry) => match entry.get().clone() {
+                OverlayCacheEntry::Ready(overlay) => CacheAction::Ready(overlay),
+                OverlayCacheEntry::Computing(waiter) => CacheAction::Wait(waiter),
+            },
             dashmap::Entry::Vacant(entry) => {
                 self.overlay_builder.metrics.overlay_cache_misses.increment(1);
-                let overlay = self.overlay_builder.build_overlay(provider)?;
-                entry.insert(overlay.clone());
-                overlay
+                let waiter = Arc::new(OverlayCacheWaiter::new());
+                entry.insert(OverlayCacheEntry::Computing(Arc::clone(&waiter)));
+                CacheAction::Compute(waiter)
             }
         };
 
-        Ok(overlay)
+        match action {
+            CacheAction::Ready(overlay) => Ok(overlay),
+            CacheAction::Wait(waiter) => waiter.wait(),
+            CacheAction::Compute(waiter) => {
+                let result = self.overlay_builder.calculate_overlay(provider, db_tip_block);
+                match result {
+                    Ok(overlay) => {
+                        waiter.finish(Ok(overlay.clone()));
+                        if let dashmap::Entry::Occupied(mut entry) =
+                            self.overlay_cache.entry(db_tip_block.hash)
+                        {
+                            let should_publish = match entry.get() {
+                                OverlayCacheEntry::Computing(existing) => {
+                                    Arc::ptr_eq(existing, &waiter)
+                                }
+                                OverlayCacheEntry::Ready(_) => false,
+                            };
+                            if should_publish {
+                                entry.insert(OverlayCacheEntry::Ready(overlay.clone()));
+                            }
+                        }
+                        Ok(overlay)
+                    }
+                    Err(error) => {
+                        waiter.finish(Err(error.clone()));
+                        if let dashmap::Entry::Occupied(entry) =
+                            self.overlay_cache.entry(db_tip_block.hash)
+                        {
+                            let should_remove = match entry.get() {
+                                OverlayCacheEntry::Computing(existing) => {
+                                    Arc::ptr_eq(existing, &waiter)
+                                }
+                                OverlayCacheEntry::Ready(_) => false,
+                            };
+                            if should_remove {
+                                entry.remove();
+                            }
+                        }
+                        Err(error)
+                    }
+                }
+            }
+        }
     }
 }
 
