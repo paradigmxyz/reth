@@ -1062,6 +1062,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     segment_max_block,
                 );
 
+                // Clamp range start to genesis since no static files exist before it.
                 let genesis = self.genesis_block_number();
                 if fixed_range.start() < genesis {
                     info!(target: "providers::static_file", ?fixed_range, "Adjusting static file range start to genesis block");
