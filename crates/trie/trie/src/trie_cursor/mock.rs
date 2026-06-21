@@ -19,6 +19,8 @@ pub struct MockTrieCursorFactory {
 
     /// List of keys that the account trie cursor has visited.
     visited_account_keys: Arc<Mutex<Vec<KeyVisit<Nibbles>>>>,
+    /// List of storage trie addresses selected by the storage cursor.
+    visited_storage_addresses: Arc<Mutex<Vec<B256>>>,
     /// List of keys that the storage trie cursor has visited, per storage trie.
     visited_storage_keys: Arc<B256Map<Mutex<Vec<KeyVisit<Nibbles>>>>>,
 }
@@ -34,6 +36,7 @@ impl MockTrieCursorFactory {
             account_trie_nodes: Arc::new(account_trie_nodes),
             storage_tries: Arc::new(storage_tries),
             visited_account_keys: Default::default(),
+            visited_storage_addresses: Default::default(),
             visited_storage_keys: Arc::new(visited_storage_keys),
         }
     }
@@ -71,6 +74,11 @@ impl MockTrieCursorFactory {
     ) -> MutexGuard<'_, Vec<KeyVisit<Nibbles>>> {
         self.visited_storage_keys.get(&hashed_address).expect("storage trie should exist").lock()
     }
+
+    /// Returns the list of storage trie addresses selected by a storage cursor.
+    pub fn visited_storage_addresses(&self) -> MutexGuard<'_, Vec<B256>> {
+        self.visited_storage_addresses.lock()
+    }
 }
 
 impl TrieCursorFactory for MockTrieCursorFactory {
@@ -96,6 +104,7 @@ impl TrieCursorFactory for MockTrieCursorFactory {
         MockTrieCursor::new_storage(
             self.storage_tries.clone(),
             self.visited_storage_keys.clone(),
+            self.visited_storage_addresses.clone(),
             hashed_address,
         )
     }
@@ -111,6 +120,7 @@ enum MockTrieCursorType {
     Storage {
         all_storage_tries: Arc<B256Map<BTreeMap<Nibbles, BranchNodeCompact>>>,
         all_visited_storage_keys: Arc<B256Map<Mutex<Vec<KeyVisit<Nibbles>>>>>,
+        visited_storage_addresses: Arc<Mutex<Vec<B256>>>,
         current_hashed_address: B256,
     },
 }
@@ -140,6 +150,7 @@ impl MockTrieCursor {
     pub fn new_storage(
         all_storage_tries: Arc<B256Map<BTreeMap<Nibbles, BranchNodeCompact>>>,
         all_visited_storage_keys: Arc<B256Map<Mutex<Vec<KeyVisit<Nibbles>>>>>,
+        visited_storage_addresses: Arc<Mutex<Vec<B256>>>,
         hashed_address: B256,
     ) -> Result<Self, DatabaseError> {
         if !all_storage_tries.contains_key(&hashed_address) {
@@ -152,6 +163,7 @@ impl MockTrieCursor {
             cursor_type: MockTrieCursorType::Storage {
                 all_storage_tries,
                 all_visited_storage_keys,
+                visited_storage_addresses,
                 current_hashed_address: hashed_address,
             },
         })
@@ -252,7 +264,12 @@ impl TrieStorageCursor for MockTrieCursor {
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.reset();
         match &mut self.cursor_type {
-            MockTrieCursorType::Storage { current_hashed_address, .. } => {
+            MockTrieCursorType::Storage {
+                current_hashed_address,
+                visited_storage_addresses,
+                ..
+            } => {
+                visited_storage_addresses.lock().push(hashed_address);
                 *current_hashed_address = hashed_address;
             }
             MockTrieCursorType::Account { .. } => {

@@ -63,7 +63,11 @@ where
     // Create storage cursor once and reuse it for all addresses
     let mut storage_cursor = factory.storage_trie_cursor(B256::default())?;
 
-    for (hashed_address, storage_updates) in trie_updates.storage_tries_ref() {
+    let mut storage_updates_by_address =
+        trie_updates.storage_tries_ref().iter().collect::<Vec<_>>();
+    storage_updates_by_address.sort_unstable_by_key(|(hashed_address, _)| *hashed_address);
+
+    for (hashed_address, storage_updates) in storage_updates_by_address {
         storage_cursor.set_hashed_address(*hashed_address);
 
         let storage_changesets = if storage_updates.is_deleted() {
@@ -357,6 +361,43 @@ mod tests {
         // path3 should have None (it didn't exist before)
         assert_eq!(storage_changesets.storage_nodes[1].0, path3);
         assert_eq!(storage_changesets.storage_nodes[1].1, None);
+    }
+
+    #[test]
+    fn test_storage_changesets_visit_addresses_in_sorted_order() {
+        let low_address = B256::from([1u8; 32]);
+        let mid_address = B256::from([2u8; 32]);
+        let high_address = B256::from([3u8; 32]);
+
+        let path = Nibbles::from_nibbles([0x1, 0x2]);
+        let node = BranchNodeCompact::new(0b1111, 0b0011, 0, vec![], None);
+
+        let mut storage_tries = B256Map::default();
+        storage_tries.insert(B256::default(), BTreeMap::new());
+        for address in [high_address, low_address, mid_address] {
+            storage_tries.insert(address, BTreeMap::from([(path, node.clone())]));
+        }
+
+        let factory = MockTrieCursorFactory::new(BTreeMap::new(), storage_tries);
+
+        let mut storage_updates = B256Map::default();
+        for address in [high_address, low_address, mid_address] {
+            storage_updates.insert(
+                address,
+                StorageTrieUpdatesSorted {
+                    is_deleted: false,
+                    storage_nodes: vec![(path, Some(node.clone()))],
+                },
+            );
+        }
+
+        let updates = TrieUpdatesSorted::new(vec![], storage_updates);
+        let _ = compute_trie_changesets(&factory, &updates).unwrap();
+
+        assert_eq!(
+            factory.visited_storage_addresses().as_slice(),
+            &[low_address, mid_address, high_address]
+        );
     }
 
     #[test]
