@@ -136,8 +136,21 @@ impl OrderedTrieRootEncodedBuilder {
     }
 
     fn add_leaf(&mut self, index: usize, bytes: &[u8]) {
-        let index_buffer = alloy_rlp::encode_fixed_size(&index);
-        self.hb.add_leaf(Nibbles::unpack(&index_buffer), bytes);
+        self.hb.add_leaf(index_nibbles(index), bytes);
+    }
+}
+
+#[inline]
+fn index_nibbles(index: usize) -> Nibbles {
+    match index {
+        0 => Nibbles::from_nibbles_unchecked([0x8, 0x0]),
+        1..=0x7f => {
+            Nibbles::from_nibbles_unchecked([(index >> 4) as u8, (index & 0x0f) as u8])
+        }
+        _ => {
+            let index_buffer = alloy_rlp::encode_fixed_size(&index);
+            Nibbles::unpack(&index_buffer)
+        }
     }
 }
 
@@ -161,6 +174,14 @@ mod tests {
             builder.push_next(item);
         }
         builder.finalize()
+    }
+
+    #[test]
+    fn index_nibbles_matches_rlp_encoding() {
+        for index in [0, 1, 2, 15, 16, 17, 0x7f, 0x80, 0x81, 255, 256, 1024] {
+            let encoded = alloy_rlp::encode_fixed_size(&index);
+            assert_eq!(index_nibbles(index), Nibbles::unpack(&encoded), "index {index}");
+        }
     }
 
     #[test]
