@@ -9,16 +9,17 @@ use alloy_eips::{
     eip2718::Decodable2718,
     eip7685::{Requests, RequestsOrHash},
 };
-use alloy_primitives::{Bytes, B128, B256};
+use alloy_primitives::{Bytes, B128, B256, B64};
 use alloy_rpc_types_engine::{
     ssz_engine_types::{
         BodiesByHashRequest, BodiesResponse, BodiesResponseCancun, BodiesResponseOsaka,
-        BodiesResponsePrague, BodyEntry, ExecutionPayloadBodyAmsterdam, ExecutionPayloadBodyParis,
-        ExecutionPayloadBodyShanghai,
+        BodiesResponsePrague, BodyEntry, BuiltPayloadAmsterdam, BuiltPayloadOsaka,
+        BuiltPayloadParis, BuiltPayloadPrague, BuiltPayloadShanghai, ExecutionPayloadBodyAmsterdam,
+        ExecutionPayloadBodyParis, ExecutionPayloadBodyShanghai,
     },
     CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
     ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ExecutionPayloadV4,
-    ForkchoiceState, PayloadAttributes, PraguePayloadFields,
+    ForkchoiceState, PayloadAttributes, PayloadId, PraguePayloadFields,
 };
 use http_body_util::BodyExt;
 use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
@@ -231,6 +232,15 @@ where
             };
             handle_new_payload(engine_api, fork.payloads_version(), &body).await
         }
+        EngineSszEndpoint::Payload(fork, payload_id) => {
+            if method != "GET" {
+                return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
+            }
+            let Some(engine_api) = handle.engine_api().await else {
+                return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
+            };
+            handle_get_payload(engine_api, fork, payload_id).await
+        }
         EngineSszEndpoint::Forkchoice(fork) => {
             if method != "POST" {
                 return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
@@ -352,6 +362,12 @@ fn parse_engine_path(path: &str) -> Option<EngineSszEndpoint> {
         (Some("engine"), Some("v2"), Some(fork), Some("payloads"), None, None) => {
             Some(EngineSszEndpoint::Payloads(fork.parse().ok()?))
         }
+        (Some("engine"), Some("v2"), Some(fork), Some("payloads"), Some(payload_id), None) => {
+            Some(EngineSszEndpoint::Payload(
+                fork.parse().ok()?,
+                PayloadId::from(payload_id.parse::<B64>().ok()?),
+            ))
+        }
         (Some("engine"), Some("v2"), Some(fork), Some("forkchoice"), None, None) => {
             Some(EngineSszEndpoint::Forkchoice(fork.parse().ok()?))
         }
@@ -373,6 +389,7 @@ enum EngineSszEndpoint {
     Capabilities,
     Identity,
     Payloads(EngineSszFork),
+    Payload(EngineSszFork, PayloadId),
     Forkchoice(EngineSszFork),
     Blobs(u8),
     PayloadBodiesByHash(EngineSszFork),
@@ -406,6 +423,17 @@ impl EngineSszFork {
             Self::Shanghai => 2,
             Self::Cancun | Self::Prague | Self::Osaka => 3,
             Self::Amsterdam => 4,
+        }
+    }
+
+    const fn get_payload_version(self) -> u8 {
+        match self {
+            Self::Paris => 1,
+            Self::Shanghai => 2,
+            Self::Cancun => 3,
+            Self::Prague => 4,
+            Self::Osaka => 5,
+            Self::Amsterdam => 6,
         }
     }
 }
@@ -456,6 +484,49 @@ where
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
     json_response(vec![engine_api.client_version().clone()])
+}
+
+async fn handle_get_payload<Provider, Pool, Validator, ChainSpec>(
+    engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
+    fork: EngineSszFork,
+    payload_id: PayloadId,
+) -> HttpResponse
+where
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
+    Pool: TransactionPool + 'static,
+    Validator: EngineApiValidator<EthEngineTypes>,
+    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+{
+    match fork.get_payload_version() {
+        1 => match engine_api.get_payload_v1_with_value_metered(payload_id).await {
+            Ok((payload, block_value)) => ssz_response(BuiltPayloadParis { payload, block_value }),
+            Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+        },
+        2 => match engine_api.get_payload_v2_metered(payload_id).await {
+            Ok(payload) => match BuiltPayloadShanghai::try_from(payload) {
+                Ok(payload) => ssz_response(payload),
+                Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+            },
+            Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+        },
+        3 => match engine_api.get_payload_v3_metered(payload_id).await {
+            Ok(payload) => ssz_response(payload),
+            Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+        },
+        4 => match engine_api.get_payload_v4_metered(payload_id).await {
+            Ok(payload) => ssz_response(BuiltPayloadPrague::from(payload)),
+            Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+        },
+        5 => match engine_api.get_payload_v5_metered(payload_id).await {
+            Ok(payload) => ssz_response(BuiltPayloadOsaka::from(payload)),
+            Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+        },
+        6 => match engine_api.get_payload_v6_metered(payload_id).await {
+            Ok(payload) => ssz_response(BuiltPayloadAmsterdam::from(payload)),
+            Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+        },
+        _ => text_response(STATUS_BAD_REQUEST, "unsupported getPayload endpoint version"),
+    }
 }
 
 async fn handle_new_payload<Provider, Pool, Validator, ChainSpec>(
@@ -966,6 +1037,29 @@ mod tests {
     fn parses_fork_scoped_payload_endpoint() {
         let endpoint = parse_engine_path("/engine/v2/prague/payloads").unwrap();
         assert_eq!(endpoint, EngineSszEndpoint::Payloads(EngineSszFork::Prague));
+    }
+
+    #[test]
+    fn parses_fork_scoped_get_payload_endpoint() {
+        let payload_id = PayloadId::new([1, 2, 3, 4, 5, 6, 7, 8]);
+        let endpoint =
+            parse_engine_path(&format!("/engine/v2/osaka/payloads/{payload_id}")).unwrap();
+        assert_eq!(endpoint, EngineSszEndpoint::Payload(EngineSszFork::Osaka, payload_id));
+    }
+
+    #[test]
+    fn rejects_get_payload_endpoint_with_trailing_segment() {
+        assert!(parse_engine_path("/engine/v2/paris/payloads/0x0102030405060708/extra").is_none());
+    }
+
+    #[test]
+    fn maps_get_payload_versions_by_fork() {
+        assert_eq!(EngineSszFork::Paris.get_payload_version(), 1);
+        assert_eq!(EngineSszFork::Shanghai.get_payload_version(), 2);
+        assert_eq!(EngineSszFork::Cancun.get_payload_version(), 3);
+        assert_eq!(EngineSszFork::Prague.get_payload_version(), 4);
+        assert_eq!(EngineSszFork::Osaka.get_payload_version(), 5);
+        assert_eq!(EngineSszFork::Amsterdam.get_payload_version(), 6);
     }
 
     #[test]

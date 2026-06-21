@@ -7,7 +7,7 @@ use alloy_eips::{
     eip4895::Withdrawals,
     eip7685::RequestsOrHash,
 };
-use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B128, B256, U64};
+use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B128, B256, U256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
     ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
@@ -22,7 +22,7 @@ use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTy
 use reth_network_api::{CellCustody, NetworkInfo};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
-    validate_payload_timestamp, EngineApiMessageVersion, MessageValidationKind,
+    validate_payload_timestamp, BuiltPayload, EngineApiMessageVersion, MessageValidationKind,
     PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{Block, BlockBody};
@@ -480,6 +480,26 @@ where
     ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV1> {
         let start = Instant::now();
         let res = Self::get_payload_v1(self, payload_id).await;
+        self.inner.metrics.latency.get_payload_v1.record(start.elapsed());
+        res
+    }
+
+    /// Returns a V1 payload together with its block value for the SSZ Engine API.
+    pub async fn get_payload_v1_with_value_metered(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<(EngineT::ExecutionPayloadEnvelopeV1, U256)> {
+        let start = Instant::now();
+        let res = async {
+            let built_payload = self.get_built_payload(payload_id).await?;
+            let block_value = built_payload.fees();
+            let payload = built_payload.try_into().map_err(|_| {
+                warn!(version = ?EngineApiMessageVersion::V1, "could not transform built payload");
+                EngineApiError::UnknownPayload
+            })?;
+            Ok((payload, block_value))
+        }
+        .await;
         self.inner.metrics.latency.get_payload_v1.record(start.elapsed());
         res
     }
