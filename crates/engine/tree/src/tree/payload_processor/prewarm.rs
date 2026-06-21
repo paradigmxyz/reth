@@ -746,20 +746,25 @@ impl BalAccountStateFields {
 
     fn into_account(self, existing_account: Option<Account>) -> Account {
         let existing_account = existing_account.as_ref();
+        let balance = match self.balance {
+            Some(balance) => balance,
+            None => existing_account.map_or(U256::ZERO, |account| account.balance),
+        };
+        let nonce = match self.nonce {
+            Some(nonce) => nonce,
+            None => existing_account.map_or(0, |account| account.nonce),
+        };
+        let bytecode_hash = match self.code_hash {
+            Some(code_hash) => Some(code_hash),
+            None => existing_account
+                .and_then(|account| account.bytecode_hash)
+                .or(Some(alloy_consensus::constants::KECCAK_EMPTY)),
+        };
+
         Account {
-            balance: self.balance.unwrap_or_else(|| {
-                existing_account
-                    .map(|account| account.balance)
-                    .unwrap_or(alloy_primitives::U256::ZERO)
-            }),
-            nonce: self
-                .nonce
-                .unwrap_or_else(|| existing_account.map(|account| account.nonce).unwrap_or(0)),
-            bytecode_hash: self.code_hash.or_else(|| {
-                existing_account
-                    .and_then(|account| account.bytecode_hash)
-                    .or(Some(alloy_consensus::constants::KECCAK_EMPTY))
-            }),
+            balance,
+            nonce,
+            bytecode_hash,
         }
     }
 }
