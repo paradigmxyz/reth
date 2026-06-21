@@ -385,6 +385,16 @@ pub(crate) struct OperationMetrics {
 }
 
 impl OperationMetrics {
+    /// Returns `true` if a database operation should record its elapsed duration.
+    pub(crate) const fn should_record_duration(value_size: Option<usize>) -> bool {
+        matches!(value_size, Some(size) if size > LARGE_VALUE_THRESHOLD_BYTES)
+    }
+
+    /// Increment the operation counter by a pre-aggregated number of calls.
+    pub(crate) fn increment_calls(&self, calls: u64) {
+        self.calls_total.increment(calls);
+    }
+
     /// Record operation metric.
     ///
     /// The duration it took to execute the closure is recorded only if the provided `value_size` is
@@ -394,7 +404,7 @@ impl OperationMetrics {
 
         // Record duration only for large values to prevent the performance hit of clock syscall
         // on small operations
-        if value_size.is_some_and(|size| size > LARGE_VALUE_THRESHOLD_BYTES) {
+        if Self::should_record_duration(value_size) {
             let start = Instant::now();
             let result = f();
             self.large_value_duration_seconds.record(start.elapsed());
