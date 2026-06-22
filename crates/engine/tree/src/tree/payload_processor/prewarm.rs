@@ -42,6 +42,9 @@ use std::sync::{
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
+/// Maximum transaction distance ahead of canonical execution for sparse-trie proof prefetches.
+const TX_PROOF_PREFETCH_LOOKAHEAD: usize = 64;
+
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 #[derive(Debug)]
 pub enum PrewarmMode<Tx> {
@@ -246,7 +249,10 @@ where
                 return;
             }
 
-            if index > 0 {
+            let executed_tx_index = ctx.executed_tx_index.load(Ordering::Relaxed);
+            let proof_prefetch_cutoff =
+                executed_tx_index.saturating_add(TX_PROOF_PREFETCH_LOOKAHEAD);
+            if index > 0 && index >= executed_tx_index && index <= proof_prefetch_cutoff {
                 let (targets, storage_targets) = MultiProofTargetsV2::from_state(res.state);
                 ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
                 if let Some(to_sparse_trie_task) = to_sparse_trie_task {
