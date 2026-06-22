@@ -158,6 +158,7 @@ use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::{Address, KECCAK_EMPTY};
 use std::{
     collections::HashMap,
+    panic::{self, AssertUnwindSafe},
     sync::{
         atomic::{AtomicUsize, Ordering},
         mpsc::RecvTimeoutError,
@@ -776,8 +777,7 @@ where
         );
         let auxiliary_provider_factory =
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
-        let mut retained_auxiliary_trie_data: Option<(Arc<HashedPostState>, Arc<TrieUpdates>)> =
-            None;
+        let mut retained_auxiliary_trie_data: Option<DeferredTrieData> = None;
 
         // Run the hashed state validation hook but don't propagate the error yet. If the state root
         // task fails, we might need to re-run this check against a fallback state.
@@ -1031,8 +1031,11 @@ where
             }
 
             if let Some(retained_hashed_state) = retained_hashed_state {
-                retained_auxiliary_trie_data =
-                    Some((retained_hashed_state, auxiliary_outcome.trie_updates));
+                retained_auxiliary_trie_data = Some(self.spawn_deferred_auxiliary_trie_task(
+                    block.number(),
+                    retained_hashed_state,
+                    auxiliary_outcome.trie_updates,
+                ));
             }
         }
 
@@ -1079,32 +1082,18 @@ where
             let _ = valid_block_tx.send(());
         }
 
-        let changeset_provider = ensure_ok_post_block!(
-            changeset_provider
-                .try_into_inner()
-                .ok()
-                .expect("changeset provider handle is not cloned"),
-            block
-        );
-
-        let (retained_hashed_state, retained_trie_output) =
-            if let Some((hashed_state, trie_updates)) = retained_auxiliary_trie_data {
-                (LazyHashedPostState::ready(hashed_state), trie_updates)
-            } else {
-                (hashed_state, trie_output)
-            };
-        let executed_block = self.spawn_deferred_trie_task(
+        let mut executed_block = self.spawn_deferred_trie_task(
             Arc::new(block),
             output,
-            retained_hashed_state,
-            retained_trie_output,
-            changeset_provider,
+            hashed_state,
+            trie_output,
         );
-        let executed_block = if let Some(outcome) = lthash_outcome {
-            executed_block.with_lthash_accumulator(outcome.accumulator)
-        } else {
-            executed_block
-        };
+        if let Some(auxiliary_trie_data) = retained_auxiliary_trie_data {
+            executed_block = executed_block.with_auxiliary_trie_data(auxiliary_trie_data);
+        }
+        if let Some(outcome) = lthash_outcome {
+            executed_block = executed_block.with_lthash_accumulator(outcome.accumulator);
+        }
         let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
         Ok(ValidationOutput::new(executed_block, timing_stats).with_raw_bal(raw_bal))
     }
@@ -2091,6 +2080,55 @@ where
             .spawn_blocking_named(DEFERRED_TRIE_WORKER_NAME, compute_trie_input_task);
 
         ExecutedBlock::with_deferred_trie_data(block, execution_outcome, deferred_trie_data)
+    }
+
+    /// Spawns a background task to sort auxiliary trie data retained for persistence.
+    fn spawn_deferred_auxiliary_trie_task(
+        &self,
+        block_number: u64,
+        hashed_state: Arc<HashedPostState>,
+        trie_output: Arc<TrieUpdates>,
+    ) -> DeferredTrieData {
+        let (deferred_trie_data, deferred_trie_task) =
+            DeferredTrieData::pending(hashed_state, trie_output);
+        let block_validation_metrics = self.metrics.block_validation.clone();
+
+        let compute_auxiliary_trie_input_task = move || {
+            let _span = debug_span!(
+                target: "engine::tree::payload_validator",
+                "compute_auxiliary_trie_input_task",
+                block_number
+            )
+            .entered();
+
+            let result = panic::catch_unwind(AssertUnwindSafe(|| {
+                let compute_start = Instant::now();
+                let computed = deferred_trie_task.compute_and_publish();
+                block_validation_metrics
+                    .deferred_trie_compute_duration
+                    .record(compute_start.elapsed().as_secs_f64());
+
+                block_validation_metrics
+                    .hashed_post_state_size
+                    .record(computed.hashed_state.total_len() as f64);
+                block_validation_metrics
+                    .trie_updates_sorted_size
+                    .record(computed.trie_updates.total_len() as f64);
+            }));
+
+            if result.is_err() {
+                error!(
+                    target: "engine::tree::payload_validator",
+                    "Deferred auxiliary trie task panicked"
+                );
+            }
+        };
+
+        self.payload_processor
+            .executor()
+            .spawn_blocking_named(DEFERRED_TRIE_WORKER_NAME, compute_auxiliary_trie_input_task);
+
+        deferred_trie_data
     }
 
     fn calculate_timing_stats(

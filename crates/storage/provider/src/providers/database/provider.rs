@@ -69,7 +69,10 @@ use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     HashedPostStateSorted,
 };
-use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
+use reth_trie_db::{
+    ChangesetCache, DatabaseStorageTrieCursor, ProvableTrieTableAdapter, StorageTrieEntryLike,
+    TrieTableAdapter,
+};
 use revm_database::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };
@@ -739,6 +742,16 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     TrieUpdatesSorted::merge_batch(blocks.iter().rev().map(|b| b.trie_updates()));
                 if !merged_trie.is_empty() {
                     self.write_trie_updates_sorted(&merged_trie)?;
+                }
+
+                let merged_provable_trie = TrieUpdatesSorted::merge_batch(
+                    blocks
+                        .iter()
+                        .rev()
+                        .filter_map(|block| block.auxiliary_trie_data().map(|data| data.trie_updates)),
+                );
+                if !merged_provable_trie.is_empty() {
+                    self.write_provable_trie_updates_sorted(&merged_provable_trie)?;
                 }
                 timings.write_trie_updates += start.elapsed();
             }
@@ -3136,6 +3149,102 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         }
         Ok(())
     }
+
+    fn write_provable_account_trie_updates<A: ProvableTrieTableAdapter>(
+        tx: &TX,
+        trie_updates: &TrieUpdatesSorted,
+        num_entries: &mut usize,
+    ) -> ProviderResult<()>
+    where
+        TX: DbTxMut,
+    {
+        let mut account_trie_cursor =
+            tx.cursor_write::<<A as ProvableTrieTableAdapter>::AccountTrieTable>()?;
+        for (key, updated_node) in trie_updates.account_nodes_ref() {
+            let nibbles = A::AccountKey::from(*key);
+            match updated_node {
+                Some(node) => {
+                    if !key.is_empty() {
+                        *num_entries += 1;
+                        account_trie_cursor.upsert(nibbles, node)?;
+                    }
+                }
+                None => {
+                    *num_entries += 1;
+                    if account_trie_cursor.seek_exact(nibbles)?.is_some() {
+                        account_trie_cursor.delete_current()?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn write_provable_storage_tries<A: ProvableTrieTableAdapter>(
+        tx: &TX,
+        storage_tries: Vec<(&B256, &StorageTrieUpdatesSorted)>,
+        num_entries: &mut usize,
+    ) -> ProviderResult<()>
+    where
+        TX: DbTxMut,
+    {
+        let mut cursor =
+            tx.cursor_dup_write::<<A as ProvableTrieTableAdapter>::StorageTrieTable>()?;
+        for (hashed_address, storage_trie_updates) in storage_tries {
+            if storage_trie_updates.is_deleted() && cursor.seek_exact(*hashed_address)?.is_some() {
+                cursor.delete_current_duplicates()?;
+            }
+
+            for (nibbles, maybe_updated) in
+                storage_trie_updates.storage_nodes.iter().filter(|(n, _)| !n.is_empty())
+            {
+                *num_entries += 1;
+                let nibbles = A::StorageSubKey::from(*nibbles);
+                if cursor
+                    .seek_by_key_subkey(*hashed_address, nibbles.clone())?
+                    .as_ref()
+                    .is_some_and(|entry| *entry.nibbles() == nibbles)
+                {
+                    cursor.delete_current()?;
+                }
+
+                if let Some(node) = maybe_updated {
+                    cursor.upsert(
+                        *hashed_address,
+                        &A::StorageValue::new(nibbles, node.clone()),
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn write_provable_trie_updates_sorted(
+        &self,
+        trie_updates: &TrieUpdatesSorted,
+    ) -> ProviderResult<usize> {
+        if trie_updates.is_empty() {
+            return Ok(0)
+        }
+
+        let mut num_entries = 0;
+
+        reth_trie_db::with_adapter!(self, |A| {
+            Self::write_provable_account_trie_updates::<A>(
+                self.tx_ref(),
+                trie_updates,
+                &mut num_entries,
+            )?;
+        });
+
+        let mut storage_tries = trie_updates.storage_tries_ref().iter().collect::<Vec<_>>();
+        storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        reth_trie_db::with_adapter!(self, |A| {
+            Self::write_provable_storage_tries::<A>(self.tx_ref(), storage_tries, &mut num_entries)?;
+        });
+
+        Ok(num_entries)
+    }
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider<TX, N> {
@@ -4468,6 +4577,93 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(storage_entries2.len(), 0, "Storage address2 should be empty after wipe");
+
+        provider_rw.commit().unwrap();
+    }
+
+    #[test]
+    fn test_write_provable_trie_updates_sorted_uses_provable_tables() {
+        use reth_trie::{
+            updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
+            BranchNodeCompact,
+        };
+
+        let factory = create_test_provider_factory();
+        let provider_rw = factory.provider_rw().unwrap();
+
+        let account_node = BranchNodeCompact::new(
+            0b1111_0000_1111_0000,
+            0b0000_0000_0000_0000,
+            0b0000_0000_0000_0000,
+            vec![],
+            None,
+        );
+        let storage_node = BranchNodeCompact::new(
+            0b0000_1111_0000_1111,
+            0b0000_0000_0000_0000,
+            0b0000_0000_0000_0000,
+            vec![],
+            None,
+        );
+
+        let storage_address = B256::from([0x11; 32]);
+        let mut storage_tries = B256Map::default();
+        storage_tries.insert(
+            storage_address,
+            StorageTrieUpdatesSorted {
+                is_deleted: false,
+                storage_nodes: vec![(Nibbles::from_nibbles([0x3, 0x4]), Some(storage_node))],
+            },
+        );
+        let trie_updates = TrieUpdatesSorted::new(
+            vec![(Nibbles::from_nibbles([0x1, 0x2]), Some(account_node))],
+            storage_tries,
+        );
+
+        let num_entries = provider_rw.write_provable_trie_updates_sorted(&trie_updates).unwrap();
+
+        assert_eq!(num_entries, 2);
+
+        let tx = provider_rw.tx_ref();
+        assert!(
+            tx.cursor_read::<tables::AccountsTrie>()
+                .unwrap()
+                .seek_exact(StoredNibbles(Nibbles::from_nibbles([0x1, 0x2])))
+                .unwrap()
+                .is_none(),
+            "canonical account trie table must stay untouched"
+        );
+        assert!(
+            tx.cursor_dup_read::<tables::StoragesTrie>()
+                .unwrap()
+                .walk_dup(Some(storage_address), None)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+                .is_empty(),
+            "canonical storage trie table must stay untouched"
+        );
+
+        assert!(
+            tx.cursor_read::<tables::ProvableAccountsTrie>()
+                .unwrap()
+                .seek_exact(StoredNibbles(Nibbles::from_nibbles([0x1, 0x2])))
+                .unwrap()
+                .is_some(),
+            "provable account trie table must receive account updates"
+        );
+        let provable_storage_entries: Vec<_> = tx
+            .cursor_dup_read::<tables::ProvableStoragesTrie>()
+            .unwrap()
+            .walk_dup(Some(storage_address), None)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(provable_storage_entries.len(), 1);
+        assert_eq!(
+            provable_storage_entries[0].1.nibbles.0,
+            Nibbles::from_nibbles([0x3, 0x4])
+        );
 
         provider_rw.commit().unwrap();
     }

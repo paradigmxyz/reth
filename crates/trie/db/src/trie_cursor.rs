@@ -2,7 +2,10 @@ use alloy_primitives::B256;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     table::{DupSort, Key, Table, Value},
-    tables::{self, PackedAccountsTrie, PackedStoragesTrie},
+    tables::{
+        self, PackedAccountsTrie, PackedProvableAccountsTrie, PackedProvableStoragesTrie,
+        PackedStoragesTrie,
+    },
     transaction::DbTx,
     DatabaseError,
 };
@@ -156,6 +159,25 @@ impl TrieTableAdapter for LegacyKeyAdapter {
 impl TrieTableAdapter for PackedKeyAdapter {
     type AccountTrieTable = PackedAccountsTrie;
     type StorageTrieTable = PackedStoragesTrie;
+}
+
+/// Helper trait to map a [`TrieKeyAdapter`] to the provable trie table types.
+pub trait ProvableTrieTableAdapter: TrieKeyAdapter {
+    /// The provable account trie table type.
+    type AccountTrieTable: Table<Key = Self::AccountKey, Value = BranchNodeCompact>;
+    /// The provable storage trie table type.
+    type StorageTrieTable: Table<Key = B256, Value = Self::StorageValue>
+        + DupSort<SubKey = Self::StorageSubKey>;
+}
+
+impl ProvableTrieTableAdapter for LegacyKeyAdapter {
+    type AccountTrieTable = tables::ProvableAccountsTrie;
+    type StorageTrieTable = tables::ProvableStoragesTrie;
+}
+
+impl ProvableTrieTableAdapter for PackedKeyAdapter {
+    type AccountTrieTable = PackedProvableAccountsTrie;
+    type StorageTrieTable = PackedProvableStoragesTrie;
 }
 
 /// Wrapper struct for database transaction implementing trie cursor factory trait.
