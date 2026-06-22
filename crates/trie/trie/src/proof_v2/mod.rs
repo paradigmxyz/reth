@@ -1095,13 +1095,15 @@ where
             if self.prefix_set.contains(&self.branch_path) {
                 let branch_path_len = self.branch_path.len();
                 let mut child_path = self.branch_path;
-                for nibble in 0u8..16 {
-                    if !curr_state_mask.is_bit_set(nibble) {
-                        child_path.truncate(branch_path_len);
-                        child_path.push_unchecked(nibble);
-                        if self.prefix_set.contains(&child_path) {
-                            next_child_nibbles.set_bit(nibble);
-                        }
+                let mut missing_child_nibbles = !curr_state_mask;
+                while !missing_child_nibbles.is_empty() {
+                    let nibble = missing_child_nibbles.trailing_zeros() as u8;
+                    missing_child_nibbles &= !TrieMask::new(1u16 << nibble);
+
+                    child_path.truncate(branch_path_len);
+                    child_path.push_unchecked(nibble);
+                    if self.prefix_set.contains(&child_path) {
+                        next_child_nibbles.set_bit(nibble);
                     }
                 }
             }
