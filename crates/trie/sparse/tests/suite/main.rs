@@ -274,6 +274,8 @@ sparse_trie_tests! {
 
     // prune
     test_prune_retains_specified_leaves,
+    test_prune_retains_upper_leaf_base_path,
+    test_prune_retains_subtrie_leaf_base_path,
     test_prune_reduces_node_count,
     test_prune_empty_retained_set,
     test_prune_requires_computed_hashes,

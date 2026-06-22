@@ -22,6 +22,10 @@ pub use lazy::{LazyTrieData, SortedTrieData};
 mod hashed_state;
 pub use hashed_state::*;
 
+/// Changed trie node base paths.
+pub mod changed_paths;
+pub use changed_paths::TrieChangedPaths;
+
 /// Input for trie computation.
 mod input;
 pub use input::{TrieInput, TrieInputSorted};

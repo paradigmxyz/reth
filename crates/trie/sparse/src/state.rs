@@ -5,12 +5,14 @@ use crate::{
     RevealableSparseTrie,
 };
 use alloc::vec::Vec;
-use alloy_primitives::{map::B256Map, B256};
+use alloy_primitives::{
+    map::{B256Map, HashSet},
+    B256,
+};
 use either::Either;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
-#[cfg(feature = "std")]
-use reth_trie_common::HashedPostStateSorted;
 use reth_trie_common::{
+    changed_paths::TrieChangedPaths,
     updates::{StorageTrieUpdates, TrieUpdates},
     DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2,
 };
@@ -40,6 +42,8 @@ pub struct SparseStateTrie<
     storage: StorageTries<S>,
     /// Flag indicating whether trie updates should be retained.
     retain_updates: bool,
+    /// Flag indicating whether changed node base paths should be retained.
+    retain_changed_paths: bool,
     /// Holds data that should be dropped after final state root is calculated.
     deferred_drops: DeferredDrops,
     /// Global LFU tracker for hot `(address, slot)` storage entries.
@@ -61,6 +65,7 @@ where
             state: Default::default(),
             storage: Default::default(),
             retain_updates: false,
+            retain_changed_paths: false,
             deferred_drops: DeferredDrops::default(),
             hot_slots_lfu: BucketedLfu::default(),
             hot_accounts_lfu: BucketedLfu::default(),
@@ -150,6 +155,47 @@ impl SparseStateTrie {
 }
 
 impl<A: SparseTrieTrait, S: SparseTrieTrait> SparseStateTrie<A, S> {
+    /// Set the retention of changed node base paths.
+    pub fn set_changed_paths(&mut self, retain_changed_paths: bool) {
+        self.retain_changed_paths = retain_changed_paths;
+        self.state.set_changed_paths(retain_changed_paths);
+        for trie in self.storage.tries.values_mut() {
+            trie.set_changed_paths(retain_changed_paths);
+        }
+        for trie in &mut self.storage.cleared_tries {
+            trie.set_changed_paths(retain_changed_paths);
+        }
+        self.storage.default_trie.set_changed_paths(retain_changed_paths);
+    }
+
+    /// Set the retention of changed node base paths.
+    pub fn with_changed_paths(mut self, retain_changed_paths: bool) -> Self {
+        self.set_changed_paths(retain_changed_paths);
+        self
+    }
+
+    /// Returns storage trie changed paths for tries that have been revealed.
+    pub fn storage_trie_changed_paths(&mut self) -> B256Map<HashSet<Nibbles>> {
+        self.storage
+            .tries
+            .iter_mut()
+            .filter_map(|(address, trie)| {
+                let changed_paths = trie.take_changed_paths()?;
+                (!changed_paths.is_empty()).then_some((*address, changed_paths))
+            })
+            .collect()
+    }
+
+    /// Returns changed paths by taking them from the revealed sparse tries.
+    ///
+    /// Returns `None` if the accounts trie is not revealed.
+    pub fn take_changed_paths(&mut self) -> Option<TrieChangedPaths> {
+        let storage_paths = self.storage_trie_changed_paths();
+        self.state
+            .take_changed_paths()
+            .map(|account_paths| TrieChangedPaths { account_paths, storage_paths })
+    }
+
     /// Takes all debug recorders from the account trie and all revealed storage tries.
     ///
     /// Returns a vec of `(Option<B256>, TrieDebugRecorder)` where `None` is the account trie
@@ -324,14 +370,19 @@ where
         }
 
         let retain_updates = self.retain_updates;
+        let retain_changed_paths = self.retain_changed_paths;
 
         #[cfg(not(feature = "std"))]
         let results: Vec<_> = targets
             .into_iter()
             .map(|(target, mut nodes)| {
                 let result = match target {
-                    Either::Left(trie) => trie.reveal_v2_proof_nodes(&mut nodes, retain_updates),
-                    Either::Right(trie) => trie.reveal_v2_proof_nodes(&mut nodes, retain_updates),
+                    Either::Left(trie) => {
+                        trie.reveal_v2_proof_nodes(&mut nodes, retain_updates, retain_changed_paths)
+                    }
+                    Either::Right(trie) => {
+                        trie.reveal_v2_proof_nodes(&mut nodes, retain_updates, retain_changed_paths)
+                    }
                 };
                 (result, nodes)
             })
@@ -347,12 +398,16 @@ where
                 .par_bridge_buffered()
                 .map(|(target, mut nodes)| {
                     let result = match target {
-                        Either::Left(trie) => {
-                            trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
-                        }
-                        Either::Right(trie) => {
-                            trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
-                        }
+                        Either::Left(trie) => trie.reveal_v2_proof_nodes(
+                            &mut nodes,
+                            retain_updates,
+                            retain_changed_paths,
+                        ),
+                        Either::Right(trie) => trie.reveal_v2_proof_nodes(
+                            &mut nodes,
+                            retain_updates,
+                            retain_changed_paths,
+                        ),
                     };
                     (result, nodes)
                 })
@@ -601,17 +656,11 @@ impl SparseTrieRetainedPaths {
         self.storage_slots.entry(hashed_address).or_default().extend(slots);
     }
 
-    /// Extends the retained paths with every account and storage slot touched by the hashed state.
-    pub fn extend_from_hashed_state(&mut self, hashed_state: &HashedPostStateSorted) {
-        self.account_paths
-            .extend(hashed_state.accounts().iter().map(|(address, _)| Nibbles::unpack(*address)));
-
-        for (address, storage) in hashed_state.account_storages() {
-            self.retain_account(*address);
-            self.retain_storage_slots(
-                *address,
-                storage.storage_slots_ref().iter().map(|(slot, _)| Nibbles::unpack(*slot)),
-            );
+    /// Extends the retained paths with changed trie node base paths.
+    pub fn extend_from_changed_paths(&mut self, changed_paths: &TrieChangedPaths) {
+        self.account_paths.extend(changed_paths.account_paths.iter().cloned());
+        for (address, paths) in &changed_paths.storage_paths {
+            self.storage_slots.entry(*address).or_default().extend(paths.iter().cloned());
         }
     }
 
@@ -734,8 +783,8 @@ mod tests {
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
-        BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, HashedStorageSorted, LeafNode, RlpNode,
-        StorageMultiProof, TrieAccount, TrieMask, TrieNodeV2,
+        BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, LeafNode, RlpNode, StorageMultiProof,
+        TrieAccount, TrieMask, TrieNodeV2,
     };
 
     /// Create a leaf key (suffix) with given nibbles padded with zeros to reach `total_len`.
@@ -902,27 +951,53 @@ mod tests {
     }
 
     #[test]
-    fn retained_paths_extend_from_hashed_state() {
-        let account = B256::with_last_byte(0x01);
+    fn retained_paths_extend_from_changed_paths() {
+        let account_path = Nibbles::from_nibbles([0x01]);
         let storage_account = B256::with_last_byte(0x02);
-        let slot = B256::with_last_byte(0x03);
-        let hashed_state = HashedPostStateSorted::new(
-            vec![(account, Some(Account::default()))],
-            B256Map::from_iter([(
+        let storage_path = Nibbles::from_nibbles([0x03]);
+        let changed_paths = TrieChangedPaths {
+            account_paths: HashSet::from_iter([account_path.clone()]),
+            storage_paths: B256Map::from_iter([(
                 storage_account,
-                HashedStorageSorted { storage_slots: vec![(slot, U256::from(1))], wiped: false },
+                HashSet::from_iter([storage_path.clone()]),
             )]),
-        );
+        };
 
         let mut retained_paths = SparseTrieRetainedPaths::default();
-        retained_paths.extend_from_hashed_state(&hashed_state);
+        retained_paths.extend_from_changed_paths(&changed_paths);
         retained_paths.sort_and_dedup();
 
-        assert_eq!(
-            retained_paths.account_paths,
-            vec![Nibbles::unpack(account), Nibbles::unpack(storage_account)]
-        );
-        assert_eq!(retained_paths.storage_slots[&storage_account], vec![Nibbles::unpack(slot)]);
+        assert_eq!(retained_paths.account_paths, vec![account_path]);
+        assert_eq!(retained_paths.storage_slots[&storage_account], vec![storage_path]);
+    }
+
+    #[test]
+    fn take_changed_paths_from_sparse_state_trie() {
+        let account = B256::with_last_byte(0x01);
+        let slot = B256::with_last_byte(0x02);
+        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
+        sparse.set_accounts_trie(RevealableSparseTrie::revealed_empty());
+        sparse.insert_storage_trie(account, RevealableSparseTrie::revealed_empty());
+        sparse.set_changed_paths(true);
+
+        let mut account_updates =
+            B256Map::from_iter([(account, LeafUpdate::Changed(vec![0x01; 32]))]);
+        sparse.trie_mut().update_leaves(&mut account_updates, |_, _| {}).unwrap();
+        assert!(account_updates.is_empty());
+        let _ = sparse.root().unwrap();
+
+        let mut storage_updates = B256Map::from_iter([(slot, LeafUpdate::Changed(vec![0x02; 32]))]);
+        sparse
+            .storage_trie_mut(&account)
+            .unwrap()
+            .update_leaves(&mut storage_updates, |_, _| {})
+            .unwrap();
+        assert!(storage_updates.is_empty());
+        let _ = sparse.storage_root(&account).unwrap();
+
+        let changed_paths = sparse.take_changed_paths().unwrap();
+        assert!(changed_paths.account_paths.contains(&Nibbles::default()));
+        assert!(changed_paths.storage_paths[&account].contains(&Nibbles::default()));
     }
 
     #[test]

@@ -88,7 +88,9 @@ use reth_provider::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
+use reth_trie::{
+    trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState, TrieChangedPaths,
+};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::{Address, KECCAK_EMPTY};
@@ -526,6 +528,10 @@ where
         );
         let overlay_factory =
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
+        let proof_overlay_factory = OverlayStateProviderFactory::new(
+            provider_factory.clone(),
+            overlay_builder.clone().with_sparse_trie_fast_path(true),
+        );
         let changeset_provider = self.spawn_changeset_provider_task(overlay_factory.clone());
 
         let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
@@ -537,12 +543,15 @@ where
             None
         };
         let processor_options =
-            PayloadProcessorSpawnOptions::new(parallel_bal_execution, pending_sparse_trie_prune);
+            PayloadProcessorSpawnOptions::new(parallel_bal_execution, pending_sparse_trie_prune)
+                .with_reusable_sparse_trie(
+                    ctx.state().tree_state.state_trie_overlays.reusable_sparse_trie(),
+                );
         let mut handle = ensure_ok!(self.spawn_payload_processor(
             env.clone(),
             txs,
             provider_builder.clone(),
-            overlay_factory,
+            proof_overlay_factory,
             &strategy,
             processor_options,
         ));
@@ -712,6 +721,7 @@ where
 
         let root_time = Instant::now();
         let mut maybe_state_root = None;
+        let mut reusable_sparse_trie_block_hash = None;
         let mut state_root_task_failed = false;
         #[cfg(feature = "trie-debug")]
         let mut trie_debug_recorders = Vec::new();
@@ -734,6 +744,7 @@ where
                         StateRootComputeOutcome {
                             state_root,
                             trie_updates,
+                            changed_paths,
                             #[cfg(feature = "trie-debug")]
                             debug_recorders,
                         },
@@ -767,8 +778,16 @@ where
 
                         // we double check the state root here for good measure
                         if state_root == block.header().state_root() {
-                            maybe_state_root = Some((state_root, trie_updates, elapsed))
+                            if maybe_new_hashed_state.is_none() {
+                                reusable_sparse_trie_block_hash = Some(block.hash());
+                            }
+                            maybe_state_root =
+                                Some((state_root, trie_updates, changed_paths, elapsed))
                         } else {
+                            ctx.state()
+                                .tree_state
+                                .state_trie_overlays
+                                .clear_reusable_sparse_trie_block_hash();
                             warn!(
                                 target: "engine::tree::payload_validator",
                                 ?state_root,
@@ -795,6 +814,12 @@ where
                 // If the state root task failed or we got a new hashed state from the fallback that
                 // won the race, we need to replace the hashed state handle and re-run the
                 // validation.
+                if maybe_new_hashed_state.is_some() {
+                    ctx.state()
+                        .tree_state
+                        .state_trie_overlays
+                        .clear_reusable_sparse_trie_block_hash();
+                }
                 if maybe_new_hashed_state.is_some() || state_root_task_failed {
                     hashed_state = maybe_new_hashed_state.unwrap_or_else(|| {
                         LazyHandle::ready(Arc::new(self.provider.hashed_post_state(&output.state)))
@@ -821,7 +846,12 @@ where
                             ?elapsed,
                             "Regular root task finished"
                         );
-                        maybe_state_root = Some((result.0, Arc::new(result.1), elapsed));
+                        maybe_state_root = Some((
+                            result.0,
+                            Arc::new(result.1),
+                            Arc::new(TrieChangedPaths::default()),
+                            elapsed,
+                        ));
                     }
                     Err(error) => {
                         debug!(target: "engine::tree::payload_validator", %error, "Parallel state root computation failed");
@@ -839,14 +869,19 @@ where
                     }),
                     block
                 );
-                maybe_state_root = Some((state_root, Arc::new(trie_updates), root_time.elapsed()));
+                maybe_state_root = Some((
+                    state_root,
+                    Arc::new(trie_updates),
+                    Arc::new(TrieChangedPaths::default()),
+                    root_time.elapsed(),
+                ));
             }
         }
 
         // Determine the state root.
         // If the state root was computed in parallel, we use it.
         // Otherwise, we fall back to computing it synchronously.
-        let (state_root, trie_output, root_elapsed) = if let Some(maybe_state_root) =
+        let (state_root, trie_output, changed_paths, root_elapsed) = if let Some(maybe_state_root) =
             maybe_state_root
         {
             maybe_state_root
@@ -870,7 +905,7 @@ where
                 self.metrics.block_validation.state_root_task_fallback_success_total.increment(1);
             }
 
-            (root, Arc::new(updates), root_time.elapsed())
+            (root, Arc::new(updates), Arc::new(TrieChangedPaths::default()), root_time.elapsed())
         };
 
         if let Err(err) = hashed_state_validate_result {
@@ -886,6 +921,7 @@ where
 
         // ensure state root matches
         if state_root != block.header().state_root() {
+            ctx.state().tree_state.state_trie_overlays.clear_reusable_sparse_trie_block_hash();
             #[cfg(feature = "trie-debug")]
             Self::write_trie_debug_recorders(block.header().number(), &trie_debug_recorders);
 
@@ -936,10 +972,13 @@ where
             output,
             hashed_state,
             trie_output,
+            changed_paths,
             changeset_provider,
         );
         let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
-        Ok(ValidationOutput::new(executed_block, timing_stats).with_raw_bal(raw_bal))
+        Ok(ValidationOutput::new(executed_block, timing_stats)
+            .with_raw_bal(raw_bal)
+            .with_reusable_sparse_trie_block_hash(reusable_sparse_trie_block_hash))
     }
 
     /// Spawns a background task to convert a [`BlockOrPayload`] into a [`SealedBlock`] and perform
@@ -1493,6 +1532,7 @@ where
                                 StateRootComputeOutcome {
                                     state_root,
                                     trie_updates: Arc::new(trie_updates),
+                                    changed_paths: Arc::new(TrieChangedPaths::default()),
                                     #[cfg(feature = "trie-debug")]
                                     debug_recorders: Vec::new(),
                                 },
@@ -1513,6 +1553,7 @@ where
                             StateRootComputeOutcome {
                                 state_root,
                                 trie_updates: Arc::new(trie_updates),
+                                changed_paths: Arc::new(TrieChangedPaths::default()),
                                 #[cfg(feature = "trie-debug")]
                                 debug_recorders: Vec::new(),
                             },
@@ -1723,8 +1764,11 @@ where
         >,
         InsertBlockErrorKind,
     > {
-        let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
-            options;
+        let PayloadProcessorSpawnOptions {
+            parallel_bal_execution,
+            pending_sparse_trie_prune,
+            reusable_sparse_trie,
+        } = options;
         match strategy {
             StateRootStrategy::StateRootTask => {
                 let spawn_start = Instant::now();
@@ -1739,7 +1783,8 @@ where
                     PayloadProcessorSpawnOptions::new(
                         parallel_bal_execution,
                         pending_sparse_trie_prune,
-                    ),
+                    )
+                    .with_reusable_sparse_trie(reusable_sparse_trie),
                 );
 
                 // record prewarming initialization duration
@@ -1863,6 +1908,7 @@ where
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         hashed_state: LazyHashedPostState,
         trie_output: Arc<TrieUpdates>,
+        changed_paths: Arc<TrieChangedPaths>,
         changeset_provider: impl TrieCursorFactory + Send + 'static,
     ) -> ExecutedBlock<N> {
         // Create deferred handle and task that owns the unsorted inputs.
@@ -1873,7 +1919,7 @@ where
             Err(handle) => handle.get().clone(),
         };
         let (deferred_trie_data, deferred_trie_task) =
-            DeferredTrieData::pending(hashed_state, trie_output);
+            DeferredTrieData::pending(hashed_state, trie_output, changed_paths);
         let block_validation_metrics = self.metrics.block_validation.clone();
 
         // Capture block info and cache handle for changeset computation
@@ -2256,6 +2302,7 @@ where
             block.execution_output,
             LazyHashedPostState::ready(block.hashed_state),
             block.trie_updates,
+            block.changed_paths,
             changeset_provider,
         ))
     }
@@ -2272,7 +2319,8 @@ where
     ) -> Option<StateRootHandle> {
         let overlay_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
-            Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone()),
+            Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone())
+                .with_sparse_trie_fast_path(true),
         );
 
         Some(self.payload_processor.spawn_state_root(
@@ -2282,6 +2330,7 @@ where
             false,
             &self.config,
             None,
+            state.tree_state.state_trie_overlays.reusable_sparse_trie(),
         ))
     }
 }

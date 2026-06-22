@@ -42,6 +42,54 @@ pub(super) fn test_prune_retains_specified_leaves<T: SparseTrie>(new_trie: fn() 
     assert!(val_b.is_some(), "retained leaf B should be accessible after prune");
 }
 
+pub(super) fn test_prune_retains_upper_leaf_base_path<T: SparseTrie>(new_trie: fn() -> T) {
+    let mut key_a = B256::ZERO;
+    key_a.0[0] = 0x10;
+    let mut key_b = B256::ZERO;
+    key_b.0[0] = 0x20;
+
+    let storage: BTreeMap<B256, U256> =
+        BTreeMap::from([(key_a, U256::from(1)), (key_b, U256::from(2))]);
+
+    let harness = SuiteTestHarness::new(storage);
+    let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
+
+    let root_before = trie.root();
+    trie.prune(&[Nibbles::from_nibbles([0x01])]);
+    let root_after = trie.root();
+
+    assert_eq!(root_before, root_after, "root hash should be unchanged after prune");
+    assert!(
+        trie.get_leaf_value(&Nibbles::unpack(key_a)).is_some(),
+        "leaf retained by base path should be accessible after prune"
+    );
+}
+
+pub(super) fn test_prune_retains_subtrie_leaf_base_path<T: SparseTrie>(new_trie: fn() -> T) {
+    let mut key_a = B256::ZERO;
+    key_a.0[0] = 0x12;
+    key_a.0[1] = 0x30;
+    let mut key_b = B256::ZERO;
+    key_b.0[0] = 0x12;
+    key_b.0[1] = 0x40;
+
+    let storage: BTreeMap<B256, U256> =
+        BTreeMap::from([(key_a, U256::from(1)), (key_b, U256::from(2))]);
+
+    let harness = SuiteTestHarness::new(storage);
+    let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
+
+    let root_before = trie.root();
+    trie.prune(&[Nibbles::from_nibbles([0x01, 0x02, 0x03])]);
+    let root_after = trie.root();
+
+    assert_eq!(root_before, root_after, "root hash should be unchanged after prune");
+    assert!(
+        trie.get_leaf_value(&Nibbles::unpack(key_a)).is_some(),
+        "subtrie leaf retained by base path should be accessible after prune"
+    );
+}
+
 /// Pruning should reduce the node count.
 ///
 /// Build a trie with 10+ leaves spread across multiple subtries, fully reveal

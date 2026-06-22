@@ -61,6 +61,19 @@ pub(super) struct Overlay {
     pub(super) hashed_post_state: Arc<HashedPostStateSorted>,
 }
 
+impl Overlay {
+    fn new(
+        trie_updates: Arc<TrieUpdatesSorted>,
+        hashed_post_state: Arc<HashedPostStateSorted>,
+    ) -> Self {
+        Self { trie_updates, hashed_post_state }
+    }
+
+    fn empty_with_hashed_post_state(hashed_post_state: Arc<HashedPostStateSorted>) -> Self {
+        Self::new(Arc::new(TrieUpdatesSorted::default()), hashed_post_state)
+    }
+}
+
 /// Source of overlay data for [`OverlayStateProviderFactory`].
 #[derive(Debug, Clone)]
 pub(super) enum OverlaySource<N: NodePrimitives = EthPrimitives> {
@@ -95,6 +108,9 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     parent_hash: B256,
     /// Optional overlay source.
     overlay_source: Option<OverlaySource<N>>,
+    /// Whether managed overlays may be skipped when the reusable sparse trie already represents
+    /// the requested parent.
+    sparse_trie_fast_path: bool,
     /// Changeset cache handle for retrieving trie changesets
     changeset_cache: ChangesetCache,
     /// Metrics for tracking provider operations
@@ -107,6 +123,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         Self {
             parent_hash,
             overlay_source: None,
+            sparse_trie_fast_path: false,
             changeset_cache,
             metrics: OverlayStateProviderMetrics::default(),
         }
@@ -117,6 +134,12 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// This overlay will be applied on top of any reverts.
     pub(super) fn with_overlay_source(mut self, source: Option<OverlaySource<N>>) -> Self {
         self.overlay_source = source;
+        self
+    }
+
+    /// Enables or disables the sparse trie fast path for managed overlays.
+    pub const fn with_sparse_trie_fast_path(mut self, sparse_trie_fast_path: bool) -> Self {
+        self.sparse_trie_fast_path = sparse_trie_fast_path;
         self
     }
 
@@ -178,6 +201,12 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     ) -> ProviderResult<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>)> {
         match &self.overlay_source {
             Some(OverlaySource::Managed { manager, state }) => {
+                if self.sparse_trie_fast_path &&
+                    manager.reusable_sparse_trie_block_hash() == Some(self.parent_hash)
+                {
+                    return Ok((Arc::new(TrieUpdatesSorted::default()), Arc::clone(state)))
+                }
+
                 let (trie, mut overlay_state) = if anchor_hash == self.parent_hash {
                     (
                         Arc::new(TrieUpdatesSorted::default()),
@@ -211,6 +240,19 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 Arc::new(HashedPostStateSorted::default()),
             )),
         }
+    }
+
+    fn reusable_sparse_trie_parent_overlay(&self) -> Option<Overlay> {
+        if !self.sparse_trie_fast_path {
+            return None
+        }
+
+        let Some(OverlaySource::Managed { manager, state }) = &self.overlay_source else {
+            return None
+        };
+
+        (manager.reusable_sparse_trie_block_hash() == Some(self.parent_hash))
+            .then(|| Overlay::empty_with_hashed_post_state(Arc::clone(state)))
     }
 
     /// Returns the block which is at the tip of the DB, i.e. the block which the state tables of
@@ -299,6 +341,10 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             + PruneCheckpointReader
             + StorageSettingsCache,
     {
+        if let Some(overlay) = self.reusable_sparse_trie_parent_overlay() {
+            return Ok(overlay)
+        }
+
         //
         // Set up variables we'll use for recording metrics. There's two different code-paths here,
         // and we want to make sure both record metrics, so we do metrics recording after.
@@ -429,6 +475,10 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             + BlockNumReader
             + StorageSettingsCache,
     {
+        if let Some(overlay) = self.reusable_sparse_trie_parent_overlay() {
+            return Ok(overlay)
+        }
+
         let db_tip_block = self.get_db_tip_block(provider)?;
         self.calculate_overlay(provider, db_tip_block)
     }
@@ -485,6 +535,10 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
             + BlockNumReader
             + StorageSettingsCache,
     {
+        if let Some(overlay) = self.overlay_builder.reusable_sparse_trie_parent_overlay() {
+            return Ok(overlay)
+        }
+
         let db_tip_block = self.overlay_builder.get_db_tip_block(provider)?;
 
         let overlay = match self.overlay_cache.entry(db_tip_block.hash) {
@@ -669,6 +723,56 @@ mod tests {
         let (trie, state) = builder.resolve_overlays(parent_hash).unwrap();
         assert!(trie.is_empty());
         assert!(state.is_empty());
+    }
+
+    #[test]
+    fn managed_overlay_skips_manager_for_reusable_sparse_trie_parent() {
+        let parent_hash = B256::with_last_byte(1);
+        let anchor_hash = B256::with_last_byte(2);
+        let manager = StateTrieOverlayManager::default();
+        manager.set_reusable_sparse_trie_block_hash(parent_hash);
+        let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
+            .with_state_trie_overlay_manager(manager)
+            .with_sparse_trie_fast_path(true);
+
+        let (trie, state) = builder.resolve_overlays(anchor_hash).unwrap();
+
+        assert!(trie.is_empty());
+        assert!(state.is_empty());
+    }
+
+    #[test]
+    fn managed_overlay_does_not_skip_reusable_sparse_trie_parent_without_fast_path() {
+        let parent_hash = B256::with_last_byte(1);
+        let anchor_hash = B256::with_last_byte(2);
+        let manager = StateTrieOverlayManager::default();
+        manager.set_reusable_sparse_trie_block_hash(parent_hash);
+        let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
+            .with_state_trie_overlay_manager(manager);
+
+        let err = builder.resolve_overlays(anchor_hash).unwrap_err();
+
+        assert!(err.to_string().contains("cannot be anchored"));
+    }
+
+    #[test]
+    fn reusable_sparse_trie_parent_preserves_explicit_hashed_state_overlay() {
+        let parent_hash = B256::with_last_byte(1);
+        let anchor_hash = B256::with_last_byte(2);
+        let manager = StateTrieOverlayManager::default();
+        manager.set_reusable_sparse_trie_block_hash(parent_hash);
+        let hashed_state = HashedPostState::default()
+            .with_accounts([(B256::with_last_byte(3), Some(Account::default()))])
+            .into_sorted();
+        let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
+            .with_state_trie_overlay_manager(manager)
+            .with_extended_hashed_state_overlay(hashed_state)
+            .with_sparse_trie_fast_path(true);
+
+        let (trie, state) = builder.resolve_overlays(anchor_hash).unwrap();
+
+        assert!(trie.is_empty());
+        assert_eq!(state.total_len(), 1);
     }
 
     #[test]

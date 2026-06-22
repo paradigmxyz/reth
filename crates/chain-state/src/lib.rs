@@ -17,6 +17,9 @@ pub use in_memory::*;
 mod deferred_trie;
 pub use deferred_trie::*;
 
+mod reusable_sparse_trie;
+pub use reusable_sparse_trie::*;
+
 mod state_trie_overlay;
 pub use state_trie_overlay::*;
 

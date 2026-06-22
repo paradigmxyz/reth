@@ -1368,6 +1368,7 @@ where
         if new_tip_num < self.persistence_state.last_persisted_block.number {
             debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
             self.pending_sparse_trie_prune = None;
+            self.state.tree_state.state_trie_overlays.clear_reusable_sparse_trie_block_hash();
             let (tx, rx) = crossbeam_channel::bounded(1);
             let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
             self.persistence_state.start_remove(new_tip_num, rx);
@@ -1715,8 +1716,16 @@ where
                                     Duration::ZERO
                                 };
 
-                                let cache_wait = wait_for_caches
-                                    .then(|| self.payload_validator.wait_for_caches());
+                                let cache_wait = wait_for_caches.then(|| {
+                                    let mut durations = self.payload_validator.wait_for_caches();
+                                    durations.sparse_trie = self
+                                        .state
+                                        .tree_state
+                                        .state_trie_overlays
+                                        .reusable_sparse_trie()
+                                        .wait_for_availability();
+                                    durations
+                                });
 
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
@@ -2159,7 +2168,7 @@ where
         let mut retained_paths = SparseTrieRetainedPaths::default();
         for block in self.state.tree_state.blocks_by_hash.values() {
             let trie_data = block.trie_data();
-            retained_paths.extend_from_hashed_state(&trie_data.hashed_state);
+            retained_paths.extend_from_changed_paths(&trie_data.changed_paths);
         }
         retained_paths
     }
@@ -2689,6 +2698,7 @@ where
             trace!(target: "engine::tree", ?new_first, ?old_first, "Reorg detected, new and old first blocks");
 
             self.pending_sparse_trie_prune = None;
+            self.state.tree_state.state_trie_overlays.clear_reusable_sparse_trie_block_hash();
             self.update_reorg_metrics(old.len(), old_first);
             self.reinsert_reorged_blocks(new.clone());
             self.reinsert_reorged_blocks(old.clone());
@@ -3014,6 +3024,7 @@ where
             executed_block: executed,
             execution_timing_stats: timing_stats,
             raw_bal,
+            reusable_sparse_trie_block_hash,
         } = execute(&mut self.payload_validator, input, ctx)?;
 
         if let Some(raw_bal) = raw_bal {
@@ -3052,6 +3063,12 @@ where
         }
 
         self.state.tree_state.insert_executed(executed.clone());
+        if let Some(block_hash) = reusable_sparse_trie_block_hash {
+            self.state
+                .tree_state
+                .state_trie_overlays
+                .set_reusable_sparse_trie_block_hash(block_hash);
+        }
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
         // emit insert event

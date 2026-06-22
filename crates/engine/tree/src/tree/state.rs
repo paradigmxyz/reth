@@ -62,6 +62,7 @@ impl<N: NodePrimitives> TreeState<N> {
     /// Resets the state and points to the given canonical head.
     pub fn reset(&mut self, current_canonical_head: BlockNumHash) {
         let engine_kind = self.engine_kind;
+        self.state_trie_overlays.clear_reusable_sparse_trie_block_hash();
         let removed_hashes = self.blocks_by_hash.keys().copied().collect::<Vec<_>>();
         if !removed_hashes.is_empty() {
             self.state_trie_overlays.remove_blocks(removed_hashes);
@@ -547,6 +548,56 @@ mod tests {
             tree_state.parent_to_child.get(&blocks[3].recovered_block().hash()),
             Some(&B256Set::from_iter([blocks[4].recovered_block().hash()]))
         );
+    }
+
+    #[test]
+    fn remove_until_preserves_reusable_sparse_trie_block_hash() {
+        let start_num_hash = BlockNumHash::default();
+        let mut tree_state = TreeState::new(
+            start_num_hash,
+            EngineApiKind::Ethereum,
+            StateTrieOverlayManager::default(),
+        );
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
+
+        for block in &blocks {
+            tree_state.insert_executed(block.clone());
+        }
+
+        let last = blocks.last().unwrap();
+        tree_state.set_canonical_head(last.recovered_block().num_hash());
+
+        let sparse_trie_block_hash = blocks[1].recovered_block().hash();
+        tree_state.state_trie_overlays.set_reusable_sparse_trie_block_hash(sparse_trie_block_hash);
+
+        tree_state.remove_until(
+            BlockNumHash::new(2, sparse_trie_block_hash),
+            start_num_hash.hash,
+            Some(blocks[1].recovered_block().num_hash()),
+        );
+
+        assert_eq!(
+            tree_state.state_trie_overlays.reusable_sparse_trie_block_hash(),
+            Some(sparse_trie_block_hash)
+        );
+    }
+
+    #[test]
+    fn reset_clears_reusable_sparse_trie_block_hash() {
+        let mut tree_state = TreeState::new(
+            BlockNumHash::default(),
+            EngineApiKind::Ethereum,
+            StateTrieOverlayManager::default(),
+        );
+        let block = TestBlockBuilder::eth().get_executed_block_with_number(1, B256::ZERO);
+        let block_hash = block.recovered_block().hash();
+
+        tree_state.insert_executed(block);
+        tree_state.state_trie_overlays.set_reusable_sparse_trie_block_hash(block_hash);
+
+        tree_state.reset(BlockNumHash::default());
+
+        assert_eq!(tree_state.state_trie_overlays.reusable_sparse_trie_block_hash(), None);
     }
 
     #[tokio::test]
