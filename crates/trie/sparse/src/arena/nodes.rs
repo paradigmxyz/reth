@@ -3,9 +3,11 @@ use super::{
     ArenaSparseSubtrie, Index, NodeArena,
 };
 use alloc::{boxed::Box, vec::Vec};
-use alloy_primitives::{keccak256, B256};
+use alloy_primitives::B256;
 use alloy_trie::{BranchNodeCompact, TrieMask};
-use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieNodeV2};
+use reth_trie_common::{
+    rlp_node_hash_uncached, BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieNodeV2,
+};
 use smallvec::SmallVec;
 
 /// Tracks whether a node's RLP encoding is cached or needs recomputation.
@@ -284,7 +286,7 @@ impl ArenaSparseNode {
             Self::Subtrie(s) => return s.arena[s.root].cached_hash(),
             _ => panic!("cached_hash called on {self:?}"),
         };
-        rlp_node.as_hash().unwrap_or_else(|| keccak256(rlp_node.as_slice()))
+        rlp_node_hash_uncached(rlp_node)
     }
 }
 

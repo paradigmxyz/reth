@@ -21,6 +21,7 @@ alloy-trie.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 
 # misc
 either = { workspace = true, optional = true }
@@ -41,7 +42,6 @@ reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-tracing.workspace = true
 
 arbitrary.workspace = true
-alloy-rlp.workspace = true
 itertools.workspace = true
 pretty_assertions.workspace = true
 proptest-arbitrary-interop.workspace = true

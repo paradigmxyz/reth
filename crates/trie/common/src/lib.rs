@@ -101,3 +101,24 @@ pub mod serde_bincode_compat {
 pub use alloy_trie::{
     nodes::*, proof, BranchNodeCompact, HashBuilder, TrieMask, TrieMaskIter, EMPTY_ROOT_HASH,
 };
+
+/// Given an RLP-encoded trie node, returns it either as `rlp(node)` or
+/// `rlp(keccak(rlp(node)))` without using Alloy's global Keccak cache.
+#[inline]
+pub fn rlp_node_from_rlp_uncached(rlp: &[u8]) -> RlpNode {
+    if rlp.len() < 32 {
+        // SAFETY: `rlp` is less than the maximum inline RlpNode capacity.
+        unsafe { RlpNode::from_raw(rlp).unwrap_unchecked() }
+    } else {
+        RlpNode::word_rlp(&alloy_primitives::keccak256_uncached(rlp))
+    }
+}
+
+/// Returns the trie-node hash represented by an [`RlpNode`] without using Alloy's global Keccak
+/// cache for embedded nodes.
+#[inline]
+pub fn rlp_node_hash_uncached(rlp_node: &RlpNode) -> alloy_primitives::B256 {
+    rlp_node
+        .as_hash()
+        .unwrap_or_else(|| alloy_primitives::keccak256_uncached(rlp_node.as_slice()))
+}

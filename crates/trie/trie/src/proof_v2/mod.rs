@@ -16,8 +16,8 @@ use alloy_rlp::Encodable;
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    prefix_set::PrefixSet, BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2,
-    ProofV2Target, RlpNode, TrieNodeV2,
+    prefix_set::PrefixSet, rlp_node_from_rlp_uncached, BranchNodeMasks, BranchNodeRef,
+    BranchNodeV2, Nibbles, ProofTrieNodeV2, ProofV2Target, RlpNode, TrieNodeV2,
 };
 use std::cmp::Ordering;
 use tracing::{error, instrument, trace};
@@ -296,7 +296,7 @@ where
             proof_node.node.encode(&mut self.rlp_encode_buf);
 
             self.retained_proofs.push(proof_node);
-            return Ok(RlpNode::from_rlp(&self.rlp_encode_buf));
+            return Ok(rlp_node_from_rlp_uncached(&self.rlp_encode_buf));
         }
 
         // If the child path is not being retained then we convert directly to an `RlpNode`
@@ -572,7 +572,7 @@ where
         } else {
             self.rlp_encode_buf.clear();
             BranchNodeRef::new(&rlp_nodes_buf, branch.state_mask).encode(&mut self.rlp_encode_buf);
-            Some(RlpNode::from_rlp(&self.rlp_encode_buf))
+            Some(rlp_node_from_rlp_uncached(&self.rlp_encode_buf))
         };
 
         // Wrap the `BranchNodeV2` so it can be pushed onto the child stack.
