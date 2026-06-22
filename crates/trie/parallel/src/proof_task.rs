@@ -134,8 +134,8 @@ impl AvailabilitySheet {
 /// channels, and workers shut down gracefully when all handles are dropped.
 #[derive(Debug, Clone)]
 pub struct ProofWorkerHandle {
-    /// Direct sender to storage worker pool
-    storage_work_tx: CrossbeamSender<StorageWorkerJob>,
+    /// Direct senders to storage workers, partitioned by hashed account prefix.
+    storage_work_txs: Arc<[CrossbeamSender<StorageWorkerJob>]>,
     /// Direct sender to account worker pool
     account_work_tx: CrossbeamSender<AccountWorkerJob>,
     /// Per-worker availability flags for storage workers. Used to determine whether to chunk
@@ -178,7 +178,6 @@ impl ProofWorkerHandle {
             + Sync
             + 'static,
     {
-        let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
 
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
@@ -191,6 +190,10 @@ impl ProofWorkerHandle {
 
         let storage_availability = Arc::new(AvailabilitySheet::new(storage_worker_count));
         let account_availability = Arc::new(AvailabilitySheet::new(account_worker_count));
+        let storage_channels: Vec<_> =
+            (0..storage_worker_count).map(|_| unbounded::<StorageWorkerJob>()).collect();
+        let storage_work_txs: Arc<[_]> =
+            storage_channels.iter().map(|(tx, _)| tx.clone()).collect::<Vec<_>>().into();
 
         debug!(
             target: "trie::proof_task",
@@ -221,7 +224,7 @@ impl ProofWorkerHandle {
 
                 let worker = StorageProofWorker::new(
                     storage_task_ctx.clone(),
-                    storage_work_rx.clone(),
+                    storage_channels[worker_id].1.clone(),
                     worker_id,
                     storage_avail.clone(),
                     storage_roots.clone(),
@@ -242,7 +245,7 @@ impl ProofWorkerHandle {
         });
 
         let account_rt = runtime.clone();
-        let account_tx = storage_work_tx.clone();
+        let account_tx = storage_work_txs.clone();
         let account_avail = account_availability.clone();
         let account_parent_span = tracing::Span::current();
         runtime.spawn_blocking_named("account-workers", move || {
@@ -281,7 +284,7 @@ impl ProofWorkerHandle {
         });
 
         Self {
-            storage_work_tx,
+            storage_work_txs,
             account_work_tx,
             storage_availability,
             account_availability,
@@ -302,7 +305,7 @@ impl ProofWorkerHandle {
 
     /// Returns the number of pending storage tasks in the queue.
     pub fn pending_storage_tasks(&self) -> usize {
-        self.storage_work_tx.len()
+        self.storage_work_txs.iter().map(CrossbeamSender::len).sum()
     }
 
     /// Returns the number of pending account tasks in the queue.
@@ -329,7 +332,7 @@ impl ProofWorkerHandle {
         proof_result_sender: CrossbeamSender<StorageProofResultMessage>,
     ) -> Result<(), ProviderError> {
         let hashed_address = input.hashed_address;
-        self.storage_work_tx
+        storage_worker_tx(&self.storage_work_txs, hashed_address)
             .send(StorageWorkerJob::StorageProof { input, proof_result_sender })
             .map_err(|err| {
                 let StorageWorkerJob::StorageProof { proof_result_sender, .. } = err.0;
@@ -773,7 +776,7 @@ struct AccountProofWorker<Factory> {
     /// Unique identifier for this worker (used for tracing)
     worker_id: usize,
     /// Channel for dispatching storage proof work (for pre-dispatched target proofs)
-    storage_work_tx: CrossbeamSender<StorageWorkerJob>,
+    storage_work_txs: Arc<[CrossbeamSender<StorageWorkerJob>]>,
     /// Per-worker availability flags
     availability: Arc<AvailabilitySheet>,
     /// Cached storage roots
@@ -796,7 +799,7 @@ where
         task_ctx: ProofTaskCtx<Factory>,
         work_rx: CrossbeamReceiver<AccountWorkerJob>,
         worker_id: usize,
-        storage_work_tx: CrossbeamSender<StorageWorkerJob>,
+        storage_work_txs: Arc<[CrossbeamSender<StorageWorkerJob>]>,
         availability: Arc<AvailabilitySheet>,
         cached_storage_roots: Arc<DashMap<B256, B256>>,
         #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
@@ -806,7 +809,7 @@ where
             task_ctx,
             work_rx,
             worker_id,
-            storage_work_tx,
+            storage_work_txs,
             availability,
             cached_storage_roots,
             #[cfg(feature = "metrics")]
@@ -980,7 +983,7 @@ where
         trace!(target: "trie::proof_task", "Processing V2 account multiproof");
 
         let storage_proof_receivers =
-            dispatch_v2_storage_proofs(&self.storage_work_tx, &account_targets, storage_targets)?;
+            dispatch_v2_storage_proofs(&self.storage_work_txs, &account_targets, storage_targets)?;
 
         let mut value_encoder = AsyncAccountValueEncoder::new(
             storage_proof_receivers,
@@ -1060,12 +1063,12 @@ where
 ///
 /// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
 fn dispatch_v2_storage_proofs(
-    storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
+    storage_work_txs: &[CrossbeamSender<StorageWorkerJob>],
     account_targets: &[ProofV2Target],
     mut storage_targets: B256Map<Vec<ProofV2Target>>,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
     if storage_targets.is_empty() {
-        return Ok(B256Map::default())
+        return Ok(B256Map::default());
     }
 
     let mut storage_proof_receivers =
@@ -1077,8 +1080,8 @@ fn dispatch_v2_storage_proofs(
     // For storage targets with associated account proofs, ensure the first target has
     // min_len(0) so the root node is returned for storage root computation
     for (hashed_address, targets) in &mut storage_targets {
-        if account_target_addresses.contains(hashed_address) &&
-            let Some(first) = targets.first_mut()
+        if account_target_addresses.contains(hashed_address)
+            && let Some(first) = targets.first_mut()
         {
             *first = first.with_min_len(0);
         }
@@ -1096,7 +1099,7 @@ fn dispatch_v2_storage_proofs(
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
         let input = StorageProofInput::new(hashed_address, targets);
 
-        storage_work_tx
+        storage_worker_tx(storage_work_txs, hashed_address)
             .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
             .map_err(|_| {
                 ParallelStateRootError::Other(format!(
@@ -1108,6 +1111,23 @@ fn dispatch_v2_storage_proofs(
     }
 
     Ok(storage_proof_receivers)
+}
+
+/// Returns the worker index for a hashed account address.
+///
+/// Routing by the leading byte keeps account/storage proofs for nearby hashed addresses on the same
+/// worker while spreading the full 256-prefix keyspace evenly across the configured worker count.
+fn storage_worker_index(hashed_address: B256, worker_count: usize) -> usize {
+    debug_assert!(worker_count > 0, "storage worker count must be non-zero");
+    (usize::from(hashed_address.as_slice()[0]) * worker_count) / 256
+}
+
+/// Returns the storage worker sender for the given hashed account address.
+fn storage_worker_tx(
+    storage_work_txs: &[CrossbeamSender<StorageWorkerJob>],
+    hashed_address: B256,
+) -> &CrossbeamSender<StorageWorkerJob> {
+    &storage_work_txs[storage_worker_index(hashed_address, storage_work_txs.len())]
 }
 
 /// Input parameters for storage proof computation.
@@ -1161,6 +1181,64 @@ mod tests {
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
         ProofTaskCtx::new(factory)
+    }
+
+    fn hashed_address_with_prefix(prefix: u8) -> B256 {
+        let mut bytes = [0u8; 32];
+        bytes[0] = prefix;
+        B256::from(bytes)
+    }
+
+    #[test]
+    fn storage_worker_index_partitions_by_hashed_address_prefix() {
+        assert_eq!(storage_worker_index(hashed_address_with_prefix(0x00), 4), 0);
+        assert_eq!(storage_worker_index(hashed_address_with_prefix(0x3f), 4), 0);
+        assert_eq!(storage_worker_index(hashed_address_with_prefix(0x40), 4), 1);
+        assert_eq!(storage_worker_index(hashed_address_with_prefix(0x80), 4), 2);
+        assert_eq!(storage_worker_index(hashed_address_with_prefix(0xc0), 4), 3);
+        assert_eq!(storage_worker_index(hashed_address_with_prefix(0xff), 4), 3);
+    }
+
+    #[test]
+    fn storage_worker_index_is_deterministic_and_in_range() {
+        let hashed_address = hashed_address_with_prefix(0x9a);
+
+        for worker_count in 1..33 {
+            let index = storage_worker_index(hashed_address, worker_count);
+            assert_eq!(index, storage_worker_index(hashed_address, worker_count));
+            assert!(index < worker_count);
+        }
+    }
+
+    #[test]
+    fn dispatch_storage_proof_queues_to_prefix_worker() {
+        let (senders, receivers): (Vec<_>, Vec<_>) =
+            (0..4).map(|_| crossbeam_channel::unbounded::<StorageWorkerJob>()).unzip();
+        let storage_availability = Arc::new(AvailabilitySheet::new(4));
+        let account_availability = Arc::new(AvailabilitySheet::new(1));
+        let handle = ProofWorkerHandle {
+            storage_work_txs: senders.into(),
+            account_work_tx: crossbeam_channel::unbounded::<AccountWorkerJob>().0,
+            storage_availability,
+            account_availability,
+            storage_worker_count: 4,
+            account_worker_count: 1,
+        };
+
+        let hashed_address = hashed_address_with_prefix(0x80);
+        let (result_tx, _result_rx) = crossbeam_channel::unbounded();
+        handle
+            .dispatch_storage_proof(StorageProofInput::new(hashed_address, Vec::new()), result_tx)
+            .unwrap();
+
+        assert_eq!(handle.storage_work_txs[0].len(), 0);
+        assert_eq!(handle.storage_work_txs[1].len(), 0);
+        assert_eq!(handle.storage_work_txs[2].len(), 1);
+        assert_eq!(handle.storage_work_txs[3].len(), 0);
+        assert!(matches!(
+            receivers[2].try_recv(),
+            Ok(StorageWorkerJob::StorageProof { input, .. }) if input.hashed_address == hashed_address
+        ));
     }
 
     /// Ensures `ProofWorkerHandle::new` spawns workers correctly.
