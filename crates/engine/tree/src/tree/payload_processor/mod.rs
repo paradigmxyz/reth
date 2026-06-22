@@ -451,8 +451,9 @@ where
             self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
                 if parallel_bal_execution {
-                    // With BALs, we don't care about the order of transactions in execution and
-                    // prewarming, so we don't have to use `for_each_ordered_in`.
+                    // With BALs, we don't care about the order of transactions in execution,
+                    // so we don't have to use `for_each_ordered_in`. BAL prewarming is driven
+                    // from the decoded access list rather than the transaction stream.
                     executor.cpu_pool().install(|| {
                         transactions
                             .into_par_iter()
@@ -462,11 +463,7 @@ where
                                 (i, tx)
                             })
                             .for_each(|(idx, tx)| {
-                                let tx = tx.map(|tx| {
-                                    let tx = WithTxEnv::new(tx);
-                                    let _ = prewarm_tx.send((idx, tx.clone()));
-                                    tx
-                                });
+                                let tx = tx.map(WithTxEnv::new);
                                 let _ = execute_tx.send((idx, tx));
                                 trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
                             });
