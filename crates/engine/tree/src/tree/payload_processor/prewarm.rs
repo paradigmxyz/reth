@@ -662,7 +662,7 @@ where
                 }
             }
 
-            let mut hashed_state = reth_trie::HashedPostState::default();
+            let mut hashed_state = reth_trie::HashedPostState::with_capacity(1);
             hashed_state.storages.insert(hashed_address, storage_map);
             let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
         }
@@ -707,7 +707,7 @@ where
         let account = account_fields.into_account(existing_account);
 
         let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
-        let mut hashed_state = reth_trie::HashedPostState::default();
+        let mut hashed_state = reth_trie::HashedPostState::with_capacity(1);
         hashed_state.accounts.insert(hashed_address, Some(account));
 
         let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
