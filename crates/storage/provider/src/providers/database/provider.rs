@@ -3155,8 +3155,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
             Self::write_account_trie_updates::<A>(self.tx_ref(), trie_updates, &mut num_entries)?;
         });
 
-        num_entries +=
-            self.write_storage_trie_updates_sorted(trie_updates.storage_tries_ref().iter())?;
+        if !trie_updates.storage_tries_ref().is_empty() {
+            num_entries +=
+                self.write_storage_trie_updates_sorted(trie_updates.storage_tries_ref().iter())?;
+        }
 
         Ok(num_entries)
     }
@@ -3173,7 +3175,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdatesSorted)>,
     ) -> ProviderResult<usize> {
         let mut num_entries = 0;
-        let mut storage_tries = storage_tries.collect::<Vec<_>>();
+        let mut storage_tries = storage_tries
+            .filter(|(_, updates)| {
+                updates.is_deleted() ||
+                    updates.storage_nodes_ref().iter().any(|(nibbles, _)| !nibbles.is_empty())
+            })
+            .collect::<Vec<_>>();
+        if storage_tries.is_empty() {
+            return Ok(0)
+        }
         storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
         reth_trie_db::with_adapter!(self, |A| {
             Self::write_storage_tries::<A>(self.tx_ref(), storage_tries, &mut num_entries)?;
