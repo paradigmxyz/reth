@@ -5,7 +5,7 @@ use futures_util::{stream, Stream};
 use reth_era::common::file_ops::EraFileType;
 use reth_fs_util as fs;
 use sha2::{Digest, Sha256};
-use std::{fmt::Debug, io, io::BufRead, path::Path, str::FromStr};
+use std::{fmt::Debug, fs::DirEntry, io, io::BufRead, path::Path, str::FromStr};
 
 /// Creates a new ordered asynchronous [`Stream`] of ERA1 files read from `dir`.
 pub fn read_dir(
@@ -84,33 +84,39 @@ fn sorted_era_entries(
     mut on_other: impl FnMut(&Path) -> eyre::Result<()>,
 ) -> eyre::Result<Vec<(usize, Box<Path>)>> {
     let mut entries = fs::read_dir(dir)?
-        .filter_map(|entry| {
-            (|| {
-                let path = entry?.path();
-
-                if let Some(name) = path.file_name().and_then(|name| name.to_str()) &&
-                    EraFileType::from_filename(name).is_some_and(&accept)
-                {
-                    let parts = name.split('-').collect::<Vec<_>>();
-
-                    if parts.len() == 3 {
-                        let number = usize::from_str(parts[1])?;
-
-                        return Ok(Some((number, path.into_boxed_path())));
-                    }
-                } else {
-                    on_other(&path)?;
-                }
-
-                Ok(None)
-            })()
-            .transpose()
-        })
+        .filter_map(|entry| parse_era_entry(entry, &accept, &mut on_other).transpose())
         .collect::<eyre::Result<Vec<_>>>()?;
 
     entries.sort_by_key(|(number, _)| *number);
 
     Ok(entries)
+}
+
+/// Parses one directory entry, returning `Some((number, path))` for an accepted ERA file.
+///
+/// Non-matching entries are forwarded to `on_other` (e.g. to pick up `checksums.txt`).
+fn parse_era_entry(
+    entry: io::Result<DirEntry>,
+    accept: &impl Fn(EraFileType) -> bool,
+    on_other: &mut impl FnMut(&Path) -> eyre::Result<()>,
+) -> eyre::Result<Option<(usize, Box<Path>)>> {
+    let path = entry?.path();
+
+    if let Some(name) = path.file_name().and_then(|name| name.to_str()) &&
+        EraFileType::from_filename(name).is_some_and(accept)
+    {
+        let parts = name.split('-').collect::<Vec<_>>();
+
+        if parts.len() == 3 {
+            let number = usize::from_str(parts[1])?;
+
+            return Ok(Some((number, path.into_boxed_path())));
+        }
+    } else {
+        on_other(&path)?;
+    }
+
+    Ok(None)
 }
 
 /// Contains information about an ERA file that is on the local file-system and is read-only.

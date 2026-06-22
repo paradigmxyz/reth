@@ -105,7 +105,7 @@ impl Ere {
 
 /// [`EraBlockReader`] for consensus-layer `.era` files.
 ///
-/// Unlike `.era1`/`.ere` files, `.era` files store consensus `SignedBeaconBlock`s. Post-merge
+/// `.era` files store consensus `SignedBeaconBlock`s. Post-merge
 /// blocks embed an execution payload; this source SSZ-decodes each beacon block, extracts that
 /// payload, and converts it into an execution `(header, body)` pair. Pre-merge slots carry no
 /// payload and are skipped.
@@ -121,7 +121,8 @@ where
         meta: &M,
     ) -> eyre::Result<impl Iterator<Item = eyre::Result<(BH, BB)>>> {
         let reader: EraReader<std::fs::File> = open(meta)?;
-        Ok(reader.iter().filter_map(|block| Self::decode(block).transpose()))
+        let mut buf = Vec::new();
+        Ok(reader.iter().filter_map(move |block| Self::decode(block, &mut buf).transpose()))
     }
 }
 
@@ -131,6 +132,7 @@ impl Era {
     /// Returns `Ok(None)` for pre-merge slots, which carry no execution payload.
     pub fn decode<BH, BB>(
         block: Result<CompressedSignedBeaconBlock, E2sError>,
+        buf: &mut Vec<u8>,
     ) -> eyre::Result<Option<(BH, BB)>>
     where
         BH: FullBlockHeader,
@@ -144,42 +146,37 @@ impl Era {
         };
         // The beacon payload decodes into alloy execution types; re-encode and decode into the
         // node's own primitives through the same RLP representation the `.era1`/`.ere` paths use.
-        Ok(Some((reencode_rlp(&header)?, reencode_rlp(&body)?)))
+        Ok(Some((reencode_rlp(&header, buf)?, reencode_rlp(&body, buf)?)))
     }
 }
 
 /// SSZ-decodes a consensus `SignedBeaconBlock` and extracts its execution block, if it has one.
 ///
-/// Only post-merge (Bellatrix and later) blocks carry a payload. The fork is found by
-/// trial-decoding newest to oldest, relying on SSZ length validation to reject the wrong layout.
-/// Cancun (`parent_beacon_block_root`) and Prague (`requests`) header fields are taken from the
-/// beacon block.
-///
-/// Returns `Ok(None)` only for genuine pre-merge (phase0/altair) slots, which are confirmed to
-/// decode as a pre-merge beacon block. Bytes that decode as no known fork are treated as an error
-/// rather than a pre-merge slot, so malformed post-merge data is never silently dropped (which
-/// would mark the file processed and skip an execution block).
+/// Only post-merge (Bellatrix and later) blocks carry a payload; the fork is found by
+/// trial-decoding newest to oldest. Returns `Ok(None)` for genuine pre-merge slots, confirmed to
+/// decode as a pre-merge block. Bytes matching no known fork are an error, so malformed data is
+/// never silently dropped.
 pub fn decode_execution_block<T: Decodable2718>(
     ssz: &[u8],
 ) -> eyre::Result<Option<alloy_consensus::Block<T>>> {
     if let Ok(beacon) = SignedBeaconBlockElectra::<ExecutionPayloadV3>::from_ssz_bytes(ssz) {
-        let parent_beacon_block_root = beacon.message.parent_root;
-        let requests = beacon.message.body.execution_requests.to_requests();
-        let payload = ExecutionPayload::V3(beacon.message.body.execution_payload);
         let sidecar = ExecutionPayloadSidecar::v4(
-            CancunPayloadFields { parent_beacon_block_root, versioned_hashes: Vec::new() },
-            PraguePayloadFields::new(requests),
+            CancunPayloadFields {
+                parent_beacon_block_root: beacon.message.parent_root,
+                versioned_hashes: Vec::new(),
+            },
+            PraguePayloadFields::new(beacon.message.body.execution_requests.to_requests()),
         );
+        let payload = ExecutionPayload::V3(beacon.message.body.execution_payload);
         return Ok(Some(payload.try_into_block_with_sidecar(&sidecar)?));
     }
 
     if let Ok(beacon) = SignedBeaconBlockDeneb::<ExecutionPayloadV3>::from_ssz_bytes(ssz) {
-        let parent_beacon_block_root = beacon.message.parent_root;
-        let payload = ExecutionPayload::V3(beacon.message.body.execution_payload);
         let sidecar = ExecutionPayloadSidecar::v3(CancunPayloadFields {
-            parent_beacon_block_root,
+            parent_beacon_block_root: beacon.message.parent_root,
             versioned_hashes: Vec::new(),
         });
+        let payload = ExecutionPayload::V3(beacon.message.body.execution_payload);
         return Ok(Some(payload.try_into_block_with_sidecar(&sidecar)?));
     }
 
@@ -193,9 +190,8 @@ pub fn decode_execution_block<T: Decodable2718>(
         return Ok(Some(payload.try_into_block()?));
     }
 
-    // Pre-merge (phase0/altair): no execution payload. Confirm the bytes really are a pre-merge
-    // beacon block before skipping; otherwise this is malformed/corrupt data that must surface as
-    // an error instead of being mistaken for a payload-less slot.
+    // Pre-merge blocks carry no execution payload. Only skip a slot once it's confirmed to be a
+    // valid pre-merge block; anything else is malformed data and must error rather than be skipped.
     if SignedBeaconBlockPhase0::from_ssz_bytes(ssz).is_ok() ||
         SignedBeaconBlockAltair::from_ssz_bytes(ssz).is_ok()
     {
@@ -213,12 +209,14 @@ pub fn decode_execution_block<T: Decodable2718>(
 /// `.era` files yield alloy execution headers/bodies, while the import pipeline writes the node's
 /// own primitives. Both share the canonical execution RLP encoding, so a round-trip bridges them
 /// without requiring a direct `From` conversion.
-fn reencode_rlp<T, U>(value: &T) -> eyre::Result<U>
+fn reencode_rlp<T, U>(value: &T, buf: &mut Vec<u8>) -> eyre::Result<U>
 where
     T: alloy_rlp::Encodable,
     U: alloy_rlp::Decodable,
 {
-    Ok(<U as alloy_rlp::Decodable>::decode(&mut alloy_rlp::encode(value).as_slice())?)
+    buf.clear();
+    alloy_rlp::Encodable::encode(value, buf);
+    Ok(<U as alloy_rlp::Decodable>::decode(&mut buf.as_slice())?)
 }
 
 /// Opens the ERA file at `meta` with the format's [`StreamReader`].
