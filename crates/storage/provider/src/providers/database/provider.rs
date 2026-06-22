@@ -27,7 +27,7 @@ use alloy_consensus::{
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
-    map::{hash_map, AddressSet, B256Map, HashMap},
+    map::{hash_map, AddressSet, B256Map, B256Set, HashMap},
     Address, BlockHash, BlockNumber, StorageKey, StorageValue, TxHash, TxNumber, B256,
 };
 use itertools::Itertools;
@@ -49,7 +49,7 @@ use reth_db_api::{
     BlockNumberList,
 };
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
-use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
+use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodePrimitives, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, FastInstant as Instant, RecoveredBlock,
     SealedHeader, StorageEntry,
@@ -180,6 +180,20 @@ impl SaveBlocksMode {
     pub const fn with_state(self) -> bool {
         matches!(self, Self::Full)
     }
+}
+
+fn changed_hashed_accounts_for_persistence<N: NodePrimitives>(
+    blocks: &[ExecutedBlock<N>],
+) -> B256Set {
+    let mut changed_accounts = B256Set::default();
+    for block in blocks {
+        for (address, account) in block.execution_outcome().state.state() {
+            if account.is_info_changed() {
+                changed_accounts.insert(keccak256(*address));
+            }
+        }
+    }
+    changed_accounts
 }
 
 /// A provider struct that fetches data from the database.
@@ -730,7 +744,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     blocks.iter().rev().map(|b| b.trie_data().hashed_state),
                 );
                 if !merged_hashed_state.is_empty() {
-                    self.write_hashed_state(&merged_hashed_state)?;
+                    let changed_hashed_accounts = changed_hashed_accounts_for_persistence(&blocks);
+                    self.write_hashed_state_with_account_filter(
+                        &merged_hashed_state,
+                        Some(&changed_hashed_accounts),
+                    )?;
                 }
                 timings.write_hashed_state += start.elapsed();
 
@@ -2426,6 +2444,59 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
             Ok(storage_changeset_lists)
         }
     }
+
+}
+
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
+    #[instrument(name = "write_hashed_state", level = "debug", target = "providers::db", skip_all)]
+    fn write_hashed_state_with_account_filter(
+        &self,
+        hashed_state: &HashedPostStateSorted,
+        changed_accounts: Option<&B256Set>,
+    ) -> ProviderResult<()> {
+        // Write hashed account updates.
+        let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
+        for (hashed_address, account) in hashed_state.accounts() {
+            if let Some(changed_accounts) = changed_accounts {
+                if !changed_accounts.contains(hashed_address) {
+                    continue
+                }
+            }
+
+            if let Some(account) = account {
+                hashed_accounts_cursor.upsert(*hashed_address, account)?;
+            } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
+                hashed_accounts_cursor.delete_current()?;
+            }
+        }
+
+        // Write hashed storage changes.
+        let sorted_storages = hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
+        let mut hashed_storage_cursor =
+            self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
+        for (hashed_address, storage) in sorted_storages {
+            if storage.is_wiped() && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
+                hashed_storage_cursor.delete_current_duplicates()?;
+            }
+
+            for (hashed_slot, value) in storage.storage_slots_ref() {
+                let entry = StorageEntry { key: *hashed_slot, value: *value };
+
+                if let Some(db_entry) =
+                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
+                    db_entry.key == entry.key
+                {
+                    hashed_storage_cursor.delete_current()?;
+                }
+
+                if !entry.value.is_zero() {
+                    hashed_storage_cursor.upsert(*hashed_address, &entry)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
@@ -2695,44 +2766,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         Ok(())
     }
 
-    #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
-        // Write hashed account updates.
-        let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
-        for (hashed_address, account) in hashed_state.accounts() {
-            if let Some(account) = account {
-                hashed_accounts_cursor.upsert(*hashed_address, account)?;
-            } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
-                hashed_accounts_cursor.delete_current()?;
-            }
-        }
-
-        // Write hashed storage changes.
-        let sorted_storages = hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
-        let mut hashed_storage_cursor =
-            self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
-        for (hashed_address, storage) in sorted_storages {
-            if storage.is_wiped() && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
-                hashed_storage_cursor.delete_current_duplicates()?;
-            }
-
-            for (hashed_slot, value) in storage.storage_slots_ref() {
-                let entry = StorageEntry { key: *hashed_slot, value: *value };
-
-                if let Some(db_entry) =
-                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
-                    db_entry.key == entry.key
-                {
-                    hashed_storage_cursor.delete_current()?;
-                }
-
-                if !entry.value.is_zero() {
-                    hashed_storage_cursor.upsert(*hashed_address, &entry)?;
-                }
-            }
-        }
-
-        Ok(())
+        self.write_hashed_state_with_account_filter(hashed_state, None)
     }
 
     /// Remove the last N blocks of state.
@@ -3970,6 +4005,105 @@ mod tests {
     use revm_database::BundleState;
     use revm_state::AccountInfo;
     use std::{sync::mpsc, time::Duration};
+
+    #[test]
+    fn test_persistence_account_filter_skips_storage_only_accounts() {
+        let factory = create_test_provider_factory();
+
+        let storage_only_address = Address::with_last_byte(1);
+        let info_changed_address = Address::with_last_byte(2);
+        let storage_slot = U256::from(7);
+        let storage_slot_key = B256::from(storage_slot);
+        let hashed_storage_only_address = keccak256(storage_only_address);
+        let hashed_info_changed_address = keccak256(info_changed_address);
+        let hashed_slot = keccak256(storage_slot_key);
+
+        let storage_only_info =
+            AccountInfo { nonce: 1, balance: U256::from(100), ..Default::default() };
+        let original_info =
+            AccountInfo { nonce: 2, balance: U256::from(200), ..Default::default() };
+        let changed_info =
+            AccountInfo { nonce: 3, balance: U256::from(300), ..Default::default() };
+
+        let bundle = BundleState::builder(1..=1)
+            .state_original_account_info(storage_only_address, storage_only_info.clone())
+            .state_present_account_info(storage_only_address, storage_only_info.clone())
+            .state_storage(
+                storage_only_address,
+                HashMap::from_iter([(storage_slot, (U256::ZERO, U256::from(10)))]),
+            )
+            .revert_storage(1, storage_only_address, vec![(storage_slot, U256::ZERO)])
+            .state_original_account_info(info_changed_address, original_info.clone())
+            .state_present_account_info(info_changed_address, changed_info.clone())
+            .revert_account_info(1, info_changed_address, Some(Some(original_info)))
+            .build();
+
+        let hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle.state()).into_sorted();
+        let block = SealedBlock::<reth_ethereum_primitives::Block>::seal_parts(
+            Header { number: 1, ..Default::default() },
+            Default::default(),
+        );
+        let executed: ExecutedBlock = ExecutedBlock::new(
+            Arc::new(block.try_recover().unwrap()),
+            Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: vec![],
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state: bundle,
+            }),
+            ComputedTrieData::default(),
+        );
+
+        let changed_accounts = changed_hashed_accounts_for_persistence(&[executed]);
+        assert!(!changed_accounts.contains(&hashed_storage_only_address));
+        assert!(changed_accounts.contains(&hashed_info_changed_address));
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .tx
+            .cursor_write::<tables::HashedAccounts>()
+            .unwrap()
+            .upsert(hashed_storage_only_address, &Account::from(storage_only_info.clone()))
+            .unwrap();
+
+        provider_rw
+            .write_hashed_state_with_account_filter(&hashed_state, Some(&changed_accounts))
+            .unwrap();
+
+        let storage_only_account = provider_rw
+            .tx
+            .cursor_read::<tables::HashedAccounts>()
+            .unwrap()
+            .seek_exact(hashed_storage_only_address)
+            .unwrap()
+            .unwrap()
+            .1;
+        assert_eq!(storage_only_account, Account::from(storage_only_info));
+
+        let changed_account = provider_rw
+            .tx
+            .cursor_read::<tables::HashedAccounts>()
+            .unwrap()
+            .seek_exact(hashed_info_changed_address)
+            .unwrap()
+            .unwrap()
+            .1;
+        assert_eq!(changed_account, Account::from(changed_info));
+
+        let storage_entry = provider_rw
+            .tx
+            .cursor_dup_read::<tables::HashedStorages>()
+            .unwrap()
+            .seek_by_key_subkey(hashed_storage_only_address, hashed_slot)
+            .unwrap()
+            .unwrap();
+        assert_eq!(storage_entry.key, hashed_slot);
+        assert_eq!(storage_entry.value, U256::from(10));
+    }
 
     #[test]
     fn test_receipts_by_block_range_empty_range() {
