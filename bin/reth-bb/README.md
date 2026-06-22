@@ -12,6 +12,10 @@ reth-bb extends the standard Ethereum node with:
 
 2. **Relaxed consensus** — the gas-limit bound-divisor check and blob gas validation are skipped, since merged blocks exceed single-block limits.
 
+3. **Benchmark-oriented database sync** — unless `--db.sync-mode` is set explicitly,
+   reth-bb opens MDBX with `safe-no-sync` to avoid durable fsync cost in ephemeral
+   benchmark datadirs. Pass `--db.sync-mode durable` when crash durability is required.
+
 ## Quick start
 
 The full workflow has five steps: **build** reth-bb, **install** txgen tools, **extract** big-block payloads, **start** reth-bb, and **replay** the payloads.
