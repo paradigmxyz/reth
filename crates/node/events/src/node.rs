@@ -244,7 +244,7 @@ impl NodeState {
                 if full.is_nan() {
                     full = 0.0;
                 }
-                info!(
+                debug!(
                     number=block.number(),
                     hash=?block.hash(),
                     peers=self.num_connected_peers(),
