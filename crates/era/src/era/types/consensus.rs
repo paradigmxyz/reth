@@ -2,42 +2,44 @@
 //!
 //! # Decoding
 //!
-//! This crate only handles compression/decompression. The decompressed bytes are SSZ-encoded
-//! consensus types, which can be decoded with [`alloy_rpc_types_beacon`]'s fork-specific beacon
-//! block types — no external consensus client is required.
-//!
-//! For extracting the execution block embedded in a post-merge beacon block, see
-//! [`reth_era_utils::decode_execution_block`](https://docs.rs/reth-era-utils).
+//! This crate handles compression/decompression and, for post-merge blocks, extraction of the
+//! embedded execution block via [`CompressedSignedBeaconBlock::decode_execution_block`]. The
+//! decompressed bytes are SSZ-encoded consensus types decoded with [`alloy_rpc_types_beacon`]'s
+//! fork-specific beacon block types — no external consensus client is required.
 //!
 //! [`alloy_rpc_types_beacon`]: https://docs.rs/alloy-rpc-types-beacon
 //!
 //! # Example
 //!
-//! ## Decoding a [`CompressedSignedBeaconBlock`]
+//! ## Decoding the execution block from a [`CompressedSignedBeaconBlock`]
 //!
-//! ```ignore
-//! use alloy_rpc_types_beacon::block::SignedBeaconBlockDeneb;
-//! use alloy_rpc_types_engine::ExecutionPayloadV3;
+//! ```no_run
 //! use reth_era::era::types::consensus::CompressedSignedBeaconBlock;
-//! use ssz::Decode;
+//! use reth_ethereum_primitives::TransactionSigned;
 //!
 //! fn decode_block(
 //!     compressed: &CompressedSignedBeaconBlock,
 //! ) -> Result<(), Box<dyn std::error::Error>> {
-//!     // Decompress to get the SSZ bytes, then decode for the known fork.
-//!     let ssz_bytes = compressed.decompress()?;
-//!     let block = SignedBeaconBlockDeneb::<ExecutionPayloadV3>::from_ssz_bytes(&ssz_bytes)
-//!         .map_err(|e| format!("{e:?}"))?;
-//!
-//!     let payload = &block.message.body.execution_payload;
-//!     println!("Parent root: {:?}", block.message.parent_root);
-//!     println!("Execution block number: {}", payload.payload_inner.payload_inner.block_number);
-//!
+//!     // Post-merge blocks carry an execution payload; pre-merge slots yield `None`.
+//!     if let Some(block) = compressed.decode_execution_block::<TransactionSigned>()? {
+//!         println!("Execution block number: {}", block.header.number);
+//!     }
 //!     Ok(())
 //! }
 //! ```
 use crate::e2s::{error::E2sError, types::Entry};
+use alloy_consensus::Block;
+use alloy_eips::eip2718::Decodable2718;
+use alloy_rpc_types_beacon::block::{
+    SignedBeaconBlockAltair, SignedBeaconBlockBellatrix, SignedBeaconBlockCapella,
+    SignedBeaconBlockDeneb, SignedBeaconBlockElectra, SignedBeaconBlockPhase0,
+};
+use alloy_rpc_types_engine::{
+    CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1,
+    ExecutionPayloadV2, ExecutionPayloadV3, PraguePayloadFields,
+};
 use snap::{read::FrameDecoder, write::FrameEncoder};
+use ssz::Decode;
 use std::io::{Read, Write};
 
 /// Maximum allowed decompressed size for a signed beacon block SSZ payload.
@@ -111,6 +113,60 @@ impl CompressedSignedBeaconBlock {
             MAX_DECOMPRESSED_SIGNED_BEACON_BLOCK_BYTES,
             "signed beacon block",
         )
+    }
+
+    /// Decodes the execution block embedded in this beacon block, if it has one.
+    ///
+    /// Only post-merge (Bellatrix and later) blocks carry a payload; the fork is found by
+    /// trial-decoding newest to oldest. Returns `Ok(None)` for genuine pre-merge slots, confirmed
+    /// to decode as a pre-merge block. Bytes matching no known fork are an error, so malformed data
+    /// is never silently dropped.
+    pub fn decode_execution_block<T: Decodable2718>(&self) -> Result<Option<Block<T>>, E2sError> {
+        let ssz = self.decompress()?;
+
+        if let Ok(beacon) = SignedBeaconBlockElectra::<ExecutionPayloadV3>::from_ssz_bytes(&ssz) {
+            let sidecar = ExecutionPayloadSidecar::v4(
+                CancunPayloadFields {
+                    parent_beacon_block_root: beacon.message.parent_root,
+                    versioned_hashes: Vec::new(),
+                },
+                PraguePayloadFields::new(beacon.message.body.execution_requests.to_requests()),
+            );
+            let payload = ExecutionPayload::V3(beacon.message.body.execution_payload);
+            return Ok(Some(payload.try_into_block_with_sidecar(&sidecar)?));
+        }
+
+        if let Ok(beacon) = SignedBeaconBlockDeneb::<ExecutionPayloadV3>::from_ssz_bytes(&ssz) {
+            let sidecar = ExecutionPayloadSidecar::v3(CancunPayloadFields {
+                parent_beacon_block_root: beacon.message.parent_root,
+                versioned_hashes: Vec::new(),
+            });
+            let payload = ExecutionPayload::V3(beacon.message.body.execution_payload);
+            return Ok(Some(payload.try_into_block_with_sidecar(&sidecar)?));
+        }
+
+        if let Ok(beacon) = SignedBeaconBlockCapella::<ExecutionPayloadV2>::from_ssz_bytes(&ssz) {
+            let payload = ExecutionPayload::V2(beacon.message.body.execution_payload);
+            return Ok(Some(payload.try_into_block()?));
+        }
+
+        if let Ok(beacon) = SignedBeaconBlockBellatrix::<ExecutionPayloadV1>::from_ssz_bytes(&ssz) {
+            let payload = ExecutionPayload::V1(beacon.message.body.execution_payload);
+            return Ok(Some(payload.try_into_block()?));
+        }
+
+        // Pre-merge blocks carry no execution payload. Only skip a slot once it's confirmed to be a
+        // valid pre-merge block; anything else is malformed data and must error rather than skip.
+        if SignedBeaconBlockPhase0::from_ssz_bytes(&ssz).is_ok() ||
+            SignedBeaconBlockAltair::from_ssz_bytes(&ssz).is_ok()
+        {
+            return Ok(None);
+        }
+
+        Err(E2sError::Ssz(format!(
+            "consensus block ({} bytes) is not a valid SignedBeaconBlock of any known fork",
+            ssz.len()
+        )))
     }
 
     /// Convert to an [`Entry`]
@@ -199,6 +255,13 @@ impl CompressedBeaconState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::B256;
+    use alloy_rpc_types_beacon::{
+        block::{BeaconBlock, BeaconBlockBodyPhase0, Eth1Data, SignedBeaconBlock},
+        BlsSignature,
+    };
+    use reth_ethereum_primitives::TransactionSigned;
+    use ssz::Encode;
 
     #[test]
     fn test_signed_beacon_block_compression_roundtrip() {
@@ -268,5 +331,45 @@ mod tests {
             decompress_snappy_bounded(compressed.data.as_slice(), 100, "beacon state").unwrap_err();
 
         assert!(format!("{err:?}").contains("exceeded limit"));
+    }
+
+    #[test]
+    fn decode_execution_block_skips_genuine_pre_merge() {
+        // A genuine pre-merge (phase0) beacon block carries no execution payload and yields `None`.
+        let block = SignedBeaconBlock {
+            message: BeaconBlock {
+                slot: 0,
+                proposer_index: 0,
+                parent_root: B256::ZERO,
+                state_root: B256::ZERO,
+                body: BeaconBlockBodyPhase0 {
+                    randao_reveal: BlsSignature::ZERO,
+                    eth1_data: Eth1Data {
+                        deposit_root: B256::ZERO,
+                        deposit_count: 0,
+                        block_hash: B256::ZERO,
+                    },
+                    graffiti: B256::ZERO,
+                    proposer_slashings: vec![],
+                    attester_slashings: vec![],
+                    attestations: vec![],
+                    deposits: vec![],
+                    voluntary_exits: vec![],
+                },
+            },
+            signature: BlsSignature::ZERO,
+        };
+        let compressed = CompressedSignedBeaconBlock::from_ssz(&block.as_ssz_bytes()).unwrap();
+        assert!(compressed.decode_execution_block::<TransactionSigned>().unwrap().is_none());
+    }
+
+    #[test]
+    fn decode_execution_block_errors_on_malformed() {
+        // Bytes that decode as no known fork are malformed, not pre-merge slots, and must error
+        // instead of being silently dropped.
+        for bytes in [vec![], vec![0u8; 8]] {
+            let compressed = CompressedSignedBeaconBlock::from_ssz(&bytes).unwrap();
+            assert!(compressed.decode_execution_block::<TransactionSigned>().is_err());
+        }
     }
 }
