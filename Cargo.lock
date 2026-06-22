@@ -8526,13 +8526,9 @@ name = "reth-era-utils"
 version = "2.3.0"
 dependencies = [
  "alloy-consensus",
- "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-rpc-types-beacon",
- "alloy-rpc-types-engine",
  "bytes",
- "ethereum_ssz",
  "eyre",
  "futures-util",
  "reqwest",
