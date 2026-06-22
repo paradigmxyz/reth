@@ -25,6 +25,7 @@ use reth_storage_errors::{
     db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation, LogLevel},
     provider::{ProviderError, ProviderResult},
 };
+use revm_database::states::reverts::AccountInfoRevert;
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
     DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
@@ -1404,13 +1405,14 @@ impl RocksDBProvider {
 
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
 
             // Iterate through account reverts - these are exactly the accounts that have
             // changesets written, ensuring history indices match changeset entries.
-            for account_block_reverts in reverts.accounts {
-                for (address, _) in account_block_reverts {
-                    account_history.entry(address).or_default().push(block_number);
+            for account_block_reverts in block.execution_outcome().state.reverts.iter() {
+                for (address, revert_account) in account_block_reverts {
+                    if !matches!(&revert_account.account, AccountInfoRevert::DoNothing) {
+                        account_history.entry(*address).or_default().push(block_number);
+                    }
                 }
             }
         }
