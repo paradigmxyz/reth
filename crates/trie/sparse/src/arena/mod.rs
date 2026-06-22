@@ -24,8 +24,6 @@ use tracing::{instrument, trace};
 
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::{LeafUpdateRecord, ProofTrieNodeRecord, RecordedOp, TrieDebugRecorder};
-#[cfg(debug_assertions)]
-use alloy_primitives::map::HashSet;
 
 /// Alias for the slotmap key type used as node references throughout the arena trie.
 type Index = DefaultKey;
