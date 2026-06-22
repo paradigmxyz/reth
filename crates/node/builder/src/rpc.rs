@@ -624,6 +624,33 @@ where
         }
     }
 
+    /// Maps the configured engine API builder.
+    pub fn map_engine_api<T>(
+        self,
+        f: impl FnOnce(EB) -> T,
+    ) -> RpcAddOns<Node, EthB, PVB, T, EVB, RpcMiddleware, AuthHttpMiddleware> {
+        let Self {
+            hooks,
+            eth_api_builder,
+            payload_validator_builder,
+            engine_api_builder,
+            engine_validator_builder,
+            rpc_middleware,
+            auth_http_middleware,
+            tokio_runtime,
+        } = self;
+        RpcAddOns {
+            hooks,
+            eth_api_builder,
+            payload_validator_builder,
+            engine_api_builder: f(engine_api_builder),
+            engine_validator_builder,
+            rpc_middleware,
+            auth_http_middleware,
+            tokio_runtime,
+        }
+    }
+
     /// Maps the [`PayloadValidatorBuilder`] builder type.
     pub fn with_payload_validator<T>(
         self,

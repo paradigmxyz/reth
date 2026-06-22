@@ -12,16 +12,13 @@ use reth_e2e_test_utils::{
     node::NodeTestContext, setup, setup_engine, transaction::TransactionTestContext, wallet::Wallet,
 };
 use reth_node_api::TreeConfig;
-use reth_node_builder::{rpc::BasicEngineApiBuilder, EngineApiExt, NodeBuilder, NodeHandle};
+use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{
     args::RpcServerArgs,
     node_config::NodeConfig,
     version::{version_metadata, CLIENT_CODE},
 };
-use reth_node_ethereum::{
-    engine_ssz_proxy::EngineSszProxyLayer, EthereumAddOns, EthereumEngineValidatorBuilder,
-    EthereumNode,
-};
+use reth_node_ethereum::EthereumNode;
 use reth_provider::BlockNumReader;
 use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_layer::secret_to_bearer_header;
@@ -289,31 +286,18 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
             .build(),
     );
     let genesis_hash = chain_spec.genesis_hash();
-    let node_config =
+    let mut node_config =
         NodeConfig::test().with_chain(chain_spec.clone()).with_unused_ports().with_rpc(
             RpcServerArgs::default()
                 .with_unused_ports()
                 .with_http()
                 .with_http_api(reth_rpc_server_types::RpcModuleSelection::All),
         );
+    node_config.engine.enable_ssz_proxy = true;
 
-    let (ssz_layer, ssz_handle) = EngineSszProxyLayer::new();
-    let engine_api_handle = ssz_handle.clone();
-    let engine_api_builder = EngineApiExt::new(
-        BasicEngineApiBuilder::<EthereumEngineValidatorBuilder>::default(),
-        move |engine_api| {
-            engine_api_handle.set_engine_api_sync(engine_api);
-        },
-    );
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
         .testing_node(runtime)
-        .with_types::<EthereumNode>()
-        .with_components(EthereumNode::components())
-        .with_add_ons(
-            EthereumAddOns::default()
-                .with_engine_api(engine_api_builder)
-                .with_auth_http_middleware(ssz_layer),
-        )
+        .node(EthereumNode::default())
         .launch()
         .await?;
 

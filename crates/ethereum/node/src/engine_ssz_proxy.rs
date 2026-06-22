@@ -56,52 +56,82 @@ const MAX_PAYLOAD_BYTES: u64 = 64 * 1024 * 1024;
 
 type EthEngineApi<Provider, Pool, Validator, ChainSpec> =
     EngineApi<Provider, EthEngineTypes, Pool, Validator, ChainSpec>;
-type SharedEthEngineApi<Provider, Pool, Validator, ChainSpec> =
-    Arc<RwLock<Option<EthEngineApi<Provider, Pool, Validator, ChainSpec>>>>;
+type SharedEngineApi<Api> = Arc<RwLock<Option<Api>>>;
 
-/// Shared handle used by [`EngineSszProxyLayer`].
-pub struct EngineSszProxyHandle<ChainSpec, Provider = (), Pool = (), Validator = ()> {
-    engine_api: SharedEthEngineApi<Provider, Pool, Validator, ChainSpec>,
+/// Engine API operations required by the SSZ transport.
+pub trait EngineSszApi: Clone + Send + Sync + 'static {
+    /// Returns the Engine API client identity response.
+    fn identity(&self) -> HttpResponse;
+
+    /// Handles a decoded SSZ new-payload request body.
+    fn new_payload(&self, version: u8, body: Bytes) -> impl Future<Output = HttpResponse> + Send;
+
+    /// Handles a decoded SSZ forkchoice-updated request body.
+    fn forkchoice_updated(
+        &self,
+        version: u8,
+        body: Bytes,
+    ) -> impl Future<Output = HttpResponse> + Send;
+
+    /// Handles a decoded SSZ get-blobs request body.
+    fn get_blobs(&self, version: u8, body: Bytes) -> impl Future<Output = HttpResponse> + Send;
+
+    /// Handles a fork-scoped get-payload request.
+    fn get_payload(
+        &self,
+        version: u8,
+        payload_id: PayloadId,
+    ) -> impl Future<Output = HttpResponse> + Send;
+
+    /// Handles a fork-scoped payload-bodies-by-hash request.
+    fn payload_bodies_by_hash(
+        &self,
+        version: u8,
+        hashes: Vec<B256>,
+    ) -> impl Future<Output = HttpResponse> + Send;
+
+    /// Handles a fork-scoped payload-bodies-by-range request.
+    fn payload_bodies_by_range(
+        &self,
+        version: u8,
+        start: u64,
+        count: u64,
+    ) -> impl Future<Output = HttpResponse> + Send;
 }
 
-impl<C, Provider, Pool, Validator> Clone for EngineSszProxyHandle<C, Provider, Pool, Validator> {
+/// Shared handle used by [`EngineSszProxyLayer`].
+pub struct EngineSszProxyHandle<Api = ()> {
+    engine_api: SharedEngineApi<Api>,
+}
+
+impl<Api> Clone for EngineSszProxyHandle<Api> {
     fn clone(&self) -> Self {
         Self { engine_api: self.engine_api.clone() }
     }
 }
 
-impl<C, Provider, Pool, Validator> std::fmt::Debug
-    for EngineSszProxyHandle<C, Provider, Pool, Validator>
-{
+impl<Api> std::fmt::Debug for EngineSszProxyHandle<Api> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineSszProxyHandle").finish_non_exhaustive()
     }
 }
 
-impl<ChainSpec, Provider, Pool, Validator>
-    EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>
-{
+impl<Api> EngineSszProxyHandle<Api> {
     fn new() -> Self {
         Self { engine_api: Default::default() }
     }
 
-    fn with_engine_api(engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>) -> Self {
+    fn with_engine_api(engine_api: Api) -> Self {
         Self { engine_api: Arc::new(RwLock::new(Some(engine_api))) }
     }
 
     /// Sets the Engine API implementation used by the proxy.
-    pub async fn set_engine_api(
-        &self,
-        engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
-    ) {
+    pub async fn set_engine_api(&self, engine_api: Api) {
         *self.engine_api.write().await = Some(engine_api);
     }
 
     /// Sets the Engine API implementation during synchronous launch wiring.
-    pub fn set_engine_api_sync(
-        &self,
-        engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
-    ) {
+    pub fn set_engine_api_sync(&self, engine_api: Api) {
         *self
             .engine_api
             .try_write()
@@ -109,43 +139,35 @@ impl<ChainSpec, Provider, Pool, Validator>
     }
 }
 
-impl<ChainSpec, Provider, Pool, Validator>
-    EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>
-{
+impl<Api: Clone> EngineSszProxyHandle<Api> {
     /// Returns the Engine API implementation used by the proxy.
-    pub async fn engine_api(&self) -> Option<EthEngineApi<Provider, Pool, Validator, ChainSpec>> {
+    pub async fn engine_api(&self) -> Option<Api> {
         self.engine_api.read().await.clone()
     }
 }
 
 /// A tower layer that intercepts SSZ Engine API routes under `/engine/v2`.
 #[derive(Clone, Debug)]
-pub struct EngineSszProxyLayer<ChainSpec, Provider = (), Pool = (), Validator = ()> {
-    handle: EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>,
+pub struct EngineSszProxyLayer<Api = ()> {
+    handle: EngineSszProxyHandle<Api>,
 }
 
-impl<ChainSpec, Provider, Pool, Validator>
-    EngineSszProxyLayer<ChainSpec, Provider, Pool, Validator>
-{
+impl<Api> EngineSszProxyLayer<Api> {
     /// Creates a new proxy layer and a handle for setting the engine after node launch.
-    pub fn new() -> (Self, EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>) {
+    pub fn new() -> (Self, EngineSszProxyHandle<Api>) {
         let handle = EngineSszProxyHandle::new();
         (Self { handle: handle.clone() }, handle)
     }
 
     /// Creates a new proxy layer with an Engine API implementation.
-    pub fn with_engine_api(
-        engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
-    ) -> (Self, EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>) {
+    pub fn with_engine_api(engine_api: Api) -> (Self, EngineSszProxyHandle<Api>) {
         let handle = EngineSszProxyHandle::with_engine_api(engine_api);
         (Self { handle: handle.clone() }, handle)
     }
 }
 
-impl<S, ChainSpec, Provider, Pool, Validator> Layer<S>
-    for EngineSszProxyLayer<ChainSpec, Provider, Pool, Validator>
-{
-    type Service = EngineSszProxyService<S, ChainSpec, Provider, Pool, Validator>;
+impl<S, Api> Layer<S> for EngineSszProxyLayer<Api> {
+    type Service = EngineSszProxyService<S, Api>;
 
     fn layer(&self, inner: S) -> Self::Service {
         EngineSszProxyService { inner, handle: self.handle.clone() }
@@ -154,20 +176,16 @@ impl<S, ChainSpec, Provider, Pool, Validator> Layer<S>
 
 /// The service produced by [`EngineSszProxyLayer`].
 #[derive(Clone, Debug)]
-pub struct EngineSszProxyService<S, ChainSpec, Provider = (), Pool = (), Validator = ()> {
+pub struct EngineSszProxyService<S, Api = ()> {
     inner: S,
-    handle: EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>,
+    handle: EngineSszProxyHandle<Api>,
 }
 
-impl<S, ChainSpec, Provider, Pool, Validator> Service<HttpRequest>
-    for EngineSszProxyService<S, ChainSpec, Provider, Pool, Validator>
+impl<S, Api> Service<HttpRequest> for EngineSszProxyService<S, Api>
 where
     S: Service<HttpRequest, Response = HttpResponse, Error = BoxError> + Send + Clone,
     S::Future: Send + 'static,
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
-    Pool: TransactionPool + 'static,
-    Validator: EngineApiValidator<EthEngineTypes>,
-    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+    Api: EngineSszApi,
 {
     type Response = HttpResponse;
     type Error = BoxError;
@@ -188,15 +206,12 @@ where
     }
 }
 
-async fn handle_engine_ssz_request<ChainSpec, Provider, Pool, Validator>(
-    handle: EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>,
+async fn handle_engine_ssz_request<Api>(
+    handle: EngineSszProxyHandle<Api>,
     request: HttpRequest,
 ) -> HttpResponse
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
-    Pool: TransactionPool + 'static,
-    Validator: EngineApiValidator<EthEngineTypes>,
-    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+    Api: EngineSszApi,
 {
     let method = request.method().as_str().to_owned();
     let path = request.uri().path().to_owned();
@@ -218,7 +233,7 @@ where
             let Some(engine_api) = handle.engine_api().await else {
                 return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
             };
-            handle_identity(engine_api)
+            engine_api.identity()
         }
         EngineSszEndpoint::Payloads(fork) => {
             if method != "POST" {
@@ -230,7 +245,7 @@ where
             let Some(engine_api) = handle.engine_api().await else {
                 return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
             };
-            handle_new_payload(engine_api, fork.payloads_version(), &body).await
+            engine_api.new_payload(fork.payloads_version(), body.into()).await
         }
         EngineSszEndpoint::Payload(fork, payload_id) => {
             if method != "GET" {
@@ -239,7 +254,7 @@ where
             let Some(engine_api) = handle.engine_api().await else {
                 return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
             };
-            handle_get_payload(engine_api, fork, payload_id).await
+            engine_api.get_payload(fork.get_payload_version(), payload_id).await
         }
         EngineSszEndpoint::Forkchoice(fork) => {
             if method != "POST" {
@@ -251,7 +266,7 @@ where
             let Some(engine_api) = handle.engine_api().await else {
                 return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
             };
-            handle_forkchoice_updated(engine_api, fork.forkchoice_version(), &body).await
+            engine_api.forkchoice_updated(fork.forkchoice_version(), body.into()).await
         }
         EngineSszEndpoint::Blobs(version) => {
             if method != "POST" {
@@ -263,17 +278,15 @@ where
             let Some(engine_api) = handle.engine_api().await else {
                 return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
             };
-            handle_get_blobs(engine_api, version, &body).await
+            engine_api.get_blobs(version, body.into()).await
         }
         EngineSszEndpoint::PayloadBodiesByHash(fork) => {
             if method != "POST" {
                 return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
             }
-            let request = match request.into_body().collect().await.map(|body| body.to_bytes()) {
+            let hashes = match request.into_body().collect().await.map(|body| body.to_bytes()) {
                 Ok(body) => match BodiesByHashRequest::from_ssz_bytes(&body) {
-                    Ok(request) => {
-                        PayloadBodiesRequest::Hash(request.block_hashes.into_iter().collect())
-                    }
+                    Ok(request) => request.block_hashes.into_iter().collect(),
                     Err(_) => return text_response(STATUS_BAD_REQUEST, "invalid ssz"),
                 },
                 Err(_) => return text_response(STATUS_BAD_REQUEST, "failed to read request body"),
@@ -281,7 +294,7 @@ where
             let Some(engine_api) = handle.engine_api().await else {
                 return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
             };
-            handle_get_payload_bodies(engine_api, fork, request).await
+            engine_api.payload_bodies_by_hash(fork.get_payload_version(), hashes).await
         }
         EngineSszEndpoint::PayloadBodiesByRange(fork) => {
             if method != "GET" {
@@ -333,12 +346,7 @@ where
             let Some(engine_api) = handle.engine_api().await else {
                 return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
             };
-            handle_get_payload_bodies(
-                engine_api,
-                fork,
-                PayloadBodiesRequest::Range { start, count },
-            )
-            .await
+            engine_api.payload_bodies_by_range(fork.get_payload_version(), start, count).await
         }
     }
 }
@@ -474,6 +482,75 @@ fn handle_capabilities() -> HttpResponse {
     }))
 }
 
+impl<Provider, Pool, Validator, ChainSpec> EngineSszApi
+    for EthEngineApi<Provider, Pool, Validator, ChainSpec>
+where
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
+    Pool: TransactionPool + 'static,
+    Validator: EngineApiValidator<EthEngineTypes>,
+    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+{
+    fn identity(&self) -> HttpResponse {
+        handle_identity(self.clone())
+    }
+
+    fn new_payload(&self, version: u8, body: Bytes) -> impl Future<Output = HttpResponse> + Send {
+        let engine_api = self.clone();
+        async move { handle_new_payload(engine_api, version, &body).await }
+    }
+
+    fn forkchoice_updated(
+        &self,
+        version: u8,
+        body: Bytes,
+    ) -> impl Future<Output = HttpResponse> + Send {
+        let engine_api = self.clone();
+        async move { handle_forkchoice_updated(engine_api, version, &body).await }
+    }
+
+    fn get_blobs(&self, version: u8, body: Bytes) -> impl Future<Output = HttpResponse> + Send {
+        let engine_api = self.clone();
+        async move { handle_get_blobs(engine_api, version, &body).await }
+    }
+
+    fn get_payload(
+        &self,
+        version: u8,
+        payload_id: PayloadId,
+    ) -> impl Future<Output = HttpResponse> + Send {
+        let engine_api = self.clone();
+        async move { handle_get_payload(engine_api, version, payload_id).await }
+    }
+
+    fn payload_bodies_by_hash(
+        &self,
+        version: u8,
+        hashes: Vec<B256>,
+    ) -> impl Future<Output = HttpResponse> + Send {
+        let engine_api = self.clone();
+        async move {
+            handle_get_payload_bodies(engine_api, version, PayloadBodiesRequest::Hash(hashes)).await
+        }
+    }
+
+    fn payload_bodies_by_range(
+        &self,
+        version: u8,
+        start: u64,
+        count: u64,
+    ) -> impl Future<Output = HttpResponse> + Send {
+        let engine_api = self.clone();
+        async move {
+            handle_get_payload_bodies(
+                engine_api,
+                version,
+                PayloadBodiesRequest::Range { start, count },
+            )
+            .await
+        }
+    }
+}
+
 fn handle_identity<Provider, Pool, Validator, ChainSpec>(
     engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
 ) -> HttpResponse
@@ -488,7 +565,7 @@ where
 
 async fn handle_get_payload<Provider, Pool, Validator, ChainSpec>(
     engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
-    fork: EngineSszFork,
+    version: u8,
     payload_id: PayloadId,
 ) -> HttpResponse
 where
@@ -497,7 +574,7 @@ where
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
-    match fork.get_payload_version() {
+    match version {
         1 => match engine_api.get_payload_v1_with_value_metered(payload_id).await {
             Ok((payload, block_value)) => ssz_response(BuiltPayloadParis { payload, block_value }),
             Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
@@ -597,7 +674,7 @@ enum PayloadBodiesRequest {
 
 async fn handle_get_payload_bodies<Provider, Pool, Validator, ChainSpec>(
     engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
-    fork: EngineSszFork,
+    version: u8,
     request: PayloadBodiesRequest,
 ) -> HttpResponse
 where
@@ -606,8 +683,8 @@ where
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
-    match fork {
-        EngineSszFork::Paris => {
+    match version {
+        1 => {
             let response = match request {
                 PayloadBodiesRequest::Hash(hashes) => {
                     engine_api.get_payload_bodies_by_hash_v1_metered(hashes).await
@@ -626,7 +703,7 @@ where
                 Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
             }
         }
-        EngineSszFork::Shanghai => {
+        2 => {
             let response = match request {
                 PayloadBodiesRequest::Hash(hashes) => {
                     engine_api.get_payload_bodies_by_hash_v1_metered(hashes).await
@@ -645,7 +722,7 @@ where
                 Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
             }
         }
-        EngineSszFork::Cancun => {
+        3 => {
             let response = match request {
                 PayloadBodiesRequest::Hash(hashes) => {
                     engine_api.get_payload_bodies_by_hash_v1_metered(hashes).await
@@ -667,7 +744,7 @@ where
                 Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
             }
         }
-        EngineSszFork::Prague => {
+        4 => {
             let response = match request {
                 PayloadBodiesRequest::Hash(hashes) => {
                     engine_api.get_payload_bodies_by_hash_v1_metered(hashes).await
@@ -689,7 +766,7 @@ where
                 Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
             }
         }
-        EngineSszFork::Osaka => {
+        5 => {
             let response = match request {
                 PayloadBodiesRequest::Hash(hashes) => {
                     engine_api.get_payload_bodies_by_hash_v1_metered(hashes).await
@@ -711,7 +788,7 @@ where
                 Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
             }
         }
-        EngineSszFork::Amsterdam => {
+        6 => {
             let response = match request {
                 PayloadBodiesRequest::Hash(hashes) => {
                     engine_api.get_payload_bodies_by_hash_v2_metered(hashes).await
@@ -730,6 +807,7 @@ where
                 Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
             }
         }
+        _ => text_response(STATUS_BAD_REQUEST, "unsupported payload bodies fork"),
     }
 }
 
