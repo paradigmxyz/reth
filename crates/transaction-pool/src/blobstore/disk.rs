@@ -399,10 +399,10 @@ impl BlobStore for DiskFileBlobStore {
         {
             let mut versioned_to_txhashes = self.inner.versioned_hashes_to_txhash.lock();
             for (idx, requested_hash) in versioned_hashes.iter().enumerate() {
-                if !result[idx] {
-                    if let Some(tx_hash) = versioned_to_txhashes.get(requested_hash).copied() {
-                        missing_tx_hashes.push((idx, tx_hash));
-                    }
+                if !result[idx] &&
+                    let Some(tx_hash) = versioned_to_txhashes.get(requested_hash).copied()
+                {
+                    missing_tx_hashes.push((idx, tx_hash));
                 }
             }
         }
