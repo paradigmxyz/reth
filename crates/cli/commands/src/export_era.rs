@@ -69,14 +69,19 @@ impl ExportFileType {
     /// Rejects consensus-layer `.era`, which can't be produced from the execution database.
     fn ensure_exportable(self) -> eyre::Result<()> {
         if matches!(self, Self::Era) {
-            eyre::bail!(
-                "Consensus-layer ERA (.era) files cannot be exported: they require beacon blocks \
-                 and state that the execution database does not store. Export `era1` or `ere` \
-                 instead."
-            );
+            return Err(era_not_exportable());
         }
         Ok(())
     }
+}
+
+/// Error returned when a consensus-layer `.era` export is requested. Such files require beacon
+/// blocks and state that the execution database does not store.
+fn era_not_exportable() -> eyre::Report {
+    eyre::eyre!(
+        "Consensus-layer ERA (.era) files cannot be exported: they require beacon blocks and \
+         state that the execution database does not store. Export `era1` or `ere` instead."
+    )
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ExportEraCommand<C> {
@@ -85,11 +90,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ExportEraC
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
     {
-        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO, runtime)?;
-
         let file_type = self.export.file_type;
         file_type.ensure_exportable()?;
         let format = file_type.format();
+
+        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO, runtime)?;
 
         // Either the specified path or default to `<data-dir>/<chain>/<format>-export/`.
         let data_dir = match &self.export.path {
@@ -132,8 +137,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ExportEraC
         let exported_files = match file_type {
             ExportFileType::Era1 => era::export::<era::Era1, _>(&provider, &export_config)?,
             ExportFileType::Ere => era::export::<era::Ere, _>(&provider, &export_config)?,
-            // Guarded above by `ensure_exportable`.
-            ExportFileType::Era => unreachable!("`.era` export is rejected before this point"),
+            // Rejected above by `ensure_exportable`.
+            ExportFileType::Era => return Err(era_not_exportable()),
         };
 
         info!(
