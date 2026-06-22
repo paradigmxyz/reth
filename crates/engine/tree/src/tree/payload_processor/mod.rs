@@ -736,7 +736,8 @@ where
             let deferred = if let Some(result) = task_result {
                 let start = Instant::now();
                 let (mut trie, deferred) = task.into_trie_for_reuse();
-                if let Some(retained_paths) = pending_sparse_trie_prune {
+                if let Some(mut retained_paths) = pending_sparse_trie_prune {
+                    retained_paths.extend_from_changed_paths(&result.changed_paths);
                     trie.prune(max_hot_slots, max_hot_accounts, retained_paths);
                 }
                 trie_metrics
