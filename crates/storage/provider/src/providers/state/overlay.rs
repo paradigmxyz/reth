@@ -108,9 +108,8 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     parent_hash: B256,
     /// Optional overlay source.
     overlay_source: Option<OverlaySource<N>>,
-    /// Whether managed overlays may be skipped when the reusable sparse trie already represents
-    /// the requested parent.
-    sparse_trie_fast_path: bool,
+    /// State root of the requested parent when the reusable sparse trie fast path is allowed.
+    reusable_sparse_trie_state_root: Option<B256>,
     /// Changeset cache handle for retrieving trie changesets
     changeset_cache: ChangesetCache,
     /// Metrics for tracking provider operations
@@ -123,7 +122,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         Self {
             parent_hash,
             overlay_source: None,
-            sparse_trie_fast_path: false,
+            reusable_sparse_trie_state_root: None,
             changeset_cache,
             metrics: OverlayStateProviderMetrics::default(),
         }
@@ -137,9 +136,9 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self
     }
 
-    /// Enables or disables the sparse trie fast path for managed overlays.
-    pub const fn with_sparse_trie_fast_path(mut self, sparse_trie_fast_path: bool) -> Self {
-        self.sparse_trie_fast_path = sparse_trie_fast_path;
+    /// Allows managed overlays to be skipped when the reusable sparse trie represents this root.
+    pub const fn with_reusable_sparse_trie_state_root(mut self, state_root: B256) -> Self {
+        self.reusable_sparse_trie_state_root = Some(state_root);
         self
     }
 
@@ -201,9 +200,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     ) -> ProviderResult<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>)> {
         match &self.overlay_source {
             Some(OverlaySource::Managed { manager, state }) => {
-                if self.sparse_trie_fast_path &&
-                    manager.reusable_sparse_trie_block_hash() == Some(self.parent_hash)
-                {
+                if self.can_use_reusable_sparse_trie_parent(manager) {
                     return Ok((Arc::new(TrieUpdatesSorted::default()), Arc::clone(state)))
                 }
 
@@ -243,16 +240,17 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     }
 
     fn reusable_sparse_trie_parent_overlay(&self) -> Option<Overlay> {
-        if !self.sparse_trie_fast_path {
-            return None
-        }
-
         let Some(OverlaySource::Managed { manager, state }) = &self.overlay_source else {
             return None
         };
 
-        (manager.reusable_sparse_trie_block_hash() == Some(self.parent_hash))
+        self.can_use_reusable_sparse_trie_parent(manager)
             .then(|| Overlay::empty_with_hashed_post_state(Arc::clone(state)))
+    }
+
+    fn can_use_reusable_sparse_trie_parent(&self, manager: &StateTrieOverlayManager<N>) -> bool {
+        self.reusable_sparse_trie_state_root
+            .is_some_and(|state_root| manager.reusable_sparse_trie_state_root() == Some(state_root))
     }
 
     /// Returns the block which is at the tip of the DB, i.e. the block which the state tables of
@@ -728,12 +726,13 @@ mod tests {
     #[test]
     fn managed_overlay_skips_manager_for_reusable_sparse_trie_parent() {
         let parent_hash = B256::with_last_byte(1);
+        let parent_state_root = B256::with_last_byte(3);
         let anchor_hash = B256::with_last_byte(2);
         let manager = StateTrieOverlayManager::default();
-        manager.set_reusable_sparse_trie_block_hash(parent_hash);
+        manager.set_reusable_sparse_trie_state_root_for_testing(parent_state_root);
         let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
             .with_state_trie_overlay_manager(manager)
-            .with_sparse_trie_fast_path(true);
+            .with_reusable_sparse_trie_state_root(parent_state_root);
 
         let (trie, state) = builder.resolve_overlays(anchor_hash).unwrap();
 
@@ -744,9 +743,10 @@ mod tests {
     #[test]
     fn managed_overlay_does_not_skip_reusable_sparse_trie_parent_without_fast_path() {
         let parent_hash = B256::with_last_byte(1);
+        let parent_state_root = B256::with_last_byte(3);
         let anchor_hash = B256::with_last_byte(2);
         let manager = StateTrieOverlayManager::default();
-        manager.set_reusable_sparse_trie_block_hash(parent_hash);
+        manager.set_reusable_sparse_trie_state_root_for_testing(parent_state_root);
         let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
             .with_state_trie_overlay_manager(manager);
 
@@ -758,16 +758,17 @@ mod tests {
     #[test]
     fn reusable_sparse_trie_parent_preserves_explicit_hashed_state_overlay() {
         let parent_hash = B256::with_last_byte(1);
+        let parent_state_root = B256::with_last_byte(4);
         let anchor_hash = B256::with_last_byte(2);
         let manager = StateTrieOverlayManager::default();
-        manager.set_reusable_sparse_trie_block_hash(parent_hash);
+        manager.set_reusable_sparse_trie_state_root_for_testing(parent_state_root);
         let hashed_state = HashedPostState::default()
             .with_accounts([(B256::with_last_byte(3), Some(Account::default()))])
             .into_sorted();
         let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
             .with_state_trie_overlay_manager(manager)
             .with_extended_hashed_state_overlay(hashed_state)
-            .with_sparse_trie_fast_path(true);
+            .with_reusable_sparse_trie_state_root(parent_state_root);
 
         let (trie, state) = builder.resolve_overlays(anchor_hash).unwrap();
 

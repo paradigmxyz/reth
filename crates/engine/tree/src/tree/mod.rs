@@ -1368,7 +1368,7 @@ where
         if new_tip_num < self.persistence_state.last_persisted_block.number {
             debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
             self.pending_sparse_trie_prune = None;
-            self.state.tree_state.state_trie_overlays.clear_reusable_sparse_trie_block_hash();
+            self.state.tree_state.state_trie_overlays.clear_reusable_sparse_trie();
             let (tx, rx) = crossbeam_channel::bounded(1);
             let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
             self.persistence_state.start_remove(new_tip_num, rx);
@@ -2698,7 +2698,7 @@ where
             trace!(target: "engine::tree", ?new_first, ?old_first, "Reorg detected, new and old first blocks");
 
             self.pending_sparse_trie_prune = None;
-            self.state.tree_state.state_trie_overlays.clear_reusable_sparse_trie_block_hash();
+            self.state.tree_state.state_trie_overlays.clear_reusable_sparse_trie();
             self.update_reorg_metrics(old.len(), old_first);
             self.reinsert_reorged_blocks(new.clone());
             self.reinsert_reorged_blocks(old.clone());
@@ -3024,7 +3024,6 @@ where
             executed_block: executed,
             execution_timing_stats: timing_stats,
             raw_bal,
-            reusable_sparse_trie_block_hash,
         } = execute(&mut self.payload_validator, input, ctx)?;
 
         if let Some(raw_bal) = raw_bal {
@@ -3063,12 +3062,6 @@ where
         }
 
         self.state.tree_state.insert_executed(executed.clone());
-        if let Some(block_hash) = reusable_sparse_trie_block_hash {
-            self.state
-                .tree_state
-                .state_trie_overlays
-                .set_reusable_sparse_trie_block_hash(block_hash);
-        }
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
         // emit insert event

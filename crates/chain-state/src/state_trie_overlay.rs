@@ -68,7 +68,7 @@ impl<N: NodePrimitives> std::fmt::Debug for StateTrieOverlayManager<N> {
         f.debug_struct("StateTrieOverlayManager")
             .field("blocks", &self.blocks.len())
             .field("overlays", &self.overlays.len())
-            .field("reusable_sparse_trie_block_hash", &self.reusable_sparse_trie_block_hash())
+            .field("reusable_sparse_trie_state_root", &self.reusable_sparse_trie_state_root())
             .finish()
     }
 }
@@ -126,24 +126,25 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         );
     }
 
-    /// Sets the block hash whose state root is represented by the reusable sparse trie.
-    pub fn set_reusable_sparse_trie_block_hash(&self, block_hash: B256) {
-        self.reusable_sparse_trie.set_block_hash(block_hash);
-    }
-
-    /// Clears the reusable sparse trie and its associated block hash.
-    pub fn clear_reusable_sparse_trie_block_hash(&self) {
+    /// Clears the reusable sparse trie and its associated state root.
+    pub fn clear_reusable_sparse_trie(&self) {
         self.reusable_sparse_trie.clear();
     }
 
-    /// Returns the block hash whose state root is represented by the reusable sparse trie.
-    pub fn reusable_sparse_trie_block_hash(&self) -> Option<B256> {
-        self.reusable_sparse_trie.block_hash()
+    /// Returns the state root represented by the reusable sparse trie.
+    pub fn reusable_sparse_trie_state_root(&self) -> Option<B256> {
+        self.reusable_sparse_trie.state_root()
     }
 
     /// Returns the reusable sparse trie owned by the overlay manager.
     pub fn reusable_sparse_trie(&self) -> ReusableSparseTrie {
         self.reusable_sparse_trie.clone()
+    }
+
+    /// Sets the reusable sparse trie's state root marker without installing a trie.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_reusable_sparse_trie_state_root_for_testing(&self, state_root: B256) {
+        self.reusable_sparse_trie.set_state_root_for_testing(state_root);
     }
 
     /// Removes blocks from the live block graph and prunes cached overlays that can no longer be
@@ -656,27 +657,27 @@ mod tests {
     }
 
     #[test]
-    fn tracks_reusable_sparse_trie_block_hash() {
+    fn tracks_reusable_sparse_trie_state_root() {
         let manager = StateTrieOverlayManager::default();
         let blocks = test_blocks();
 
-        assert_eq!(manager.reusable_sparse_trie_block_hash(), None);
+        assert_eq!(manager.reusable_sparse_trie_state_root(), None);
 
         manager.insert_block(blocks[0].clone());
-        let first_hash = blocks[0].recovered_block().hash();
-        manager.set_reusable_sparse_trie_block_hash(first_hash);
-        assert_eq!(manager.reusable_sparse_trie_block_hash(), Some(first_hash));
+        let first_root = blocks[0].recovered_block().state_root();
+        manager.set_reusable_sparse_trie_state_root_for_testing(first_root);
+        assert_eq!(manager.reusable_sparse_trie_state_root(), Some(first_root));
 
-        let second_hash = blocks[1].recovered_block().hash();
-        manager.set_reusable_sparse_trie_block_hash(second_hash);
-        assert_eq!(manager.reusable_sparse_trie_block_hash(), Some(second_hash));
+        let second_root = blocks[1].recovered_block().state_root();
+        manager.set_reusable_sparse_trie_state_root_for_testing(second_root);
+        assert_eq!(manager.reusable_sparse_trie_state_root(), Some(second_root));
 
-        manager.clear_reusable_sparse_trie_block_hash();
-        assert_eq!(manager.reusable_sparse_trie_block_hash(), None);
+        manager.clear_reusable_sparse_trie();
+        assert_eq!(manager.reusable_sparse_trie_state_root(), None);
     }
 
     #[test]
-    fn removing_reusable_sparse_trie_block_hash_keeps_marker() {
+    fn removing_reusable_sparse_trie_state_root_keeps_marker() {
         let manager = StateTrieOverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
@@ -684,13 +685,14 @@ mod tests {
         }
 
         let block_hash = blocks[1].recovered_block().hash();
-        manager.set_reusable_sparse_trie_block_hash(block_hash);
+        let state_root = blocks[1].recovered_block().state_root();
+        manager.set_reusable_sparse_trie_state_root_for_testing(state_root);
 
         manager.remove_blocks([blocks[0].recovered_block().hash()]);
-        assert_eq!(manager.reusable_sparse_trie_block_hash(), Some(block_hash));
+        assert_eq!(manager.reusable_sparse_trie_state_root(), Some(state_root));
 
         manager.remove_blocks([block_hash]);
-        assert_eq!(manager.reusable_sparse_trie_block_hash(), Some(block_hash));
+        assert_eq!(manager.reusable_sparse_trie_state_root(), Some(state_root));
     }
 
     #[test]

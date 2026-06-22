@@ -590,7 +590,7 @@ where
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
         let proof_overlay_factory = OverlayStateProviderFactory::new(
             provider_factory.clone(),
-            overlay_builder.clone().with_sparse_trie_fast_path(true),
+            overlay_builder.clone().with_reusable_sparse_trie_state_root(parent_block.state_root()),
         );
         let changeset_provider = self.spawn_changeset_provider_task(overlay_factory.clone());
 
@@ -781,7 +781,6 @@ where
 
         let root_time = Instant::now();
         let mut maybe_state_root = None;
-        let mut reusable_sparse_trie_block_hash = None;
         let mut state_root_task_failed = false;
         #[cfg(feature = "trie-debug")]
         let mut trie_debug_recorders = Vec::new();
@@ -838,16 +837,10 @@ where
 
                         // we double check the state root here for good measure
                         if state_root == block.header().state_root() {
-                            if maybe_new_hashed_state.is_none() {
-                                reusable_sparse_trie_block_hash = Some(block.hash());
-                            }
                             maybe_state_root =
                                 Some((state_root, trie_updates, changed_paths, elapsed))
                         } else {
-                            ctx.state()
-                                .tree_state
-                                .state_trie_overlays
-                                .clear_reusable_sparse_trie_block_hash();
+                            ctx.state().tree_state.state_trie_overlays.clear_reusable_sparse_trie();
                             warn!(
                                 target: "engine::tree::payload_validator",
                                 ?state_root,
@@ -875,10 +868,7 @@ where
                 // won the race, we need to replace the hashed state handle and re-run the
                 // validation.
                 if maybe_new_hashed_state.is_some() {
-                    ctx.state()
-                        .tree_state
-                        .state_trie_overlays
-                        .clear_reusable_sparse_trie_block_hash();
+                    ctx.state().tree_state.state_trie_overlays.clear_reusable_sparse_trie();
                 }
                 if maybe_new_hashed_state.is_some() || state_root_task_failed {
                     hashed_state = maybe_new_hashed_state.unwrap_or_else(|| {
@@ -981,7 +971,7 @@ where
 
         // ensure state root matches
         if state_root != block.header().state_root() {
-            ctx.state().tree_state.state_trie_overlays.clear_reusable_sparse_trie_block_hash();
+            ctx.state().tree_state.state_trie_overlays.clear_reusable_sparse_trie();
             #[cfg(feature = "trie-debug")]
             Self::write_trie_debug_recorders(block.header().number(), &trie_debug_recorders);
 
@@ -1036,9 +1026,7 @@ where
             changeset_provider,
         );
         let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
-        Ok(ValidationOutput::new(executed_block, timing_stats)
-            .with_raw_bal(raw_bal)
-            .with_reusable_sparse_trie_block_hash(reusable_sparse_trie_block_hash))
+        Ok(ValidationOutput::new(executed_block, timing_stats).with_raw_bal(raw_bal))
     }
 
     /// Spawns a background task to convert a [`BlockOrPayload`] into a [`SealedBlock`] and perform
@@ -2380,7 +2368,7 @@ where
         let overlay_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
             Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone())
-                .with_sparse_trie_fast_path(true),
+                .with_reusable_sparse_trie_state_root(parent_state_root),
         );
 
         Some(self.payload_processor.spawn_state_root(

@@ -13,11 +13,11 @@ use tracing::debug;
 /// Generation token for reusable sparse trie invalidation.
 pub type ReusableSparseTrieGeneration = u64;
 
-/// Shared reusable sparse trie and the block hash marker it represents.
+/// Shared reusable sparse trie and the state root marker it represents.
 #[derive(Debug, Default, Clone)]
 pub struct ReusableSparseTrie {
     trie: Arc<Mutex<Option<PreservedSparseTrie>>>,
-    block_hash: Arc<RwLock<Option<B256>>>,
+    state_root: Arc<RwLock<Option<B256>>>,
     generation: Arc<AtomicU64>,
 }
 
@@ -47,7 +47,7 @@ impl ReusableSparseTrie {
                     "Clearing anchored sparse trie - parent state root mismatch"
                 );
                 trie.clear();
-                self.clear_block_hash();
+                self.clear_state_root();
                 trie
             }
             PreservedSparseTrie::Cleared { trie } => {
@@ -56,7 +56,7 @@ impl ReusableSparseTrie {
                     %parent_state_root,
                     "Using cleared sparse trie with preserved allocations"
                 );
-                self.clear_block_hash();
+                self.clear_state_root();
                 trie
             }
         });
@@ -67,7 +67,7 @@ impl ReusableSparseTrie {
     pub fn lock(&self) -> ReusableSparseTrieGuard<'_> {
         ReusableSparseTrieGuard {
             trie: self.trie.lock(),
-            block_hash: Arc::clone(&self.block_hash),
+            state_root: Arc::clone(&self.state_root),
             generation: Arc::clone(&self.generation),
         }
     }
@@ -75,7 +75,7 @@ impl ReusableSparseTrie {
     /// Clears the reusable sparse trie marker and stores the trie as cleared if one is present.
     pub fn clear(&self) {
         self.generation.fetch_add(1, Ordering::AcqRel);
-        self.clear_block_hash();
+        self.clear_state_root();
 
         let mut preserved = self.trie.lock();
         let Some(trie) = preserved.take() else { return };
@@ -85,14 +85,15 @@ impl ReusableSparseTrie {
         preserved.replace(PreservedSparseTrie::cleared(trie));
     }
 
-    /// Sets the block hash whose state root is represented by the reusable sparse trie.
-    pub fn set_block_hash(&self, block_hash: B256) {
-        *self.block_hash.write() = Some(block_hash);
+    /// Returns the state root represented by the reusable sparse trie.
+    pub fn state_root(&self) -> Option<B256> {
+        *self.state_root.read()
     }
 
-    /// Returns the block hash whose state root is represented by the reusable sparse trie.
-    pub fn block_hash(&self) -> Option<B256> {
-        *self.block_hash.read()
+    /// Sets the state root marker without installing a trie.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_state_root_for_testing(&self, state_root: B256) {
+        *self.state_root.write() = Some(state_root);
     }
 
     /// Waits until the reusable sparse trie lock becomes available.
@@ -112,8 +113,8 @@ impl ReusableSparseTrie {
         elapsed
     }
 
-    fn clear_block_hash(&self) {
-        *self.block_hash.write() = None;
+    fn clear_state_root(&self) {
+        *self.state_root.write() = None;
     }
 }
 
@@ -124,7 +125,7 @@ impl ReusableSparseTrie {
 #[derive(Debug)]
 pub struct ReusableSparseTrieGuard<'a> {
     trie: parking_lot::MutexGuard<'a, Option<PreservedSparseTrie>>,
-    block_hash: Arc<RwLock<Option<B256>>>,
+    state_root: Arc<RwLock<Option<B256>>>,
     generation: Arc<AtomicU64>,
 }
 
@@ -137,6 +138,7 @@ impl ReusableSparseTrieGuard<'_> {
         generation: ReusableSparseTrieGeneration,
     ) {
         if self.generation.load(Ordering::Acquire) == generation {
+            *self.state_root.write() = Some(state_root);
             self.trie.replace(PreservedSparseTrie::anchored(trie, state_root));
         }
     }
@@ -150,7 +152,7 @@ impl ReusableSparseTrieGuard<'_> {
         if self.generation.load(Ordering::Acquire) == generation {
             trie.clear();
             self.trie.replace(PreservedSparseTrie::cleared(trie));
-            *self.block_hash.write() = None;
+            *self.state_root.write() = None;
         }
     }
 }
@@ -198,7 +200,6 @@ mod tests {
     fn clear_invalidates_in_flight_anchored_store() {
         let reusable = ReusableSparseTrie::default();
         let state_root = B256::with_last_byte(1);
-        let block_hash = B256::with_last_byte(2);
 
         let generation = reusable.generation.load(Ordering::Acquire);
         reusable.lock().store_anchored_if_current(
@@ -206,7 +207,7 @@ mod tests {
             state_root,
             generation,
         );
-        reusable.set_block_hash(block_hash);
+        assert_eq!(reusable.state_root(), Some(state_root));
 
         let (Some(trie), generation) = reusable.take_for_parent(state_root) else {
             panic!("anchored trie should be available")
@@ -215,7 +216,7 @@ mod tests {
         reusable.clear();
         reusable.lock().store_anchored_if_current(trie, state_root, generation);
 
-        assert_eq!(reusable.block_hash(), None);
+        assert_eq!(reusable.state_root(), None);
         assert!(reusable.take_for_parent(state_root).0.is_none());
     }
 }
