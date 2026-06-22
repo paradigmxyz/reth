@@ -153,6 +153,7 @@ use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::{Address, KECCAK_EMPTY};
 use std::{
     collections::HashMap,
+    convert::Infallible,
     panic::{self, AssertUnwindSafe},
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -404,7 +405,7 @@ where
             }
             BlockOrPayload::Block(block) => {
                 let txs = block.body().clone_transactions();
-                let convert = |tx: N::SignedTx| tx.try_into_recovered();
+                let convert = |tx: N::SignedTx| SignerRecoverable::try_into_recovered(tx);
                 Either::Right((txs, convert))
             }
         })
@@ -482,7 +483,9 @@ where
                     Ok(val) => val,
                     Err(e) => {
                         let block = validated_block.try_into_inner().expect("sole handle")?;
-                        return Err(InsertBlockError::new(block, e.into()).into())
+                        return Err(
+                            InsertBlockError::new(block.into_sealed_block(), e.into()).into()
+                        )
                     }
                 }
             };
@@ -522,7 +525,7 @@ where
         else {
             // this is pre-validated in the tree
             return Err(InsertBlockError::new(
-                validated_block.try_into_inner().expect("sole handle")?,
+                validated_block.try_into_inner().expect("sole handle")?.into_sealed_block(),
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
             .into())
@@ -563,9 +566,6 @@ where
             "Decided which state root algorithm to run"
         );
 
-        // Get an iterator over the transactions in the payload
-        let txs = self.tx_iterator_for(&input)?;
-
         // Create overlay factory for payload processor (StateRootTask path needs it for
         // multiproofs)
         let provider_factory = self.provider.clone();
@@ -579,6 +579,20 @@ where
         let changeset_provider = self.spawn_changeset_provider_task(overlay_factory.clone());
 
         let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
+
+        // Reuse the recovered transactions from payload validation instead of decoding and
+        // recovering the payload body again in the tx iterator.
+        let recovered_block = match validated_block.get() {
+            Ok(block) => block,
+            Err(_) => {
+                return Err(validated_block
+                    .try_into_inner()
+                    .expect("sole handle")
+                    .expect_err("Err result checked"))
+            }
+        };
+        let recovered_txs: Vec<_> = recovered_block.clone_transactions_recovered().collect();
+        let txs = (recovered_txs, |tx| Ok::<_, Infallible>(tx));
 
         // Spawn the appropriate processor based on strategy
         let mut handle = ensure_ok!(self.spawn_payload_processor(
@@ -672,7 +686,7 @@ where
         if let (Some(metrics), Some(stats)) = (&state_provider_metrics, &state_provider_stats) {
             metrics.record_totals(stats);
         }
-        let (output, senders, receipt_root_rx, built_bal) = ensure_ok!(execution_result);
+        let (output, _senders, receipt_root_rx, built_bal) = ensure_ok!(execution_result);
 
         // After executing the block we can stop prewarming transactions
         handle.stop_prewarming_execution();
@@ -708,7 +722,6 @@ where
             });
 
         let block = validated_block.try_into_inner().expect("sole handle")?;
-        let block = block.with_senders(senders);
 
         // Wait for the receipt root computation to complete.
         let receipt_root_bloom = {
@@ -985,14 +998,14 @@ where
         Ok(ValidationOutput::new(executed_block, timing_stats).with_raw_bal(raw_bal))
     }
 
-    /// Spawns a background task to convert a [`BlockOrPayload`] into a [`SealedBlock`] and perform
+    /// Spawns a background task to convert a [`BlockOrPayload`] into a [`RecoveredBlock`] and perform
     /// basic consensus validations on it.
     #[expect(clippy::type_complexity)]
     pub fn spawn_convert_and_validate<T>(
         &self,
         input: &BlockOrPayload<T>,
         parent: SealedHeader<N::BlockHeader>,
-    ) -> LazyHandle<Result<SealedBlock<N::Block>, InsertPayloadError<N::Block>>>
+    ) -> LazyHandle<Result<RecoveredBlock<N::Block>, InsertPayloadError<N::Block>>>
     where
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
         V: PayloadValidator<T, Block = N::Block> + Clone,
@@ -1009,31 +1022,31 @@ where
             )
             .entered();
             let block = match input {
-                BlockOrPayload::Block(block) => block,
-                BlockOrPayload::Payload(payload) => {
-                    validator.convert_payload_to_block(payload)?
-                }
+                BlockOrPayload::Block(block) => block
+                    .try_recover()
+                    .map_err(|e| NewPayloadError::Other(e.into()))?,
+                BlockOrPayload::Payload(payload) => validator.ensure_well_formed_payload(payload)?,
             };
 
-            if let Err(e) = consensus.validate_header(block.sealed_header()) {
+            if let Err(e) = consensus.validate_header(block.sealed_block().sealed_header()) {
                 error!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {}: {e}", block.hash());
-                return Err(InsertBlockError::consensus_error(e, block).into())
+                return Err(InsertBlockError::consensus_error(e, block.clone_sealed_block()).into())
             }
 
             // now validate against the parent
             let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_header_against_parent").entered();
-            if let Err(e) = consensus.validate_header_against_parent(block.sealed_header(), &parent)
+            if let Err(e) = consensus.validate_header_against_parent(block.sealed_block().sealed_header(), &parent)
             {
                 warn!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {} against parent: {e}", block.hash());
-                return Err(InsertBlockError::consensus_error(e, block).into())
+                return Err(InsertBlockError::consensus_error(e, block.clone_sealed_block()).into())
             }
             drop(_enter);
 
             if let Err(e) =
-                consensus.validate_block_pre_execution_with_tx_root(&block, None)
+                consensus.validate_block_pre_execution_with_tx_root(block.sealed_block(), None)
             {
                 error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
-                return Err(InsertBlockError::consensus_error(e, block).into())
+                return Err(InsertBlockError::consensus_error(e, block.clone_sealed_block()).into())
             }
 
             Ok(block)
