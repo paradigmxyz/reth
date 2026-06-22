@@ -136,6 +136,13 @@ impl OrderedTrieRootEncodedBuilder {
     }
 
     fn add_leaf(&mut self, index: usize, bytes: &[u8]) {
+        if index <= 0x7f {
+            let encoded = if index == 0 { 0x80 } else { index as u8 };
+            self.hb
+                .add_leaf(Nibbles::from_nibbles_unchecked([encoded >> 4, encoded & 0x0f]), bytes);
+            return;
+        }
+
         let index_buffer = alloy_rlp::encode_fixed_size(&index);
         self.hb.add_leaf(Nibbles::unpack(&index_buffer), bytes);
     }
