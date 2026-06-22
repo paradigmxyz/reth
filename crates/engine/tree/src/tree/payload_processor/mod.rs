@@ -34,7 +34,9 @@ use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
 };
-use reth_trie_sparse::{ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie};
+use reth_trie_sparse::{
+    ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie, SparseTrieRetainedPaths,
+};
 use std::{
     ops::Not,
     sync::{
@@ -114,7 +116,7 @@ where
     precompile_cache_disabled: bool,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
-    /// A pruned `SparseStateTrie`, kept around as a cache of already revealed trie nodes and to
+    /// A preserved `SparseStateTrie`, kept around as a cache of already revealed trie nodes and to
     /// re-use allocated memory. Stored with the block hash it was computed for to enable trie
     /// preservation across sequential payload validations.
     sparse_state_trie: SharedPreservedSparseTrie,
@@ -132,6 +134,31 @@ where
     /// Dedicated blocking pool for warming the BAL read-set, created lazily on the first BAL block
     /// (see [`Self::bal_prewarm_pool`]). Its threads exit when the processor is dropped.
     bal_prewarm_pool: OnceLock<Arc<bal_prewarm_pool::BalPrewarmPool>>,
+}
+
+/// Options for spawning payload processor tasks.
+#[derive(Debug, Default)]
+pub struct PayloadProcessorSpawnOptions {
+    /// Whether to execute BAL blocks through the parallel BAL path.
+    pub parallel_bal_execution: bool,
+    /// Pending sparse trie prune request to run after successful state root computation.
+    pub pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
+}
+
+impl PayloadProcessorSpawnOptions {
+    /// Creates new payload processor spawn options.
+    pub const fn new(
+        parallel_bal_execution: bool,
+        pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
+    ) -> Self {
+        Self { parallel_bal_execution, pending_sparse_trie_prune }
+    }
+}
+
+struct SparseTrieTaskOptions {
+    parent_state_root: B256,
+    chunk_size: usize,
+    pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
 }
 
 impl<N, Evm> PayloadProcessor<Evm>
@@ -266,7 +293,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         multiproof_provider_factory: F,
         config: &TreeConfig,
-        parallel_bal_execution: bool,
+        options: PayloadProcessorSpawnOptions,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -276,6 +303,8 @@ where
             + Sync
             + 'static,
     {
+        let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
+            options;
         // start preparing transactions immediately
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
@@ -288,6 +317,7 @@ where
             env.parent_state_root,
             halve_workers,
             config,
+            pending_sparse_trie_prune,
         );
         // BAL blocks only bypass the normal execution state hook when the validator decided that
         // the parallel BAL executor will consume this block. If not, treat the BAL as absent here
@@ -361,6 +391,7 @@ where
         parent_state_root: B256,
         halve_workers: bool,
         config: &TreeConfig,
+        pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
     ) -> StateRootHandle
     where
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -384,8 +415,15 @@ where
             state_root_tx,
             hashed_state_tx,
             from_multi_proof,
-            parent_state_root,
-            config.multiproof_chunk_size(),
+            SparseTrieTaskOptions {
+                parent_state_root,
+                chunk_size: config.multiproof_chunk_size(),
+                pending_sparse_trie_prune: if self.disable_sparse_trie_cache_pruning {
+                    None
+                } else {
+                    pending_sparse_trie_prune
+                },
+            },
         );
 
         StateRootHandle::new(parent_state_root, updates_tx, state_root_rx, hashed_state_rx)
@@ -607,14 +645,14 @@ where
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
         hashed_state_tx: mpsc::Sender<HashedPostState>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
-        parent_state_root: B256,
-        chunk_size: usize,
+        options: SparseTrieTaskOptions,
     ) {
+        let SparseTrieTaskOptions { parent_state_root, chunk_size, pending_sparse_trie_prune } =
+            options;
         let preserved_sparse_trie = self.sparse_state_trie.clone();
         let trie_metrics = self.trie_metrics.clone();
         let max_hot_slots = self.sparse_trie_max_hot_slots;
         let max_hot_accounts = self.sparse_trie_max_hot_accounts;
-        let disable_cache_pruning = self.disable_sparse_trie_cache_pruning;
         let executor = self.executor.clone();
 
         let parent_span = Span::current();
@@ -626,7 +664,7 @@ where
 
             // Reuse a stored SparseStateTrie if available, applying continuation logic.
             // If this payload's parent state root matches the preserved trie's anchor,
-            // we can reuse the pruned trie structure. Otherwise, we clear the trie but
+            // we can reuse the preserved trie structure. Otherwise, we clear the trie but
             // keep allocations.
             let start = Instant::now();
             let preserved = preserved_sparse_trie.take();
@@ -692,11 +730,10 @@ where
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
             let deferred = if let Some(result) = task_result {
                 let start = Instant::now();
-                let (trie, deferred) = task.into_trie_for_reuse(
-                    max_hot_slots,
-                    max_hot_accounts,
-                    disable_cache_pruning,
-                );
+                let (mut trie, deferred) = task.into_trie_for_reuse();
+                if let Some(retained_paths) = pending_sparse_trie_prune {
+                    trie.prune(max_hot_slots, max_hot_accounts, retained_paths);
+                }
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
@@ -1026,7 +1063,10 @@ where
 #[cfg(test)]
 mod tests {
     use crate::tree::{
-        payload_processor::{evm_state_to_hashed_post_state, ExecutionEnv, PayloadProcessor},
+        payload_processor::{
+            evm_state_to_hashed_post_state, ExecutionEnv, PayloadProcessor,
+            PayloadProcessorSpawnOptions,
+        },
         precompile_cache::PrecompileCacheMap,
         ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
     };
@@ -1211,7 +1251,7 @@ mod tests {
             .execution_cache
             .update_with_guard(|slot| *slot = Some(make_saved_cache(parent_hash)));
 
-        // Checking out the cache bumps its usage_guard refcount, marking the slot as in-use.
+        // Checking out the cache bumps its `ExecutionCache` refcount, marking the slot as in-use.
         // The returned SavedCache shares the same underlying ExecutionCache Arc as the slot,
         // so any writes through the slot are observable here
         let checked_out = payload_processor
@@ -1377,7 +1417,7 @@ mod tests {
                 OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
             ),
             &TreeConfig::default(),
-            false,
+            PayloadProcessorSpawnOptions::default(),
         );
 
         let mut state_hook = handle.state_hook().expect("state hook is None");
@@ -1402,7 +1442,7 @@ mod tests {
     /// 2. Fork block (parent = block 2) checks out the cache via `get_cache_for`, simulating what
     ///    `PrewarmCacheTask` does when it receives a `SavedCache`.
     /// 3. Prewarm populates the shared cache with fork-specific state.
-    /// 4. While the prewarm clone is alive, the cache is unavailable (`usage_guard` > 1).
+    /// 4. While the prewarm clone is alive, the cache is unavailable (`usage_count` > 1).
     /// 5. Prewarm drops without calling `save_cache` (fork block was invalid).
     /// 6. Canonical block 5 (parent = block 4) must get a cache with correct hash and no stale fork
     ///    data.
@@ -1428,7 +1468,7 @@ mod tests {
         let fork_key = B256::from([0xCC; 32]);
         prewarm_cache.cache().insert_storage(fork_addr, fork_key, Some(U256::from(999)));
 
-        // While prewarm holds the clone, the usage_guard count > 1 → cache is in use.
+        // While prewarm holds the clone, the cache handle count > 1 so the cache is in use.
         let during_prewarm = execution_cache.get_cache_for(block4_hash);
         assert!(
             during_prewarm.is_none(),
