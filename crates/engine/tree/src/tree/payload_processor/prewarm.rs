@@ -358,7 +358,7 @@ where
         let stream_parent_span = parent_span;
         let prefetch_bal = Arc::clone(&decoded_bal);
         let stream_bal = Arc::clone(&decoded_bal);
-        let (stream_tx, stream_rx) = oneshot::channel();
+        let (stream_tx, mut stream_rx) = oneshot::channel();
 
         if let Some(to_sparse_trie_task) = to_sparse_trie_task {
             let ctx = ctx.clone();
@@ -425,9 +425,17 @@ where
             pool.end_block();
         }
 
-        stream_rx
-            .blocking_recv()
-            .expect("BAL hashed-state streaming task dropped without signaling completion");
+        match stream_rx.try_recv() {
+            Ok(()) => {}
+            Err(oneshot::error::TryRecvError::Empty) => {
+                stream_rx
+                    .blocking_recv()
+                    .expect("BAL hashed-state streaming task dropped without signaling completion");
+            }
+            Err(oneshot::error::TryRecvError::Closed) => {
+                panic!("BAL hashed-state streaming task dropped without signaling completion");
+            }
+        }
 
         // Drop the per-thread providers
         executor.bal_streaming_pool().clear();
