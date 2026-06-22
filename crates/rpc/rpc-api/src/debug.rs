@@ -40,6 +40,10 @@ pub trait DebugApi<TxReq: RpcObject> {
     #[method(name = "getBadBlocks")]
     async fn bad_blocks(&self) -> RpcResult<Vec<serde_json::Value>>;
 
+    /// Clears all transactions from the transaction pool.
+    #[method(name = "clearTxpool")]
+    async fn debug_clear_txpool(&self) -> RpcResult<()>;
+
     /// Returns the structured logs created during the execution of EVM between two blocks
     /// (excluding start) as a JSON object.
     #[method(name = "traceChain")]
