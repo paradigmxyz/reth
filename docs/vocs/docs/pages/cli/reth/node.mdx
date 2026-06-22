@@ -1046,10 +1046,10 @@ Engine:
           Allow unwinding canonical header to ancestor during forkchoice updates. See `TreeConfig::unwind_canonical_header` for more details
 
       --engine.storage-worker-count <STORAGE_WORKER_COUNT>
-          Configure the number of storage proof workers in the Tokio blocking pool. If not specified, defaults to 2x available parallelism
+          Configure the number of storage proof workers in the Tokio blocking pool. If not specified, defaults to 2x available parallelism, with a minimum of 128
 
       --engine.account-worker-count <ACCOUNT_WORKER_COUNT>
-          Configure the number of account proof workers in the Tokio blocking pool. If not specified, defaults to the same count as storage workers
+          Configure the number of account proof workers in the Tokio blocking pool. If not specified, defaults to 2x available parallelism, with a minimum of 128
 
       --engine.prewarming-threads <PREWARMING_THREADS>
           Configure the number of prewarming threads. If not specified, defaults to available parallelism
