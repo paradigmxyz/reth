@@ -672,7 +672,7 @@ human_bytes = "0.4.1"
 indexmap = "2"
 interprocess = "2.4.2"
 lz4_flex = { version = "0.12", default-features = false }
-memmap2 = "0.9.4"
+memmap2 = "0.9.11"
 num-traits = "0.2.15"
 page_size = "0.6.0"
 plain_hasher = "0.2"
