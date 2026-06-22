@@ -502,7 +502,6 @@ where
         } else {
             RocksDBProvider::builder(self.data_dir().rocksdb())
                 .with_default_tables()
-                .with_block_access_lists()
                 .with_metrics()
                 .with_statistics()
                 .build()?

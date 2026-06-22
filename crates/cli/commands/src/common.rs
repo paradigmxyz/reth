@@ -153,7 +153,6 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             reth_fs_util::create_dir_all(&rocksdb_path)?;
             let mut builder = RocksDBProvider::builder(data_dir.rocksdb())
                 .with_default_tables()
-                .with_block_access_lists()
                 .with_database_log_level(self.db.log_level);
             if let Some(cache_size) = self.db.rocksdb_block_cache_size {
                 builder = builder.with_block_cache_size(cache_size);
@@ -162,7 +161,6 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         } else {
             let mut builder = RocksDBProvider::builder(data_dir.rocksdb())
                 .with_default_tables()
-                .with_block_access_lists()
                 .with_database_log_level(self.db.log_level)
                 .with_read_only(!access.is_read_write());
             if let Some(cache_size) = self.db.rocksdb_block_cache_size {

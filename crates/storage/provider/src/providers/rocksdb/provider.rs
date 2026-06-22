@@ -317,15 +317,12 @@ impl RocksDBBuilder {
     /// - [`tables::TransactionHashNumbers`] - Transaction hash to number mapping
     /// - [`tables::AccountsHistory`] - Account history index
     /// - [`tables::StoragesHistory`] - Storage history index
+    /// - [`tables::BlockAccessLists`] - Block access list payloads
     pub fn with_default_tables(self) -> Self {
         self.with_table::<tables::TransactionHashNumbers>()
             .with_table::<tables::AccountsHistory>()
             .with_table::<tables::StoragesHistory>()
-    }
-
-    /// Adds the block access list payload table with BlobDB options.
-    pub fn with_block_access_lists(self) -> Self {
-        self.with_table::<tables::BlockAccessLists>()
+            .with_table::<tables::BlockAccessLists>()
     }
 
     /// Enables metrics.
@@ -2863,13 +2860,24 @@ mod tests {
         let key = StorageShardedKey::new(Address::ZERO, B256::ZERO, 100);
         provider.put::<tables::StoragesHistory>(key.clone(), &value).unwrap();
         assert!(provider.get::<tables::StoragesHistory>(key).unwrap().is_some());
+
+        // Should be able to write/read BlockAccessLists
+        let bal_key = reth_db_api::models::StoredBlockAccessListKey::new(NumHash::new(
+            1,
+            B256::with_last_byte(1),
+        ));
+        let bal_value =
+            reth_db_api::models::StoredBlockAccessList::new(RawBal::from(Bytes::from_static(&[
+                0xc0,
+            ])));
+        provider.put::<tables::BlockAccessLists>(bal_key, &bal_value).unwrap();
+        assert_eq!(provider.get::<tables::BlockAccessLists>(bal_key).unwrap(), Some(bal_value));
     }
 
     #[test]
     fn block_access_lists_store_large_payloads_in_blob_files() {
         let temp_dir = TempDir::new().unwrap();
-        let provider =
-            RocksDBBuilder::new(temp_dir.path()).with_block_access_lists().build().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
         let bal_key = reth_db_api::models::StoredBlockAccessListKey::new(NumHash::new(
             1,
             B256::with_last_byte(1),
@@ -2891,10 +2899,9 @@ mod tests {
     }
 
     #[test]
-    fn with_block_access_lists_registers_bal_column_family() {
+    fn default_tables_register_bal_column_family() {
         let temp_dir = TempDir::new().unwrap();
-        let provider =
-            RocksDBBuilder::new(temp_dir.path()).with_block_access_lists().build().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
         let bal_key = reth_db_api::models::StoredBlockAccessListKey::new(NumHash::new(
             1,
             B256::with_last_byte(1),

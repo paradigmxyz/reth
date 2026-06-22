@@ -107,7 +107,6 @@ impl<N> ProviderFactoryBuilder<N> {
         let static_file_provider = StaticFileProvider::read_only(static_files_dir)?;
         let rocksdb_provider = RocksDBProvider::builder(&rocksdb_dir)
             .with_default_tables()
-            .with_block_access_lists()
             .with_read_only(true)
             .build()?;
         let factory =

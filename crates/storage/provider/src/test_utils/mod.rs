@@ -75,7 +75,6 @@ pub fn create_test_provider_factory_with_node_types<N: NodeTypesForProvider>(
         StaticFileProvider::read_write(static_files_path).expect("static file provider"),
         RocksDBBuilder::new(&rocksdb_path)
             .with_default_tables()
-            .with_block_access_lists()
             .build()
             .expect("failed to create test RocksDB provider"),
         reth_tasks::Runtime::test(),
@@ -108,7 +107,6 @@ pub fn create_test_provider_factory_with_chain_spec_and_db_args(
         StaticFileProvider::read_write(static_files_path).expect("static file provider"),
         RocksDBBuilder::new(&rocksdb_path)
             .with_default_tables()
-            .with_block_access_lists()
             .build()
             .expect("failed to create test RocksDB provider"),
         reth_tasks::Runtime::test(),

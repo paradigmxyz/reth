@@ -462,7 +462,7 @@ mod tests {
 
     fn test_store() -> (tempfile::TempDir, RocksDBBalStore) {
         let dir = tempfile::tempdir().unwrap();
-        let rocksdb = RocksDBBuilder::new(dir.path()).with_block_access_lists().build().unwrap();
+        let rocksdb = RocksDBBuilder::new(dir.path()).with_default_tables().build().unwrap();
         (dir, RocksDBBalStore::new(rocksdb))
     }
 
@@ -637,7 +637,7 @@ mod tests {
     #[test]
     fn prune_uses_configured_retention() {
         let dir = tempfile::tempdir().unwrap();
-        let rocksdb = RocksDBBuilder::new(dir.path()).with_block_access_lists().build().unwrap();
+        let rocksdb = RocksDBBuilder::new(dir.path()).with_default_tables().build().unwrap();
         let store = RocksDBBalStore::with_config(
             rocksdb,
             RocksDBBalStoreConfig::with_retention_distance(2),
