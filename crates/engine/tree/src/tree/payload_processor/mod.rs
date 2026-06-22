@@ -421,41 +421,21 @@ where
             + Sync
             + 'static,
     {
-        let (updates_tx, from_multi_proof) = crossbeam_channel::unbounded();
-
-        let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
-        #[cfg(feature = "trie-debug")]
-        let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
-        let proof_handle = ProofWorkerHandle::new(&self.executor, task_ctx, halve_workers);
-
-        let (state_root_tx, state_root_rx) = channel();
-        let (hashed_state_tx, hashed_state_rx) = channel();
-
-        self.spawn_sparse_trie_task(
+        self.spawn_state_root_with_trie(
             self.sparse_state_trie.clone(),
             "sparse-trie",
-            proof_handle,
-            state_root_tx,
-            hashed_state_tx,
-            from_multi_proof,
-            SparseTrieTaskOptions {
-                parent_state_root,
-                chunk_size: config.multiproof_chunk_size(),
-                pending_sparse_trie_prune: if self.disable_sparse_trie_cache_pruning {
-                    None
-                } else {
-                    pending_sparse_trie_prune
-                },
-            },
-        );
-
-        StateRootHandle::new(parent_state_root, updates_tx, state_root_rx, hashed_state_rx)
+            multiproof_provider_factory,
+            parent_state_root,
+            halve_workers,
+            config,
+            pending_sparse_trie_prune,
+        )
     }
 
     /// Spawns an auxiliary sparse state-root computation pipeline.
     ///
-    /// This mirrors [`Self::spawn_state_root`] but uses a separate preserved sparse trie so the
-    /// auxiliary root can be anchored independently from the canonical state root.
+    /// This uses a separate preserved sparse trie so the auxiliary root can be anchored
+    /// independently from the canonical state root.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     pub fn spawn_auxiliary_state_root<F>(
         &self,
@@ -463,6 +443,34 @@ where
         parent_root: B256,
         halve_workers: bool,
         config: &TreeConfig,
+    ) -> StateRootHandle
+    where
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.spawn_state_root_with_trie(
+            self.auxiliary_sparse_state_trie.clone(),
+            "auxiliary-sparse-trie",
+            multiproof_provider_factory,
+            parent_root,
+            halve_workers,
+            config,
+            None,
+        )
+    }
+
+    fn spawn_state_root_with_trie<F>(
+        &self,
+        preserved_sparse_trie: SharedPreservedSparseTrie,
+        task_name: &'static str,
+        multiproof_provider_factory: F,
+        parent_root: B256,
+        halve_workers: bool,
+        config: &TreeConfig,
+        pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
     ) -> StateRootHandle
     where
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -482,14 +490,21 @@ where
         let (hashed_state_tx, hashed_state_rx) = channel();
 
         self.spawn_sparse_trie_task(
-            self.auxiliary_sparse_state_trie.clone(),
-            "auxiliary-sparse-trie",
+            preserved_sparse_trie,
+            task_name,
             proof_handle,
             state_root_tx,
             hashed_state_tx,
             from_multi_proof,
-            parent_root,
-            config.multiproof_chunk_size(),
+            SparseTrieTaskOptions {
+                parent_state_root: parent_root,
+                chunk_size: config.multiproof_chunk_size(),
+                pending_sparse_trie_prune: if self.disable_sparse_trie_cache_pruning {
+                    None
+                } else {
+                    pending_sparse_trie_prune
+                },
+            },
         );
 
         StateRootHandle::new(parent_root, updates_tx, state_root_rx, hashed_state_rx)
