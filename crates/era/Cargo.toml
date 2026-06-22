@@ -27,8 +27,6 @@ ethereum_ssz_derive.workspace = true
 sha2.workspace = true
 
 [dev-dependencies]
-alloy-rpc-types-beacon = { workspace = true, features = ["ssz"] }
-alloy-rpc-types-engine = { workspace = true, features = ["ssz"] }
 eyre.workspace = true
 rand.workspace = true
 reqwest.workspace = true

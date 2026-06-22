@@ -8486,8 +8486,6 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-rpc-types-beacon",
- "alloy-rpc-types-engine",
  "ethereum_ssz",
  "ethereum_ssz_derive",
  "eyre",

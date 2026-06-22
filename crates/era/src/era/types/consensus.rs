@@ -15,7 +15,7 @@
 //!
 //! ## Decoding a [`CompressedSignedBeaconBlock`]
 //!
-//! ```no_run
+//! ```ignore
 //! use alloy_rpc_types_beacon::block::SignedBeaconBlockDeneb;
 //! use alloy_rpc_types_engine::ExecutionPayloadV3;
 //! use reth_era::era::types::consensus::CompressedSignedBeaconBlock;
