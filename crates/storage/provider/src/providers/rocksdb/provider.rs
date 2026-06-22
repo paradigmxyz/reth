@@ -1286,6 +1286,10 @@ impl RocksDBProvider {
     /// Panics if the provider is in read-only mode.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = batch.len(), batch_size = batch.size_in_bytes()))]
     pub fn commit_batch(&self, batch: WriteBatchWithTransaction<true>) -> ProviderResult<()> {
+        if batch.is_empty() {
+            return Ok(())
+        }
+
         self.0.db_rw().write_opt(batch, &synced_write_options()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                 message: e.to_string().into(),
@@ -1386,7 +1390,9 @@ impl RocksDBProvider {
                 batch.put::<tables::TransactionHashNumbers>(*transaction.tx_hash(), &tx_num)?;
             }
         }
-        ctx.pending_batches.lock().push(batch.into_inner());
+        if !batch.is_empty() {
+            ctx.pending_batches.lock().push(batch.into_inner());
+        }
         Ok(())
     }
 
@@ -1419,7 +1425,9 @@ impl RocksDBProvider {
         for (address, indices) in account_history {
             batch.append_account_history_shard(address, indices)?;
         }
-        ctx.pending_batches.lock().push(batch.into_inner());
+        if !batch.is_empty() {
+            ctx.pending_batches.lock().push(batch.into_inner());
+        }
         Ok(())
     }
 
@@ -1466,7 +1474,9 @@ impl RocksDBProvider {
                 batch.put::<tables::StoragesHistory>(key, &shard)?;
             }
         }
-        ctx.pending_batches.lock().push(batch.into_inner());
+        if !batch.is_empty() {
+            ctx.pending_batches.lock().push(batch.into_inner());
+        }
         Ok(())
     }
 
@@ -1842,6 +1852,10 @@ impl<'a> RocksDBBatch<'a> {
     /// Panics if the provider is in read-only mode.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = self.inner.len(), batch_size = self.inner.size_in_bytes()))]
     pub fn commit(self) -> ProviderResult<()> {
+        if self.inner.is_empty() {
+            return Ok(())
+        }
+
         self.provider.0.db_rw().write_opt(self.inner, &synced_write_options()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                 message: e.to_string().into(),
