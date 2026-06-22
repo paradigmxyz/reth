@@ -60,7 +60,8 @@ where
     #[instrument(
         name = "AccountHistory::prune",
         target = "pruner",
-        skip(self, provider),
+        skip(self, provider, input),
+        fields(to_block = input.to_block),
         ret(level = "trace")
     )]
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
