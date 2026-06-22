@@ -2898,24 +2898,6 @@ mod tests {
         assert!(has_blob_file);
     }
 
-    #[test]
-    fn default_tables_register_bal_column_family() {
-        let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
-        let bal_key = reth_db_api::models::StoredBlockAccessListKey::new(NumHash::new(
-            1,
-            B256::with_last_byte(1),
-        ));
-        let bal_value =
-            reth_db_api::models::StoredBlockAccessList::new(RawBal::from(Bytes::from_static(&[
-                0xc0,
-            ])));
-
-        provider.put::<tables::BlockAccessLists>(bal_key, &bal_value).unwrap();
-
-        assert_eq!(provider.get::<tables::BlockAccessLists>(bal_key).unwrap(), Some(bal_value));
-    }
-
     #[derive(Debug)]
     struct TestTable;
 

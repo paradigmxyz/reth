@@ -1,4 +1,4 @@
-use crate::providers::{RocksDBBatch, RocksDBProvider};
+use crate::providers::RocksDBProvider;
 use alloy_eip7928::BAL_RETENTION_PERIOD_SLOTS;
 use alloy_eips::NumHash;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
@@ -56,38 +56,6 @@ impl RocksDBBalStore {
         &self.rocksdb
     }
 
-    /// Stages a BAL insert in an existing RocksDB batch.
-    pub fn insert_in_batch(
-        batch: &mut RocksDBBatch<'_>,
-        block: NumHash,
-        bal: &RawBal,
-    ) -> ProviderResult<()> {
-        let key = StoredBlockAccessListKey::new(block);
-        let value = StoredBlockAccessList::new_unchecked(bal.clone(), bal.hash());
-        batch.put::<tables::BlockAccessLists>(key, &value)
-    }
-
-    /// Stages multiple BAL inserts in an existing RocksDB batch.
-    pub fn insert_many_in_batch<'a>(
-        batch: &mut RocksDBBatch<'_>,
-        entries: impl IntoIterator<Item = (NumHash, &'a RawBal)>,
-    ) -> ProviderResult<()> {
-        for (block, bal) in entries {
-            Self::insert_in_batch(batch, block, bal)?;
-        }
-        Ok(())
-    }
-
-    fn delete_keys_in_batch(
-        batch: &mut RocksDBBatch<'_>,
-        keys: &[StoredBlockAccessListKey],
-    ) -> ProviderResult<()> {
-        for key in keys {
-            batch.delete::<tables::BlockAccessLists>(*key)?;
-        }
-        Ok(())
-    }
-
     fn keys_through_block(
         &self,
         to_block: BlockNumber,
@@ -138,7 +106,9 @@ impl RocksDBBalStore {
         }
 
         let mut batch = self.rocksdb.batch();
-        Self::delete_keys_in_batch(&mut batch, &keys)?;
+        for key in &keys {
+            batch.delete::<tables::BlockAccessLists>(*key)?;
+        }
         batch.commit()?;
         Ok(keys.len())
     }
@@ -381,10 +351,10 @@ impl BalStore for RocksDBBalStore {
         }
 
         let mut batch = self.rocksdb.batch();
-        Self::insert_many_in_batch(
-            &mut batch,
-            pending.iter().map(|(key, bal)| (key.num_hash(), bal)),
-        )?;
+        for (key, bal) in &pending {
+            let value = StoredBlockAccessList::new_unchecked(bal.clone(), bal.hash());
+            batch.put::<tables::BlockAccessLists>(*key, &value)?;
+        }
         batch.commit()?;
 
         buffer.remove_flushed(&pending);
@@ -660,22 +630,6 @@ mod tests {
                 ])
                 .unwrap(),
             vec![None, Some(retained_bal)]
-        );
-    }
-
-    #[test]
-    fn batch_insert_helper_writes_readable_payloads() {
-        let (_dir, store) = test_store();
-        let hash = B256::with_last_byte(1);
-        let bal = RawBal::from(Bytes::from_static(&[0xc1, 0x01]));
-        let mut batch = store.rocksdb_provider().batch();
-
-        RocksDBBalStore::insert_in_batch(&mut batch, NumHash::new(1, hash), &bal).unwrap();
-        batch.commit().unwrap();
-
-        assert_eq!(
-            store.get_by_block_num_hash(NumHash::new(1, hash)).unwrap(),
-            Some(bal.as_raw().clone())
         );
     }
 

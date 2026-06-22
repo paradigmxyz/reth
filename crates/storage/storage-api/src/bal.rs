@@ -71,10 +71,7 @@ pub trait BalStore: Send + Sync + 'static {
 
     /// Fetch BALs for the given block hashes.
     ///
-    /// The returned vector must align with `block_hashes`. Stores that are indexed by block number
-    /// and block hash may return
-    /// [`ProviderError::UnsupportedProvider`](reth_storage_errors::provider::ProviderError::UnsupportedProvider)
-    /// instead of maintaining a separate hash-only index.
+    /// The returned vector must align with `block_hashes`.
     fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>>;
 
     /// Fetches the BAL for the given block hash.
