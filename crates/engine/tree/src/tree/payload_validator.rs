@@ -1181,34 +1181,35 @@ where
                         sender.send_hashed_state(hashed_state);
                     }
                 };
+                let mut on_receipt = |index, receipt: &Receipt| {
+                    receipt_tx
+                        .send(IndexedReceipt::new(index, receipt.clone()))
+                        .map_err(|_| BlockExecutionError::msg("receipt root task closed"))
+                };
                 // SAFETY: The borrowed evm2 database is consumed by this synchronous block
                 // execution call and cannot outlive `state_provider`.
                 let db = unsafe { BorrowedEvm2StateProviderDatabase::new(&state_provider) };
                 self.evm_config
                     .executor(db)
                     .with_precompile_cache_map(self.precompile_cache_map.clone())
-                    .execute_payload_with_fallible_hashed_state_hook(
+                    .execute_payload_with_fallible_receipt_hashed_state_hook(
                         env.evm_env.clone(),
                         transactions,
                         context,
                         |executed| {
                             executed_tx_index.store(executed, Ordering::Relaxed);
                         },
+                        &mut on_receipt,
                         &mut on_hashed_state_update,
                         hashed_state_mode,
                     )
             })
             .map_err(|err| match err {
                 Evm2PayloadExecutionError::Execution(err) => BlockExecutionError::other(err),
-                Evm2PayloadExecutionError::Transaction(err) => err,
+                Evm2PayloadExecutionError::Transaction(err) |
+                Evm2PayloadExecutionError::Receipt(err) => err,
             })?;
         drop(state_hook_sender);
-
-        for (index, receipt) in output.result.receipts.iter().cloned().enumerate() {
-            receipt_tx
-                .send(IndexedReceipt::new(index, receipt))
-                .map_err(|_| BlockExecutionError::msg("receipt root task closed"))?;
-        }
         drop(receipt_tx);
 
         if !streamed_state_updates && let Some(updates_tx) = handle.sparse_trie_updates_tx() {

@@ -212,6 +212,31 @@ pub trait Evm2PayloadExecutor {
         TxErr: core::error::Error + Send + Sync + 'static,
         F: FnMut(usize),
         H: FnMut(HashedPostState);
+
+    /// Executes a fallible stream of evm2-native transaction envelopes with progress, receipt, and
+    /// hashed-state hooks.
+    #[expect(clippy::too_many_arguments)]
+    fn execute_payload_with_fallible_receipt_hashed_state_hook<I, F, R, H, Env, TxErr, ReceiptErr>(
+        self,
+        evm_env: Env,
+        transactions: I,
+        context: Evm2BlockExecutionContext<'_>,
+        on_transaction_executed: F,
+        on_receipt: R,
+        on_hashed_state_update: H,
+        hashed_state_mode: Evm2HashedStateMode,
+    ) -> Result<
+        BlockExecutionOutput<Receipt>,
+        Evm2PayloadExecutionError<Self::Error, TxErr, ReceiptErr>,
+    >
+    where
+        Env: Evm2Env,
+        I: IntoIterator<Item = Result<RecoveredTxEnvelope, TxErr>>,
+        TxErr: core::error::Error + Send + Sync + 'static,
+        ReceiptErr: core::error::Error + Send + Sync + 'static,
+        F: FnMut(usize),
+        R: FnMut(usize, &Receipt) -> Result<(), ReceiptErr>,
+        H: FnMut(HashedPostState);
 }
 
 impl<C, DB> Evm2PayloadExecutor for EthEvm2Executor<C, DB>
@@ -255,7 +280,8 @@ where
         )
         .map_err(|err| match err {
             Evm2PayloadExecutionError::Execution(err) => err,
-            Evm2PayloadExecutionError::Transaction(err) => match err {},
+            Evm2PayloadExecutionError::Transaction(err) |
+            Evm2PayloadExecutionError::Receipt(err) => match err {},
         })
     }
 
@@ -275,6 +301,46 @@ where
         F: FnMut(usize),
         H: FnMut(HashedPostState),
     {
+        self.execute_payload_with_fallible_receipt_hashed_state_hook(
+            evm_env,
+            transactions,
+            context,
+            on_transaction_executed,
+            |_, _| Ok::<(), core::convert::Infallible>(()),
+            on_hashed_state_update,
+            hashed_state_mode,
+        )
+        .map_err(|err| match err {
+            Evm2PayloadExecutionError::Execution(err) => Evm2PayloadExecutionError::Execution(err),
+            Evm2PayloadExecutionError::Transaction(err) => {
+                Evm2PayloadExecutionError::Transaction(err)
+            }
+            Evm2PayloadExecutionError::Receipt(err) => match err {},
+        })
+    }
+
+    fn execute_payload_with_fallible_receipt_hashed_state_hook<I, F, R, H, Env, TxErr, ReceiptErr>(
+        self,
+        evm_env: Env,
+        transactions: I,
+        context: Evm2BlockExecutionContext<'_>,
+        on_transaction_executed: F,
+        on_receipt: R,
+        on_hashed_state_update: H,
+        hashed_state_mode: Evm2HashedStateMode,
+    ) -> Result<
+        BlockExecutionOutput<Receipt>,
+        Evm2PayloadExecutionError<Self::Error, TxErr, ReceiptErr>,
+    >
+    where
+        Env: Evm2Env,
+        I: IntoIterator<Item = Result<RecoveredTxEnvelope, TxErr>>,
+        TxErr: core::error::Error + Send + Sync + 'static,
+        ReceiptErr: core::error::Error + Send + Sync + 'static,
+        F: FnMut(usize),
+        R: FnMut(usize, &Receipt) -> Result<(), ReceiptErr>,
+        H: FnMut(HashedPostState),
+    {
         let spec_id = evm_env.spec_id();
         let block_env = evm_env.block_env();
         let block_number = block_env.number.to::<u64>();
@@ -282,6 +348,7 @@ where
         execute_evm2_block_with_context_precompiles_and_fallible_hooks_envelopes_with_hashed_state_mode::<
             DB,
             TxErr,
+            ReceiptErr,
         >(
             spec_id,
             block_env,
@@ -296,6 +363,7 @@ where
                 None,
             )),
             on_transaction_executed,
+            on_receipt,
             on_hashed_state_update,
             hashed_state_mode,
         )

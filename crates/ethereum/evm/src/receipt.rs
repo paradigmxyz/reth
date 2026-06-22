@@ -173,6 +173,28 @@ impl RethReceiptBuilder {
         )
         .with_hashed_state(hashed_state)
     }
+
+    /// Builds a block execution output from already-built evm2 receipts and an owned accumulated
+    /// evm2 block state.
+    pub fn build_evm2_block_output_from_receipts_and_block_state_with_hashed_state(
+        &self,
+        receipts: Vec<Receipt>,
+        state: BlockStateAccumulator,
+        hashed_state: Option<HashedPostState>,
+    ) -> BlockExecutionOutput<Receipt> {
+        let gas_used = receipts.last().map_or(0, |receipt| receipt.cumulative_gas_used);
+
+        BlockExecutionOutput::new(
+            BlockExecutionResult {
+                receipts,
+                requests: Default::default(),
+                gas_used,
+                blob_gas_used: 0,
+            },
+            state,
+        )
+        .with_hashed_state(hashed_state)
+    }
 }
 
 fn block_state_from_source<S>(source: &S) -> BlockStateAccumulator

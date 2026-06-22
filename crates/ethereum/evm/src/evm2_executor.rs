@@ -106,36 +106,41 @@ impl<E> core::error::Error for Evm2ExecutionError<E> where E: core::error::Error
 
 /// Error returned by evm2 payload execution over a fallible transaction stream.
 #[derive(Debug)]
-pub enum Evm2PayloadExecutionError<E, TxErr> {
+pub enum Evm2PayloadExecutionError<E, TxErr, ReceiptErr = Infallible> {
     /// The evm2 executor failed while executing the block.
     Execution(E),
     /// The transaction stream failed before yielding the next transaction.
     Transaction(TxErr),
+    /// The receipt callback failed after a transaction committed.
+    Receipt(ReceiptErr),
 }
 
-impl<E, TxErr> From<E> for Evm2PayloadExecutionError<E, TxErr> {
+impl<E, TxErr, ReceiptErr> From<E> for Evm2PayloadExecutionError<E, TxErr, ReceiptErr> {
     fn from(err: E) -> Self {
         Self::Execution(err)
     }
 }
 
-impl<E, TxErr> core::fmt::Display for Evm2PayloadExecutionError<E, TxErr>
+impl<E, TxErr, ReceiptErr> core::fmt::Display for Evm2PayloadExecutionError<E, TxErr, ReceiptErr>
 where
     E: core::fmt::Display,
     TxErr: core::fmt::Display,
+    ReceiptErr: core::fmt::Display,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Execution(err) => write!(f, "evm2 payload execution error: {err}"),
             Self::Transaction(err) => write!(f, "transaction stream error: {err}"),
+            Self::Receipt(err) => write!(f, "receipt callback error: {err}"),
         }
     }
 }
 
-impl<E, TxErr> core::error::Error for Evm2PayloadExecutionError<E, TxErr>
+impl<E, TxErr, ReceiptErr> core::error::Error for Evm2PayloadExecutionError<E, TxErr, ReceiptErr>
 where
     E: core::error::Error + Send + Sync + 'static,
     TxErr: core::error::Error + Send + Sync + 'static,
+    ReceiptErr: core::error::Error + Send + Sync + 'static,
 {
 }
 
@@ -406,6 +411,7 @@ where
     match execute_evm2_block_with_context_precompiles_and_fallible_hooks_envelopes_with_hashed_state_mode::<
         DB,
         Infallible,
+        Infallible,
     >(
         spec_id,
         block_env,
@@ -415,12 +421,15 @@ where
         context,
         precompiles,
         on_transaction_executed,
+        |_, _| Ok::<(), Infallible>(()),
         on_hashed_state_update,
         hashed_state_mode,
     ) {
         Ok(output) => Ok(output),
         Err(Evm2PayloadExecutionError::Execution(err)) => Err(err),
-        Err(Evm2PayloadExecutionError::Transaction(err)) => match err {},
+        Err(Evm2PayloadExecutionError::Transaction(err) | Evm2PayloadExecutionError::Receipt(err)) => {
+            match err {}
+        }
     }
 }
 
@@ -428,10 +437,11 @@ where
 ///
 /// This consumes each transaction only when execution reaches it, so upstream transaction
 /// conversion can continue in parallel with earlier transaction execution.
-#[expect(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, clippy::type_complexity)]
 pub(crate) fn execute_evm2_block_with_context_precompiles_and_fallible_hooks_envelopes_with_hashed_state_mode<
     DB,
     TxErr,
+    ReceiptErr,
 >(
     spec_id: SpecId,
     block_env: BlockEnv,
@@ -441,11 +451,12 @@ pub(crate) fn execute_evm2_block_with_context_precompiles_and_fallible_hooks_env
     context: Evm2BlockExecutionContext<'_>,
     precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
     mut on_transaction_executed: impl FnMut(usize),
+    mut on_receipt: impl FnMut(usize, &Receipt) -> Result<(), ReceiptErr>,
     mut on_hashed_state_update: impl FnMut(HashedPostState),
     hashed_state_mode: Evm2HashedStateMode,
 ) -> Result<
     BlockExecutionOutput<Receipt>,
-    Evm2PayloadExecutionError<Evm2ExecutionError<DB::Error>, TxErr>,
+    Evm2PayloadExecutionError<Evm2ExecutionError<DB::Error>, TxErr, ReceiptErr>,
 >
 where
     DB: Database + 'static,
@@ -474,7 +485,8 @@ where
         block_number,
         context,
     )?;
-    let mut results = Vec::new();
+    let mut receipts = Vec::new();
+    let mut cumulative_gas_used = 0;
 
     for (index, transaction) in transactions.into_iter().enumerate() {
         let transaction = transaction.map_err(Evm2PayloadExecutionError::Transaction)?;
@@ -488,11 +500,14 @@ where
             &mut on_hashed_state_update,
             &transaction,
         )?;
-        results.push((tx_type, outcome));
+        cumulative_gas_used += outcome.gas_used;
+        let receipt = RethReceiptBuilder.build_evm2_receipt(tx_type, outcome, cumulative_gas_used);
+        on_receipt(index, &receipt).map_err(Evm2PayloadExecutionError::Receipt)?;
+        receipts.push(receipt);
         on_transaction_executed(index + 1);
     }
 
-    let mut requests = block_requests_from_tx_results::<DB>(spec_id, context, &results)?;
+    let mut requests = block_requests_from_receipts::<DB>(spec_id, context, &receipts)?;
     post_execution_system_call_state_changes::<DB>(
         &mut evm,
         &mut block_state,
@@ -517,11 +532,12 @@ where
         context.withdrawals,
     )?;
 
-    let mut output = RethReceiptBuilder.build_evm2_block_output_from_block_state_with_hashed_state(
-        results,
-        block_state,
-        hashed_state.map(HashedPostStateSink::into_hashed_post_state),
-    );
+    let mut output = RethReceiptBuilder
+        .build_evm2_block_output_from_receipts_and_block_state_with_hashed_state(
+            receipts,
+            block_state,
+            hashed_state.map(HashedPostStateSink::into_hashed_post_state),
+        );
     output.result.requests = requests;
 
     Ok(output)
@@ -791,10 +807,10 @@ where
     Ok(())
 }
 
-fn block_requests_from_tx_results<DB>(
+fn block_requests_from_receipts<DB>(
     spec_id: SpecId,
     context: Evm2BlockExecutionContext<'_>,
-    results: &[(TxType, TxResult)],
+    receipts: &[Receipt],
 ) -> Result<Requests, Evm2ExecutionError<DB::Error>>
 where
     DB: Database + 'static,
@@ -804,25 +820,25 @@ where
         return Ok(requests)
     }
 
-    let deposit_requests = parse_deposit_requests_from_tx_results::<DB>(
+    let deposit_requests = parse_deposit_requests_from_receipts::<DB>(
         context.deposit_contract_address.unwrap_or(MAINNET_DEPOSIT_CONTRACT_ADDRESS),
-        results,
+        receipts,
     )?;
     requests.push_request_with_type(DEPOSIT_REQUEST_TYPE, deposit_requests);
 
     Ok(requests)
 }
 
-fn parse_deposit_requests_from_tx_results<DB>(
+fn parse_deposit_requests_from_receipts<DB>(
     deposit_contract_address: Address,
-    results: &[(TxType, TxResult)],
+    receipts: &[Receipt],
 ) -> Result<Vec<u8>, Evm2ExecutionError<DB::Error>>
 where
     DB: Database + 'static,
 {
     let mut out = Vec::new();
-    for (_, outcome) in results {
-        for log in &outcome.logs {
+    for receipt in receipts {
+        for log in &receipt.logs {
             if log.address != deposit_contract_address ||
                 log.topics().first() != Some(&DepositEvent::SIGNATURE_HASH)
             {
@@ -1183,6 +1199,7 @@ mod tests {
             execute_evm2_block_with_context_precompiles_and_fallible_hooks_envelopes_with_hashed_state_mode::<
                 TestDatabase,
                 TestTxError,
+                Infallible,
             >(
                 SpecId::FRONTIER,
                 BlockEnv::default(),
@@ -1192,12 +1209,63 @@ mod tests {
                 Evm2BlockExecutionContext::default(),
                 Box::new(Precompiles::base(SpecId::FRONTIER)),
                 |count| executed = count,
+                |_, _| Ok::<(), Infallible>(()),
                 |_| {},
                 Evm2HashedStateMode::OutputOnly,
             );
 
         assert_eq!(executed, 1);
         assert!(matches!(result, Err(Evm2PayloadExecutionError::Transaction(TestTxError))));
+    }
+
+    #[test]
+    fn receipt_callback_streams_ordered_transaction_receipts() {
+        let caller = address!("0000000000000000000000000000000000000001");
+        let other = address!("0000000000000000000000000000000000000002");
+        let target = address!("0000000000000000000000000000000000001000");
+        let mut database = TestDatabase::default();
+        database
+            .accounts
+            .insert(caller, AccountInfo::default().with_balance(U256::from(1_000_000u64)));
+        database
+            .accounts
+            .insert(other, AccountInfo::default().with_balance(U256::from(1_000_000u64)));
+        let first = legacy_transfer(caller, target, U256::from(1));
+        let second = legacy_transfer(other, target, U256::from(2));
+
+        let mut streamed_receipts = Vec::new();
+        let output =
+            execute_evm2_block_with_context_precompiles_and_fallible_hooks_envelopes_with_hashed_state_mode::<
+                TestDatabase,
+                Infallible,
+                Infallible,
+            >(
+                SpecId::FRONTIER,
+                BlockEnv::default(),
+                Db::new(database),
+                1,
+                [Ok(evm2_recovered_tx(first)), Ok(evm2_recovered_tx(second))],
+                Evm2BlockExecutionContext::default(),
+                Box::new(Precompiles::base(SpecId::FRONTIER)),
+                |_| {},
+                |index, receipt| {
+                    streamed_receipts.push((index, receipt.clone()));
+                    Ok::<(), Infallible>(())
+                },
+                |_| {},
+                Evm2HashedStateMode::OutputOnly,
+            )
+            .expect("evm2 execution succeeds");
+
+        assert_eq!(streamed_receipts.len(), 2);
+        assert_eq!(streamed_receipts[0].0, 0);
+        assert_eq!(streamed_receipts[1].0, 1);
+        assert_eq!(streamed_receipts[0].1.cumulative_gas_used, 21_000);
+        assert_eq!(streamed_receipts[1].1.cumulative_gas_used, 42_000);
+        assert_eq!(
+            streamed_receipts.into_iter().map(|(_, receipt)| receipt).collect::<Vec<_>>(),
+            output.result.receipts
+        );
     }
 
     #[test]
@@ -1592,9 +1660,9 @@ mod tests {
             address: MAINNET_DEPOSIT_CONTRACT_ADDRESS,
             data: deposit,
         });
-        let outcome = TxResult { status: true, logs: vec![log], ..Default::default() };
+        let receipt = Receipt { tx_type: TxType::Legacy, logs: vec![log], ..Default::default() };
 
-        let requests = block_requests_from_tx_results::<TestDatabase>(
+        let requests = block_requests_from_receipts::<TestDatabase>(
             SpecId::PRAGUE,
             Evm2BlockExecutionContext {
                 chain_id: 1,
@@ -1606,7 +1674,7 @@ mod tests {
                 withdrawals: None,
                 deposit_contract_address: None,
             },
-            &[(TxType::Legacy, outcome)],
+            &[receipt],
         )
         .expect("deposit log decodes");
 
