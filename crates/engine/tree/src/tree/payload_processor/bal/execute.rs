@@ -17,13 +17,17 @@
 use super::{ordered_outputs::ordered_worker_outputs, worker, BalExecutionError};
 use alloy_eip7928::{
     bal::{Bal as AlloyBal, DecodedBal},
-    compute_block_access_list_hash, BlockAccessList,
+    compute_block_access_list_hash, AccountChanges, BalanceChange, BlockAccessIndex,
+    BlockAccessList, CodeChange, NonceChange, SlotChanges, StorageChange,
 };
 use alloy_evm::{
     block::{BlockExecutionError, BlockExecutor, BlockValidationError, TxResult},
     Evm,
 };
-use alloy_primitives::Address;
+use alloy_primitives::{
+    map::{AddressMap, U256Map},
+    Address, B256, U256,
+};
 use crossbeam_channel::{Receiver, Sender};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
 use reth_primitives_traits::ReceiptTy;
@@ -33,7 +37,7 @@ use revm::{
     context::{result::ResultAndState, Block},
     database::{states::bundle_state::BundleRetention, State},
 };
-use revm_state::bal::Bal as RevmBal;
+use revm_state::{bal::Bal as RevmBal, Account, AccountInfo, Bytecode, EvmState};
 use std::sync::Arc;
 
 use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
@@ -117,7 +121,7 @@ where
         .with_bal_builder()
         .build();
 
-    let (block_result, senders) = {
+    let (block_result, senders, built_bal) = {
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
         let (abort_guard, abort_rx) = AbortGuard::new();
 
@@ -142,6 +146,15 @@ where
         let mut canonical_executor = evm_config.create_executor_with_state(evm, ctx.clone());
 
         canonical_executor.apply_pre_execution_changes()?;
+        let mut bal_builder = IndexedBalBuilder::from_revm_bal(
+            canonical_executor
+                .evm_mut()
+                .db_mut()
+                .bal_state
+                .bal_builder
+                .take()
+                .expect("with_bal_builder set"),
+        );
         let mut senders = Vec::with_capacity(transaction_count);
         let mut last_sent_len = 0usize;
         for output in ordered_worker_outputs(&result_rx, transaction_count) {
@@ -149,6 +162,10 @@ where
 
             gas_tracker.validate_tx_limit(output.tx_gas_limit)?;
             gas_tracker.record_result(output.result.result());
+            bal_builder.update_state(
+                BlockAccessIndex::new(output.index as u64 + 1),
+                &output.result.result().state,
+            );
             canonical_executor.evm_mut().db_mut().bump_bal_index();
 
             let _ = canonical_executor.commit_transaction(output.result);
@@ -165,12 +182,18 @@ where
         }
         drop(abort_guard);
 
+        canonical_executor.evm_mut().db_mut().bal_state.bal_builder = Some(RevmBal::new());
         canonical_executor.evm_mut().db_mut().bump_bal_index();
-        let block_result = canonical_executor.apply_post_execution_changes()?;
-        (block_result, senders)
+        let (mut evm, block_result) = canonical_executor.finish()?;
+        if let Some(post_exec_bal) = evm.db_mut().bal_state.bal_builder.take() {
+            bal_builder.extend_revm_bal(post_exec_bal);
+        }
+        evm.db_mut().reset_bal_index();
+        drop(evm);
+        (block_result, senders, bal_builder.into_alloy_bal())
     };
 
-    let built_bal = take_built_bal_and_log_divergence(&mut canonical_state, bal);
+    let built_bal = log_bal_divergence(built_bal, bal);
 
     canonical_state.merge_transitions(BundleRetention::Reverts);
     Ok((
@@ -201,16 +224,9 @@ fn convert_alloy_to_revm_bal(alloy_bal: &AlloyBal) -> Result<Arc<RevmBal>, BalEx
     Ok(Arc::new(received_bal_revm))
 }
 
-fn take_built_bal_and_log_divergence<DB>(
-    canonical_state: &mut State<DB>,
-    received_bal: &AlloyBal,
-) -> BlockAccessList
-where
-    DB: Database,
-{
-    let built_bal = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
-    if tracing::enabled!(target: "engine::tree::payload_processor::bal", tracing::Level::DEBUG) &&
-        built_bal.as_slice() != received_bal.as_slice()
+fn log_bal_divergence(built_bal: BlockAccessList, received_bal: &AlloyBal) -> BlockAccessList {
+    if tracing::enabled!(target: "engine::tree::payload_processor::bal", tracing::Level::DEBUG)
+        && built_bal.as_slice() != received_bal.as_slice()
     {
         let rebuilt = compute_block_access_list_hash(built_bal.as_slice());
         let expected = compute_block_access_list_hash(received_bal.as_slice());
@@ -225,6 +241,228 @@ where
     }
 
     built_bal
+}
+
+#[derive(Default)]
+struct IndexedBalBuilder {
+    accounts: AddressMap<IndexedAccountBal>,
+}
+
+impl IndexedBalBuilder {
+    fn from_revm_bal(bal: RevmBal) -> Self {
+        let mut this = Self {
+            accounts: AddressMap::with_capacity_and_hasher(bal.accounts.len(), Default::default()),
+        };
+        this.extend_revm_bal(bal);
+        this
+    }
+
+    fn update_state(&mut self, bal_index: BlockAccessIndex, state: &EvmState) {
+        for (address, account) in state {
+            self.accounts
+                .entry(*address)
+                .or_insert_with(|| IndexedAccountBal::new(*address))
+                .update(bal_index, account);
+        }
+    }
+
+    fn extend_revm_bal(&mut self, bal: RevmBal) {
+        for (address, account) in bal.accounts {
+            self.accounts
+                .entry(address)
+                .or_insert_with(|| IndexedAccountBal::new(address))
+                .extend_revm(account);
+        }
+    }
+
+    fn into_alloy_bal(self) -> BlockAccessList {
+        let mut alloy_bal = self
+            .accounts
+            .into_values()
+            .map(IndexedAccountBal::into_alloy_account)
+            .collect::<BlockAccessList>();
+        alloy_bal.sort_unstable_by_key(|account| account.address);
+        alloy_bal
+    }
+}
+
+#[derive(Default)]
+struct IndexedAccountBal {
+    address: Address,
+    nonce: Vec<(BlockAccessIndex, u64)>,
+    balance: Vec<(BlockAccessIndex, U256)>,
+    code: Vec<(BlockAccessIndex, (B256, Bytecode))>,
+    storage: U256Map<IndexedStorageBal>,
+}
+
+impl IndexedAccountBal {
+    fn new(address: Address) -> Self {
+        Self {
+            address,
+            nonce: Vec::new(),
+            balance: Vec::new(),
+            code: Vec::new(),
+            storage: U256Map::default(),
+        }
+    }
+
+    fn update(&mut self, bal_index: BlockAccessIndex, account: &Account) {
+        if account.is_selfdestructed_locally() {
+            let original = account.original_info();
+            let empty = AccountInfo::default();
+            self.update_info(bal_index, &original, &empty);
+            self.update_storage_with(bal_index, account, U256::ZERO);
+            return;
+        }
+
+        let original = account.original_info();
+        self.update_info(bal_index, &original, &account.info);
+        for (slot, value) in &account.storage {
+            self.storage.entry(*slot).or_default().update(
+                bal_index,
+                &value.original_value,
+                value.present_value,
+            );
+        }
+    }
+
+    fn update_info(
+        &mut self,
+        bal_index: BlockAccessIndex,
+        original: &AccountInfo,
+        present: &AccountInfo,
+    ) {
+        update_indexed_writes(&mut self.nonce, bal_index, &original.nonce, present.nonce, |v| v);
+        update_indexed_writes(
+            &mut self.balance,
+            bal_index,
+            &original.balance,
+            present.balance,
+            |v| v,
+        );
+        if original.code_hash != present.code_hash {
+            update_indexed_writes(
+                &mut self.code,
+                bal_index,
+                &original.code_hash,
+                (present.code_hash, present.code.clone().unwrap_or_default()),
+                |(hash, _)| hash,
+            );
+        }
+    }
+
+    fn update_storage_with(
+        &mut self,
+        bal_index: BlockAccessIndex,
+        account: &Account,
+        present_value: U256,
+    ) {
+        for (slot, value) in &account.storage {
+            self.storage.entry(*slot).or_default().update(
+                bal_index,
+                &value.original_value,
+                present_value,
+            );
+        }
+    }
+
+    fn extend_revm(&mut self, account: revm_state::bal::AccountBal) {
+        self.nonce.extend(account.account_info.nonce.writes);
+        self.balance.extend(account.account_info.balance.writes);
+        self.code.extend(account.account_info.code.writes);
+        for (slot, writes) in account.storage.storage {
+            self.storage.entry(slot).or_default().writes.extend(writes.writes);
+        }
+    }
+
+    fn into_alloy_account(self) -> AccountChanges {
+        let mut account = AccountChanges {
+            address: self.address,
+            storage_changes: Vec::with_capacity(self.storage.len()),
+            storage_reads: Vec::new(),
+            balance_changes: self
+                .balance
+                .into_iter()
+                .map(|(index, value)| BalanceChange::new(index, value))
+                .collect(),
+            nonce_changes: self
+                .nonce
+                .into_iter()
+                .map(|(index, value)| NonceChange::new(index, value))
+                .collect(),
+            code_changes: self
+                .code
+                .into_iter()
+                .map(|(index, (_, code))| CodeChange::new(index, code.original_bytes()))
+                .collect(),
+        };
+
+        for (slot, storage) in self.storage {
+            if storage.writes.is_empty() {
+                account.storage_reads.push(slot);
+            } else {
+                account.storage_changes.push(SlotChanges::new(
+                    slot,
+                    storage
+                        .writes
+                        .into_iter()
+                        .map(|(index, value)| StorageChange::new(index, value))
+                        .collect(),
+                ));
+            }
+        }
+        account.sort();
+        account
+    }
+}
+
+#[derive(Default)]
+struct IndexedStorageBal {
+    writes: Vec<(BlockAccessIndex, U256)>,
+}
+
+impl IndexedStorageBal {
+    fn update(&mut self, index: BlockAccessIndex, original_value: &U256, value: U256) {
+        update_indexed_writes(&mut self.writes, index, original_value, value, |v| v);
+    }
+}
+
+fn update_indexed_writes<T, K, F>(
+    writes: &mut Vec<(BlockAccessIndex, T)>,
+    index: BlockAccessIndex,
+    original_subvalue: &K,
+    value: T,
+    key: F,
+) where
+    K: PartialEq,
+    F: Fn(&T) -> &K,
+{
+    if let Some(last) = writes.last_mut()
+        && last.0 != index
+    {
+        if key(&last.1) != key(&value) {
+            writes.push((index, value));
+        }
+        return;
+    }
+
+    let (previous, last) = match writes.as_mut_slice() {
+        [.., previous, last] => (key(&previous.1), last),
+        [last] => (original_subvalue, last),
+        [] => {
+            if original_subvalue != key(&value) {
+                writes.push((index, value));
+            }
+            return;
+        }
+    };
+
+    if previous == key(&value) {
+        writes.pop();
+        return;
+    }
+
+    last.1 = value;
 }
 
 /// Closes the abort channel on drop, waking scoped workers before the scope exits.
@@ -320,6 +558,60 @@ mod tests {
         let alloy_bal: AlloyBal = bal.into();
         let raw = alloy_rlp::encode(&alloy_bal).into();
         Arc::new(DecodedBal::new(alloy_bal, raw))
+    }
+
+    #[test]
+    fn indexed_bal_builder_matches_revm_bal_update_rules() {
+        use revm_state::{Account as RevmAccount, EvmStorageSlot, TransactionId};
+
+        let address = alloy_primitives::Address::from([0x11; 20]);
+        let selfdestructed = alloy_primitives::Address::from([0x22; 20]);
+
+        let original = AccountInfo {
+            nonce: 1,
+            balance: U256::from(10),
+            code_hash: B256::ZERO,
+            code: None,
+            account_id: None,
+        };
+        let mut account = RevmAccount::from(original);
+        account.info.nonce = 2;
+        account.info.balance = U256::from(20);
+        account
+            .storage
+            .insert(U256::from(1), EvmStorageSlot::new(U256::from(5), TransactionId::ZERO));
+        account.storage.insert(
+            U256::from(2),
+            EvmStorageSlot::new_changed(U256::ZERO, U256::from(9), TransactionId::ZERO),
+        );
+
+        let mut destruct_account = RevmAccount::from(AccountInfo {
+            nonce: 7,
+            balance: U256::from(30),
+            code_hash: B256::ZERO,
+            code: None,
+            account_id: None,
+        });
+        destruct_account.mark_selfdestructed_locally();
+        destruct_account.storage.insert(
+            U256::from(3),
+            EvmStorageSlot::new_changed(U256::from(44), U256::from(44), TransactionId::ZERO),
+        );
+
+        let mut reference = RevmBal::new();
+        reference.update_account(BlockAccessIndex::new(1), address, &account);
+        reference.update_account(BlockAccessIndex::new(2), selfdestructed, &destruct_account);
+
+        let mut indexed = IndexedBalBuilder::default();
+        let mut first_state = EvmState::default();
+        first_state.insert(address, account);
+        indexed.update_state(BlockAccessIndex::new(1), &first_state);
+
+        let mut second_state = EvmState::default();
+        second_state.insert(selfdestructed, destruct_account);
+        indexed.update_state(BlockAccessIndex::new(2), &second_state);
+
+        assert_eq!(indexed.into_alloy_bal(), reference.into_alloy_bal());
     }
 
     /// Builds an in-memory canonical DB pre-populated with the post-Cancun system contracts
