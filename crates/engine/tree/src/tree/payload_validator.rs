@@ -136,7 +136,8 @@ use reth_evm::{
     ConfigureEvm, Evm2Env, EvmEnvFor, ExecutionCtxFor,
 };
 use reth_evm_ethereum::{
-    AsEvm2BlockExecutionContext, Evm2HashedStateMode, Evm2PayloadExecutor, Evm2TxEnv,
+    AsEvm2BlockExecutionContext, Evm2HashedStateMode, Evm2PayloadExecutionError,
+    Evm2PayloadExecutor, Evm2TxEnv,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
 use reth_execution_types::evm2_state_source_hashed_post_state;
@@ -1152,24 +1153,11 @@ where
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
         let execution_start = Instant::now();
-
-        let mut senders = Vec::with_capacity(transaction_count);
-        let transactions = handle
-            .iter_transactions()
-            .map(|tx| {
-                let tx = tx.map_err(BlockExecutionError::other)?;
-                let (tx_env, tx) = tx.into_parts();
-                senders.push(*tx.signer());
-                Ok(tx_env.into_envelope())
-            })
-            .collect::<Result<Vec<_>, BlockExecutionError>>()?;
-
         let execution_ctx = self.execution_ctx_for(input).map_err(BlockExecutionError::other)?;
         let context = execution_ctx.as_evm2_block_execution_context(
             self.evm_config.chain_id(),
             self.evm_config.deposit_contract_address(),
         );
-
         let state_hook_sender = handle.state_hook_sender();
         let streamed_state_updates = state_hook_sender.is_some();
         let hashed_state_mode = if streamed_state_updates {
@@ -1177,6 +1165,15 @@ where
         } else {
             Evm2HashedStateMode::OutputOnly
         };
+
+        let mut senders = Vec::with_capacity(transaction_count);
+        let transactions = handle.iter_transactions().map(|tx| {
+            let tx = tx.map_err(BlockExecutionError::other)?;
+            let (tx_env, tx) = tx.into_parts();
+            senders.push(*tx.signer());
+            Ok(tx_env.into_envelope())
+        });
+
         let output = debug_span!(target: "engine::tree", "execute_evm2_block")
             .in_scope(|| {
                 let mut on_hashed_state_update = |hashed_state| {
@@ -1190,7 +1187,7 @@ where
                 self.evm_config
                     .executor(db)
                     .with_precompile_cache_map(self.precompile_cache_map.clone())
-                    .execute_payload_with_hashed_state_hook(
+                    .execute_payload_with_fallible_hashed_state_hook(
                         env.evm_env.clone(),
                         transactions,
                         context,
@@ -1201,7 +1198,10 @@ where
                         hashed_state_mode,
                     )
             })
-            .map_err(BlockExecutionError::other)?;
+            .map_err(|err| match err {
+                Evm2PayloadExecutionError::Execution(err) => BlockExecutionError::other(err),
+                Evm2PayloadExecutionError::Transaction(err) => err,
+            })?;
         drop(state_hook_sender);
 
         for (index, receipt) in output.result.receipts.iter().cloned().enumerate() {

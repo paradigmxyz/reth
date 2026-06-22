@@ -104,6 +104,41 @@ where
 
 impl<E> core::error::Error for Evm2ExecutionError<E> where E: core::error::Error + Send + 'static {}
 
+/// Error returned by evm2 payload execution over a fallible transaction stream.
+#[derive(Debug)]
+pub enum Evm2PayloadExecutionError<E, TxErr> {
+    /// The evm2 executor failed while executing the block.
+    Execution(E),
+    /// The transaction stream failed before yielding the next transaction.
+    Transaction(TxErr),
+}
+
+impl<E, TxErr> From<E> for Evm2PayloadExecutionError<E, TxErr> {
+    fn from(err: E) -> Self {
+        Self::Execution(err)
+    }
+}
+
+impl<E, TxErr> core::fmt::Display for Evm2PayloadExecutionError<E, TxErr>
+where
+    E: core::fmt::Display,
+    TxErr: core::fmt::Display,
+{
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Execution(err) => write!(f, "evm2 payload execution error: {err}"),
+            Self::Transaction(err) => write!(f, "transaction stream error: {err}"),
+        }
+    }
+}
+
+impl<E, TxErr> core::error::Error for Evm2PayloadExecutionError<E, TxErr>
+where
+    E: core::error::Error + Send + Sync + 'static,
+    TxErr: core::error::Error + Send + Sync + 'static,
+{
+}
+
 /// Additional block-level execution context for evm2.
 #[derive(Debug, Clone, Copy)]
 pub struct Evm2BlockExecutionContext<'a> {
@@ -361,10 +396,57 @@ pub(crate) fn execute_evm2_block_with_context_precompiles_and_hooks_envelopes_wi
     transactions: impl IntoIterator<Item = RecoveredTxEnvelope>,
     context: Evm2BlockExecutionContext<'_>,
     precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
+    on_transaction_executed: impl FnMut(usize),
+    on_hashed_state_update: impl FnMut(HashedPostState),
+    hashed_state_mode: Evm2HashedStateMode,
+) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<DB::Error>>
+where
+    DB: Database + 'static,
+{
+    match execute_evm2_block_with_context_precompiles_and_fallible_hooks_envelopes_with_hashed_state_mode::<
+        DB,
+        Infallible,
+    >(
+        spec_id,
+        block_env,
+        database,
+        block_number,
+        transactions.into_iter().map(Ok::<_, Infallible>),
+        context,
+        precompiles,
+        on_transaction_executed,
+        on_hashed_state_update,
+        hashed_state_mode,
+    ) {
+        Ok(output) => Ok(output),
+        Err(Evm2PayloadExecutionError::Execution(err)) => Err(err),
+        Err(Evm2PayloadExecutionError::Transaction(err)) => match err {},
+    }
+}
+
+/// Executes a block worth of evm2-native recovered transactions from a fallible transaction stream.
+///
+/// This consumes each transaction only when execution reaches it, so upstream transaction
+/// conversion can continue in parallel with earlier transaction execution.
+#[expect(clippy::too_many_arguments)]
+pub(crate) fn execute_evm2_block_with_context_precompiles_and_fallible_hooks_envelopes_with_hashed_state_mode<
+    DB,
+    TxErr,
+>(
+    spec_id: SpecId,
+    block_env: BlockEnv,
+    database: impl DynDatabase + 'static,
+    block_number: u64,
+    transactions: impl IntoIterator<Item = Result<RecoveredTxEnvelope, TxErr>>,
+    context: Evm2BlockExecutionContext<'_>,
+    precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
     mut on_transaction_executed: impl FnMut(usize),
     mut on_hashed_state_update: impl FnMut(HashedPostState),
     hashed_state_mode: Evm2HashedStateMode,
-) -> Result<BlockExecutionOutput<Receipt>, Evm2ExecutionError<DB::Error>>
+) -> Result<
+    BlockExecutionOutput<Receipt>,
+    Evm2PayloadExecutionError<Evm2ExecutionError<DB::Error>, TxErr>,
+>
 where
     DB: Database + 'static,
 {
@@ -395,6 +477,7 @@ where
     let mut results = Vec::new();
 
     for (index, transaction) in transactions.into_iter().enumerate() {
+        let transaction = transaction.map_err(Evm2PayloadExecutionError::Transaction)?;
         let tx_type =
             TxType::try_from(transaction.ty()).expect("evm2 transaction envelope has valid type");
         let outcome = execute_transaction::<DB>(
@@ -1051,6 +1134,17 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct TestTxError;
+
+    impl core::fmt::Display for TestTxError {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            f.write_str("test transaction stream error")
+        }
+    }
+
+    impl core::error::Error for TestTxError {}
+
     #[test]
     fn executes_legacy_transfer_with_evm2() {
         let caller = address!("0000000000000000000000000000000000000001");
@@ -1072,6 +1166,38 @@ mod tests {
             output.account_state(&target).unwrap().current.as_ref().unwrap().balance,
             U256::from(1)
         );
+    }
+
+    #[test]
+    fn fallible_transaction_stream_is_consumed_lazily() {
+        let caller = address!("0000000000000000000000000000000000000001");
+        let target = address!("0000000000000000000000000000000000001000");
+        let mut database = TestDatabase::default();
+        database
+            .accounts
+            .insert(caller, AccountInfo::default().with_balance(U256::from(1_000_000u64)));
+        let transaction = legacy_transfer(caller, target, U256::from(1));
+
+        let mut executed = 0;
+        let result =
+            execute_evm2_block_with_context_precompiles_and_fallible_hooks_envelopes_with_hashed_state_mode::<
+                TestDatabase,
+                TestTxError,
+            >(
+                SpecId::FRONTIER,
+                BlockEnv::default(),
+                Db::new(database),
+                1,
+                [Ok(evm2_recovered_tx(transaction)), Err(TestTxError)],
+                Evm2BlockExecutionContext::default(),
+                Box::new(Precompiles::base(SpecId::FRONTIER)),
+                |count| executed = count,
+                |_| {},
+                Evm2HashedStateMode::OutputOnly,
+            );
+
+        assert_eq!(executed, 1);
+        assert!(matches!(result, Err(Evm2PayloadExecutionError::Transaction(TestTxError))));
     }
 
     #[test]

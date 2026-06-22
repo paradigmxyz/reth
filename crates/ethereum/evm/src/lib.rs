@@ -136,6 +136,7 @@ pub use evm2_convert::{
 mod evm2_executor;
 pub use evm2_executor::{
     Evm2BlockExecutionContext, Evm2BlockSystemCalls, Evm2ExecutionError, Evm2HashedStateMode,
+    Evm2PayloadExecutionError,
 };
 
 mod receipt;
