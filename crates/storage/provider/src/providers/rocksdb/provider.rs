@@ -1284,7 +1284,7 @@ impl RocksDBProvider {
     ///
     /// # Panics
     /// Panics if the provider is in read-only mode.
-    #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = batch.len(), batch_size = batch.size_in_bytes()))]
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = batch.len()))]
     pub fn commit_batch(&self, batch: WriteBatchWithTransaction<true>) -> ProviderResult<()> {
         self.0.db_rw().write_opt(batch, &synced_write_options()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
@@ -1840,7 +1840,7 @@ impl<'a> RocksDBBatch<'a> {
     ///
     /// # Panics
     /// Panics if the provider is in read-only mode.
-    #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = self.inner.len(), batch_size = self.inner.size_in_bytes()))]
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = self.inner.len()))]
     pub fn commit(self) -> ProviderResult<()> {
         self.provider.0.db_rw().write_opt(self.inner, &synced_write_options()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
