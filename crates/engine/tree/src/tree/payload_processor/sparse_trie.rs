@@ -317,9 +317,9 @@ where
                 self.promote_pending_account_updates()?;
                 self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
 
-                if self.finished_state_updates &&
-                    self.account_updates.is_empty() &&
-                    self.storage_updates.iter().all(|(_, updates)| updates.is_empty())
+                if self.finished_state_updates
+                    && self.account_updates.is_empty()
+                    && self.storage_updates.iter().all(|(_, updates)| updates.is_empty())
                 {
                     break;
                 }
@@ -668,8 +668,8 @@ where
         let mut tries_to_compute_roots: Vec<(B256, SendStorageTriePtr<S>)> =
             Vec::with_capacity(addresses_to_compute_roots.len());
         for address in addresses_to_compute_roots {
-            if let Some(trie) = self.trie.storage_tries_mut().get_mut(&address) &&
-                !trie.is_root_cached()
+            if let Some(trie) = self.trie.storage_tries_mut().get_mut(&address)
+                && !trie.is_root_cached()
             {
                 tries_to_compute_roots.push((address, SendStorageTriePtr(trie)));
             }
@@ -707,6 +707,110 @@ where
         });
     }
 
+    /// Attempts to promote one pending account update into a leaf update.
+    fn try_promote_pending_account_update(
+        &mut self,
+        addr: B256,
+        account: &mut Option<Option<Account>>,
+    ) -> PendingAccountPromotion {
+        if let Some(updates) = self.storage_updates.get(&addr) {
+            if !updates.is_empty() {
+                // If account has pending storage updates, it is still pending.
+                return PendingAccountPromotion::BlockedByStorage;
+            } else if let Some(account) = account.take() {
+                let storage_root = self
+                    .trie
+                    .storage_root(&addr)
+                    .expect("updates are drained, storage trie should be revealed by now");
+                let encoded =
+                    encode_account_leaf_value(account, storage_root, &mut self.account_rlp_buf);
+                self.account_updates.insert(addr, LeafUpdate::Changed(encoded));
+                return PendingAccountPromotion::Promoted;
+            }
+        }
+
+        // Get the current account state either from the trie or from latest account update.
+        let trie_account = match self.account_updates.get(&addr) {
+            Some(LeafUpdate::Changed(encoded)) => {
+                Some(encoded).filter(|encoded| !encoded.is_empty())
+            }
+            // Needs to be revealed first.
+            Some(LeafUpdate::Touched) => return PendingAccountPromotion::BlockedByAccount,
+            None => self.trie.get_account_value(&addr),
+        };
+
+        let trie_account = trie_account
+            .map(|value| TrieAccount::decode(&mut &value[..]).expect("invalid account RLP"));
+
+        let (account, storage_root) = if let Some(account) = account.take() {
+            // If account is Some(_) here it means it didn't have any storage updates
+            // and we can fetch the storage root directly from the account trie.
+            //
+            // If it did have storage updates, we would've processed it above when iterating over
+            // storage tries.
+            let storage_root =
+                trie_account.map(|account| account.storage_root).unwrap_or(EMPTY_ROOT_HASH);
+
+            (account, storage_root)
+        } else {
+            (
+                trie_account.map(Into::into),
+                self.trie.storage_root(&addr).expect(
+                    "account had storage updates that were applied to its trie, storage root must be revealed by now",
+                ),
+            )
+        };
+
+        let encoded = encode_account_leaf_value(account, storage_root, &mut self.account_rlp_buf);
+        self.account_updates.insert(addr, LeafUpdate::Changed(encoded));
+
+        PendingAccountPromotion::Promoted
+    }
+
+    /// Re-runs promotion only for accounts known to have been blocked by account reveal.
+    fn retry_account_blocked_promotions(
+        &mut self,
+        mut blocked_by_account: Vec<B256>,
+    ) -> SparseTrieResult<()> {
+        while !blocked_by_account.is_empty() {
+            let span =
+                trace_span!("promote_account_blocked_updates", promoted = tracing::field::Empty)
+                    .entered();
+            let mut next_blocked_by_account = Vec::new();
+            let mut num_promoted = 0;
+
+            for addr in blocked_by_account {
+                let Some(mut account) = self.pending_account_updates.remove(&addr) else {
+                    continue;
+                };
+
+                match self.try_promote_pending_account_update(addr, &mut account) {
+                    PendingAccountPromotion::Promoted => {
+                        num_promoted += 1;
+                    }
+                    PendingAccountPromotion::BlockedByStorage => {
+                        self.pending_account_updates.insert(addr, account);
+                    }
+                    PendingAccountPromotion::BlockedByAccount => {
+                        next_blocked_by_account.push(addr);
+                        self.pending_account_updates.insert(addr, account);
+                    }
+                }
+            }
+
+            span.record("promoted", num_promoted);
+            drop(span);
+
+            if num_promoted == 0 || !self.process_account_leaf_updates(false)? {
+                break;
+            }
+
+            blocked_by_account = next_blocked_by_account;
+        }
+
+        Ok(())
+    }
+
     /// Iterates through all storage tries for which all updates were processed, computes their
     /// storage roots, and promotes corresponding pending account updates into proper leaf updates
     /// for accounts trie.
@@ -724,65 +828,78 @@ where
 
         self.compute_drained_storage_roots();
 
-        loop {
-            let span = trace_span!("promote_updates", promoted = tracing::field::Empty).entered();
-            // Now handle pending account updates that can be upgraded to a proper update.
-            let account_rlp_buf = &mut self.account_rlp_buf;
-            let mut num_promoted = 0;
-            self.pending_account_updates.retain(|addr, account| {
-                if let Some(updates) = self.storage_updates.get(addr) {
-                    if !updates.is_empty() {
-                        // If account has pending storage updates, it is still pending.
-                        return true;
-                    } else if let Some(account) = account.take() {
-                        let storage_root = self.trie.storage_root(addr).expect("updates are drained, storage trie should be revealed by now");
-                        let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
-                        self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
-                        num_promoted += 1;
-                        return false;
-                    }
+        let span = trace_span!("promote_updates", promoted = tracing::field::Empty).entered();
+        // Now handle pending account updates that can be upgraded to a proper update. Track which
+        // entries were blocked by account reveal so later retries do not rescan storage-blocked
+        // entries that cannot become ready in this promotion cycle.
+        let account_rlp_buf = &mut self.account_rlp_buf;
+        let mut blocked_by_account = Vec::new();
+        let mut num_promoted = 0;
+        self.pending_account_updates.retain(|addr, account| {
+            if let Some(updates) = self.storage_updates.get(addr) {
+                if !updates.is_empty() {
+                    // If account has pending storage updates, it is still pending.
+                    return true;
+                } else if let Some(account) = account.take() {
+                    let storage_root = self
+                        .trie
+                        .storage_root(addr)
+                        .expect("updates are drained, storage trie should be revealed by now");
+                    let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
+                    self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
+                    num_promoted += 1;
+                    return false;
                 }
-
-                // Get the current account state either from the trie or from latest account update.
-                let trie_account = match self.account_updates.get(addr) {
-                    Some(LeafUpdate::Changed(encoded)) => {
-                        Some(encoded).filter(|encoded| !encoded.is_empty())
-                    }
-                    // Needs to be revealed first
-                    Some(LeafUpdate::Touched) => return true,
-                    None => self.trie.get_account_value(addr),
-                };
-
-                let trie_account = trie_account.map(|value| TrieAccount::decode(&mut &value[..]).expect("invalid account RLP"));
-
-                let (account, storage_root) = if let Some(account) = account.take() {
-                    // If account is Some(_) here it means it didn't have any storage updates
-                    // and we can fetch the storage root directly from the account trie.
-                    //
-                    // If it did have storage updates, we would've had processed it above when iterating over storage tries.
-                    let storage_root = trie_account.map(|account| account.storage_root).unwrap_or(EMPTY_ROOT_HASH);
-
-                    (account, storage_root)
-                } else {
-                    (trie_account.map(Into::into), self.trie.storage_root(addr).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
-                };
-
-                let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
-                self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
-                num_promoted += 1;
-
-                false
-            });
-            span.record("promoted", num_promoted);
-            drop(span);
-
-            // Only exit when no new updates are processed.
-            //
-            // We need to keep iterating if any updates are being drained because that might
-            // indicate that more pending account updates can be promoted.
-            if num_promoted == 0 || !self.process_account_leaf_updates(false)? {
-                break
             }
+
+            // Get the current account state either from the trie or from latest account update.
+            let trie_account = match self.account_updates.get(addr) {
+                Some(LeafUpdate::Changed(encoded)) => {
+                    Some(encoded).filter(|encoded| !encoded.is_empty())
+                }
+                // Needs to be revealed first.
+                Some(LeafUpdate::Touched) => {
+                    blocked_by_account.push(*addr);
+                    return true;
+                }
+                None => self.trie.get_account_value(addr),
+            };
+
+            let trie_account = trie_account
+                .map(|value| TrieAccount::decode(&mut &value[..]).expect("invalid account RLP"));
+
+            let (account, storage_root) = if let Some(account) = account.take() {
+                // If account is Some(_) here it means it didn't have any storage updates
+                // and we can fetch the storage root directly from the account trie.
+                //
+                // If it did have storage updates, we would've processed it above when iterating
+                // over storage tries.
+                let storage_root =
+                    trie_account.map(|account| account.storage_root).unwrap_or(EMPTY_ROOT_HASH);
+
+                (account, storage_root)
+            } else {
+                (
+                    trie_account.map(Into::into),
+                    self.trie.storage_root(addr).expect(
+                        "account had storage updates that were applied to its trie, storage root must be revealed by now",
+                    ),
+                )
+            };
+
+            let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
+            self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
+            num_promoted += 1;
+
+            false
+        });
+        span.record("promoted", num_promoted);
+        drop(span);
+
+        // Only retry when account updates were drained. Storage-blocked entries cannot become
+        // ready again until a later proof/update event drains their storage updates.
+        if num_promoted != 0 && self.process_account_leaf_updates(false)? {
+            self.retry_account_blocked_promotions(blocked_by_account)?;
         }
 
         Ok(())
@@ -819,6 +936,12 @@ where
             },
         );
     }
+}
+
+enum PendingAccountPromotion {
+    Promoted,
+    BlockedByStorage,
+    BlockedByAccount,
 }
 
 /// RLP-encodes the account as a [`TrieAccount`] leaf value, or returns empty for deletions.
