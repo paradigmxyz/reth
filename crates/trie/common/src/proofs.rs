@@ -730,7 +730,7 @@ pub struct AccountProof {
 /// strips that lone sentinel so the response matches geth and the spec. It is applied only at
 /// the response boundary, leaving the underlying proof construction unchanged.
 #[cfg(feature = "eip1186")]
-fn strip_empty_trie_sentinel(proof: Vec<Bytes>) -> Vec<Bytes> {
+fn normalize_eip1186_empty_trie_proof(proof: Vec<Bytes>) -> Vec<Bytes> {
     if proof.len() == 1 && proof[0].as_ref() == [EMPTY_STRING_CODE] {
         Vec::new()
     } else {
@@ -782,7 +782,7 @@ impl AccountProof {
             code_hash,
             nonce: info.nonce,
             storage_hash,
-            account_proof: strip_empty_trie_sentinel(self.proof),
+            account_proof: normalize_eip1186_empty_trie_proof(self.proof),
             storage_proof: self
                 .storage_proofs
                 .into_iter()
@@ -970,7 +970,7 @@ impl StorageProof {
         alloy_rpc_types_eth::EIP1186StorageProof {
             key: slot,
             value: self.value,
-            proof: strip_empty_trie_sentinel(self.proof),
+            proof: normalize_eip1186_empty_trie_proof(self.proof),
         }
     }
 
@@ -1404,7 +1404,7 @@ mod tests {
 
     #[cfg(feature = "eip1186")]
     #[test]
-    fn eip1186_response_strips_empty_trie_sentinel() {
+    fn eip1186_response_normalizes_empty_trie_proof() {
         let slot = B256::with_last_byte(1);
         let sentinel = || vec![Bytes::from([EMPTY_STRING_CODE])];
 
