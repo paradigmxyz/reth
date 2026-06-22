@@ -152,6 +152,7 @@ where
         Self { inner, cache_map, spec_id, metrics }
     }
 
+    #[cfg_attr(not(feature = "metrics"), allow(clippy::missing_const_for_fn))]
     fn increment_by_one_precompile_cache_hits(&self) {
         #[cfg(feature = "metrics")]
         if let Some(metrics) = &self.metrics {
@@ -159,6 +160,7 @@ where
         }
     }
 
+    #[cfg_attr(not(feature = "metrics"), allow(clippy::missing_const_for_fn))]
     fn increment_by_one_precompile_cache_misses(&self) {
         #[cfg(feature = "metrics")]
         if let Some(metrics) = &self.metrics {
@@ -166,6 +168,7 @@ where
         }
     }
 
+    #[cfg_attr(not(feature = "metrics"), allow(clippy::missing_const_for_fn))]
     fn set_precompile_cache_size_metric(&self, to: f64) {
         #[cfg(not(feature = "metrics"))]
         let _ = to;
@@ -176,6 +179,7 @@ where
         }
     }
 
+    #[cfg_attr(not(feature = "metrics"), allow(clippy::missing_const_for_fn))]
     fn increment_by_one_precompile_errors(&self) {
         #[cfg(feature = "metrics")]
         if let Some(metrics) = &self.metrics {

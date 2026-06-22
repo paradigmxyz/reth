@@ -4464,7 +4464,7 @@ mod tests {
                     ),
                 ),
             ],
-            [(high_code_hash, bytecode.clone()), (low_code_hash, bytecode.clone())],
+            [(high_code_hash, bytecode.clone()), (low_code_hash, bytecode)],
         );
 
         let (plain_state, reverts) =
