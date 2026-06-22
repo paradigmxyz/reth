@@ -10,12 +10,8 @@ use nodes::{
 
 use crate::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates};
 use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
-use alloy_primitives::{
-    keccak256,
-    map::{B256Map, HashMap, HashSet},
-    B256,
-};
-use alloy_trie::{BranchNodeCompact, TrieMask};
+use alloy_primitives::{keccak256, map::B256Map, B256};
+use alloy_trie::TrieMask;
 use core::{cmp::Reverse, mem};
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{
@@ -2138,7 +2134,11 @@ impl ArenaParallelSparseTrie {
     }
 
     #[cfg(debug_assertions)]
-    fn collect_reachable_nodes(arena: &NodeArena, idx: Index, reachable: &mut HashSet<Index>) {
+    fn collect_reachable_nodes(
+        arena: &NodeArena,
+        idx: Index,
+        reachable: &mut alloy_primitives::map::HashSet<Index>,
+    ) {
         if !reachable.insert(idx) {
             return;
         }
@@ -2153,9 +2153,10 @@ impl ArenaParallelSparseTrie {
 
     #[cfg(debug_assertions)]
     fn assert_no_orphaned_nodes(arena: &NodeArena, root: Index, label: &str) {
-        let mut reachable = HashSet::default();
+        let mut reachable = alloy_primitives::map::HashSet::default();
         Self::collect_reachable_nodes(arena, root, &mut reachable);
-        let all_indices: HashSet<Index> = arena.iter().map(|(idx, _)| idx).collect();
+        let all_indices: alloy_primitives::map::HashSet<Index> =
+            arena.iter().map(|(idx, _)| idx).collect();
         let orphaned: Vec<_> = all_indices.difference(&reachable).collect();
         debug_assert!(
             orphaned.is_empty(),
@@ -2280,10 +2281,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
         } else {
             self.buffers.updates = None;
         }
-    }
-
-    fn reserve_nodes(&mut self, additional: usize) {
-        self.upper_arena.reserve(additional);
     }
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all, fields(num_nodes = nodes.len()))]
@@ -2466,8 +2463,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return;
         }
 
-        // Count total dirty leaves across all subtries to make a global parallelism
-        // decision, matching the approach in ParallelSparseTrie.
+        // Count total dirty leaves across all subtries to make one global parallelism decision.
         let mut total_dirty_leaves: u64 = 0;
         let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>)> = Vec::new();
         for (idx, node) in &mut self.upper_arena {
@@ -2484,8 +2480,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             taken.push((idx, subtrie));
         }
 
-        // Hash taken subtries: in parallel if total dirty leaves meet the threshold,
-        // otherwise serially. This mirrors ParallelSparseTrie's all-or-nothing approach.
+        // Hash taken subtries in parallel if total dirty leaves meet the threshold.
         if !taken.is_empty() {
             if taken.len() == 1 || total_dirty_leaves < self.parallelism_thresholds.min_dirty_leaves
             {
@@ -2595,14 +2590,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
             updates.clear()
         }
         self.buffers.clear();
-    }
-
-    fn shrink_nodes_to(&mut self, _size: usize) {
-        // Subtries are recreated from scratch on each block, so there is nothing to shrink.
-    }
-
-    fn shrink_values_to(&mut self, _size: usize) {
-        // Values are stored inline in nodes; no separate value storage.
     }
 
     fn size_hint(&self) -> usize {
@@ -2808,6 +2795,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         sorted.sort_unstable_by_key(|entry| entry.1);
 
         let threshold = self.parallelism_thresholds.min_updates;
+        let parallelize_distributed_updates = sorted.len() >= threshold.saturating_mul(4);
 
         let mut cursor = mem::take(&mut self.buffers.cursor);
         cursor.reset(&self.upper_arena, self.root, Nibbles::default());
@@ -2885,7 +2873,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     let might_empty_subtrie =
                         all_removals && num_subtrie_updates as u64 >= subtrie_num_leaves;
 
-                    if num_subtrie_updates >= threshold && !might_empty_subtrie {
+                    if (num_subtrie_updates >= threshold || parallelize_distributed_updates) &&
+                        !might_empty_subtrie
+                    {
                         // Take subtrie for parallel update.
                         trace!(target: TRACE_TARGET, ?subtrie_root_path, num_subtrie_updates, "Taking subtrie for parallel update");
                         let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
@@ -3102,14 +3092,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
     #[cfg(feature = "trie-debug")]
     fn take_debug_recorder(&mut self) -> TrieDebugRecorder {
         core::mem::take(&mut self.debug_recorder)
-    }
-
-    fn commit_updates(
-        &mut self,
-        _updated: &HashMap<Nibbles, BranchNodeCompact>,
-        _removed: &HashSet<Nibbles>,
-    ) {
-        // no-op for arena trie
     }
 }
 

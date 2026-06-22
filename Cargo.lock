@@ -250,9 +250,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-eip7928"
-version = "0.4.3"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55c4584eaf235a861172e30d0d8adfa95957186f59b93f997851df90b32da7ba"
+checksum = "17201e6cbb4efbb1e510b0746839cd743a5cec3fcfb4673ea2342bd657341c93"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -10711,7 +10711,6 @@ dependencies = [
  "alloy-rlp",
  "alloy-trie",
  "arbitrary",
- "assert_matches",
  "either",
  "itertools 0.14.0",
  "metrics",
@@ -10724,12 +10723,9 @@ dependencies = [
  "reth-execution-errors",
  "reth-metrics",
  "reth-primitives-traits",
- "reth-provider",
- "reth-storage-api",
  "reth-tracing",
  "reth-trie",
  "reth-trie-common",
- "reth-trie-db",
  "serde",
  "serde_json",
  "slotmap",
