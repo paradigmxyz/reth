@@ -503,8 +503,13 @@ where
         }
 
         // If the gas usage is suspiciously high (multiple times higher than parent's gas limit), be
-        // cautious and block on pre-execution checks of the block.
-        if input.gas_used() > parent_block.gas_limit() * MAX_EXPECTED_GAS_USAGE_MULTIPLIER {
+        // cautious and block on pre-execution checks of the block. Payloads carrying a raw BAL can
+        // legitimately exercise this path in high-throughput replay, and their decoded BAL is
+        // still validated before execution below while the converted block is awaited before
+        // returning a valid result.
+        if input.gas_used() > parent_block.gas_limit() * MAX_EXPECTED_GAS_USAGE_MULTIPLIER
+            && !input.has_raw_block_access_list()
+        {
             // Call `.get()` to await the pre-execution checks and exit early if they fail.
             if validated_block.get().is_err() {
                 return Err(validated_block
@@ -2400,6 +2405,14 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
                 .map(|block_access_list| DecodedBal::from_rlp_bytes(block_access_list.clone()))
                 .transpose(),
             Self::Block(_) => Ok(None),
+        }
+    }
+
+    /// Returns true if this payload carries raw block access list bytes.
+    pub fn has_raw_block_access_list(&self) -> bool {
+        match self {
+            Self::Payload(payload) => payload.block_access_list().is_some(),
+            Self::Block(_) => false,
         }
     }
 
