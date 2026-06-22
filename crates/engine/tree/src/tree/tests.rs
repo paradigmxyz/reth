@@ -279,7 +279,7 @@ impl TestHarness {
             parent_to_child,
             engine_kind: EngineApiKind::Ethereum,
             state_trie_overlays,
-            warm_accesses: WarmAccessMultiset::default(),
+            warm_accesses: Default::default(),
         };
 
         let last_executed_block = blocks.last().unwrap().clone();
