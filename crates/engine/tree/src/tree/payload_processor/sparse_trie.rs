@@ -216,22 +216,11 @@ where
         metrics.hashing_task_idle_time_seconds.record(total_idle_time.as_secs_f64());
     }
 
-    /// Prunes the trie for reuse in the next payload built on top of this one.
+    /// Returns the trie for reuse in the next payload built on top of this one.
     ///
     /// Should be called after the state root result has been sent.
-    ///
-    /// When `disable_pruning` is true, the trie is preserved without any node pruning or storage
-    /// trie eviction, keeping the full cache intact for benchmarking purposes.
-    pub(super) fn into_trie_for_reuse(
-        self,
-        max_hot_slots: usize,
-        max_hot_accounts: usize,
-        disable_pruning: bool,
-    ) -> (SparseStateTrie<A, S>, DeferredDrops) {
+    pub(super) fn into_trie_for_reuse(self) -> (SparseStateTrie<A, S>, DeferredDrops) {
         let Self { mut trie, .. } = self;
-        if !disable_pruning {
-            trie.prune(max_hot_slots, max_hot_accounts);
-        }
         let deferred = trie.take_deferred_drops();
         (trie, deferred)
     }

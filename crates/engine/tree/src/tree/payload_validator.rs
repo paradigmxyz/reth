@@ -102,7 +102,7 @@ use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     multiproof::{StateRootComputeOutcome, StateRootHandle},
-    payload_processor::PayloadProcessor,
+    payload_processor::{PayloadProcessor, PayloadProcessorSpawnOptions},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
@@ -116,6 +116,7 @@ use alloy_primitives::{map::B256Set, B256};
 use reth_tasks::LazyHandle;
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
+use reth_trie_sparse::SparseTrieRetainedPaths;
 
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
 use reth_chain_state::{
@@ -189,6 +190,8 @@ pub struct TreeCtx<'a, N: NodePrimitives> {
     state: &'a mut EngineApiTreeState<N>,
     /// Reference to the canonical in-memory state
     canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
+    /// Pending sparse trie prune request to consume when spawning a sparse trie task.
+    pending_sparse_trie_prune: &'a mut Option<SparseTrieRetainedPaths>,
 }
 
 impl<'a, N: NodePrimitives> std::fmt::Debug for TreeCtx<'a, N> {
@@ -196,6 +199,7 @@ impl<'a, N: NodePrimitives> std::fmt::Debug for TreeCtx<'a, N> {
         f.debug_struct("TreeCtx")
             .field("state", &"EngineApiTreeState")
             .field("canonical_in_memory_state", &self.canonical_in_memory_state)
+            .field("pending_sparse_trie_prune", &self.pending_sparse_trie_prune.is_some())
             .finish()
     }
 }
@@ -205,8 +209,9 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     pub const fn new(
         state: &'a mut EngineApiTreeState<N>,
         canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
+        pending_sparse_trie_prune: &'a mut Option<SparseTrieRetainedPaths>,
     ) -> Self {
-        Self { state, canonical_in_memory_state }
+        Self { state, canonical_in_memory_state, pending_sparse_trie_prune }
     }
 }
 
@@ -224,6 +229,11 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     /// Returns a reference to the canonical in-memory state
     pub const fn canonical_in_memory_state(&self) -> &'a CanonicalInMemoryState<N> {
         self.canonical_in_memory_state
+    }
+
+    /// Takes the pending sparse trie prune request, if any.
+    pub const fn take_sparse_trie_prune(&mut self) -> Option<SparseTrieRetainedPaths> {
+        self.pending_sparse_trie_prune.take()
     }
 }
 
@@ -581,13 +591,20 @@ where
         let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
 
         // Spawn the appropriate processor based on strategy
+        let pending_sparse_trie_prune = if matches!(strategy, StateRootStrategy::StateRootTask) {
+            ctx.take_sparse_trie_prune()
+        } else {
+            None
+        };
+        let processor_options =
+            PayloadProcessorSpawnOptions::new(parallel_bal_execution, pending_sparse_trie_prune);
         let mut handle = ensure_ok!(self.spawn_payload_processor(
             env.clone(),
             txs,
             provider_builder.clone(),
             overlay_factory,
             &strategy,
-            parallel_bal_execution,
+            processor_options,
         ));
 
         // Create optional cache stats for detailed block logging
@@ -1748,7 +1765,7 @@ where
         level = "debug",
         target = "engine::tree::payload_validator",
         skip_all,
-        fields(?strategy, parallel_bal_execution)
+        fields(?strategy, parallel_bal_execution = options.parallel_bal_execution)
     )]
     fn spawn_payload_processor<T: ExecutableTxIterator<Evm>>(
         &mut self,
@@ -1757,7 +1774,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         overlay_factory: OverlayStateProviderFactory<P, N>,
         strategy: &StateRootStrategy<N>,
-        parallel_bal_execution: bool,
+        options: PayloadProcessorSpawnOptions,
     ) -> Result<
         PayloadHandle<
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
@@ -1766,6 +1783,8 @@ where
         >,
         InsertBlockErrorKind,
     > {
+        let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
+            options;
         match strategy {
             StateRootStrategy::StateRootTask => {
                 let spawn_start = Instant::now();
@@ -1777,7 +1796,10 @@ where
                     provider_builder,
                     overlay_factory,
                     &self.config,
-                    parallel_bal_execution,
+                    PayloadProcessorSpawnOptions::new(
+                        parallel_bal_execution,
+                        pending_sparse_trie_prune,
+                    ),
                 );
 
                 // record prewarming initialization duration
@@ -2319,6 +2341,7 @@ where
             // Full proof workers — tx count unknown at FCU time (block built incrementally)
             false,
             &self.config,
+            None,
         ))
     }
 }
