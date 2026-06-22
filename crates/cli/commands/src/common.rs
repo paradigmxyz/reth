@@ -27,8 +27,8 @@ use reth_provider::{
         BlockchainProvider, NodeTypesForProvider, RocksDBProvider, StaticFileProvider,
         StaticFileProviderBuilder,
     },
-    BalConfig, BalStoreHandle, InMemoryBalStore, ProviderFactory, StaticFileProviderFactory,
-    StorageSettings,
+    BalStoreHandle, ProviderFactory, RocksDBBalStore, RocksDBBalStoreConfig,
+    StaticFileProviderFactory, StorageSettings,
 };
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
@@ -153,6 +153,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             reth_fs_util::create_dir_all(&rocksdb_path)?;
             let mut builder = RocksDBProvider::builder(data_dir.rocksdb())
                 .with_default_tables()
+                .with_block_access_lists()
                 .with_database_log_level(self.db.log_level);
             if let Some(cache_size) = self.db.rocksdb_block_cache_size {
                 builder = builder.with_block_cache_size(cache_size);
@@ -161,6 +162,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         } else {
             let mut builder = RocksDBProvider::builder(data_dir.rocksdb())
                 .with_default_tables()
+                .with_block_access_lists()
                 .with_database_log_level(self.db.log_level)
                 .with_read_only(!access.is_read_write());
             if let Some(cache_size) = self.db.rocksdb_block_cache_size {
@@ -196,10 +198,14 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
-        let balstore_cache_size =
-            self.db.balstore_cache_size.unwrap_or(BalConfig::DEFAULT_IN_MEMORY_RETENTION_DISTANCE);
-        let bal_store = BalStoreHandle::new(InMemoryBalStore::new(
-            BalConfig::with_in_memory_retention_distance(balstore_cache_size),
+        let bal_store_config = self
+            .db
+            .balstore_cache_size
+            .map(RocksDBBalStoreConfig::with_retention_distance)
+            .unwrap_or_default();
+        let bal_store = BalStoreHandle::new(RocksDBBalStore::with_config(
+            rocksdb_provider.clone(),
+            bal_store_config,
         ));
         let factory = ProviderFactory::<NodeTypesWithDBAdapter<N, DatabaseEnv>>::new(
             db,
