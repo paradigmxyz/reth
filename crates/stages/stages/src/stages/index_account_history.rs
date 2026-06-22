@@ -144,7 +144,9 @@ where
 
         if use_rocksdb {
             provider.commit_pending_rocksdb_batches()?;
-            provider.rocksdb_provider().flush(&[Tables::AccountsHistory.name()])?;
+            provider
+                .rocksdb_provider()
+                .schedule_committed_flush(&[Tables::AccountsHistory.name()])?;
         }
 
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })

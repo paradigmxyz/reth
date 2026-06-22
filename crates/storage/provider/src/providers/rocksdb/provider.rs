@@ -27,7 +27,7 @@ use reth_storage_errors::{
 };
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
-    DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
+    DBRawIteratorWithThreadMode, FlushOptions, IteratorMode, OptimisticTransactionDB,
     OptimisticTransactionOptions, Options, SnapshotWithThreadMode, Transaction,
     WriteBatchWithTransaction, WriteBufferManager, WriteOptions, DB,
 };
@@ -1064,6 +1064,37 @@ impl RocksDBProvider {
                 key: Vec::new(),
             })))
         })?;
+
+        Ok(())
+    }
+
+    /// Schedules pending memtable flushes for tables whose batches were already durably committed.
+    ///
+    /// This is intended for stage paths that call [`Self::commit_batch`] through
+    /// `commit_pending_rocksdb_batches` immediately before flushing. Those writes use synced write
+    /// options, so the data is recoverable from the WAL without blocking the pipeline until
+    /// `RocksDB` finishes writing the flushed SST files.
+    ///
+    /// # Panics
+    /// Panics if the provider is in read-only mode.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(tables = ?tables))]
+    pub fn schedule_committed_flush(&self, tables: &[&'static str]) -> ProviderResult<()> {
+        let db = self.0.db_rw();
+        let mut options = FlushOptions::default();
+        options.set_wait(false);
+
+        for cf_name in tables {
+            if let Some(cf) = db.cf_handle(cf_name) {
+                db.flush_cf_opt(&cf, &options).map_err(|e| {
+                    ProviderError::Database(DatabaseError::Write(Box::new(DatabaseWriteError {
+                        info: DatabaseErrorInfo { message: e.to_string().into(), code: -1 },
+                        operation: DatabaseWriteOperation::Flush,
+                        table_name: cf_name,
+                        key: Vec::new(),
+                    })))
+                })?;
+            }
+        }
 
         Ok(())
     }
