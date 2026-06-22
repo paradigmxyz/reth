@@ -233,7 +233,7 @@ async fn partial_stateless_exex<
                     );
 
                     // === Phase 2: Compute actual witness (Merkle proof) size & Generate Sidecar ===
-                    let witness_result = if miss.total_missed > 0 {
+                    let witness_result = {
                         // Extract raw targets and hashed multiproof targets in one pass
                         let (raw_targets, targets) = build_sidecar_targets(&miss);
                         let target_accounts = targets.len();
@@ -465,13 +465,6 @@ async fn partial_stateless_exex<
                                 None
                             }
                         }
-                    } else {
-                        info!(
-                            target: "partial_stateless",
-                            block = *block_number,
-                            "No witness needed (100% cache hit)"
-                        );
-                        None
                     };
 
                     if let Some(witness) = witness_result {
