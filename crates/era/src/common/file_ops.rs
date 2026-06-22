@@ -363,4 +363,22 @@ mod tests {
         );
         assert_eq!(EraFileType::from_filename("mainnet-00000-abcd1234.txt"), None);
     }
+
+    #[test]
+    fn from_dir_detects_single_format() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("mainnet-00000-aaaaaaaa.era1"), b"x").unwrap();
+        std::fs::write(dir.path().join("mainnet-00001-bbbbbbbb.era1"), b"x").unwrap();
+
+        assert_eq!(EraFileType::from_dir(dir.path()).unwrap(), Some(EraFileType::Era1));
+    }
+
+    #[test]
+    fn from_dir_errors_on_mixed_formats() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("mainnet-00000-aaaaaaaa.era1"), b"x").unwrap();
+        std::fs::write(dir.path().join("mainnet-00000-bbbbbbbb.era"), b"x").unwrap();
+
+        assert!(EraFileType::from_dir(dir.path()).is_err());
+    }
 }
