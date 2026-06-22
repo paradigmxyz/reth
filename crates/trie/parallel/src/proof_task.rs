@@ -37,7 +37,9 @@ use alloy_primitives::{
     map::{B256Map, B256Set},
     B256, U256,
 };
-use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
+use crossbeam_channel::{
+    unbounded, Receiver as CrossbeamReceiver, Select, Sender as CrossbeamSender, TryRecvError,
+};
 use reth_execution_errors::StateProofError;
 use reth_primitives_traits::{dashmap::DashMap, FastInstant as Instant};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
@@ -184,9 +186,9 @@ impl ProofWorkerHandle {
 
         let divisor = if halve_workers { 2 } else { 1 };
         let storage_worker_count =
-            runtime.proof_storage_worker_pool().current_num_threads() / divisor;
+            (runtime.proof_storage_worker_pool().current_num_threads() / divisor).max(1);
         let account_worker_count =
-            runtime.proof_account_worker_pool().current_num_threads() / divisor;
+            (runtime.proof_account_worker_pool().current_num_threads() / divisor).max(1);
 
         let storage_availability = Arc::new(AvailabilitySheet::new(storage_worker_count));
         let account_availability = Arc::new(AvailabilitySheet::new(account_worker_count));
@@ -194,6 +196,8 @@ impl ProofWorkerHandle {
             (0..storage_worker_count).map(|_| unbounded::<StorageWorkerJob>()).collect();
         let storage_work_txs: Arc<[_]> =
             storage_channels.iter().map(|(tx, _)| tx.clone()).collect::<Vec<_>>().into();
+        let storage_work_rxs: Arc<[_]> =
+            storage_channels.iter().map(|(_, rx)| rx.clone()).collect::<Vec<_>>().into();
 
         debug!(
             target: "trie::proof_task",
@@ -209,6 +213,7 @@ impl ProofWorkerHandle {
         let storage_task_ctx = task_ctx.clone();
         let storage_avail = storage_availability.clone();
         let storage_roots = cached_storage_roots.clone();
+        let storage_rx = storage_work_rxs.clone();
         let storage_parent_span = tracing::Span::current();
         runtime.spawn_blocking_named("storage-workers", move || {
             let worker_id = AtomicUsize::new(0);
@@ -224,7 +229,7 @@ impl ProofWorkerHandle {
 
                 let worker = StorageProofWorker::new(
                     storage_task_ctx.clone(),
-                    storage_channels[worker_id].1.clone(),
+                    storage_rx.clone(),
                     worker_id,
                     storage_avail.clone(),
                     storage_roots.clone(),
@@ -558,8 +563,11 @@ pub(crate) enum StorageWorkerJob {
 struct StorageProofWorker<Factory> {
     /// Shared task context with database factory and prefix sets
     task_ctx: ProofTaskCtx<Factory>,
-    /// Channel for receiving work
-    work_rx: CrossbeamReceiver<StorageWorkerJob>,
+    /// Per-worker channels for receiving work.
+    ///
+    /// Each worker prefers its own queue for prefix locality, but can steal from other queues when
+    /// idle so a hot hashed-account prefix cannot starve the pool.
+    work_rxs: Arc<[CrossbeamReceiver<StorageWorkerJob>]>,
     /// Unique identifier for this worker (used for tracing)
     worker_id: usize,
     /// Per-worker availability flags
@@ -581,7 +589,7 @@ where
     /// Creates a new storage proof worker.
     const fn new(
         task_ctx: ProofTaskCtx<Factory>,
-        work_rx: CrossbeamReceiver<StorageWorkerJob>,
+        work_rxs: Arc<[CrossbeamReceiver<StorageWorkerJob>]>,
         worker_id: usize,
         availability: Arc<AvailabilitySheet>,
         cached_storage_roots: Arc<DashMap<B256, B256>>,
@@ -590,7 +598,7 @@ where
     ) -> Self {
         Self {
             task_ctx,
-            work_rx,
+            work_rxs,
             worker_id,
             availability,
             cached_storage_roots,
@@ -598,6 +606,36 @@ where
             metrics,
             #[cfg(feature = "metrics")]
             cursor_metrics,
+        }
+    }
+
+    /// Receives storage work, preferring this worker's prefix queue before stealing from others.
+    fn recv_job(&self) -> Option<StorageWorkerJob> {
+        loop {
+            let mut has_connected_rx = false;
+            for offset in 0..self.work_rxs.len() {
+                let index = (self.worker_id + offset) % self.work_rxs.len();
+                match self.work_rxs[index].try_recv() {
+                    Ok(job) => return Some(job),
+                    Err(TryRecvError::Empty) => has_connected_rx = true,
+                    Err(TryRecvError::Disconnected) => {}
+                }
+            }
+
+            if !has_connected_rx {
+                return None;
+            }
+
+            let mut select = Select::new();
+            for rx in self.work_rxs.iter() {
+                select.recv(rx);
+            }
+
+            let oper = select.select();
+            let index = oper.index();
+            if let Ok(job) = oper.recv(&self.work_rxs[index]) {
+                return Some(job);
+            }
         }
     }
 
@@ -650,7 +688,7 @@ where
         let mut total_idle_time = Duration::ZERO;
         let mut idle_start = Instant::now();
 
-        while let Ok(job) = self.work_rx.recv() {
+        while let Some(job) = self.recv_job() {
             total_idle_time += idle_start.elapsed();
 
             // Mark worker as busy.
@@ -1189,6 +1227,25 @@ mod tests {
         B256::from(bytes)
     }
 
+    fn overlay_test_factory(
+    ) -> impl DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+           + Clone
+           + Send
+           + Sync
+           + 'static {
+        let chain_spec = Arc::new(ChainSpec::default());
+        let anchor_hash = chain_spec.genesis_hash();
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        let changeset_cache = reth_trie_db::ChangesetCache::new();
+        reth_provider::providers::OverlayStateProviderFactory::new(
+            provider_factory,
+            reth_provider::providers::OverlayBuilder::<reth_ethereum_primitives::EthPrimitives>::new(
+                anchor_hash,
+                changeset_cache,
+            ),
+        )
+    }
+
     #[test]
     fn storage_worker_index_partitions_by_hashed_address_prefix() {
         assert_eq!(storage_worker_index(hashed_address_with_prefix(0x00), 4), 0);
@@ -1241,21 +1298,41 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn idle_storage_worker_steals_from_other_prefix_queue() {
+        let (senders, receivers): (Vec<_>, Vec<_>) =
+            (0..2).map(|_| crossbeam_channel::unbounded::<StorageWorkerJob>()).unzip();
+        let worker = StorageProofWorker::new(
+            test_ctx(overlay_test_factory()),
+            receivers.into(),
+            0,
+            Arc::new(AvailabilitySheet::new(2)),
+            Arc::<DashMap<_, _>>::default(),
+            #[cfg(feature = "metrics")]
+            ProofTaskTrieMetrics::default(),
+            #[cfg(feature = "metrics")]
+            ProofTaskCursorMetrics::new(),
+        );
+
+        let hashed_address = hashed_address_with_prefix(0xff);
+        let (result_tx, _result_rx) = crossbeam_channel::unbounded();
+        senders[1]
+            .send(StorageWorkerJob::StorageProof {
+                input: StorageProofInput::new(hashed_address, Vec::new()),
+                proof_result_sender: result_tx,
+            })
+            .unwrap();
+
+        assert!(matches!(
+            worker.recv_job(),
+            Some(StorageWorkerJob::StorageProof { input, .. }) if input.hashed_address == hashed_address
+        ));
+    }
+
     /// Ensures `ProofWorkerHandle::new` spawns workers correctly.
     #[test]
     fn spawn_proof_workers_creates_handle() {
-        let chain_spec = Arc::new(ChainSpec::default());
-        let anchor_hash = chain_spec.genesis_hash();
-        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
-        let changeset_cache = reth_trie_db::ChangesetCache::new();
-        let factory = reth_provider::providers::OverlayStateProviderFactory::new(
-            provider_factory,
-            reth_provider::providers::OverlayBuilder::<reth_ethereum_primitives::EthPrimitives>::new(
-                anchor_hash,
-                changeset_cache,
-            ),
-        );
-        let ctx = test_ctx(factory);
+        let ctx = test_ctx(overlay_test_factory());
 
         let runtime = reth_tasks::Runtime::test();
         let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false);
