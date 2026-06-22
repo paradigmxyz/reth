@@ -172,26 +172,26 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
     fn update_skip_node(&mut self) {
         let old = self.can_skip_current_node;
         self.can_skip_current_node = self.stack.last().is_some_and(|node| {
-                // If the current key is not removed according to the [`AddedRemovedKeys`], and all
-                // of its siblings are removed, then we don't want to skip it. This
-                // allows the `ProofRetainer` to include this node in the returned
-                // proofs. Required to support leaf removal.
-                let key_is_only_nonremoved_child =
-                    self.added_removed_keys.as_ref().is_some_and(|added_removed_keys| {
-                        node.full_key_is_only_nonremoved_child(added_removed_keys.as_ref())
-                    });
+            // If the current key is not removed according to the [`AddedRemovedKeys`], and all of
+            // its siblings are removed, then we don't want to skip it. This allows the
+            // `ProofRetainer` to include this node in the returned proofs. Required to support
+            // leaf removal.
+            let key_is_only_nonremoved_child =
+                self.added_removed_keys.as_ref().is_some_and(|added_removed_keys| {
+                    node.full_key_is_only_nonremoved_child(added_removed_keys.as_ref())
+                });
 
-                trace!(
-                    target: "trie::walker",
-                    ?key_is_only_nonremoved_child,
-                    full_key=?node.full_key(),
-                    "Checked for only non-removed child",
-                );
+            trace!(
+                target: "trie::walker",
+                ?key_is_only_nonremoved_child,
+                full_key=?node.full_key(),
+                "Checked for only non-removed child",
+            );
 
-                !self.changes.contains(node.full_key()) &&
-                    node.hash_flag() &&
-                    !key_is_only_nonremoved_child
-            });
+            !self.changes.contains(node.full_key()) &&
+                node.hash_flag() &&
+                !key_is_only_nonremoved_child
+        });
         trace!(
             target: "trie::walker",
             old,
