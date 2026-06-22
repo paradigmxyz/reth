@@ -794,6 +794,7 @@ where
                 maybe_state_root = Some((
                     block.header().state_root(),
                     Arc::new(TrieUpdates::default()),
+                    Arc::new(TrieChangedPaths::default()),
                     root_time.elapsed(),
                 ));
             }
