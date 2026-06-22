@@ -493,20 +493,37 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         tx_nums: &[TxNumber],
         ctx: &StaticFileWriteCtx,
     ) -> ProviderResult<()> {
+        let receipts_prune_mode =
+            ctx.receipts_prunable.then_some(ctx.receipts_prune_mode).flatten();
+
+        if let Some(receipts_prune_mode) = receipts_prune_mode {
+            for (block, &first_tx) in blocks.iter().zip(tx_nums) {
+                let block_number = block.recovered_block().number();
+                w.increment_block(block_number)?;
+
+                // skip writing receipts if pruning configuration requires us to.
+                if receipts_prune_mode.should_prune(block_number, ctx.tip) {
+                    continue
+                }
+
+                let mut tx_num = first_tx;
+                for receipt in &block.execution_outcome().receipts {
+                    w.append_receipt(tx_num, receipt)?;
+                    tx_num += 1;
+                }
+            }
+
+            return Ok(())
+        }
+
         for (block, &first_tx) in blocks.iter().zip(tx_nums) {
             let block_number = block.recovered_block().number();
             w.increment_block(block_number)?;
 
-            // skip writing receipts if pruning configuration requires us to.
-            if ctx.receipts_prunable &&
-                ctx.receipts_prune_mode
-                    .is_some_and(|mode| mode.should_prune(block_number, ctx.tip))
-            {
-                continue
-            }
-
-            for (i, receipt) in block.execution_outcome().receipts.iter().enumerate() {
-                w.append_receipt(first_tx + i as u64, receipt)?;
+            let mut tx_num = first_tx;
+            for receipt in &block.execution_outcome().receipts {
+                w.append_receipt(tx_num, receipt)?;
+                tx_num += 1;
             }
         }
         Ok(())
