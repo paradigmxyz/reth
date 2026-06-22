@@ -356,12 +356,11 @@ where
         let executor = self.executor.clone();
         let parent_span = Span::current();
         let stream_parent_span = parent_span;
-        let prefetch_bal = Arc::clone(&decoded_bal);
-        let stream_bal = Arc::clone(&decoded_bal);
         let (stream_tx, stream_rx) = oneshot::channel();
 
         if let Some(to_sparse_trie_task) = to_sparse_trie_task {
             let ctx = ctx.clone();
+            let stream_bal = Arc::clone(&decoded_bal);
             executor.bal_streaming_pool().spawn(move || {
                 let branch_span = debug_span!(
                     target: "engine::tree::payload_processor::prewarm",
@@ -408,6 +407,7 @@ where
             //
             // This runs side-by-side with the parallel transaction execution reducing the time it
             // spends blocking on the data.
+            let prefetch_bal = Arc::clone(&decoded_bal);
             let caches = saved_cache.cache().clone();
             let provider_builder = ctx.provider.clone();
             let build = Arc::new(move || provider_builder.build());
