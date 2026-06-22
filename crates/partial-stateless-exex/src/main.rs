@@ -16,9 +16,13 @@ use partial_stateless::{
     network_cache::NetworkStateCache,
     persistence::{load_from_file, save_to_file},
     policy::LastNBlocksPolicy,
-    witness::{measure_multiproof_size, build_sidecar_targets},
-    PartialExecutionWitness, PartialExecutionWitnessState, PartialStatelessSidecar,
-    SerializableMultiProof,
+    witness::{
+        accessed_to_state_targets, build_sidecar_targets, cache_hit_targets,
+        measure_multiproof_size,
+    },
+    CacheFootprintStats, PartialExecutionWitness, PartialExecutionWitnessState,
+    PartialStatelessSidecar, PartitionCheck, SerializableMultiProof, SidecarBenchmarkManifest,
+    StateTargetSet,
 };
 use reth_ethereum::{
     chainspec::EthChainSpec,
@@ -191,11 +195,16 @@ async fn partial_stateless_exex<
                     }
 
                     // Compute miss BEFORE updating cache (simulates what a validator would see)
+                    let cache_snapshot_before = cache.snapshot();
+                    let cache_memory_before = cache.estimated_memory_bytes();
                     let miss = cache.compute_miss(&accessed);
+                    let accessed_targets = accessed_to_state_targets(&accessed);
+                    let cache_hit_targets = cache_hit_targets(&accessed, &miss);
 
                     // Now update the cache
                     let stats = cache.on_block_executed(*block_number, &accessed);
                     let snapshot = cache.snapshot();
+                    let cache_memory_after = cache.estimated_memory_bytes();
 
                     // Log comprehensive info
                     info!(
@@ -340,11 +349,61 @@ async fn partial_stateless_exex<
                                         break 'sidecar Err(eyre::eyre!("Failed to write sidecar file {:?}: {:?}", sidecar_path, e));
                                     }
 
+                                    let sidecar_bytes_len = fs::metadata(&sidecar_path)
+                                        .map(|m| m.len() as usize)
+                                        .unwrap_or(0);
+                                    let sidecar_miss = StateTargetSet::from(&raw_targets);
+                                    let partition =
+                                        PartitionCheck::new(&accessed_targets, &cache_hit_targets, &sidecar_miss);
+                                    let manifest = SidecarBenchmarkManifest {
+                                        schema_version: 1,
+                                        block_number: *block_number,
+                                        block_hash: block.hash(),
+                                        parent_hash,
+                                        parent_state_root,
+                                        cache_block: block_number - 1,
+                                        cache_policy_metadata: format!(
+                                            "LastNBlocks(account: {}, storage/code: {})",
+                                            config.account_window, config.storage_window
+                                        ),
+                                        sidecar_file: sidecar_path
+                                            .file_name()
+                                            .map(|name| name.to_string_lossy().into_owned())
+                                            .unwrap_or_else(|| sidecar_path.display().to_string()),
+                                        sidecar_bytes: sidecar_bytes_len,
+                                        cache_before: CacheFootprintStats::new(
+                                            cache_snapshot_before.total_accounts,
+                                            cache_snapshot_before.total_storage_slots,
+                                            cache_snapshot_before.total_codes,
+                                            cache_memory_before,
+                                        ),
+                                        cache_after: CacheFootprintStats::new(
+                                            snapshot.total_accounts,
+                                            snapshot.total_storage_slots,
+                                            snapshot.total_codes,
+                                            cache_memory_after,
+                                        ),
+                                        accessed: accessed_targets.clone(),
+                                        cache_hit: cache_hit_targets.clone(),
+                                        sidecar_miss,
+                                        partition,
+                                        partial_sidecar_stats: result.clone(),
+                                    };
+                                    let manifest_path = sidecar_path.with_extension("manifest.json");
+                                    let manifest_bytes = match serde_json::to_vec_pretty(&manifest) {
+                                        Ok(bytes) => bytes,
+                                        Err(e) => break 'sidecar Err(eyre::eyre!("Failed to serialize sidecar manifest: {:?}", e)),
+                                    };
+                                    if let Err(e) = fs::write(&manifest_path, manifest_bytes) {
+                                        break 'sidecar Err(eyre::eyre!("Failed to write sidecar manifest {:?}: {:?}", manifest_path, e));
+                                    }
+
                                     info!(
                                         target: "partial_stateless",
                                         block = *block_number,
                                         path = %sidecar_path.display(),
-                                        size = format_bytes(fs::metadata(&sidecar_path).map(|m| m.len() as usize).unwrap_or(0)),
+                                        manifest = %manifest_path.display(),
+                                        size = format_bytes(sidecar_bytes_len),
                                         "Saved witness sidecar successfully"
                                     );
 

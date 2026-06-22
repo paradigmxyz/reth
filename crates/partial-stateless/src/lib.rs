@@ -21,6 +21,7 @@ pub use network_cache::{CachedEntry, NetworkStateCache};
 pub use policy::{CachePolicy, LastNBlocksPolicy};
 pub use witness::{measure_multiproof_size, miss_to_proof_targets, WitnessResult};
 pub use sidecar::{
-    PartialExecutionWitness, PartialExecutionWitnessState, PartialStatelessSidecar,
-    SerializableMultiProof, SerializableStorageMultiProof, WitnessTargets,
+    CacheFootprintStats, PartialExecutionWitness, PartialExecutionWitnessState,
+    PartialStatelessSidecar, PartitionCheck, SerializableMultiProof, SerializableStorageMultiProof,
+    SidecarBenchmarkManifest, StateTargetSet, WitnessTargets,
 };

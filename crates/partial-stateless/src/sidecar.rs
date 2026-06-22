@@ -35,6 +35,142 @@ impl WitnessTargets {
     }
 }
 
+/// Generic target set used by the benchmark manifest.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StateTargetSet {
+    pub accounts: Vec<Address>,
+    pub storage: Vec<(Address, B256)>,
+    pub code_hashes: Vec<B256>,
+}
+
+impl StateTargetSet {
+    pub fn sort_dedup(&mut self) {
+        self.accounts.sort();
+        self.accounts.dedup();
+        self.storage.sort();
+        self.storage.dedup();
+        self.code_hashes.sort();
+        self.code_hashes.dedup();
+    }
+}
+
+impl From<&WitnessTargets> for StateTargetSet {
+    fn from(value: &WitnessTargets) -> Self {
+        let mut set = Self {
+            accounts: value.missed_accounts.clone(),
+            storage: value.missed_storage.clone(),
+            code_hashes: value.missed_code_hashes.clone(),
+        };
+        set.sort_dedup();
+        set
+    }
+}
+
+/// Exact partition check for `accessed == cache_hit disjoint_union sidecar_miss`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PartitionCheck {
+    pub accounts_ok: bool,
+    pub storage_ok: bool,
+    pub code_hashes_ok: bool,
+    pub accounts_disjoint: bool,
+    pub storage_disjoint: bool,
+    pub code_hashes_disjoint: bool,
+    pub partition_ok: bool,
+}
+
+impl PartitionCheck {
+    pub fn new(
+        accessed: &StateTargetSet,
+        cache_hit: &StateTargetSet,
+        sidecar_miss: &StateTargetSet,
+    ) -> Self {
+        fn check<T: Ord + Clone>(accessed: &[T], hit: &[T], miss: &[T]) -> (bool, bool) {
+            let mut union = Vec::with_capacity(hit.len() + miss.len());
+            union.extend_from_slice(hit);
+            union.extend_from_slice(miss);
+            union.sort();
+            union.dedup();
+
+            let mut expected = accessed.to_vec();
+            expected.sort();
+            expected.dedup();
+
+            let mut h = hit.to_vec();
+            h.sort();
+            h.dedup();
+            let mut m = miss.to_vec();
+            m.sort();
+            m.dedup();
+
+            let disjoint = h.iter().all(|item| m.binary_search(item).is_err());
+            (union == expected, disjoint)
+        }
+
+        let (accounts_ok, accounts_disjoint) =
+            check(&accessed.accounts, &cache_hit.accounts, &sidecar_miss.accounts);
+        let (storage_ok, storage_disjoint) =
+            check(&accessed.storage, &cache_hit.storage, &sidecar_miss.storage);
+        let (code_hashes_ok, code_hashes_disjoint) =
+            check(&accessed.code_hashes, &cache_hit.code_hashes, &sidecar_miss.code_hashes);
+        let partition_ok = accounts_ok
+            && storage_ok
+            && code_hashes_ok
+            && accounts_disjoint
+            && storage_disjoint
+            && code_hashes_disjoint;
+
+        Self {
+            accounts_ok,
+            storage_ok,
+            code_hashes_ok,
+            accounts_disjoint,
+            storage_disjoint,
+            code_hashes_disjoint,
+            partition_ok,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CacheFootprintStats {
+    pub accounts: usize,
+    pub storage_slots: usize,
+    pub codes: usize,
+    pub estimated_memory_bytes: usize,
+}
+
+impl CacheFootprintStats {
+    pub fn new(
+        accounts: usize,
+        storage_slots: usize,
+        codes: usize,
+        estimated_memory_bytes: usize,
+    ) -> Self {
+        Self { accounts, storage_slots, codes, estimated_memory_bytes }
+    }
+}
+
+/// Benchmark-only metadata written next to the lean sidecar.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SidecarBenchmarkManifest {
+    pub schema_version: u64,
+    pub block_number: u64,
+    pub block_hash: B256,
+    pub parent_hash: B256,
+    pub parent_state_root: B256,
+    pub cache_block: u64,
+    pub cache_policy_metadata: String,
+    pub sidecar_file: String,
+    pub sidecar_bytes: usize,
+    pub cache_before: CacheFootprintStats,
+    pub cache_after: CacheFootprintStats,
+    pub accessed: StateTargetSet,
+    pub cache_hit: StateTargetSet,
+    pub sidecar_miss: StateTargetSet,
+    pub partition: PartitionCheck,
+    pub partial_sidecar_stats: WitnessResult,
+}
+
 /// A serialized representation of a `StorageMultiProof` that can be easily serialized/deserialized with `serde`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SerializableStorageMultiProof {
@@ -189,4 +325,56 @@ pub struct PartialStatelessSidecar {
     pub witness: PartialExecutionWitness,
     /// Summary stats about the witness.
     pub stats: WitnessResult,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn partition_check_accepts_exact_disjoint_cover() {
+        let account_a = Address::repeat_byte(0x01);
+        let account_b = Address::repeat_byte(0x02);
+        let slot_a = B256::repeat_byte(0x0a);
+        let slot_b = B256::repeat_byte(0x0b);
+        let code_a = B256::repeat_byte(0xca);
+        let code_b = B256::repeat_byte(0xcb);
+
+        let accessed = StateTargetSet {
+            accounts: vec![account_a, account_b],
+            storage: vec![(account_a, slot_a), (account_b, slot_b)],
+            code_hashes: vec![code_a, code_b],
+        };
+        let cache_hit = StateTargetSet {
+            accounts: vec![account_a],
+            storage: vec![(account_a, slot_a)],
+            code_hashes: vec![code_a],
+        };
+        let sidecar_miss = StateTargetSet {
+            accounts: vec![account_b],
+            storage: vec![(account_b, slot_b)],
+            code_hashes: vec![code_b],
+        };
+
+        let check = PartitionCheck::new(&accessed, &cache_hit, &sidecar_miss);
+        assert!(check.partition_ok);
+    }
+
+    #[test]
+    fn partition_check_rejects_overlap() {
+        let account = Address::repeat_byte(0x01);
+        let code_hash = B256::repeat_byte(0xca);
+        let accessed = StateTargetSet {
+            accounts: vec![account],
+            storage: vec![],
+            code_hashes: vec![code_hash],
+        };
+        let cache_hit = accessed.clone();
+        let sidecar_miss = accessed;
+
+        let check = PartitionCheck::new(&cache_hit, &cache_hit, &sidecar_miss);
+        assert!(!check.accounts_disjoint);
+        assert!(!check.code_hashes_disjoint);
+        assert!(!check.partition_ok);
+    }
 }
