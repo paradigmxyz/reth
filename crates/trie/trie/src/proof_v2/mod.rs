@@ -34,6 +34,19 @@ pub(crate) use target::*;
 /// Target to use with the `tracing` crate.
 static TRACE_TARGET: &str = "trie::proof_v2";
 
+#[inline]
+fn right_padded_packed_nibbles(path: &Nibbles) -> B256 {
+    let mut key = B256::ZERO;
+    path.pack_to(key.as_mut_slice());
+    key
+}
+
+struct HashedCursorEntry<V> {
+    packed_key: B256,
+    key: Nibbles,
+    value: V,
+}
+
 /// Number of bytes to pre-allocate for [`ProofCalculator`]'s `rlp_encode_buf` field.
 const RLP_ENCODE_BUF_SIZE: usize = 1024;
 
@@ -687,7 +700,7 @@ where
         &mut self,
         value_encoder: &mut VE,
         targets: &mut Option<TargetsCursor<'a>>,
-        hashed_cursor_current: &mut Option<(Nibbles, VE::DeferredEncoder)>,
+        hashed_cursor_current: &mut Option<HashedCursorEntry<VE::DeferredEncoder>>,
         lower_bound: Nibbles,
         upper_bound: Option<Nibbles>,
     ) -> Result<(), StateProofError> {
@@ -698,30 +711,31 @@ where
             debug_assert_eq!(key_b256.len(), 32);
             let key = Nibbles::unpack_array(key_b256.as_ref());
             let val = value_encoder.deferred_encoder(key_b256, val);
-            (key, val)
+            HashedCursorEntry { packed_key: key_b256, key, value: val }
         };
 
         // If the cursor hasn't been used, or the last iterated key is prior to this range's
         // key range, then seek forward to at least the first key.
-        if hashed_cursor_current.as_ref().is_none_or(|(key, _)| key < &lower_bound) {
+        let lower_key = right_padded_packed_nibbles(&lower_bound);
+        if hashed_cursor_current.as_ref().is_none_or(|entry| entry.packed_key < lower_key) {
             trace!(
                 target: TRACE_TARGET,
-                current=?hashed_cursor_current.as_ref().map(|(k, _)| k),
+                current=?hashed_cursor_current.as_ref().map(|entry| entry.key),
                 "Seeking hashed cursor to meet lower bound",
             );
 
-            let lower_key = B256::right_padding_from(&lower_bound.pack());
             *hashed_cursor_current =
                 self.hashed_cursor.seek(lower_key)?.map(&mut map_hashed_cursor_entry);
         }
 
         // Loop over all keys in the range, calling `push_leaf` on each.
-        while let Some((key, _)) = hashed_cursor_current.as_ref() &&
-            upper_bound.is_none_or(|upper_bound| key < &upper_bound)
+        let upper_key = upper_bound.as_ref().map(right_padded_packed_nibbles);
+        while let Some(entry) = hashed_cursor_current.as_ref() &&
+            upper_key.as_ref().is_none_or(|upper_key| entry.packed_key < *upper_key)
         {
-            let (key, val) =
+            let HashedCursorEntry { key, value, .. } =
                 core::mem::take(hashed_cursor_current).expect("while-let checks for Some");
-            self.push_leaf(targets, key, val)?;
+            self.push_leaf(targets, key, value)?;
             *hashed_cursor_current = self.hashed_cursor.next()?.map(&mut map_hashed_cursor_entry);
         }
 
@@ -1309,7 +1323,7 @@ where
         &mut self,
         value_encoder: &mut VE,
         trie_cursor_state: &mut TrieCursorState,
-        hashed_cursor_current: &mut Option<(Nibbles, VE::DeferredEncoder)>,
+        hashed_cursor_current: &mut Option<HashedCursorEntry<VE::DeferredEncoder>>,
         sub_trie_targets: SubTrieTargets<'a>,
     ) -> Result<(), StateProofError> {
         let sub_trie_upper_bound = sub_trie_targets.upper_bound();
@@ -1398,7 +1412,7 @@ where
             // more data and we should complete computation.
             if hashed_cursor_current
                 .as_ref()
-                .is_none_or(|(key, _)| !key.starts_with(&sub_trie_targets.prefix))
+                .is_none_or(|entry| !entry.key.starts_with(&sub_trie_targets.prefix))
             {
                 break;
             }
@@ -1484,7 +1498,7 @@ where
         // Initialize the variables which track the state of the two cursors. Both indicate the
         // cursors are unseeked.
         let mut trie_cursor_state = TrieCursorState::unseeked();
-        let mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)> = None;
+        let mut hashed_cursor_current: Option<HashedCursorEntry<VE::DeferredEncoder>> = None;
 
         // Divide targets into chunks, each chunk corresponding to a different sub-trie within the
         // overall trie, and handle all proofs within that sub-trie.
@@ -1564,7 +1578,7 @@ where
         // Initialize the variables which track the state of the two cursors. Both indicate the
         // cursors are unseeked.
         let mut trie_cursor_state = TrieCursorState::unseeked();
-        let mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)> = None;
+        let mut hashed_cursor_current: Option<HashedCursorEntry<VE::DeferredEncoder>> = None;
 
         static EMPTY_TARGETS: [ProofV2Target; 0] = [];
         let sub_trie_targets =
@@ -1817,6 +1831,57 @@ mod tests {
     use itertools::Itertools;
     use reth_trie_common::{prefix_set::PrefixSetMut, ProofTrieNode, TrieNode};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn right_padded_packed_nibbles_matches_existing_pack_padding() {
+        let cases = [
+            Nibbles::new(),
+            Nibbles::from_nibbles([0x0a]),
+            Nibbles::from_nibbles([0x0a, 0x0b]),
+            Nibbles::from_nibbles([0x0a, 0x0b, 0x0c]),
+            Nibbles::unpack(B256::repeat_byte(0xab)),
+        ];
+
+        for path in cases {
+            pretty_assertions::assert_eq!(
+                B256::right_padding_from(&path.pack()),
+                right_padded_packed_nibbles(&path)
+            );
+        }
+    }
+
+    #[test]
+    fn right_padded_packed_nibbles_preserves_bound_ordering() {
+        let cases = [
+            (
+                Nibbles::unpack(B256::right_padding_from(&[0x5f])),
+                Nibbles::from_nibbles([0x06]),
+            ),
+            (
+                Nibbles::unpack(B256::right_padding_from(&[0x60])),
+                Nibbles::from_nibbles([0x06]),
+            ),
+            (
+                Nibbles::unpack(B256::right_padding_from(&[0x6a, 0x20])),
+                Nibbles::from_nibbles([0x06, 0x0a, 0x03]),
+            ),
+            (
+                Nibbles::unpack(B256::right_padding_from(&[0x6a, 0x30])),
+                Nibbles::from_nibbles([0x06, 0x0a, 0x03]),
+            ),
+            (
+                Nibbles::unpack(B256::right_padding_from(&[0x70])),
+                Nibbles::from_nibbles([0x06, 0x0f]),
+            ),
+        ];
+
+        for (key, bound) in cases {
+            pretty_assertions::assert_eq!(
+                key < bound,
+                right_padded_packed_nibbles(&key) < right_padded_packed_nibbles(&bound)
+            );
+        }
+    }
 
     /// Converts legacy proofs to V2 proofs by combining extension nodes with their child branch
     /// nodes.
