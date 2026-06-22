@@ -378,7 +378,8 @@ where
         {
             trie.wipe()?;
         } else {
-            let mut trie = S::default().with_updates(self.retain_updates);
+            let mut trie = S::default();
+            trie.set_updates(self.retain_updates);
             trie.wipe();
             self.storage.tries.insert(address, RevealableSparseTrie::Revealed(Box::new(trie)));
         }
