@@ -1,9 +1,9 @@
-use alloy_primitives::{Address, B256, Bytes};
-use serde::{Deserialize, Serialize};
 use crate::witness::WitnessResult;
-use reth_trie_common::{MultiProof, StorageMultiProof, BranchNodeMasks, Nibbles, TrieMask};
-use reth_trie_common::proof::ProofNodes;
 use alloy_primitives::map::{B256Map, HashMap};
+use alloy_primitives::{Address, B256, Bytes};
+use reth_trie_common::proof::ProofNodes;
+use reth_trie_common::{BranchNodeMasks, MultiProof, Nibbles, StorageMultiProof, TrieMask};
+use serde::{Deserialize, Serialize};
 
 /// Hashed / Raw target keys that were missed in the network state cache for a block.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -14,6 +14,25 @@ pub struct WitnessTargets {
     pub missed_storage: Vec<(Address, B256)>,
     /// List of missed contract code hashes.
     pub missed_code_hashes: Vec<B256>,
+}
+
+impl WitnessTargets {
+    pub fn key_preimages(&self) -> Vec<Bytes> {
+        let mut addresses = Vec::with_capacity(self.missed_accounts.len() + self.missed_storage.len());
+        addresses.extend_from_slice(&self.missed_accounts);
+        addresses.extend(self.missed_storage.iter().map(|(address, _)| *address));
+        addresses.sort();
+        addresses.dedup();
+
+        let mut slots: Vec<B256> = self.missed_storage.iter().map(|(_, slot)| *slot).collect();
+        slots.sort();
+        slots.dedup();
+
+        let mut keys = Vec::with_capacity(addresses.len() + slots.len());
+        keys.extend(addresses.into_iter().map(|address| address.to_vec().into()));
+        keys.extend(slots.into_iter().map(Bytes::from));
+        keys
+    }
 }
 
 /// A serialized representation of a `StorageMultiProof` that can be easily serialized/deserialized with `serde`.
@@ -122,6 +141,30 @@ impl SerializableMultiProof {
     }
 }
 
+/// State component of a partial execution witness.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum PartialExecutionWitnessState {
+    /// Reth MPT multiproof encoded in the local serializable representation.
+    MptMultiProof(Vec<u8>),
+}
+
+impl PartialExecutionWitnessState {
+    pub fn mpt_multiproof_bytes(&self) -> &[u8] {
+        match self {
+            Self::MptMultiProof(bytes) => bytes,
+        }
+    }
+}
+
+/// ExecutionWitness-shaped material carried by the sidecar.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PartialExecutionWitness {
+    pub state: PartialExecutionWitnessState,
+    pub codes: Vec<Bytes>,
+    pub keys: Vec<Bytes>,
+    pub headers: Vec<Bytes>,
+}
+
 /// The Builder-Side Witness Sidecar for a block in the Partial Stateless prototype.
 ///
 /// Contains all the necessary data (Merkle proofs, bytecodes) for a stateless validator
@@ -140,14 +183,10 @@ pub struct PartialStatelessSidecar {
     pub cache_block: u64,
     /// Metadata describing the cache eviction policy (e.g. "LastNBlocks(60, 30)").
     pub cache_policy_metadata: String,
-    /// The targets that were missed in the cache.
-    pub raw_targets: WitnessTargets,
-    /// The serialized `MultiProof` (containing account subtree and storage subtrees).
-    pub serialized_multiproof: Vec<u8>,
-    /// Missed contract bytecodes in bytes.
-    pub missed_bytecodes: Vec<Bytes>,
-    /// RLP-encoded ancestor headers required for re-execution.
-    pub ancestor_headers: Vec<Bytes>,
+    /// Cache-missed targets covered by `witness`.
+    pub miss_manifest: WitnessTargets,
+    /// Execution material split like Reth `ExecutionWitness`: state, codes, keys, headers.
+    pub witness: PartialExecutionWitness,
     /// Summary stats about the witness.
     pub stats: WitnessResult,
 }

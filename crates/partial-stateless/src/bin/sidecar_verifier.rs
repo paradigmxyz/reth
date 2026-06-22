@@ -115,17 +115,17 @@ fn clean_inline_nodes(proof: &mut Vec<alloy_primitives::Bytes>) {
 /// Crypto-verify the sidecar's proofs and code preimages against `parent_state_root`.
 fn crypto_verify(sidecar: &PartialStatelessSidecar) -> Res<CryptoVerdict> {
     let serializable: SerializableMultiProof =
-        bincode::deserialize(&sidecar.serialized_multiproof)?;
+        bincode::deserialize(sidecar.witness.state.mpt_multiproof_bytes())?;
     let multiproof = serializable.to_multiproof();
     let root = sidecar.parent_state_root;
 
     // Group missed storage slots by account; missed accounts without storage still
     // get an (empty-slots) entry so their account proof is checked.
     let mut slots_by_account: BTreeMap<Address, Vec<B256>> = BTreeMap::new();
-    for addr in &sidecar.raw_targets.missed_accounts {
+    for addr in &sidecar.miss_manifest.missed_accounts {
         slots_by_account.entry(*addr).or_default();
     }
-    for (addr, slot) in &sidecar.raw_targets.missed_storage {
+    for (addr, slot) in &sidecar.miss_manifest.missed_storage {
         slots_by_account.entry(*addr).or_default().push(*slot);
     }
 
@@ -148,9 +148,9 @@ fn crypto_verify(sidecar: &PartialStatelessSidecar) -> Res<CryptoVerdict> {
     }
 
     let declared: HashSet<B256> =
-        sidecar.raw_targets.missed_code_hashes.iter().copied().collect();
+        sidecar.miss_manifest.missed_code_hashes.iter().copied().collect();
     let mut codes_checked = 0usize;
-    for code in &sidecar.missed_bytecodes {
+    for code in &sidecar.witness.codes {
         let h = keccak256(code);
         if !declared.contains(&h) {
             return Err(format!(
@@ -179,7 +179,7 @@ fn coverage(sidecar: &PartialStatelessSidecar, witness: &ReferenceWitness) -> Co
         .map(|bytes| norm_hex(&keccak256(&bytes).to_string()))
         .collect();
     let sidecar_code_hashes: HashSet<String> = sidecar
-        .raw_targets
+        .miss_manifest
         .missed_code_hashes
         .iter()
         .map(|h| norm_hex(&h.to_string()))
@@ -189,10 +189,10 @@ fn coverage(sidecar: &PartialStatelessSidecar, witness: &ReferenceWitness) -> Co
     // Keys: proxy (flat preimage list; account/slot pairing lost upstream).
     let ref_keys: HashSet<String> = witness.keys.iter().map(|k| norm_hex(k)).collect();
     let mut sidecar_keys: HashSet<String> = HashSet::new();
-    for addr in &sidecar.raw_targets.missed_accounts {
+    for addr in &sidecar.miss_manifest.missed_accounts {
         sidecar_keys.insert(norm_hex(&hex::encode(addr)));
     }
-    for (_addr, slot) in &sidecar.raw_targets.missed_storage {
+    for (_addr, slot) in &sidecar.miss_manifest.missed_storage {
         sidecar_keys.insert(norm_hex(&hex::encode(slot)));
     }
     let covered_keys = ref_keys.intersection(&sidecar_keys).count();
@@ -200,7 +200,8 @@ fn coverage(sidecar: &PartialStatelessSidecar, witness: &ReferenceWitness) -> Co
     // Headers: compare RLP encoded bytes by hex (exact match).
     let ref_headers_set: HashSet<String> = witness.headers.iter().map(|h| norm_hex(h)).collect();
     let sidecar_headers_set: HashSet<String> = sidecar
-        .ancestor_headers
+        .witness
+        .headers
         .iter()
         .map(|bytes| norm_hex(&hex::encode(bytes)))
         .collect();

@@ -126,7 +126,10 @@ fn test_sidecar_serialization_and_targets() {
     use alloy_primitives::map::{B256Map, HashMap};
     use partial_stateless::{
         witness::{build_sidecar_targets, WitnessResult},
-        sidecar::{WitnessTargets, PartialStatelessSidecar, SerializableMultiProof},
+        sidecar::{
+            PartialExecutionWitness, PartialExecutionWitnessState, PartialStatelessSidecar,
+            SerializableMultiProof, WitnessTargets,
+        },
         network_cache::MissResult,
     };
 
@@ -212,10 +215,13 @@ fn test_sidecar_serialization_and_targets() {
         block_number: 100,
         cache_block: 99,
         cache_policy_metadata: "LastNBlocks(60, 30)".to_string(),
-        raw_targets: raw_targets.clone(),
-        serialized_multiproof,
-        missed_bytecodes: vec![Bytes::from(vec![9, 8, 7])],
-        ancestor_headers: vec![],
+        miss_manifest: raw_targets.clone(),
+        witness: PartialExecutionWitness {
+            state: PartialExecutionWitnessState::MptMultiProof(serialized_multiproof),
+            codes: vec![Bytes::from(vec![9, 8, 7])],
+            keys: raw_targets.key_preimages(),
+            headers: vec![],
+        },
         stats,
     };
 
@@ -223,8 +229,8 @@ fn test_sidecar_serialization_and_targets() {
     let deserialized_sidecar: PartialStatelessSidecar = bincode::deserialize(&sidecar_bytes).expect("deserialize sidecar");
 
     assert_eq!(deserialized_sidecar.block_number, sidecar.block_number);
-    assert_eq!(deserialized_sidecar.raw_targets.missed_accounts, sidecar.raw_targets.missed_accounts);
-    assert_eq!(deserialized_sidecar.missed_bytecodes, sidecar.missed_bytecodes);
+    assert_eq!(deserialized_sidecar.miss_manifest.missed_accounts, sidecar.miss_manifest.missed_accounts);
+    assert_eq!(deserialized_sidecar.witness.codes, sidecar.witness.codes);
     assert_eq!(deserialized_sidecar.stats.total_size_bytes, sidecar.stats.total_size_bytes);
 
     // 4. Test build_sidecar_targets
@@ -248,7 +254,10 @@ fn test_sidecar_serialization_and_targets() {
 fn test_sidecar_disk_write() {
     use std::fs;
     use partial_stateless::{
-        sidecar::{WitnessTargets, PartialStatelessSidecar},
+        sidecar::{
+            PartialExecutionWitness, PartialExecutionWitnessState, PartialStatelessSidecar,
+            WitnessTargets,
+        },
         witness::WitnessResult,
     };
 
@@ -283,10 +292,13 @@ fn test_sidecar_disk_write() {
         block_number: 100,
         cache_block: 99,
         cache_policy_metadata: "LastNBlocks(60, 30)".to_string(),
-        raw_targets,
-        serialized_multiproof: vec![1, 2, 3, 4],
-        missed_bytecodes: vec![alloy_primitives::Bytes::from(vec![9, 8, 7])],
-        ancestor_headers: vec![],
+        miss_manifest: raw_targets.clone(),
+        witness: PartialExecutionWitness {
+            state: PartialExecutionWitnessState::MptMultiProof(vec![1, 2, 3, 4]),
+            codes: vec![alloy_primitives::Bytes::from(vec![9, 8, 7])],
+            keys: raw_targets.key_preimages(),
+            headers: vec![],
+        },
         stats,
     };
 

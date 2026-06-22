@@ -17,7 +17,8 @@ use partial_stateless::{
     persistence::{load_from_file, save_to_file},
     policy::LastNBlocksPolicy,
     witness::{measure_multiproof_size, build_sidecar_targets},
-    PartialStatelessSidecar, SerializableMultiProof,
+    PartialExecutionWitness, PartialExecutionWitnessState, PartialStatelessSidecar,
+    SerializableMultiProof,
 };
 use reth_ethereum::{
     chainspec::EthChainSpec,
@@ -307,10 +308,15 @@ async fn partial_stateless_exex<
                                             "LastNBlocks(account: {}, storage/code: {})",
                                             config.account_window, config.storage_window
                                         ),
-                                        raw_targets: raw_targets.clone(),
-                                        serialized_multiproof,
-                                        missed_bytecodes: missed_bytecodes.clone(),
-                                        ancestor_headers,
+                                        miss_manifest: raw_targets.clone(),
+                                        witness: PartialExecutionWitness {
+                                            state: PartialExecutionWitnessState::MptMultiProof(
+                                                serialized_multiproof,
+                                            ),
+                                            codes: missed_bytecodes.clone(),
+                                            keys: raw_targets.key_preimages(),
+                                            headers: ancestor_headers,
+                                        },
                                         stats: result.clone(),
                                     };
 
