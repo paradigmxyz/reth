@@ -243,17 +243,31 @@ impl EraFileType {
 
     /// Detects the ERA file type from the files in `dir`.
     ///
-    /// Returns the type of the first recognized `.era`, `.era1` or `.ere`/`.erae` file found.
+    /// Returns the single recognized type, `None` if the directory has no ERA files, or an error if
+    /// it mixes formats.
     pub fn from_dir(dir: impl AsRef<Path>) -> io::Result<Option<Self>> {
+        let mut found: Option<Self> = None;
         for entry in std::fs::read_dir(dir)? {
             if let Some(name) = entry?.file_name().to_str() &&
                 let Some(era_type) = Self::from_filename(name)
             {
-                return Ok(Some(era_type));
+                match found {
+                    Some(existing) if existing != era_type => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            format!(
+                                "directory mixes ERA formats ({} and {}); import one at a time",
+                                existing.extension(),
+                                era_type.extension(),
+                            ),
+                        ));
+                    }
+                    _ => found = Some(era_type),
+                }
             }
         }
 
-        Ok(None)
+        Ok(found)
     }
 
     /// Detect file type from a URL, defaulting to `Era`.
