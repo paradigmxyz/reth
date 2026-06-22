@@ -450,6 +450,7 @@ alloy-sol-types = { version = "1.6.0", default-features = false }
 alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
 alloy-eip7928 = { version = "0.4.4", default-features = false, features = ["rlp"] }
+alloy-eip8289 = { version = "0.1.0", default-features = false }
 alloy-evm = { version = "0.37.0", default-features = false }
 alloy-rlp = { version = "0.3.13", default-features = false, features = ["core-net"] }
 alloy-trie = { version = "0.9.4", default-features = false }
@@ -703,7 +704,8 @@ vergen-git2 = "9.1.0"
 ipnet = "2.11"
 
 [patch.crates-io]
-#alloy-eip7928 = { git = "https://github.com/Rimeeeeee/eips", branch = "eip-8268" }
+alloy-eip7928 = { git = "https://github.com/Rimeeeeee/eips", branch = "eip-8289" }
+alloy-eip8289 = { git = "https://github.com/Rimeeeeee/eips", branch = "eip-8289" }
 alloy-hardforks = { git = "https://github.com/Rimeeeeee/hardforks", branch = "eip-8268" }
 alloy-consensus = { git = "https://github.com/Rimeeeeee/alloy", branch = "bogota" }
 alloy-contract = { git = "https://github.com/Rimeeeeee/alloy", branch = "bogota" }

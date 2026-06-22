@@ -1,6 +1,7 @@
 //! Functionality related to tree state.
 
 use crate::engine::EngineApiKind;
+use alloy_eip8289::{WamItem, WamItems, WarmAccessMultiset};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
     map::{B256Map, B256Set},
@@ -40,6 +41,8 @@ pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     pub(crate) engine_kind: EngineApiKind,
     /// Flattened state trie overlays for in-memory blocks.
     pub(crate) state_trie_overlays: StateTrieOverlayManager<N>,
+    /// Warm accesses collected from the latest validated block access lists.
+    pub warm_accesses: WarmAccessMultiset,
 }
 
 impl<N: NodePrimitives> TreeState<N> {
@@ -56,6 +59,7 @@ impl<N: NodePrimitives> TreeState<N> {
             parent_to_child: B256Map::default(),
             engine_kind,
             state_trie_overlays,
+            warm_accesses: WarmAccessMultiset::default(),
         }
     }
 
@@ -69,6 +73,7 @@ impl<N: NodePrimitives> TreeState<N> {
         self.blocks_by_hash.clear();
         self.blocks_by_number.clear();
         self.parent_to_child.clear();
+        self.warm_accesses = WarmAccessMultiset::default();
         self.current_canonical_head = current_canonical_head;
         self.engine_kind = engine_kind;
     }
@@ -76,6 +81,31 @@ impl<N: NodePrimitives> TreeState<N> {
     /// Returns the number of executed blocks stored.
     pub fn block_count(&self) -> usize {
         self.blocks_by_hash.len()
+    }
+
+    /// Returns the refcount for a warm account or storage slot.
+    pub fn warm_access_count(&self, item: &WamItem) -> u32 {
+        self.warm_accesses.count(item)
+    }
+
+    /// Adds one validated BAL and removes the BAL leaving the warming window.
+    pub fn apply_wam_transition(&mut self, add: &WamItems, del: Option<&WamItems>) {
+        self.warm_accesses.apply_item_transition(add, del);
+    }
+
+    /// Finds the hash at `target_number` on the in-memory chain ending at `hash`.
+    pub fn block_hash_on_chain(&self, mut hash: B256, target_number: BlockNumber) -> Option<B256> {
+        loop {
+            let block = self.blocks_by_hash.get(&hash)?;
+            let number = block.block_number();
+            if number == target_number {
+                return Some(hash)
+            }
+            if number < target_number {
+                return None
+            }
+            hash = block.recovered_block().parent_hash();
+        }
     }
 
     /// Returns the [`ExecutedBlock`] by hash.

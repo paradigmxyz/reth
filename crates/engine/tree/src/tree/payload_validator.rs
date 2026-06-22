@@ -50,6 +50,7 @@ use crate::tree::{
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
+use alloy_eip8289::WamItems;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{map::B256Set, B256};
@@ -669,6 +670,7 @@ where
                 .ok()
         };
 
+        let wam_items = built_bal.as_ref().map(WamItems::from_bal);
         ensure_ok_post_block!(
             self.validate_post_execution(
                 &block,
@@ -922,7 +924,9 @@ where
             changeset_provider,
         );
         let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
-        Ok(ValidationOutput::new(executed_block, timing_stats).with_raw_bal(raw_bal))
+        Ok(ValidationOutput::new(executed_block, timing_stats)
+            .with_raw_bal(raw_bal)
+            .with_wam_items(wam_items))
     }
 
     /// Spawns a background task to convert a [`BlockOrPayload`] into a [`SealedBlock`] and perform

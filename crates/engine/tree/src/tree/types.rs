@@ -2,6 +2,7 @@
 
 use crate::tree::error::InsertPayloadError;
 use alloy_eip7928::bal::RawBal;
+use alloy_eip8289::WamItems;
 use reth_chain_state::{ExecutedBlock, ExecutionTimingStats};
 use reth_primitives_traits::{BlockTy, NodePrimitives};
 
@@ -21,6 +22,8 @@ pub struct ValidationOutput<N: NodePrimitives> {
     pub execution_timing_stats: Option<Box<ExecutionTimingStats>>,
     /// Validated raw block access list carried by the payload.
     pub raw_bal: Option<RawBal>,
+    /// Deduplicated warm-access items derived from the validated block access list.
+    pub wam_items: Option<WamItems>,
 }
 
 impl<N: NodePrimitives> ValidationOutput<N> {
@@ -29,12 +32,18 @@ impl<N: NodePrimitives> ValidationOutput<N> {
         executed_block: ExecutedBlock<N>,
         execution_timing_stats: Option<Box<ExecutionTimingStats>>,
     ) -> Self {
-        Self { executed_block, execution_timing_stats, raw_bal: None }
+        Self { executed_block, execution_timing_stats, raw_bal: None, wam_items: None }
     }
 
     /// Sets the validated raw block access list carried by the payload.
     pub fn with_raw_bal(mut self, raw_bal: Option<RawBal>) -> Self {
         self.raw_bal = raw_bal;
+        self
+    }
+
+    /// Sets the warm-access items derived from the validated block access list.
+    pub fn with_wam_items(mut self, wam_items: Option<WamItems>) -> Self {
+        self.wam_items = wam_items;
         self
     }
 }

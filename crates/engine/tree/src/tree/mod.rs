@@ -6,6 +6,7 @@ use crate::{
     tree::{error::InsertPayloadError, payload_validator::TreeCtx},
 };
 use alloy_consensus::BlockHeader;
+use alloy_eip8289::{WamItems, WARMING_WINDOW};
 use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rpc_types_engine::{
@@ -2990,7 +2991,38 @@ where
             executed_block: executed,
             execution_timing_stats: timing_stats,
             raw_bal,
+            wam_items,
         } = execute(&mut self.payload_validator, input, ctx)?;
+
+        if let Some(wam_items) = wam_items {
+            let block_number = executed.recovered_block().number();
+            let extends_canonical = executed.recovered_block().parent_hash() ==
+                self.state.tree_state.canonical_block_hash();
+            let leaving_items = block_number.checked_sub(WARMING_WINDOW).and_then(|number| {
+                let hash = if extends_canonical {
+                    self.provider.block_hash(number).ok().flatten()
+                } else {
+                    self.state
+                        .tree_state
+                        .block_hash_on_chain(executed.recovered_block().parent_hash(), number)
+                        .or_else(|| self.provider.block_hash(number).ok().flatten())
+                }?;
+
+                match self.provider.bal_store().get_decoded_by_hash(hash) {
+                    Ok(Some(bal)) => Some(WamItems::from_accounts(bal.as_bal().as_slice())),
+                    Ok(None) => {
+                        warn!(target: "engine::tree", ?number, ?hash, "BAL leaving warming window is missing from cache");
+                        None
+                    }
+                    Err(err) => {
+                        warn!(target: "engine::tree", ?number, ?hash, %err, "Failed to fetch BAL leaving warming window");
+                        None
+                    }
+                }
+            });
+
+            self.state.tree_state.apply_wam_transition(&wam_items, leaving_items.as_ref());
+        }
 
         if let Some(raw_bal) = raw_bal {
             let num_hash = executed.recovered_block().num_hash();
