@@ -554,7 +554,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         if let Some(writer) = &mut self.changeset_offsets {
             writer.sync().map_err(ProviderError::other)?;
             // Update the header with the actual number of offsets written
-            self.writer.user_header_mut().set_changeset_offsets_len(writer.len());
+            if self.writer.user_header().changeset_offsets_len() != writer.len() {
+                self.writer.user_header_mut().set_changeset_offsets_len(writer.len());
+            }
         }
 
         if self.writer.is_dirty() {
@@ -636,7 +638,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         if let Some(writer) = &mut self.changeset_offsets {
             writer.sync().map_err(ProviderError::other)?;
             // Update the header with the actual number of offsets written
-            self.writer.user_header_mut().set_changeset_offsets_len(writer.len());
+            if self.writer.user_header().changeset_offsets_len() != writer.len() {
+                self.writer.user_header_mut().set_changeset_offsets_len(writer.len());
+            }
         }
 
         if self.writer.is_dirty() {
