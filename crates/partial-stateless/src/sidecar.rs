@@ -150,6 +150,44 @@ impl CacheFootprintStats {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WitnessReductionStats {
+    pub total_reduction_ratio: Option<f64>,
+    pub mpt_reduction_ratio: Option<f64>,
+    pub account_proof_reduction_ratio: Option<f64>,
+    pub storage_proof_reduction_ratio: Option<f64>,
+    pub bytecode_reduction_ratio: Option<f64>,
+}
+
+impl WitnessReductionStats {
+    pub fn new(partial: &WitnessResult, full: &WitnessResult) -> Self {
+        fn reduction(partial: usize, full: usize) -> Option<f64> {
+            if full == 0 {
+                None
+            } else {
+                Some(1.0 - partial as f64 / full as f64)
+            }
+        }
+
+        let partial_mpt = partial.account_proof_bytes + partial.storage_proof_bytes;
+        let full_mpt = full.account_proof_bytes + full.storage_proof_bytes;
+
+        Self {
+            total_reduction_ratio: reduction(partial.total_size_bytes, full.total_size_bytes),
+            mpt_reduction_ratio: reduction(partial_mpt, full_mpt),
+            account_proof_reduction_ratio: reduction(
+                partial.account_proof_bytes,
+                full.account_proof_bytes,
+            ),
+            storage_proof_reduction_ratio: reduction(
+                partial.storage_proof_bytes,
+                full.storage_proof_bytes,
+            ),
+            bytecode_reduction_ratio: reduction(partial.bytecode_bytes, full.bytecode_bytes),
+        }
+    }
+}
+
 /// Benchmark-only metadata written next to the lean sidecar.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SidecarBenchmarkManifest {
@@ -168,7 +206,9 @@ pub struct SidecarBenchmarkManifest {
     pub cache_hit: StateTargetSet,
     pub sidecar_miss: StateTargetSet,
     pub partition: PartitionCheck,
+    pub full_sidecar_baseline_stats: WitnessResult,
     pub partial_sidecar_stats: WitnessResult,
+    pub reduction: WitnessReductionStats,
 }
 
 /// A serialized representation of a `StorageMultiProof` that can be easily serialized/deserialized with `serde`.
@@ -376,5 +416,36 @@ mod tests {
         assert!(!check.accounts_disjoint);
         assert!(!check.code_hashes_disjoint);
         assert!(!check.partition_ok);
+    }
+
+    #[test]
+    fn reduction_stats_compare_partial_to_full() {
+        let partial = WitnessResult {
+            total_size_bytes: 40,
+            account_proof_bytes: 10,
+            storage_proof_bytes: 20,
+            bytecode_bytes: 10,
+            account_proof_nodes: 1,
+            storage_proof_nodes: 2,
+            target_accounts: 1,
+            target_storage_slots: 2,
+            computation_time_ms: None,
+        };
+        let full = WitnessResult {
+            total_size_bytes: 100,
+            account_proof_bytes: 20,
+            storage_proof_bytes: 40,
+            bytecode_bytes: 40,
+            account_proof_nodes: 2,
+            storage_proof_nodes: 4,
+            target_accounts: 2,
+            target_storage_slots: 4,
+            computation_time_ms: None,
+        };
+
+        let reduction = WitnessReductionStats::new(&partial, &full);
+        assert_eq!(reduction.total_reduction_ratio, Some(0.6));
+        assert_eq!(reduction.mpt_reduction_ratio, Some(0.5));
+        assert_eq!(reduction.bytecode_reduction_ratio, Some(0.75));
     }
 }

@@ -95,6 +95,24 @@ pub fn cache_hit_targets(accessed: &BlockAccessedState, miss: &MissResult) -> St
     targets
 }
 
+/// Convert raw state targets into hashed `MultiProofTargets`.
+pub fn state_targets_to_proof_targets(targets: &StateTargetSet) -> MultiProofTargets {
+    let mut multiproof_targets = MultiProofTargets::with_capacity(targets.accounts.len());
+
+    for address in &targets.accounts {
+        let hashed_address = keccak256(address);
+        multiproof_targets.entry(hashed_address).or_default();
+    }
+
+    for (address, slot) in &targets.storage {
+        let hashed_address = keccak256(address);
+        let hashed_slot = keccak256(slot);
+        multiproof_targets.entry(hashed_address).or_default().insert(hashed_slot);
+    }
+
+    multiproof_targets
+}
+
 /// Measure the total byte size of a `MultiProof`, adding the size of any missed bytecodes.
 ///
 /// This counts the raw bytes of all trie nodes in the proof (account + storage subtrees)

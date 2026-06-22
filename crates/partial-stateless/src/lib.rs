@@ -23,5 +23,5 @@ pub use witness::{measure_multiproof_size, miss_to_proof_targets, WitnessResult}
 pub use sidecar::{
     CacheFootprintStats, PartialExecutionWitness, PartialExecutionWitnessState,
     PartialStatelessSidecar, PartitionCheck, SerializableMultiProof, SerializableStorageMultiProof,
-    SidecarBenchmarkManifest, StateTargetSet, WitnessTargets,
+    SidecarBenchmarkManifest, StateTargetSet, WitnessReductionStats, WitnessTargets,
 };
