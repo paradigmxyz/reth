@@ -7,7 +7,7 @@
 //! computed root.
 
 use alloy_eips::Encodable2718;
-use alloy_primitives::{map::HashMap, Bloom, B256};
+use alloy_primitives::{Bloom, B256};
 use crossbeam_channel::Receiver;
 use reth_primitives_traits::Receipt;
 use reth_trie_common::ordered_root::OrderedTrieRootEncodedBuilder;
@@ -81,7 +81,8 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
         let mut aggregated_bloom = Bloom::ZERO;
         let mut encode_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
         let mut next = 0usize;
-        let mut pending = HashMap::new();
+        let mut pending: Vec<Option<R>> = Vec::new();
+        let mut pending_count = 0usize;
 
         let mut push = |receipt: R| {
             let receipt_with_bloom = receipt.with_bloom_ref();
@@ -98,12 +99,33 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
                 push(indexed_receipt.receipt);
                 next += 1;
 
-                while let Some(receipt) = pending.remove(&next) {
+                while pending_count != 0 && next < pending.len() {
+                    let Some(receipt) = pending[next].take() else {
+                        break;
+                    };
+                    pending_count -= 1;
                     push(receipt);
                     next += 1;
                 }
             } else {
-                pending.insert(indexed_receipt.index, indexed_receipt.receipt);
+                if receipts_len.is_some_and(|len| indexed_receipt.index >= len) {
+                    tracing::error!(
+                        target: "engine::tree::payload_processor",
+                        index = indexed_receipt.index,
+                        expected = receipts_len,
+                        "Receipt root task received out-of-bounds receipt index"
+                    );
+                    return;
+                }
+
+                if indexed_receipt.index >= pending.len() {
+                    pending.resize_with(indexed_receipt.index + 1, || None);
+                }
+
+                if pending[indexed_receipt.index].is_none() {
+                    pending_count += 1;
+                }
+                pending[indexed_receipt.index] = Some(indexed_receipt.receipt);
             }
         }
 
@@ -117,11 +139,11 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
             return;
         }
 
-        if !pending.is_empty() {
+        if pending_count != 0 {
             tracing::error!(
                 target: "engine::tree::payload_processor",
                 received = next,
-                pending = pending.len(),
+                pending = pending_count,
                 "Receipt root task received gapped receipts"
             );
             return;
