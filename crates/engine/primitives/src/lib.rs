@@ -11,8 +11,6 @@
 
 extern crate alloc;
 
-use alloc::{boxed::Box, sync::Arc};
-
 use alloy_consensus::BlockHeader;
 use reth_errors::ConsensusError;
 use reth_payload_primitives::{
@@ -215,9 +213,9 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     }
 
     /// Verifies payload post-execution w.r.t. hashed state updates.
-    fn validate_block_post_execution_with_hashed_state(
+    fn validate_block_post_execution_with_hashed_state<'a>(
         &self,
-        _state_updates: Box<dyn FnOnce() -> Arc<HashedPostState> + Send + '_>,
+        _state_updates: &dyn FnOnce() -> &'a HashedPostState,
         _block: &RecoveredBlock<Self::Block>,
     ) -> Result<(), ConsensusError> {
         // method not used by l1

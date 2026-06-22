@@ -743,20 +743,14 @@ where
 
         // Run the hashed state validation hook but don't propagate the error yet. If the state root
         // task fails, we might need to re-run this check against a fallback state.
-        let mut hashed_state_validate_result = if strategy.is_skipped() {
-            Ok(())
-        } else {
-            debug_span!(
-                target: "engine::tree::payload_validator",
-                "validate_block_post_execution_with_hashed_state"
-            )
-            .in_scope(|| {
-                self.validator.validate_block_post_execution_with_hashed_state(
-                    Box::new(|| Arc::clone(hashed_state.get())),
-                    &block,
-                )
-            })
-        };
+        let mut hashed_state_validate_result = debug_span!(
+            target: "engine::tree::payload_validator",
+            "validate_block_post_execution_with_hashed_state"
+        )
+        .in_scope(|| {
+            self.validator
+                .validate_block_post_execution_with_hashed_state(&|| hashed_state.get(), &block)
+        });
 
         let root_time = Instant::now();
         let mut maybe_state_root = None;
@@ -861,7 +855,7 @@ where
                     });
                     hashed_state_validate_result =
                         self.validator.validate_block_post_execution_with_hashed_state(
-                            Box::new(|| Arc::clone(hashed_state.get())),
+                            &|| hashed_state.get(),
                             &block,
                         );
                 }
@@ -2162,13 +2156,6 @@ enum StateRootStrategy<N: NodePrimitives> {
     Synchronous,
     /// Custom state root computation strategy.
     Custom(#[debug(skip)] CustomStateRoot<N>),
-}
-
-impl<N: NodePrimitives> StateRootStrategy<N> {
-    /// Returns `true` if the strategy is [`Self::Skipped`].
-    const fn is_skipped(&self) -> bool {
-        matches!(self, Self::Skipped)
-    }
 }
 
 /// Type that validates the payloads processed by the engine.
