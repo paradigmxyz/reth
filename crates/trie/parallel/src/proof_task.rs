@@ -37,9 +37,7 @@ use alloy_primitives::{
     map::{B256Map, B256Set},
     B256, U256,
 };
-use crossbeam_channel::{
-    unbounded, Receiver as CrossbeamReceiver, Select, Sender as CrossbeamSender, TryRecvError,
-};
+use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_execution_errors::StateProofError;
 use reth_primitives_traits::{dashmap::DashMap, FastInstant as Instant};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
@@ -196,8 +194,6 @@ impl ProofWorkerHandle {
             (0..storage_worker_count).map(|_| unbounded::<StorageWorkerJob>()).collect();
         let storage_work_txs: Arc<[_]> =
             storage_channels.iter().map(|(tx, _)| tx.clone()).collect::<Vec<_>>().into();
-        let storage_work_rxs: Arc<[_]> =
-            storage_channels.iter().map(|(_, rx)| rx.clone()).collect::<Vec<_>>().into();
 
         debug!(
             target: "trie::proof_task",
@@ -213,7 +209,6 @@ impl ProofWorkerHandle {
         let storage_task_ctx = task_ctx.clone();
         let storage_avail = storage_availability.clone();
         let storage_roots = cached_storage_roots.clone();
-        let storage_rx = storage_work_rxs.clone();
         let storage_parent_span = tracing::Span::current();
         runtime.spawn_blocking_named("storage-workers", move || {
             let worker_id = AtomicUsize::new(0);
@@ -229,7 +224,7 @@ impl ProofWorkerHandle {
 
                 let worker = StorageProofWorker::new(
                     storage_task_ctx.clone(),
-                    storage_rx.clone(),
+                    storage_channels[worker_id].1.clone(),
                     worker_id,
                     storage_avail.clone(),
                     storage_roots.clone(),
@@ -300,7 +295,7 @@ impl ProofWorkerHandle {
 
     /// Returns `true` if more than one storage worker is currently idle.
     pub fn has_multiple_idle_storage_workers(&self) -> bool {
-        self.storage_availability.has_multiple_idle()
+        self.storage_availability.has_multiple_idle() && self.pending_storage_tasks() == 0
     }
 
     /// Returns `true` if more than one account worker is currently idle.
@@ -563,11 +558,8 @@ pub(crate) enum StorageWorkerJob {
 struct StorageProofWorker<Factory> {
     /// Shared task context with database factory and prefix sets
     task_ctx: ProofTaskCtx<Factory>,
-    /// Per-worker channels for receiving work.
-    ///
-    /// Each worker prefers its own queue for prefix locality, but can steal from other queues when
-    /// idle so a hot hashed-account prefix cannot starve the pool.
-    work_rxs: Arc<[CrossbeamReceiver<StorageWorkerJob>]>,
+    /// Dedicated channel for receiving this worker's prefix-routed work.
+    work_rx: CrossbeamReceiver<StorageWorkerJob>,
     /// Unique identifier for this worker (used for tracing)
     worker_id: usize,
     /// Per-worker availability flags
@@ -589,7 +581,7 @@ where
     /// Creates a new storage proof worker.
     const fn new(
         task_ctx: ProofTaskCtx<Factory>,
-        work_rxs: Arc<[CrossbeamReceiver<StorageWorkerJob>]>,
+        work_rx: CrossbeamReceiver<StorageWorkerJob>,
         worker_id: usize,
         availability: Arc<AvailabilitySheet>,
         cached_storage_roots: Arc<DashMap<B256, B256>>,
@@ -598,7 +590,7 @@ where
     ) -> Self {
         Self {
             task_ctx,
-            work_rxs,
+            work_rx,
             worker_id,
             availability,
             cached_storage_roots,
@@ -606,36 +598,6 @@ where
             metrics,
             #[cfg(feature = "metrics")]
             cursor_metrics,
-        }
-    }
-
-    /// Receives storage work, preferring this worker's prefix queue before stealing from others.
-    fn recv_job(&self) -> Option<StorageWorkerJob> {
-        loop {
-            let mut has_connected_rx = false;
-            for offset in 0..self.work_rxs.len() {
-                let index = (self.worker_id + offset) % self.work_rxs.len();
-                match self.work_rxs[index].try_recv() {
-                    Ok(job) => return Some(job),
-                    Err(TryRecvError::Empty) => has_connected_rx = true,
-                    Err(TryRecvError::Disconnected) => {}
-                }
-            }
-
-            if !has_connected_rx {
-                return None;
-            }
-
-            let mut select = Select::new();
-            for rx in self.work_rxs.iter() {
-                select.recv(rx);
-            }
-
-            let oper = select.select();
-            let index = oper.index();
-            if let Ok(job) = oper.recv(&self.work_rxs[index]) {
-                return Some(job);
-            }
         }
     }
 
@@ -688,7 +650,7 @@ where
         let mut total_idle_time = Duration::ZERO;
         let mut idle_start = Instant::now();
 
-        while let Some(job) = self.recv_job() {
+        while let Ok(job) = self.work_rx.recv() {
             total_idle_time += idle_start.elapsed();
 
             // Mark worker as busy.
@@ -1299,34 +1261,31 @@ mod tests {
     }
 
     #[test]
-    fn idle_storage_worker_steals_from_other_prefix_queue() {
-        let (senders, receivers): (Vec<_>, Vec<_>) =
+    fn queued_storage_work_suppresses_idle_chunking_signal() {
+        let (senders, _receivers): (Vec<_>, Vec<_>) =
             (0..2).map(|_| crossbeam_channel::unbounded::<StorageWorkerJob>()).unzip();
-        let worker = StorageProofWorker::new(
-            test_ctx(overlay_test_factory()),
-            receivers.into(),
-            0,
-            Arc::new(AvailabilitySheet::new(2)),
-            Arc::<DashMap<_, _>>::default(),
-            #[cfg(feature = "metrics")]
-            ProofTaskTrieMetrics::default(),
-            #[cfg(feature = "metrics")]
-            ProofTaskCursorMetrics::new(),
-        );
+        let storage_availability = Arc::new(AvailabilitySheet::new(2));
+        let account_availability = Arc::new(AvailabilitySheet::new(1));
+        let handle = ProofWorkerHandle {
+            storage_work_txs: senders.into(),
+            account_work_tx: crossbeam_channel::unbounded::<AccountWorkerJob>().0,
+            storage_availability: storage_availability.clone(),
+            account_availability,
+            storage_worker_count: 2,
+            account_worker_count: 1,
+        };
+        storage_availability.mark_idle(0);
+        storage_availability.mark_idle(1);
+
+        assert!(handle.has_multiple_idle_storage_workers());
 
         let hashed_address = hashed_address_with_prefix(0xff);
         let (result_tx, _result_rx) = crossbeam_channel::unbounded();
-        senders[1]
-            .send(StorageWorkerJob::StorageProof {
-                input: StorageProofInput::new(hashed_address, Vec::new()),
-                proof_result_sender: result_tx,
-            })
+        handle
+            .dispatch_storage_proof(StorageProofInput::new(hashed_address, Vec::new()), result_tx)
             .unwrap();
 
-        assert!(matches!(
-            worker.recv_job(),
-            Some(StorageWorkerJob::StorageProof { input, .. }) if input.hashed_address == hashed_address
-        ));
+        assert!(!handle.has_multiple_idle_storage_workers());
     }
 
     /// Ensures `ProofWorkerHandle::new` spawns workers correctly.
