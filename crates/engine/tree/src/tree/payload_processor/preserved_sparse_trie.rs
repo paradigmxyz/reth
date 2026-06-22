@@ -73,7 +73,7 @@ impl PreservedTrieGuard<'_> {
 pub(super) enum PreservedSparseTrie {
     /// Trie with a computed state root that can be reused for continuation payloads.
     Anchored {
-        /// The sparse state trie (pruned after root computation).
+        /// The sparse state trie anchored to the computed state root.
         trie: SparseTrie,
         /// The state root this trie represents (computed from the previous block).
         /// Used to verify continuity: new payload's `parent_state_root` must match this.
@@ -102,7 +102,7 @@ impl PreservedSparseTrie {
 
     /// Consumes self and returns the trie for reuse.
     ///
-    /// If the preserved trie is anchored and the parent state root matches, the pruned
+    /// If the preserved trie is anchored and the parent state root matches, the preserved
     /// trie structure is reused directly. Otherwise, the trie is cleared but allocations
     /// are preserved to reduce memory overhead.
     pub(super) fn into_trie_for(self, parent_state_root: B256) -> SparseTrie {
