@@ -665,24 +665,19 @@ where
     ///
     /// we trigger state root computation on a rayon pool.
     fn compute_drained_storage_roots(&mut self) {
-        let addresses_to_compute_roots: Vec<_> = self
-            .storage_updates
-            .iter()
-            .filter_map(|(address, updates)| updates.is_empty().then_some(*address))
-            .collect();
-
         struct SendStorageTriePtr<S>(*mut RevealableSparseTrie<S>);
         // SAFETY: this wrapper only forwards the pointer across rayon; deref invariants are
         // documented at the use site below.
         unsafe impl<S: Send> Send for SendStorageTriePtr<S> {}
 
-        let mut tries_to_compute_roots: Vec<(B256, SendStorageTriePtr<S>)> =
-            Vec::with_capacity(addresses_to_compute_roots.len());
-        for address in addresses_to_compute_roots {
-            if let Some(trie) = self.trie.storage_tries_mut().get_mut(&address) &&
-                !trie.is_root_cached()
+        let mut tries_to_compute_roots: Vec<(B256, SendStorageTriePtr<S>)> = Vec::new();
+        let storage_tries = self.trie.storage_tries_mut();
+        for (address, updates) in &self.storage_updates {
+            if updates.is_empty()
+                && let Some(trie) = storage_tries.get_mut(address)
+                && !trie.is_root_cached()
             {
-                tries_to_compute_roots.push((address, SendStorageTriePtr(trie)));
+                tries_to_compute_roots.push((*address, SendStorageTriePtr(trie)));
             }
         }
 
@@ -710,7 +705,7 @@ where
             let _enter = span.entered();
             // SAFETY:
             // - pointers are created from `storage_tries_mut().get_mut(address)` above;
-            // - `addresses_to_compute_roots` comes from map iteration, so addresses are unique;
+            // - pointers come from `storage_updates` map iteration, so addresses are unique;
             // - we do not insert/remove entries between pointer collection and use, so pointers
             //   stay valid and map reallocation cannot occur;
             // - each pointer is consumed by at most one rayon task, so no aliasing mutable access.
@@ -740,18 +735,24 @@ where
             // Now handle pending account updates that can be upgraded to a proper update.
             let account_rlp_buf = &mut self.account_rlp_buf;
             let mut num_promoted = 0;
+            let mut promoted_storage_updates = Vec::new();
             self.pending_account_updates.retain(|addr, account| {
-                if let Some(updates) = self.storage_updates.get(addr) {
-                    if !updates.is_empty() {
+                let has_drained_storage_updates = match self.storage_updates.get(addr) {
+                    Some(updates) if !updates.is_empty() => {
                         // If account has pending storage updates, it is still pending.
                         return true;
-                    } else if let Some(account) = account.take() {
-                        let storage_root = self.trie.storage_root(addr).expect("updates are drained, storage trie should be revealed by now");
-                        let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
-                        self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
-                        num_promoted += 1;
-                        return false;
                     }
+                    Some(_) => true,
+                    None => false,
+                };
+
+                if has_drained_storage_updates && let Some(account) = account.take() {
+                    let storage_root = self.trie.storage_root(addr).expect("updates are drained, storage trie should be revealed by now");
+                    let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
+                    self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
+                    promoted_storage_updates.push(*addr);
+                    num_promoted += 1;
+                    return false;
                 }
 
                 // Get the current account state either from the trie or from latest account update.
@@ -775,7 +776,12 @@ where
 
                     (account, storage_root)
                 } else {
-                    (trie_account.map(Into::into), self.trie.storage_root(addr).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
+                    let storage_root = self.trie.storage_root(addr).expect("account had storage updates that were applied to its trie, storage root must be revealed by now");
+                    if has_drained_storage_updates {
+                        promoted_storage_updates.push(*addr);
+                    }
+
+                    (trie_account.map(Into::into), storage_root)
                 };
 
                 let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
@@ -784,6 +790,9 @@ where
 
                 false
             });
+            for address in promoted_storage_updates {
+                self.storage_updates.remove(&address);
+            }
             span.record("promoted", num_promoted);
             drop(span);
 
