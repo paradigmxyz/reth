@@ -360,8 +360,13 @@ where
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
-        let prewarm_handle =
-            self.spawn_caching_with(env, prewarm_rx, provider_builder, None, false);
+        let prewarm_handle = self.spawn_caching_with(
+            env,
+            prewarm_rx,
+            provider_builder,
+            None,
+            parallel_bal_execution,
+        );
         PayloadHandle {
             state_root_handle: None,
             install_state_hook: false,

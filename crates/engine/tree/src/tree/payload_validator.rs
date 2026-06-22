@@ -769,14 +769,13 @@ where
 
         // Run the hashed state validation hook but don't propagate the error yet. If the state root
         // task fails, we might need to re-run this check against a fallback state.
-        let mut hashed_state_validate_result = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").in_scope(|| {
-            // Wait for the background keccak256 hashing task to complete. This blocks until
-            // all changed addresses and storage slots have been hashed.
-            let hashed_state_ref =
-                debug_span!(target: "engine::tree::payload_validator", "wait_hashed_post_state")
-                    .in_scope(|| hashed_state.get());
-
-            self.validator.validate_block_post_execution_with_hashed_state(hashed_state_ref, &block)
+        let mut hashed_state_validate_result = debug_span!(
+            target: "engine::tree::payload_validator",
+            "validate_block_post_execution_with_hashed_state"
+        )
+        .in_scope(|| {
+            self.validator
+                .validate_block_post_execution_with_hashed_state(&|| hashed_state.get(), &block)
         });
 
         let root_time = Instant::now();
@@ -786,6 +785,18 @@ where
         let mut trie_debug_recorders = Vec::new();
 
         match strategy {
+            StateRootStrategy::Skipped => {
+                debug!(
+                    target: "engine::tree::payload_validator",
+                    state_root = ?block.header().state_root(),
+                    "Skipping trie state-root computation"
+                );
+                maybe_state_root = Some((
+                    block.header().state_root(),
+                    Arc::new(TrieUpdates::default()),
+                    root_time.elapsed(),
+                ));
+            }
             StateRootStrategy::StateRootTask => {
                 debug!(target: "engine::tree::payload_validator", "Using sparse trie state root algorithm");
 
@@ -876,7 +887,7 @@ where
                     });
                     hashed_state_validate_result =
                         self.validator.validate_block_post_execution_with_hashed_state(
-                            hashed_state.get(),
+                            &|| hashed_state.get(),
                             &block,
                         );
                 }
@@ -1779,12 +1790,12 @@ where
     ///
     /// This method determines how to execute the block and compute its state root based on
     /// the selected strategy:
+    /// - `Skipped`: Trusts the header state root and does not compute trie state.
     /// - `StateRootTask`: Uses a dedicated task for state root computation with proof generation
     /// - `Parallel`: Computes state root in parallel with block execution
     /// - `Synchronous`: Falls back to sequential execution and state root computation
     ///
-    /// The method handles strategy fallbacks if the preferred approach fails, ensuring
-    /// block execution always completes with a valid state root.
+    /// The method handles strategy fallbacks if the preferred computed-root approach fails.
     ///
     /// # Arguments
     ///
@@ -1843,6 +1854,7 @@ where
 
                 Ok(handle)
             }
+            StateRootStrategy::Skipped |
             StateRootStrategy::Parallel |
             StateRootStrategy::Synchronous |
             StateRootStrategy::Custom(_) => {
@@ -1901,7 +1913,9 @@ where
     /// Note: Use state root task only if prefix sets are empty, otherwise proof generation is
     /// too expensive because it requires walking all paths in every proof.
     fn plan_state_root_computation(&self) -> StateRootStrategy<N> {
-        if let Some(custom_state_root) = &self.custom_state_root {
+        if self.config.skip_state_root() {
+            StateRootStrategy::Skipped
+        } else if let Some(custom_state_root) = &self.custom_state_root {
             StateRootStrategy::Custom(custom_state_root.clone())
         } else if self.config.state_root_fallback() {
             StateRootStrategy::Synchronous
@@ -2188,6 +2202,8 @@ where
 /// Strategy describing how to compute the state root.
 #[derive(derive_more::Debug, Clone)]
 enum StateRootStrategy<N: NodePrimitives> {
+    /// Skip trie state-root computation and trust the block header root.
+    Skipped,
     /// Use the state root task (background sparse trie computation).
     StateRootTask,
     /// Run the parallel state root computation on the calling thread.
