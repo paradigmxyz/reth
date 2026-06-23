@@ -40,9 +40,10 @@ impl HooksBuilder {
 
 impl Default for HooksBuilder {
     fn default() -> Self {
+        let process = Collector::default();
         Self {
             hooks: vec![
-                Box::new(|| Collector::default().collect()),
+                Box::new(move || process.collect()),
                 Box::new(collect_memory_stats),
                 Box::new(collect_io_stats),
             ],
