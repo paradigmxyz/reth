@@ -3,10 +3,10 @@
 //! Converts `MissResult` into `MultiProofTargets` and provides helpers
 //! for measuring witness (Merkle proof) size.
 
-use crate::network_cache::MissResult;
-use crate::WitnessTargets;
-use alloy_primitives::{keccak256, Address};
+use crate::{network_cache::MissResult, BlockAccessedState, StateTargetSet, WitnessTargets};
+use alloy_primitives::{keccak256, Address, B256};
 use reth_trie_common::{MultiProof, MultiProofTargets};
+use std::collections::HashSet;
 
 /// Result of witness computation for a single block.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -52,6 +52,65 @@ pub fn miss_to_proof_targets(miss: &MissResult) -> MultiProofTargets {
     }
 
     targets
+}
+
+/// Convert the complete block accessed universe into benchmark target metadata.
+pub fn accessed_to_state_targets(accessed: &BlockAccessedState) -> StateTargetSet {
+    let mut targets = StateTargetSet {
+        accounts: accessed.accounts.keys().copied().collect(),
+        storage: accessed.storage.keys().copied().collect(),
+        code_hashes: accessed.codes.keys().copied().collect(),
+    };
+    targets.sort_dedup();
+    targets
+}
+
+/// Compute the cache-hit side of `accessed == cache_hit ∪ sidecar_miss`.
+pub fn cache_hit_targets(accessed: &BlockAccessedState, miss: &MissResult) -> StateTargetSet {
+    let missed_accounts: HashSet<Address> = miss.missed_accounts.iter().copied().collect();
+    let missed_storage: HashSet<(Address, B256)> = miss.missed_storage.iter().copied().collect();
+    let missed_codes: HashSet<B256> = miss.missed_codes.iter().copied().collect();
+
+    let mut targets = StateTargetSet {
+        accounts: accessed
+            .accounts
+            .keys()
+            .filter(|address| !missed_accounts.contains(*address))
+            .copied()
+            .collect(),
+        storage: accessed
+            .storage
+            .keys()
+            .filter(|key| !missed_storage.contains(*key))
+            .copied()
+            .collect(),
+        code_hashes: accessed
+            .codes
+            .keys()
+            .filter(|code_hash| !missed_codes.contains(*code_hash))
+            .copied()
+            .collect(),
+    };
+    targets.sort_dedup();
+    targets
+}
+
+/// Convert raw state targets into hashed `MultiProofTargets`.
+pub fn state_targets_to_proof_targets(targets: &StateTargetSet) -> MultiProofTargets {
+    let mut multiproof_targets = MultiProofTargets::with_capacity(targets.accounts.len());
+
+    for address in &targets.accounts {
+        let hashed_address = keccak256(address);
+        multiproof_targets.entry(hashed_address).or_default();
+    }
+
+    for (address, slot) in &targets.storage {
+        let hashed_address = keccak256(address);
+        let hashed_slot = keccak256(slot);
+        multiproof_targets.entry(hashed_address).or_default().insert(hashed_slot);
+    }
+
+    multiproof_targets
 }
 
 /// Measure the total byte size of a `MultiProof`, adding the size of any missed bytecodes.
@@ -173,4 +232,3 @@ pub fn build_sidecar_targets(miss: &MissResult) -> (WitnessTargets, MultiProofTa
 
     (raw_targets, multiproof_targets)
 }
-

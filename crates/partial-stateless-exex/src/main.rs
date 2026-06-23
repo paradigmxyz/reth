@@ -16,8 +16,13 @@ use partial_stateless::{
     network_cache::NetworkStateCache,
     persistence::{load_from_file, save_to_file},
     policy::LastNBlocksPolicy,
-    witness::{measure_multiproof_size, build_sidecar_targets},
-    PartialStatelessSidecar, SerializableMultiProof,
+    witness::{
+        accessed_to_state_targets, build_sidecar_targets, cache_hit_targets,
+        measure_multiproof_size, state_targets_to_proof_targets,
+    },
+    CacheFootprintStats, PartialExecutionWitness, PartialExecutionWitnessState,
+    PartialStatelessSidecar, PartitionCheck, SerializableMultiProof, SidecarBenchmarkManifest,
+    StateTargetSet, WitnessReductionStats,
 };
 use reth_ethereum::{
     chainspec::EthChainSpec,
@@ -190,11 +195,16 @@ async fn partial_stateless_exex<
                     }
 
                     // Compute miss BEFORE updating cache (simulates what a validator would see)
+                    let cache_snapshot_before = cache.snapshot();
+                    let cache_memory_before = cache.estimated_memory_bytes();
                     let miss = cache.compute_miss(&accessed);
+                    let accessed_targets = accessed_to_state_targets(&accessed);
+                    let cache_hit_targets = cache_hit_targets(&accessed, &miss);
 
                     // Now update the cache
                     let stats = cache.on_block_executed(*block_number, &accessed);
                     let snapshot = cache.snapshot();
+                    let cache_memory_after = cache.estimated_memory_bytes();
 
                     // Log comprehensive info
                     info!(
@@ -223,11 +233,14 @@ async fn partial_stateless_exex<
                     );
 
                     // === Phase 2: Compute actual witness (Merkle proof) size & Generate Sidecar ===
-                    let witness_result = if miss.total_missed > 0 {
+                    let witness_result = {
                         // Extract raw targets and hashed multiproof targets in one pass
                         let (raw_targets, targets) = build_sidecar_targets(&miss);
                         let target_accounts = targets.len();
                         let target_slots: usize = targets.values().map(|slots| slots.len()).sum();
+                        let full_targets = state_targets_to_proof_targets(&accessed_targets);
+                        let full_target_accounts = full_targets.len();
+                        let full_target_slots: usize = full_targets.values().map(|slots| slots.len()).sum();
 
                         // Calculate total bytes of missed bytecodes
                         let missed_bytecode_bytes: usize = miss.missed_codes
@@ -240,6 +253,32 @@ async fn partial_stateless_exex<
                             .iter()
                             .filter_map(|code_hash| accessed.codes.get(code_hash).cloned())
                             .collect();
+
+                        let full_bytecode_bytes: usize =
+                            accessed.codes.values().map(|bytes| bytes.len()).sum();
+                        let full_start = Instant::now();
+                        let full_sidecar_baseline_stats = match state_provider
+                            .multiproof(TrieInput::default(), full_targets)
+                        {
+                            Ok(full_proof) => {
+                                let elapsed_ms = full_start.elapsed().as_millis() as u64;
+                                let mut full_result =
+                                    measure_multiproof_size(&full_proof, full_bytecode_bytes);
+                                full_result.computation_time_ms = Some(elapsed_ms);
+                                full_result.target_accounts = full_target_accounts;
+                                full_result.target_storage_slots = full_target_slots;
+                                full_result
+                            }
+                            Err(e) => {
+                                warn!(
+                                    target: "partial_stateless",
+                                    block = *block_number,
+                                    error = %e,
+                                    "Failed to compute full sidecar baseline multiproof"
+                                );
+                                continue;
+                            }
+                        };
 
                         let start = Instant::now();
                         // Compute multiproof with empty TrieInput (proof against DB state)
@@ -307,10 +346,15 @@ async fn partial_stateless_exex<
                                             "LastNBlocks(account: {}, storage/code: {})",
                                             config.account_window, config.storage_window
                                         ),
-                                        raw_targets: raw_targets.clone(),
-                                        serialized_multiproof,
-                                        missed_bytecodes: missed_bytecodes.clone(),
-                                        ancestor_headers,
+                                        miss_manifest: raw_targets.clone(),
+                                        witness: PartialExecutionWitness {
+                                            state: PartialExecutionWitnessState::MptMultiProof(
+                                                serialized_multiproof,
+                                            ),
+                                            codes: missed_bytecodes.clone(),
+                                            keys: raw_targets.key_preimages(),
+                                            headers: ancestor_headers,
+                                        },
                                         stats: result.clone(),
                                     };
 
@@ -334,11 +378,66 @@ async fn partial_stateless_exex<
                                         break 'sidecar Err(eyre::eyre!("Failed to write sidecar file {:?}: {:?}", sidecar_path, e));
                                     }
 
+                                    let sidecar_bytes_len = fs::metadata(&sidecar_path)
+                                        .map(|m| m.len() as usize)
+                                        .unwrap_or(0);
+                                    let sidecar_miss = StateTargetSet::from(&raw_targets);
+                                    let partition =
+                                        PartitionCheck::new(&accessed_targets, &cache_hit_targets, &sidecar_miss);
+                                    let manifest = SidecarBenchmarkManifest {
+                                        schema_version: 1,
+                                        block_number: *block_number,
+                                        block_hash: block.hash(),
+                                        parent_hash,
+                                        parent_state_root,
+                                        cache_block: block_number - 1,
+                                        cache_policy_metadata: format!(
+                                            "LastNBlocks(account: {}, storage/code: {})",
+                                            config.account_window, config.storage_window
+                                        ),
+                                        sidecar_file: sidecar_path
+                                            .file_name()
+                                            .map(|name| name.to_string_lossy().into_owned())
+                                            .unwrap_or_else(|| sidecar_path.display().to_string()),
+                                        sidecar_bytes: sidecar_bytes_len,
+                                        cache_before: CacheFootprintStats::new(
+                                            cache_snapshot_before.total_accounts,
+                                            cache_snapshot_before.total_storage_slots,
+                                            cache_snapshot_before.total_codes,
+                                            cache_memory_before,
+                                        ),
+                                        cache_after: CacheFootprintStats::new(
+                                            snapshot.total_accounts,
+                                            snapshot.total_storage_slots,
+                                            snapshot.total_codes,
+                                            cache_memory_after,
+                                        ),
+                                        accessed: accessed_targets.clone(),
+                                        cache_hit: cache_hit_targets.clone(),
+                                        sidecar_miss,
+                                        partition,
+                                        full_sidecar_baseline_stats: full_sidecar_baseline_stats.clone(),
+                                        partial_sidecar_stats: result.clone(),
+                                        reduction: WitnessReductionStats::new(
+                                            &result,
+                                            &full_sidecar_baseline_stats,
+                                        ),
+                                    };
+                                    let manifest_path = sidecar_path.with_extension("manifest.json");
+                                    let manifest_bytes = match serde_json::to_vec_pretty(&manifest) {
+                                        Ok(bytes) => bytes,
+                                        Err(e) => break 'sidecar Err(eyre::eyre!("Failed to serialize sidecar manifest: {:?}", e)),
+                                    };
+                                    if let Err(e) = fs::write(&manifest_path, manifest_bytes) {
+                                        break 'sidecar Err(eyre::eyre!("Failed to write sidecar manifest {:?}: {:?}", manifest_path, e));
+                                    }
+
                                     info!(
                                         target: "partial_stateless",
                                         block = *block_number,
                                         path = %sidecar_path.display(),
-                                        size = format_bytes(fs::metadata(&sidecar_path).map(|m| m.len() as usize).unwrap_or(0)),
+                                        manifest = %manifest_path.display(),
+                                        size = format_bytes(sidecar_bytes_len),
                                         "Saved witness sidecar successfully"
                                     );
 
@@ -366,13 +465,6 @@ async fn partial_stateless_exex<
                                 None
                             }
                         }
-                    } else {
-                        info!(
-                            target: "partial_stateless",
-                            block = *block_number,
-                            "No witness needed (100% cache hit)"
-                        );
-                        None
                     };
 
                     if let Some(witness) = witness_result {
