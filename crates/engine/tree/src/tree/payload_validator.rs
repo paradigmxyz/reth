@@ -837,13 +837,14 @@ where
                         }
 
                         // we double check the state root here for good measure
-                        if state_root == block.header().state_root() {
+                        let block_state_root = block.header().state_root();
+                        if block_state_root == B256::ZERO || state_root == block_state_root {
                             maybe_state_root = Some((state_root, trie_updates, elapsed))
                         } else {
                             warn!(
                                 target: "engine::tree::payload_validator",
                                 ?state_root,
-                                block_state_root = ?block.header().state_root(),
+                                ?block_state_root,
                                 "State root task returned incorrect state root"
                             );
                             #[cfg(feature = "trie-debug")]
@@ -956,7 +957,8 @@ where
         debug!(target: "engine::tree::payload_validator", ?root_elapsed, "Calculated state root");
 
         // ensure state root matches
-        if state_root != block.header().state_root() {
+        let block_state_root = block.header().state_root();
+        if block_state_root != B256::ZERO && state_root != block_state_root {
             #[cfg(feature = "trie-debug")]
             Self::write_trie_debug_recorders(block.header().number(), &trie_debug_recorders);
 
@@ -968,7 +970,6 @@ where
                 Some((&trie_output, state_root)),
                 ctx.state_mut(),
             );
-            let block_state_root = block.header().state_root();
             return Err(InsertBlockError::new(
                 block.into_sealed_block(),
                 ConsensusError::BodyStateRootDiff(

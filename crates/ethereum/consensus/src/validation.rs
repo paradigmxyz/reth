@@ -54,7 +54,7 @@ where
     ChainSpec: EthereumHardforks,
 {
     // Check if gas used matches the value set in header.
-    if block.header().gas_used() != result.gas_used {
+    if block.header().gas_used() != 0 && block.header().gas_used() != result.gas_used {
         return Err(ConsensusError::BlockGasUsed {
             gas: GotExpected { got: result.gas_used, expected: block.header().gas_used() },
             gas_spent_by_tx: gas_spent_by_transactions(&result.receipts),
@@ -98,7 +98,7 @@ where
             return Err(ConsensusError::RequestsHashMissing)
         };
         let requests_hash = result.requests.requests_hash();
-        if requests_hash != header_requests_hash {
+        if header_requests_hash != B256::ZERO && requests_hash != header_requests_hash {
             return Err(ConsensusError::BodyRequestsHashDiff(
                 GotExpected::new(requests_hash, header_requests_hash).into(),
             ))
@@ -115,7 +115,7 @@ where
         let Some(block_access_list_hash) = block_access_list_hash
     {
         let block_bal_hash = block.header().block_access_list_hash().unwrap_or_default();
-        if block_access_list_hash != block_bal_hash {
+        if block_bal_hash != B256::ZERO && block_access_list_hash != block_bal_hash {
             return Err(ConsensusError::BlockAccessListHashMismatch(
                 GotExpected::new(block_access_list_hash, block_bal_hash).into(),
             ))
@@ -149,19 +149,21 @@ fn verify_receipts<R: Receipt>(
 
 /// Compare the calculated receipts root with the expected receipts root, also compare
 /// the calculated logs bloom with the expected logs bloom.
+///
+/// A zero receipts root means the header does not commit to post-execution receipt fields.
 fn compare_receipts_root_and_logs_bloom(
     calculated_receipts_root: B256,
     calculated_logs_bloom: Bloom,
     expected_receipts_root: B256,
     expected_logs_bloom: Bloom,
 ) -> Result<(), ConsensusError> {
-    if calculated_receipts_root != expected_receipts_root {
+    if expected_receipts_root != B256::ZERO && calculated_receipts_root != expected_receipts_root {
         return Err(ConsensusError::BodyReceiptRootDiff(
             GotExpected { got: calculated_receipts_root, expected: expected_receipts_root }.into(),
         ))
     }
 
-    if calculated_logs_bloom != expected_logs_bloom {
+    if expected_receipts_root != B256::ZERO && calculated_logs_bloom != expected_logs_bloom {
         return Err(ConsensusError::BodyBloomLogDiff(
             GotExpected { got: calculated_logs_bloom, expected: expected_logs_bloom }.into(),
         ))
@@ -215,6 +217,17 @@ mod tests {
             calculated_logs_bloom,
             expected_receipts_root,
             expected_logs_bloom
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn test_compare_receipts_root_and_logs_bloom_zero_root_skips_comparison() {
+        assert!(compare_receipts_root_and_logs_bloom(
+            B256::random(),
+            Bloom::random(),
+            B256::ZERO,
+            Bloom::ZERO
         )
         .is_ok());
     }
