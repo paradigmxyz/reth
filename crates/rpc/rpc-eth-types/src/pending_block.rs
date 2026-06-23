@@ -18,12 +18,25 @@ use reth_primitives_traits::{
 use reth_rpc_convert::{RpcConvert, RpcTypes};
 
 /// Configured [`reth_evm::EvmEnv`] for a pending block.
-#[derive(Debug, Clone, Constructor)]
+#[derive(Debug, Constructor)]
 pub struct PendingBlockEnv<Evm: ConfigureEvm> {
     /// Configured [`reth_evm::EvmEnv`] for the pending block.
     pub evm_env: EvmEnvFor<Evm>,
     /// Origin block for the config
     pub origin: PendingBlockEnvOrigin<BlockTy<Evm::Primitives>, ReceiptTy<Evm::Primitives>>,
+}
+
+impl<Evm> Clone for PendingBlockEnv<Evm>
+where
+    Evm: ConfigureEvm,
+    EvmEnvFor<Evm>: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            evm_env: self.evm_env.clone(),
+            origin: self.origin.clone(),
+        }
+    }
 }
 
 /// The origin for a configured [`PendingBlockEnv`]
