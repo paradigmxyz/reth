@@ -34,6 +34,9 @@ use reth_trie_sparse::{
 use revm_primitives::{hash_map::Entry, B256Map};
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
+/// Maximum proof worker messages to merge before returning to sparse-trie scheduling.
+const MAX_COALESCED_PROOF_RESULTS: usize = 128;
+
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaParallelSparseTrie> {
     /// Sender for proof results.
@@ -256,6 +259,7 @@ where
 
         loop {
             let mut t = Instant::now();
+            let mut processed_revealed_proofs = false;
             crossbeam_channel::select_biased! {
                 recv(self.updates) -> message => {
                     let wake = Instant::now();
@@ -290,9 +294,14 @@ where
                     };
 
                     let mut result = result.result?;
-                    while let Ok(next) = self.proof_result_rx.try_recv() {
+                    let mut coalesced = 1;
+                    while coalesced < MAX_COALESCED_PROOF_RESULTS {
+                        let Ok(next) = self.proof_result_rx.try_recv() else {
+                            break
+                        };
                         let res = next.result?;
                         result.extend(res);
+                        coalesced += 1;
                     }
 
                     let phase_end = Instant::now();
@@ -305,17 +314,20 @@ where
                     self.metrics
                         .sparse_trie_reveal_multiproof_duration_histogram
                         .record(t.elapsed());
+
+                    if self.updates.is_empty() {
+                        self.process_ready_updates_and_dispatch()?;
+                        processed_revealed_proofs = true;
+                    }
                 },
             }
 
             if self.updates.is_empty() && self.proof_result_rx.is_empty() {
-                // If we don't have any pending messages, we can spend some time on computing
-                // storage roots and promoting account updates.
-                self.dispatch_pending_targets();
-                t = Instant::now();
-                self.process_new_updates()?;
-                self.promote_pending_account_updates()?;
-                self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
+                if !processed_revealed_proofs {
+                    // If we don't have any pending messages, we can spend some time on computing
+                    // storage roots and promoting account updates.
+                    self.process_ready_updates_and_dispatch()?;
+                }
 
                 if self.finished_state_updates &&
                     self.account_updates.is_empty() &&
@@ -324,14 +336,12 @@ where
                     break;
                 }
 
-                self.dispatch_pending_targets();
-
                 // If there's still no pending updates spend some time pre-computing the account
                 // trie upper hashes
                 if self.proof_result_rx.is_empty() {
                     self.trie.calculate_subtries();
                 }
-            } else if self.updates.is_empty() {
+            } else if self.updates.is_empty() && !processed_revealed_proofs {
                 // If we don't have any pending updates, apply them to the trie,
                 t = Instant::now();
                 self.process_new_updates()?;
@@ -502,6 +512,19 @@ where
         self.trie.reveal_decoded_multiproof_v2(result).map_err(|e| {
             ParallelStateRootError::Other(format!("could not reveal multiproof: {e:?}"))
         })
+    }
+
+    fn process_ready_updates_and_dispatch(&mut self) -> SparseTrieResult<()> {
+        self.dispatch_pending_targets();
+
+        let start = Instant::now();
+        self.process_new_updates()?;
+        self.promote_pending_account_updates()?;
+        self.metrics.sparse_trie_process_updates_duration_histogram.record(start.elapsed());
+
+        self.dispatch_pending_targets();
+
+        Ok(())
     }
 
     fn process_new_updates(&mut self) -> SparseTrieResult<()> {
