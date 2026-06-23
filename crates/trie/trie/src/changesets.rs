@@ -172,8 +172,9 @@ fn compute_wiped_storage_changesets(
         all_nodes,
     )?;
 
-    // Collect into a Vec
-    let mut storage_changesets = Vec::new();
+    // Collect into a Vec. Wiped tries include every changed path plus all existing nodes; changed
+    // paths are the lower-bound capacity we know before walking the cursor.
+    let mut storage_changesets = Vec::with_capacity(storage_updates.storage_nodes.len());
     for result in merged {
         storage_changesets.push(result?);
     }
