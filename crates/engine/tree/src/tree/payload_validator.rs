@@ -109,7 +109,10 @@ use crate::tree::{
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
+use alloy_eip7928::{
+    bal::{Bal as AlloyBal, DecodedBal},
+    BlockAccessList,
+};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{map::B256Set, B256};
@@ -1131,12 +1134,7 @@ where
         input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
     ) -> Result<
-        (
-            BlockExecutionOutput<N::Receipt>,
-            Vec<Address>,
-            ReceiptRootReceiver,
-            Option<BlockAccessList>,
-        ),
+        (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<DecodedBal>),
         InsertBlockErrorKind,
     >
     where
@@ -1148,7 +1146,8 @@ where
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
-        let has_bal = env.decoded_bal.is_some();
+        let input_bal = env.decoded_bal.clone();
+        let has_bal = input_bal.is_some();
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
@@ -1219,7 +1218,12 @@ where
         debug_span!(target: "engine::tree", "merge_transitions")
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
 
-        let built_bal = if has_bal { db.take_built_alloy_bal() } else { None };
+        let built_bal = if has_bal {
+            db.take_built_alloy_bal()
+                .map(|built_bal| post_execution_bal(built_bal, input_bal.as_deref()))
+        } else {
+            None
+        };
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
 
         let execution_duration = execution_start.elapsed();
@@ -1259,7 +1263,7 @@ where
     /// 2. Relies on BAL prewarm to stream sparse-trie updates and optional state prefetches.
     /// 3. Spawns the receipt-root task.
     /// 4. Calls [`crate::tree::payload_processor::bal::execute_block`].
-    /// 5. Returns the rebuilt BAL for post-execution consensus validation.
+    /// 5. Returns the post-execution BAL for consensus validation.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     #[expect(clippy::type_complexity)]
     fn execute_block_bal<Tx, Err, MakeStateProvider, T>(
@@ -1269,12 +1273,7 @@ where
         handle: &PayloadHandle<Tx, Err, N::Receipt>,
         make_state_provider: &MakeStateProvider,
     ) -> Result<
-        (
-            BlockExecutionOutput<N::Receipt>,
-            Vec<Address>,
-            ReceiptRootReceiver,
-            Option<BlockAccessList>,
-        ),
+        (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<DecodedBal>),
         InsertBlockErrorKind,
     >
     where
@@ -1720,7 +1719,7 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
         ctx: &mut TreeCtx<'_, N>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
-        built_bal: Option<BlockAccessList>,
+        built_bal: Option<DecodedBal>,
     ) -> Result<(), InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
@@ -1733,8 +1732,7 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
-        let block_access_list_hash =
-            built_bal.as_ref().map(|bal| compute_block_access_list_hash(bal));
+        let block_access_list_hash = built_bal.as_ref().map(|bal| bal.hash());
 
         if let Err(err) = self.consensus.validate_block_post_execution(
             block,
@@ -2507,3 +2505,24 @@ pub type CustomStateRoot<N> = Arc<
         + Sync
         + 'static,
 >;
+
+/// Builds the BAL used for post-execution consensus validation.
+///
+/// If the rebuilt BAL is exactly equal to the received decoded BAL, the returned value reuses the
+/// received raw RLP bytes and cached hash. Otherwise the rebuilt BAL is encoded so the consensus
+/// check still compares the header commitment against the canonical execution output.
+fn post_execution_bal(built_bal: BlockAccessList, input_bal: Option<&DecodedBal>) -> DecodedBal {
+    if let Some(input_bal) = input_bal &&
+        built_bal.as_slice() == input_bal.as_bal().as_slice()
+    {
+        return DecodedBal::new_unchecked(
+            AlloyBal::from(built_bal),
+            input_bal.as_raw().clone(),
+            input_bal.hash(),
+        )
+    }
+
+    let built_bal = AlloyBal::from(built_bal);
+    let raw = alloy_rlp::encode(&built_bal).into();
+    DecodedBal::new(built_bal, raw)
+}
