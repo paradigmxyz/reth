@@ -294,7 +294,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         bundles: Vec<Bundle<RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>>>,
         state_context: Option<StateContext>,
         mut state_override: Option<StateOverride>,
-    ) -> impl Future<Output = Result<Vec<Vec<EthCallResponse>>, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<Vec<Vec<EthCallResponse>>, Self::Error>> + Send
+    where
+        EvmEnvFor<Self::Evm>: Clone,
+    {
         async move {
             // Check if the vector of bundles is empty
             if bundles.is_empty() {
@@ -433,6 +436,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     ) -> impl Future<Output = Result<AccessListResult, Self::Error>> + Send
     where
         Self: Trace,
+        EvmEnvFor<Self::Evm>: Clone,
     {
         async move {
             let block_id = block_number.unwrap_or_default();
@@ -456,6 +460,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     ) -> impl Future<Output = Result<AccessListResult, Self::Error>> + Send
     where
         Self: Trace,
+        EvmEnvFor<Self::Evm>: Clone,
     {
         self.spawn_blocking_io_fut(async move |this| {
             let state = this.state_at_block_id(at).await?;

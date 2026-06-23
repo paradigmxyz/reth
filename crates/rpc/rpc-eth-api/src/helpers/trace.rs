@@ -122,6 +122,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     ) -> impl Future<Output = Result<Option<R>, Self::Error>> + Send
     where
         Self: LoadTransaction,
+        EvmEnvFor<Self::Evm>: Clone,
         F: FnOnce(
                 TransactionInfo,
                 TracingInspector,
@@ -152,6 +153,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     ) -> impl Future<Output = Result<Option<R>, Self::Error>> + Send
     where
         Self: LoadTransaction,
+        EvmEnvFor<Self::Evm>: Clone,
         F: FnOnce(
                 TransactionInfo,
                 Insp,
