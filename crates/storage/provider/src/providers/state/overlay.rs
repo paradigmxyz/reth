@@ -109,13 +109,6 @@ impl Overlay {
     fn hashed_post_state_total_len(&self) -> usize {
         self.hashed_post_states.iter().map(|state| state.total_len()).sum()
     }
-
-    pub(super) fn into_flattened(self) -> (Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>) {
-        (
-            TrieUpdatesSorted::merge_batch(self.trie_updates.into_iter().rev()),
-            HashedPostStateSorted::merge_batch(self.hashed_post_states.into_iter().rev()),
-        )
-    }
 }
 
 /// Source of overlay data for [`OverlayStateProviderFactory`].

@@ -1,4 +1,4 @@
-use super::overlay::{OverlayBuilder, OverlaySource};
+use super::overlay::{Overlay, OverlayBuilder, OverlaySource};
 use crate::{
     AccountReader, BlockHashReader, ChangeSetReader, EitherReader, HashedPostStateProvider,
     ProviderError, RocksDBProviderFactory, StateProvider, StateRootProvider,
@@ -23,11 +23,11 @@ use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
-    updates::TrieUpdates,
+    updates::{TrieUpdates, TrieUpdatesSorted},
     witness::TrieWitness,
-    AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage, KeccakKeyHasher,
-    MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot, TrieInput,
-    TrieInputSorted,
+    AccountProof, ExecutionWitnessMode, HashedPostState, HashedPostStateSorted, HashedStorage,
+    KeccakKeyHasher, MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot,
+    TrieInput, TrieInputSorted,
 };
 use reth_trie_db::{
     ChangesetCache, DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
@@ -312,7 +312,7 @@ where
         let overlay_builder = OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
             .with_overlay_source(Some(OverlaySource::Immediate { trie: nodes, state }));
         let (trie_updates, hashed_post_state) =
-            overlay_builder.build_overlay(self.provider)?.into_flattened();
+            flatten_overlay_layers(overlay_builder.build_overlay(self.provider)?);
 
         Ok(TrieInputSorted::new(trie_updates, hashed_post_state, prefix_sets))
     }
@@ -334,6 +334,16 @@ where
         self.lowest_available_blocks.storage_history_block_number = Some(block_number);
         self
     }
+}
+
+fn flatten_overlay_layers(
+    overlay: Overlay,
+) -> (Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>) {
+    let Overlay { trie_updates, hashed_post_states } = overlay;
+    (
+        TrieUpdatesSorted::merge_batch(trie_updates.into_iter().rev()),
+        HashedPostStateSorted::merge_batch(hashed_post_states.into_iter().rev()),
+    )
 }
 
 impl<Provider, N> HistoricalStateProviderRef<'_, Provider, N>
