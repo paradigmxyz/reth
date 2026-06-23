@@ -18,6 +18,8 @@ pub(super) struct ArenaCursorStackEntry {
     /// The dense index at which to resume child iteration in [`ArenaCursor::next`].
     /// Only meaningful when this entry's node is a branch.
     pub(super) next_dense_idx: usize,
+    /// Whether this subtree has already emitted a changed path during the current walk.
+    pub(super) subtree_emitted_changed_path: bool,
 }
 
 /// Result of [`ArenaCursor::seek`] describing the state at the deepest ancestor node.
@@ -60,7 +62,7 @@ pub(super) enum NextResult {
 /// reference, so the caller retains full ownership of the arena between calls.
 #[derive(Debug, Default, Clone)]
 pub(super) struct ArenaCursor {
-    stack: Vec<ArenaCursorStackEntry>,
+    pub(super) stack: Vec<ArenaCursorStackEntry>,
     /// Whether the head entry should be popped at the start of the next [`Self::next`] call.
     /// Set when `next` returns [`NextResult::NonBranch`] or [`NextResult::Branch`].
     needs_pop: bool,
@@ -106,7 +108,12 @@ impl ArenaCursor {
     /// Pushes an entry onto the stack for the node at the given index and path.
     fn push(&mut self, arena: &NodeArena, idx: Index, path: Nibbles) {
         debug_assert!(arena.contains_key(idx), "push called with invalid arena index");
-        self.stack.push(ArenaCursorStackEntry { index: idx, path, next_dense_idx: 0 });
+        self.stack.push(ArenaCursorStackEntry {
+            index: idx,
+            path,
+            next_dense_idx: 0,
+            subtree_emitted_changed_path: false,
+        });
         trace!(target: TRACE_TARGET, entry = ?self.stack.last().expect("just pushed"), "Pushed stack entry");
     }
 
