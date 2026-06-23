@@ -10598,6 +10598,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-stages-types",
  "reth-storage-errors",
+ "reth-tasks",
  "reth-tracing",
  "reth-trie-common",
  "reth-trie-sparse",

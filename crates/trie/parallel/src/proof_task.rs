@@ -446,7 +446,7 @@ where
             let root_node = calculator.storage_root_node(hashed_address)?;
             vec![root_node]
         } else {
-            calculator.storage_proof(hashed_address, &mut targets)?
+            calculator.storage_proof_inline(hashed_address, &mut targets)?
         };
 
         let root = calculator.compute_root_hash(&proof)?;

@@ -15,11 +15,16 @@ use alloy_primitives::{keccak256, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::trie::StateProofError;
+use reth_storage_errors::db::DatabaseError;
+use reth_tasks::WorkerPool;
 use reth_trie_common::{
     prefix_set::PrefixSet, BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2,
     ProofV2Target, RlpNode, TrieNodeV2,
 };
-use std::cmp::Ordering;
+use std::{
+    cmp::Ordering,
+    sync::mpsc::{self, Receiver, Sender},
+};
 use tracing::{error, instrument, trace};
 
 mod value;
@@ -37,6 +42,112 @@ static TRACE_TARGET: &str = "trie::proof_v2";
 /// Number of bytes to pre-allocate for [`ProofCalculator`]'s `rlp_encode_buf` field.
 const RLP_ENCODE_BUF_SIZE: usize = 1024;
 
+/// Result of a hashed-state range lookup.
+///
+/// This is intentionally separated from branch planning so proof calculation can experiment with
+/// dispatching slow hashed-state reads while keeping trie-table branch lookups inline.
+#[derive(Debug)]
+struct DispatchedHashedRange<V> {
+    /// Ordered leaves found in the requested key range.
+    entries: Vec<(Nibbles, V)>,
+    /// First cursor entry at or after the range upper bound, or `None` if the hashed cursor is
+    /// exhausted.
+    next: Option<(Nibbles, V)>,
+}
+
+/// Raw hashed-state range result produced before values are converted into deferred encoders.
+#[derive(Debug)]
+struct RawDispatchedHashedRange<V> {
+    /// Ordered leaves found in the requested key range.
+    entries: Vec<(B256, V)>,
+    /// First cursor entry at or after the range upper bound, or `None` if the hashed cursor is
+    /// exhausted.
+    next: Option<(B256, V)>,
+}
+
+/// Pending worker response for a dispatched hashed-state range.
+#[derive(Debug)]
+struct PendingHashedRange<V> {
+    rx: Receiver<Result<RawDispatchedHashedRange<V>, DatabaseError>>,
+}
+
+#[derive(Debug)]
+enum HashedRangeCommand<V> {
+    Fetch {
+        current: Option<(B256, V)>,
+        lower_bound: Nibbles,
+        upper_bound: Option<Nibbles>,
+        reply: Sender<Result<RawDispatchedHashedRange<V>, DatabaseError>>,
+    },
+    Shutdown,
+}
+
+impl<V> PendingHashedRange<V> {
+    /// Waits for the dispatched range result.
+    fn recv(self) -> Result<RawDispatchedHashedRange<V>, StateProofError> {
+        self.rx.recv().expect("hashed range worker should send a response").map_err(Into::into)
+    }
+}
+
+fn read_raw_hashed_key_range<HC>(
+    hashed_cursor: &mut HC,
+    mut current: Option<(B256, HC::Value)>,
+    lower_bound: Nibbles,
+    upper_bound: Option<Nibbles>,
+) -> Result<RawDispatchedHashedRange<HC::Value>, DatabaseError>
+where
+    HC: HashedCursor,
+{
+    let current_key = current.as_ref().map(|(key, _)| Nibbles::unpack_array(key.as_ref()));
+
+    if current_key.as_ref().is_none_or(|key| key < &lower_bound) {
+        trace!(
+            target: TRACE_TARGET,
+            current=?current_key,
+            "Seeking hashed cursor to meet lower bound",
+        );
+
+        let lower_key = B256::right_padding_from(&lower_bound.pack());
+        current = hashed_cursor.seek(lower_key)?;
+    }
+
+    let mut entries = Vec::new();
+    let mut next = None;
+
+    while let Some((key, value)) = current.take() {
+        let nibbles = Nibbles::unpack_array(key.as_ref());
+        if upper_bound.is_some_and(|upper_bound| nibbles >= upper_bound) {
+            next = Some((key, value));
+            break;
+        }
+
+        entries.push((key, value));
+        current = hashed_cursor.next()?;
+    }
+
+    Ok(RawDispatchedHashedRange { entries, next })
+}
+
+fn run_hashed_range_worker<HC>(
+    mut hashed_cursor: HC,
+    rx: Receiver<HashedRangeCommand<HC::Value>>,
+) -> HC
+where
+    HC: HashedCursor,
+{
+    while let Ok(command) = rx.recv() {
+        let HashedRangeCommand::Fetch { current, lower_bound, upper_bound, reply } = command else {
+            break;
+        };
+
+        let result =
+            read_raw_hashed_key_range(&mut hashed_cursor, current, lower_bound, upper_bound);
+        let _ = reply.send(result);
+    }
+
+    hashed_cursor
+}
+
 /// A proof calculator that generates merkle proofs using only leaf data.
 ///
 /// The calculator:
@@ -45,11 +156,11 @@ const RLP_ENCODE_BUF_SIZE: usize = 1024;
 /// - Automatically resets after each calculation
 /// - Re-uses cursors from one calculation to the next
 #[derive(Debug)]
-pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
+pub struct ProofCalculator<TC, HC: HashedCursor, VE: LeafValueEncoder> {
     /// Trie cursor for traversing stored branch nodes.
     trie_cursor: TC,
     /// Hashed cursor for iterating over leaf data.
-    hashed_cursor: HC,
+    hashed_cursor: Option<HC>,
     /// Branches which are currently in the process of being constructed, each being a child of
     /// the previous one.
     branch_stack: Vec<ProofTrieBranch>,
@@ -89,14 +200,16 @@ pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
     rlp_encode_buf: Vec<u8>,
     /// Prefix set for tracking changed keys.
     prefix_set: PrefixSet,
+    /// Sender for scoped worker-backed hashed-state range reads.
+    hashed_range_tx: Option<Sender<HashedRangeCommand<HC::Value>>>,
 }
 
-impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
+impl<TC, HC: HashedCursor, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
     /// Create a new [`ProofCalculator`] instance for calculating account proofs.
     pub fn new(trie_cursor: TC, hashed_cursor: HC) -> Self {
         Self {
             trie_cursor,
-            hashed_cursor,
+            hashed_cursor: Some(hashed_cursor),
             branch_stack: Vec::<_>::with_capacity(64),
             branch_path: Nibbles::new(),
             child_stack: Vec::<_>::with_capacity(64),
@@ -105,6 +218,7 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
             rlp_nodes_bufs: Vec::<_>::with_capacity(8),
             rlp_encode_buf: Vec::<_>::with_capacity(RLP_ENCODE_BUF_SIZE),
             prefix_set: PrefixSet::default(),
+            hashed_range_tx: None,
         }
     }
 
@@ -119,6 +233,11 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
         self.prefix_set = prefix_set;
         self
     }
+
+    fn hashed_cursor_mut(&mut self) -> &mut HC {
+        self.hashed_cursor.as_mut().expect("hashed cursor should be available")
+    }
+
 }
 
 impl<TC, HC, VE> ProofCalculator<TC, HC, VE>
@@ -238,16 +357,16 @@ where
             // point the target for 0xabc2 will not match the branch due to its prefix, but any of
             // the other targets would, so we need to check those as well.
             if lower.key_nibbles.starts_with(path) {
-                return !check_min_len ||
-                    (path.len() >= lower.min_len as usize ||
-                        targets
+                return !check_min_len
+                    || (path.len() >= lower.min_len as usize
+                        || targets
                             .skip_iter()
                             .take_while(|target| target.key_nibbles.starts_with(path))
-                            .any(|target| path.len() >= target.min_len as usize) ||
-                        targets
+                            .any(|target| path.len() >= target.min_len as usize)
+                        || targets
                             .rev_iter()
                             .take_while(|target| target.key_nibbles.starts_with(path))
-                            .any(|target| path.len() >= target.min_len as usize))
+                            .any(|target| path.len() >= target.min_len as usize));
             }
 
             // If the path isn't in the current range then iterate forward until it is (or until
@@ -258,7 +377,7 @@ where
                 (lower, upper) = targets.next();
                 trace!(target: TRACE_TARGET, target = ?lower, "upper target <= path, next target");
             } else {
-                return false
+                return false;
             }
         }
     }
@@ -276,7 +395,7 @@ where
     ) -> Result<RlpNode, StateProofError> {
         // If the child is already an `RlpNode` then there is nothing to do.
         if let ProofTrieBranchChild::RlpNode(rlp_node) = child {
-            return Ok(rlp_node)
+            return Ok(rlp_node);
         }
 
         // If we should retain the child then do so.
@@ -367,7 +486,7 @@ where
     ) -> Result<(), StateProofError> {
         if matches!(self.child_stack.last(), Some(ProofTrieBranchChild::RlpNode(_))) {
             trace!(target: TRACE_TARGET, "Last child already committed, leaving stack unchanged");
-            return Ok(())
+            return Ok(());
         }
 
         let Some(child_path) = self.last_child_path() else { return Ok(()) };
@@ -621,7 +740,7 @@ where
                     // If the child stack is empty then this is the first leaf, push it and be done
                     self.child_stack
                         .push(ProofTrieBranchChild::Leaf { short_key: key, value: val });
-                    return Ok(())
+                    return Ok(());
                 }
                 None => {
                     // If the child stack is not empty then it must only have a single other child
@@ -635,7 +754,7 @@ where
                         .is_empty());
                     let (nibble, short_key) = self.push_new_branch(key);
                     self.push_new_leaf(targets, nibble, short_key, val)?;
-                    return Ok(())
+                    return Ok(());
                 }
             };
 
@@ -648,7 +767,7 @@ where
             // children. We can pop it and loop back to the top to try again with its parent branch.
             if common_prefix_len < self.branch_path.len() {
                 self.pop_branch(targets)?;
-                continue
+                continue;
             }
 
             // If the current branch is a prefix of the new key then the leaf is a child of the
@@ -667,7 +786,7 @@ where
                 self.push_new_leaf(targets, nibble, short_key, val)?;
             }
 
-            return Ok(())
+            return Ok(());
         }
     }
 
@@ -691,6 +810,77 @@ where
         lower_bound: Nibbles,
         upper_bound: Option<Nibbles>,
     ) -> Result<(), StateProofError> {
+        let dispatched_range = self.dispatch_hashed_key_range(
+            value_encoder,
+            hashed_cursor_current,
+            lower_bound,
+            upper_bound,
+        )?;
+
+        for (key, val) in dispatched_range.entries {
+            self.push_leaf(targets, key, val)?;
+        }
+
+        *hashed_cursor_current = dispatched_range.next;
+
+        trace!(target: TRACE_TARGET, "No further keys within range");
+        Ok(())
+    }
+
+    /// Reads a hashed-state range and returns ordered entries plus the next cursor position.
+    ///
+    /// The current implementation is inline, but the method forms the dispatch boundary for an
+    /// experimental worker-backed range lookup: branch lookups remain synchronous in
+    /// `next_uncached_key_range`, while leaf data for a proven-needed range can be fetched
+    /// independently and later applied by [`Self::calculate_key_range`].
+    #[instrument(
+        target = TRACE_TARGET,
+        level = "trace",
+        skip_all,
+        fields(?lower_bound, ?upper_bound),
+    )]
+    fn dispatch_hashed_key_range(
+        &mut self,
+        value_encoder: &mut VE,
+        hashed_cursor_current: &mut Option<(Nibbles, VE::DeferredEncoder)>,
+        lower_bound: Nibbles,
+        upper_bound: Option<Nibbles>,
+    ) -> Result<DispatchedHashedRange<VE::DeferredEncoder>, StateProofError> {
+        if self.hashed_range_tx.is_some() {
+            // The worker owns the real hashed cursor state. The local lookahead is only used by
+            // the inline path, so drop it and let the worker seek to the proven range lower bound.
+            let _ = hashed_cursor_current.take();
+            let tx = self.hashed_range_tx.as_ref().expect("checked sender is present");
+            let (reply, rx) = mpsc::channel();
+            tx.send(HashedRangeCommand::Fetch {
+                current: None,
+                lower_bound,
+                upper_bound,
+                reply,
+            })
+            .expect("hashed range worker should be alive");
+            let raw_range = PendingHashedRange { rx }.recv()?;
+
+            let entries = raw_range
+                .entries
+                .into_iter()
+                .map(|(key_b256, val)| {
+                    debug_assert_eq!(key_b256.len(), 32);
+                    let key = Nibbles::unpack_array(key_b256.as_ref());
+                    let val = value_encoder.deferred_encoder(key_b256, val);
+                    (key, val)
+                })
+                .collect();
+            let next = raw_range.next.map(|(key_b256, val)| {
+                debug_assert_eq!(key_b256.len(), 32);
+                let key = Nibbles::unpack_array(key_b256.as_ref());
+                let val = value_encoder.deferred_encoder(key_b256, val);
+                (key, val)
+            });
+
+            return Ok(DispatchedHashedRange { entries, next });
+        }
+
         // A helper closure for mapping entries returned from the `hashed_cursor`, converting the
         // key to Nibbles and immediately creating the DeferredValueEncoder so that encoding of the
         // leaf value can begin ASAP.
@@ -712,21 +902,23 @@ where
 
             let lower_key = B256::right_padding_from(&lower_bound.pack());
             *hashed_cursor_current =
-                self.hashed_cursor.seek(lower_key)?.map(&mut map_hashed_cursor_entry);
+                self.hashed_cursor_mut().seek(lower_key)?.map(&mut map_hashed_cursor_entry);
         }
 
-        // Loop over all keys in the range, calling `push_leaf` on each.
-        while let Some((key, _)) = hashed_cursor_current.as_ref() &&
-            upper_bound.is_none_or(|upper_bound| key < &upper_bound)
+        let mut entries = Vec::new();
+
+        // Loop over all keys in the range, collecting leaves for later ordered application.
+        while let Some((key, _)) = hashed_cursor_current.as_ref()
+            && upper_bound.is_none_or(|upper_bound| key < &upper_bound)
         {
             let (key, val) =
                 core::mem::take(hashed_cursor_current).expect("while-let checks for Some");
-            self.push_leaf(targets, key, val)?;
-            *hashed_cursor_current = self.hashed_cursor.next()?.map(&mut map_hashed_cursor_entry);
+            entries.push((key, val));
+            *hashed_cursor_current =
+                self.hashed_cursor_mut().next()?.map(&mut map_hashed_cursor_entry);
         }
 
-        trace!(target: TRACE_TARGET, "No further keys within range");
-        Ok(())
+        Ok(DispatchedHashedRange { entries, next: core::mem::take(hashed_cursor_current) })
     }
 
     /// Constructs and returns a new [`ProofTrieBranch`] based on an existing [`BranchNodeCompact`].
@@ -771,7 +963,7 @@ where
             self.branch_path = cached_path;
             self.branch_stack
                 .push(Self::new_from_cached_branch(cached_branch, cached_path.len() as u8));
-            return Ok(())
+            return Ok(());
         }
 
         // Get the nibble which should be set in the parent branch's `state_mask` for this new
@@ -847,7 +1039,7 @@ where
         let mut entry = self.trie_cursor.seek(key)?;
         while let Some((ref path, ref branch)) = entry {
             if !self.should_skip_cached_branch(path, branch) {
-                break
+                break;
             }
             entry = self.trie_cursor.next()?;
         }
@@ -862,7 +1054,7 @@ where
         cached_branch: &BranchNodeCompact,
     ) -> bool {
         if !self.prefix_set.contains(cached_path) {
-            return false
+            return false;
         }
 
         let mut num_unmatched = 0u32;
@@ -906,7 +1098,7 @@ where
         // If the `uncalculated_lower_bound` is None it indicates that there can be no more
         // leaf data, so similarly there can be no more cached branch data.
         let Some(uncalculated_lower_bound) = uncalculated_lower_bound else {
-            return Ok(PopCachedBranchOutcome::Exhausted)
+            return Ok(PopCachedBranchOutcome::Exhausted);
         };
 
         // If there is a branch on top of the stack we use that.
@@ -921,7 +1113,7 @@ where
         // If [`TrieCursorState::path`] returns None it means that the cursor has been
         // exhausted, so there can be no more cached data.
         let Some(mut trie_cursor_path) = trie_cursor_state.path() else {
-            return Ok(PopCachedBranchOutcome::Exhausted)
+            return Ok(PopCachedBranchOutcome::Exhausted);
         };
 
         // If the trie cursor is seeked to a branch whose leaves have already been processed
@@ -935,13 +1127,13 @@ where
             if let Some(new_trie_cursor_path) = trie_cursor_state.path() {
                 trie_cursor_path = new_trie_cursor_path
             } else {
-                return Ok(PopCachedBranchOutcome::Exhausted)
+                return Ok(PopCachedBranchOutcome::Exhausted);
             };
         }
 
         // If the trie cursor has exceeded the sub-trie then we consider it to be exhausted.
         if !trie_cursor_path.starts_with(sub_trie_prefix) {
-            return Ok(PopCachedBranchOutcome::Exhausted)
+            return Ok(PopCachedBranchOutcome::Exhausted);
         }
 
         // At this point we can be sure that the cursor is in an `Available` state. We know for
@@ -1037,7 +1229,7 @@ where
                         self.commit_branches(targets, &lower)?;
                         return Ok(Some((lower, sub_trie_upper_bound.copied())));
                     }
-                    return Ok(None)
+                    return Ok(None);
                 }
                 PopCachedBranchOutcome::CalculateLeaves(range) => {
                     self.commit_branches(targets, &range.0)?;
@@ -1112,8 +1304,8 @@ where
             // This can happen when `calculate_key_range` finds no keys for a child's range,
             // leaving the child's bit unset in `state_mask`. Without this, re-entering this
             // function would select the same child again.
-            if uncalculated_lower_bound_ref.starts_with(&self.branch_path) &&
-                uncalculated_lower_bound_ref.len() > self.branch_path.len()
+            if uncalculated_lower_bound_ref.starts_with(&self.branch_path)
+                && uncalculated_lower_bound_ref.len() > self.branch_path.len()
             {
                 let lower_nibble =
                     uncalculated_lower_bound_ref.get_unchecked(self.branch_path.len());
@@ -1128,8 +1320,8 @@ where
                     ?next_child_nibbles,
                     "Unset already processed key nibbles from next_child_nibbles",
                 );
-            } else if !uncalculated_lower_bound_ref.starts_with(&self.branch_path) &&
-                uncalculated_lower_bound_ref > &self.branch_path
+            } else if !uncalculated_lower_bound_ref.starts_with(&self.branch_path)
+                && uncalculated_lower_bound_ref > &self.branch_path
             {
                 // The lower bound has moved entirely past this branch (e.g. branch is 0x6 but
                 // lower is 0x7). All remaining children have been processed.
@@ -1163,7 +1355,7 @@ where
                 // be the next possible prefix, if any.
                 uncalculated_lower_bound = cached_path.next_without_prefix();
 
-                continue
+                continue;
             }
 
             // Determine the next nibble of the branch which has not yet been constructed, and
@@ -1176,8 +1368,8 @@ where
             // any dirty leaves between that path and this child, it indicates there may be leaves
             // which would split that extension node. In that case we return the range to process
             // the leaves.
-            if uncalculated_lower_bound_ref < &child_path &&
-                self.prefix_set.contains_range(uncalculated_lower_bound_ref..&child_path)
+            if uncalculated_lower_bound_ref < &child_path
+                && self.prefix_set.contains_range(uncalculated_lower_bound_ref..&child_path)
             {
                 self.cached_branch_stack.push((cached_path, cached_branch));
                 return Ok(Some((*uncalculated_lower_bound_ref, Some(child_path))));
@@ -1192,8 +1384,8 @@ where
             //
             // If the child's path is in the prefix set then the cached hash is stale and must
             // not be used.
-            if cached_branch.hash_mask.is_bit_set(child_nibble) &&
-                !self.prefix_set.contains(&child_path)
+            if cached_branch.hash_mask.is_bit_set(child_nibble)
+                && !self.prefix_set.contains(&child_path)
             {
                 // Commit the last child. We do this here for two reasons:
                 // - `commit_last_child` will check if the last child needs to be retained. We need
@@ -1232,7 +1424,7 @@ where
                     // Push the current cached branch back onto the stack before looping.
                     self.cached_branch_stack.push((cached_path, cached_branch));
 
-                    continue
+                    continue;
                 }
             }
 
@@ -1251,8 +1443,8 @@ where
             // the cached branch for this child. We push it onto the `cached_branch_stack` and loop
             // back to the top.
             if let TrieCursorState::Available(next_cached_path, next_cached_branch) =
-                &trie_cursor_state &&
-                next_cached_path.starts_with(&child_path)
+                &trie_cursor_state
+                && next_cached_path.starts_with(&child_path)
             {
                 // Push the current cached branch back on before pushing its child and then looping
                 self.cached_branch_stack.push((cached_path, cached_branch));
@@ -1369,8 +1561,8 @@ where
             //
             // This can specifically happen when there is a cached branch which shouldn't exist, or
             // if state mask bit is set on a cached branch which shouldn't be.
-            if let Some(prev_lower) = prev_uncalculated_lower_bound.as_ref() &&
-                calc_lower_bound < *prev_lower
+            if let Some(prev_lower) = prev_uncalculated_lower_bound.as_ref()
+                && calc_lower_bound < *prev_lower
             {
                 let msg = format!(
                     "next_uncached_key_range went backwards: calc_lower={calc_lower_bound:?} < \
@@ -1478,7 +1670,7 @@ where
         // If there are no targets then nothing could be returned, return early.
         if targets.is_empty() {
             trace!(target: TRACE_TARGET, "Empty targets, returning");
-            return Ok(Vec::new())
+            return Ok(Vec::new());
         }
 
         // Initialize the variables which track the state of the two cursors. Both indicate the
@@ -1523,7 +1715,7 @@ where
         targets: &mut [ProofV2Target],
     ) -> Result<Vec<ProofTrieNodeV2>, StateProofError> {
         self.trie_cursor.reset();
-        self.hashed_cursor.reset();
+        self.hashed_cursor_mut().reset();
         self.proof_inner(value_encoder, targets)
     }
 
@@ -1629,17 +1821,33 @@ where
         &mut self,
         hashed_address: B256,
         targets: &mut [ProofV2Target],
+    ) -> Result<Vec<ProofTrieNodeV2>, StateProofError>
+    where
+        HC: Send,
+        HC::Value: Send,
+    {
+        self.storage_proof_inline(hashed_address, targets)
+    }
+
+    /// Generate a storage proof using the inline hashed cursor path.
+    ///
+    /// This exists for callers that already run inside proof workers and cannot send their hashed
+    /// cursor to a nested range worker.
+    pub fn storage_proof_inline(
+        &mut self,
+        hashed_address: B256,
+        targets: &mut [ProofV2Target],
     ) -> Result<Vec<ProofTrieNodeV2>, StateProofError> {
-        self.hashed_cursor.set_hashed_address(hashed_address);
+        self.hashed_cursor_mut().set_hashed_address(hashed_address);
 
         // Shortcut: check if storage is empty
-        if self.hashed_cursor.is_storage_empty()? {
+        if self.hashed_cursor_mut().is_storage_empty()? {
             // Return a single EmptyRoot node at the root path
             return Ok(vec![ProofTrieNodeV2 {
                 path: Nibbles::default(),
                 node: TrieNodeV2::EmptyRoot,
                 masks: None,
-            }])
+            }]);
         }
 
         // Don't call `set_hashed_address` on the trie cursor until after the previous shortcut has
@@ -1651,6 +1859,53 @@ where
         self.proof_inner(&mut storage_value_encoder, targets)
     }
 
+    /// Generate a storage proof using the experimental worker-backed hashed range reader.
+    #[instrument(target = TRACE_TARGET, level = "trace", skip(self, targets))]
+    pub fn storage_proof_with_worker_hashed_ranges(
+        &mut self,
+        worker_pool: &WorkerPool,
+        hashed_address: B256,
+        targets: &mut [ProofV2Target],
+    ) -> Result<Vec<ProofTrieNodeV2>, StateProofError>
+    where
+        HC: Send,
+        HC::Value: Send,
+    {
+        self.hashed_cursor_mut().set_hashed_address(hashed_address);
+
+        if self.hashed_cursor_mut().is_storage_empty()? {
+            return Ok(vec![ProofTrieNodeV2 {
+                path: Nibbles::default(),
+                node: TrieNodeV2::EmptyRoot,
+                masks: None,
+            }]);
+        }
+
+        self.trie_cursor.set_hashed_address(hashed_address);
+        self.hashed_cursor_mut().reset();
+
+        let hashed_cursor = self.hashed_cursor.take().expect("hashed cursor should be available");
+        let (tx, rx) = mpsc::channel();
+
+        let mut storage_value_encoder = StorageValueEncoder;
+        worker_pool.in_place_scope(|scope| {
+            let (cursor_tx, cursor_rx) = mpsc::channel();
+            scope.spawn(move |_| {
+                let hashed_cursor = run_hashed_range_worker(hashed_cursor, rx);
+                let _ = cursor_tx.send(hashed_cursor);
+            });
+            self.hashed_range_tx = Some(tx);
+
+            let result = self.proof_inner(&mut storage_value_encoder, targets);
+
+            let tx = self.hashed_range_tx.take().expect("hashed range sender should be present");
+            let _ = tx.send(HashedRangeCommand::Shutdown);
+            self.hashed_cursor = Some(cursor_rx.recv().expect("hashed range worker panicked"));
+
+            result
+        })
+    }
+
     /// Calculates the root node of a storage trie.
     ///
     /// This method does not accept targets nor retain proofs. Returns the root node which can
@@ -1660,14 +1915,14 @@ where
         &mut self,
         hashed_address: B256,
     ) -> Result<ProofTrieNodeV2, StateProofError> {
-        self.hashed_cursor.set_hashed_address(hashed_address);
+        self.hashed_cursor_mut().set_hashed_address(hashed_address);
 
-        if self.hashed_cursor.is_storage_empty()? {
+        if self.hashed_cursor_mut().is_storage_empty()? {
             return Ok(ProofTrieNodeV2 {
                 path: Nibbles::default(),
                 node: TrieNodeV2::EmptyRoot,
                 masks: None,
-            })
+            });
         }
 
         // Don't call `set_hashed_address` on the trie cursor until after the previous shortcut has
@@ -1836,6 +2091,44 @@ mod tests {
         )
     }
 
+    #[test]
+    fn test_storage_proof_uses_worker_pool_hashed_range_reader() {
+        let key_20 = B256::right_padding_from(&[0x20]);
+        let key_30 = B256::right_padding_from(&[0x30]);
+        let key_40 = B256::right_padding_from(&[0x40]);
+        let harness = TrieTestHarness::new(BTreeMap::from([
+            (key_20, U256::from(20)),
+            (key_30, U256::from(30)),
+            (key_40, U256::from(40)),
+        ]));
+        let hashed_address = harness.hashed_address();
+
+        let mut targets = vec![ProofV2Target::new(key_20), ProofV2Target::new(key_40)];
+        let trie_cursor =
+            harness.trie_cursor_factory().storage_trie_cursor(hashed_address).unwrap();
+        let hashed_cursor =
+            harness.hashed_cursor_factory().hashed_storage_cursor(hashed_address).unwrap();
+        let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
+        let expected = calculator.storage_proof_inline(hashed_address, &mut targets).unwrap();
+
+        let mut worker_targets = vec![ProofV2Target::new(key_20), ProofV2Target::new(key_40)];
+        let trie_cursor =
+            harness.trie_cursor_factory().storage_trie_cursor(hashed_address).unwrap();
+        let hashed_cursor =
+            harness.hashed_cursor_factory().hashed_storage_cursor(hashed_address).unwrap();
+        let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
+        let worker_pool = WorkerPool::new(2, "proof-v2-test");
+        let actual = calculator
+            .storage_proof_with_worker_hashed_ranges(
+                &worker_pool,
+                hashed_address,
+                &mut worker_targets,
+            )
+            .unwrap();
+
+        pretty_assertions::assert_eq!(expected, actual);
+    }
+
     /// A test harness for comparing `StorageProofCalculator` and legacy `StorageProof`
     /// implementations.
     ///
@@ -1894,8 +2187,8 @@ mod tests {
             // Helper function to check if a node path matches at least one target
             let node_matches_target = |node_path: &Nibbles| -> bool {
                 targets_vec.iter().any(|target| {
-                    target.key_nibbles.starts_with(node_path) &&
-                        node_path.len() >= target.min_len as usize
+                    target.key_nibbles.starts_with(node_path)
+                        && node_path.len() >= target.min_len as usize
                 })
             };
 
