@@ -601,7 +601,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             .map(|(n, _)| n + 1)
             .unwrap_or_default();
 
-        let tx_nums: SmallVec<[TxNumber; 4]> = {
+        let tx_nums: SmallVec<[TxNumber; 32]> = {
             let mut nums = SmallVec::with_capacity(blocks.len());
             let mut current = first_tx_num;
             for block in &blocks {
@@ -619,7 +619,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let sf_ctx = self.static_file_write_ctx(save_mode, first_number, last_block_number)?;
         let rocksdb_provider = self.rocksdb_provider.clone();
         let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
-        let rocksdb_enabled = rocksdb_ctx.storage_settings.storage_v2;
+        let storage_v2 = rocksdb_ctx.storage_settings.storage_v2;
+        let rocksdb_enabled = storage_v2;
 
         let mut sf_result = None;
         let mut rocksdb_result = None;
@@ -658,7 +659,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             let mdbx_start = Instant::now();
 
             // Collect all transaction hashes across all blocks, sort them, and write in batch
-            if !self.cached_storage_settings().storage_v2 &&
+            if !storage_v2 &&
                 self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
             {
                 let start = Instant::now();
