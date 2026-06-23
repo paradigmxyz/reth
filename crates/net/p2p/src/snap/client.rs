@@ -1,8 +1,8 @@
 use crate::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
 use futures::Future;
 use reth_eth_wire_types::snap::{
-    AccountRangeMessage, ByteCodesMessage, GetAccountRangeMessage, GetByteCodesMessage,
-    GetStorageRangesMessage, StorageRangesMessage,
+    AccountRangeMessage, BlockAccessListsMessage, ByteCodesMessage, GetAccountRangeMessage,
+    GetBlockAccessListsMessage, GetByteCodesMessage, GetStorageRangesMessage, StorageRangesMessage,
 };
 
 /// Response types for snap sync requests
@@ -14,6 +14,10 @@ pub enum SnapResponse {
     StorageRanges(StorageRangesMessage),
     /// Response containing bytecode data
     ByteCodes(ByteCodesMessage),
+    /// Response containing block access lists.
+    ///
+    /// Only valid for `snap/2` (EIP-8189).
+    BlockAccessLists(BlockAccessListsMessage),
 }
 
 /// The snap sync downloader client
@@ -57,6 +61,24 @@ pub trait SnapClient: DownloadClient {
     fn get_byte_codes_with_priority(
         &self,
         request: GetByteCodesMessage,
+        priority: Priority,
+    ) -> Self::Output;
+
+    /// Sends the block access lists request to the p2p network and returns the block
+    /// access lists response received from a peer.
+    ///
+    /// Only valid for `snap/2` (EIP-8189).
+    fn get_block_access_lists(&self, request: GetBlockAccessListsMessage) -> Self::Output {
+        self.get_block_access_lists_with_priority(request, Priority::Normal)
+    }
+
+    /// Sends the block access lists request to the p2p network with priority set and returns
+    /// the block access lists response received from a peer.
+    ///
+    /// Only valid for `snap/2` (EIP-8189).
+    fn get_block_access_lists_with_priority(
+        &self,
+        request: GetBlockAccessListsMessage,
         priority: Priority,
     ) -> Self::Output;
 }

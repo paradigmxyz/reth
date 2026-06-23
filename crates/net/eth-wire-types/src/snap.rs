@@ -28,6 +28,21 @@ impl SnapVersion {
             Self::V2 => 10,
         }
     }
+
+    /// Returns `true` if `id` is a valid `snap/2` message id.
+    ///
+    /// snap/2 (EIP-8189) drops trie nodes (`0x06`/`0x07`) and adds BAL (`0x08`/`0x09`),
+    /// so validity is not a contiguous range.
+    pub const fn supports_message_id(self, id: u8) -> bool {
+        match self {
+            // snap/2: 0x00..=0x05 plus BAL (0x08/0x09). TrieNodes (0x06/0x07) removed.
+            Self::V2 => {
+                id <= SnapMessageId::ByteCodes as u8 ||
+                    id == SnapMessageId::GetBlockAccessLists as u8 ||
+                    id == SnapMessageId::BlockAccessLists as u8
+            }
+        }
+    }
 }
 
 /// Message IDs for the snap sync protocol
@@ -425,5 +440,22 @@ mod tests {
         if let Err(e) = result {
             assert_eq!(e.to_string(), "Unknown message ID");
         }
+    }
+
+    #[test]
+    fn test_snap_v2_message_validity() {
+        let v2 = SnapVersion::V2;
+        // 0x00..=0x05 valid.
+        for id in 0x00..=0x05 {
+            assert!(v2.supports_message_id(id), "snap/2 should accept {id:#x}");
+        }
+        // Trie nodes (0x06/0x07) are removed in snap/2.
+        assert!(!v2.supports_message_id(0x06));
+        assert!(!v2.supports_message_id(0x07));
+        // BAL added in snap/2.
+        assert!(v2.supports_message_id(SnapMessageId::GetBlockAccessLists as u8));
+        assert!(v2.supports_message_id(SnapMessageId::BlockAccessLists as u8));
+        assert!(!v2.supports_message_id(0x0a));
+        assert!(!v2.supports_message_id(0xff));
     }
 }
