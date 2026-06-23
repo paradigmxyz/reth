@@ -252,6 +252,7 @@ where
         + Clone
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
+    EvmEnvFor<Evm>: Clone,
 {
     /// Creates a new `TreePayloadValidator`.
     #[expect(clippy::too_many_arguments)]
@@ -2171,6 +2172,7 @@ where
     N: NodePrimitives,
     V: PayloadValidator<Types, Block = N::Block> + Clone,
     Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N> + 'static,
+    EvmEnvFor<Evm>: Clone,
     Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
 {
     fn validate_payload_attributes_against_header(
