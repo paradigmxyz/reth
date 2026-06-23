@@ -1071,8 +1071,38 @@ fn dispatch_v2_storage_proofs(
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(storage_targets.len(), Default::default());
 
-    // Collect hashed addresses from account targets that need their storage roots computed
-    let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
+    enum AccountTargetAddresses {
+        Empty,
+        Inline { len: usize, addresses: [B256; 4] },
+        Set(B256Set),
+    }
+
+    impl AccountTargetAddresses {
+        fn new(account_targets: &[ProofV2Target]) -> Self {
+            match account_targets.len() {
+                0 => Self::Empty,
+                1..=4 => {
+                    let mut addresses = [B256::ZERO; 4];
+                    for (address, target) in addresses.iter_mut().zip(account_targets) {
+                        *address = target.key();
+                    }
+                    Self::Inline { len: account_targets.len(), addresses }
+                }
+                _ => Self::Set(account_targets.iter().map(|t| t.key()).collect()),
+            }
+        }
+
+        fn contains(&self, address: &B256) -> bool {
+            match self {
+                Self::Empty => false,
+                Self::Inline { len, addresses } => addresses[..*len].contains(address),
+                Self::Set(addresses) => addresses.contains(address),
+            }
+        }
+    }
+
+    // Collect hashed addresses from account targets that need their storage roots computed.
+    let account_target_addresses = AccountTargetAddresses::new(account_targets);
 
     // For storage targets with associated account proofs, ensure the first target has
     // min_len(0) so the root node is returned for storage root computation
