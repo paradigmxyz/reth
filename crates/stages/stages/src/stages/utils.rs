@@ -20,11 +20,13 @@ use reth_provider::{
 use reth_stages_api::StageError;
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
+use smallvec::SmallVec;
 use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
 use tracing::info;
 
 /// Number of blocks before pushing indices from cache to [`Collector`]
 const DEFAULT_CACHE_THRESHOLD: u64 = 100_000;
+type HistoryBlockList = SmallVec<[u64; 1]>;
 
 /// Collects all history (`H`) indices for a range of changesets (`CS`) and stores them in a
 /// [`Collector`].
@@ -59,9 +61,9 @@ where
     let mut changeset_cursor = provider.tx_ref().cursor_read::<CS>()?;
 
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
-    let mut cache: HashMap<P, Vec<u64>> = HashMap::default();
+    let mut cache: HashMap<P, HistoryBlockList> = HashMap::default();
 
-    let mut collect = |cache: &mut HashMap<P, Vec<u64>>| {
+    let mut collect = |cache: &mut HashMap<P, HistoryBlockList>| {
         for (key, indices) in cache.drain() {
             let last = *indices.last().expect("qed");
             collector
@@ -101,11 +103,11 @@ where
 
 /// Allows collecting indices from a cache with a custom insert fn
 fn collect_indices<K, F>(
-    cache: impl Iterator<Item = (K, Vec<u64>)>,
+    cache: impl Iterator<Item = (K, HistoryBlockList)>,
     mut insert_fn: F,
 ) -> Result<(), StageError>
 where
-    F: FnMut(K, Vec<u64>) -> Result<(), StageError>,
+    F: FnMut(K, HistoryBlockList) -> Result<(), StageError>,
 {
     for (key, indices) in cache {
         insert_fn(key, indices)?
@@ -123,9 +125,9 @@ where
     Provider: DBProvider + ChangeSetReader + StaticFileProviderFactory,
 {
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
-    let mut cache: AddressMap<Vec<u64>> = AddressMap::default();
+    let mut cache: AddressMap<HistoryBlockList> = AddressMap::default();
 
-    let mut insert_fn = |address: Address, indices: Vec<u64>| {
+    let mut insert_fn = |address: Address, indices: HistoryBlockList| {
         let last = indices.last().expect("indices is non-empty");
         collector
             .insert(ShardedKey::new(address, *last), BlockNumberList::new_pre_sorted(indices))?;
@@ -179,9 +181,9 @@ where
     Provider: DBProvider + StorageChangeSetReader + StaticFileProviderFactory,
 {
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
-    let mut cache: HashMap<AddressStorageKey, Vec<u64>> = HashMap::default();
+    let mut cache: HashMap<AddressStorageKey, HistoryBlockList> = HashMap::default();
 
-    let mut insert_fn = |key: AddressStorageKey, indices: Vec<u64>| {
+    let mut insert_fn = |key: AddressStorageKey, indices: HistoryBlockList| {
         let last = indices.last().expect("qed");
         collector.insert(
             StorageShardedKey::new(key.0 .0, key.0 .1, *last),
