@@ -91,7 +91,7 @@ default = [
     "jit",
     "keccak-cache-global",
     "asm-keccak",
-    "min-trace-logs",
+    "min-debug-logs",
 ]
 
 jit = [
