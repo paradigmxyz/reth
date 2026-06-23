@@ -11,13 +11,14 @@ use reth_db_api::{
 use reth_era::{
     common::{decode::DecodeCompressedRlp, file_ops::StreamReader},
     e2s::error::E2sError,
+    era::{file::EraReader, types::consensus::CompressedSignedBeaconBlock},
     era1::{file::Era1Reader, types::execution::BlockTuple},
-    ere::file::EreReader,
+    ere::{file::EreReader, types::execution::BlockTuple as EreBlockTuple},
 };
 use reth_era_downloader::EraMeta;
 use reth_etl::Collector;
 use reth_fs_util as fs;
-use reth_primitives_traits::{Block, FullBlockBody, FullBlockHeader, NodePrimitives};
+use reth_primitives_traits::{Block, BlockBody, FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_provider::{
     providers::StaticFileProviderRWRefMut, BlockReader, BlockWriter, StaticFileProviderFactory,
     StaticFileSegment, StaticFileWriter,
@@ -59,10 +60,6 @@ where
     }
 }
 
-/// [`EraBlockReader`] for `.ere`/`.erae` files.
-#[derive(Debug)]
-pub struct Ere;
-
 impl<BH, BB> EraBlockReader<BH, BB> for Ere
 where
     BH: FullBlockHeader + Value,
@@ -72,13 +69,89 @@ where
         meta: &M,
     ) -> eyre::Result<impl Iterator<Item = eyre::Result<(BH, BB)>>> {
         let reader: EreReader<std::fs::File> = open(meta)?;
-        Ok(reader.iter().map(|block| {
-            let block = block?;
-            let header: BH = block.header.decode()?;
-            let body: BB = block.body.decode()?;
-            Ok((header, body))
-        }))
+        Ok(reader.iter().map(Self::decode))
     }
+}
+
+/// [`EraBlockReader`] for `.ere`/`.erae` files.
+#[derive(Debug)]
+pub struct Ere;
+
+impl Ere {
+    /// Extracts a pair of [`FullBlockHeader`] and [`FullBlockBody`] from an ERE block tuple, whose
+    /// header and body are RLP-compressed.
+    pub fn decode<BH, BB, E>(block: Result<EreBlockTuple, E>) -> eyre::Result<(BH, BB)>
+    where
+        BH: FullBlockHeader + Value,
+        BB: FullBlockBody<OmmerHeader = BH>,
+        E: From<E2sError> + Error + Send + Sync + 'static,
+    {
+        let block = block?;
+        let header: BH = block.header.decode()?;
+        let body: BB = block.body.decode()?;
+        Ok((header, body))
+    }
+}
+
+/// [`EraBlockReader`] for consensus-layer `.era` files.
+///
+/// `.era` files store consensus `SignedBeaconBlock`s. Post-merge
+/// blocks embed an execution payload; this source SSZ-decodes each beacon block, extracts that
+/// payload, and converts it into an execution `(header, body)` pair. Pre-merge slots carry no
+/// payload and are skipped.
+#[derive(Debug)]
+pub struct Era;
+
+impl<BH, BB> EraBlockReader<BH, BB> for Era
+where
+    BH: FullBlockHeader,
+    BB: FullBlockBody,
+{
+    fn blocks<M: EraMeta + ?Sized>(
+        meta: &M,
+    ) -> eyre::Result<impl Iterator<Item = eyre::Result<(BH, BB)>>> {
+        let reader: EraReader<std::fs::File> = open(meta)?;
+        let mut buf = Vec::new();
+        Ok(reader.iter().filter_map(move |block| Self::decode(block, &mut buf).transpose()))
+    }
+}
+
+impl Era {
+    /// Decodes the execution `(header, body)` embedded in a consensus `SignedBeaconBlock`.
+    ///
+    /// Returns `Ok(None)` for pre-merge slots, which carry no execution payload.
+    pub fn decode<BH, BB>(
+        block: Result<CompressedSignedBeaconBlock, E2sError>,
+        buf: &mut Vec<u8>,
+    ) -> eyre::Result<Option<(BH, BB)>>
+    where
+        BH: FullBlockHeader,
+        BB: FullBlockBody,
+    {
+        let Some(alloy_consensus::Block { header, body }) =
+            block?.decode_execution_block::<<BB as BlockBody>::Transaction>()?
+        else {
+            return Ok(None);
+        };
+        // The beacon payload decodes into alloy execution types; re-encode and decode into the
+        // node's own primitives through the same RLP representation the `.era1`/`.ere` paths use.
+        Ok(Some((reencode_rlp(&header, buf)?, reencode_rlp(&body, buf)?)))
+    }
+}
+
+/// Re-encodes an alloy execution type as RLP and decodes it back into the node's primitive type.
+///
+/// `.era` files yield alloy execution headers/bodies, while the import pipeline writes the node's
+/// own primitives. Both share the canonical execution RLP encoding, so a round-trip bridges them
+/// without requiring a direct `From` conversion.
+fn reencode_rlp<T, U>(value: &T, buf: &mut Vec<u8>) -> eyre::Result<U>
+where
+    T: alloy_rlp::Encodable,
+    U: alloy_rlp::Decodable,
+{
+    buf.clear();
+    alloy_rlp::Encodable::encode(value, buf);
+    Ok(<U as alloy_rlp::Decodable>::decode(&mut buf.as_slice())?)
 }
 
 /// Opens the ERA file at `meta` with the format's [`StreamReader`].
@@ -298,6 +371,17 @@ where
             break;
         }
 
+        // Reject gaps: the import marks the Headers/Bodies stages complete up to `height`, so a
+        // non-contiguous append would leave earlier blocks missing while the stages report done.
+        if number != last_header_number + 1 {
+            eyre::bail!(
+                "non-contiguous ERA import: expected block {}, got {number}; the execution \
+                 database must be synced up to block {} before importing this file",
+                last_header_number + 1,
+                number - 1,
+            );
+        }
+
         let hash = header.hash_slow();
         last_header_number = number;
 
@@ -473,5 +557,33 @@ mod tests {
 
         assert_eq!(height, 1);
         assert!(!meta.marked.get());
+    }
+
+    #[test]
+    fn process_iter_rejects_non_contiguous_blocks() {
+        let pf = create_test_provider_factory();
+        init_genesis(&pf).unwrap();
+
+        let static_file_provider = pf.static_file_provider();
+        let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+        let provider = pf.database_provider_rw().unwrap();
+        let folder = tempdir().unwrap();
+        let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+
+        // Genesis DB sits at height 0, but the first block is 5: a gap that must be rejected
+        // rather than appended (as a pre-merge `.era` import would otherwise produce).
+        let blocks = [5u64, 6]
+            .into_iter()
+            .map(|number| Ok((Header { number, ..Default::default() }, BlockBody::default())));
+
+        let result = process_iter::<_, Block, _, _>(
+            blocks,
+            &mut writer,
+            &provider,
+            &mut hash_collector,
+            0..,
+        );
+
+        assert!(result.is_err());
     }
 }

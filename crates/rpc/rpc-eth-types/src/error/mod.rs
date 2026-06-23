@@ -18,7 +18,7 @@ use reth_rpc_server_types::result::{
 };
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
-    PoolError, PoolErrorKind, PoolTransactionError,
+    PoolError, PoolErrorKind, PoolTransactionError, RawPoolTransactionError,
 };
 use revm::{
     context_interface::result::{
@@ -567,6 +567,21 @@ where
 impl From<RecoveryError> for EthApiError {
     fn from(_: RecoveryError) -> Self {
         Self::InvalidTransactionSignature
+    }
+}
+
+impl From<RawPoolTransactionError> for EthApiError {
+    fn from(err: RawPoolTransactionError) -> Self {
+        match err {
+            RawPoolTransactionError::EmptyRawTransactionData => Self::EmptyRawTransactionData,
+            RawPoolTransactionError::FailedToDecodeSignedTransaction => {
+                Self::FailedToDecodeSignedTransaction
+            }
+            RawPoolTransactionError::InvalidTransactionSignature => {
+                Self::InvalidTransactionSignature
+            }
+            RawPoolTransactionError::Other(err) => Self::PoolError(RpcPoolError::Other(err)),
+        }
     }
 }
 

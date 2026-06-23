@@ -12,13 +12,16 @@ use reth_e2e_test_utils::{
     node::NodeTestContext, setup, setup_engine, transaction::TransactionTestContext, wallet::Wallet,
 };
 use reth_node_api::TreeConfig;
-use reth_node_builder::{NodeBuilder, NodeHandle};
+use reth_node_builder::{rpc::BasicEngineApiBuilder, EngineApiExt, NodeBuilder, NodeHandle};
 use reth_node_core::{
     args::RpcServerArgs,
     node_config::NodeConfig,
     version::{version_metadata, CLIENT_CODE},
 };
-use reth_node_ethereum::{engine_ssz_proxy::EngineSszProxyLayer, EthereumAddOns, EthereumNode};
+use reth_node_ethereum::{
+    engine_ssz_proxy::EngineSszProxyLayer, EthereumAddOns, EthereumEngineValidatorBuilder,
+    EthereumNode,
+};
 use reth_provider::BlockNumReader;
 use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_layer::secret_to_bearer_header;
@@ -237,6 +240,7 @@ async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
         slot_number: None,
+        target_gas_limit: None,
     };
 
     let request = TestingBuildBlockRequestV1 {
@@ -293,17 +297,26 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
                 .with_http_api(reth_rpc_server_types::RpcModuleSelection::All),
         );
 
-    let (ssz_layer, ssz_handle) = EngineSszProxyLayer::new(chain_spec.clone());
+    let (ssz_layer, ssz_handle) = EngineSszProxyLayer::new();
+    let engine_api_handle = ssz_handle.clone();
+    let engine_api_builder = EngineApiExt::new(
+        BasicEngineApiBuilder::<EthereumEngineValidatorBuilder>::default(),
+        move |engine_api| {
+            engine_api_handle.set_engine_api_sync(engine_api);
+        },
+    );
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
         .testing_node(runtime)
         .with_types::<EthereumNode>()
         .with_components(EthereumNode::components())
-        .with_add_ons(EthereumAddOns::default().with_auth_http_middleware(ssz_layer))
+        .with_add_ons(
+            EthereumAddOns::default()
+                .with_engine_api(engine_api_builder)
+                .with_auth_http_middleware(ssz_layer),
+        )
         .launch()
         .await?;
 
-    ssz_handle.set_engine(node.add_ons_handle.beacon_engine_handle.clone()).await;
-    ssz_handle.set_blob_store(node.pool.blob_store().clone()).await;
     let node = NodeTestContext::new(node, eth_payload_attributes).await?;
 
     let wallets = Wallet::new(2).wallet_gen();
@@ -316,6 +329,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
         slot_number: None,
+        target_gas_limit: None,
     };
 
     let envelope = node

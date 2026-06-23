@@ -145,6 +145,8 @@ where
     AdminApiClient::remove_peer(client, node.into()).await.unwrap();
     AdminApiClient::add_trusted_peer(client, node.into()).await.unwrap();
     AdminApiClient::remove_trusted_peer(client, node.into()).await.unwrap();
+    AdminApiClient::ban_peer(client, node.into()).await.unwrap();
+    AdminApiClient::unban_peer(client, node.into()).await.unwrap();
     AdminApiClient::node_info(client).await.unwrap();
 }
 
@@ -447,6 +449,7 @@ where
     DebugApiClient::<TransactionRequest>::raw_transaction(client, B256::default()).await.unwrap();
     DebugApiClient::<TransactionRequest>::raw_receipts(client, block_id).await.unwrap_err();
     DebugApiClient::<TransactionRequest>::bad_blocks(client).await.unwrap();
+    DebugApiClient::<TransactionRequest>::debug_clear_txpool(client).await.unwrap();
     DebugApiClient::<TransactionRequest>::debug_account_at(
         client,
         block_id,

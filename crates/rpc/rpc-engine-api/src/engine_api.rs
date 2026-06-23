@@ -72,6 +72,11 @@ impl<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSpec>
     pub fn chain_spec(&self) -> &Arc<ChainSpec> {
         &self.inner.chain_spec
     }
+
+    /// Returns the configured client version.
+    pub fn client_version(&self) -> &ClientVersionV1 {
+        &self.inner.client
+    }
 }
 
 impl<Provider, PayloadT, Pool, Validator, ChainSpec>
@@ -2044,6 +2049,7 @@ mod tests {
             withdrawals: Some(vec![]),
             parent_beacon_block_root: None,
             slot_number: None,
+            target_gas_limit: None,
         };
         let custody_columns = B128::from(0b1010u128);
 
@@ -2099,6 +2105,7 @@ mod tests {
             // Invalid for V3/Cancun, but should be ignored if forkchoice is SYNCING.
             parent_beacon_block_root: None,
             slot_number: None,
+            target_gas_limit: None,
         };
 
         let api_task = tokio::spawn(async move {
@@ -2147,6 +2154,7 @@ mod tests {
             withdrawals: Some(vec![]),
             parent_beacon_block_root: None,
             slot_number: None,
+            target_gas_limit: None,
         };
 
         let api_task = tokio::spawn(async move {
