@@ -662,9 +662,12 @@ where
                 }
             }
 
-            let mut hashed_state = reth_trie::HashedPostState::default();
-            hashed_state.storages.insert(hashed_address, storage_map);
-            let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
+            if !storage_map.storage.is_empty() {
+                let mut hashed_state = reth_trie::HashedPostState::default();
+                hashed_state.storages.insert(hashed_address, storage_map);
+                let _ =
+                    to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
+            }
         }
 
         let existing_account = if account_fields.needs_parent_account() {
