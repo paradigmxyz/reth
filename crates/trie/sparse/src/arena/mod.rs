@@ -276,20 +276,11 @@ impl ArenaSparseSubtrie {
             let mut child_path = frame.branch_logical_path;
             child_path.push(nibble);
 
-            // Child's full prefix for the retention check.
-            let child_short_key = match &self.arena[old_child_idx] {
-                ArenaSparseNode::Branch(b) => &b.short_key,
-                ArenaSparseNode::Leaf { key, .. } => key,
-                other => unreachable!("subtrie prune: unexpected child node kind: {other:?}"),
-            };
-            let mut child_prefix = child_path;
-            child_prefix.extend(child_short_key);
-
-            while retained_leaves.peek().is_some_and(|retained| *retained < &child_prefix) {
+            while retained_leaves.peek().is_some_and(|retained| *retained < &child_path) {
                 retained_leaves.next();
             }
 
-            if retained_leaves.peek().is_some_and(|retained| retained.starts_with(&child_prefix)) {
+            if retained_leaves.peek().is_some_and(|retained| retained.starts_with(&child_path)) {
                 // Retained — move child to new arena.
                 let child_node = self.arena.remove(old_child_idx).expect("child exists");
                 let new_child_idx = new_arena.insert(child_node);
@@ -2865,12 +2856,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         continue;
                     }
 
-                    let short_key =
-                        self.upper_arena[head_idx].short_key().expect("must be branch or leaf");
-                    let mut node_prefix = head_path;
-                    node_prefix.extend(short_key);
-
-                    let range = prefix_range(retained_leaves, 0, &node_prefix);
+                    let range = prefix_range(retained_leaves, 0, &head_path);
                     if !range.is_empty() {
                         continue;
                     }
@@ -3287,7 +3273,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
 mod tests {
     use super::{
         ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
-        TRACE_TARGET,
+        ArenaSparseSubtrie, TRACE_TARGET,
     };
     use crate::{ArenaParallelSparseTrie, ArenaParallelismThresholds, LeafUpdate, SparseTrie};
     use alloy_primitives::{map::B256Map, B256, U256};
@@ -3430,6 +3416,102 @@ mod tests {
         assert!(changed_paths.contains(&leaf_base_path));
         assert!(!changed_paths.contains(&branch_logical_path));
         assert!(!changed_paths.contains(&leaf_logical_path));
+    }
+
+    #[test]
+    fn prune_retains_upper_node_by_base_path_not_logical_path() {
+        let mut trie = ArenaParallelSparseTrie::default();
+
+        let leaf_idx = trie.upper_arena.insert(ArenaSparseNode::Leaf {
+            state: ArenaSparseNodeState::Dirty,
+            value: vec![0x01],
+            key: Nibbles::from_nibbles([0x04]),
+        });
+        let retained_branch_idx =
+            trie.upper_arena.insert(ArenaSparseNode::Branch(ArenaSparseNodeBranch {
+                state: ArenaSparseNodeState::Dirty,
+                children: smallvec![ArenaSparseNodeBranchChild::Revealed(leaf_idx)],
+                state_mask: TrieMask::new(1 << 0x03),
+                short_key: Nibbles::from_nibbles([0x0A]),
+                branch_masks: Default::default(),
+            }));
+        trie.upper_arena[trie.root] = ArenaSparseNode::Branch(ArenaSparseNodeBranch {
+            state: ArenaSparseNodeState::Dirty,
+            children: smallvec![ArenaSparseNodeBranchChild::Revealed(retained_branch_idx)],
+            state_mask: TrieMask::new(1 << 0x01),
+            short_key: Nibbles::default(),
+            branch_masks: Default::default(),
+        });
+
+        let _ = trie.root();
+        trie.prune(&[Nibbles::from_nibbles([0x01])]);
+
+        let ArenaSparseNode::Branch(root_branch) = &trie.upper_arena[trie.root] else {
+            panic!("root should remain a branch")
+        };
+        let ArenaSparseNodeBranchChild::Revealed(child_idx) = root_branch.children[0] else {
+            panic!("retained base-path child should remain revealed")
+        };
+        assert!(matches!(&trie.upper_arena[child_idx], ArenaSparseNode::Branch(_)));
+    }
+
+    #[test]
+    fn prune_retains_subtrie_node_by_base_path_not_logical_path() {
+        let mut trie = ArenaParallelSparseTrie::default();
+        let mut subtrie = ArenaSparseSubtrie::new(false, false);
+        subtrie.path = Nibbles::from_nibbles([0x01]);
+
+        let leaf_idx = subtrie.arena.insert(ArenaSparseNode::Leaf {
+            state: ArenaSparseNodeState::Dirty,
+            value: vec![0x01],
+            key: Nibbles::from_nibbles([0x04]),
+        });
+        let retained_branch_idx =
+            subtrie.arena.insert(ArenaSparseNode::Branch(ArenaSparseNodeBranch {
+                state: ArenaSparseNodeState::Dirty,
+                children: smallvec![ArenaSparseNodeBranchChild::Revealed(leaf_idx)],
+                state_mask: TrieMask::new(1 << 0x03),
+                short_key: Nibbles::from_nibbles([0x0A]),
+                branch_masks: Default::default(),
+            }));
+        subtrie.arena[subtrie.root] = ArenaSparseNode::Branch(ArenaSparseNodeBranch {
+            state: ArenaSparseNodeState::Dirty,
+            children: smallvec![ArenaSparseNodeBranchChild::Revealed(retained_branch_idx)],
+            state_mask: TrieMask::new(1 << 0x02),
+            short_key: Nibbles::default(),
+            branch_masks: Default::default(),
+        });
+        subtrie.num_leaves = 1;
+        subtrie.num_dirty_leaves = 1;
+
+        let subtrie_idx = trie.upper_arena.insert(ArenaSparseNode::Subtrie(subtrie));
+        trie.upper_arena[trie.root] = ArenaSparseNode::Branch(ArenaSparseNodeBranch {
+            state: ArenaSparseNodeState::Dirty,
+            children: smallvec![ArenaSparseNodeBranchChild::Revealed(subtrie_idx)],
+            state_mask: TrieMask::new(1 << 0x01),
+            short_key: Nibbles::default(),
+            branch_masks: Default::default(),
+        });
+
+        let _ = trie.root();
+        trie.prune(&[Nibbles::from_nibbles([0x01, 0x02])]);
+
+        let ArenaSparseNode::Branch(root_branch) = &trie.upper_arena[trie.root] else {
+            panic!("root should remain a branch")
+        };
+        let ArenaSparseNodeBranchChild::Revealed(subtrie_idx) = root_branch.children[0] else {
+            panic!("retained subtrie should remain revealed")
+        };
+        let ArenaSparseNode::Subtrie(subtrie) = &trie.upper_arena[subtrie_idx] else {
+            panic!("retained child should remain a subtrie")
+        };
+        let ArenaSparseNode::Branch(subtrie_root) = &subtrie.arena[subtrie.root] else {
+            panic!("subtrie root should remain a branch")
+        };
+        let ArenaSparseNodeBranchChild::Revealed(child_idx) = subtrie_root.children[0] else {
+            panic!("retained base-path child should remain revealed")
+        };
+        assert!(matches!(&subtrie.arena[child_idx], ArenaSparseNode::Branch(_)));
     }
 
     #[test]
