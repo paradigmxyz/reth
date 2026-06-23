@@ -67,10 +67,14 @@ impl BalPrewarmPool {
     /// Begins a block: hands every worker the provider builder and shared cache so each opens its
     /// own read txn over the parent state. Pair with [`end_block`](Self::end_block).
     pub(crate) fn begin_block(&self, build: Arc<BuildProviderFn>, caches: ExecutionCache) {
-        for worker in &self.workers {
+        let Some((last_worker, workers)) = self.workers.split_last() else { return };
+
+        for worker in workers {
             let _ = worker
                 .send(PrewarmMsg::BeginBlock { build: build.clone(), caches: caches.clone() });
         }
+
+        let _ = last_worker.send(PrewarmMsg::BeginBlock { build, caches });
     }
 
     /// Fire-and-forget: warm an account (basic account + bytecode) on some worker.
@@ -91,11 +95,17 @@ impl BalPrewarmPool {
         let (tx, rx) = oneshot::channel();
         let tx = Arc::new(SendOnDrop { sender: Some(tx) });
 
-        for worker in &self.workers {
+        let Some((last_worker, workers)) = self.workers.split_last() else {
+            drop(tx);
+            rx.blocking_recv().expect("BAL prewarm pool dropped without signaling completion");
+            return
+        };
+
+        for worker in workers {
             let _ = worker.send(PrewarmMsg::EndBlock(tx.clone()));
         }
 
-        drop(tx);
+        let _ = last_worker.send(PrewarmMsg::EndBlock(tx));
         rx.blocking_recv().expect("BAL prewarm pool dropped without signaling completion");
     }
 
