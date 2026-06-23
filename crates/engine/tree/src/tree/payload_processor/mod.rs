@@ -221,7 +221,7 @@ where
     /// Returns true when this retained-path sparse-trie prune request should be applied.
     fn should_apply_sparse_trie_prune(&self) -> bool {
         let request = self.sparse_trie_prune_requests.fetch_add(1, Ordering::Relaxed);
-        request % SPARSE_TRIE_PRUNE_REQUEST_INTERVAL == 0
+        request.is_multiple_of(SPARSE_TRIE_PRUNE_REQUEST_INTERVAL)
     }
 }
 
@@ -427,16 +427,15 @@ where
         let (state_root_tx, state_root_rx) = channel();
         let (hashed_state_tx, hashed_state_rx) = channel();
 
-        let pending_sparse_trie_prune =
-            if self.disable_sparse_trie_cache_pruning ||
-                pending_sparse_trie_prune
-                    .as_ref()
-                    .is_some_and(|_| !self.should_apply_sparse_trie_prune())
-            {
-                None
-            } else {
-                pending_sparse_trie_prune
-            };
+        let pending_sparse_trie_prune = if self.disable_sparse_trie_cache_pruning ||
+            pending_sparse_trie_prune
+                .as_ref()
+                .is_some_and(|_| !self.should_apply_sparse_trie_prune())
+        {
+            None
+        } else {
+            pending_sparse_trie_prune
+        };
 
         self.spawn_sparse_trie_task(
             proof_handle,
