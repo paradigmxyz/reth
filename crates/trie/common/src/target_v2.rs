@@ -133,6 +133,8 @@ pub struct ChunkedMultiProofTargetsV2 {
     account_targets: alloc::vec::IntoIter<ProofV2Target>,
     /// Storage targets by account address
     storage_targets: B256Map<Vec<ProofV2Target>>,
+    /// Remaining storage-only targets to process after all account targets are consumed.
+    storage_only_targets: Option<alloc::vec::IntoIter<(B256, Vec<ProofV2Target>)>>,
     /// Current account being processed (if any storage slots remain)
     current_account_storage: Option<(B256, alloc::vec::IntoIter<ProofV2Target>)>,
     /// Chunk size
@@ -145,6 +147,7 @@ impl ChunkedMultiProofTargetsV2 {
         Self {
             account_targets: targets.account_targets.into_iter(),
             storage_targets: targets.storage_targets,
+            storage_only_targets: None,
             current_account_storage: None,
             size,
         }
@@ -208,16 +211,18 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
         }
 
         // Process any remaining storage-only entries (accounts not in account_targets)
-        while let Some((account_addr, storage_slots)) = self.storage_targets.iter_mut().next() &&
-            count < self.size
-        {
-            let account_addr = *account_addr;
-            let storage_slots = core::mem::take(storage_slots);
-            let remaining_capacity = self.size - count;
+        while count < self.size {
+            if self.storage_only_targets.is_none() {
+                self.storage_only_targets =
+                    Some(self.storage_targets.drain().collect::<Vec<_>>().into_iter());
+            }
 
-            // Always remove from the map - if there are remaining slots they go to
-            // current_account_storage
-            self.storage_targets.remove(&account_addr);
+            let Some((account_addr, storage_slots)) =
+                self.storage_only_targets.as_mut().and_then(Iterator::next)
+            else {
+                break;
+            };
+            let remaining_capacity = self.size - count;
 
             if storage_slots.len() <= remaining_capacity {
                 // Optimization: We can take all slots, just move the vec
