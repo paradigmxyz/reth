@@ -245,6 +245,31 @@ impl SnapProtocolMessage {
         }
     }
 
+    /// Returns the `request_id` used to correlate this message with its request/response pair.
+    pub const fn request_id(&self) -> u64 {
+        match self {
+            Self::GetAccountRange(m) => m.request_id,
+            Self::AccountRange(m) => m.request_id,
+            Self::GetStorageRanges(m) => m.request_id,
+            Self::StorageRanges(m) => m.request_id,
+            Self::GetByteCodes(m) => m.request_id,
+            Self::ByteCodes(m) => m.request_id,
+            Self::GetBlockAccessLists(m) => m.request_id,
+            Self::BlockAccessLists(m) => m.request_id,
+        }
+    }
+
+    /// Returns `true` if this is a response message (as opposed to a request).
+    pub const fn is_response(&self) -> bool {
+        matches!(
+            self,
+            Self::AccountRange(_) |
+                Self::StorageRanges(_) |
+                Self::ByteCodes(_) |
+                Self::BlockAccessLists(_)
+        )
+    }
+
     /// Encode the message to bytes
     pub fn encode(&self) -> Bytes {
         let mut buf = Vec::new();
@@ -342,6 +367,7 @@ impl SnapProtocolMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_case::test_case;
 
     // Helper function to create a B256 from a u64 for testing
     fn b256_from_u64(value: u64) -> B256 {
@@ -457,5 +483,51 @@ mod tests {
         assert!(v2.supports_message_id(SnapMessageId::BlockAccessLists as u8));
         assert!(!v2.supports_message_id(0x0a));
         assert!(!v2.supports_message_id(0xff));
+    }
+
+    #[test_case(
+        SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
+            request_id: 1, root_hash: B256::ZERO, starting_hash: B256::ZERO,
+            limit_hash: B256::ZERO, response_bytes: 0,
+        }), 1, false ; "get_account_range is a request"
+    )]
+    #[test_case(
+        SnapProtocolMessage::AccountRange(AccountRangeMessage {
+            request_id: 2, accounts: vec![], proof: vec![],
+        }), 2, true ; "account_range is a response"
+    )]
+    #[test_case(
+        SnapProtocolMessage::GetStorageRanges(GetStorageRangesMessage {
+            request_id: 3, root_hash: B256::ZERO, account_hashes: vec![],
+            starting_hash: B256::ZERO, limit_hash: B256::ZERO, response_bytes: 0,
+        }), 3, false ; "get_storage_ranges is a request"
+    )]
+    #[test_case(
+        SnapProtocolMessage::StorageRanges(StorageRangesMessage {
+            request_id: 4, slots: vec![], proof: vec![],
+        }), 4, true ; "storage_ranges is a response"
+    )]
+    #[test_case(
+        SnapProtocolMessage::GetByteCodes(GetByteCodesMessage {
+            request_id: 5, hashes: vec![], response_bytes: 0,
+        }), 5, false ; "get_byte_codes is a request"
+    )]
+    #[test_case(
+        SnapProtocolMessage::ByteCodes(ByteCodesMessage { request_id: 6, codes: vec![] }),
+        6, true ; "byte_codes is a response"
+    )]
+    #[test_case(
+        SnapProtocolMessage::GetBlockAccessLists(GetBlockAccessListsMessage {
+            request_id: 7, block_hashes: vec![], response_bytes: 0,
+        }), 7, false ; "get_block_access_lists is a request"
+    )]
+    #[test_case(
+        SnapProtocolMessage::BlockAccessLists(BlockAccessListsMessage {
+            request_id: 8, block_access_lists: BlockAccessLists(vec![]),
+        }), 8, true ; "block_access_lists is a response"
+    )]
+    fn request_id_and_is_response(msg: SnapProtocolMessage, expected_id: u64, is_response: bool) {
+        assert_eq!(msg.request_id(), expected_id);
+        assert_eq!(msg.is_response(), is_response);
     }
 }
