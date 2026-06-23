@@ -153,6 +153,12 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
         (!matches!(self.db_cursor_state, DbCursorState::Wiped)).then_some(&mut self.cursor)
     }
 
+    /// Returns `true` when the in-memory overlay cannot affect this cursor.
+    #[inline]
+    fn is_db_only(&self) -> bool {
+        self.in_memory_cursor.is_empty() && !matches!(self.db_cursor_state, DbCursorState::Wiped)
+    }
+
     /// Asserts that the next entry to be returned from the cursor is not previous to the last entry
     /// returned.
     fn set_last_key(&mut self, next_entry: &Option<(Nibbles, BranchNodeCompact)>) {
@@ -250,6 +256,21 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        if self.is_db_only() {
+            let entry = match self.cursor.seek(key)? {
+                Some((db_key, node)) if db_key == key => Some((key, node)),
+                _ => None,
+            };
+
+            #[cfg(debug_assertions)]
+            {
+                self.seeked = true;
+            }
+
+            self.set_last_key(&entry);
+            return Ok(entry)
+        }
+
         let mem_entry = self.in_memory_cursor.seek(&key);
 
         if let Some((mem_key, entry_inner)) = mem_entry &&
@@ -293,6 +314,18 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        if self.is_db_only() {
+            let entry = self.cursor.seek(key)?;
+
+            #[cfg(debug_assertions)]
+            {
+                self.seeked = true;
+            }
+
+            self.set_last_key(&entry);
+            return Ok(entry)
+        }
+
         let mem_entry = self.in_memory_cursor.seek(&key);
 
         if let Some((mem_key, Some(node))) = mem_entry &&
@@ -337,6 +370,12 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         let Some(last_key) = self.last_key else {
             return Ok(None);
         };
+
+        if self.is_db_only() {
+            let entry = self.cursor.next()?;
+            self.set_last_key(&entry);
+            return Ok(entry)
+        }
 
         // If either cursor is currently pointing to the last entry which was returned then consume
         // that entry so that `choose_next_entry` is looking at the subsequent one.
@@ -396,6 +435,11 @@ impl<C: TrieStorageCursor> TrieStorageCursor for InMemoryTrieCursor<'_, C> {
 mod tests {
     use super::*;
     use crate::trie_cursor::mock::MockTrieCursor;
+    use crate::{
+        mock::{KeyVisit, KeyVisitType},
+        updates::StorageTrieUpdatesSorted,
+    };
+    use alloy_primitives::map::B256Map;
     use parking_lot::Mutex;
     use std::{collections::BTreeMap, sync::Arc};
 
@@ -621,6 +665,71 @@ mod tests {
 
         let result = cursor.seek_exact(Nibbles::from_nibbles([0x4])).unwrap();
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_empty_overlay_seek_exact_miss_positions_db_cursor() {
+        let db_nodes = vec![(
+            Nibbles::from_nibbles([0x3]),
+            BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None),
+        )];
+
+        let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
+        let db_nodes_arc = Arc::new(db_nodes_map);
+        let visited_keys = Arc::new(Mutex::new(Vec::new()));
+        let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys.clone());
+
+        let trie_updates = TrieUpdatesSorted::default();
+        let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
+
+        let seek_key = Nibbles::from_nibbles([0x2]);
+        let result = cursor.seek_exact(seek_key).unwrap();
+
+        assert_eq!(result, None);
+        assert_eq!(cursor.current().unwrap(), Some(Nibbles::from_nibbles([0x3])));
+        assert_eq!(
+            visited_keys.lock().as_slice(),
+            &[KeyVisit {
+                visit_type: KeyVisitType::SeekNonExact(seek_key),
+                visited_key: Some(Nibbles::from_nibbles([0x3])),
+            }]
+        );
+        assert_eq!(cursor.next().unwrap(), None);
+    }
+
+    #[test]
+    fn test_wiped_storage_overlay_does_not_use_db_only_path() {
+        let hashed_address = B256::repeat_byte(0x01);
+        let db_nodes = vec![(
+            Nibbles::from_nibbles([0x1]),
+            BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None),
+        )];
+
+        let mut storage_tries = B256Map::default();
+        storage_tries.insert(hashed_address, db_nodes.into_iter().collect());
+
+        let mut visited_storage_keys = B256Map::default();
+        visited_storage_keys.insert(hashed_address, Mutex::new(Vec::new()));
+        let visited_storage_keys = Arc::new(visited_storage_keys);
+
+        let mock_cursor = MockTrieCursor::new_storage(
+            Arc::new(storage_tries),
+            visited_storage_keys.clone(),
+            hashed_address,
+        )
+        .unwrap();
+
+        let mut storage_updates = B256Map::default();
+        storage_updates.insert(
+            hashed_address,
+            StorageTrieUpdatesSorted { is_deleted: true, storage_nodes: Vec::new() },
+        );
+        let trie_updates = TrieUpdatesSorted::new(Vec::new(), storage_updates);
+        let mut cursor =
+            InMemoryTrieCursor::new_storage(mock_cursor, &trie_updates, hashed_address);
+
+        assert_eq!(cursor.seek(Nibbles::default()).unwrap(), None);
+        assert!(visited_storage_keys.get(&hashed_address).unwrap().lock().is_empty());
     }
 
     #[test]
