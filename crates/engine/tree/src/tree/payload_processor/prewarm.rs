@@ -627,8 +627,9 @@ where
 
     /// Hashes and streams a single BAL account's state to the sparse trie task.
     ///
-    /// For each changed account, storage slots are hashed and sent immediately, then the account
-    /// is sent as a separate update. The parent account is read only when the BAL did not provide
+    /// For each changed account, storage slots are hashed and sent before any parent account read.
+    /// When the BAL already provides all account leaf fields, the storage and account update can
+    /// share one sparse-trie message. The parent account is read only when the BAL did not provide
     /// all account leaf fields needed by the sparse trie.
     ///
     /// The `provider` is lazily initialized on first call and reused across accounts on the same
@@ -651,6 +652,9 @@ where
             return;
         }
 
+        let needs_parent_account = account_fields.needs_parent_account();
+        let mut hashed_state = reth_trie::HashedPostState::with_capacity(1);
+
         if !account_changes.storage_changes.is_empty() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
             let mut storage_map = reth_trie::HashedStorage::new(false);
@@ -662,12 +666,16 @@ where
                 }
             }
 
-            let mut hashed_state = reth_trie::HashedPostState::default();
             hashed_state.storages.insert(hashed_address, storage_map);
-            let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
+
+            if needs_parent_account {
+                let _ = to_sparse_trie_task
+                    .send(StateRootMessage::HashedStateUpdate(hashed_state));
+                hashed_state = reth_trie::HashedPostState::with_capacity(1);
+            }
         }
 
-        let existing_account = if account_fields.needs_parent_account() {
+        let existing_account = if needs_parent_account {
             if provider.is_none() {
                 let _span = debug_span!(
                     target: "engine::tree::payload_processor::prewarm",
@@ -707,7 +715,6 @@ where
         let account = account_fields.into_account(existing_account);
 
         let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
-        let mut hashed_state = reth_trie::HashedPostState::default();
         hashed_state.accounts.insert(hashed_address, Some(account));
 
         let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
