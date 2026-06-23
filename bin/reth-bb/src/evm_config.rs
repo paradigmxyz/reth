@@ -287,8 +287,27 @@ where
         let mut plan = BbEvmPlan::new(segments);
 
         // Add prior block hashes to the seeding list.
-        plan.block_hashes_to_seed.extend(payload.prior_block_hashes.clone());
-        plan.block_hashes_to_seed.sort_unstable_by_key(|(n, _)| *n);
+        let prior_hashes = &payload.prior_block_hashes;
+        let seeds_are_sorted = plan.block_hashes_to_seed.is_sorted_by_key(|(n, _)| *n);
+        // Prior big-block hashes normally precede current inter-segment hashes, so keep that
+        // chronological concatenation and fall back to sorting only for out-of-order inputs.
+        if prior_hashes.is_empty() {
+            if !seeds_are_sorted {
+                plan.block_hashes_to_seed.sort_unstable_by_key(|(n, _)| *n);
+            }
+        } else if seeds_are_sorted &&
+            prior_hashes.is_sorted_by_key(|(n, _)| *n) &&
+            plan.block_hashes_to_seed.first().is_none_or(|(first, _)| {
+                prior_hashes.last().is_none_or(|(last, _)| last <= first)
+            })
+        {
+            let segment_hashes = core::mem::take(&mut plan.block_hashes_to_seed);
+            plan.block_hashes_to_seed = prior_hashes.clone();
+            plan.block_hashes_to_seed.extend(segment_hashes);
+        } else {
+            plan.block_hashes_to_seed.extend(prior_hashes.clone());
+            plan.block_hashes_to_seed.sort_unstable_by_key(|(n, _)| *n);
+        }
 
         Ok(plan)
     }
