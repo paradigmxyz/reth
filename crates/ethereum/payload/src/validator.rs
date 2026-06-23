@@ -12,12 +12,20 @@ use std::sync::Arc;
 pub struct EthereumExecutionPayloadValidator<ChainSpec> {
     /// Chain spec to validate against.
     chain_spec: Arc<ChainSpec>,
+    /// Whether to allow pre-Amsterdam BAL payloads.
+    allow_pre_amsterdam_bal: bool,
 }
 
 impl<ChainSpec> EthereumExecutionPayloadValidator<ChainSpec> {
     /// Create a new validator.
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec }
+        Self { chain_spec, allow_pre_amsterdam_bal: false }
+    }
+
+    /// Allow pre-Amsterdam BAL payloads.
+    pub const fn with_allow_pre_amsterdam_bal(mut self, allow: bool) -> Self {
+        self.allow_pre_amsterdam_bal = allow;
+        self
     }
 
     /// Returns the chain spec used by the validator.
@@ -36,7 +44,7 @@ impl<ChainSpec: EthereumHardforks> EthereumExecutionPayloadValidator<ChainSpec> 
         &self,
         payload: ExecutionData,
     ) -> Result<SealedBlock<Block<T>>, PayloadError> {
-        ensure_well_formed_payload(&self.chain_spec, payload)
+        ensure_well_formed_payload_inner(&self.chain_spec, payload, self.allow_pre_amsterdam_bal)
     }
 }
 
@@ -71,14 +79,34 @@ where
     ChainSpec: EthereumHardforks,
     T: SignedTransaction,
 {
+    ensure_well_formed_payload_inner(chain_spec, payload, false)
+}
+
+fn ensure_well_formed_payload_inner<ChainSpec, T>(
+    chain_spec: ChainSpec,
+    payload: ExecutionData,
+    allow_pre_amsterdam_bal: bool,
+) -> Result<SealedBlock<Block<T>>, PayloadError>
+where
+    ChainSpec: EthereumHardforks,
+    T: SignedTransaction,
+{
     let ExecutionData { payload, sidecar } = payload;
 
     let expected_hash = payload.block_hash();
+    let should_ignore_pre_amsterdam_bal = allow_pre_amsterdam_bal &&
+        payload.block_access_list().is_some() &&
+        !chain_spec.is_amsterdam_active_at_timestamp(payload.timestamp());
 
-    // First parse the block
-    let sealed_block = payload.try_into_block_with_sidecar(&sidecar)?.seal_slow();
+    let mut block = payload.try_into_block_with_sidecar(&sidecar)?;
 
-    // Ensure the hash included in the payload matches the block hash
+    if should_ignore_pre_amsterdam_bal {
+        block.header.block_access_list_hash = None;
+        block.header.slot_number = None;
+    }
+
+    let sealed_block = block.seal_slow();
+
     if expected_hash != sealed_block.hash() {
         return Err(PayloadError::BlockHash {
             execution: sealed_block.hash(),
@@ -104,4 +132,61 @@ where
     )?;
 
     Ok(sealed_block)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::{EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
+    use alloy_eips::eip7685::EMPTY_REQUESTS_HASH;
+    use alloy_primitives::{Bytes, B256};
+    use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV4};
+    use reth_chainspec::ChainSpecBuilder;
+    use reth_ethereum_primitives::{Block as EthBlock, TransactionSigned};
+
+    #[test]
+    fn pre_amsterdam_bal_payload_is_opt_in() {
+        let block = empty_prague_block();
+        let original_hash = block.clone().seal_slow().hash();
+        let raw_bal = Bytes::from_static(&[0xc0]);
+        let payload = ExecutionPayload::V4(ExecutionPayloadV4::from_block_unchecked_with_bal(
+            original_hash,
+            &block,
+            raw_bal,
+        ));
+        let execution_data =
+            ExecutionData { payload, sidecar: ExecutionPayloadSidecar::from_block(&block) };
+
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().prague_activated().build());
+        assert!(matches!(
+            EthereumExecutionPayloadValidator::new(chain_spec.clone())
+                .ensure_well_formed_payload::<TransactionSigned>(execution_data.clone())
+                .unwrap_err(),
+            PayloadError::BlockHash { .. }
+        ));
+
+        let sealed = EthereumExecutionPayloadValidator::new(chain_spec)
+            .with_allow_pre_amsterdam_bal(true)
+            .ensure_well_formed_payload::<TransactionSigned>(execution_data)
+            .unwrap();
+
+        assert_eq!(sealed.hash(), original_hash);
+        assert!(sealed.header().block_access_list_hash.is_none());
+        assert!(sealed.header().slot_number.is_none());
+    }
+
+    fn empty_prague_block() -> EthBlock {
+        let mut block = EthBlock::default();
+        block.header.ommers_hash = EMPTY_OMMER_ROOT_HASH;
+        block.header.transactions_root = EMPTY_ROOT_HASH;
+        block.header.receipts_root = EMPTY_ROOT_HASH;
+        block.header.withdrawals_root = Some(EMPTY_ROOT_HASH);
+        block.header.base_fee_per_gas = Some(0);
+        block.header.parent_beacon_block_root = Some(B256::ZERO);
+        block.header.blob_gas_used = Some(0);
+        block.header.excess_blob_gas = Some(0);
+        block.header.requests_hash = Some(EMPTY_REQUESTS_HASH);
+        block.body.withdrawals = Some(Default::default());
+        block
+    }
 }

@@ -29,6 +29,12 @@ impl<ChainSpec> EthereumEngineValidator<ChainSpec> {
         Self { inner: EthereumExecutionPayloadValidator::new(chain_spec) }
     }
 
+    /// Allow pre-Amsterdam BAL payloads.
+    pub fn with_allow_pre_amsterdam_bal(mut self, allow: bool) -> Self {
+        self.inner = self.inner.with_allow_pre_amsterdam_bal(allow);
+        self
+    }
+
     /// Returns the chain spec used by the validator.
     #[inline]
     fn chain_spec(&self) -> &ChainSpec {

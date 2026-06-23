@@ -258,6 +258,14 @@ RETH_ARGS=(
   --no-persist-peers
 )
 
+if [ "$USE_BAL" = "true" ]; then
+  if "$BINARY" node --help 2>/dev/null | grep -qF -- '--engine.allow-pre-amsterdam-bal'; then
+    RETH_ARGS+=(--engine.allow-pre-amsterdam-bal)
+  else
+    echo "BAL replay requested, but ${LABEL} binary rejected --engine.allow-pre-amsterdam-bal; continuing without it"
+  fi
+fi
+
 SYNC_STATE_IDLE=false
 if "$BINARY" node --help 2>/dev/null | grep -qF -- '--debug.startup-sync-state-idle'; then
   RETH_ARGS+=(--debug.startup-sync-state-idle)

@@ -335,7 +335,10 @@ where
             ctx.node.evm_config().clone(),
             ctx.config.rpc.flashbots_config(),
             ctx.node.task_executor().clone(),
-            Arc::new(EthereumEngineValidator::new(ctx.config.chain.clone())),
+            Arc::new(
+                EthereumEngineValidator::new(ctx.config.chain.clone())
+                    .with_allow_pre_amsterdam_bal(ctx.config.engine.allow_pre_amsterdam_bal),
+            ),
         );
 
         let eth_config =
@@ -759,7 +762,10 @@ where
     type Consensus = Arc<EthBeaconConsensus<<Node::Types as NodeTypes>::ChainSpec>>;
 
     async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
-        Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))
+        Ok(Arc::new(
+            EthBeaconConsensus::new(ctx.chain_spec())
+                .with_allow_pre_amsterdam_bal(ctx.config().engine.allow_pre_amsterdam_bal),
+        ))
     }
 }
 
@@ -781,6 +787,7 @@ where
     type Validator = EthereumEngineValidator<Types::ChainSpec>;
 
     async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
-        Ok(EthereumEngineValidator::new(ctx.config.chain.clone()))
+        Ok(EthereumEngineValidator::new(ctx.config.chain.clone())
+            .with_allow_pre_amsterdam_bal(ctx.config.engine.allow_pre_amsterdam_bal))
     }
 }

@@ -1109,6 +1109,9 @@ Engine:
 
           When enabled, persistence cycles are deferred from the moment an FCU with payload attributes arrives until the next FCU clears the build. Useful on chains with short block times where persistence I/O can interfere with block building latency.
 
+      --engine.allow-pre-amsterdam-bal
+          Allow block access lists before Amsterdam activation. This is only intended for benchmarking pre-Amsterdam BAL replay
+
       --engine.disable-bal-parallel-execution
           Disable BAL (Block Access List, EIP-7928) based parallel execution
 

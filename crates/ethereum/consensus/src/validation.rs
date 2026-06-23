@@ -46,7 +46,7 @@ pub(crate) fn validate_block_post_execution_with_bal_hashes<B, R, ChainSpec>(
     result: &BlockExecutionResult<R>,
     receipt_root_bloom: Option<(B256, Bloom)>,
     block_access_list_hash: Option<B256>,
-    allow_bal_hashes: bool,
+    allow_pre_amsterdam_bal: bool,
 ) -> Result<(), ConsensusError>
 where
     B: Block,
@@ -106,7 +106,7 @@ where
     }
 
     // Validate that the header block access list hash matches the calculated block access list hash
-    let is_allowed_pre_amsterdam_bal_hash = allow_bal_hashes &&
+    let is_allowed_pre_amsterdam_bal_hash = allow_pre_amsterdam_bal &&
         !chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) &&
         block.header().block_access_list_hash().is_some();
 

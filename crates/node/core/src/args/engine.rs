@@ -55,6 +55,7 @@ pub struct DefaultEngineValues {
     share_execution_cache_with_payload_builder: bool,
     share_sparse_trie_with_payload_builder: bool,
     suppress_persistence_during_build: bool,
+    allow_pre_amsterdam_bal: bool,
     bal_parallel_execution_disabled: bool,
     bal_parallel_state_root_disabled: bool,
 }
@@ -247,6 +248,12 @@ impl DefaultEngineValues {
         self
     }
 
+    /// Set whether to allow BAL payloads before Amsterdam activation by default.
+    pub const fn with_allow_pre_amsterdam_bal(mut self, v: bool) -> Self {
+        self.allow_pre_amsterdam_bal = v;
+        self
+    }
+
     /// Set whether to disable BAL-based parallel execution by default
     pub const fn with_bal_parallel_execution_disabled(mut self, v: bool) -> Self {
         self.bal_parallel_execution_disabled = v;
@@ -292,6 +299,7 @@ impl Default for DefaultEngineValues {
             share_execution_cache_with_payload_builder: false,
             share_sparse_trie_with_payload_builder: false,
             suppress_persistence_during_build: false,
+            allow_pre_amsterdam_bal: false,
             bal_parallel_execution_disabled: false,
             bal_parallel_state_root_disabled: false,
         }
@@ -523,6 +531,11 @@ pub struct EngineArgs {
     )]
     pub suppress_persistence_during_build: bool,
 
+    /// Allow block access lists before Amsterdam activation. This is only intended for
+    /// benchmarking pre-Amsterdam BAL replay.
+    #[arg(long = "engine.allow-pre-amsterdam-bal", default_value_t = DefaultEngineValues::get_global().allow_pre_amsterdam_bal)]
+    pub allow_pre_amsterdam_bal: bool,
+
     /// Disable BAL (Block Access List, EIP-7928) based parallel execution.
     #[arg(long = "engine.disable-bal-parallel-execution", default_value_t = DefaultEngineValues::get_global().bal_parallel_execution_disabled)]
     pub bal_parallel_execution_disabled: bool,
@@ -584,6 +597,7 @@ impl Default for EngineArgs {
             share_execution_cache_with_payload_builder,
             share_sparse_trie_with_payload_builder,
             suppress_persistence_during_build,
+            allow_pre_amsterdam_bal,
             bal_parallel_execution_disabled,
             bal_parallel_state_root_disabled,
         } = DefaultEngineValues::get_global().clone();
@@ -623,6 +637,7 @@ impl Default for EngineArgs {
             share_execution_cache_with_payload_builder,
             share_sparse_trie_with_payload_builder,
             suppress_persistence_during_build,
+            allow_pre_amsterdam_bal,
             bal_parallel_execution_disabled,
             bal_parallel_state_root_disabled,
             disable_bal_batch_io: false,
@@ -809,6 +824,7 @@ mod tests {
             share_execution_cache_with_payload_builder: false,
             share_sparse_trie_with_payload_builder: false,
             suppress_persistence_during_build: false,
+            allow_pre_amsterdam_bal: true,
             bal_parallel_execution_disabled: true,
             bal_parallel_state_root_disabled: true,
             disable_bal_batch_io: true,
@@ -856,6 +872,7 @@ mod tests {
             "--engine.disable-sparse-trie-cache-pruning",
             "--engine.state-root-task-timeout",
             "2s",
+            "--engine.allow-pre-amsterdam-bal",
             "--engine.disable-bal-parallel-execution",
             "--engine.disable-bal-parallel-state-root",
             "--engine.disable-bal-batch-io",
