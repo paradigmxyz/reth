@@ -620,6 +620,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let rocksdb_provider = self.rocksdb_provider.clone();
         let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
         let rocksdb_enabled = rocksdb_ctx.storage_settings.storage_v2;
+        let bytecode_only_state_write = save_mode.with_state()
+            && self.cached_storage_settings().use_hashed_state()
+            && sf_ctx.write_receipts
+            && sf_ctx.write_account_changesets
+            && sf_ctx.write_storage_changesets;
 
         let mut sf_result = None;
         let mut rocksdb_result = None;
@@ -698,7 +703,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 self.insert_block_mdbx_only(recovered_block, tx_nums[i])?;
                 timings.insert_block += start.elapsed();
 
-                if save_mode.with_state() {
+                if save_mode.with_state() && !bytecode_only_state_write {
                     let execution_output = block.execution_outcome();
 
                     // Write state and changesets to the database.
@@ -724,6 +729,12 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Write all hashed state and trie updates in single batches.
             // This reduces cursor open/close overhead from N calls to 1.
             if save_mode.with_state() {
+                if bytecode_only_state_write {
+                    let start = Instant::now();
+                    self.write_bytecodes_from_blocks(&blocks)?;
+                    timings.write_state += start.elapsed();
+                }
+
                 // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
                 let start = Instant::now();
                 let merged_hashed_state = HashedPostStateSorted::merge_batch(
@@ -915,6 +926,45 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let mut bytecodes_cursor = self.tx_ref().cursor_write::<tables::Bytecodes>()?;
         for (hash, bytecode) in bytecodes {
             bytecodes_cursor.upsert(hash, &bytecode)?;
+        }
+        Ok(())
+    }
+
+    /// Writes execution bytecodes for a batch of blocks, de-duplicated by code hash.
+    #[instrument(
+        level = "debug",
+        target = "providers::db",
+        skip_all,
+        fields(block_count = blocks.len())
+    )]
+    fn write_bytecodes_from_blocks(
+        &self,
+        blocks: &[ExecutedBlock<N::Primitives>],
+    ) -> ProviderResult<()> {
+        let bytecode_count =
+            blocks.iter().map(|block| block.execution_outcome().state.contracts.len()).sum();
+        if bytecode_count == 0 {
+            return Ok(())
+        }
+
+        let mut bytecodes = Vec::with_capacity(bytecode_count);
+        for block in blocks {
+            bytecodes.extend(
+                block
+                    .execution_outcome()
+                    .state
+                    .contracts
+                    .iter()
+                    .map(|(hash, bytecode)| (*hash, bytecode)),
+            );
+        }
+
+        bytecodes.sort_unstable_by_key(|(hash, _)| *hash);
+        bytecodes.dedup_by_key(|(hash, _)| *hash);
+
+        let mut bytecodes_cursor = self.tx_ref().cursor_write::<tables::Bytecodes>()?;
+        for (hash, bytecode) in bytecodes {
+            bytecodes_cursor.upsert(hash, &Bytecode(bytecode.clone()))?;
         }
         Ok(())
     }
