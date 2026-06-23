@@ -1410,7 +1410,16 @@ impl RocksDBProvider {
             // changesets written, ensuring history indices match changeset entries.
             for account_block_reverts in reverts.accounts {
                 for (address, _) in account_block_reverts {
-                    account_history.entry(address).or_default().push(block_number);
+                    match account_history.entry(address) {
+                        std::collections::btree_map::Entry::Occupied(mut entry) => {
+                            entry.get_mut().push(block_number);
+                        }
+                        std::collections::btree_map::Entry::Vacant(entry) => {
+                            let mut indices = Vec::with_capacity(blocks.len().min(4));
+                            indices.push(block_number);
+                            entry.insert(indices);
+                        }
+                    }
                 }
             }
         }
@@ -1444,10 +1453,16 @@ impl RocksDBProvider {
                 for revert in storage_block_reverts {
                     for (slot, _) in revert.storage_revert {
                         let plain_key = B256::new(slot.to_be_bytes());
-                        storage_history
-                            .entry((revert.address, plain_key))
-                            .or_default()
-                            .push(block_number);
+                        match storage_history.entry((revert.address, plain_key)) {
+                            std::collections::btree_map::Entry::Occupied(mut entry) => {
+                                entry.get_mut().push(block_number);
+                            }
+                            std::collections::btree_map::Entry::Vacant(entry) => {
+                                let mut indices = Vec::with_capacity(blocks.len().min(4));
+                                indices.push(block_number);
+                                entry.insert(indices);
+                            }
+                        }
                     }
                 }
             }
