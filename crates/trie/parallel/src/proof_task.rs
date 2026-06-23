@@ -33,10 +33,7 @@ use crate::{
     root::ParallelStateRootError,
     value_encoder::{AsyncAccountValueEncoder, ValueEncoderStats},
 };
-use alloy_primitives::{
-    map::{B256Map, B256Set},
-    B256, U256,
-};
+use alloy_primitives::{map::B256Map, B256, U256};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_execution_errors::StateProofError;
 use reth_primitives_traits::{dashmap::DashMap, FastInstant as Instant};
@@ -245,7 +242,6 @@ impl ProofWorkerHandle {
         });
 
         let account_rt = runtime.clone();
-        let account_tx = storage_work_txs.clone();
         let account_avail = account_availability.clone();
         let account_parent_span = tracing::Span::current();
         runtime.spawn_blocking_named("account-workers", move || {
@@ -264,7 +260,6 @@ impl ProofWorkerHandle {
                     task_ctx.clone(),
                     account_work_rx.clone(),
                     worker_id,
-                    account_tx.clone(),
                     account_avail.clone(),
                     cached_storage_roots.clone(),
                     #[cfg(feature = "metrics")]
@@ -775,8 +770,6 @@ struct AccountProofWorker<Factory> {
     work_rx: CrossbeamReceiver<AccountWorkerJob>,
     /// Unique identifier for this worker (used for tracing)
     worker_id: usize,
-    /// Channel for dispatching storage proof work (for pre-dispatched target proofs)
-    storage_work_txs: Arc<[CrossbeamSender<StorageWorkerJob>]>,
     /// Per-worker availability flags
     availability: Arc<AvailabilitySheet>,
     /// Cached storage roots
@@ -799,7 +792,6 @@ where
         task_ctx: ProofTaskCtx<Factory>,
         work_rx: CrossbeamReceiver<AccountWorkerJob>,
         worker_id: usize,
-        storage_work_txs: Arc<[CrossbeamSender<StorageWorkerJob>]>,
         availability: Arc<AvailabilitySheet>,
         cached_storage_roots: Arc<DashMap<B256, B256>>,
         #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
@@ -809,7 +801,6 @@ where
             task_ctx,
             work_rx,
             worker_id,
-            storage_work_txs,
             availability,
             cached_storage_roots,
             #[cfg(feature = "metrics")]
@@ -982,19 +973,18 @@ where
 
         trace!(target: "trie::proof_task", "Processing V2 account multiproof");
 
-        let storage_proof_receivers =
-            dispatch_v2_storage_proofs(&self.storage_work_txs, &account_targets, storage_targets)?;
-
         let mut value_encoder = AsyncAccountValueEncoder::new(
-            storage_proof_receivers,
+            B256Map::default(),
             self.cached_storage_roots.clone(),
-            v2_storage_calculator,
+            v2_storage_calculator.clone(),
         );
 
         let account_proofs =
             v2_account_calculator.proof(&mut value_encoder, &mut account_targets)?;
 
-        let (storage_proofs, value_encoder_stats) = value_encoder.finalize()?;
+        let (_, value_encoder_stats) = value_encoder.finalize()?;
+        let storage_proofs =
+            compute_v2_storage_proofs(v2_storage_calculator, &account_targets, storage_targets)?;
 
         let proof = DecodedMultiProofV2 { account_proofs, storage_proofs };
 
@@ -1055,33 +1045,33 @@ where
     }
 }
 
-/// Queues V2 storage proofs for all accounts in the targets and returns receivers.
-///
-/// This function queues all storage proof tasks to the worker pool but returns immediately
-/// with receivers, allowing the account trie walk to proceed in parallel with storage proof
-/// computation. This enables interleaved parallelism for better performance.
-///
-/// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
-fn dispatch_v2_storage_proofs(
-    storage_work_txs: &[CrossbeamSender<StorageWorkerJob>],
+/// Computes V2 storage proofs for all accounts in the targets using the account worker's reused
+/// storage proof calculator.
+fn compute_v2_storage_proofs<TC, HC>(
+    v2_storage_calculator: Rc<RefCell<proof_v2::StorageProofCalculator<TC, HC>>>,
     account_targets: &[ProofV2Target],
     mut storage_targets: B256Map<Vec<ProofV2Target>>,
-) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
+) -> Result<B256Map<Vec<ProofTrieNodeV2>>, StateProofError>
+where
+    TC: TrieStorageCursor,
+    HC: HashedStorageCursor<Value = U256>,
+{
     if storage_targets.is_empty() {
         return Ok(B256Map::default());
     }
 
-    let mut storage_proof_receivers =
+    let mut storage_proofs =
         B256Map::with_capacity_and_hasher(storage_targets.len(), Default::default());
 
     // Collect hashed addresses from account targets that need their storage roots computed
-    let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
+    let account_target_addresses: std::collections::BTreeSet<_> =
+        account_targets.iter().map(|t| t.key()).collect();
 
     // For storage targets with associated account proofs, ensure the first target has
     // min_len(0) so the root node is returned for storage root computation
     for (hashed_address, targets) in &mut storage_targets {
-        if account_target_addresses.contains(hashed_address)
-            && let Some(first) = targets.first_mut()
+        if account_target_addresses.contains(hashed_address) &&
+            let Some(first) = targets.first_mut()
         {
             *first = first.with_min_len(0);
         }
@@ -1093,24 +1083,14 @@ fn dispatch_v2_storage_proofs(
     let mut sorted_storage_targets: Vec<_> = storage_targets.into_iter().collect();
     sorted_storage_targets.sort_unstable_by_key(|(addr, _)| *addr);
 
-    // Dispatch all proofs for targeted storage slots
-    for (hashed_address, targets) in sorted_storage_targets {
-        // Create channel for receiving StorageProofResultMessage
-        let (result_tx, result_rx) = crossbeam_channel::unbounded();
-        let input = StorageProofInput::new(hashed_address, targets);
-
-        storage_worker_tx(storage_work_txs, hashed_address)
-            .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
-            .map_err(|_| {
-                ParallelStateRootError::Other(format!(
-                    "Failed to queue storage proof for {hashed_address:?}: storage worker pool unavailable",
-                ))
-            })?;
-
-        storage_proof_receivers.insert(hashed_address, result_rx);
+    // Compute all proofs for targeted storage slots.
+    let mut calculator = v2_storage_calculator.borrow_mut();
+    for (hashed_address, mut targets) in sorted_storage_targets {
+        let proof = calculator.storage_proof(hashed_address, &mut targets)?;
+        storage_proofs.insert(hashed_address, proof);
     }
 
-    Ok(storage_proof_receivers)
+    Ok(storage_proofs)
 }
 
 /// Returns the worker index for a hashed account address.
