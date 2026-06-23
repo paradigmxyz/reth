@@ -285,6 +285,18 @@ impl RocksDBBuilder {
         cf_options
     }
 
+    /// Creates optimized column family options for account and storage history shards.
+    ///
+    /// History keys are hash-heavy and shard values are already encoded as compact
+    /// [`BlockNumberList`] bitmaps, so SST compression mostly adds write and compaction CPU during
+    /// replay.
+    fn history_column_family_options(cache: &Cache) -> Options {
+        let mut cf_options = Self::default_column_family_options(cache);
+        cf_options.set_compression_type(DBCompressionType::None);
+        cf_options.set_bottommost_compression_type(DBCompressionType::None);
+        cf_options
+    }
+
     /// Adds a column family for a specific table type.
     pub fn with_table<T: Table>(mut self) -> Self {
         self.column_families.push(T::NAME.to_string());
@@ -352,6 +364,10 @@ impl RocksDBBuilder {
             .map(|name| {
                 let cf_options = if name == tables::TransactionHashNumbers::NAME {
                     Self::tx_hash_numbers_column_family_options(&self.block_cache)
+                } else if name == tables::AccountsHistory::NAME
+                    || name == tables::StoragesHistory::NAME
+                {
+                    Self::history_column_family_options(&self.block_cache)
                 } else {
                     Self::default_column_family_options(&self.block_cache)
                 };
