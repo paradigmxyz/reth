@@ -33,9 +33,10 @@ use reth_primitives_traits::{
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory,
-    HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader, StateProofProvider,
-    StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
+    AccountRangeProvider, AccountRangeResult, BlockBodyIndicesProvider, BytecodeReader, DBProvider,
+    DatabaseProviderFactory, HashedPostStateProvider, NodePrimitivesProvider,
+    StageCheckpointReader, StateProofProvider, StorageChangeSetReader, StorageRootProvider,
+    StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -883,6 +884,21 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HashedPostStateProvid
 {
     fn hashed_post_state(&self, _state: &revm_database::BundleState) -> HashedPostState {
         HashedPostState::default()
+    }
+}
+
+impl<T, ChainSpec> AccountRangeProvider for MockEthProvider<T, ChainSpec>
+where
+    T: NodePrimitives,
+    ChainSpec: EthChainSpec + Send + Sync + 'static,
+{
+    fn account_range_overlaid(
+        &self,
+        _input: TrieInput,
+        _start: B256,
+        _limit: usize,
+    ) -> ProviderResult<AccountRangeResult> {
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 

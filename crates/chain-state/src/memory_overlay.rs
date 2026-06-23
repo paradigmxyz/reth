@@ -4,8 +4,9 @@ use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, Stora
 use reth_errors::ProviderResult;
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
-    AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
-    StateProvider, StateProviderBox, StateRootProvider, StorageRootProvider,
+    AccountRangeProvider, AccountRangeResult, AccountReader, BlockHashReader, BytecodeReader,
+    HashedPostStateProvider, StateProofProvider, StateProvider, StateProviderBox,
+    StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
@@ -211,6 +212,20 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
 impl<N: NodePrimitives> HashedPostStateProvider for MemoryOverlayStateProviderRef<'_, N> {
     fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
         self.historical.hashed_post_state(bundle_state)
+    }
+}
+
+impl<N: NodePrimitives> AccountRangeProvider for MemoryOverlayStateProviderRef<'_, N> {
+    fn account_range_overlaid(
+        &self,
+        mut input: TrieInput,
+        start: B256,
+        limit: usize,
+    ) -> ProviderResult<AccountRangeResult> {
+        // This overlay owns no cursor, so it pushes its in-memory state down to `historical` (which
+        // does), mirroring how `state_root_from_nodes` delegates here.
+        input.prepend_self(self.trie_input().clone());
+        self.historical.account_range_overlaid(input, start, limit)
     }
 }
 

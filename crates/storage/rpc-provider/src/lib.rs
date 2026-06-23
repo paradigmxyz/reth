@@ -43,12 +43,12 @@ use reth_node_types::{
 };
 use reth_primitives_traits::{Account, Bytecode, RecoveredBlock, SealedHeader};
 use reth_provider::{
-    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BytecodeReader,
-    CanonChainTracker, CanonStateNotification, CanonStateNotifications, CanonStateSubscriptions,
-    ChainStateBlockReader, ChainStateBlockWriter, ChangeSetReader, DatabaseProviderFactory,
-    HeaderProvider, PruneCheckpointReader, ReceiptProvider, StageCheckpointReader, StateProvider,
-    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, StorageReader,
-    TransactionVariant, TransactionsProvider,
+    AccountRangeProvider, AccountRangeResult, AccountReader, BlockHashReader, BlockIdReader,
+    BlockNumReader, BlockReader, BytecodeReader, CanonChainTracker, CanonStateNotification,
+    CanonStateNotifications, CanonStateSubscriptions, ChainStateBlockReader, ChainStateBlockWriter,
+    ChangeSetReader, DatabaseProviderFactory, HeaderProvider, PruneCheckpointReader,
+    ReceiptProvider, StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory,
+    StateReader, StateRootProvider, StorageReader, TransactionVariant, TransactionsProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 pub mod rpc_response;
@@ -1068,6 +1068,23 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
                 bytecode_hash,
             }))
         }
+    }
+}
+
+impl<P, Node, N> AccountRangeProvider for RpcBlockchainStateProvider<P, Node, N>
+where
+    P: Provider<N> + Clone + 'static,
+    N: Network,
+    Node: NodeTypes,
+{
+    fn account_range_overlaid(
+        &self,
+        _input: TrieInput,
+        _start: B256,
+        _limit: usize,
+    ) -> ProviderResult<AccountRangeResult> {
+        // No JSON-RPC method enumerates accounts in hashed order, so this provider cannot back it.
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 

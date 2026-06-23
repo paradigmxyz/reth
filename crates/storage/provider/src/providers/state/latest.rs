@@ -258,16 +258,23 @@ impl<Provider: DBProvider> HashedPostStateProvider for LatestStateProviderRef<'_
     }
 }
 
-impl<Provider: DBProvider + StorageSettingsCache + Sync> AccountRangeProvider
+impl<Provider: DBProvider + StorageSettingsCache> AccountRangeProvider
     for LatestStateProviderRef<'_, Provider>
 {
-    fn account_range(
+    fn account_range_overlaid(
         &self,
+        input: TrieInput,
         start: B256,
         limit: usize,
     ) -> ProviderResult<reth_storage_api::AccountRangeResult> {
+        // Latest state has no historical overlay of its own, so the input's hashed state is the
+        // only overlay layered on top of the database hashed account cursor.
+        let overlay = input.state.into_sorted();
         super::account_range::account_range(
-            &reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
+            &HashedPostStateCursorFactory::new(
+                reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
+                &overlay,
+            ),
             start,
             limit,
         )

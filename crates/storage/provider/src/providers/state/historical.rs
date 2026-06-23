@@ -658,16 +658,19 @@ where
         + PruneCheckpointReader
         + StageCheckpointReader
         + StorageSettingsCache
-        + NodePrimitivesProvider<Primitives = N>
-        + Sync,
+        + NodePrimitivesProvider<Primitives = N>,
     N: NodePrimitives,
 {
-    fn account_range(
+    fn account_range_overlaid(
         &self,
+        input: TrieInput,
         start: B256,
         limit: usize,
     ) -> ProviderResult<reth_storage_api::AccountRangeResult> {
-        let TrieInputSorted { state, .. } = self.build_overlay(TrieInputSorted::default())?;
+        // Layer `input` (e.g. in-memory blocks) on top of this block's historical reverts via the
+        // overlay builder, then enumerate the combined hashed account state.
+        let TrieInputSorted { state, .. } =
+            self.build_overlay(TrieInputSorted::from_unsorted(input))?;
         super::account_range::account_range(
             &HashedPostStateCursorFactory::new(
                 reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
