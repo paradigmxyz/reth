@@ -329,17 +329,19 @@ impl ArenaCursor {
                 _ => unreachable!("unexpected node type on stack: {:?}", arena[head_idx]),
             };
 
-            let head_branch_logical_path = logical_branch_path(arena, head);
-
             // If full_path doesn't extend past the branch's logical path, the target is at or
             // within the branch's short_key — treat as diverged.
-            if full_path.len() <= head_branch_logical_path.len() ||
-                !full_path.starts_with(&head_branch_logical_path)
-            {
+            let head_branch_logical_path_len = logical_branch_path_len(arena, head);
+            if full_path.len() <= head_branch_logical_path_len {
                 return SeekResult::Diverged;
             }
 
-            let child_nibble = full_path.get_unchecked(head_branch_logical_path.len());
+            let head_branch_logical_path = logical_branch_path(arena, head);
+            if !full_path.starts_with(&head_branch_logical_path) {
+                return SeekResult::Diverged;
+            }
+
+            let child_nibble = full_path.get_unchecked(head_branch_logical_path_len);
             let Some(branch_child_idx) = BranchChildIdx::new(head_branch.state_mask, child_nibble)
             else {
                 return SeekResult::NoChild { child_nibble };
