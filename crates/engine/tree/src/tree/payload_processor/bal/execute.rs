@@ -10,20 +10,21 @@
 //! worker results in transaction order, tracks block gas admission, and builds the BAL that this
 //! execution actually produced.
 //!
-//! The rebuilt BAL is returned to the outer payload validator for consensus post-execution
-//! validation. This module only logs the first divergence between the received BAL and the BAL
-//! rebuilt from canonical execution.
+//! The rebuilt BAL hash is returned to the outer payload validator for consensus post-execution
+//! validation. This module only materializes the rebuilt Alloy BAL when debug divergence logging is
+//! needed.
 
 use super::{ordered_outputs::ordered_worker_outputs, worker, BalExecutionError};
 use alloy_eip7928::{
     bal::{Bal as AlloyBal, DecodedBal},
-    compute_block_access_list_hash, BlockAccessList,
+    BlockAccessIndex,
 };
 use alloy_evm::{
     block::{BlockExecutionError, BlockExecutor, BlockValidationError, TxResult},
     Evm,
 };
-use alloy_primitives::Address;
+use alloy_primitives::{Address, B256};
+use alloy_rlp::{Encodable, Header};
 use crossbeam_channel::{Receiver, Sender};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
 use reth_primitives_traits::ReceiptTy;
@@ -33,7 +34,7 @@ use revm::{
     context::{result::ResultAndState, Block},
     database::{states::bundle_state::BundleRetention, State},
 };
-use revm_state::bal::Bal as RevmBal;
+use revm_state::bal::{AccountBal, Bal as RevmBal, BalWrites};
 use std::sync::Arc;
 
 use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
@@ -51,7 +52,7 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
 ) -> Result<
-    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
+    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, B256),
     BalExecutionError,
 >
 where
@@ -94,7 +95,7 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
     worker_count: usize,
 ) -> Result<
-    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
+    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, B256),
     BalExecutionError,
 >
 where
@@ -170,13 +171,14 @@ where
         (block_result, senders)
     };
 
-    let built_bal = take_built_bal_and_log_divergence(&mut canonical_state, bal);
+    let built_bal_hash =
+        take_built_bal_hash_and_log_divergence(&mut canonical_state, bal, input_bal.hash());
 
     canonical_state.merge_transitions(BundleRetention::Reverts);
     Ok((
         BlockExecutionOutput { state: canonical_state.take_bundle(), result: block_result },
         senders,
-        built_bal,
+        built_bal_hash,
     ))
 }
 
@@ -201,30 +203,253 @@ fn convert_alloy_to_revm_bal(alloy_bal: &AlloyBal) -> Result<Arc<RevmBal>, BalEx
     Ok(Arc::new(received_bal_revm))
 }
 
-fn take_built_bal_and_log_divergence<DB>(
+fn take_built_bal_hash_and_log_divergence<DB>(
     canonical_state: &mut State<DB>,
     received_bal: &AlloyBal,
-) -> BlockAccessList
+    received_hash: B256,
+) -> B256
 where
     DB: Database,
 {
-    let built_bal = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
-    if tracing::enabled!(target: "engine::tree::payload_processor::bal", tracing::Level::DEBUG) &&
-        built_bal.as_slice() != received_bal.as_slice()
+    let built_bal = canonical_state.take_built_bal().expect("with_bal_builder set");
+    let built_hash = compute_revm_bal_hash(&built_bal);
+    if tracing::enabled!(target: "engine::tree::payload_processor::bal", tracing::Level::DEBUG)
+        && built_hash != received_hash
     {
-        let rebuilt = compute_block_access_list_hash(built_bal.as_slice());
-        let expected = compute_block_access_list_hash(received_bal.as_slice());
+        let built_bal = built_bal.into_alloy_bal();
         let div = received_bal.diff(built_bal.as_slice());
         tracing::debug!(
             target: "engine::tree::payload_processor::bal",
-            %rebuilt,
-            %expected,
+            rebuilt = %built_hash,
+            expected = %received_hash,
             %div,
             "first BAL divergence",
         );
     }
 
-    built_bal
+    built_hash
+}
+
+pub(crate) fn compute_revm_bal_hash(bal: &RevmBal) -> B256 {
+    let mut accounts = bal.accounts.iter().collect::<Vec<_>>();
+    accounts.sort_unstable_by_key(|(address, _)| *address);
+
+    let payload_len =
+        accounts.iter().map(|(address, account)| account_changes_len(address, account)).sum();
+    let mut out = Vec::with_capacity(rlp_list_len(payload_len));
+    encode_list_header(payload_len, &mut out);
+    for (address, account) in accounts {
+        encode_account_changes(address, account, &mut out);
+    }
+
+    alloy_primitives::keccak256(out)
+}
+
+fn account_changes_len(address: &Address, account: &AccountBal) -> usize {
+    let storage_changes_len = storage_changes_list_len(account);
+    let storage_reads_len = storage_reads_list_len(account);
+    let balance_changes_len =
+        write_changes_list_len(&account.account_info.balance, |index, value| {
+            pair_len(&index, value)
+        });
+    let nonce_changes_len =
+        write_changes_list_len(&account.account_info.nonce, |index, value| pair_len(&index, value));
+    let code_changes_len = write_changes_list_len(&account.account_info.code, |index, value| {
+        pair_len(&index, value.1.original_byte_slice())
+    });
+    let payload_len = address.length()
+        + storage_changes_len
+        + storage_reads_len
+        + balance_changes_len
+        + nonce_changes_len
+        + code_changes_len;
+
+    rlp_list_len(payload_len)
+}
+
+fn encode_account_changes(address: &Address, account: &AccountBal, out: &mut Vec<u8>) {
+    let storage_changes_len = storage_changes_list_len(account);
+    let storage_reads_len = storage_reads_list_len(account);
+    let balance_changes_len =
+        write_changes_list_len(&account.account_info.balance, |index, value| {
+            pair_len(&index, value)
+        });
+    let nonce_changes_len =
+        write_changes_list_len(&account.account_info.nonce, |index, value| pair_len(&index, value));
+    let code_changes_len = write_changes_list_len(&account.account_info.code, |index, value| {
+        pair_len(&index, value.1.original_byte_slice())
+    });
+    let payload_len = address.length()
+        + storage_changes_len
+        + storage_reads_len
+        + balance_changes_len
+        + nonce_changes_len
+        + code_changes_len;
+
+    encode_list_header(payload_len, out);
+    address.encode(out);
+    encode_storage_changes_list(account, storage_changes_len, out);
+    encode_storage_reads_list(account, storage_reads_len, out);
+    encode_write_changes_list(
+        &account.account_info.balance,
+        balance_changes_len,
+        out,
+        |index, value, out| {
+            encode_pair(&index, value, out);
+        },
+    );
+    encode_write_changes_list(
+        &account.account_info.nonce,
+        nonce_changes_len,
+        out,
+        |index, value, out| {
+            encode_pair(&index, value, out);
+        },
+    );
+    encode_write_changes_list(
+        &account.account_info.code,
+        code_changes_len,
+        out,
+        |index, value, out| {
+            encode_pair(&index, value.1.original_byte_slice(), out);
+        },
+    );
+}
+
+fn storage_changes_list_len(account: &AccountBal) -> usize {
+    let payload_len = account
+        .storage
+        .storage
+        .iter()
+        .filter(|(_, value)| !value.writes.is_empty())
+        .map(|(slot, value)| {
+            let changes_len = write_changes_list_len(value, |index, value| pair_len(&index, value));
+            rlp_list_len(slot.length() + changes_len)
+        })
+        .sum();
+
+    rlp_list_len(payload_len)
+}
+
+fn encode_storage_changes_list(account: &AccountBal, list_len: usize, out: &mut Vec<u8>) {
+    encode_list_header_payload(list_len, out);
+    for (slot, value) in
+        account.storage.storage.iter().filter(|(_, value)| !value.writes.is_empty())
+    {
+        let changes_len = write_changes_list_len(value, |index, value| pair_len(&index, value));
+        encode_list_header(slot.length() + changes_len, out);
+        slot.encode(out);
+        encode_write_changes_list(value, changes_len, out, |index, value, out| {
+            encode_pair(&index, value, out);
+        });
+    }
+}
+
+fn storage_reads_list_len(account: &AccountBal) -> usize {
+    let payload_len = account
+        .storage
+        .storage
+        .iter()
+        .filter(|(_, value)| value.writes.is_empty())
+        .map(|(slot, _)| slot.length())
+        .sum();
+
+    rlp_list_len(payload_len)
+}
+
+fn encode_storage_reads_list(account: &AccountBal, list_len: usize, out: &mut Vec<u8>) {
+    encode_list_header_payload(list_len, out);
+    for (slot, _) in account.storage.storage.iter().filter(|(_, value)| value.writes.is_empty()) {
+        slot.encode(out);
+    }
+}
+
+fn write_changes_list_len<T, F>(writes: &BalWrites<T>, mut item_len: F) -> usize
+where
+    T: PartialEq + Clone,
+    F: FnMut(BlockAccessIndex, &T) -> usize,
+{
+    let payload_len = if writes_sorted(writes) {
+        writes.writes.iter().map(|(index, value)| item_len(*index, value)).sum()
+    } else {
+        let mut ordered = writes.writes.iter().collect::<Vec<_>>();
+        ordered.sort_unstable_by_key(|(index, _)| *index);
+        ordered.into_iter().map(|(index, value)| item_len(*index, value)).sum()
+    };
+
+    rlp_list_len(payload_len)
+}
+
+fn encode_write_changes_list<T, F>(
+    writes: &BalWrites<T>,
+    list_len: usize,
+    out: &mut Vec<u8>,
+    mut encode_item: F,
+) where
+    T: PartialEq + Clone,
+    F: FnMut(BlockAccessIndex, &T, &mut Vec<u8>),
+{
+    encode_list_header_payload(list_len, out);
+    if writes_sorted(writes) {
+        for (index, value) in &writes.writes {
+            encode_item(*index, value, out);
+        }
+    } else {
+        let mut ordered = writes.writes.iter().collect::<Vec<_>>();
+        ordered.sort_unstable_by_key(|(index, _)| *index);
+        for (index, value) in ordered {
+            encode_item(*index, value, out);
+        }
+    }
+}
+
+fn writes_sorted<T>(writes: &BalWrites<T>) -> bool
+where
+    T: PartialEq + Clone,
+{
+    writes.writes.windows(2).all(|window| window[0].0 <= window[1].0)
+}
+
+fn pair_len<A, B>(first: &A, second: &B) -> usize
+where
+    A: Encodable + ?Sized,
+    B: Encodable + ?Sized,
+{
+    rlp_list_len(first.length() + second.length())
+}
+
+fn encode_pair<A, B>(first: &A, second: &B, out: &mut Vec<u8>)
+where
+    A: Encodable + ?Sized,
+    B: Encodable + ?Sized,
+{
+    encode_list_header(first.length() + second.length(), out);
+    first.encode(out);
+    second.encode(out);
+}
+
+const fn rlp_list_len(payload_len: usize) -> usize {
+    Header { list: true, payload_length: payload_len }.length_with_payload()
+}
+
+fn encode_list_header_payload(list_len: usize, out: &mut Vec<u8>) {
+    let payload_len = rlp_list_payload_len(list_len);
+    encode_list_header(payload_len, out);
+}
+
+fn rlp_list_payload_len(list_len: usize) -> usize {
+    for header_len in 1..=9 {
+        let Some(payload_len) = list_len.checked_sub(header_len) else { continue };
+        if (Header { list: true, payload_length: payload_len }).length() == header_len {
+            return payload_len;
+        }
+    }
+
+    unreachable!("RLP list header is at most 9 bytes")
+}
+
+fn encode_list_header(payload_len: usize, out: &mut Vec<u8>) {
+    Header { list: true, payload_length: payload_len }.encode(out);
 }
 
 /// Closes the abort channel on drop, waking scoped workers before the scope exits.
@@ -297,13 +522,16 @@ impl BlockGasTracker {
 mod tests {
     use super::*;
     use alloy_consensus::{BlockHeader, Header};
-    use alloy_eip7928::{bal::Bal as AlloyBal, BlockAccessList};
+    use alloy_eip7928::{
+        bal::Bal as AlloyBal, AccountChanges, BalanceChange, BlockAccessList, CodeChange,
+        NonceChange, SlotChanges, StorageChange,
+    };
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE},
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     };
-    use alloy_primitives::{keccak256, B256, U256};
+    use alloy_primitives::{keccak256, Bytes, B256, U256};
     use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Block as _, Recovered, SealedBlock};
@@ -320,6 +548,45 @@ mod tests {
         let alloy_bal: AlloyBal = bal.into();
         let raw = alloy_rlp::encode(&alloy_bal).into();
         Arc::new(DecodedBal::new(alloy_bal, raw))
+    }
+
+    #[test]
+    fn revm_bal_hash_matches_alloy_hash() {
+        let low_address = Address::with_last_byte(1);
+        let high_address = Address::with_last_byte(2);
+        let code = Bytes::from_static(&[0x60, 0x00]);
+        let mut alloy_bal = AlloyBal::new(vec![
+            AccountChanges {
+                address: high_address,
+                storage_reads: vec![U256::from(7)],
+                balance_changes: vec![BalanceChange::new(BlockAccessIndex::new(8), U256::from(80))],
+                nonce_changes: vec![NonceChange::new(BlockAccessIndex::new(7), 70)],
+                code_changes: vec![CodeChange::new(BlockAccessIndex::new(6), code.clone())],
+                ..Default::default()
+            },
+            AccountChanges {
+                address: low_address,
+                storage_changes: vec![SlotChanges::new(
+                    U256::from(2),
+                    vec![
+                        StorageChange::new(BlockAccessIndex::new(5), U256::from(50)),
+                        StorageChange::new(BlockAccessIndex::new(3), U256::from(30)),
+                    ],
+                )],
+                balance_changes: vec![
+                    BalanceChange::new(BlockAccessIndex::new(4), U256::from(40)),
+                    BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)),
+                ],
+                ..Default::default()
+            },
+        ]);
+
+        let revm_bal = RevmBal::clone_from_alloy(alloy_bal.as_vec()).expect("valid BAL");
+        let direct = compute_revm_bal_hash(&revm_bal);
+
+        alloy_bal.sort();
+        let expected = alloy_eip7928::compute_block_access_list_hash(alloy_bal.as_slice());
+        assert_eq!(direct, expected);
     }
 
     /// Builds an in-memory canonical DB pre-populated with the post-Cancun system contracts
@@ -488,7 +755,7 @@ mod tests {
         input_bal: Arc<DecodedBal>,
         block: &SealedBlock<Block>,
         txs: Vec<Tx>,
-    ) -> Result<(BlockExecutionOutput<Receipt>, BlockAccessList), BalExecutionError>
+    ) -> Result<(BlockExecutionOutput<Receipt>, B256), BalExecutionError>
     where
         Tx: ExecutableTxFor<EthEvmConfig> + Send,
         DB: Database + Send,
@@ -510,7 +777,7 @@ mod tests {
             tx_stream(txs),
             receipt_tx,
         )
-        .map(|(output, _, built_bal)| (output, built_bal))
+        .map(|(output, _, built_bal_hash)| (output, built_bal_hash))
     }
 
     /// Inserts `AccountInfo { nonce: 0, balance }` for `addr` into the canonical DB.
@@ -1032,7 +1299,7 @@ mod tests {
     }
 
     #[test]
-    fn returns_built_bal_for_final_hash_mismatch() {
+    fn returns_rebuilt_bal_hash_for_final_hash_mismatch() {
         // Build the BAL an empty block actually produces, then append a phantom address
         // that execution never touches. The rebuilt BAL omits it, and the outer consensus
         // validator is responsible for comparing that rebuilt hash to the header commitment.
@@ -1043,6 +1310,7 @@ mod tests {
         // Real BAL the block would produce.
         let real_bal = reference_bal_for_empty_block(&evm_config);
         assert!(!real_bal.is_empty(), "reference BAL must be non-empty");
+        let real_hash = alloy_eip7928::compute_block_access_list_hash(&real_bal);
 
         // Tamper: append a phantom address not accessed during execution.
         let phantom = alloy_primitives::Address::from([0xFF; 20]);
@@ -1071,11 +1339,11 @@ mod tests {
         );
 
         match result {
-            Ok((_, built_bal)) => {
-                let rebuilt = alloy_eip7928::compute_block_access_list_hash(&built_bal);
-                assert_ne!(rebuilt, tampered_hash, "rebuilt and header hashes must differ");
+            Ok((_, built_bal_hash)) => {
+                assert_eq!(built_bal_hash, real_hash, "rebuilt hash must match canonical BAL");
+                assert_ne!(built_bal_hash, tampered_hash, "rebuilt and header hashes must differ");
             }
-            Err(e) => panic!("expected success with rebuilt BAL, got {e:?}"),
+            Err(e) => panic!("expected success with rebuilt BAL hash, got {e:?}"),
         }
     }
 
