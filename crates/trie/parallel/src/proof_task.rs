@@ -192,6 +192,11 @@ impl ProofWorkerHandle {
         let storage_availability = Arc::new(AvailabilitySheet::new(storage_worker_count));
         let account_availability = Arc::new(AvailabilitySheet::new(account_worker_count));
 
+        // Populate managed overlay caches before all proof workers request their providers. The
+        // workers still create their own read transactions, but cache-backed overlay factories can
+        // avoid making every worker wait on the first overlay build.
+        let _ = task_ctx.factory.database_provider_ro();
+
         debug!(
             target: "trie::proof_task",
             storage_worker_count,
