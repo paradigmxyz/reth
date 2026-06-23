@@ -129,6 +129,57 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
 
         let _ = self.result_tx.send((builder.finalize(), aggregated_bloom));
     }
+
+    /// Runs the receipt root computation for callers that send receipts in transaction order.
+    ///
+    /// This keeps the production validation path on the straight-line case: both serial execution
+    /// and BAL ordered commit stream receipts by increasing transaction index.
+    pub fn run_ordered(self, receipts_len: usize) {
+        let _span = debug_span!(
+            target: "engine::tree::payload_processor",
+            "receipt_root",
+            receipts_len,
+        )
+        .entered();
+
+        let mut builder = OrderedTrieRootEncodedBuilder::new();
+        let mut aggregated_bloom = Bloom::ZERO;
+        let mut encode_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
+        let mut next = 0usize;
+
+        for indexed_receipt in self.receipt_rx {
+            if indexed_receipt.index != next {
+                tracing::error!(
+                    target: "engine::tree::payload_processor",
+                    expected = next,
+                    received = indexed_receipt.index,
+                    "Receipt root task received out-of-order receipt on ordered path"
+                );
+                return;
+            }
+
+            let receipt_with_bloom = indexed_receipt.receipt.with_bloom_ref();
+
+            encode_buf.clear();
+            receipt_with_bloom.encode_2718(&mut encode_buf);
+
+            aggregated_bloom |= *receipt_with_bloom.bloom_ref();
+            builder.push_next(&encode_buf);
+            next += 1;
+        }
+
+        if receipts_len != next {
+            tracing::error!(
+                target: "engine::tree::payload_processor",
+                expected = receipts_len,
+                received = next,
+                "Receipt root task received incomplete receipts, execution likely aborted"
+            );
+            return;
+        }
+
+        let _ = self.result_tx.send((builder.finalize(), aggregated_bloom));
+    }
 }
 
 #[cfg(test)]
@@ -201,6 +252,35 @@ mod tests {
         let (root, bloom) = result_rx.await.unwrap();
 
         // Verify against expected values from existing test
+        assert_eq!(
+            root,
+            b256!("0x61353b4fb714dc1fccacbf7eafc4273e62f3d1eed716fe41b2a0cd2e12c63ebc")
+        );
+        assert_eq!(
+            bloom,
+            Bloom::from(hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_receipt_root_task_ordered_path() {
+        let receipts: Vec<Receipt> = vec![Receipt::default(); 5];
+
+        let (tx, rx) = bounded(4);
+        let (result_tx, result_rx) = oneshot::channel();
+        let receipts_len = receipts.len();
+
+        let handle = ReceiptRootTaskHandle::new(rx, result_tx);
+        let join_handle = tokio::task::spawn_blocking(move || handle.run_ordered(receipts_len));
+
+        for (i, receipt) in receipts.into_iter().enumerate() {
+            tx.send(IndexedReceipt::new(i, receipt)).unwrap();
+        }
+        drop(tx);
+
+        join_handle.await.unwrap();
+        let (root, bloom) = result_rx.await.unwrap();
+
         assert_eq!(
             root,
             b256!("0x61353b4fb714dc1fccacbf7eafc4273e62f3d1eed716fe41b2a0cd2e12c63ebc")

@@ -1334,7 +1334,7 @@ where
         let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
         self.payload_processor
             .executor()
-            .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
+            .spawn_blocking_named("receipt-root", move || task_handle.run_ordered(receipts_len));
 
         (receipt_tx, result_rx)
     }
