@@ -1,10 +1,10 @@
-//! Flattened state trie overlays for in-memory blocks.
+//! State trie overlays for in-memory blocks.
 //!
 //! Payload validation needs a view of the state trie as of an in-memory parent block even when that
 //! parent has not been persisted yet. [`StateTrieOverlayManager`] tracks those in-memory blocks and
-//! builds reusable flattened state trie overlays on demand.
+//! resolves the trie data needed to overlay them on top of persisted state.
 
-use crate::{EthPrimitives, ExecutedBlock, ReusableSparseTrie};
+use crate::{ComputedTrieData, EthPrimitives, ExecutedBlock, ReusableSparseTrie};
 use alloy_primitives::B256;
 use reth_metrics::{
     metrics::{Counter, Histogram},
@@ -24,7 +24,7 @@ use std::{
 };
 use tracing::{debug, trace};
 
-/// Manages flattened state trie overlays for in-memory blocks.
+/// Manages state trie overlays for in-memory blocks.
 ///
 /// The manager owns the in-memory block graph and a cache of flattened state trie overlays keyed by
 /// `(anchor_hash, tip_hash)`.
@@ -215,6 +215,35 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         Ok((Arc::clone(&input.nodes), Arc::clone(&input.state)))
     }
 
+    /// Returns overlay layers from `anchor_hash` to `parent_hash`.
+    ///
+    /// Layers are returned oldest-to-newest, so callers can apply them in order on top of the
+    /// anchor state while preserving the same newest-wins semantics as the flattened overlay.
+    #[tracing::instrument(
+        level = "trace",
+        target = "chain_state::state_trie_overlay",
+        skip_all,
+        fields(tip_hash = %parent_hash, anchor_hash = %anchor_hash, block_count = tracing::field::Empty)
+    )]
+    pub fn overlay_layers_for_parent(
+        &self,
+        parent_hash: B256,
+        anchor_hash: B256,
+    ) -> Result<Vec<StateTrieOverlayLayer>, StateTrieOverlayError> {
+        debug!(
+            target: "chain_state::state_trie_overlay",
+            tip_hash = %parent_hash,
+            %anchor_hash,
+            "loading state trie overlay layers for parent"
+        );
+
+        let mut blocks = self.blocks_from_tip_to_anchor(parent_hash, anchor_hash)?;
+        tracing::Span::current().record("block_count", blocks.len());
+        blocks.reverse();
+
+        Ok(blocks.into_iter().map(|block| StateTrieOverlayLayer::from(block.trie_data())).collect())
+    }
+
     #[tracing::instrument(
         level = "trace",
         target = "chain_state::state_trie_overlay",
@@ -260,19 +289,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         span.record("cache_reused", false);
 
         // Resolve the block path and any cached parent overlay before locking the child entry.
-        let mut hash = tip_hash;
-        let mut blocks = Vec::new();
-        loop {
-            let block =
-                self.blocks.get(&hash).ok_or(StateTrieOverlayError { tip_hash, anchor_hash })?;
-            let parent_hash = block.recovered_block().parent_hash();
-            blocks.push(block.clone());
-
-            if parent_hash == anchor_hash {
-                break
-            }
-            hash = parent_hash;
-        }
+        let mut blocks = self.blocks_from_tip_to_anchor(tip_hash, anchor_hash)?;
         span.record("block_count", blocks.len());
         let parent_input = blocks.first().and_then(|block| {
             let parent_hash = block.recovered_block().parent_hash();
@@ -374,6 +391,32 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         }
     }
 
+    fn blocks_from_tip_to_anchor(
+        &self,
+        tip_hash: B256,
+        anchor_hash: B256,
+    ) -> Result<Vec<ExecutedBlock<N>>, StateTrieOverlayError> {
+        if tip_hash == anchor_hash {
+            return Ok(Vec::new())
+        }
+
+        let mut hash = tip_hash;
+        let mut blocks = Vec::new();
+        loop {
+            let block =
+                self.blocks.get(&hash).ok_or(StateTrieOverlayError { tip_hash, anchor_hash })?;
+            let parent_hash = block.recovered_block().parent_hash();
+            blocks.push(block.clone());
+
+            if parent_hash == anchor_hash {
+                break
+            }
+            hash = parent_hash;
+        }
+
+        Ok(blocks)
+    }
+
     fn compute_overlay(
         &self,
         compute_input: ComputeOverlayInput<N>,
@@ -393,6 +436,21 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         }
 
         Arc::new(compute_overlay(compute_input, anchor_hash, &self.metrics))
+    }
+}
+
+/// One in-memory block's state and trie data, ordered as a composable overlay layer.
+#[derive(Clone, Debug, Default)]
+pub struct StateTrieOverlayLayer {
+    /// Sorted trie updates produced by state root computation.
+    pub trie_updates: Arc<TrieUpdatesSorted>,
+    /// Sorted hashed post-state produced by execution.
+    pub hashed_state: Arc<HashedPostStateSorted>,
+}
+
+impl From<ComputedTrieData> for StateTrieOverlayLayer {
+    fn from(value: ComputedTrieData) -> Self {
+        Self { trie_updates: value.trie_updates, hashed_state: value.hashed_state }
     }
 }
 
@@ -654,6 +712,28 @@ mod tests {
         let (_, cached_short) =
             manager.overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor).unwrap();
         assert!(Arc::ptr_eq(&short, &cached_short));
+    }
+
+    #[test]
+    fn returns_overlay_layers_oldest_to_newest() {
+        let manager = StateTrieOverlayManager::default();
+        let blocks = test_blocks();
+        for block in &blocks {
+            manager.insert_block(block.clone());
+        }
+
+        let anchor_hash = blocks[0].recovered_block().parent_hash();
+        let layers = manager
+            .overlay_layers_for_parent(blocks[2].recovered_block().hash(), anchor_hash)
+            .unwrap();
+
+        assert_eq!(layers.len(), 3);
+        let account_keys =
+            layers.iter().map(|layer| layer.hashed_state.accounts[0].0).collect::<Vec<_>>();
+        assert_eq!(
+            account_keys,
+            vec![B256::with_last_byte(1), B256::with_last_byte(2), B256::with_last_byte(3)]
+        );
     }
 
     #[test]

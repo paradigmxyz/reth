@@ -42,7 +42,7 @@ pub trait HashedCursorFactory {
 }
 
 /// The cursor for iterating over hashed entries.
-#[auto_impl::auto_impl(&mut)]
+#[auto_impl::auto_impl(&mut, Box)]
 pub trait HashedCursor {
     /// Value returned by the cursor.
     type Value: std::fmt::Debug;
@@ -63,7 +63,7 @@ pub trait HashedCursor {
 }
 
 /// The cursor for iterating over hashed storage entries.
-#[auto_impl::auto_impl(&mut)]
+#[auto_impl::auto_impl(&mut, Box)]
 pub trait HashedStorageCursor: HashedCursor {
     /// Returns `true` if there are no entries for a given key.
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError>;

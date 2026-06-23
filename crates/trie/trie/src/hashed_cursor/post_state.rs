@@ -515,6 +515,30 @@ mod tests {
         assert!(!visited_keys.lock().is_empty(), "exact overlay deletion should consult the DB");
     }
 
+    #[test]
+    fn test_boxed_layered_storage_cursor_prefers_newest_overlay() {
+        let db_nodes = vec![(key(0x02), U256::from(1)), (key(0x05), U256::from(5))];
+        let db_nodes_map: BTreeMap<B256, U256> = db_nodes.into_iter().collect();
+        let db_nodes_arc = Arc::new(db_nodes_map);
+        let visited_keys = Arc::new(Mutex::new(Vec::new()));
+        let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys);
+
+        let older_post_state =
+            storage_post_state(vec![(key(0x02), U256::from(2)), (key(0x04), U256::from(4))]);
+        let newer_post_state =
+            storage_post_state(vec![(key(0x02), U256::from(3)), (key(0x04), U256::ZERO)]);
+
+        let inner_cursor: Box<dyn HashedStorageCursor<Value = U256>> = Box::new(mock_cursor);
+        let older_cursor: Box<dyn HashedStorageCursor<Value = U256> + '_> = Box::new(
+            HashedPostStateCursor::new_storage(inner_cursor, &older_post_state, B256::ZERO),
+        );
+        let mut cursor =
+            HashedPostStateCursor::new_storage(older_cursor, &newer_post_state, B256::ZERO);
+
+        assert_eq!(cursor.seek(key(0x02)).unwrap(), Some((key(0x02), U256::from(3))));
+        assert_eq!(cursor.next().unwrap(), Some((key(0x05), U256::from(5))));
+    }
+
     mod proptest_tests {
         use super::*;
         use itertools::Itertools;
