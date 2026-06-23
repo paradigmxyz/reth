@@ -568,16 +568,19 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let mode = if parallel_bal_execution {
-            PrewarmMode::BlockAccessList(
-                env.decoded_bal.clone().expect("BAL dispatch implies decoded BAL"),
+        let (mode, track_executed_tx_index) = if parallel_bal_execution {
+            (
+                PrewarmMode::BlockAccessList(
+                    env.decoded_bal.clone().expect("BAL dispatch implies decoded BAL"),
+                ),
+                false,
             )
         } else if self.disable_transaction_prewarming ||
             env.transaction_count < SMALL_BLOCK_TX_THRESHOLD
         {
-            PrewarmMode::Skipped
+            (PrewarmMode::Skipped, false)
         } else {
-            PrewarmMode::Transactions(transactions)
+            (PrewarmMode::Transactions(transactions), true)
         };
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
@@ -617,6 +620,7 @@ where
             saved_cache,
             to_prewarm_task: Some(to_prewarm_task),
             executed_tx_index,
+            track_executed_tx_index,
             cache_metrics: self.cache_metrics.clone(),
         }
     }
@@ -921,6 +925,11 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
         &self.prewarm_handle.executed_tx_index
     }
 
+    /// Returns whether transaction prewarm workers observe the executed transaction index.
+    pub const fn tracks_executed_tx_index(&self) -> bool {
+        self.prewarm_handle.track_executed_tx_index
+    }
+
     /// Terminates the pre-warming transaction processing.
     ///
     /// Note: This does not terminate the task yet.
@@ -971,6 +980,8 @@ pub struct CacheTaskHandle<R> {
     /// Shared counter tracking the next transaction index to be executed by the main execution
     /// loop. Prewarm workers skip transactions below this index.
     executed_tx_index: Arc<AtomicUsize>,
+    /// Whether transaction prewarm workers observe [`Self::executed_tx_index`].
+    track_executed_tx_index: bool,
     /// Metrics for the execution cache.
     cache_metrics: Option<CachedStateMetrics>,
 }
