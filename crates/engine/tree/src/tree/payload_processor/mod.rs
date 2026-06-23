@@ -295,6 +295,7 @@ where
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        EvmEnvFor<Evm>: Clone,
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
             + Clone
             + Send
@@ -985,7 +986,7 @@ impl<R> Drop for CacheTaskHandle<R> {
 }
 
 /// EVM context required to execute a block.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Evm environment.
     pub evm_env: EvmEnvFor<Evm>,
@@ -1010,6 +1011,25 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Optional decoded BAL for the block.
     /// Used to validate and optimize execution.
     pub decoded_bal: Option<Arc<DecodedBal>>,
+}
+
+impl<Evm> Clone for ExecutionEnv<Evm>
+where
+    Evm: ConfigureEvm,
+    EvmEnvFor<Evm>: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            evm_env: self.evm_env.clone(),
+            hash: self.hash,
+            parent_hash: self.parent_hash,
+            parent_state_root: self.parent_state_root,
+            transaction_count: self.transaction_count,
+            gas_used: self.gas_used,
+            withdrawals: self.withdrawals.clone(),
+            decoded_bal: self.decoded_bal.clone(),
+        }
+    }
 }
 
 impl<Evm: ConfigureEvm> ExecutionEnv<Evm>

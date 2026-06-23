@@ -25,7 +25,7 @@ use alloy_primitives::{keccak256, B256, U256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
+use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmEnvFor, EvmFor, RecoveredTx, SpecFor};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
@@ -83,6 +83,7 @@ where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
+    EvmEnvFor<Evm>: Clone,
 {
     /// Initializes the task with the given transactions pending execution
     pub fn new(

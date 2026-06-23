@@ -60,6 +60,7 @@ where
     Err: core::error::Error + Send + Sync + 'static,
     DB: Database + Send + 'a,
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'a,
+    EvmEnvFor<Evm>: Clone,
     ReceiptTy<Evm::Primitives>: Clone,
 {
     let worker_pool = runtime.bal_streaming_pool();
@@ -103,6 +104,7 @@ where
     Err: core::error::Error + Send + Sync + 'static,
     DB: Database + Send + 'scope,
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'scope,
+    EvmEnvFor<Evm>: Clone,
     ReceiptTy<Evm::Primitives>: Clone,
 {
     let bal = input_bal.as_bal();
