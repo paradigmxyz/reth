@@ -38,6 +38,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority, WorkerPool};
 use reth_trie_db::ChangesetCache;
+use reth_trie_sparse::SparseTrieRetainedPaths;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
@@ -319,6 +320,9 @@ where
     /// Set when an FCU with payload attributes is received, cleared on the next FCU without.
     /// Suppresses persistence cycles during payload building.
     building_payload: bool,
+    /// Retained paths from the latest persistence cleanup to apply during the next sparse trie
+    /// cache preservation.
+    pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
     /// Task runtime for spawning blocking work on named, reusable threads.
     runtime: reth_tasks::Runtime,
 }
@@ -412,6 +416,7 @@ where
             changeset_cache,
             execution_timing_stats: B256Map::default(),
             building_payload: false,
+            pending_sparse_trie_prune: None,
             runtime,
         }
     }
@@ -1362,6 +1367,7 @@ where
         debug!(target: "engine::tree", ?new_tip_num, last_persisted_block_number=?self.persistence_state.last_persisted_block.number, "Removing blocks using persistence task");
         if new_tip_num < self.persistence_state.last_persisted_block.number {
             debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
+            self.pending_sparse_trie_prune = None;
             let (tx, rx) = crossbeam_channel::bounded(1);
             let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
             self.persistence_state.start_remove(new_tip_num, rx);
@@ -1814,6 +1820,7 @@ where
         if ctrl.is_unwind() {
             // the node reset so we need to clear everything above that height so that backfill
             // height is the new canonical block.
+            self.pending_sparse_trie_prune = None;
             self.state.tree_state.reset(backfill_num_hash)
         } else {
             self.state.tree_state.remove_until(
@@ -2142,7 +2149,19 @@ where
             number: self.persistence_state.last_persisted_block.number,
             hash: self.persistence_state.last_persisted_block.hash,
         });
+        let retained_paths = self.sparse_trie_retained_paths_for_in_memory_blocks();
+        self.pending_sparse_trie_prune = Some(retained_paths);
         Ok(())
+    }
+
+    /// Builds sparse trie retained paths from all blocks still present in the in-memory tree.
+    fn sparse_trie_retained_paths_for_in_memory_blocks(&self) -> SparseTrieRetainedPaths {
+        let mut retained_paths = SparseTrieRetainedPaths::default();
+        for block in self.state.tree_state.blocks_by_hash.values() {
+            let trie_data = block.trie_data();
+            retained_paths.extend_from_hashed_state(&trie_data.hashed_state);
+        }
+        retained_paths
     }
 
     /// Return an [`ExecutedBlock`] from database or in-memory state by hash.
@@ -2669,6 +2688,7 @@ where
             let old_first = old.first().map(|first| first.recovered_block().num_hash());
             trace!(target: "engine::tree", ?new_first, ?old_first, "Reorg detected, new and old first blocks");
 
+            self.pending_sparse_trie_prune = None;
             self.update_reorg_metrics(old.len(), old_first);
             self.reinsert_reorged_blocks(new.clone());
             self.reinsert_reorged_blocks(old.clone());
@@ -2982,7 +3002,11 @@ where
         // as this indicates there's already a canonical block at that height.
         let is_fork = block_id.block.number <= self.state.tree_state.current_canonical_head.number;
 
-        let ctx = TreeCtx::new(&mut self.state, &self.canonical_in_memory_state);
+        let ctx = TreeCtx::new(
+            &mut self.state,
+            &self.canonical_in_memory_state,
+            &mut self.pending_sparse_trie_prune,
+        );
 
         let start = Instant::now();
 

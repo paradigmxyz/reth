@@ -7,7 +7,7 @@ use reqwest::{Client, Url};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_era::common::file_ops::EraFileType;
-use reth_era_downloader::{read_dir, EraClient, EraStream, EraStreamConfig};
+use reth_era_downloader::{read_dir, read_era_dir, EraClient, EraStream, EraStreamConfig};
 use reth_era_utils as era;
 use reth_etl::Collector;
 use reth_fs_util as fs;
@@ -91,22 +91,29 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
 
         if let Some(path) = self.import.path {
             let era_type = EraFileType::from_dir(&path)?.ok_or_else(|| {
-                eyre!("No ERA1 (.era1) or ERE (.ere, .erae) files found in {}", path.display())
+                eyre!(
+                    "No ERA (.era), ERA1 (.era1) or ERE (.ere, .erae) files found in {}",
+                    path.display()
+                )
             })?;
 
             info!(target: "reth::cli", ?era_type, path = %path.display(), to_block = ?self.to_block, "Starting ERA import");
 
-            let stream = read_dir(path, next_block)?;
-
             match era_type {
-                EraFileType::Ere => era::import::<era::Ere, _, _, _, _, _, _>(
-                    stream,
+                EraFileType::Era => era::import::<era::Era, _, _, _, _, _, _>(
+                    read_era_dir(path)?,
                     &provider_factory,
                     &mut hash_collector,
                     self.to_block,
                 )?,
-                _ => era::import::<era::Era1, _, _, _, _, _, _>(
-                    stream,
+                EraFileType::Ere => era::import::<era::Ere, _, _, _, _, _, _>(
+                    read_dir(path, next_block)?,
+                    &provider_factory,
+                    &mut hash_collector,
+                    self.to_block,
+                )?,
+                EraFileType::Era1 => era::import::<era::Era1, _, _, _, _, _, _>(
+                    read_dir(path, next_block)?,
                     &provider_factory,
                     &mut hash_collector,
                     self.to_block,
@@ -126,8 +133,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
 
             fs::create_dir_all(&folder)?;
 
-            let config = EraStreamConfig::default().start_from(next_block);
-            let client = EraClient::new(Client::new(), url, folder);
+            let mut config = EraStreamConfig::default();
+            // `start_from` maps a block number to a file index as `block / BLOCKS_PER_FILE`, valid
+            // only for execution-layer files (era1/ere). Consensus `.era` files are slot-indexed,
+            // so stream from 0 and let the pipeline skip already-imported blocks.
+            if !matches!(era_type, EraFileType::Era) {
+                config = config.start_from(next_block);
+            }
+            let client = EraClient::new(Client::new(), url, folder).with_era_type(era_type);
             let stream = EraStream::new(client, config);
 
             match era_type {
@@ -137,7 +150,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
                     &mut hash_collector,
                     self.to_block,
                 )?,
-                _ => era::import::<era::Era1, _, _, _, _, _, _>(
+                EraFileType::Era1 => era::import::<era::Era1, _, _, _, _, _, _>(
+                    stream,
+                    &provider_factory,
+                    &mut hash_collector,
+                    self.to_block,
+                )?,
+                EraFileType::Era => era::import::<era::Era, _, _, _, _, _, _>(
                     stream,
                     &provider_factory,
                     &mut hash_collector,
