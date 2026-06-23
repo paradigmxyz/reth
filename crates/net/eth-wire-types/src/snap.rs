@@ -36,6 +36,23 @@ impl SnapVersion {
     pub const fn max_message_id(self) -> u8 {
         self.message_count() - 1
     }
+
+    /// Returns `true` if `id` is a valid message id for this snap version.
+    ///
+    /// `snap/2` drops trie nodes (`0x06`/`0x07`) and adds BAL (`0x08`/`0x09`), so
+    /// validity is not a contiguous range.
+    pub const fn supports_message_id(self, id: u8) -> bool {
+        match self {
+            // snap/1: 0x00..=0x07 (GetAccountRange..=TrieNodes). BAL is invalid.
+            Self::V1 => id <= SnapMessageId::TrieNodes as u8,
+            // snap/2: 0x00..=0x05 plus BAL (0x08/0x09). TrieNodes (0x06/0x07) removed.
+            Self::V2 => {
+                id <= SnapMessageId::ByteCodes as u8 ||
+                    id == SnapMessageId::GetBlockAccessLists as u8 ||
+                    id == SnapMessageId::BlockAccessLists as u8
+            }
+        }
+    }
 }
 
 /// Message IDs for the snap sync protocol
@@ -530,5 +547,36 @@ mod tests {
         if let Err(e) = result {
             assert_eq!(e.to_string(), "Unknown message ID");
         }
+    }
+
+    #[test]
+    fn test_snap_v1_message_validity() {
+        let v1 = SnapVersion::V1;
+        // 0x00..=0x07 valid, including trie nodes.
+        for id in 0x00..=0x07 {
+            assert!(v1.supports_message_id(id), "snap/1 should accept {id:#x}");
+        }
+        // BAL is snap/2 only.
+        assert!(!v1.supports_message_id(SnapMessageId::GetBlockAccessLists as u8));
+        assert!(!v1.supports_message_id(SnapMessageId::BlockAccessLists as u8));
+        assert!(!v1.supports_message_id(0x0a));
+        assert!(!v1.supports_message_id(0xff));
+    }
+
+    #[test]
+    fn test_snap_v2_message_validity() {
+        let v2 = SnapVersion::V2;
+        // 0x00..=0x05 valid.
+        for id in 0x00..=0x05 {
+            assert!(v2.supports_message_id(id), "snap/2 should accept {id:#x}");
+        }
+        // Trie nodes removed in snap/2.
+        assert!(!v2.supports_message_id(SnapMessageId::GetTrieNodes as u8));
+        assert!(!v2.supports_message_id(SnapMessageId::TrieNodes as u8));
+        // BAL added in snap/2.
+        assert!(v2.supports_message_id(SnapMessageId::GetBlockAccessLists as u8));
+        assert!(v2.supports_message_id(SnapMessageId::BlockAccessLists as u8));
+        assert!(!v2.supports_message_id(0x0a));
+        assert!(!v2.supports_message_id(0xff));
     }
 }
