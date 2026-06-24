@@ -26,10 +26,7 @@ use reth_ethereum_forks::Hardforks;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 #[cfg(feature = "std")]
-use reth_evm::{
-    precompile_cache::{CachedPrecompileProvider, PrecompileCacheMap},
-    ConfigureEngineEvm, ExecutableTxIterator,
-};
+use reth_evm::{precompile_cache::PrecompileCacheMap, ConfigureEngineEvm, ExecutableTxIterator};
 use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, NextBlockEnvAttributes};
 #[cfg(feature = "std")]
 use reth_primitives_traits::SignedTransaction;
@@ -120,6 +117,9 @@ mod executor;
 #[cfg(feature = "std")]
 pub use executor::{EthBlockExecutor, EthExecutor};
 
+mod factory;
+pub use factory::EthBlockExecutorFactory;
+
 mod convert;
 pub use convert::{EthTxEnv, ExecutableRecoveredTx};
 
@@ -140,14 +140,10 @@ pub use test_utils::*;
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone)]
 pub struct EthEvmConfig<C = ChainSpec, EvmFactory = ()> {
+    /// Inner Ethereum block executor factory.
+    pub executor_factory: EthBlockExecutorFactory<C, EvmFactory>,
     /// Ethereum block assembler placeholder.
     pub block_assembler: EthBlockAssembler<C>,
-    /// Chain specification.
-    pub chain_spec: Arc<C>,
-    /// Shared precompile cache.
-    #[cfg(feature = "std")]
-    pub precompile_cache_map: PrecompileCacheMap<evm2::SpecId>,
-    _evm_factory: PhantomData<EvmFactory>,
 }
 
 impl EthEvmConfig {
@@ -174,22 +170,22 @@ impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory> {
     pub fn new_with_evm_factory(chain_spec: Arc<ChainSpec>, _evm_factory: EvmFactory) -> Self {
         Self {
             block_assembler: EthBlockAssembler::new(chain_spec.clone()),
-            chain_spec,
-            #[cfg(feature = "std")]
-            precompile_cache_map: PrecompileCacheMap::default(),
-            _evm_factory: PhantomData,
+            executor_factory: EthBlockExecutorFactory::new_with_evm_factory(
+                chain_spec,
+                _evm_factory,
+            ),
         }
     }
 
     /// Returns the chain spec associated with this configuration.
     pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
-        &self.chain_spec
+        self.executor_factory.chain_spec()
     }
 
     /// Returns the shared precompile cache map.
     #[cfg(feature = "std")]
     pub const fn precompile_cache_map(&self) -> &PrecompileCacheMap<evm2::SpecId> {
-        &self.precompile_cache_map
+        self.executor_factory.precompile_cache_map()
     }
 }
 
@@ -235,10 +231,10 @@ where
 
     fn evm_env(&self, header: &Header) -> Result<EvmEnvFor<Self>, Self::Error> {
         Ok(EthEvmEnv {
-            spec: spec_id(self.chain_spec.as_ref(), header),
+            spec: spec_id(self.chain_spec().as_ref(), header),
             block: block_env_with_blob_params(
                 header,
-                self.chain_spec.as_ref().blob_params_at_timestamp(header.timestamp),
+                self.chain_spec().as_ref().blob_params_at_timestamp(header.timestamp),
             ),
         })
     }
@@ -249,7 +245,7 @@ where
         attributes: &NextBlockEnvAttributes,
     ) -> Result<EvmEnvFor<Self>, Self::Error> {
         let base_fee = self
-            .chain_spec
+            .chain_spec()
             .as_ref()
             .next_block_base_fee(parent, attributes.timestamp)
             .unwrap_or_default();
@@ -266,10 +262,10 @@ where
         };
 
         Ok(EthEvmEnv {
-            spec: spec_id(self.chain_spec.as_ref(), &header),
+            spec: spec_id(self.chain_spec().as_ref(), &header),
             block: block_env_with_blob_params(
                 &header,
-                self.chain_spec.as_ref().blob_params_at_timestamp(attributes.timestamp),
+                self.chain_spec().as_ref().blob_params_at_timestamp(attributes.timestamp),
             ),
         })
     }
@@ -312,11 +308,11 @@ where
     }
 
     fn chain_id(&self) -> u64 {
-        self.chain_spec.chain_id()
+        self.chain_spec().chain_id()
     }
 
     fn deposit_contract_address(&self) -> Option<Address> {
-        self.chain_spec.deposit_contract_address()
+        self.chain_spec().deposit_contract_address()
     }
 
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
@@ -326,7 +322,7 @@ where
     {
         #[cfg(feature = "std")]
         {
-            EthExecutor::new(self.chain_spec.clone(), db, self.precompile_cache_map.clone())
+            self.executor_factory.executor(db)
         }
 
         #[cfg(not(feature = "std"))]
@@ -348,13 +344,7 @@ where
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static,
     {
-        EthBlockExecutor::new(
-            evm,
-            ctx,
-            self.chain_spec.chain_id(),
-            self.chain_spec.deposit_contract_address(),
-            hashed_state_mode,
-        )
+        self.executor_factory.create_executor(evm, ctx, hashed_state_mode)
     }
 
     #[cfg(feature = "std")]
@@ -362,22 +352,7 @@ where
     where
         DB: evm2::evm::DynDatabase + 'static,
     {
-        let mut version = evm2::Version::new(env.spec);
-        version.chain_id = self.chain_spec.chain_id();
-
-        evm2::Evm::<evm2::BaseEvmTypes>::new_with_execution_config(
-            evm2::ExecutionConfig::for_spec_and_version(env.spec, version),
-            env.spec,
-            env.block,
-            evm2::ethereum::ethereum_tx_registry(env.spec),
-            db,
-            alloc::boxed::Box::new(CachedPrecompileProvider::new(
-                evm2::Precompiles::base(env.spec),
-                self.precompile_cache_map.clone(),
-                env.spec,
-                None,
-            )),
-        )
+        self.executor_factory.evm_with_env(db, env)
     }
 
     #[cfg(feature = "std")]
@@ -398,8 +373,8 @@ where
             &mut evm,
             block_number,
             ctx.block_execution_context(
-                self.chain_spec.chain_id(),
-                self.chain_spec.deposit_contract_address(),
+                self.chain_spec().chain_id(),
+                self.chain_spec().deposit_contract_address(),
             ),
         )
         .map_err(Into::into)
@@ -410,24 +385,7 @@ where
     where
         DB: reth_storage_api::StateProvider + Send + 'static,
     {
-        let mut version = evm2::Version::new(env.spec);
-        version.chain_id = self.chain_spec.chain_id();
-        version.features.remove(evm2::EvmFeatures::NONCE_CHECK);
-        version.features.remove(evm2::EvmFeatures::BALANCE_CHECK);
-
-        evm2::Evm::<evm2::BaseEvmTypes>::new_with_execution_config(
-            evm2::ExecutionConfig::for_spec_and_version(env.spec, version),
-            env.spec,
-            env.block,
-            evm2::ethereum::ethereum_tx_registry(env.spec),
-            evm2::evm::Db::new(reth_storage_api::EvmStateProviderDatabase::new(state_provider)),
-            alloc::boxed::Box::new(CachedPrecompileProvider::new(
-                evm2::Precompiles::base(env.spec),
-                self.precompile_cache_map.clone(),
-                env.spec,
-                None,
-            )),
-        )
+        self.executor_factory.prewarm_evm(state_provider, env)
     }
 
     #[cfg(feature = "std")]
@@ -481,13 +439,13 @@ where
     fn evm_env_for_payload(&self, payload: &ExecutionData) -> Result<EvmEnvFor<Self>, Self::Error> {
         Ok(EthEvmEnv {
             spec: spec_id_by_timestamp_and_block_number(
-                self.chain_spec.as_ref(),
+                self.chain_spec().as_ref(),
                 payload.payload.timestamp(),
                 payload.payload.block_number(),
             ),
             block: payload_block_env(
                 payload,
-                self.chain_spec.as_ref().blob_params_at_timestamp(payload.payload.timestamp()),
+                self.chain_spec().as_ref().blob_params_at_timestamp(payload.payload.timestamp()),
             ),
         })
     }
