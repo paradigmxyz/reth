@@ -713,7 +713,7 @@ where
             // block's take() blocks until we've stored the trie for reuse.
             let mut guard = preserved_sparse_trie.lock();
 
-            let task_result = result.as_ref().ok().cloned();
+            let task_state_root = result.as_ref().ok().map(|outcome| outcome.state_root);
             // Send state root computation result - next block may start but will block on take()
             if state_root_tx.send(result).is_err() {
                 // Receiver dropped - payload was likely invalid or cancelled.
@@ -733,7 +733,7 @@ where
             // A failed computation may have left the trie in a partially updated state.
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
-            let deferred = if let Some(result) = task_result {
+            let deferred = if let Some(state_root) = task_state_root {
                 let start = Instant::now();
                 let (mut trie, deferred) = task.into_trie_for_reuse();
                 if let Some(retained_paths) = pending_sparse_trie_prune {
@@ -748,7 +748,7 @@ where
                 trie_metrics
                     .sparse_trie_retained_storage_tries
                     .set(trie.retained_storage_tries_count() as f64);
-                guard.store(PreservedSparseTrie::anchored(trie, result.state_root));
+                guard.store(PreservedSparseTrie::anchored(trie, state_root));
                 deferred
             } else {
                 debug!(
