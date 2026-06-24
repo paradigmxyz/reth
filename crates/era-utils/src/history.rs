@@ -1,14 +1,5 @@
 use alloy_consensus::BlockHeader;
-use alloy_eips::eip2718::Decodable2718;
 use alloy_primitives::{BlockHash, BlockNumber, U256};
-use alloy_rpc_types_beacon::block::{
-    SignedBeaconBlockAltair, SignedBeaconBlockBellatrix, SignedBeaconBlockCapella,
-    SignedBeaconBlockDeneb, SignedBeaconBlockElectra, SignedBeaconBlockPhase0,
-};
-use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1,
-    ExecutionPayloadV2, ExecutionPayloadV3, PraguePayloadFields,
-};
 use futures_util::{Stream, StreamExt};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -39,7 +30,6 @@ use reth_storage_api::{
     errors::ProviderResult, DBProvider, DatabaseProviderFactory, NodePrimitivesProvider,
     StageCheckpointWriter,
 };
-use ssz::Decode;
 use std::{collections::Bound, error::Error, ops::RangeBounds, sync::mpsc};
 use tracing::info;
 
@@ -138,9 +128,8 @@ impl Era {
         BH: FullBlockHeader,
         BB: FullBlockBody,
     {
-        let ssz = block?.decompress()?;
         let Some(alloy_consensus::Block { header, body }) =
-            decode_execution_block::<<BB as BlockBody>::Transaction>(&ssz)?
+            block?.decode_execution_block::<<BB as BlockBody>::Transaction>()?
         else {
             return Ok(None);
         };
@@ -148,60 +137,6 @@ impl Era {
         // node's own primitives through the same RLP representation the `.era1`/`.ere` paths use.
         Ok(Some((reencode_rlp(&header, buf)?, reencode_rlp(&body, buf)?)))
     }
-}
-
-/// SSZ-decodes a consensus `SignedBeaconBlock` and extracts its execution block, if it has one.
-///
-/// Only post-merge (Bellatrix and later) blocks carry a payload; the fork is found by
-/// trial-decoding newest to oldest. Returns `Ok(None)` for genuine pre-merge slots, confirmed to
-/// decode as a pre-merge block. Bytes matching no known fork are an error, so malformed data is
-/// never silently dropped.
-pub fn decode_execution_block<T: Decodable2718>(
-    ssz: &[u8],
-) -> eyre::Result<Option<alloy_consensus::Block<T>>> {
-    if let Ok(beacon) = SignedBeaconBlockElectra::<ExecutionPayloadV3>::from_ssz_bytes(ssz) {
-        let sidecar = ExecutionPayloadSidecar::v4(
-            CancunPayloadFields {
-                parent_beacon_block_root: beacon.message.parent_root,
-                versioned_hashes: Vec::new(),
-            },
-            PraguePayloadFields::new(beacon.message.body.execution_requests.to_requests()),
-        );
-        let payload = ExecutionPayload::V3(beacon.message.body.execution_payload);
-        return Ok(Some(payload.try_into_block_with_sidecar(&sidecar)?));
-    }
-
-    if let Ok(beacon) = SignedBeaconBlockDeneb::<ExecutionPayloadV3>::from_ssz_bytes(ssz) {
-        let sidecar = ExecutionPayloadSidecar::v3(CancunPayloadFields {
-            parent_beacon_block_root: beacon.message.parent_root,
-            versioned_hashes: Vec::new(),
-        });
-        let payload = ExecutionPayload::V3(beacon.message.body.execution_payload);
-        return Ok(Some(payload.try_into_block_with_sidecar(&sidecar)?));
-    }
-
-    if let Ok(beacon) = SignedBeaconBlockCapella::<ExecutionPayloadV2>::from_ssz_bytes(ssz) {
-        let payload = ExecutionPayload::V2(beacon.message.body.execution_payload);
-        return Ok(Some(payload.try_into_block()?));
-    }
-
-    if let Ok(beacon) = SignedBeaconBlockBellatrix::<ExecutionPayloadV1>::from_ssz_bytes(ssz) {
-        let payload = ExecutionPayload::V1(beacon.message.body.execution_payload);
-        return Ok(Some(payload.try_into_block()?));
-    }
-
-    // Pre-merge blocks carry no execution payload. Only skip a slot once it's confirmed to be a
-    // valid pre-merge block; anything else is malformed data and must error rather than be skipped.
-    if SignedBeaconBlockPhase0::from_ssz_bytes(ssz).is_ok() ||
-        SignedBeaconBlockAltair::from_ssz_bytes(ssz).is_ok()
-    {
-        return Ok(None);
-    }
-
-    Err(eyre::eyre!(
-        "consensus block ({} bytes) is not a valid SignedBeaconBlock of any known fork",
-        ssz.len()
-    ))
 }
 
 /// Re-encodes an alloy execution type as RLP and decodes it back into the node's primitive type.
@@ -541,18 +476,12 @@ where
 mod tests {
     use super::*;
     use alloy_consensus::Header;
-    use alloy_primitives::B256;
-    use alloy_rpc_types_beacon::{
-        block::{BeaconBlock, BeaconBlockBodyPhase0, Eth1Data, SignedBeaconBlock},
-        BlsSignature,
-    };
     use reth_db_common::init::init_genesis;
-    use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
+    use reth_ethereum_primitives::{Block, BlockBody};
     use reth_provider::{
         test_utils::create_test_provider_factory, DatabaseProviderFactory,
         StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
     };
-    use ssz::Encode;
     use std::{cell::Cell, path::Path};
     use tempfile::tempdir;
 
@@ -582,44 +511,6 @@ mod tests {
         fn path(&self) -> &Path {
             Path::new("test.era1")
         }
-    }
-
-    #[test]
-    fn decode_execution_block_skips_genuine_pre_merge() {
-        // A genuine pre-merge (phase0) beacon block carries no execution payload and yields `None`.
-        let block = SignedBeaconBlock {
-            message: BeaconBlock {
-                slot: 0,
-                proposer_index: 0,
-                parent_root: B256::ZERO,
-                state_root: B256::ZERO,
-                body: BeaconBlockBodyPhase0 {
-                    randao_reveal: BlsSignature::ZERO,
-                    eth1_data: Eth1Data {
-                        deposit_root: B256::ZERO,
-                        deposit_count: 0,
-                        block_hash: B256::ZERO,
-                    },
-                    graffiti: B256::ZERO,
-                    proposer_slashings: vec![],
-                    attester_slashings: vec![],
-                    attestations: vec![],
-                    deposits: vec![],
-                    voluntary_exits: vec![],
-                },
-            },
-            signature: BlsSignature::ZERO,
-        };
-        let ssz = block.as_ssz_bytes();
-        assert!(decode_execution_block::<TransactionSigned>(&ssz).unwrap().is_none());
-    }
-
-    #[test]
-    fn decode_execution_block_errors_on_malformed() {
-        // Bytes that decode as no known fork are malformed, not pre-merge slots, and must error
-        // instead of being silently dropped.
-        assert!(decode_execution_block::<TransactionSigned>(&[]).is_err());
-        assert!(decode_execution_block::<TransactionSigned>(&[0u8; 8]).is_err());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

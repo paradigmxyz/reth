@@ -12,14 +12,8 @@ exclude.workspace = true
 [dependencies]
 # alloy
 alloy-consensus.workspace = true
-alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
-alloy-rpc-types-beacon = { workspace = true, features = ["ssz"] }
-alloy-rpc-types-engine = { workspace = true, features = ["ssz"] }
-
-# ssz
-ethereum_ssz.workspace = true
 
 # reth
 reth-db-api.workspace = true

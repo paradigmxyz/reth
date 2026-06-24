@@ -65,6 +65,14 @@ where
     };
 }
 
+async fn assert_empty_raw_transaction_sync_error(client: &HttpClient, params: ArrayParams) {
+    let err = client
+        .request::<Value, _>("eth_sendRawTransactionSync", params)
+        .await
+        .expect_err("empty raw transaction should fail after RPC parameter decoding");
+    assert!(err.to_string().contains("empty transaction data"), "{err:?}");
+}
+
 /// Represents a builder for creating JSON-RPC requests.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct RawRpcParamsBuilder {
@@ -670,6 +678,28 @@ async fn test_call_eth_functions_http() {
     let handle = launch_http(vec![RethRpcModule::Eth]).await;
     let client = handle.http_client().unwrap();
     test_basic_eth_calls(&client).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_send_raw_transaction_sync_accepts_optional_timeout_arg() {
+    reth_tracing::init_test_tracing();
+
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    let mut one_arg = ArrayParams::new();
+    one_arg.insert(Bytes::default()).unwrap();
+    assert_empty_raw_transaction_sync_error(&client, one_arg).await;
+
+    let mut null_timeout = ArrayParams::new();
+    null_timeout.insert(Bytes::default()).unwrap();
+    null_timeout.insert(Value::Null).unwrap();
+    assert_empty_raw_transaction_sync_error(&client, null_timeout).await;
+
+    let mut two_args = ArrayParams::new();
+    two_args.insert(Bytes::default()).unwrap();
+    two_args.insert(1u64).unwrap();
+    assert_empty_raw_transaction_sync_error(&client, two_args).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
