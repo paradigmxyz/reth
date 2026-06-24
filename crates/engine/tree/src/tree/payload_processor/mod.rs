@@ -505,11 +505,9 @@ where
                                 (i, tx)
                             })
                             .for_each(|(idx, tx)| {
-                                let tx = tx.map(|tx| {
-                                    let tx = WithTxEnv::new(tx);
-                                    let _ = prewarm_tx.send((idx, tx.clone()));
-                                    tx
-                                });
+                                // BAL prewarm consumes the decoded block access list, not this
+                                // transaction stream, so only feed the execution receiver here.
+                                let tx = tx.map(WithTxEnv::new);
                                 let _ = execute_tx.send((idx, tx));
                                 trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
                             });
