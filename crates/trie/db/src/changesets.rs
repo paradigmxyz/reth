@@ -19,7 +19,6 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
-    changesets::compute_trie_changesets,
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory},
     TrieInputSorted,
 };
@@ -32,6 +31,9 @@ use std::{
 };
 use tracing::{debug, debug_span, warn};
 
+#[cfg(test)]
+use reth_trie::changesets::compute_trie_changesets;
+
 #[cfg(feature = "metrics")]
 use reth_metrics::{
     metrics::{Counter, Gauge},
@@ -43,13 +45,10 @@ use reth_metrics::{
 /// # Algorithm
 ///
 /// For block N:
-/// 1. Query cumulative `HashedPostState` revert for block N-1 (from db tip to after N-1)
-/// 2. Use that to calculate cumulative `TrieUpdates` revert for block N-1
-/// 3. Query per-block `HashedPostState` revert for block N
-/// 4. Create prefix sets from the per-block revert (step 3)
-/// 5. Create overlay with cumulative trie updates and cumulative state revert for N-1
-/// 6. Calculate trie updates for block N using the overlay and per-block `HashedPostState`.
-/// 7. Compute changesets using the N-1 overlay and the newly calculated trie updates for N
+/// 1. Query cumulative `HashedPostState` revert from the database tip to after N.
+/// 2. Calculate cumulative `TrieUpdates` revert from the database tip to after N.
+/// 3. Query per-block `HashedPostState` revert for block N.
+/// 4. Overlay the post-N trie and calculate trie updates to the pre-N state.
 ///
 /// # Arguments
 ///
@@ -125,79 +124,58 @@ where
         "Computing range trie changesets from database state"
     );
 
-    // Step 1: Collect/calculate state reverts
-
-    // This is just the changes from this specific range.
+    // Step 1: collect the state revert for the requested range.
     let range_state_revert = crate::state::from_reverts_auto(provider, range)?;
 
-    // This reverts all changes from db tip back to just after the range was processed.
-    let cumulative_state_revert = end_block
+    // Step 2: collect the state revert from the database tip to just after the range.
+    let tail_state_revert = end_block
         .checked_add(1)
         .map(|next_block| crate::state::from_reverts_auto(provider, next_block..))
         .transpose()?
         .unwrap_or_default();
-
-    // This reverts all changes from db tip back to just before the range was processed.
-    let mut cumulative_state_revert_prev = cumulative_state_revert.clone();
-    cumulative_state_revert_prev.extend_ref_and_sort(&range_state_revert);
-
-    // Step 2: Calculate cumulative trie updates revert for the block before the range.
-    // This gives us the trie state as it was before the range was processed.
-    let prefix_sets_prev = cumulative_state_revert_prev.construct_prefix_sets();
-    let input_prev = TrieInputSorted::new(
-        Arc::default(),
-        Arc::new(cumulative_state_revert_prev),
-        prefix_sets_prev,
-    );
 
     type DbStateRoot<'a, TX, A> = reth_trie::StateRoot<
         DatabaseTrieCursorFactory<&'a TX, A>,
         DatabaseHashedCursorFactory<&'a TX>,
     >;
 
-    let cumulative_trie_updates_prev =
-        DbStateRoot::<_, A>::overlay_root_from_nodes_with_updates(provider.tx_ref(), input_prev)
-            .map_err(ProviderError::other)?
-            .1
-            .into_sorted();
-
-    // Step 3: Create prefix sets from range revert (only paths changed by this range).
-    let prefix_sets = range_state_revert.construct_prefix_sets();
-
-    // Step 4: Calculate trie updates for the range.
-    // Use cumulative trie updates for the pre-range block as the node overlay and cumulative state
-    // for the post-range block.
-    let input = TrieInputSorted::new(
-        Arc::new(cumulative_trie_updates_prev.clone()),
-        Arc::new(cumulative_state_revert),
-        prefix_sets,
+    // Step 3: compute trie reverts from the database tip to just after the range.
+    let tail_input = TrieInputSorted::new(
+        Arc::default(),
+        Arc::new(tail_state_revert.clone()),
+        tail_state_revert.construct_prefix_sets(),
     );
-
-    let trie_updates =
-        DbStateRoot::<_, A>::overlay_root_from_nodes_with_updates(provider.tx_ref(), input)
+    let tail_trie_revert =
+        DbStateRoot::<_, A>::overlay_root_from_nodes_with_updates(provider.tx_ref(), tail_input)
             .map_err(ProviderError::other)?
             .1
             .into_sorted();
 
-    // Step 5: Compute changesets using cumulative trie updates for the pre-range block as overlay.
-    // Create an overlay cursor factory that has the trie state from before the range.
-    let db_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
-    let overlay_factory =
-        InMemoryTrieCursorFactory::new(db_cursor_factory, &cumulative_trie_updates_prev);
+    // Step 4: overlay the post-range trie and compute the trie revert to the pre-range state.
+    let mut pre_range_state_revert = tail_state_revert;
+    pre_range_state_revert.extend_ref_and_sort(&range_state_revert);
 
-    let changesets =
-        compute_trie_changesets(&overlay_factory, &trie_updates).map_err(ProviderError::other)?;
+    let range_input = TrieInputSorted::new(
+        Arc::new(tail_trie_revert),
+        Arc::new(pre_range_state_revert),
+        range_state_revert.construct_prefix_sets(),
+    );
+    let range_trie_revert =
+        DbStateRoot::<_, A>::overlay_root_from_nodes_with_updates(provider.tx_ref(), range_input)
+            .map_err(ProviderError::other)?
+            .1
+            .into_sorted();
 
     debug!(
         target: "trie::changeset_cache",
         start_block,
         end_block,
-        num_account_nodes = changesets.account_nodes_ref().len(),
-        num_storage_tries = changesets.storage_tries_ref().len(),
+        num_account_nodes = range_trie_revert.account_nodes_ref().len(),
+        num_storage_tries = range_trie_revert.storage_tries_ref().len(),
         "Computed range trie changesets successfully"
     );
 
-    Ok(changesets)
+    Ok(range_trie_revert)
 }
 
 /// Computes block trie updates using the changeset cache.
@@ -684,7 +662,10 @@ impl ChangesetCache {
         if all_cached {
             // Merge cached reverts newest to oldest so older values take precedence when there are
             // conflicting updates.
-            let accumulated_reverts = TrieUpdatesSorted::merge_slice(&cached_reverts);
+            let mut accumulated_reverts = TrieUpdatesSorted::default();
+            for changesets in &cached_reverts {
+                accumulated_reverts.extend_ref_and_sort(changesets);
+            }
             let elapsed = timer.elapsed();
 
             let num_account_nodes = accumulated_reverts.account_nodes_ref().len();
@@ -981,7 +962,7 @@ mod tests {
     };
     use reth_stages_types::{StageCheckpoint, StageId};
     use reth_storage_api::{BlockHashReader, StageCheckpointWriter, TrieWriter};
-    use reth_trie::StateRoot;
+    use reth_trie::{BranchNodeCompact, Nibbles, StateRoot};
 
     // Helper function to create empty TrieUpdatesSorted for testing
     fn create_test_changesets() -> Arc<TrieUpdatesSorted> {
@@ -994,6 +975,24 @@ mod tests {
 
     fn test_storage(slot: u64, value: u64) -> StorageEntry {
         StorageEntry { key: B256::from(U256::from(slot)), value: U256::from(value) }
+    }
+
+    fn seed_headers(
+        factory: &impl StaticFileProviderFactory<
+            Primitives: reth_primitives_traits::NodePrimitives<BlockHeader = Header>,
+        >,
+        end_block: BlockNumber,
+    ) {
+        let static_file_provider = factory.static_file_provider();
+        let mut header_writer =
+            static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+        for block_number in 0..=end_block {
+            let header = Header { number: block_number, ..Default::default() };
+            header_writer
+                .append_header(&header, &B256::with_last_byte(block_number as u8))
+                .unwrap();
+        }
+        header_writer.commit().unwrap();
     }
 
     fn legacy_compute_range_trie_changesets<Provider>(
@@ -1103,18 +1102,40 @@ mod tests {
     }
 
     #[test]
-    fn aggregate_range_matches_legacy_per_block_merge() {
+    fn cached_range_merge_keeps_oldest_revert_values() {
         let factory = create_test_provider_factory();
-        let static_file_provider = factory.static_file_provider();
-        let mut header_writer =
-            static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
-        for block_number in 0..=3 {
-            let header = Header { number: block_number, ..Default::default() };
-            header_writer
-                .append_header(&header, &B256::with_last_byte(block_number as u8))
-                .unwrap();
-        }
-        header_writer.commit().unwrap();
+        seed_headers(&factory, 2);
+
+        let provider = factory.provider_rw().unwrap();
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(2)).unwrap();
+
+        let cache = ChangesetCache::new();
+        let path = Nibbles::from_nibbles([0x1, 0x2]);
+        let older_node = BranchNodeCompact::new(0b0001, 0, 0, vec![], None);
+        let newer_node = BranchNodeCompact::new(0b0010, 0, 0, vec![], None);
+
+        cache.insert(
+            B256::with_last_byte(1),
+            1,
+            Arc::new(TrieUpdatesSorted::new(
+                vec![(path, Some(older_node.clone()))],
+                B256Map::default(),
+            )),
+        );
+        cache.insert(
+            B256::with_last_byte(2),
+            2,
+            Arc::new(TrieUpdatesSorted::new(vec![(path, Some(newer_node))], B256Map::default())),
+        );
+
+        let accumulated = cache.get_or_compute_range(&*provider, 1..=2).unwrap();
+        assert_eq!(accumulated.account_nodes_ref(), &[(path, Some(older_node))]);
+    }
+
+    #[test]
+    fn aggregate_range_reverts_to_pre_range_state() {
+        let factory = create_test_provider_factory();
+        seed_headers(&factory, 3);
 
         let provider = factory.provider_rw().unwrap();
         let address = Address::with_last_byte(1);
@@ -1180,13 +1201,17 @@ mod tests {
         provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(3)).unwrap();
         crate::with_adapter!(provider, |A| seed_tip_trie_tables::<_, A>(&*provider));
 
-        let expected = legacy_compute_range_trie_changesets(&*provider, 1..=3);
         let actual = compute_range_trie_changesets(&*provider, 1..=3).unwrap();
-        assert_eq!(actual, expected);
+        let storage_revert = actual
+            .storage_tries_ref()
+            .get(&hashed_address)
+            .expect("created account storage trie should be deleted by range revert");
+        assert!(storage_revert.is_deleted());
+        assert!(storage_revert.storage_nodes_ref().is_empty());
 
         let cache = ChangesetCache::new();
         let from_cache_api = cache.get_or_compute_range(&*provider, 1..=3).unwrap();
-        assert_eq!(from_cache_api, expected);
+        assert_eq!(from_cache_api, actual);
         assert!(cache.inner.read().entries.is_empty());
 
         let block_hash = provider.block_hash(2).unwrap().unwrap();
@@ -1198,16 +1223,7 @@ mod tests {
     #[test]
     fn aggregate_range_matches_legacy_per_block_merge_with_storage_wipe() {
         let factory = create_test_provider_factory();
-        let static_file_provider = factory.static_file_provider();
-        let mut header_writer =
-            static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
-        for block_number in 0..=3 {
-            let header = Header { number: block_number, ..Default::default() };
-            header_writer
-                .append_header(&header, &B256::with_last_byte(block_number as u8))
-                .unwrap();
-        }
-        header_writer.commit().unwrap();
+        seed_headers(&factory, 3);
 
         let provider = factory.provider_rw().unwrap();
         let address = Address::with_last_byte(1);
