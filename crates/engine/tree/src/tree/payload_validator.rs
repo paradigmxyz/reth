@@ -552,7 +552,11 @@ where
         .map(Arc::new);
 
         if let Some(decoded_bal) = decoded_bal.as_deref() {
-            ensure_ok!(Self::validate_received_bal_gas(decoded_bal, input.gas_limit()));
+            // Reject oversized BAL sidecars before executing the block.
+            ensure_ok!(decoded_bal
+                .as_bal()
+                .validate_gas_limit(input.gas_limit())
+                .map_err(ConsensusError::from));
         }
 
         let env = ExecutionEnv {
@@ -1134,13 +1138,6 @@ where
         } else {
             self.provider.sealed_header_by_hash(hash)
         }
-    }
-
-    fn validate_received_bal_gas(
-        decoded_bal: &DecodedBal,
-        gas_limit: u64,
-    ) -> Result<(), ConsensusError> {
-        decoded_bal.as_bal().validate_gas_limit(gas_limit).map_err(ConsensusError::from)
     }
 
     /// Executes a block with the given state provider.
