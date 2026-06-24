@@ -1,17 +1,23 @@
 //! Traits for execution.
 
 use crate::{ConfigureEvm, EvmEnv, TxEnvFor};
-use alloc::sync::Arc;
-use alloy_consensus::transaction::{Either, Recovered};
+use alloc::{sync::Arc, vec::Vec};
+use alloy_consensus::{
+    transaction::{Either, Recovered},
+    Header,
+};
 use alloy_eips::eip2718::WithEncoded;
-use alloy_primitives::{Address, Bytes};
+use alloy_primitives::{Address, Bytes, B256};
 use core::fmt::Debug;
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_execution_types::{BlockExecutionResult, HashedPostState};
-use reth_primitives_traits::{NodePrimitives, ReceiptTy, RecoveredBlock, TxTy};
+use reth_primitives_traits::{
+    Block, HeaderTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, TxTy,
+};
+use reth_storage_api::StateProvider;
 
 /// Converts a value into the transaction environment expected by an EVM configuration.
 pub trait IntoTxEnv<TxEnv> {
@@ -119,6 +125,66 @@ pub trait BlockExecutorFactory: Clone + Debug + Send + Sync + Unpin {
         Self: 'a,
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static;
+}
+
+/// Input for block assembly.
+#[expect(missing_debug_implementations)]
+#[non_exhaustive]
+pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory + 'a, H = Header> {
+    /// EVM environment used for block execution.
+    pub evm_env: F::EvmEnv,
+    /// Execution context used for block execution.
+    pub execution_ctx: F::ExecutionCtx<'a>,
+    /// Parent block header.
+    pub parent: &'a SealedHeader<H>,
+    /// Transactions included in the block.
+    pub transactions: Vec<TxTy<F::Primitives>>,
+    /// Output of block execution.
+    pub output: &'b BlockExecutionResult<ReceiptTy<F::Primitives>>,
+    /// Provider with access to state.
+    pub state_provider: &'b dyn StateProvider,
+    /// State root for the assembled block.
+    pub state_root: B256,
+    /// Block access list hash.
+    pub block_access_list_hash: Option<B256>,
+}
+
+impl<'a, 'b, F: BlockExecutorFactory + 'a, H> BlockAssemblerInput<'a, 'b, F, H> {
+    /// Creates a new [`BlockAssemblerInput`].
+    #[expect(clippy::too_many_arguments)]
+    pub const fn new(
+        evm_env: F::EvmEnv,
+        execution_ctx: F::ExecutionCtx<'a>,
+        parent: &'a SealedHeader<H>,
+        transactions: Vec<TxTy<F::Primitives>>,
+        output: &'b BlockExecutionResult<ReceiptTy<F::Primitives>>,
+        state_provider: &'b dyn StateProvider,
+        state_root: B256,
+        block_access_list_hash: Option<B256>,
+    ) -> Self {
+        Self {
+            evm_env,
+            execution_ctx,
+            parent,
+            transactions,
+            output,
+            state_provider,
+            state_root,
+            block_access_list_hash,
+        }
+    }
+}
+
+/// A type that assembles a block from execution output.
+pub trait BlockAssembler<F: BlockExecutorFactory>: Clone + Debug + Send + Sync + Unpin {
+    /// Block produced by the assembler.
+    type Block: Block;
+
+    /// Assembles a block from execution output.
+    fn assemble_block(
+        &self,
+        input: BlockAssemblerInput<'_, '_, F, HeaderTy<F::Primitives>>,
+    ) -> Result<Self::Block, BlockExecutionError>;
 }
 
 /// A type that knows how to execute blocks.

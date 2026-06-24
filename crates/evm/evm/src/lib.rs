@@ -95,7 +95,10 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
 
     /// Configured block assembler.
     #[cfg(feature = "std")]
-    type BlockAssembler: Debug + Clone + Send + Sync + Unpin + 'static;
+    type BlockAssembler: crate::execute::BlockAssembler<
+        Self::BlockExecutorFactory,
+        Block = BlockTy<Self::Primitives>,
+    >;
 
     /// Executor returned for block execution over the provided database.
     type Executor<DB>: Executor<Primitives = Self::Primitives>
