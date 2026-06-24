@@ -535,6 +535,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         {
             writer.append(&offset).map_err(ProviderError::other)?;
         }
+        if let Some(writer) = &mut self.changeset_offsets {
+            writer.flush().map_err(ProviderError::other)?;
+        }
         Ok(())
     }
 

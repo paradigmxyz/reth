@@ -6,7 +6,7 @@
 use crate::ChangesetOffset;
 use std::{
     fs::{File, OpenOptions},
-    io::{self, Write},
+    io::{self, BufWriter, Write},
     os::unix::fs::FileExt,
     path::Path,
 };
@@ -14,7 +14,7 @@ use std::{
 /// Writer for appending changeset offsets to a sidecar file.
 #[derive(Debug)]
 pub struct ChangesetOffsetWriter {
-    file: File,
+    file: BufWriter<File>,
     /// Number of records written.
     records_written: u64,
 }
@@ -104,7 +104,7 @@ impl ChangesetOffsetWriter {
         }
 
         let records_written = committed_len;
-        let file = OpenOptions::new().create(true).append(true).open(path)?;
+        let file = BufWriter::new(OpenOptions::new().create(true).append(true).open(path)?);
 
         Ok(Self { file, records_written })
     }
@@ -127,9 +127,15 @@ impl ChangesetOffsetWriter {
         Ok(())
     }
 
+    /// Flushes buffered offset records to the sidecar file.
+    pub fn flush(&mut self) -> io::Result<()> {
+        self.file.flush()
+    }
+
     /// Syncs all data to disk. Must be called before committing the header.
     pub fn sync(&mut self) -> io::Result<()> {
-        self.file.sync_all()
+        self.flush()?;
+        self.file.get_ref().sync_all()
     }
 
     /// Truncates the file to contain exactly `len` records and syncs to disk.
@@ -138,8 +144,9 @@ impl ChangesetOffsetWriter {
     /// The sync is required for crash safety - without it, a crash could
     /// resurrect the old file length.
     pub fn truncate(&mut self, len: u64) -> io::Result<()> {
-        self.file.set_len(len * Self::RECORD_SIZE as u64)?;
-        self.file.sync_all()?;
+        self.file.flush()?;
+        self.file.get_ref().set_len(len * Self::RECORD_SIZE as u64)?;
+        self.file.get_ref().sync_all()?;
         self.records_written = len;
         Ok(())
     }
