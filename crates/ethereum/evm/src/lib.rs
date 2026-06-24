@@ -205,6 +205,10 @@ where
     where
         Self: 'a;
     #[cfg(feature = "std")]
+    type BlockExecutorFactory = EthBlockExecutorFactory<ChainSpec, EvmF>;
+    #[cfg(feature = "std")]
+    type BlockAssembler = EthBlockAssembler<ChainSpec>;
+    #[cfg(feature = "std")]
     type Executor<DB>
         = EthExecutor<ChainSpec, DB>
     where
@@ -228,6 +232,16 @@ where
         = evm2::Evm<evm2::BaseEvmTypes>
     where
         DB: reth_storage_api::StateProvider + Send + 'static;
+
+    #[cfg(feature = "std")]
+    fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
+        &self.executor_factory
+    }
+
+    #[cfg(feature = "std")]
+    fn block_assembler(&self) -> &Self::BlockAssembler {
+        &self.block_assembler
+    }
 
     fn evm_env(&self, header: &Header) -> Result<EvmEnvFor<Self>, Self::Error> {
         Ok(EthEvmEnv {

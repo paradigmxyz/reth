@@ -1,10 +1,11 @@
 //! Traits for execution.
 
-use crate::{ConfigureEvm, TxEnvFor};
+use crate::{ConfigureEvm, EvmEnv, TxEnvFor};
 use alloc::sync::Arc;
 use alloy_consensus::transaction::{Either, Recovered};
 use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::{Address, Bytes};
+use core::fmt::Debug;
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
@@ -83,6 +84,41 @@ pub trait BlockExecutor: Sized {
     ) -> Result<BlockExecutionOutput<ReceiptTy<Self::Primitives>>, Self::Error>
     where
         H: FnMut(HashedPostState);
+}
+
+/// A type that creates configured block executors.
+pub trait BlockExecutorFactory: Clone + Debug + Send + Sync + Unpin {
+    /// The primitive types used by the factory.
+    type Primitives: NodePrimitives;
+    /// Transaction environment consumed by executors from this factory.
+    type Transaction: Clone + Send + Sync + 'static;
+    /// EVM environment consumed by this factory.
+    type EvmEnv: EvmEnv;
+    /// Execution context for a block or payload.
+    type ExecutionCtx<'a>: Debug + Clone + Send
+    where
+        Self: 'a;
+    /// Block executor returned by this factory.
+    type Executor<'a, DB>: BlockExecutor<
+        Primitives = Self::Primitives,
+        Transaction = Self::Transaction,
+    >
+    where
+        Self: 'a,
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static;
+
+    /// Creates a configured block executor.
+    fn create_executor<'a, DB>(
+        &'a self,
+        evm: evm2::Evm<evm2::BaseEvmTypes>,
+        ctx: Self::ExecutionCtx<'a>,
+        hashed_state_mode: HashedStateMode,
+    ) -> Self::Executor<'a, DB>
+    where
+        Self: 'a,
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static;
 }
 
 /// A type that knows how to execute blocks.

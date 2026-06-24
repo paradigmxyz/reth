@@ -85,6 +85,18 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     where
         Self: 'a;
 
+    /// Configured block executor factory.
+    #[cfg(feature = "std")]
+    type BlockExecutorFactory: crate::execute::BlockExecutorFactory<
+        Primitives = Self::Primitives,
+        Transaction = TxEnvFor<Self>,
+        EvmEnv = EvmEnvFor<Self>,
+    >;
+
+    /// Configured block assembler.
+    #[cfg(feature = "std")]
+    type BlockAssembler: Debug + Clone + Send + Sync + Unpin + 'static;
+
     /// Executor returned for block execution over the provided database.
     type Executor<DB>: Executor<Primitives = Self::Primitives>
     where
@@ -107,6 +119,14 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     type PrewarmEvm<DB>
     where
         DB: reth_storage_api::StateProvider + Send + 'static;
+
+    /// Returns the configured block executor factory.
+    #[cfg(feature = "std")]
+    fn block_executor_factory(&self) -> &Self::BlockExecutorFactory;
+
+    /// Returns the configured block assembler.
+    #[cfg(feature = "std")]
+    fn block_assembler(&self) -> &Self::BlockAssembler;
 
     /// Creates a new EVM environment for the given header.
     fn evm_env(&self, header: &HeaderTy<Self::Primitives>) -> Result<EvmEnvFor<Self>, Self::Error>;

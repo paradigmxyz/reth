@@ -1,5 +1,5 @@
 use alloc::sync::Arc;
-use core::marker::PhantomData;
+use core::{fmt::Debug, marker::PhantomData};
 
 use alloy_consensus::Header;
 use reth_chainspec::ChainSpec;
@@ -10,9 +10,11 @@ use reth_evm::precompile_cache::{CachedPrecompileProvider, PrecompileCacheMap};
 
 #[cfg(feature = "std")]
 use crate::{EthBlockExecutionCtx, EthBlockExecutor, EthEvmEnv, EthExecutor, HashedStateMode};
+#[cfg(feature = "std")]
+use crate::{EthPrimitives, EthTxEnv};
 
 /// Ethereum block executor factory.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct EthBlockExecutorFactory<C = ChainSpec, EvmFactory = ()> {
     /// Chain specification.
     chain_spec: Arc<C>,
@@ -20,6 +22,17 @@ pub struct EthBlockExecutorFactory<C = ChainSpec, EvmFactory = ()> {
     #[cfg(feature = "std")]
     precompile_cache_map: PrecompileCacheMap<evm2::SpecId>,
     _evm_factory: PhantomData<EvmFactory>,
+}
+
+impl<C, EvmFactory> Clone for EthBlockExecutorFactory<C, EvmFactory> {
+    fn clone(&self) -> Self {
+        Self {
+            chain_spec: self.chain_spec.clone(),
+            #[cfg(feature = "std")]
+            precompile_cache_map: self.precompile_cache_map.clone(),
+            _evm_factory: PhantomData,
+        }
+    }
 }
 
 impl<C> EthBlockExecutorFactory<C> {
@@ -137,5 +150,41 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
                 None,
             )),
         )
+    }
+}
+
+#[cfg(feature = "std")]
+impl<C, EvmFactory> reth_evm::execute::BlockExecutorFactory
+    for EthBlockExecutorFactory<C, EvmFactory>
+where
+    C: EthChainSpec<Header = Header> + EthExecutorSpec + Debug + Send + Sync + 'static,
+    EvmFactory: Clone + Debug + Send + Sync + Unpin + 'static,
+{
+    type Primitives = EthPrimitives;
+    type Transaction = EthTxEnv;
+    type EvmEnv = EthEvmEnv;
+    type ExecutionCtx<'a>
+        = EthBlockExecutionCtx<'a>
+    where
+        Self: 'a;
+    type Executor<'a, DB>
+        = EthBlockExecutor<'a, DB>
+    where
+        Self: 'a,
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static;
+
+    fn create_executor<'a, DB>(
+        &'a self,
+        evm: evm2::Evm<evm2::BaseEvmTypes>,
+        ctx: Self::ExecutionCtx<'a>,
+        hashed_state_mode: HashedStateMode,
+    ) -> Self::Executor<'a, DB>
+    where
+        Self: 'a,
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static,
+    {
+        Self::create_executor(self, evm, ctx, hashed_state_mode)
     }
 }

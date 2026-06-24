@@ -43,6 +43,10 @@ where
         = Inner::ExecutionCtx<'a>
     where
         Self: 'a;
+    #[cfg(feature = "std")]
+    type BlockExecutorFactory = Inner::BlockExecutorFactory;
+    #[cfg(feature = "std")]
+    type BlockAssembler = Inner::BlockAssembler;
     type Executor<DB>
         = Inner::Executor<DB>
     where
@@ -60,6 +64,16 @@ where
         = Inner::PrewarmEvm<DB>
     where
         DB: StateProvider + Send + 'static;
+
+    #[cfg(feature = "std")]
+    fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
+        self.inner().block_executor_factory()
+    }
+
+    #[cfg(feature = "std")]
+    fn block_assembler(&self) -> &Self::BlockAssembler {
+        self.inner().block_assembler()
+    }
 
     fn evm_env(&self, header: &HeaderTy<Self::Primitives>) -> Result<EvmEnvFor<Self>, Self::Error> {
         self.inner().evm_env(header)

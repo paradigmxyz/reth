@@ -70,6 +70,8 @@ where
         = <EthEvmConfig<C> as ConfigureEvm>::ExecutionCtx<'a>
     where
         Self: 'a;
+    type BlockExecutorFactory = <EthEvmConfig<C> as ConfigureEvm>::BlockExecutorFactory;
+    type BlockAssembler = <EthEvmConfig<C> as ConfigureEvm>::BlockAssembler;
     type Executor<DB>
         = <EthEvmConfig<C> as ConfigureEvm>::Executor<DB>
     where
@@ -85,6 +87,14 @@ where
         = <EthEvmConfig<C> as ConfigureEvm>::PrewarmEvm<DB>
     where
         DB: StateProvider + Send + 'static;
+
+    fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
+        self.inner.block_executor_factory()
+    }
+
+    fn block_assembler(&self) -> &Self::BlockAssembler {
+        self.inner.block_assembler()
+    }
 
     fn evm_env(&self, header: &HeaderTy<Self::Primitives>) -> Result<EvmEnvFor<Self>, Self::Error> {
         self.inner.evm_env(header)
