@@ -10,7 +10,7 @@ use reth_chainspec::{EthChainSpec, EthExecutorSpec};
 use reth_evm::precompile_cache::{CachedPrecompileProvider, PrecompileCacheMap};
 
 #[cfg(feature = "std")]
-use crate::{EthBlockExecutionCtx, EthBlockExecutor, EthEvmEnv, EthExecutor, HashedStateMode};
+use crate::{EthBlockExecutionCtx, EthBlockExecutor, EthEvmEnv, HashedStateMode};
 #[cfg(feature = "std")]
 use crate::{EthPrimitives, EthTxEnv};
 
@@ -63,16 +63,6 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
     #[cfg(feature = "std")]
     pub const fn precompile_cache_map(&self) -> &PrecompileCacheMap<evm2::SpecId> {
         &self.precompile_cache_map
-    }
-
-    /// Returns an executor for block execution over the provided database.
-    #[cfg(feature = "std")]
-    pub fn executor<DB>(&self, db: DB) -> EthExecutor<C, DB>
-    where
-        DB: evm2::evm::Database + Clone + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static,
-    {
-        EthExecutor::new(self.chain_spec.clone(), db, self.precompile_cache_map.clone())
     }
 
     /// Creates a configured Ethereum block executor.

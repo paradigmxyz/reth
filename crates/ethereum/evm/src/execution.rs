@@ -1,15 +1,22 @@
 //! EVM-backed Ethereum execution helpers.
 
+#[cfg(test)]
 use crate::{convert::recovered_tx_envelope, RethReceiptBuilder};
+#[cfg(test)]
+use alloc::boxed::Box;
 use alloc::{
-    boxed::Box,
     format,
     string::{String, ToString},
     vec::Vec,
 };
-use alloy_consensus::{constants::ETH_TO_WEI, transaction::Recovered, BlockHeader, Header, TxType};
+#[cfg(test)]
+use alloy_consensus::transaction::Recovered;
+#[cfg(test)]
+use alloy_consensus::TxType;
+use alloy_consensus::{constants::ETH_TO_WEI, BlockHeader, Header};
+#[cfg(test)]
+use alloy_eips::eip2718::Typed2718;
 use alloy_eips::{
-    eip2718::Typed2718,
     eip4895::Withdrawal,
     eip6110::{DEPOSIT_REQUEST_TYPE, MAINNET_DEPOSIT_CONTRACT_ADDRESS},
     eip7002::WITHDRAWAL_REQUEST_TYPE,
@@ -25,20 +32,30 @@ use evm2::evm::Db;
 use evm2::Precompiles;
 use evm2::{
     bytecode::Bytecode as ExecutableBytecode,
-    env::BlockEnv,
-    ethereum::{ethereum_tx_registry, RecoveredTxEnvelope},
+    ethereum::RecoveredTxEnvelope,
     evm::{
-        precompile::PrecompileProvider, AccountChange, AccountChangeRef, AccountInfo,
-        BlockStateAccumulator, Database, DbErrorCode, DynDatabase, StateChangeSink,
-        StateChangeSource, StateChanges, StorageChange, BEACON_ROOTS_ADDRESS,
+        AccountChange, AccountChangeRef, AccountInfo, BlockStateAccumulator, Database, DbErrorCode,
+        StateChangeSink, StateChangeSource, StateChanges, StorageChange, BEACON_ROOTS_ADDRESS,
         CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
     },
     registry::HandlerError,
-    BaseEvmTypes, Evm, ExecutionConfig, SpecId, TxResult, Version,
+    BaseEvmTypes, Evm, SpecId, TxResult,
 };
-use reth_ethereum_primitives::{Receipt, TransactionSigned};
+#[cfg(test)]
+use evm2::{
+    env::BlockEnv,
+    ethereum::ethereum_tx_registry,
+    evm::{precompile::PrecompileProvider, DynDatabase},
+    ExecutionConfig, Version,
+};
+use reth_ethereum_primitives::Receipt;
+#[cfg(test)]
+use reth_ethereum_primitives::TransactionSigned;
+#[cfg(test)]
 use reth_evm::execute::HashedStateMode;
-use reth_execution_types::{BlockExecutionOutput, HashedPostStateSink};
+#[cfg(test)]
+use reth_execution_types::BlockExecutionOutput;
+use reth_execution_types::HashedPostStateSink;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 
 const DEPOSIT_BYTES_SIZE: usize = 48 + 32 + 8 + 96 + 8;
@@ -182,6 +199,7 @@ pub struct BlockSystemCalls {
 }
 
 /// Inputs required to execute an Ethereum block with evm2.
+#[cfg(test)]
 pub(crate) struct BlockExecutionInput<'a, DB> {
     spec_id: SpecId,
     block_env: BlockEnv,
@@ -191,6 +209,7 @@ pub(crate) struct BlockExecutionInput<'a, DB> {
     precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
 }
 
+#[cfg(test)]
 impl<'a, DB> BlockExecutionInput<'a, DB> {
     /// Creates a new Ethereum block execution input.
     pub(crate) fn new(
@@ -205,6 +224,7 @@ impl<'a, DB> BlockExecutionInput<'a, DB> {
     }
 }
 
+#[cfg(test)]
 impl<DB> BlockExecutionInput<'_, DB>
 where
     DB: DynDatabase + 'static,
@@ -341,6 +361,7 @@ where
 }
 
 /// Hooks invoked while executing an Ethereum block.
+#[cfg(test)]
 pub(crate) struct ExecutionHooks<F, R, H> {
     on_transaction_executed: F,
     on_receipt: R,
@@ -348,6 +369,7 @@ pub(crate) struct ExecutionHooks<F, R, H> {
     hashed_state_mode: HashedStateMode,
 }
 
+#[cfg(test)]
 impl<F, R, H> ExecutionHooks<F, R, H> {
     /// Creates execution hooks.
     pub(crate) const fn new(
@@ -360,6 +382,7 @@ impl<F, R, H> ExecutionHooks<F, R, H> {
     }
 }
 
+#[cfg(test)]
 const fn ignore_receipt(_index: usize, _receipt: &Receipt) -> Result<(), Infallible> {
     Ok(())
 }

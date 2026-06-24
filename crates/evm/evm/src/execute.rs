@@ -1,19 +1,29 @@
 //! Traits for execution.
 
 use crate::{ConfigureEvm, EvmEnv, TxEnvFor};
+#[cfg(feature = "std")]
+use alloc::{boxed::Box, rc::Rc};
 use alloc::{sync::Arc, vec::Vec};
+#[cfg(feature = "std")]
+use alloy_consensus::BlockHeader as _;
 use alloy_consensus::{
     transaction::{Either, Recovered},
     Header,
 };
 use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::{Address, Bytes, B256};
+#[cfg(feature = "std")]
+use core::cell::RefCell;
 use core::fmt::Debug;
+#[cfg(feature = "std")]
+use evm2::evm::{CacheDB, Database, Db, DbErrorCode, DbResult, DynDatabase, StateChangeSource};
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_execution_types::{BlockExecutionResult, HashedPostState};
+#[cfg(feature = "std")]
+use reth_primitives_traits::BlockTy;
 use reth_primitives_traits::{
     Block, HeaderTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, TxTy,
 };
@@ -451,6 +461,186 @@ pub trait Executor: Sized {
 
     /// Takes the encoded block access list from executor.
     fn take_bal(&mut self) -> Option<Bytes>;
+}
+
+/// Generic block executor backed by a [`ConfigureEvm`] implementation.
+#[cfg(feature = "std")]
+#[expect(missing_debug_implementations)]
+pub struct BasicBlockExecutor<Evm, DB> {
+    evm_config: Evm,
+    database: DB,
+}
+
+#[cfg(feature = "std")]
+impl<Evm, DB> BasicBlockExecutor<Evm, DB> {
+    /// Creates a new generic block executor.
+    pub const fn new(evm_config: Evm, database: DB) -> Self {
+        Self { evm_config, database }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<Evm, DB> BasicBlockExecutor<Evm, DB>
+where
+    Evm: ConfigureEvm,
+    DB: Database + Clone + 'static,
+    DB::Error: core::error::Error + Send + Sync + 'static,
+{
+    fn execute_block_with_database(
+        &self,
+        block: &RecoveredBlock<BlockTy<Evm::Primitives>>,
+        database: impl DynDatabase + 'static,
+    ) -> Result<BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, BlockExecutionError> {
+        let evm_env =
+            self.evm_config.evm_env(block.header()).map_err(BlockExecutionError::other)?;
+        let evm = self.evm_config.evm_with_env(database, evm_env);
+        let ctx = self
+            .evm_config
+            .context_for_block(block.sealed_block())
+            .map_err(BlockExecutionError::other)?;
+        let mut executor =
+            self.evm_config.create_executor::<DB>(evm, ctx, HashedStateMode::OutputOnly);
+
+        executor.apply_pre_execution_changes(&mut |_| {}).map_err(BlockExecutionError::other)?;
+        for transaction in block.clone_transactions_recovered() {
+            let tx_env = TxEnvFor::<Evm>::from(transaction);
+            executor
+                .execute_transaction(tx_env, &mut |_| {})
+                .map_err(BlockExecutionError::other)?;
+        }
+        executor.finish(&mut |_| {}).map_err(BlockExecutionError::other)
+    }
+}
+
+#[cfg(feature = "std")]
+impl<Evm, DB> Executor for BasicBlockExecutor<Evm, DB>
+where
+    Evm: ConfigureEvm,
+    DB: Database + Clone + 'static,
+    DB::Error: core::error::Error + Send + Sync + 'static,
+{
+    type Primitives = Evm::Primitives;
+    type Error = BlockExecutionError;
+
+    fn execute_one(
+        &mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    {
+        self.execute_block_with_database(block, Db::new(self.database.clone()))
+            .map(|output| output.result)
+    }
+
+    fn execute(
+        self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    {
+        self.execute_block_with_database(block, Db::new(self.database.clone()))
+    }
+
+    fn execute_batch<'a, I>(
+        self,
+        blocks: I,
+    ) -> Result<ExecutionOutcome<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        I: IntoIterator<Item = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
+    {
+        let mut blocks = blocks.into_iter();
+        let Some(block) = blocks.next() else { return Ok(ExecutionOutcome::default()) };
+
+        let first_block = block.header().number();
+        let database = SharedBatchDatabase::new(self.database.clone());
+        let mut states = Vec::new();
+        let mut results = Vec::new();
+
+        let output = self.execute_block_with_database(block, database.clone())?;
+        database.commit_source(&output.state);
+        results.push(output.result);
+        states.push(output.state.into_inner());
+
+        for block in blocks {
+            let output = self.execute_block_with_database(block, database.clone())?;
+            database.commit_source(&output.state);
+            results.push(output.result);
+            states.push(output.state.into_inner());
+        }
+
+        Ok(ExecutionOutcome::from_block_states(first_block, states, results))
+    }
+
+    fn size_hint(&self) -> usize {
+        0
+    }
+
+    fn take_bal(&mut self) -> Option<Bytes> {
+        None
+    }
+}
+
+#[cfg(feature = "std")]
+struct SharedBatchDatabase<DB: Database> {
+    inner: Rc<RefCell<CacheDB<Db<DB>>>>,
+}
+
+#[cfg(feature = "std")]
+impl<DB: Database> Clone for SharedBatchDatabase<DB> {
+    fn clone(&self) -> Self {
+        Self { inner: Rc::clone(&self.inner) }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<DB> SharedBatchDatabase<DB>
+where
+    DB: Database,
+{
+    fn new(database: DB) -> Self {
+        Self { inner: Rc::new(RefCell::new(CacheDB::new(Db::new(database)))) }
+    }
+
+    fn commit_source<S: StateChangeSource>(&self, source: &S) {
+        self.inner.borrow_mut().commit_source(source);
+    }
+}
+
+#[cfg(feature = "std")]
+impl<DB> DynDatabase for SharedBatchDatabase<DB>
+where
+    DB: Database + 'static,
+{
+    fn get_account(
+        &mut self,
+        address: &alloy_primitives::Address,
+    ) -> DbResult<Option<evm2::evm::AccountInfo>> {
+        self.inner.borrow_mut().get_account(address)
+    }
+
+    fn get_code_by_hash(
+        &mut self,
+        code_hash: &alloy_primitives::B256,
+    ) -> DbResult<evm2::bytecode::Bytecode> {
+        self.inner.borrow_mut().get_code_by_hash(code_hash)
+    }
+
+    fn get_storage(
+        &mut self,
+        address: &alloy_primitives::Address,
+        key: &evm2::interpreter::Word,
+    ) -> DbResult<evm2::interpreter::Word> {
+        self.inner.borrow_mut().get_storage(address, key)
+    }
+
+    fn get_block_hash(
+        &mut self,
+        number: &evm2::interpreter::Word,
+    ) -> DbResult<Option<alloy_primitives::B256>> {
+        self.inner.borrow_mut().get_block_hash(number)
+    }
+
+    fn error(&mut self, code: DbErrorCode) -> Box<dyn core::error::Error> {
+        self.inner.borrow_mut().error(code)
+    }
 }
 
 /// Executor returned by configurations that do not support block execution in the active build.

@@ -141,7 +141,7 @@ pub use build::EthBlockAssembler;
 #[cfg(feature = "std")]
 mod executor;
 #[cfg(feature = "std")]
-pub use executor::{EthBlockExecutor, EthExecutor};
+pub use executor::EthBlockExecutor;
 
 mod factory;
 pub use factory::EthBlockExecutorFactory;
@@ -235,7 +235,7 @@ where
     type BlockAssembler = EthBlockAssembler<ChainSpec>;
     #[cfg(feature = "std")]
     type Executor<DB>
-        = EthExecutor<ChainSpec, DB>
+        = reth_evm::execute::BasicBlockExecutor<Self, DB>
     where
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static;
@@ -352,7 +352,7 @@ where
     {
         #[cfg(feature = "std")]
         {
-            self.executor_factory.executor(db)
+            reth_evm::execute::BasicBlockExecutor::new(self.clone(), db)
         }
 
         #[cfg(not(feature = "std"))]
