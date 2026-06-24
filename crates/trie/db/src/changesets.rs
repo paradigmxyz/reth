@@ -287,26 +287,18 @@ where
             available: 0..=0,
         })?;
 
-    // Step 1: Get the block hash for the target block
-    let block_hash = provider.block_hash(block_number)?.ok_or_else(|| {
-        ProviderError::other(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!("block hash not found for block number {}", block_number),
-        ))
-    })?;
+    // Step 1: Get the trie changesets for the target block from cache
+    let changesets = cache.get_or_compute(provider, block_number)?;
 
-    // Step 2: Get the trie changesets for the target block from cache
-    let changesets = cache.get_or_compute(block_hash, block_number, provider)?;
-
-    // Step 3: Get the trie reverts for the state after the target block using the cache
+    // Step 2: Get the trie reverts for the state after the target block using the cache
     let reverts = cache.get_or_compute_range(provider, (block_number + 1)..=db_tip_block)?;
 
-    // Step 4: Create an InMemoryTrieCursorFactory with the reverts
+    // Step 3: Create an InMemoryTrieCursorFactory with the reverts
     // This gives us the trie state as it was after the target block was processed
     let db_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
     let cursor_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, &reverts);
 
-    // Step 5: Collect all account trie nodes that changed in the target block
+    // Step 4: Collect all account trie nodes that changed in the target block
     let account_nodes_ref = changesets.account_nodes_ref();
     let mut account_nodes = Vec::with_capacity(account_nodes_ref.len());
     let mut account_cursor = cursor_factory.account_trie_cursor()?;
@@ -318,7 +310,7 @@ where
         account_nodes.push((*nibbles, node_value));
     }
 
-    // Step 6: Collect all storage trie nodes that changed in the target block
+    // Step 5: Collect all storage trie nodes that changed in the target block
     let mut storage_tries = B256Map::default();
 
     // Iterate over the storage tries from the changesets
@@ -379,20 +371,6 @@ impl ChangesetCache {
         self.inner.read().get(&ChangesetRangeKey::single(block_number, block_hash))
     }
 
-    /// Inserts changesets for a block into the cache.
-    ///
-    /// This method does not perform any eviction. Eviction must be explicitly
-    /// triggered by calling `evict()`.
-    ///
-    /// # Arguments
-    ///
-    /// * `block_hash` - Hash of the block
-    /// * `block_number` - Block number for tracking and eviction
-    /// * `changesets` - Trie changesets to cache
-    fn insert(&self, block_hash: B256, block_number: u64, changesets: Arc<TrieUpdatesSorted>) {
-        self.inner.write().insert(ChangesetRangeKey::single(block_number, block_hash), changesets);
-    }
-
     /// Evicts changesets for blocks below the given block number.
     ///
     /// This should be called after blocks are persisted to the database to free
@@ -413,7 +391,6 @@ impl ChangesetCache {
     ///
     /// # Arguments
     ///
-    /// * `block_hash` - Hash of the block to get changesets for
     /// * `block_number` - Block number (for cache insertion and logging)
     /// * `provider` - Database provider for DB access
     ///
@@ -422,9 +399,8 @@ impl ChangesetCache {
     /// Changesets for the block, either from cache or computed on-the-fly.
     pub fn get_or_compute<P>(
         &self,
-        block_hash: B256,
-        block_number: u64,
         provider: &P,
+        block_number: BlockNumber,
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
         P: DBProvider
@@ -434,56 +410,7 @@ impl ChangesetCache {
             + BlockNumReader
             + StorageSettingsCache,
     {
-        // Try cache first.
-        {
-            let cache = self.inner.read();
-            let key = ChangesetRangeKey::single(block_number, block_hash);
-            if let Some(changesets) = cache.get(&key) {
-                debug!(
-                    target: "trie::changeset_cache",
-                    ?block_hash,
-                    block_number,
-                    "Changeset cache HIT"
-                );
-                return Ok(changesets);
-            }
-        }
-
-        // No cache hit - compute from database.
-        warn!(
-            target: "trie::changeset_cache",
-            ?block_hash,
-            block_number,
-            "Changeset cache MISS, falling back to DB-based computation"
-        );
-
-        let start = Instant::now();
-
-        // Compute changesets
-        let changesets = compute_block_trie_changesets(provider, block_number)?;
-
-        let changesets = Arc::new(changesets);
-        let elapsed = start.elapsed();
-
-        debug!(
-            target: "trie::changeset_cache",
-            ?elapsed,
-            block_number,
-            ?block_hash,
-            "Changeset computed from database and inserting into cache"
-        );
-
-        // Store in cache (with write lock)
-        self.insert(block_hash, block_number, Arc::clone(&changesets));
-
-        debug!(
-            target: "trie::changeset_cache",
-            ?block_hash,
-            block_number,
-            "Changeset successfully cached"
-        );
-
-        Ok(changesets)
+        self.get_or_compute_range(provider, block_number..=block_number)
     }
 
     /// Gets or computes trie reverts for a range of blocks.
@@ -516,7 +443,7 @@ impl ChangesetCache {
         &self,
         provider: &P,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<TrieUpdatesSorted>
+    ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
         P: DBProvider
             + StageCheckpointReader
@@ -563,7 +490,7 @@ impl ChangesetCache {
                 end_block,
                 "Empty changeset range requested"
             );
-            return Ok(TrieUpdatesSorted::default())
+            return Ok(Arc::new(TrieUpdatesSorted::default()))
         }
 
         let end_block_hash = provider.block_hash(end_block)?.ok_or_else(|| {
@@ -587,7 +514,7 @@ impl ChangesetCache {
                 "Changeset cache HIT for block range"
             );
 
-            return Ok((*accumulated_reverts).clone())
+            return Ok(accumulated_reverts)
         }
 
         let mut cached_reverts =
@@ -626,7 +553,7 @@ impl ChangesetCache {
         if all_cached {
             // `merge_slice` gives precedence to earlier items, so pass reverts oldest-to-newest.
             cached_reverts.reverse();
-            let accumulated_reverts = TrieUpdatesSorted::merge_slice(&cached_reverts);
+            let accumulated_reverts = Arc::new(TrieUpdatesSorted::merge_slice(&cached_reverts));
             let elapsed = timer.elapsed();
 
             let num_account_nodes = accumulated_reverts.account_nodes_ref().len();
@@ -643,7 +570,7 @@ impl ChangesetCache {
                 "Finished accumulating cached trie reverts for block range"
             );
 
-            self.inner.write().insert(range_key, Arc::new(accumulated_reverts.clone()));
+            self.inner.write().insert(range_key, Arc::clone(&accumulated_reverts));
             return Ok(accumulated_reverts)
         }
 
@@ -654,8 +581,11 @@ impl ChangesetCache {
             "Changeset cache MISS in range, falling back to aggregate DB-based computation"
         );
 
-        let accumulated_reverts =
-            compute_range_trie_changesets(provider, start_block..=end_block, db_tip_block)?;
+        let accumulated_reverts = Arc::new(compute_range_trie_changesets(
+            provider,
+            start_block..=end_block,
+            db_tip_block,
+        )?);
 
         let elapsed = timer.elapsed();
 
@@ -674,7 +604,7 @@ impl ChangesetCache {
             "Finished accumulating trie reverts for block range"
         );
 
-        self.inner.write().insert(range_key, Arc::new(accumulated_reverts.clone()));
+        self.inner.write().insert(range_key, Arc::clone(&accumulated_reverts));
 
         Ok(accumulated_reverts)
     }
@@ -888,7 +818,7 @@ mod tests {
         StaticFileWriter,
     };
     use reth_stages_types::{StageCheckpoint, StageId};
-    use reth_storage_api::{BlockHashReader, StageCheckpointWriter, TrieWriter};
+    use reth_storage_api::{StageCheckpointWriter, TrieWriter};
     use reth_trie::{BranchNodeCompact, Nibbles, StateRoot};
 
     // Helper function to create empty TrieUpdatesSorted for testing
@@ -1058,19 +988,27 @@ mod tests {
         let older_node = BranchNodeCompact::new(0b0001, 0, 0, vec![], None);
         let newer_node = BranchNodeCompact::new(0b0010, 0, 0, vec![], None);
 
-        cache.insert(
-            B256::with_last_byte(1),
-            1,
-            Arc::new(TrieUpdatesSorted::new(
-                vec![(path, Some(older_node.clone()))],
-                B256Map::default(),
-            )),
-        );
-        cache.insert(
-            B256::with_last_byte(2),
-            2,
-            Arc::new(TrieUpdatesSorted::new(vec![(path, Some(newer_node))], B256Map::default())),
-        );
+        {
+            let mut cache = cache.inner.write();
+            insert_test_changesets(
+                &mut cache,
+                B256::with_last_byte(1),
+                1,
+                Arc::new(TrieUpdatesSorted::new(
+                    vec![(path, Some(older_node.clone()))],
+                    B256Map::default(),
+                )),
+            );
+            insert_test_changesets(
+                &mut cache,
+                B256::with_last_byte(2),
+                2,
+                Arc::new(TrieUpdatesSorted::new(
+                    vec![(path, Some(newer_node))],
+                    B256Map::default(),
+                )),
+            );
+        }
 
         let accumulated = cache.get_or_compute_range(&*provider, 1..=2).unwrap();
         assert_eq!(accumulated.account_nodes_ref(), &[(path, Some(older_node))]);
@@ -1155,11 +1093,10 @@ mod tests {
 
         let cache = ChangesetCache::new();
         let from_cache_api = cache.get_or_compute_range(&*provider, 1..=3).unwrap();
-        assert_eq!(from_cache_api, actual);
+        assert_eq!(*from_cache_api, actual);
         assert_eq!(cache.inner.read().entries.len(), 1);
 
-        let block_hash = provider.block_hash(2).unwrap().unwrap();
-        let block_changesets = cache.get_or_compute(block_hash, 2, &*provider).unwrap();
+        let block_changesets = cache.get_or_compute(&*provider, 2).unwrap();
         assert_eq!(*block_changesets, legacy_compute_block_trie_changesets(&*provider, 2));
         assert_eq!(cache.inner.read().entries.len(), 2);
     }
