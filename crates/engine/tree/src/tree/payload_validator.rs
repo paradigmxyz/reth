@@ -148,7 +148,7 @@ use reth_provider::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
+use reth_trie::{changesets, updates::TrieUpdates, HashedPostState};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::{Address, KECCAK_EMPTY};
@@ -590,6 +590,7 @@ where
         );
         let overlay_factory =
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
+        let changeset_provider_factory = overlay_factory.clone();
         let changeset_provider = self.spawn_changeset_provider_task(overlay_factory.clone());
 
         let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
@@ -1012,6 +1013,7 @@ where
             hashed_state,
             trie_output,
             changeset_provider,
+            changeset_provider_factory,
         );
         let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
         Ok(ValidationOutput::new(executed_block, timing_stats).with_raw_bal(raw_bal))
@@ -1934,7 +1936,8 @@ where
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         hashed_state: LazyHashedPostState,
         trie_output: Arc<TrieUpdates>,
-        changeset_provider: impl TrieCursorFactory + Send + 'static,
+        changeset_provider: OverlayStateProvider<P::Provider>,
+        changeset_provider_factory: OverlayStateProviderFactory<P, N>,
     ) -> ExecutedBlock<N> {
         // Create deferred handle and task that owns the unsorted inputs.
         // Resolve the lazy handle into Arc<HashedPostState>. By this point the hashed state has
@@ -1985,10 +1988,33 @@ where
                 // eviction that can happen between task spawn and execution.
                 let changeset_start = Instant::now();
 
-                match reth_trie::changesets::compute_trie_changesets(
-                    &changeset_provider,
-                    &computed.trie_updates,
-                ) {
+                let parallel_factory_count =
+                    changesets::storage_trie_changeset_parallel_factory_count(
+                        &computed.trie_updates,
+                    );
+                let changesets = match parallel_factory_count {
+                    Some(factory_count) => (|| {
+                        let mut changeset_providers = Vec::with_capacity(factory_count);
+                        changeset_providers.push(changeset_provider);
+                        for _ in 1..factory_count {
+                            changeset_providers
+                                .push(changeset_provider_factory.database_provider_ro()?);
+                        }
+
+                        changesets::compute_trie_changesets_with_parallel_storage_factories(
+                            changeset_providers,
+                            &computed.trie_updates,
+                        )
+                        .map_err(ProviderError::from)
+                    })(),
+                    None => changesets::compute_trie_changesets(
+                        &changeset_provider,
+                        &computed.trie_updates,
+                    )
+                    .map_err(ProviderError::from),
+                };
+
+                match changesets {
                     Ok(changesets) => {
                         debug!(
                             target: "engine::tree::changeset",
@@ -2330,6 +2356,7 @@ where
             LazyHashedPostState::ready(block.hashed_state),
             block.trie_updates,
             changeset_provider,
+            overlay_factory,
         ))
     }
 

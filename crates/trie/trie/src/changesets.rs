@@ -21,6 +21,7 @@
 use crate::trie_cursor::TrieCursorIter;
 use alloy_primitives::{map::B256Map, B256};
 use itertools::{merge_join_by, EitherOrBoth};
+use rayon::prelude::*;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
@@ -32,6 +33,12 @@ use crate::trie_cursor::{TrieCursor, TrieCursorFactory, TrieStorageCursor};
 
 /// Result type for changeset operations.
 pub type ChangesetResult<T> = Result<T, DatabaseError>;
+
+const PARALLEL_STORAGE_CHANGESET_MIN_TRIES: usize = 32;
+const PARALLEL_STORAGE_CHANGESET_MIN_NODES: usize = 1024;
+const PARALLEL_STORAGE_CHANGESET_MIN_WIPED_TRIES: usize = 4;
+const PARALLEL_STORAGE_CHANGESET_CHUNKS_PER_THREAD: usize = 2;
+const PARALLEL_STORAGE_CHANGESET_MAX_CHUNKS: usize = 32;
 
 /// Computes trie changesets by looking up current node values from the trie.
 ///
@@ -58,6 +65,61 @@ where
     let account_nodes = compute_account_changesets(factory, trie_updates)?;
 
     // Compute storage trie changesets
+    let storage_tries = compute_storage_trie_changesets(factory, trie_updates)?;
+
+    // Build and return the result
+    Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))
+}
+
+/// Returns the number of storage cursor factories needed to parallelize storage trie changesets.
+///
+/// `None` means the update set is small enough that the single-cursor path is expected to be
+/// cheaper.
+pub fn storage_trie_changeset_parallel_factory_count(
+    trie_updates: &TrieUpdatesSorted,
+) -> Option<usize> {
+    let storage_trie_count = trie_updates.storage_tries_ref().len();
+    should_parallelize_storage_changesets(trie_updates).then(|| {
+        storage_trie_count.div_ceil(parallel_storage_changeset_chunk_size(storage_trie_count))
+    })
+}
+
+/// Computes trie changesets using one owned storage cursor factory per parallel storage chunk.
+///
+/// Account trie changesets are computed with the first factory. Storage trie changesets are
+/// independent across accounts, so large blocks can move separate read-only providers into Rayon
+/// workers without sharing a database transaction across threads.
+pub fn compute_trie_changesets_with_parallel_storage_factories<Factory>(
+    factories: Vec<Factory>,
+    trie_updates: &TrieUpdatesSorted,
+) -> ChangesetResult<TrieUpdatesSorted>
+where
+    Factory: TrieCursorFactory + Send,
+{
+    assert!(
+        !factories.is_empty(),
+        "parallel changeset computation requires at least one storage factory"
+    );
+    assert_eq!(
+        storage_trie_changeset_parallel_factory_count(trie_updates),
+        Some(factories.len()),
+        "storage factory count must match the number of parallel changeset chunks"
+    );
+
+    // Compute account trie changesets before moving factories into storage workers.
+    let account_nodes = compute_account_changesets(&factories[0], trie_updates)?;
+    let storage_tries = compute_storage_trie_changesets_parallel(factories, trie_updates)?;
+
+    Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))
+}
+
+fn compute_storage_trie_changesets<Factory>(
+    factory: &Factory,
+    trie_updates: &TrieUpdatesSorted,
+) -> ChangesetResult<B256Map<StorageTrieUpdatesSorted>>
+where
+    Factory: TrieCursorFactory,
+{
     let mut storage_tries = B256Map::default();
 
     // Create storage cursor once and reuse it for all addresses
@@ -85,8 +147,84 @@ where
         }
     }
 
-    // Build and return the result
-    Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))
+    Ok(storage_tries)
+}
+
+fn compute_storage_trie_changesets_parallel<Factory>(
+    factories: Vec<Factory>,
+    trie_updates: &TrieUpdatesSorted,
+) -> ChangesetResult<B256Map<StorageTrieUpdatesSorted>>
+where
+    Factory: TrieCursorFactory + Send,
+{
+    let entries = trie_updates.storage_tries_ref().iter().collect::<Vec<_>>();
+    let chunk_size = parallel_storage_changeset_chunk_size(entries.len());
+
+    let chunks = entries
+        .par_chunks(chunk_size)
+        .zip(factories.into_par_iter())
+        .map(|(chunk, factory)| -> ChangesetResult<Vec<(B256, StorageTrieUpdatesSorted)>> {
+            let mut storage_cursor = factory.storage_trie_cursor(B256::default())?;
+            let mut storage_tries = Vec::with_capacity(chunk.len());
+
+            for (hashed_address, storage_updates) in chunk.iter().copied() {
+                storage_cursor.set_hashed_address(*hashed_address);
+
+                let storage_changesets = if storage_updates.is_deleted() {
+                    // Handle wiped storage
+                    compute_wiped_storage_changesets(&mut storage_cursor, storage_updates)?
+                } else {
+                    // Handle normal storage updates
+                    compute_storage_changesets(&mut storage_cursor, storage_updates)?
+                };
+
+                if !storage_changesets.is_empty() {
+                    storage_tries.push((
+                        *hashed_address,
+                        StorageTrieUpdatesSorted {
+                            is_deleted: storage_updates.is_deleted(),
+                            storage_nodes: storage_changesets,
+                        },
+                    ));
+                }
+            }
+
+            Ok(storage_tries)
+        })
+        .collect::<ChangesetResult<Vec<_>>>()?;
+
+    let mut storage_tries = B256Map::default();
+    for chunk in chunks {
+        storage_tries.extend(chunk);
+    }
+
+    Ok(storage_tries)
+}
+
+fn should_parallelize_storage_changesets(trie_updates: &TrieUpdatesSorted) -> bool {
+    let storage_tries = trie_updates.storage_tries_ref();
+    if storage_tries.len() < PARALLEL_STORAGE_CHANGESET_MIN_TRIES {
+        return false;
+    }
+
+    let mut storage_nodes = 0usize;
+    let mut wiped_tries = 0usize;
+    for storage_updates in storage_tries.values() {
+        storage_nodes = storage_nodes.saturating_add(storage_updates.storage_nodes.len());
+        if storage_updates.is_deleted() {
+            wiped_tries += 1;
+        }
+    }
+
+    storage_nodes >= PARALLEL_STORAGE_CHANGESET_MIN_NODES
+        || wiped_tries >= PARALLEL_STORAGE_CHANGESET_MIN_WIPED_TRIES
+}
+
+fn parallel_storage_changeset_chunk_size(storage_tries: usize) -> usize {
+    let target_chunks = rayon::current_num_threads()
+        .saturating_mul(PARALLEL_STORAGE_CHANGESET_CHUNKS_PER_THREAD)
+        .min(PARALLEL_STORAGE_CHANGESET_MAX_CHUNKS);
+    storage_tries.div_ceil(target_chunks.max(1)).max(1)
 }
 
 /// Computes account trie changesets.
@@ -357,6 +495,52 @@ mod tests {
         // path3 should have None (it didn't exist before)
         assert_eq!(storage_changesets.storage_nodes[1].0, path3);
         assert_eq!(storage_changesets.storage_nodes[1].1, None);
+    }
+
+    #[test]
+    fn test_parallel_storage_changesets_match_sequential() {
+        let mut storage_tries = B256Map::default();
+        storage_tries.insert(B256::default(), BTreeMap::new());
+
+        let mut storage_updates = B256Map::default();
+        let updates_per_trie =
+            PARALLEL_STORAGE_CHANGESET_MIN_NODES / PARALLEL_STORAGE_CHANGESET_MIN_TRIES + 1;
+
+        for trie_idx in 0..PARALLEL_STORAGE_CHANGESET_MIN_TRIES {
+            let hashed_address = B256::from([trie_idx as u8; 32]);
+            let node = BranchNodeCompact::new(0b1111, 0b0011, 0, vec![], None);
+
+            let mut existing_nodes = BTreeMap::new();
+            let mut update_nodes = Vec::with_capacity(updates_per_trie);
+
+            for node_idx in 0..updates_per_trie {
+                let path = Nibbles::from_nibbles([
+                    (trie_idx % 16) as u8,
+                    (node_idx / 16) as u8,
+                    (node_idx % 16) as u8,
+                ]);
+                existing_nodes.insert(path, node.clone());
+                update_nodes.push((path, Some(node.clone())));
+            }
+
+            storage_tries.insert(hashed_address, existing_nodes);
+            storage_updates.insert(
+                hashed_address,
+                StorageTrieUpdatesSorted { is_deleted: false, storage_nodes: update_nodes },
+            );
+        }
+
+        let factory = MockTrieCursorFactory::new(BTreeMap::new(), storage_tries);
+        let updates = TrieUpdatesSorted::new(vec![], storage_updates);
+        let factory_count = storage_trie_changeset_parallel_factory_count(&updates)
+            .expect("large update set should use parallel changesets");
+
+        let sequential = compute_trie_changesets(&factory, &updates).unwrap();
+        let factories = (0..factory_count).map(|_| factory.clone()).collect();
+        let parallel =
+            compute_trie_changesets_with_parallel_storage_factories(factories, &updates).unwrap();
+
+        assert_eq!(parallel, sequential);
     }
 
     #[test]
