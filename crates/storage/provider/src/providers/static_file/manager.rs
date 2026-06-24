@@ -461,9 +461,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         for (block, &first_tx) in blocks.iter().zip(tx_nums) {
             let b = block.recovered_block();
             w.increment_block(b.number())?;
-            for (i, tx) in b.body().transactions().iter().enumerate() {
-                w.append_transaction(first_tx + i as u64, tx)?;
-            }
+            w.append_transactions(
+                b.body()
+                    .transactions()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, tx)| Ok::<_, ProviderError>((first_tx + i as u64, tx))),
+            )?;
         }
         Ok(())
     }
@@ -505,9 +509,14 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 continue
             }
 
-            for (i, receipt) in block.execution_outcome().receipts.iter().enumerate() {
-                w.append_receipt(first_tx + i as u64, receipt)?;
-            }
+            w.append_receipts(
+                block
+                    .execution_outcome()
+                    .receipts
+                    .iter()
+                    .enumerate()
+                    .map(|(i, receipt)| Ok::<_, ProviderError>((first_tx + i as u64, receipt))),
+            )?;
         }
         Ok(())
     }
