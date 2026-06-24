@@ -91,7 +91,11 @@ impl<N: NodePrimitives> Chain<N> {
     ) -> Self {
         let block = block.into();
         let block_number = block.header().number();
-        Self::new([block], execution_outcome, BTreeMap::from([(block_number, trie_data)]))
+        Self {
+            blocks: BTreeMap::from([(block_number, block)]),
+            execution_outcome,
+            trie_data: BTreeMap::from([(block_number, trie_data)]),
+        }
     }
 
     /// Get the blocks in this chain.
