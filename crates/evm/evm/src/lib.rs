@@ -43,9 +43,6 @@ pub use aliases::*;
 
 /// Resolved EVM environment data needed by the EVM execution path.
 pub trait EvmEnv: Debug + Clone + Send + Sync + 'static {
-    /// Returns the active EVM spec.
-    fn spec_id(&self) -> evm2::SpecId;
-
     /// Returns the EVM block environment.
     fn block_env(&self) -> evm2::env::BlockEnv;
 

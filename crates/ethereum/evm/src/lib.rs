@@ -69,10 +69,6 @@ impl Default for EthEvmEnv {
 }
 
 impl EvmEnv for EthEvmEnv {
-    fn spec_id(&self) -> evm2::SpecId {
-        self.spec
-    }
-
     fn block_env(&self) -> evm2::env::BlockEnv {
         self.block
     }
