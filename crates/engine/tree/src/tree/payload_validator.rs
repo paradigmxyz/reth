@@ -776,7 +776,8 @@ where
             block
         );
         let auxiliary_provider_factory =
-            OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
+            OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone())
+                .with_provable_trie_tables();
         let mut retained_auxiliary_trie_data: Option<DeferredTrieData> = None;
 
         // Run the hashed state validation hook but don't propagate the error yet. If the state root
@@ -1538,6 +1539,16 @@ where
             state_updates,
             retain_trie_data: _,
         } = auxiliary_state_root;
+
+        if state_updates.is_empty() {
+            return Ok(StateRootComputeOutcome {
+                state_root: parent_root,
+                trie_updates: Arc::new(TrieUpdates::default()),
+                #[cfg(feature = "trie-debug")]
+                debug_recorders: Vec::new(),
+            });
+        }
+
         let mut handle = self.payload_processor.spawn_auxiliary_state_root(
             multiproof_provider_factory,
             parent_root,

@@ -24,8 +24,9 @@ use reth_trie::{
 };
 use reth_trie_db::{
     ChangesetCache, DatabaseAccountTrieCursor, DatabaseHashedCursorFactory,
-    DatabaseStorageTrieCursor, LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter,
-    PackedStoragesTrie,
+    DatabaseProvableAccountTrieCursor, DatabaseProvableStorageTrieCursor, DatabaseStorageTrieCursor,
+    LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter, PackedProvableAccountsTrie,
+    PackedProvableStoragesTrie, PackedStoragesTrie,
 };
 use std::{
     ops::RangeInclusive,
@@ -83,6 +84,13 @@ pub(super) enum OverlaySource<N: NodePrimitives = EthPrimitives> {
         /// This is populated by the `with_hashed_state_overlay` methods.
         state: Arc<HashedPostStateSorted>,
     },
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+enum TrieTableKind {
+    #[default]
+    Canonical,
+    Provable,
 }
 
 /// Builder for calculating trie and hashed-state overlays.
@@ -445,6 +453,8 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     factory: F,
     /// Overlay builder containing the configuration and overlay calculation logic.
     overlay_builder: OverlayBuilder<N>,
+    /// Trie tables used by providers produced by this factory.
+    trie_table_kind: TrieTableKind,
     /// A cache which maps `db_tip -> Overlay`. If the db tip changes during usage of the factory
     /// then a new entry will get added to this, but in most cases only one entry is present.
     overlay_cache: Arc<DashMap<BlockHash, Overlay>>,
@@ -453,7 +463,18 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
 impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     /// Create a new overlay state provider factory
     pub fn new(factory: F, overlay_builder: OverlayBuilder<N>) -> Self {
-        Self { factory, overlay_builder, overlay_cache: Default::default() }
+        Self {
+            factory,
+            overlay_builder,
+            trie_table_kind: TrieTableKind::Canonical,
+            overlay_cache: Default::default(),
+        }
+    }
+
+    /// Read trie nodes from the provable trie tables.
+    pub fn with_provable_trie_tables(mut self) -> Self {
+        self.trie_table_kind = TrieTableKind::Provable;
+        self
     }
 
     /// Set the hashed state overlay.
@@ -533,7 +554,8 @@ where
 
         let is_v2 = provider.cached_storage_settings().is_v2();
         self.overlay_builder.metrics.database_provider_ro_duration.record(overall_start.elapsed());
-        Ok(OverlayStateProvider::new(provider, trie_updates, hashed_post_state, is_v2))
+        Ok(OverlayStateProvider::new(provider, trie_updates, hashed_post_state, is_v2)
+            .with_trie_table_kind(self.trie_table_kind))
     }
 }
 
@@ -548,6 +570,7 @@ pub struct OverlayStateProvider<Provider: DBProvider> {
     trie_updates: Arc<TrieUpdatesSorted>,
     hashed_post_state: Arc<HashedPostStateSorted>,
     is_v2: bool,
+    trie_table_kind: TrieTableKind,
 }
 
 impl<Provider> OverlayStateProvider<Provider>
@@ -562,7 +585,18 @@ where
         hashed_post_state: Arc<HashedPostStateSorted>,
         is_v2: bool,
     ) -> Self {
-        Self { provider, trie_updates, hashed_post_state, is_v2 }
+        Self {
+            provider,
+            trie_updates,
+            hashed_post_state,
+            is_v2,
+            trie_table_kind: TrieTableKind::Canonical,
+        }
+    }
+
+    const fn with_trie_table_kind(mut self, trie_table_kind: TrieTableKind) -> Self {
+        self.trie_table_kind = trie_table_kind;
+        self
     }
 }
 
@@ -584,14 +618,27 @@ where
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
         let tx = self.provider.tx_ref();
         let trie_updates = self.trie_updates.as_ref();
-        let cursor: Box<dyn TrieCursor + Send> = if self.is_v2 {
-            Box::new(DatabaseAccountTrieCursor::<_, PackedKeyAdapter>::new(
-                tx.cursor_read::<PackedAccountsTrie>()?,
-            ))
-        } else {
-            Box::new(DatabaseAccountTrieCursor::<_, LegacyKeyAdapter>::new(
-                tx.cursor_read::<tables::AccountsTrie>()?,
-            ))
+        let cursor: Box<dyn TrieCursor + Send> = match (self.trie_table_kind, self.is_v2) {
+            (TrieTableKind::Canonical, true) => Box::new(
+                DatabaseAccountTrieCursor::<_, PackedKeyAdapter>::new(
+                    tx.cursor_read::<PackedAccountsTrie>()?,
+                ),
+            ),
+            (TrieTableKind::Canonical, false) => Box::new(
+                DatabaseAccountTrieCursor::<_, LegacyKeyAdapter>::new(
+                    tx.cursor_read::<tables::AccountsTrie>()?,
+                ),
+            ),
+            (TrieTableKind::Provable, true) => Box::new(
+                DatabaseProvableAccountTrieCursor::<_, PackedKeyAdapter>::new(
+                    tx.cursor_read::<PackedProvableAccountsTrie>()?,
+                ),
+            ),
+            (TrieTableKind::Provable, false) => Box::new(
+                DatabaseProvableAccountTrieCursor::<_, LegacyKeyAdapter>::new(
+                    tx.cursor_read::<tables::ProvableAccountsTrie>()?,
+                ),
+            ),
         };
         Ok(InMemoryTrieCursor::new_account(cursor, trie_updates))
     }
@@ -602,16 +649,31 @@ where
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         let tx = self.provider.tx_ref();
         let trie_updates = self.trie_updates.as_ref();
-        let cursor: Box<dyn TrieStorageCursor + Send> = if self.is_v2 {
-            Box::new(DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
-                tx.cursor_dup_read::<PackedStoragesTrie>()?,
-                hashed_address,
-            ))
-        } else {
-            Box::new(DatabaseStorageTrieCursor::<_, LegacyKeyAdapter>::new(
-                tx.cursor_dup_read::<tables::StoragesTrie>()?,
-                hashed_address,
-            ))
+        let cursor: Box<dyn TrieStorageCursor + Send> = match (self.trie_table_kind, self.is_v2) {
+            (TrieTableKind::Canonical, true) => Box::new(
+                DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
+                    tx.cursor_dup_read::<PackedStoragesTrie>()?,
+                    hashed_address,
+                ),
+            ),
+            (TrieTableKind::Canonical, false) => Box::new(
+                DatabaseStorageTrieCursor::<_, LegacyKeyAdapter>::new(
+                    tx.cursor_dup_read::<tables::StoragesTrie>()?,
+                    hashed_address,
+                ),
+            ),
+            (TrieTableKind::Provable, true) => Box::new(
+                DatabaseProvableStorageTrieCursor::<_, PackedKeyAdapter>::new(
+                    tx.cursor_dup_read::<PackedProvableStoragesTrie>()?,
+                    hashed_address,
+                ),
+            ),
+            (TrieTableKind::Provable, false) => Box::new(
+                DatabaseProvableStorageTrieCursor::<_, LegacyKeyAdapter>::new(
+                    tx.cursor_dup_read::<tables::ProvableStoragesTrie>()?,
+                    hashed_address,
+                ),
+            ),
         };
         Ok(InMemoryTrieCursor::new_storage(cursor, trie_updates, hashed_address))
     }

@@ -224,6 +224,58 @@ where
     }
 }
 
+/// Wrapper struct for database transactions using provable trie tables.
+#[derive(Debug, Clone)]
+pub struct DatabaseProvableTrieCursorFactory<T, A: ProvableTrieTableAdapter> {
+    tx: T,
+    _adapter: PhantomData<A>,
+}
+
+impl<T, A: ProvableTrieTableAdapter> DatabaseProvableTrieCursorFactory<T, A> {
+    /// Create new [`DatabaseProvableTrieCursorFactory`].
+    pub const fn new(tx: T) -> Self {
+        Self { tx, _adapter: PhantomData }
+    }
+}
+
+impl<TX, A> TrieCursorFactory for DatabaseProvableTrieCursorFactory<&TX, A>
+where
+    TX: DbTx,
+    A: ProvableTrieTableAdapter,
+{
+    type AccountTrieCursor<'a>
+        = DatabaseProvableAccountTrieCursor<
+        <TX as DbTx>::Cursor<<A as ProvableTrieTableAdapter>::AccountTrieTable>,
+        A,
+    >
+    where
+        Self: 'a;
+
+    type StorageTrieCursor<'a>
+        = DatabaseProvableStorageTrieCursor<
+        <TX as DbTx>::DupCursor<<A as ProvableTrieTableAdapter>::StorageTrieTable>,
+        A,
+    >
+    where
+        Self: 'a;
+
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
+        Ok(DatabaseProvableAccountTrieCursor::new(
+            self.tx.cursor_read::<<A as ProvableTrieTableAdapter>::AccountTrieTable>()?,
+        ))
+    }
+
+    fn storage_trie_cursor(
+        &self,
+        hashed_address: B256,
+    ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
+        Ok(DatabaseProvableStorageTrieCursor::new(
+            self.tx.cursor_dup_read::<<A as ProvableTrieTableAdapter>::StorageTrieTable>()?,
+            hashed_address,
+        ))
+    }
+}
+
 /// A cursor over the account trie.
 #[derive(Debug)]
 pub struct DatabaseAccountTrieCursor<C, A: TrieKeyAdapter>(C, PhantomData<A>);
@@ -386,6 +438,134 @@ impl<C, A> TrieStorageCursor for DatabaseStorageTrieCursor<C, A>
 where
     A: TrieTableAdapter,
     C: DbCursorRO<A::StorageTrieTable> + DbDupCursorRO<A::StorageTrieTable> + Send,
+{
+    fn set_hashed_address(&mut self, hashed_address: B256) {
+        self.hashed_address = hashed_address;
+    }
+}
+
+/// A cursor over provable account trie nodes stored in the database.
+#[derive(Debug)]
+pub struct DatabaseProvableAccountTrieCursor<C, A: ProvableTrieTableAdapter>(C, PhantomData<A>);
+
+impl<C, A: ProvableTrieTableAdapter> DatabaseProvableAccountTrieCursor<C, A> {
+    /// Create a new provable account trie cursor.
+    pub const fn new(cursor: C) -> Self {
+        Self(cursor, PhantomData)
+    }
+}
+
+impl<C, A> TrieCursor for DatabaseProvableAccountTrieCursor<C, A>
+where
+    A: ProvableTrieTableAdapter,
+    C: DbCursorRO<<A as ProvableTrieTableAdapter>::AccountTrieTable> + Send,
+{
+    fn seek_exact(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        Ok(self
+            .0
+            .seek_exact(A::AccountKey::from(key))?
+            .map(|value| (A::account_key_to_nibbles(&value.0), value.1)))
+    }
+
+    fn seek(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        Ok(self
+            .0
+            .seek(A::AccountKey::from(key))?
+            .map(|value| (A::account_key_to_nibbles(&value.0), value.1)))
+    }
+
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        Ok(self.0.next()?.map(|value| (A::account_key_to_nibbles(&value.0), value.1)))
+    }
+
+    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+        Ok(self.0.current()?.map(|(k, _)| A::account_key_to_nibbles(&k)))
+    }
+
+    fn reset(&mut self) {
+        // No-op for database cursors
+    }
+}
+
+/// A cursor over provable storage trie nodes stored in the database.
+#[derive(Debug)]
+pub struct DatabaseProvableStorageTrieCursor<C, A: ProvableTrieTableAdapter> {
+    /// The underlying cursor.
+    pub cursor: C,
+    /// Hashed address used for cursor positioning.
+    hashed_address: B256,
+    _adapter: PhantomData<A>,
+}
+
+impl<C, A: ProvableTrieTableAdapter> DatabaseProvableStorageTrieCursor<C, A> {
+    /// Create a new provable storage trie cursor.
+    pub const fn new(cursor: C, hashed_address: B256) -> Self {
+        Self { cursor, hashed_address, _adapter: PhantomData }
+    }
+}
+
+impl<C, A> TrieCursor for DatabaseProvableStorageTrieCursor<C, A>
+where
+    A: ProvableTrieTableAdapter,
+    C: DbCursorRO<<A as ProvableTrieTableAdapter>::StorageTrieTable>
+        + DbDupCursorRO<<A as ProvableTrieTableAdapter>::StorageTrieTable>
+        + Send,
+{
+    fn seek_exact(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        let subkey = A::StorageSubKey::from(key);
+        Ok(self
+            .cursor
+            .seek_by_key_subkey(self.hashed_address, subkey.clone())?
+            .filter(|e| *e.nibbles() == subkey)
+            .map(|value| {
+                let (subkey, node) = value.into_parts();
+                (A::subkey_to_nibbles(&subkey), node)
+            }))
+    }
+
+    fn seek(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        Ok(self.cursor.seek_by_key_subkey(self.hashed_address, A::StorageSubKey::from(key))?.map(
+            |value| {
+                let (subkey, node) = value.into_parts();
+                (A::subkey_to_nibbles(&subkey), node)
+            },
+        ))
+    }
+
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        Ok(self.cursor.next_dup()?.map(|(_, value)| {
+            let (subkey, node) = value.into_parts();
+            (A::subkey_to_nibbles(&subkey), node)
+        }))
+    }
+
+    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+        Ok(self.cursor.current()?.map(|(_, v)| A::subkey_to_nibbles(v.nibbles())))
+    }
+
+    fn reset(&mut self) {
+        // No-op for database cursors
+    }
+}
+
+impl<C, A> TrieStorageCursor for DatabaseProvableStorageTrieCursor<C, A>
+where
+    A: ProvableTrieTableAdapter,
+    C: DbCursorRO<<A as ProvableTrieTableAdapter>::StorageTrieTable>
+        + DbDupCursorRO<<A as ProvableTrieTableAdapter>::StorageTrieTable>
+        + Send,
 {
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.hashed_address = hashed_address;
