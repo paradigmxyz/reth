@@ -157,9 +157,7 @@ jobs:
           github-token: ${{ secrets.DEREK_BENCH_ACK_TOKEN }}
           script: |
             const org = 'paradigmxyz';
-            const allowedUsers = new Set(['rkrasiuk']);
             const checkMembership = async (username) => {
-              if (allowedUsers.has(username)) return true;
               try {
                 const { status } = await github.rest.orgs.checkMembershipForUser({ org, username });
                 return status === 204 || status === 302;
@@ -759,7 +757,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
         continue-on-error: true
-      - uses: astral-sh/setup-uv@bd01e18f51369d5a26f1651c3cb451d3417e3bba # v6.3.1
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
 
       - name: Mask OTLP endpoints
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -1467,39 +1465,47 @@ jobs:
           CHART_DIR="pr/${PR_NUMBER}/${RUN_ID}"
           CHARTS_REPO="https://x-access-token:${DEREK_TOKEN}@github.com/decofe/reth-bench-charts.git"
 
-          TMP_DIR=$(mktemp -d)
-          if git clone --depth 1 --filter=blob:none --sparse "${CHARTS_REPO}" "${TMP_DIR}" 2>/dev/null; then
-            git -C "${TMP_DIR}" sparse-checkout set --no-cone "${CHART_DIR}"
-            true
-          else
-            git init "${TMP_DIR}"
-            git -C "${TMP_DIR}" remote add origin "${CHARTS_REPO}"
-          fi
-          .github/scripts/configure-git-token-user.sh "${TMP_DIR}" "${DEREK_TOKEN}"
+          TMP_DIR=""
+          prepare_artifacts() {
+            if [ -n "${TMP_DIR}" ]; then
+              rm -rf "${TMP_DIR}"
+            fi
 
-          mkdir -p "${TMP_DIR}/${CHART_DIR}"
-          cp "$BENCH_WORK_DIR"/charts/*.png "${TMP_DIR}/${CHART_DIR}/"
-          if [ "${BENCH_TRACING_CHROME:-false}" = "true" ]; then
-            TRACE_DIR="${CHART_DIR}/tracing-chrome"
-            mkdir -p "${TMP_DIR}/${TRACE_DIR}"
-            mapfile -t RUN_DIRS < <(find "$BENCH_WORK_DIR" -mindepth 1 -maxdepth 1 -type d \( -name 'baseline-*' -o -name 'feature-*' \) -printf '%f\n' | sort -V)
-            for run_dir in "${RUN_DIRS[@]}"; do
-              TRACE="$BENCH_WORK_DIR/$run_dir/tracing-chrome-profile.json"
-              if [ ! -f "$TRACE" ]; then continue; fi
+            TMP_DIR=$(mktemp -d)
+            if git clone --depth 1 --filter=blob:none --sparse "${CHARTS_REPO}" "${TMP_DIR}" 2>/dev/null; then
+              git -C "${TMP_DIR}" sparse-checkout set --no-cone "${CHART_DIR}"
+              true
+            else
+              git init "${TMP_DIR}"
+              git -C "${TMP_DIR}" remote add origin "${CHARTS_REPO}"
+            fi
+            .github/scripts/configure-git-token-user.sh "${TMP_DIR}" "${DEREK_TOKEN}"
 
-              TRACE_SIZE=$(du -h "$TRACE" | cut -f1)
-              echo "Adding $run_dir Chrome trace (${TRACE_SIZE}) to benchmark artifacts..."
-              gzip -c "$TRACE" > "${TMP_DIR}/${TRACE_DIR}/${run_dir}.json.gz"
-            done
-          fi
-          git -C "${TMP_DIR}" add "${CHART_DIR}"
+            mkdir -p "${TMP_DIR}/${CHART_DIR}"
+            cp "$BENCH_WORK_DIR"/charts/*.png "${TMP_DIR}/${CHART_DIR}/"
+            if [ "${BENCH_TRACING_CHROME:-false}" = "true" ]; then
+              TRACE_DIR="${CHART_DIR}/tracing-chrome"
+              mkdir -p "${TMP_DIR}/${TRACE_DIR}"
+              mapfile -t RUN_DIRS < <(find "$BENCH_WORK_DIR" -mindepth 1 -maxdepth 1 -type d \( -name 'baseline-*' -o -name 'feature-*' \) -printf '%f\n' | sort -V)
+              for run_dir in "${RUN_DIRS[@]}"; do
+                TRACE="$BENCH_WORK_DIR/$run_dir/tracing-chrome-profile.json"
+                if [ ! -f "$TRACE" ]; then continue; fi
+
+                TRACE_SIZE=$(du -h "$TRACE" | cut -f1)
+                echo "Adding $run_dir Chrome trace (${TRACE_SIZE}) to benchmark artifacts..."
+                gzip -c "$TRACE" > "${TMP_DIR}/${TRACE_DIR}/${run_dir}.json.gz"
+              done
+            fi
+            git -C "${TMP_DIR}" add "${CHART_DIR}"
+          }
+
+          prepare_artifacts
           if git -C "${TMP_DIR}" diff --cached --quiet; then
             echo "Artifacts for ${CHART_DIR} are already present, skipping push"
             PUSH_SHA="$(git -C "${TMP_DIR}" rev-parse HEAD)"
           else
-            git -C "${TMP_DIR}" commit -m "bench artifacts for PR #${PR_NUMBER} run ${RUN_ID}"
-
             for attempt in 1 2 3 4 5; do
+              git -C "${TMP_DIR}" commit -m "bench artifacts for PR #${PR_NUMBER} run ${RUN_ID}"
               if git -C "${TMP_DIR}" push origin HEAD:main; then
                 break
               fi
@@ -1509,8 +1515,7 @@ jobs:
                 exit 1
               fi
               sleep "$attempt"
-              git -C "${TMP_DIR}" fetch origin main
-              git -C "${TMP_DIR}" rebase origin/main
+              prepare_artifacts
             done
 
             PUSH_SHA="$(git -C "${TMP_DIR}" rev-parse HEAD)"
