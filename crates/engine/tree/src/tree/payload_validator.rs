@@ -1990,14 +1990,15 @@ where
                     &computed.trie_updates,
                 ) {
                     Ok(changesets) => {
+                        let elapsed = changeset_start.elapsed();
+                        pending_changeset_guard.resolve(block_number, Arc::new(changesets));
+
                         debug!(
                             target: "engine::tree::changeset",
                             ?block_number,
-                            elapsed = ?changeset_start.elapsed(),
+                            elapsed = ?elapsed,
                             "Computed and caching changesets"
                         );
-
-                        pending_changeset_guard.resolve(block_number, Arc::new(changesets));
                     }
                     Err(e) => {
                         warn!(
