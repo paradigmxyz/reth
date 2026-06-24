@@ -201,6 +201,189 @@ impl HashedStateMode {
     }
 }
 
+/// Inputs required to execute an Ethereum block with evm2.
+pub(crate) struct BlockExecutionInput<'a, DB> {
+    spec_id: SpecId,
+    block_env: BlockEnv,
+    database: DB,
+    block_number: u64,
+    context: BlockExecutionContext<'a>,
+    precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
+}
+
+impl<'a, DB> BlockExecutionInput<'a, DB> {
+    /// Creates a new Ethereum block execution input.
+    pub(crate) fn new(
+        spec_id: SpecId,
+        block_env: BlockEnv,
+        database: DB,
+        block_number: u64,
+        context: BlockExecutionContext<'a>,
+        precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
+    ) -> Self {
+        Self { spec_id, block_env, database, block_number, context, precompiles }
+    }
+}
+
+impl<DB> BlockExecutionInput<'_, DB>
+where
+    DB: DynDatabase + 'static,
+{
+    /// Executes recovered Ethereum transactions.
+    pub(crate) fn execute_recovered_transactions<ErrorDB>(
+        self,
+        transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
+    ) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError<ErrorDB::Error>>
+    where
+        ErrorDB: Database + 'static,
+    {
+        match self.execute_fallible_envelopes::<ErrorDB, Infallible, Infallible, _, _, _, _>(
+            transactions.into_iter().map(recovered_tx_envelope).map(Ok::<_, Infallible>),
+            ExecutionHooks::new(|_| {}, ignore_receipt, |_| {}, HashedStateMode::OutputOnly),
+        ) {
+            Ok(output) => Ok(output),
+            Err(PayloadExecutionError::Execution(err)) => Err(err),
+            Err(PayloadExecutionError::Transaction(err) | PayloadExecutionError::Receipt(err)) => {
+                match err {}
+            }
+        }
+    }
+
+    /// Executes a fallible stream of EVM-native recovered transaction envelopes.
+    ///
+    /// This consumes each transaction only when execution reaches it, so upstream transaction
+    /// conversion can continue in parallel with earlier transaction execution.
+    #[expect(clippy::type_complexity)]
+    pub(crate) fn execute_fallible_envelopes<ErrorDB, TxErr, ReceiptErr, I, F, R, H>(
+        self,
+        transactions: I,
+        hooks: ExecutionHooks<F, R, H>,
+    ) -> Result<
+        BlockExecutionOutput<Receipt>,
+        PayloadExecutionError<EthExecutionError<ErrorDB::Error>, TxErr, ReceiptErr>,
+    >
+    where
+        ErrorDB: Database + 'static,
+        I: IntoIterator<Item = Result<RecoveredTxEnvelope, TxErr>>,
+        F: FnMut(usize),
+        R: for<'receipt> FnMut(usize, &'receipt Receipt) -> Result<(), ReceiptErr>,
+        H: FnMut(HashedPostState),
+    {
+        let Self { spec_id, block_env, database, block_number, context, precompiles } = self;
+        let ExecutionHooks {
+            mut on_transaction_executed,
+            mut on_receipt,
+            mut on_hashed_state_update,
+            hashed_state_mode,
+        } = hooks;
+
+        let block_beneficiary = block_env.beneficiary;
+        let mut version = Version::new(spec_id);
+        version.chain_id = context.chain_id;
+        let mut evm = Evm::<BaseEvmTypes>::new_with_execution_config(
+            ExecutionConfig::for_spec_and_version(spec_id, version),
+            spec_id,
+            block_env,
+            ethereum_tx_registry(spec_id),
+            database,
+            precompiles,
+        );
+        let mut block_state = BlockStateAccumulator::new();
+        let mut hashed_state =
+            hashed_state_mode.output().then(HashedPostStateSink::<KeccakKeyHasher>::default);
+        pre_execution_system_call_state_changes::<ErrorDB>(
+            &mut evm,
+            &mut block_state,
+            hashed_state.as_mut(),
+            hashed_state_mode.stream(),
+            &mut on_hashed_state_update,
+            spec_id,
+            block_number,
+            context,
+        )?;
+        let mut receipts = Vec::new();
+        let mut cumulative_gas_used = 0;
+
+        for (index, transaction) in transactions.into_iter().enumerate() {
+            let transaction = transaction.map_err(PayloadExecutionError::Transaction)?;
+            let tx_type =
+                TxType::try_from(transaction.ty()).expect("transaction envelope has valid type");
+            let outcome = execute_transaction::<ErrorDB>(
+                &mut evm,
+                &mut block_state,
+                hashed_state.as_mut(),
+                hashed_state_mode.stream(),
+                &mut on_hashed_state_update,
+                &transaction,
+            )?;
+            cumulative_gas_used += outcome.gas_used;
+            let receipt = RethReceiptBuilder.build_receipt(tx_type, outcome, cumulative_gas_used);
+            on_receipt(index, &receipt).map_err(PayloadExecutionError::Receipt)?;
+            receipts.push(receipt);
+            on_transaction_executed(index + 1);
+        }
+
+        let mut requests = block_requests_from_receipts::<ErrorDB>(spec_id, context, &receipts)?;
+        post_execution_system_call_state_changes::<ErrorDB>(
+            &mut evm,
+            &mut block_state,
+            hashed_state.as_mut(),
+            hashed_state_mode.stream(),
+            &mut on_hashed_state_update,
+            spec_id,
+            context,
+            &mut requests,
+        )?;
+
+        post_block_balance_state_changes::<ErrorDB>(
+            &mut evm,
+            &mut block_state,
+            hashed_state.as_mut(),
+            hashed_state_mode.stream(),
+            &mut on_hashed_state_update,
+            spec_id,
+            block_number,
+            block_beneficiary,
+            context.ommers,
+            context.withdrawals,
+        )?;
+
+        let mut output = RethReceiptBuilder
+            .build_block_output_from_receipts_and_state_with_hashed_state(
+                receipts,
+                block_state,
+                hashed_state.map(HashedPostStateSink::into_hashed_post_state),
+            );
+        output.result.requests = requests;
+
+        Ok(output)
+    }
+}
+
+/// Hooks invoked while executing an Ethereum block.
+pub(crate) struct ExecutionHooks<F, R, H> {
+    on_transaction_executed: F,
+    on_receipt: R,
+    on_hashed_state_update: H,
+    hashed_state_mode: HashedStateMode,
+}
+
+impl<F, R, H> ExecutionHooks<F, R, H> {
+    /// Creates execution hooks.
+    pub(crate) const fn new(
+        on_transaction_executed: F,
+        on_receipt: R,
+        on_hashed_state_update: H,
+        hashed_state_mode: HashedStateMode,
+    ) -> Self {
+        Self { on_transaction_executed, on_receipt, on_hashed_state_update, hashed_state_mode }
+    }
+}
+
+const fn ignore_receipt(_index: usize, _receipt: &Receipt) -> Result<(), Infallible> {
+    Ok(())
+}
+
 /// Executes a block worth of recovered Ethereum transactions with the active EVM.
 #[cfg(test)]
 fn execute_block<DB>(
@@ -285,256 +468,15 @@ fn execute_block_with_context_and_precompiles<DB>(
 where
     DB: Database + 'static,
 {
-    execute_block_with_dyn_database_context_and_precompiles::<DB>(
+    BlockExecutionInput::new(
         spec_id,
         block_env,
         Db::new(database),
         block_number,
-        transactions,
         context,
         precompiles,
     )
-}
-
-/// Executes a block worth of recovered Ethereum transactions with additional block-level context,
-/// the provided precompile provider, and a dynamic EVM database.
-pub(crate) fn execute_block_with_dyn_database_context_and_precompiles<DB>(
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    database: impl DynDatabase + 'static,
-    block_number: u64,
-    transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
-    context: BlockExecutionContext<'_>,
-    precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
-) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError<DB::Error>>
-where
-    DB: Database + 'static,
-{
-    execute_block_with_context_precompiles_and_hook::<DB>(
-        spec_id,
-        block_env,
-        database,
-        block_number,
-        transactions,
-        context,
-        precompiles,
-        |_| {},
-    )
-}
-
-/// Executes a block worth of recovered Ethereum transactions with additional block-level context,
-/// invoking `on_transaction_executed` after each transaction is committed to the block state.
-#[expect(clippy::too_many_arguments)]
-fn execute_block_with_context_precompiles_and_hook<DB>(
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    database: impl DynDatabase + 'static,
-    block_number: u64,
-    transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
-    context: BlockExecutionContext<'_>,
-    precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
-    on_transaction_executed: impl FnMut(usize),
-) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError<DB::Error>>
-where
-    DB: Database + 'static,
-{
-    execute_block_with_context_precompiles_and_hook_envelopes::<DB>(
-        spec_id,
-        block_env,
-        database,
-        block_number,
-        transactions.into_iter().map(recovered_tx_envelope),
-        context,
-        precompiles,
-        on_transaction_executed,
-    )
-}
-
-/// Executes a block worth of EVM-native recovered transactions with additional block-level
-/// context, invoking `on_transaction_executed` after each transaction is committed to the block
-/// state.
-#[expect(clippy::too_many_arguments)]
-pub(crate) fn execute_block_with_context_precompiles_and_hook_envelopes<DB>(
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    database: impl DynDatabase + 'static,
-    block_number: u64,
-    transactions: impl IntoIterator<Item = RecoveredTxEnvelope>,
-    context: BlockExecutionContext<'_>,
-    precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
-    on_transaction_executed: impl FnMut(usize),
-) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError<DB::Error>>
-where
-    DB: Database + 'static,
-{
-    execute_block_with_context_precompiles_and_hooks_envelopes_with_hashed_state_mode::<DB>(
-        spec_id,
-        block_env,
-        database,
-        block_number,
-        transactions,
-        context,
-        precompiles,
-        on_transaction_executed,
-        |_| {},
-        HashedStateMode::OutputOnly,
-    )
-}
-
-/// Executes a block worth of EVM-native recovered transactions with additional block-level
-/// context, invoking `on_transaction_executed` after each transaction is committed to the block
-/// state and optionally producing hashed post-state according to `hashed_state_mode`.
-#[expect(clippy::too_many_arguments)]
-pub(crate) fn execute_block_with_context_precompiles_and_hooks_envelopes_with_hashed_state_mode<
-    DB,
->(
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    database: impl DynDatabase + 'static,
-    block_number: u64,
-    transactions: impl IntoIterator<Item = RecoveredTxEnvelope>,
-    context: BlockExecutionContext<'_>,
-    precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
-    on_transaction_executed: impl FnMut(usize),
-    on_hashed_state_update: impl FnMut(HashedPostState),
-    hashed_state_mode: HashedStateMode,
-) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError<DB::Error>>
-where
-    DB: Database + 'static,
-{
-    match execute_block_with_context_precompiles_and_fallible_hooks_envelopes_with_hashed_state_mode::<
-        DB,
-        Infallible,
-        Infallible,
-    >(
-        spec_id,
-        block_env,
-        database,
-        block_number,
-        transactions.into_iter().map(Ok::<_, Infallible>),
-        context,
-        precompiles,
-        on_transaction_executed,
-        |_, _| Ok::<(), Infallible>(()),
-        on_hashed_state_update,
-        hashed_state_mode,
-    ) {
-        Ok(output) => Ok(output),
-        Err(PayloadExecutionError::Execution(err)) => Err(err),
-        Err(PayloadExecutionError::Transaction(err) | PayloadExecutionError::Receipt(err)) => {
-            match err {}
-        }
-    }
-}
-
-/// Executes a block worth of EVM-native recovered transactions from a fallible transaction stream.
-///
-/// This consumes each transaction only when execution reaches it, so upstream transaction
-/// conversion can continue in parallel with earlier transaction execution.
-#[expect(clippy::too_many_arguments, clippy::type_complexity)]
-pub(crate) fn execute_block_with_context_precompiles_and_fallible_hooks_envelopes_with_hashed_state_mode<
-    DB,
-    TxErr,
-    ReceiptErr,
->(
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    database: impl DynDatabase + 'static,
-    block_number: u64,
-    transactions: impl IntoIterator<Item = Result<RecoveredTxEnvelope, TxErr>>,
-    context: BlockExecutionContext<'_>,
-    precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
-    mut on_transaction_executed: impl FnMut(usize),
-    mut on_receipt: impl FnMut(usize, &Receipt) -> Result<(), ReceiptErr>,
-    mut on_hashed_state_update: impl FnMut(HashedPostState),
-    hashed_state_mode: HashedStateMode,
-) -> Result<
-    BlockExecutionOutput<Receipt>,
-    PayloadExecutionError<EthExecutionError<DB::Error>, TxErr, ReceiptErr>,
->
-where
-    DB: Database + 'static,
-{
-    let block_beneficiary = block_env.beneficiary;
-    let mut version = Version::new(spec_id);
-    version.chain_id = context.chain_id;
-    let mut evm = Evm::<BaseEvmTypes>::new_with_execution_config(
-        ExecutionConfig::for_spec_and_version(spec_id, version),
-        spec_id,
-        block_env,
-        ethereum_tx_registry(spec_id),
-        database,
-        precompiles,
-    );
-    let mut block_state = BlockStateAccumulator::new();
-    let mut hashed_state =
-        hashed_state_mode.output().then(HashedPostStateSink::<KeccakKeyHasher>::default);
-    pre_execution_system_call_state_changes::<DB>(
-        &mut evm,
-        &mut block_state,
-        hashed_state.as_mut(),
-        hashed_state_mode.stream(),
-        &mut on_hashed_state_update,
-        spec_id,
-        block_number,
-        context,
-    )?;
-    let mut receipts = Vec::new();
-    let mut cumulative_gas_used = 0;
-
-    for (index, transaction) in transactions.into_iter().enumerate() {
-        let transaction = transaction.map_err(PayloadExecutionError::Transaction)?;
-        let tx_type =
-            TxType::try_from(transaction.ty()).expect("transaction envelope has valid type");
-        let outcome = execute_transaction::<DB>(
-            &mut evm,
-            &mut block_state,
-            hashed_state.as_mut(),
-            hashed_state_mode.stream(),
-            &mut on_hashed_state_update,
-            &transaction,
-        )?;
-        cumulative_gas_used += outcome.gas_used;
-        let receipt = RethReceiptBuilder.build_receipt(tx_type, outcome, cumulative_gas_used);
-        on_receipt(index, &receipt).map_err(PayloadExecutionError::Receipt)?;
-        receipts.push(receipt);
-        on_transaction_executed(index + 1);
-    }
-
-    let mut requests = block_requests_from_receipts::<DB>(spec_id, context, &receipts)?;
-    post_execution_system_call_state_changes::<DB>(
-        &mut evm,
-        &mut block_state,
-        hashed_state.as_mut(),
-        hashed_state_mode.stream(),
-        &mut on_hashed_state_update,
-        spec_id,
-        context,
-        &mut requests,
-    )?;
-
-    post_block_balance_state_changes::<DB>(
-        &mut evm,
-        &mut block_state,
-        hashed_state.as_mut(),
-        hashed_state_mode.stream(),
-        &mut on_hashed_state_update,
-        spec_id,
-        block_number,
-        block_beneficiary,
-        context.ommers,
-        context.withdrawals,
-    )?;
-
-    let mut output = RethReceiptBuilder
-        .build_block_output_from_receipts_and_state_with_hashed_state(
-            receipts,
-            block_state,
-            hashed_state.map(HashedPostStateSink::into_hashed_post_state),
-        );
-    output.result.requests = requests;
-
-    Ok(output)
+    .execute_recovered_transactions::<DB>(transactions)
 }
 
 fn map_handler_error<DB>(
@@ -1185,24 +1127,23 @@ mod tests {
         let transaction = legacy_transfer(caller, target, U256::from(1));
 
         let mut executed = 0;
-        let result =
-            execute_block_with_context_precompiles_and_fallible_hooks_envelopes_with_hashed_state_mode::<
-                TestDatabase,
-                TestTxError,
-                Infallible,
-            >(
-                SpecId::FRONTIER,
-                BlockEnv::default(),
-                Db::new(database),
-                1,
-                [Ok(recovered_tx_envelope(transaction)), Err(TestTxError)],
-                BlockExecutionContext::default(),
-                Box::new(Precompiles::base(SpecId::FRONTIER)),
+        let result = BlockExecutionInput::new(
+            SpecId::FRONTIER,
+            BlockEnv::default(),
+            Db::new(database),
+            1,
+            BlockExecutionContext::default(),
+            Box::new(Precompiles::base(SpecId::FRONTIER)),
+        )
+        .execute_fallible_envelopes::<TestDatabase, TestTxError, Infallible, _, _, _, _>(
+            [Ok(recovered_tx_envelope(transaction)), Err(TestTxError)],
+            ExecutionHooks::new(
                 |count| executed = count,
-                |_, _| Ok::<(), Infallible>(()),
+                ignore_receipt,
                 |_| {},
                 HashedStateMode::OutputOnly,
-            );
+            ),
+        );
 
         assert_eq!(executed, 1);
         assert!(matches!(result, Err(PayloadExecutionError::Transaction(TestTxError))));
@@ -1224,28 +1165,27 @@ mod tests {
         let second = legacy_transfer(other, target, U256::from(2));
 
         let mut streamed_receipts = Vec::new();
-        let output =
-            execute_block_with_context_precompiles_and_fallible_hooks_envelopes_with_hashed_state_mode::<
-                TestDatabase,
-                Infallible,
-                Infallible,
-            >(
-                SpecId::FRONTIER,
-                BlockEnv::default(),
-                Db::new(database),
-                1,
-                [Ok(recovered_tx_envelope(first)), Ok(recovered_tx_envelope(second))],
-                BlockExecutionContext::default(),
-                Box::new(Precompiles::base(SpecId::FRONTIER)),
+        let output = BlockExecutionInput::new(
+            SpecId::FRONTIER,
+            BlockEnv::default(),
+            Db::new(database),
+            1,
+            BlockExecutionContext::default(),
+            Box::new(Precompiles::base(SpecId::FRONTIER)),
+        )
+        .execute_fallible_envelopes::<TestDatabase, Infallible, Infallible, _, _, _, _>(
+            [Ok(recovered_tx_envelope(first)), Ok(recovered_tx_envelope(second))],
+            ExecutionHooks::new(
                 |_| {},
-                |index, receipt| {
+                |index, receipt: &Receipt| {
                     streamed_receipts.push((index, receipt.clone()));
                     Ok::<(), Infallible>(())
                 },
                 |_| {},
                 HashedStateMode::OutputOnly,
-            )
-            .expect("EVM execution succeeds");
+            ),
+        )
+        .expect("EVM execution succeeds");
 
         assert_eq!(streamed_receipts.len(), 2);
         assert_eq!(streamed_receipts[0].0, 0);
@@ -1269,22 +1209,24 @@ mod tests {
         let transaction = legacy_transfer(caller, target, U256::from(1));
 
         let mut streamed_updates = Vec::new();
-        let output =
-            execute_block_with_context_precompiles_and_hooks_envelopes_with_hashed_state_mode::<
-                TestDatabase,
-            >(
-                SpecId::FRONTIER,
-                BlockEnv::default(),
-                Db::new(database),
-                1,
-                [recovered_tx_envelope(transaction)],
-                BlockExecutionContext::default(),
-                Box::new(Precompiles::base(SpecId::FRONTIER)),
+        let output = BlockExecutionInput::new(
+            SpecId::FRONTIER,
+            BlockEnv::default(),
+            Db::new(database),
+            1,
+            BlockExecutionContext::default(),
+            Box::new(Precompiles::base(SpecId::FRONTIER)),
+        )
+        .execute_fallible_envelopes::<TestDatabase, Infallible, Infallible, _, _, _, _>(
+            [Ok(recovered_tx_envelope(transaction))],
+            ExecutionHooks::new(
                 |_| {},
+                ignore_receipt,
                 |update| streamed_updates.push(update),
                 HashedStateMode::StreamOnly,
-            )
-            .expect("EVM execution succeeds");
+            ),
+        )
+        .expect("EVM execution succeeds");
 
         assert!(output.hashed_state.is_none());
         assert!(!streamed_updates.is_empty());
@@ -1302,22 +1244,24 @@ mod tests {
         let transaction = legacy_transfer(caller, target, U256::from(1));
 
         let mut streamed_updates = Vec::new();
-        let output =
-            execute_block_with_context_precompiles_and_hooks_envelopes_with_hashed_state_mode::<
-                TestDatabase,
-            >(
-                SpecId::FRONTIER,
-                BlockEnv::default(),
-                Db::new(database),
-                1,
-                [recovered_tx_envelope(transaction)],
-                BlockExecutionContext::default(),
-                Box::new(Precompiles::base(SpecId::FRONTIER)),
+        let output = BlockExecutionInput::new(
+            SpecId::FRONTIER,
+            BlockEnv::default(),
+            Db::new(database),
+            1,
+            BlockExecutionContext::default(),
+            Box::new(Precompiles::base(SpecId::FRONTIER)),
+        )
+        .execute_fallible_envelopes::<TestDatabase, Infallible, Infallible, _, _, _, _>(
+            [Ok(recovered_tx_envelope(transaction))],
+            ExecutionHooks::new(
                 |_| {},
+                ignore_receipt,
                 |update| streamed_updates.push(update),
                 HashedStateMode::OutputOnly,
-            )
-            .expect("EVM execution succeeds");
+            ),
+        )
+        .expect("EVM execution succeeds");
 
         assert!(streamed_updates.is_empty());
         assert_hashed_state_matches_output(&output);

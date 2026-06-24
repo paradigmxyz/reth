@@ -2,10 +2,7 @@
 
 use crate::{
     block_env_with_blob_params,
-    execution::{
-        execute_block_with_context_precompiles_and_fallible_hooks_envelopes_with_hashed_state_mode,
-        execute_block_with_dyn_database_context_and_precompiles,
-    },
+    execution::{BlockExecutionInput, ExecutionHooks},
     spec_id, BlockExecutionContext, BlockSystemCalls, EthExecutionError, HashedStateMode,
     PayloadExecutionError,
 };
@@ -87,7 +84,7 @@ where
         };
         let spec_id = spec_id(self.chain_spec.as_ref(), header);
 
-        execute_block_with_dyn_database_context_and_precompiles::<ErrorDB>(
+        BlockExecutionInput::new(
             spec_id,
             block_env_with_blob_params(
                 header,
@@ -95,7 +92,6 @@ where
             ),
             database,
             header.number,
-            transactions,
             context,
             alloc::boxed::Box::new(CachedPrecompileProvider::new(
                 evm2::Precompiles::base(spec_id),
@@ -104,6 +100,7 @@ where
                 None,
             )),
         )
+        .execute_recovered_transactions::<ErrorDB>(transactions)
     }
 }
 
@@ -338,16 +335,11 @@ where
         let block_env = evm_env.block_env();
         let block_number = block_env.number.to::<u64>();
 
-        execute_block_with_context_precompiles_and_fallible_hooks_envelopes_with_hashed_state_mode::<
-            DB,
-            TxErr,
-            ReceiptErr,
-        >(
+        BlockExecutionInput::new(
             spec_id,
             block_env,
             Db::new(self.database),
             block_number,
-            transactions,
             context,
             alloc::boxed::Box::new(CachedPrecompileProvider::new(
                 evm2::Precompiles::base(spec_id),
@@ -355,10 +347,15 @@ where
                 spec_id,
                 None,
             )),
-            on_transaction_executed,
-            on_receipt,
-            on_hashed_state_update,
-            hashed_state_mode,
+        )
+        .execute_fallible_envelopes::<DB, TxErr, ReceiptErr, _, _, _, _>(
+            transactions,
+            ExecutionHooks::new(
+                on_transaction_executed,
+                on_receipt,
+                on_hashed_state_update,
+                hashed_state_mode,
+            ),
         )
     }
 }
