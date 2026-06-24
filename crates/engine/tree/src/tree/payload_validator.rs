@@ -242,20 +242,22 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
 /// Validation still queues JIT work and can use resident compiled code, but helper execution is
 /// paused during validation to minimize latency. Queued work resumes when validation exits, so JIT
 /// compilation is biased toward idle periods instead of competing with payload validation.
-struct JitPauseGuard<Evm: ConfigureEvm>(Evm);
+struct JitPauseGuard<Evm: ConfigureEvm>(Option<Evm>);
 
 impl<Evm: ConfigureEvm> JitPauseGuard<Evm> {
     fn new(evm_config: &Evm) -> Self {
         if let Some(jit_backend) = evm_config.jit_backend() {
             jit_backend.pause();
+            return Self(Some(evm_config.clone()));
         }
-        Self(evm_config.clone())
+        Self(None)
     }
 }
 
 impl<Evm: ConfigureEvm> Drop for JitPauseGuard<Evm> {
     fn drop(&mut self) {
-        if let Some(jit_backend) = self.0.jit_backend() {
+        let Some(evm_config) = &self.0 else { return };
+        if let Some(jit_backend) = evm_config.jit_backend() {
             jit_backend.resume();
         }
     }
