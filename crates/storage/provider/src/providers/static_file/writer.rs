@@ -416,9 +416,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         let valid_blocks = if actual_sidecar_blocks > 0 {
             let reader = ChangesetOffsetReader::new(&csoff_path, actual_sidecar_blocks)
                 .map_err(ProviderError::other)?;
-            let offsets = reader
-                .get_range(0, actual_sidecar_blocks)
-                .map_err(ProviderError::other)?;
+            let offsets =
+                reader.get_range(0, actual_sidecar_blocks).map_err(ProviderError::other)?;
 
             // Find last block where offset + num_changes <= actual_nippy_rows
             // This correctly handles rows=0 with offset=0, num_changes=0 (empty blocks)
