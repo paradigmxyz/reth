@@ -651,6 +651,8 @@ where
             return;
         }
 
+        let mut hashed_state = reth_trie::HashedPostState::default();
+
         if !account_changes.storage_changes.is_empty() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
             let mut storage_map = reth_trie::HashedStorage::new(false);
@@ -662,9 +664,7 @@ where
                 }
             }
 
-            let mut hashed_state = reth_trie::HashedPostState::default();
             hashed_state.storages.insert(hashed_address, storage_map);
-            let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
         }
 
         let existing_account = if account_fields.needs_parent_account() {
@@ -685,6 +685,10 @@ where
                             ?err,
                             "Failed to build provider for BAL account reads"
                         );
+                        if !hashed_state.is_empty() {
+                            let _ = to_sparse_trie_task
+                                .send(StateRootMessage::HashedStateUpdate(hashed_state));
+                        }
                         return;
                     }
                 };
@@ -707,7 +711,6 @@ where
         let account = account_fields.into_account(existing_account);
 
         let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
-        let mut hashed_state = reth_trie::HashedPostState::default();
         hashed_state.accounts.insert(hashed_address, Some(account));
 
         let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
