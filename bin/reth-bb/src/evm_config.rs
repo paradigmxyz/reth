@@ -271,23 +271,21 @@ where
         payload: &'a BigBlockData<ExecutionData>,
     ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
         let mut current_tx = 0;
-        let segments: Vec<_> = payload
-            .env_switches
-            .iter()
-            .map(|exec_data| {
-                let start_tx = current_tx;
-                let mut evm_env = self.inner.evm_env_for_payload(exec_data)?;
-                evm_env.cfg_env.disable_base_fee = true;
-                let ctx = self.inner.context_for_payload(exec_data)?;
-                current_tx += exec_data.payload.transactions().len();
-                Ok(BigBlockSegment { start_tx, evm_env, ctx })
-            })
-            .collect::<Result<_, Self::Error>>()?;
+        let mut segments = Vec::with_capacity(payload.env_switches.len());
+        for exec_data in &payload.env_switches {
+            let start_tx = current_tx;
+            let mut evm_env = self.inner.evm_env_for_payload(exec_data)?;
+            evm_env.cfg_env.disable_base_fee = true;
+            let ctx = self.inner.context_for_payload(exec_data)?;
+            current_tx += exec_data.payload.transactions().len();
+            segments.push(BigBlockSegment { start_tx, evm_env, ctx });
+        }
 
         let mut plan = BbEvmPlan::new(segments);
 
         // Add prior block hashes to the seeding list.
-        plan.block_hashes_to_seed.extend(payload.prior_block_hashes.clone());
+        plan.block_hashes_to_seed.reserve(payload.prior_block_hashes.len());
+        plan.block_hashes_to_seed.extend_from_slice(&payload.prior_block_hashes);
         plan.block_hashes_to_seed.sort_unstable_by_key(|(n, _)| *n);
 
         Ok(plan)

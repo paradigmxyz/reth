@@ -53,7 +53,7 @@ impl<'a> BbEvmPlan<'a> {
     /// Creates a new `BbEvmPlan` from segments and hardfork flags.
     pub(crate) fn new(segments: Vec<BigBlockSegment<'a>>) -> Self {
         // Pre-compute all inter-segment block hashes.
-        let mut block_hashes_to_seed = Vec::new();
+        let mut block_hashes_to_seed = Vec::with_capacity(segments.len().saturating_sub(1));
         for seg in segments.iter().skip(1) {
             let finished_block_number = seg.evm_env.block_env.number.saturating_to::<u64>() - 1;
             let finished_block_hash = seg.ctx.parent_hash;
