@@ -32,7 +32,10 @@ use reth_trie_sparse::{
     SparseTrie,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
-use tracing::{debug, debug_span, error, instrument, trace_span};
+use tracing::{debug, debug_span, error, instrument, trace_span, Span};
+
+const PARALLEL_STORAGE_UPDATE_MIN_TRIES: usize = 8;
+const PARALLEL_STORAGE_UPDATE_MIN_LEAVES: usize = 64;
 
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaParallelSparseTrie> {
@@ -562,49 +565,116 @@ where
         skip_all
     )]
     fn process_leaf_updates(&mut self, new: bool) -> SparseTrieResult<()> {
-        let storage_updates =
-            if new { &mut self.new_storage_updates } else { &mut self.storage_updates };
-
-        // Process all storage updates, skipping tries with no pending updates.
-        let span = trace_span!("process_storage_leaf_updates").entered();
-        for (address, updates) in storage_updates {
-            if updates.is_empty() {
-                continue;
-            }
-            let _enter = trace_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_trie_leaf_updates", a=%address).entered();
-
-            let trie = self.trie.get_or_create_storage_trie_mut(*address);
-            let fetched = self.fetched_storage_targets.entry(*address).or_default();
-            let mut targets = Vec::new();
-
-            let updates_len_before = updates.len();
-            trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
-                Entry::Occupied(mut entry) => {
-                    if min_len < *entry.get() {
-                        entry.insert(min_len);
-                        targets.push(ProofV2Target::new(path).with_min_len(min_len));
-                    }
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(min_len);
-                    targets.push(ProofV2Target::new(path).with_min_len(min_len));
-                }
-            })?;
-            let updates_len_after = updates.len();
-            self.storage_cache_hits += (updates_len_before - updates_len_after) as u64;
-            self.storage_cache_misses += updates_len_after as u64;
-
-            if !targets.is_empty() {
-                self.pending_targets.extend_storage_targets(address, targets);
-            }
-        }
-
-        drop(span);
+        self.process_storage_leaf_updates(new)?;
 
         // Process account trie updates and fill the account targets.
         self.process_account_leaf_updates(new)?;
 
         Ok(())
+    }
+
+    fn process_storage_leaf_updates(&mut self, new: bool) -> SparseTrieResult<()> {
+        let storage_updates = if new { &self.new_storage_updates } else { &self.storage_updates };
+        let addresses: Vec<_> = storage_updates
+            .iter()
+            .filter_map(|(address, updates)| (!updates.is_empty()).then_some(*address))
+            .collect();
+
+        if addresses.is_empty() {
+            return Ok(());
+        }
+
+        let span = trace_span!("process_storage_leaf_updates");
+        let _enter = span.clone().entered();
+
+        let total_updates = addresses
+            .iter()
+            .filter_map(|address| storage_updates.get(address).map(B256Map::len))
+            .sum::<usize>();
+
+        if addresses.len() < PARALLEL_STORAGE_UPDATE_MIN_TRIES
+            || total_updates < PARALLEL_STORAGE_UPDATE_MIN_LEAVES
+        {
+            for address in addresses {
+                let outcome = self.process_one_storage_leaf_update(new, address, &span)?;
+                self.apply_storage_update_outcome(outcome);
+            }
+            return Ok(());
+        }
+
+        let tasks = addresses
+            .into_iter()
+            .map(|address| StorageLeafUpdateTask {
+                address,
+                parent_span: span.clone(),
+                trie: self.trie.take_or_create_storage_trie(&address),
+                updates: if new {
+                    self.new_storage_updates
+                        .remove(&address)
+                        .expect("address collected from storage updates")
+                } else {
+                    self.storage_updates
+                        .remove(&address)
+                        .expect("address collected from storage updates")
+                },
+                fetched: self.fetched_storage_targets.remove(&address).unwrap_or_default(),
+            })
+            .collect::<Vec<_>>();
+
+        let outcomes = tasks.into_par_iter().map(StorageLeafUpdateTask::run).collect::<Vec<_>>();
+
+        let mut error = None;
+        for outcome in outcomes {
+            let StorageLeafUpdateTaskResult { address, trie, updates, fetched, result } = outcome;
+
+            self.trie.storage_tries_mut().insert(address, trie);
+            if new {
+                self.new_storage_updates.insert(address, updates);
+            } else {
+                self.storage_updates.insert(address, updates);
+            }
+            self.fetched_storage_targets.insert(address, fetched);
+
+            match result {
+                Ok(outcome) => self.apply_storage_update_outcome(outcome),
+                Err(err) if error.is_none() => error = Some(err),
+                Err(_) => {}
+            }
+        }
+
+        if let Some(error) = error {
+            return Err(error);
+        }
+
+        Ok(())
+    }
+
+    fn process_one_storage_leaf_update(
+        &mut self,
+        new: bool,
+        address: B256,
+        parent_span: &Span,
+    ) -> SparseTrieResult<StorageLeafUpdateOutcome> {
+        let updates = if new {
+            self.new_storage_updates
+                .get_mut(&address)
+                .expect("address collected from storage updates")
+        } else {
+            self.storage_updates.get_mut(&address).expect("address collected from storage updates")
+        };
+        let trie = self.trie.get_or_create_storage_trie_mut(address);
+        let fetched = self.fetched_storage_targets.entry(address).or_default();
+
+        process_storage_leaf_update(address, parent_span, trie, updates, fetched)
+    }
+
+    fn apply_storage_update_outcome(&mut self, outcome: StorageLeafUpdateOutcome) {
+        self.storage_cache_hits += outcome.cache_hits;
+        self.storage_cache_misses += outcome.cache_misses;
+
+        if !outcome.targets.is_empty() {
+            self.pending_targets.extend_storage_targets(&outcome.address, outcome.targets);
+        }
     }
 
     /// Invokes `update_leaves` for the accounts trie and collects any new targets.
@@ -836,6 +906,87 @@ fn encode_account_leaf_value(
     account_rlp_buf.clone()
 }
 
+struct StorageLeafUpdateTask<S> {
+    address: B256,
+    parent_span: Span,
+    trie: RevealableSparseTrie<S>,
+    updates: B256Map<LeafUpdate>,
+    fetched: B256Map<u8>,
+}
+
+impl<S> StorageLeafUpdateTask<S>
+where
+    S: SparseTrie + Default + Clone,
+{
+    fn run(mut self) -> StorageLeafUpdateTaskResult<S> {
+        let result = process_storage_leaf_update(
+            self.address,
+            &self.parent_span,
+            &mut self.trie,
+            &mut self.updates,
+            &mut self.fetched,
+        );
+
+        StorageLeafUpdateTaskResult {
+            address: self.address,
+            trie: self.trie,
+            updates: self.updates,
+            fetched: self.fetched,
+            result,
+        }
+    }
+}
+
+struct StorageLeafUpdateTaskResult<S> {
+    address: B256,
+    trie: RevealableSparseTrie<S>,
+    updates: B256Map<LeafUpdate>,
+    fetched: B256Map<u8>,
+    result: SparseTrieResult<StorageLeafUpdateOutcome>,
+}
+
+struct StorageLeafUpdateOutcome {
+    address: B256,
+    targets: Vec<ProofV2Target>,
+    cache_hits: u64,
+    cache_misses: u64,
+}
+
+fn process_storage_leaf_update<S>(
+    address: B256,
+    parent_span: &Span,
+    trie: &mut RevealableSparseTrie<S>,
+    updates: &mut B256Map<LeafUpdate>,
+    fetched: &mut B256Map<u8>,
+) -> SparseTrieResult<StorageLeafUpdateOutcome>
+where
+    S: SparseTrie + Default + Clone,
+{
+    let _enter = trace_span!(target: "engine::tree::payload_processor::sparse_trie", parent: parent_span, "storage_trie_leaf_updates", a=%address).entered();
+    let mut targets = Vec::new();
+    let updates_len_before = updates.len();
+    trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
+        Entry::Occupied(mut entry) => {
+            if min_len < *entry.get() {
+                entry.insert(min_len);
+                targets.push(ProofV2Target::new(path).with_min_len(min_len));
+            }
+        }
+        Entry::Vacant(entry) => {
+            entry.insert(min_len);
+            targets.push(ProofV2Target::new(path).with_min_len(min_len));
+        }
+    })?;
+    let updates_len_after = updates.len();
+
+    Ok(StorageLeafUpdateOutcome {
+        address,
+        targets,
+        cache_hits: (updates_len_before - updates_len_after) as u64,
+        cache_misses: updates_len_after as u64,
+    })
+}
+
 /// Pending proof targets queued for dispatch to proof workers, along with their count.
 #[derive(Default)]
 struct PendingTargets {
@@ -974,6 +1125,63 @@ mod tests {
         assert_eq!(decoded.balance, U256::from(42));
         assert_eq!(decoded.storage_root, storage_root);
         assert_eq!(account_rlp_buf, encoded);
+    }
+
+    #[test]
+    fn parallel_storage_leaf_updates_drain_revealed_tries() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = provider_factory.chain_spec().genesis_hash();
+        let overlay_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayBuilder::<reth_chain_state::EthPrimitives>::new(
+                anchor_hash,
+                ChangesetCache::new(),
+            ),
+        );
+        let proof_worker_handle =
+            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
+
+        let trie = SparseStateTrie::<ArenaParallelSparseTrie>::default()
+            .with_accounts_trie(RevealableSparseTrie::revealed_empty())
+            .with_default_storage_trie(RevealableSparseTrie::revealed_empty())
+            .with_updates(true);
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        drop(updates_tx);
+
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker_handle,
+            MultiProofTaskMetrics::default(),
+            trie,
+            B256::ZERO,
+            1,
+        );
+
+        for address_idx in 0u8..PARALLEL_STORAGE_UPDATE_MIN_TRIES as u8 {
+            let address = B256::from([address_idx; 32]);
+            let updates = task.new_storage_updates.entry(address).or_default();
+            for slot_idx in
+                0u8..(PARALLEL_STORAGE_UPDATE_MIN_LEAVES / PARALLEL_STORAGE_UPDATE_MIN_TRIES) as u8
+            {
+                let slot = B256::from([address_idx.wrapping_mul(17).wrapping_add(slot_idx); 32]);
+                updates.insert(
+                    slot,
+                    LeafUpdate::Changed(
+                        alloy_rlp::encode_fixed_size(&U256::from(slot_idx + 1)).to_vec(),
+                    ),
+                );
+            }
+        }
+
+        task.process_storage_leaf_updates(true).unwrap();
+
+        assert!(task.new_storage_updates.values().all(B256Map::is_empty));
+        assert!(task.pending_targets.is_empty());
+        assert_eq!(task.storage_cache_hits, PARALLEL_STORAGE_UPDATE_MIN_LEAVES as u64);
+        assert_eq!(task.storage_cache_misses, 0);
     }
 
     #[test]
