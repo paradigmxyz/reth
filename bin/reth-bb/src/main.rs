@@ -99,17 +99,28 @@ impl PayloadValidator<BbPayloadTypes> for BbEngineValidator {
             block.header.parent_hash = first.parent_hash;
         }
 
-        // Update block's gas usage to make sure metrics are correct
-        block.header.gas_used += blocks.iter().map(|b| b.gas_used).sum::<u64>();
-        block.header.gas_limit += blocks.iter().map(|b| b.gas_limit).sum::<u64>();
+        let mut previous_gas_used = 0;
+        let mut previous_gas_limit = 0;
+        let mut previous_transactions = 0;
+        for previous in &blocks {
+            previous_gas_used += previous.gas_used;
+            previous_gas_limit += previous.gas_limit;
+            previous_transactions += previous.body().transactions.len();
+        }
+
+        // Update block's gas usage to make sure metrics are correct.
+        block.header.gas_used += previous_gas_used;
+        block.header.gas_limit += previous_gas_limit;
 
         // Prepend transactions from previous blocks to make sure that persistence indices are
         // correct.
-        block.body.transactions = blocks
-            .into_iter()
-            .flat_map(|b| b.into_body().transactions)
-            .chain(core::mem::take(&mut block.body.transactions))
-            .collect();
+        let mut transactions =
+            Vec::with_capacity(previous_transactions + block.body.transactions.len());
+        for previous in blocks {
+            transactions.extend(previous.into_body().transactions);
+        }
+        transactions.append(&mut block.body.transactions);
+        block.body.transactions = transactions;
 
         // Use `new_unchecked` to preserve the hash
         Ok(SealedBlock::new_unchecked(block, hash))
