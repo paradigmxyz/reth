@@ -214,6 +214,7 @@ impl RocksDBBuilder {
         options.create_if_missing(true);
         options.create_missing_column_families(true);
         options.set_max_background_jobs(DEFAULT_MAX_BACKGROUND_JOBS);
+        options.set_enable_pipelined_write(true);
         options.set_bytes_per_sync(DEFAULT_BYTES_PER_SYNC);
         let write_buffer_manager =
             WriteBufferManager::new_write_buffer_manager(DEFAULT_WRITE_BUFFER_MANAGER_SIZE, true);
