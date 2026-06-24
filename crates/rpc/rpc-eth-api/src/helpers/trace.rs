@@ -1,7 +1,7 @@
 //! Loads a pending block from database. Helper trait for `eth_` call and trace RPC methods.
 
 use super::{Call, LoadBlock, LoadState, LoadTransaction};
-use crate::{FromEthApiError, FromEvmError, RpcNodeCore};
+use crate::{FromEthApiError, FromEvmError};
 use alloy_consensus::{
     transaction::{Recovered, TxHashRef},
     BlockHeader,
@@ -10,7 +10,6 @@ use alloy_eips::BlockId;
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::TransactionInfo;
 use evm2::{
-    ethereum::RecoveredTxEnvelope,
     evm::{Db, DbErrorCode},
     registry::HandlerError,
     BaseEvmTypes, TxResultWithState,
@@ -18,7 +17,7 @@ use evm2::{
 use evm2_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use futures::Future;
 use reth_errors::{ProviderError, RethError};
-use reth_evm::{ConfigureEvm, EvmEnvFor, TxEnvFor};
+use reth_evm::{execute::BlockExecutorFactory, ConfigureEvm, EvmEnvFor, TxEnvFor};
 use reth_primitives_traits::{BlockBody, RecoveredBlock};
 use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::{
@@ -49,22 +48,6 @@ impl<Insp> TracingCtx<'_, Insp> {
     }
 }
 
-/// Provides the evm2 transaction envelope required by trace execution.
-pub trait TraceTxEnv: RpcNodeCore {
-    /// Returns the recovered evm2 transaction envelope for a configured transaction environment.
-    fn recovered_tx_envelope(tx_env: &TxEnvFor<Self::Evm>) -> &RecoveredTxEnvelope;
-}
-
-impl<T> TraceTxEnv for T
-where
-    T: RpcNodeCore,
-    TxEnvFor<T::Evm>: AsRef<RecoveredTxEnvelope>,
-{
-    fn recovered_tx_envelope(tx_env: &TxEnvFor<Self::Evm>) -> &RecoveredTxEnvelope {
-        tx_env.as_ref()
-    }
-}
-
 /// Executes CPU heavy trace tasks.
 pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     /// Executes a transaction with the provided inspector without committing state changes.
@@ -76,7 +59,6 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         inspector: I,
     ) -> Result<(I, TxResultWithState), Self::Error>
     where
-        Self: TraceTxEnv,
         I: evm2::Inspector<BaseEvmTypes> + 'static,
     {
         let mut evm = self.evm_config().evm_with_env_and_inspector(Db::new(db), evm_env, inspector);
@@ -87,17 +69,18 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             HandlerError(HandlerError),
         }
 
-        let resolution = match evm.transact(Self::recovered_tx_envelope(&tx_env)) {
-            Ok(executed) => {
-                if let Some(code) = executed.result().db_error_code {
-                    let _ = executed.discard();
-                    Resolution::DatabaseError(code)
-                } else {
-                    Resolution::Result(executed.detach())
+        let resolution =
+            match evm.transact(self.evm_config().block_executor_factory().evm_tx(&tx_env)) {
+                Ok(executed) => {
+                    if let Some(code) = executed.result().db_error_code {
+                        let _ = executed.discard();
+                        Resolution::DatabaseError(code)
+                    } else {
+                        Resolution::Result(executed.detach())
+                    }
                 }
-            }
-            Err(err) => Resolution::HandlerError(err),
-        };
+                Err(err) => Resolution::HandlerError(err),
+            };
 
         let result = match resolution {
             Resolution::Result(result) => result,
@@ -142,7 +125,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         f: F,
     ) -> impl Future<Output = Result<Option<R>, Self::Error>> + Send
     where
-        Self: LoadBlock + LoadTransaction + TraceTxEnv,
+        Self: LoadBlock + LoadTransaction,
         F: FnOnce(
                 TransactionInfo,
                 TracingInspector,
@@ -165,7 +148,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         f: F,
     ) -> impl Future<Output = Result<Option<R>, Self::Error>> + Send
     where
-        Self: LoadBlock + LoadTransaction + TraceTxEnv,
+        Self: LoadBlock + LoadTransaction,
         F: FnOnce(
                 TransactionInfo,
                 Insp,
@@ -216,7 +199,6 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     ) -> Result<u64, Self::Error>
     where
         I: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
-        Self: TraceTxEnv,
         ProviderTx<Self::Provider>: Clone + 'a,
     {
         for (idx, tx) in transactions.into_iter().enumerate() {
@@ -247,7 +229,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         f: F,
     ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
     where
-        Self: LoadBlock + TraceTxEnv,
+        Self: LoadBlock,
         F: Fn(TransactionInfo, TracingCtx<'_, Insp>) -> Result<R, Self::Error> + Send + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
         Insp: evm2::Inspector<BaseEvmTypes> + Send + 'static,
@@ -314,7 +296,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         f: F,
     ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
     where
-        Self: LoadBlock + TraceTxEnv,
+        Self: LoadBlock,
         F: Fn(TransactionInfo, TracingCtx<'_, TracingInspector>) -> Result<R, Self::Error>
             + Send
             + 'static,
@@ -339,7 +321,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         f: F,
     ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
     where
-        Self: LoadBlock + TraceTxEnv,
+        Self: LoadBlock,
         F: Fn(TransactionInfo, TracingCtx<'_, Insp>) -> Result<R, Self::Error> + Send + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
         Insp: evm2::Inspector<BaseEvmTypes> + Send + 'static,

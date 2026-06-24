@@ -45,7 +45,6 @@ jsonrpsee.workspace = true
 alloy-network.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-engine = { workspace = true, features = ["ssz"] }
-evm2.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -95,12 +94,10 @@ asm-keccak = [
     "reth-node-core/asm-keccak",
     "reth-evm/asm-keccak",
     "reth-evm-ethereum/asm-keccak",
-    "evm2/asm-keccak",
 ]
 portable = [
     "reth-evm/portable",
     "reth-evm-ethereum/portable",
-    "evm2/portable",
 ]
 keccak-cache-global = [
     "alloy-primitives/keccak-cache-global",

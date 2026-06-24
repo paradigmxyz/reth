@@ -4,14 +4,13 @@ use crate::{EthEngineTypes, EthEvmConfig};
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
 use alloy_network::Ethereum;
 use alloy_rpc_types_engine::ExecutionData;
-use evm2::ethereum::RecoveredTxEnvelope;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthExecutorSpec, EthereumHardforks, Hardforks};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_engine_primitives::EngineTypes;
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthBuiltPayload, EthPayloadAttributes};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
-use reth_evm::{ConfigureEvm, EvmEnv, NextBlockEnvAttributes, TxEnvFor};
+use reth_evm::{ConfigureEvm, EvmEnv, NextBlockEnvAttributes};
 use reth_network::{primitives::BasicNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives,
@@ -320,7 +319,6 @@ where
     >,
     EthB: EthApiBuilder<N>,
     <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
-    TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<RecoveredTxEnvelope>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
@@ -399,7 +397,6 @@ where
     >,
     EthB: EthApiBuilder<N>,
     <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
-    TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<RecoveredTxEnvelope>,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,

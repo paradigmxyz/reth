@@ -9384,7 +9384,6 @@ dependencies = [
  "alloy-sol-types",
  "enr",
  "ethereum_ssz",
- "evm2",
  "eyre",
  "futures",
  "http-body-util",
