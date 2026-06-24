@@ -214,13 +214,6 @@ where
     where
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static;
-    #[cfg(feature = "std")]
-    type BlockExecutor<'a, DB>
-        = EthBlockExecutor<'a, DB>
-    where
-        Self: 'a,
-        DB: evm2::evm::Database + Clone + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static;
     #[cfg(not(feature = "std"))]
     type Executor<DB>
         = reth_evm::execute::UnsupportedExecutor<EthPrimitives>
@@ -352,7 +345,7 @@ where
         evm: evm2::Evm<evm2::BaseEvmTypes>,
         ctx: EthBlockExecutionCtx<'a>,
         hashed_state_mode: HashedStateMode,
-    ) -> Self::BlockExecutor<'a, DB>
+    ) -> reth_evm::BlockExecutorFor<'a, Self, DB>
     where
         Self: 'a,
         DB: evm2::evm::Database + Clone + 'static,

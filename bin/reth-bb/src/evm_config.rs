@@ -77,12 +77,6 @@ where
     where
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static;
-    type BlockExecutor<'a, DB>
-        = <EthEvmConfig<C> as ConfigureEvm>::BlockExecutor<'a, DB>
-    where
-        Self: 'a,
-        DB: evm2::evm::Database + Clone + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static;
     type PrewarmEvm<DB>
         = <EthEvmConfig<C> as ConfigureEvm>::PrewarmEvm<DB>
     where
@@ -150,7 +144,7 @@ where
         evm: evm2::Evm<evm2::BaseEvmTypes>,
         ctx: ExecutionCtxFor<'a, Self>,
         hashed_state_mode: reth_evm::execute::HashedStateMode,
-    ) -> Self::BlockExecutor<'a, DB>
+    ) -> reth_evm::BlockExecutorFor<'a, Self, DB>
     where
         Self: 'a,
         DB: evm2::evm::Database + Clone + 'static,

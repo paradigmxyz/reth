@@ -53,13 +53,6 @@ where
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static;
     #[cfg(feature = "std")]
-    type BlockExecutor<'a, DB>
-        = Inner::BlockExecutor<'a, DB>
-    where
-        Self: 'a,
-        DB: evm2::evm::Database + Clone + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static;
-    #[cfg(feature = "std")]
     type PrewarmEvm<DB>
         = Inner::PrewarmEvm<DB>
     where
@@ -130,7 +123,7 @@ where
         evm: evm2::Evm<evm2::BaseEvmTypes>,
         ctx: crate::ExecutionCtxFor<'a, Self>,
         hashed_state_mode: crate::execute::HashedStateMode,
-    ) -> Self::BlockExecutor<'a, DB>
+    ) -> crate::BlockExecutorFor<'a, Self, DB>
     where
         Self: 'a,
         DB: evm2::evm::Database + Clone + 'static,

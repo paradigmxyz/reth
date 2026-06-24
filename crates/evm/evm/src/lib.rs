@@ -11,7 +11,7 @@
 
 extern crate alloc;
 
-use crate::execute::{BlockExecutor, Executor, HashedStateMode, IntoTxEnv};
+use crate::execute::{Executor, HashedStateMode, IntoTxEnv};
 use alloc::{boxed::Box, string::String};
 use alloy_consensus::transaction::Recovered;
 use alloy_eips::eip4895::Withdrawals;
@@ -100,17 +100,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// Executor returned for block execution over the provided database.
     type Executor<DB>: Executor<Primitives = Self::Primitives>
     where
-        DB: evm2::evm::Database + Clone + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static;
-
-    /// Configured block executor returned for an active block execution.
-    #[cfg(feature = "std")]
-    type BlockExecutor<'a, DB>: BlockExecutor<
-        Primitives = Self::Primitives,
-        Transaction = TxEnvFor<Self>,
-    >
-    where
-        Self: 'a,
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static;
 
@@ -214,7 +203,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         evm: evm2::Evm<evm2::BaseEvmTypes>,
         ctx: ExecutionCtxFor<'a, Self>,
         hashed_state_mode: HashedStateMode,
-    ) -> Self::BlockExecutor<'a, DB>
+    ) -> <Self::BlockExecutorFactory as crate::execute::BlockExecutorFactory>::Executor<'a, DB>
     where
         Self: 'a,
         DB: evm2::evm::Database + Clone + 'static,
