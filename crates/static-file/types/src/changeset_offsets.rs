@@ -202,15 +202,17 @@ impl ChangesetOffsetReader {
 
         let count = (end - start) as usize;
         let byte_pos = start * Self::RECORD_SIZE as u64;
+        let byte_len = count.checked_mul(Self::RECORD_SIZE).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "changeset offset range is too large")
+        })?;
 
         let mut result = Vec::with_capacity(count);
-        let mut buf = [0u8; Self::RECORD_SIZE];
+        let mut buf = vec![0u8; byte_len];
+        self.file.read_exact_at(&mut buf, byte_pos)?;
 
-        for i in 0..count {
-            let pos = byte_pos + (i as u64) * Self::RECORD_SIZE as u64;
-            self.file.read_exact_at(&mut buf, pos)?;
-            let offset = u64::from_le_bytes(buf[..8].try_into().unwrap());
-            let num_changes = u64::from_le_bytes(buf[8..].try_into().unwrap());
+        for record in buf.chunks_exact(Self::RECORD_SIZE) {
+            let offset = u64::from_le_bytes(record[..8].try_into().unwrap());
+            let num_changes = u64::from_le_bytes(record[8..].try_into().unwrap());
             result.push(ChangesetOffset::new(offset, num_changes));
         }
 
