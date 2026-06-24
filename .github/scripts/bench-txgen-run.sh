@@ -249,6 +249,7 @@ RETH_ARGS=(
   --log.file.directory "$OUTPUT_DIR/reth-logs"
   --engine.accept-execution-requests-hash
   --http
+  # txgen reorg mode builds synthetic side-fork blocks via testing_buildBlockV1.
   --http.api eth,net,web3,debug,reth,testing
   --http.port 8545
   --ws
