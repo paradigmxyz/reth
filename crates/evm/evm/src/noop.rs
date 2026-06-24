@@ -49,6 +49,13 @@ where
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static;
     #[cfg(feature = "std")]
+    type BlockExecutor<'a, DB>
+        = Inner::BlockExecutor<'a, DB>
+    where
+        Self: 'a,
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static;
+    #[cfg(feature = "std")]
     type PrewarmEvm<DB>
         = Inner::PrewarmEvm<DB>
     where
@@ -104,6 +111,22 @@ where
     }
 
     #[cfg(feature = "std")]
+    fn create_executor<'a, DB>(
+        &'a self,
+        db: DB,
+        evm_env: EvmEnvFor<Self>,
+        ctx: crate::ExecutionCtxFor<'a, Self>,
+        hashed_state_mode: crate::execute::HashedStateMode,
+    ) -> Self::BlockExecutor<'a, DB>
+    where
+        Self: 'a,
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static,
+    {
+        self.inner().create_executor(db, evm_env, ctx, hashed_state_mode)
+    }
+
+    #[cfg(feature = "std")]
     fn evm_with_env<DB>(&self, db: DB, evm_env: EvmEnvFor<Self>) -> evm2::Evm<evm2::BaseEvmTypes>
     where
         DB: evm2::evm::DynDatabase + 'static,
@@ -128,16 +151,11 @@ where
     }
 
     #[cfg(feature = "std")]
-    fn prewarm_evm_with_precompiles<DB>(
-        &self,
-        state_provider: DB,
-        env: EvmEnvFor<Self>,
-        precompiles: Box<dyn evm2::precompile::PrecompileProvider<evm2::BaseEvmTypes>>,
-    ) -> Self::PrewarmEvm<DB>
+    fn prewarm_evm<DB>(&self, state_provider: DB, env: EvmEnvFor<Self>) -> Self::PrewarmEvm<DB>
     where
         DB: StateProvider + Send + 'static,
     {
-        self.inner().prewarm_evm_with_precompiles(state_provider, env, precompiles)
+        self.inner().prewarm_evm(state_provider, env)
     }
 
     #[cfg(feature = "std")]

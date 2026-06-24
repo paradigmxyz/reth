@@ -8,9 +8,9 @@ use alloy_primitives::{Address, Bytes};
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
-use reth_execution_types::BlockExecutionResult;
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock, TxTy};
+use reth_execution_types::{BlockExecutionResult, HashedPostState};
+use reth_primitives_traits::{NodePrimitives, ReceiptTy, RecoveredBlock, TxTy};
 
 /// Converts a value into the transaction environment expected by an EVM configuration.
 pub trait IntoTxEnv<TxEnv> {
@@ -22,6 +22,67 @@ impl<TxEnv> IntoTxEnv<TxEnv> for TxEnv {
     fn into_tx_env(self) -> TxEnv {
         self
     }
+}
+
+/// Controls how execution produces trie-ready hashed post-state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HashedStateMode {
+    /// Accumulate final hashed post-state in the returned block execution output.
+    OutputOnly,
+    /// Stream hashed state updates to the provided hook without accumulating output hashed state.
+    StreamOnly,
+    /// Accumulate final output hashed state and stream each committed update.
+    OutputAndStream,
+}
+
+impl HashedStateMode {
+    /// Returns true if execution should include hashed state in its output.
+    pub const fn output(self) -> bool {
+        matches!(self, Self::OutputOnly | Self::OutputAndStream)
+    }
+
+    /// Returns true if execution should stream hashed state updates.
+    pub const fn stream(self) -> bool {
+        matches!(self, Self::StreamOnly | Self::OutputAndStream)
+    }
+}
+
+/// A configured block executor.
+pub trait BlockExecutor: Sized {
+    /// The primitive types used by the executor.
+    type Primitives: NodePrimitives;
+    /// Transaction environment consumed by this executor.
+    type Transaction;
+    /// The error type returned by the executor.
+    type Error: core::error::Error + Send + Sync + 'static;
+
+    /// Applies pre-execution block changes.
+    fn apply_pre_execution_changes<H>(
+        &mut self,
+        on_hashed_state_update: &mut H,
+    ) -> Result<(), Self::Error>
+    where
+        H: FnMut(HashedPostState);
+
+    /// Executes a transaction.
+    fn execute_transaction<H>(
+        &mut self,
+        transaction: Self::Transaction,
+        on_hashed_state_update: &mut H,
+    ) -> Result<(), Self::Error>
+    where
+        H: FnMut(HashedPostState);
+
+    /// Returns receipts accumulated so far.
+    fn receipts(&self) -> &[ReceiptTy<Self::Primitives>];
+
+    /// Finishes block execution and returns the output.
+    fn finish<H>(
+        self,
+        on_hashed_state_update: &mut H,
+    ) -> Result<BlockExecutionOutput<ReceiptTy<Self::Primitives>>, Self::Error>
+    where
+        H: FnMut(HashedPostState);
 }
 
 /// A type that knows how to execute blocks.

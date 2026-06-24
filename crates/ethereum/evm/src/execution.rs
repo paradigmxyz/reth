@@ -37,6 +37,7 @@ use evm2::{
     BaseEvmTypes, Evm, ExecutionConfig, SpecId, TxResult, Version,
 };
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
+use reth_evm::execute::HashedStateMode;
 use reth_execution_types::{BlockExecutionOutput, HashedPostStateSink};
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 
@@ -178,27 +179,6 @@ pub struct BlockSystemCalls {
     pub parent_hash: B256,
     /// Parent beacon block root for EIP-4788 beacon roots.
     pub parent_beacon_block_root: Option<B256>,
-}
-
-/// Controls how execution produces trie-ready hashed post-state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HashedStateMode {
-    /// Accumulate final hashed post-state in the returned block execution output.
-    OutputOnly,
-    /// Stream hashed state updates to the provided hook without accumulating output hashed state.
-    StreamOnly,
-    /// Accumulate final output hashed state and stream each committed update.
-    OutputAndStream,
-}
-
-impl HashedStateMode {
-    const fn output(self) -> bool {
-        matches!(self, Self::OutputOnly | Self::OutputAndStream)
-    }
-
-    const fn stream(self) -> bool {
-        matches!(self, Self::StreamOnly | Self::OutputAndStream)
-    }
 }
 
 /// Inputs required to execute an Ethereum block with evm2.
@@ -626,7 +606,7 @@ fn send_hashed_state_update(
     }
 }
 
-fn execute_transaction<DB>(
+pub(crate) fn execute_transaction<DB>(
     evm: &mut Evm<BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,
@@ -682,7 +662,7 @@ where
 }
 
 #[expect(clippy::needless_option_as_deref, clippy::too_many_arguments)]
-fn pre_execution_system_call_state_changes<DB>(
+pub(crate) fn pre_execution_system_call_state_changes<DB>(
     evm: &mut Evm<BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,
@@ -739,7 +719,7 @@ where
     Ok(())
 }
 
-fn block_requests_from_receipts<DB>(
+pub(crate) fn block_requests_from_receipts<DB>(
     spec_id: SpecId,
     context: BlockExecutionContext<'_>,
     receipts: &[Receipt],
@@ -792,7 +772,7 @@ where
 }
 
 #[expect(clippy::needless_option_as_deref, clippy::too_many_arguments)]
-fn post_execution_system_call_state_changes<DB>(
+pub(crate) fn post_execution_system_call_state_changes<DB>(
     evm: &mut Evm<BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,
@@ -903,7 +883,7 @@ fn commit_state_changes<S: StateChangeSource>(
 }
 
 #[expect(clippy::too_many_arguments)]
-fn post_block_balance_state_changes<DB>(
+pub(crate) fn post_block_balance_state_changes<DB>(
     evm: &mut Evm<BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,

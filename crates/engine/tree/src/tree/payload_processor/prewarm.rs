@@ -13,10 +13,8 @@
 
 use super::bal_prewarm_pool::BalPrewarmPool;
 use crate::tree::{
-    payload_processor::multiproof::StateRootMessage,
-    precompile_cache::{CachedPrecompileProvider, PrecompileCacheMap},
-    CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
-    PayloadExecutionCache, SavedCache, StateProviderBuilder,
+    payload_processor::multiproof::StateRootMessage, CachedStateCacheMetrics, CachedStateMetrics,
+    CachedStateProvider, ExecutionEnv, PayloadExecutionCache, SavedCache, StateProviderBuilder,
 };
 #[cfg(any())]
 use alloy_consensus::transaction::TxHashRef;
@@ -571,8 +569,6 @@ where
     /// loop. Prewarm workers skip transactions with `index < counter` since those have already
     /// been executed.
     pub executed_tx_index: Arc<AtomicUsize>,
-    /// The precompile cache map.
-    pub precompile_cache_map: PrecompileCacheMap<evm2::SpecId>,
     /// Whether to disable BAL-driven parallel state root computation.
     /// Only valid when BAL parallel execution is also disabled.
     pub disable_bal_parallel_state_root: bool,
@@ -613,17 +609,7 @@ where
             state_provider = Box::new(CachedStateProvider::new_prewarm(state_provider, caches));
         }
 
-        let env = self.env.evm_env.clone();
-        let spec = env.spec_id();
-        let precompiles: Box<dyn evm2::precompile::PrecompileProvider<evm2::BaseEvmTypes>> =
-            Box::new(CachedPrecompileProvider::new(
-                evm2::Precompiles::base(spec),
-                self.precompile_cache_map.clone(),
-                spec,
-                None,
-            ));
-
-        Some(self.evm_config.prewarm_evm_with_precompiles(state_provider, env, precompiles))
+        Some(self.evm_config.prewarm_evm(state_provider, self.env.evm_env.clone()))
     }
 
     /// Returns `true` if prewarming should stop.

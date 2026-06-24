@@ -72,7 +72,6 @@ pub use payload_processor::*;
 pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
-pub use reth_evm_ethereum::{AsBlockExecutionContext, EthPayloadExecutor, EthTxEnv};
 pub use reth_execution_cache::{
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider,
     ExecutionCache, PayloadExecutionCache, SavedCache,

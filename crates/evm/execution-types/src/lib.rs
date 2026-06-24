@@ -21,6 +21,7 @@ pub use evm2::{
         StateChangeSource as ExecutionStateChangeSource, StorageChange as ExecutionStorageChange,
     },
 };
+pub use reth_trie_common::HashedPostState;
 
 mod chain;
 pub use chain::*;

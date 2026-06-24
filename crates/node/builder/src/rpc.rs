@@ -4,9 +4,7 @@ pub use jsonrpsee::{
     core::middleware::layer::Either,
     server::middleware::rpc::{RpcService, RpcServiceBuilder},
 };
-use reth_engine_tree::tree::{
-    AsBlockExecutionContext, EthPayloadExecutor, EthTxEnv, WaitForCaches,
-};
+use reth_engine_tree::tree::WaitForCaches;
 pub use reth_engine_tree::tree::{BasicEngineValidator, EngineValidator};
 pub use reth_rpc_builder::{
     middleware::{RethAuthHttpMiddleware, RethRpcMiddleware},
@@ -18,7 +16,6 @@ use crate::{
     invalid_block_hook::InvalidBlockHookExt, ConfigureEngineEvm, ConsensusEngineEvent,
     ConsensusEngineHandle,
 };
-use alloy_consensus::{EthereumReceipt, EthereumTxEnvelope, TxEip4844};
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
 use evm2::ethereum::RecoveredTxEnvelope;
@@ -26,7 +23,7 @@ use jsonrpsee::RpcModule;
 use parking_lot::Mutex;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
-use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, ExecutionCtxFor, TxEnvFor};
+use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, TxEnvFor};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
     NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
@@ -37,7 +34,6 @@ use reth_node_core::{
     version::{version_metadata, CLIENT_CODE},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
-use reth_provider::BorrowedEvmStateProviderDatabase;
 use reth_rpc::{
     eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer, RpcNodeCore},
     AdminApi,
@@ -1461,15 +1457,9 @@ where
     Node: FullNodeComponents<
         Evm: ConfigureEngineEvm<
             <<Node::Types as NodeTypes>::Payload as PayloadTypes>::ExecutionData,
-        > + ConfigureEvm<Primitives = PrimitivesTy<Node::Types>, TxEnv = EthTxEnv>,
+        > + ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
     >,
     EvmEnvFor<Node::Evm>: EvmEnv,
-    for<'a> ExecutionCtxFor<'a, Node::Evm>: AsBlockExecutionContext,
-    <Node::Evm as ConfigureEvm>::Executor<BorrowedEvmStateProviderDatabase>: EthPayloadExecutor,
-    PrimitivesTy<Node::Types>: reth_node_api::NodePrimitives<
-        SignedTx = EthereumTxEnvelope<TxEip4844>,
-        Receipt = EthereumReceipt,
-    >,
     EV: PayloadValidatorBuilder<Node>,
     EV::Validator: reth_engine_primitives::PayloadValidator<
             <Node::Types as NodeTypes>::Payload,

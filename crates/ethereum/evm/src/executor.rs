@@ -2,29 +2,36 @@
 
 use crate::{
     convert::{block_env_with_blob_params, spec_id},
-    execution::{BlockExecutionInput, ExecutionHooks},
-    BlockExecutionContext, BlockSystemCalls, EthExecutionError, HashedStateMode,
-    PayloadExecutionError,
+    execution::{
+        block_requests_from_receipts, execute_transaction, post_block_balance_state_changes,
+        post_execution_system_call_state_changes, pre_execution_system_call_state_changes,
+        BlockExecutionInput,
+    },
+    BlockExecutionContext, BlockSystemCalls, EthBlockExecutionCtx, EthEvmEnv, EthExecutionError,
+    EthTxEnv, HashedStateMode, RethReceiptBuilder,
 };
-use alloc::{rc::Rc, sync::Arc, vec::Vec};
-use alloy_consensus::{transaction::Recovered, Header};
-use alloy_primitives::Bytes;
+use alloc::{borrow::Cow, rc::Rc, sync::Arc, vec::Vec};
+use alloy_consensus::{transaction::Recovered, Header, TxType};
+use alloy_eips::{eip2718::Typed2718, eip4895::Withdrawal};
+use alloy_primitives::{Address, Bytes, B256};
 use core::cell::RefCell;
 use evm2::{
-    ethereum::RecoveredTxEnvelope,
-    evm::{CacheDB, Database, Db, DbErrorCode, DbResult, DynDatabase, StateChangeSource},
+    evm::{
+        BlockStateAccumulator, CacheDB, Database, Db, DbErrorCode, DbResult, DynDatabase,
+        StateChangeSource,
+    },
+    BaseEvmTypes, Evm, ExecutionConfig, Version,
 };
 use reth_chainspec::{EthChainSpec, EthExecutorSpec};
 use reth_ethereum_forks::Hardforks;
 use reth_ethereum_primitives::{Block, EthPrimitives, Receipt, TransactionSigned};
 use reth_evm::{
-    execute::{BlockExecutionOutput, ExecutionOutcome, Executor},
+    execute::{BlockExecutionOutput, BlockExecutor, ExecutionOutcome, Executor},
     precompile_cache::{CachedPrecompileProvider, PrecompileCacheMap},
-    EvmEnv,
 };
-use reth_execution_types::BlockExecutionResult;
+use reth_execution_types::{BlockExecutionResult, HashedPostStateSink};
 use reth_primitives_traits::{BlockBody, RecoveredBlock};
-use reth_trie_common::HashedPostState;
+use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 
 /// EVM-backed Ethereum block executor.
 #[derive(Debug, Clone)]
@@ -163,200 +170,235 @@ where
     }
 }
 
-/// Specialized payload executor hooks used by engine payload validation.
-pub trait EthPayloadExecutor {
-    /// Error returned by payload execution.
-    type Error: core::error::Error + Send + Sync + 'static;
-
-    /// Returns this executor configured with the provided precompile cache.
-    fn with_precompile_cache_map(
-        self,
-        precompile_cache_map: PrecompileCacheMap<evm2::SpecId>,
-    ) -> Self
-    where
-        Self: Sized;
-
-    /// Executes EVM-native transaction envelopes with progress and hashed-state hooks.
-    fn execute_payload_with_hashed_state_hook<I, F, H, Env>(
-        self,
-        evm_env: Env,
-        transactions: I,
-        context: BlockExecutionContext<'_>,
-        on_transaction_executed: F,
-        on_hashed_state_update: H,
-        hashed_state_mode: HashedStateMode,
-    ) -> Result<BlockExecutionOutput<Receipt>, Self::Error>
-    where
-        Env: EvmEnv,
-        I: IntoIterator<Item = RecoveredTxEnvelope>,
-        F: FnMut(usize),
-        H: FnMut(HashedPostState);
-
-    /// Executes a fallible stream of EVM-native transaction envelopes with progress and
-    /// hashed-state hooks.
-    fn execute_payload_with_fallible_hashed_state_hook<I, F, H, Env, TxErr>(
-        self,
-        evm_env: Env,
-        transactions: I,
-        context: BlockExecutionContext<'_>,
-        on_transaction_executed: F,
-        on_hashed_state_update: H,
-        hashed_state_mode: HashedStateMode,
-    ) -> Result<BlockExecutionOutput<Receipt>, PayloadExecutionError<Self::Error, TxErr>>
-    where
-        Env: EvmEnv,
-        I: IntoIterator<Item = Result<RecoveredTxEnvelope, TxErr>>,
-        TxErr: core::error::Error + Send + Sync + 'static,
-        F: FnMut(usize),
-        H: FnMut(HashedPostState);
-
-    /// Executes a fallible stream of EVM-native transaction envelopes with progress, receipt, and
-    /// hashed-state hooks.
-    #[expect(clippy::too_many_arguments)]
-    fn execute_payload_with_fallible_receipt_hashed_state_hook<I, F, R, H, Env, TxErr, ReceiptErr>(
-        self,
-        evm_env: Env,
-        transactions: I,
-        context: BlockExecutionContext<'_>,
-        on_transaction_executed: F,
-        on_receipt: R,
-        on_hashed_state_update: H,
-        hashed_state_mode: HashedStateMode,
-    ) -> Result<BlockExecutionOutput<Receipt>, PayloadExecutionError<Self::Error, TxErr, ReceiptErr>>
-    where
-        Env: EvmEnv,
-        I: IntoIterator<Item = Result<RecoveredTxEnvelope, TxErr>>,
-        TxErr: core::error::Error + Send + Sync + 'static,
-        ReceiptErr: core::error::Error + Send + Sync + 'static,
-        F: FnMut(usize),
-        R: FnMut(usize, &Receipt) -> Result<(), ReceiptErr>,
-        H: FnMut(HashedPostState);
+/// Configured Ethereum block executor backed by evm2.
+#[expect(missing_debug_implementations)]
+pub struct EthBlockExecutor<'a, DB> {
+    evm: Evm<BaseEvmTypes>,
+    spec_id: evm2::SpecId,
+    block_number: u64,
+    block_beneficiary: Address,
+    parent_hash: B256,
+    parent_beacon_block_root: Option<B256>,
+    ommers: &'a [Header],
+    withdrawals: Option<Cow<'a, [Withdrawal]>>,
+    chain_id: u64,
+    deposit_contract_address: Option<Address>,
+    block_state: BlockStateAccumulator,
+    hashed_state: Option<HashedPostStateSink<KeccakKeyHasher>>,
+    hashed_state_mode: HashedStateMode,
+    receipts: Vec<Receipt>,
+    cumulative_gas_used: u64,
+    _database: core::marker::PhantomData<DB>,
 }
 
-impl<C, DB> EthPayloadExecutor for EthExecutor<C, DB>
+impl<'a, DB> EthBlockExecutor<'a, DB>
 where
-    C: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
-    DB: Database + Clone + 'static,
-    DB::Error: core::error::Error + Send + Sync + 'static,
+    DB: Database + 'static,
 {
-    type Error = EthExecutionError<DB::Error>;
-
-    fn with_precompile_cache_map(
-        mut self,
+    /// Creates a configured Ethereum block executor.
+    pub(crate) fn new(
+        database: DB,
+        env: EthEvmEnv,
+        context: EthBlockExecutionCtx<'a>,
+        chain_id: u64,
+        deposit_contract_address: Option<alloy_primitives::Address>,
         precompile_cache_map: PrecompileCacheMap<evm2::SpecId>,
+        hashed_state_mode: HashedStateMode,
     ) -> Self {
-        self.precompile_cache_map = precompile_cache_map;
-        self
-    }
+        let block_number = env.block.number.to::<u64>();
+        let block_beneficiary = env.block.beneficiary;
+        let mut version = Version::new(env.spec);
+        version.chain_id = chain_id;
 
-    fn execute_payload_with_hashed_state_hook<I, F, H, Env>(
-        self,
-        evm_env: Env,
-        transactions: I,
-        context: BlockExecutionContext<'_>,
-        on_transaction_executed: F,
-        on_hashed_state_update: H,
-        hashed_state_mode: HashedStateMode,
-    ) -> Result<BlockExecutionOutput<Receipt>, Self::Error>
-    where
-        Env: EvmEnv,
-        I: IntoIterator<Item = RecoveredTxEnvelope>,
-        F: FnMut(usize),
-        H: FnMut(HashedPostState),
-    {
-        self.execute_payload_with_fallible_hashed_state_hook(
-            evm_env,
-            transactions.into_iter().map(Ok::<_, core::convert::Infallible>),
-            context,
-            on_transaction_executed,
-            on_hashed_state_update,
-            hashed_state_mode,
-        )
-        .map_err(|err| match err {
-            PayloadExecutionError::Execution(err) => err,
-            PayloadExecutionError::Transaction(err) | PayloadExecutionError::Receipt(err) => {
-                match err {}
-            }
-        })
-    }
-
-    fn execute_payload_with_fallible_hashed_state_hook<I, F, H, Env, TxErr>(
-        self,
-        evm_env: Env,
-        transactions: I,
-        context: BlockExecutionContext<'_>,
-        on_transaction_executed: F,
-        on_hashed_state_update: H,
-        hashed_state_mode: HashedStateMode,
-    ) -> Result<BlockExecutionOutput<Receipt>, PayloadExecutionError<Self::Error, TxErr>>
-    where
-        Env: EvmEnv,
-        I: IntoIterator<Item = Result<RecoveredTxEnvelope, TxErr>>,
-        TxErr: core::error::Error + Send + Sync + 'static,
-        F: FnMut(usize),
-        H: FnMut(HashedPostState),
-    {
-        self.execute_payload_with_fallible_receipt_hashed_state_hook(
-            evm_env,
-            transactions,
-            context,
-            on_transaction_executed,
-            |_, _| Ok::<(), core::convert::Infallible>(()),
-            on_hashed_state_update,
-            hashed_state_mode,
-        )
-        .map_err(|err| match err {
-            PayloadExecutionError::Execution(err) => PayloadExecutionError::Execution(err),
-            PayloadExecutionError::Transaction(err) => PayloadExecutionError::Transaction(err),
-            PayloadExecutionError::Receipt(err) => match err {},
-        })
-    }
-
-    fn execute_payload_with_fallible_receipt_hashed_state_hook<I, F, R, H, Env, TxErr, ReceiptErr>(
-        self,
-        evm_env: Env,
-        transactions: I,
-        context: BlockExecutionContext<'_>,
-        on_transaction_executed: F,
-        on_receipt: R,
-        on_hashed_state_update: H,
-        hashed_state_mode: HashedStateMode,
-    ) -> Result<BlockExecutionOutput<Receipt>, PayloadExecutionError<Self::Error, TxErr, ReceiptErr>>
-    where
-        Env: EvmEnv,
-        I: IntoIterator<Item = Result<RecoveredTxEnvelope, TxErr>>,
-        TxErr: core::error::Error + Send + Sync + 'static,
-        ReceiptErr: core::error::Error + Send + Sync + 'static,
-        F: FnMut(usize),
-        R: FnMut(usize, &Receipt) -> Result<(), ReceiptErr>,
-        H: FnMut(HashedPostState),
-    {
-        let spec_id = evm_env.spec_id();
-        let block_env = evm_env.block_env();
-        let block_number = block_env.number.to::<u64>();
-
-        BlockExecutionInput::new(
-            spec_id,
-            block_env,
-            Db::new(self.database),
-            block_number,
-            context,
+        let evm = Evm::<BaseEvmTypes>::new_with_execution_config(
+            ExecutionConfig::for_spec_and_version(env.spec, version),
+            env.spec,
+            env.block,
+            evm2::ethereum::ethereum_tx_registry(env.spec),
+            Db::new(database),
             alloc::boxed::Box::new(CachedPrecompileProvider::new(
-                evm2::Precompiles::base(spec_id),
-                self.precompile_cache_map,
-                spec_id,
+                evm2::Precompiles::base(env.spec),
+                precompile_cache_map,
+                env.spec,
                 None,
             )),
+        );
+
+        Self {
+            evm,
+            spec_id: env.spec,
+            block_number,
+            block_beneficiary,
+            parent_hash: context.parent_hash,
+            parent_beacon_block_root: context.parent_beacon_block_root,
+            ommers: context.ommers,
+            withdrawals: context.withdrawals,
+            chain_id,
+            deposit_contract_address,
+            block_state: BlockStateAccumulator::new(),
+            hashed_state: hashed_state_mode
+                .output()
+                .then(HashedPostStateSink::<KeccakKeyHasher>::default),
+            hashed_state_mode,
+            receipts: Vec::new(),
+            cumulative_gas_used: 0,
+            _database: core::marker::PhantomData,
+        }
+    }
+
+    const fn block_context<'ctx>(
+        chain_id: u64,
+        deposit_contract_address: Option<Address>,
+        parent_hash: B256,
+        parent_beacon_block_root: Option<B256>,
+        ommers: &'ctx [Header],
+        withdrawals: Option<&'ctx [Withdrawal]>,
+    ) -> BlockExecutionContext<'ctx> {
+        BlockExecutionContext {
+            chain_id,
+            system_calls: Some(BlockSystemCalls { parent_hash, parent_beacon_block_root }),
+            ommers: Some(ommers),
+            withdrawals,
+            deposit_contract_address,
+        }
+    }
+}
+
+impl<DB> BlockExecutor for EthBlockExecutor<'_, DB>
+where
+    DB: Database + 'static,
+    DB::Error: core::error::Error + Send + Sync + 'static,
+{
+    type Primitives = EthPrimitives;
+    type Transaction = EthTxEnv;
+    type Error = EthExecutionError<DB::Error>;
+
+    fn apply_pre_execution_changes<H>(
+        &mut self,
+        on_hashed_state_update: &mut H,
+    ) -> Result<(), Self::Error>
+    where
+        H: FnMut(HashedPostState),
+    {
+        let context = Self::block_context(
+            self.chain_id,
+            self.deposit_contract_address,
+            self.parent_hash,
+            self.parent_beacon_block_root,
+            self.ommers,
+            None,
+        );
+        pre_execution_system_call_state_changes::<DB>(
+            &mut self.evm,
+            &mut self.block_state,
+            self.hashed_state.as_mut(),
+            self.hashed_state_mode.stream(),
+            on_hashed_state_update,
+            self.spec_id,
+            self.block_number,
+            context,
         )
-        .execute_fallible_envelopes::<DB, TxErr, ReceiptErr, _, _, _, _>(
-            transactions,
-            ExecutionHooks::new(
-                on_transaction_executed,
-                on_receipt,
-                on_hashed_state_update,
-                hashed_state_mode,
-            ),
-        )
+    }
+
+    fn execute_transaction<H>(
+        &mut self,
+        transaction: Self::Transaction,
+        on_hashed_state_update: &mut H,
+    ) -> Result<(), Self::Error>
+    where
+        H: FnMut(HashedPostState),
+    {
+        let transaction = transaction.into_envelope();
+        let tx_type =
+            TxType::try_from(transaction.ty()).expect("transaction envelope has valid type");
+        let outcome = execute_transaction::<DB>(
+            &mut self.evm,
+            &mut self.block_state,
+            self.hashed_state.as_mut(),
+            self.hashed_state_mode.stream(),
+            on_hashed_state_update,
+            &transaction,
+        )?;
+        self.cumulative_gas_used += outcome.gas_used;
+        self.receipts.push(RethReceiptBuilder.build_receipt(
+            tx_type,
+            outcome,
+            self.cumulative_gas_used,
+        ));
+        Ok(())
+    }
+
+    fn receipts(&self) -> &[Receipt] {
+        &self.receipts
+    }
+
+    fn finish<H>(
+        mut self,
+        on_hashed_state_update: &mut H,
+    ) -> Result<BlockExecutionOutput<Receipt>, Self::Error>
+    where
+        H: FnMut(HashedPostState),
+    {
+        let context = Self::block_context(
+            self.chain_id,
+            self.deposit_contract_address,
+            self.parent_hash,
+            self.parent_beacon_block_root,
+            self.ommers,
+            None,
+        );
+        let mut requests =
+            block_requests_from_receipts::<DB>(self.spec_id, context, &self.receipts)?;
+        let context = Self::block_context(
+            self.chain_id,
+            self.deposit_contract_address,
+            self.parent_hash,
+            self.parent_beacon_block_root,
+            self.ommers,
+            None,
+        );
+        post_execution_system_call_state_changes::<DB>(
+            &mut self.evm,
+            &mut self.block_state,
+            self.hashed_state.as_mut(),
+            self.hashed_state_mode.stream(),
+            on_hashed_state_update,
+            self.spec_id,
+            context,
+            &mut requests,
+        )?;
+
+        let withdrawals = self.withdrawals.clone();
+        let context = Self::block_context(
+            self.chain_id,
+            self.deposit_contract_address,
+            self.parent_hash,
+            self.parent_beacon_block_root,
+            self.ommers,
+            withdrawals.as_deref(),
+        );
+        post_block_balance_state_changes::<DB>(
+            &mut self.evm,
+            &mut self.block_state,
+            self.hashed_state.as_mut(),
+            self.hashed_state_mode.stream(),
+            on_hashed_state_update,
+            self.spec_id,
+            self.block_number,
+            self.block_beneficiary,
+            context.ommers,
+            context.withdrawals,
+        )?;
+
+        let mut output = RethReceiptBuilder
+            .build_block_output_from_receipts_and_state_with_hashed_state(
+                self.receipts,
+                self.block_state,
+                self.hashed_state.map(HashedPostStateSink::into_hashed_post_state),
+            );
+        output.result.requests = requests;
+
+        Ok(output)
     }
 }
 

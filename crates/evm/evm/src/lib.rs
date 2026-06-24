@@ -11,7 +11,7 @@
 
 extern crate alloc;
 
-use crate::execute::{Executor, IntoTxEnv};
+use crate::execute::{BlockExecutor, Executor, HashedStateMode, IntoTxEnv};
 use alloc::{boxed::Box, string::String};
 use alloy_consensus::transaction::Recovered;
 use alloy_eips::eip4895::Withdrawals;
@@ -88,6 +88,17 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// Executor returned for block execution over the provided database.
     type Executor<DB>: Executor<Primitives = Self::Primitives>
     where
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static;
+
+    /// Configured block executor returned for an active block execution.
+    #[cfg(feature = "std")]
+    type BlockExecutor<'a, DB>: BlockExecutor<
+        Primitives = Self::Primitives,
+        Transaction = TxEnvFor<Self>,
+    >
+    where
+        Self: 'a,
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static;
 
@@ -176,6 +187,20 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         self.executor(db)
     }
 
+    /// Creates a configured block executor for active block execution.
+    #[cfg(feature = "std")]
+    fn create_executor<'a, DB>(
+        &'a self,
+        db: DB,
+        evm_env: EvmEnvFor<Self>,
+        ctx: ExecutionCtxFor<'a, Self>,
+        hashed_state_mode: HashedStateMode,
+    ) -> Self::BlockExecutor<'a, DB>
+    where
+        Self: 'a,
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static;
+
     /// Creates an EVM instance for single-transaction execution with the configured environment.
     #[cfg(feature = "std")]
     fn evm_with_env<DB>(&self, db: DB, evm_env: EvmEnvFor<Self>) -> evm2::Evm<evm2::BaseEvmTypes>
@@ -213,14 +238,9 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         DB: evm2::evm::Database + 'static,
         DB::Error: Error + Send + Sync + 'static;
 
-    /// Creates a prewarm evm over the provided state with the provided precompile provider.
+    /// Creates a prewarm evm over the provided state.
     #[cfg(feature = "std")]
-    fn prewarm_evm_with_precompiles<DB>(
-        &self,
-        state_provider: DB,
-        env: EvmEnvFor<Self>,
-        precompiles: Box<dyn evm2::precompile::PrecompileProvider<evm2::BaseEvmTypes>>,
-    ) -> Self::PrewarmEvm<DB>
+    fn prewarm_evm<DB>(&self, state_provider: DB, env: EvmEnvFor<Self>) -> Self::PrewarmEvm<DB>
     where
         DB: reth_storage_api::StateProvider + Send + 'static;
 

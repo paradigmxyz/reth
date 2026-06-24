@@ -103,7 +103,6 @@ use crate::tree::{
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     multiproof::{StateRootComputeOutcome, StateRootHandle, StateRootMessage},
     payload_processor::{PayloadProcessor, PayloadProcessorSpawnOptions},
-    precompile_cache::PrecompileCacheMap,
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
     PayloadHandle, StateProviderBuilder, TreeConfig, WaitForCaches,
@@ -130,13 +129,9 @@ use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
-use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::{
-    execute::{ExecutableTxFor, RecoveredTx},
+    execute::{BlockExecutor, ExecutableTxFor, HashedStateMode, RecoveredTx},
     ConfigureEvm, EvmEnv, EvmEnvFor, ExecutionCtxFor,
-};
-use reth_evm_ethereum::{
-    AsBlockExecutionContext, EthPayloadExecutor, EthTxEnv, HashedStateMode, PayloadExecutionError,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
 use reth_execution_types::hashed_post_state_from_state_source;
@@ -292,8 +287,6 @@ where
     config: TreeConfig,
     /// Payload processor for state root computation.
     payload_processor: PayloadProcessor<Evm>,
-    /// Shared EVM precompile cache for prewarming and execution.
-    precompile_cache_map: PrecompileCacheMap<evm2::SpecId>,
     /// Hook to call when invalid blocks are encountered.
     #[debug(skip)]
     invalid_block_hook: Box<dyn InvalidBlockHook<Evm::Primitives>>,
@@ -342,19 +335,12 @@ where
         changeset_cache: ChangesetCache,
         runtime: reth_tasks::Runtime,
     ) -> Self {
-        let precompile_cache_map = PrecompileCacheMap::default();
-        let payload_processor = PayloadProcessor::new(
-            runtime.clone(),
-            evm_config.clone(),
-            &config,
-            precompile_cache_map.clone(),
-        );
+        let payload_processor = PayloadProcessor::new(runtime.clone(), evm_config.clone(), &config);
         Self {
             provider,
             consensus,
             evm_config,
             payload_processor,
-            precompile_cache_map,
             config,
             invalid_block_hook,
             metrics: EngineApiMetrics::default(),
@@ -464,11 +450,8 @@ where
     ) -> InsertPayloadResult<N>
     where
         V: PayloadValidator<T, Block = N::Block> + Clone,
-        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N, TxEnv = EthTxEnv>,
+        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
         EvmEnvFor<Evm>: EvmEnv,
-        for<'a> ExecutionCtxFor<'a, Evm>: AsBlockExecutionContext,
-        Evm::Executor<BorrowedEvmStateProviderDatabase>: EthPayloadExecutor,
-        N: NodePrimitives<SignedTx = TransactionSigned, Receipt = Receipt>,
     {
         let parent_hash = input.parent_hash();
         let _jit_pause = JitPauseGuard::new(&self.evm_config);
@@ -1140,11 +1123,8 @@ where
         V: PayloadValidator<T, Block = N::Block>,
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
         T::ExecutionData: ExecutionPayload,
-        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N, TxEnv = EthTxEnv>,
+        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
         EvmEnvFor<Evm>: EvmEnv,
-        for<'a> ExecutionCtxFor<'a, Evm>: AsBlockExecutionContext,
-        Evm::Executor<BorrowedEvmStateProviderDatabase>: EthPayloadExecutor,
-        N: NodePrimitives<SignedTx = TransactionSigned, Receipt = Receipt>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
@@ -1153,10 +1133,6 @@ where
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
         let execution_start = Instant::now();
         let execution_ctx = self.execution_ctx_for(input).map_err(BlockExecutionError::other)?;
-        let context = execution_ctx.as_block_execution_context(
-            self.evm_config.chain_id(),
-            self.evm_config.deposit_contract_address(),
-        );
         let state_hook_sender = handle.state_hook_sender();
         let streamed_state_updates = state_hook_sender.is_some();
         let hashed_state_mode = if streamed_state_updates {
@@ -1165,49 +1141,66 @@ where
             HashedStateMode::OutputOnly
         };
 
-        let mut senders = Vec::with_capacity(transaction_count);
-        let transactions = handle.iter_transactions().map(|tx| {
-            let tx = tx.map_err(BlockExecutionError::other)?;
-            let (tx_env, tx) = tx.into_parts();
-            senders.push(*tx.signer());
-            Ok(tx_env.into_envelope())
-        });
-
-        let output = debug_span!(target: "engine::tree", "execute_block")
-            .in_scope(|| {
+        let (output, senders) =
+            debug_span!(target: "engine::tree", "execute_block").in_scope(|| {
                 let mut on_hashed_state_update = |hashed_state| {
                     if let Some(sender) = state_hook_sender.as_ref() {
                         sender.send_hashed_state(hashed_state);
                     }
                 };
-                let mut on_receipt = |index, receipt: &Receipt| {
-                    receipt_tx
-                        .send(IndexedReceipt::new(index, receipt.clone()))
-                        .map_err(|_| BlockExecutionError::msg("receipt root task closed"))
-                };
                 // SAFETY: The borrowed EVM database is consumed by this synchronous block
                 // execution call and cannot outlive `state_provider`.
                 let db = unsafe { BorrowedEvmStateProviderDatabase::new(&state_provider) };
-                self.evm_config
-                    .executor(db)
-                    .with_precompile_cache_map(self.precompile_cache_map.clone())
-                    .execute_payload_with_fallible_receipt_hashed_state_hook(
-                        env.evm_env.clone(),
-                        transactions,
-                        context,
-                        |executed| {
-                            executed_tx_index.store(executed, Ordering::Relaxed);
-                        },
-                        &mut on_receipt,
-                        &mut on_hashed_state_update,
-                        hashed_state_mode,
-                    )
-            })
-            .map_err(|err| match err {
-                PayloadExecutionError::Execution(err) => BlockExecutionError::other(err),
-                PayloadExecutionError::Transaction(err) | PayloadExecutionError::Receipt(err) => {
-                    err
+                let mut executor = self.evm_config.create_executor(
+                    db,
+                    env.evm_env.clone(),
+                    execution_ctx,
+                    hashed_state_mode,
+                );
+                let pre_exec_start = Instant::now();
+                executor
+                    .apply_pre_execution_changes(&mut on_hashed_state_update)
+                    .map_err(BlockExecutionError::other)?;
+                self.metrics.record_pre_execution(pre_exec_start.elapsed());
+
+                let mut senders = Vec::with_capacity(transaction_count);
+                let mut transactions = handle.iter_transactions();
+                let mut last_sent_len = 0usize;
+                loop {
+                    let wait_start = Instant::now();
+                    let Some(tx_result) = transactions.next() else { break };
+                    self.metrics.record_transaction_wait(wait_start.elapsed());
+                    let tx = tx_result.map_err(BlockExecutionError::other)?;
+                    let (tx_env, tx) = tx.into_parts();
+                    senders.push(*tx.signer());
+
+                    let tx_start = Instant::now();
+                    executor
+                        .execute_transaction(tx_env, &mut on_hashed_state_update)
+                        .map_err(BlockExecutionError::other)?;
+                    self.metrics.record_transaction_execution(tx_start.elapsed());
+                    executed_tx_index.store(senders.len(), Ordering::Relaxed);
+
+                    let current_len = executor.receipts().len();
+                    if current_len > last_sent_len {
+                        last_sent_len = current_len;
+                        if let Some(receipt) = executor.receipts().last() {
+                            let tx_index = current_len - 1;
+                            receipt_tx
+                                .send(IndexedReceipt::new(tx_index, receipt.clone()))
+                                .map_err(|_| {
+                                    BlockExecutionError::msg("receipt root task closed")
+                                })?;
+                        }
+                    }
                 }
+
+                let post_exec_start = Instant::now();
+                let output = executor
+                    .finish(&mut on_hashed_state_update)
+                    .map_err(BlockExecutionError::other)?;
+                self.metrics.record_post_execution(post_exec_start.elapsed());
+                Ok::<_, BlockExecutionError>((output, senders))
             })?;
         drop(state_hook_sender);
         drop(receipt_tx);
@@ -2074,14 +2067,12 @@ where
         + HashedPostStateProvider
         + Clone
         + 'static,
-    N: NodePrimitives<SignedTx = TransactionSigned, Receipt = Receipt>,
+    N: NodePrimitives,
     V: PayloadValidator<Types, Block = N::Block> + Clone,
-    Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N, TxEnv = EthTxEnv>
+    Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N>
         + ConfigureEvm<Primitives = N>
         + 'static,
     EvmEnvFor<Evm>: EvmEnv,
-    for<'a> ExecutionCtxFor<'a, Evm>: AsBlockExecutionContext,
-    Evm::Executor<BorrowedEvmStateProviderDatabase>: EthPayloadExecutor,
     Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
 {
     fn validate_payload_attributes_against_header(

@@ -84,18 +84,8 @@ pub struct EthBlockExecutionCtx<'a> {
     pub slot_number: Option<u64>,
 }
 
-/// Converts a resolved execution context into Ethereum block execution context.
-pub trait AsBlockExecutionContext {
-    /// Returns the block execution context.
-    fn as_block_execution_context(
-        &self,
-        chain_id: u64,
-        deposit_contract_address: Option<Address>,
-    ) -> crate::execution::BlockExecutionContext<'_>;
-}
-
-impl AsBlockExecutionContext for EthBlockExecutionCtx<'_> {
-    fn as_block_execution_context(
+impl EthBlockExecutionCtx<'_> {
+    fn block_execution_context(
         &self,
         chain_id: u64,
         deposit_contract_address: Option<Address>,
@@ -128,16 +118,16 @@ pub use build::EthBlockAssembler;
 #[cfg(feature = "std")]
 mod executor;
 #[cfg(feature = "std")]
-pub use executor::{EthExecutor, EthPayloadExecutor};
+pub use executor::{EthBlockExecutor, EthExecutor};
 
 mod convert;
 pub use convert::{EthTxEnv, ExecutableRecoveredTx};
 
 mod execution;
 pub use execution::{
-    BlockExecutionContext, BlockSystemCalls, EthExecutionError, HashedStateMode,
-    PayloadExecutionError,
+    BlockExecutionContext, BlockSystemCalls, EthExecutionError, PayloadExecutionError,
 };
+pub use reth_evm::execute::HashedStateMode;
 
 mod receipt;
 pub use receipt::RethReceiptBuilder;
@@ -222,6 +212,13 @@ where
     type Executor<DB>
         = EthExecutor<ChainSpec, DB>
     where
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static;
+    #[cfg(feature = "std")]
+    type BlockExecutor<'a, DB>
+        = EthBlockExecutor<'a, DB>
+    where
+        Self: 'a,
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static;
     #[cfg(not(feature = "std"))]
@@ -340,6 +337,30 @@ where
     }
 
     #[cfg(feature = "std")]
+    fn create_executor<'a, DB>(
+        &'a self,
+        db: DB,
+        env: EthEvmEnv,
+        ctx: EthBlockExecutionCtx<'a>,
+        hashed_state_mode: HashedStateMode,
+    ) -> Self::BlockExecutor<'a, DB>
+    where
+        Self: 'a,
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static,
+    {
+        EthBlockExecutor::new(
+            db,
+            env,
+            ctx,
+            self.chain_spec.chain_id(),
+            self.chain_spec.deposit_contract_address(),
+            self.precompile_cache_map.clone(),
+            hashed_state_mode,
+        )
+    }
+
+    #[cfg(feature = "std")]
     fn evm_with_env<DB>(&self, db: DB, env: EthEvmEnv) -> evm2::Evm<evm2::BaseEvmTypes>
     where
         DB: evm2::evm::DynDatabase + 'static,
@@ -379,7 +400,7 @@ where
         crate::execution::apply_pre_execution_system_calls::<DB>(
             &mut evm,
             block_number,
-            ctx.as_block_execution_context(
+            ctx.block_execution_context(
                 self.chain_spec.chain_id(),
                 self.chain_spec.deposit_contract_address(),
             ),
@@ -388,14 +409,7 @@ where
     }
 
     #[cfg(feature = "std")]
-    fn prewarm_evm_with_precompiles<DB>(
-        &self,
-        state_provider: DB,
-        env: EthEvmEnv,
-        precompiles: alloc::boxed::Box<
-            dyn evm2::precompile::PrecompileProvider<evm2::BaseEvmTypes>,
-        >,
-    ) -> Self::PrewarmEvm<DB>
+    fn prewarm_evm<DB>(&self, state_provider: DB, env: EthEvmEnv) -> Self::PrewarmEvm<DB>
     where
         DB: reth_storage_api::StateProvider + Send + 'static,
     {
@@ -410,7 +424,12 @@ where
             env.block,
             evm2::ethereum::ethereum_tx_registry(env.spec),
             evm2::evm::Db::new(reth_storage_api::EvmStateProviderDatabase::new(state_provider)),
-            precompiles,
+            alloc::boxed::Box::new(CachedPrecompileProvider::new(
+                evm2::Precompiles::base(env.spec),
+                self.precompile_cache_map.clone(),
+                env.spec,
+                None,
+            )),
         )
     }
 
