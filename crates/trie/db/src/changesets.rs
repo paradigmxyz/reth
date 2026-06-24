@@ -23,7 +23,11 @@ use reth_trie::{
     TrieInputSorted,
 };
 use reth_trie_common::updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted};
-use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    ops::RangeInclusive,
+    sync::Arc,
+};
 use tracing::{debug, warn};
 
 #[cfg(test)]
@@ -655,7 +659,7 @@ impl ChangesetRangeKey {
 #[derive(Debug)]
 struct ChangesetCacheInner {
     /// Cache entries keyed by inclusive block range plus the range's canonical end hash.
-    entries: BTreeMap<ChangesetRangeKey, Arc<TrieUpdatesSorted>>,
+    entries: HashMap<ChangesetRangeKey, Arc<TrieUpdatesSorted>>,
 
     /// Range start block to cache keys mapping for eviction.
     range_starts: BTreeMap<BlockNumber, Vec<ChangesetRangeKey>>,
@@ -699,7 +703,7 @@ impl ChangesetCacheInner {
     /// via the `evict()` method to manage memory usage.
     fn new() -> Self {
         Self {
-            entries: BTreeMap::new(),
+            entries: HashMap::new(),
             range_starts: BTreeMap::new(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
