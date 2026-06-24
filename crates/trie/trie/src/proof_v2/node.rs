@@ -1,5 +1,7 @@
 use crate::proof_v2::DeferredValueEncoder;
-use alloy_rlp::Encodable;
+use alloy_primitives::Keccak256;
+use alloy_rlp::{length_of_length, Encodable, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
+use alloy_trie::nodes::{encode_path_leaf, BranchNodeRef, ExtensionNodeRef};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
     BranchNodeMasks, BranchNodeV2, LeafNode, LeafNodeRef, Nibbles, ProofTrieNodeV2, RlpNode,
@@ -42,6 +44,10 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
                 value.encode(buf)?;
                 let value_enc_len = buf.len();
 
+                if let Some(rlp_node) = hashed_leaf_rlp_node(&short_key, &buf[..value_enc_len]) {
+                    return Ok((rlp_node, None))
+                }
+
                 // Determine the required buffer size for the encoded leaf
                 let leaf_enc_len = LeafNodeRef::new(&short_key, buf).length();
 
@@ -60,8 +66,8 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
                 Ok((RlpNode::from_rlp(&buf[value_enc_len..]), None))
             }
             Self::Branch { node: branch_node, .. } => {
-                branch_node.encode(buf);
-                Ok((RlpNode::from_rlp(buf), Some(branch_node.stack)))
+                let rlp_node = branch_v2_rlp_node(&branch_node, buf);
+                Ok((rlp_node, Some(branch_node.stack)))
             }
             Self::RlpNode(rlp_node) => Ok((rlp_node, None)),
         }
@@ -138,6 +144,170 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
     }
 }
 
+/// Returns the same [`RlpNode`] as encoding `node` and passing it to [`RlpNode::from_rlp`], but
+/// streams large proof-node encodings directly into Keccak instead of first materializing the full
+/// node RLP in a growable byte buffer.
+pub(crate) fn trie_node_v2_rlp_node(node: &TrieNodeV2, buf: &mut Vec<u8>) -> RlpNode {
+    match node {
+        TrieNodeV2::EmptyRoot => RlpNode::from_raw(&[EMPTY_STRING_CODE])
+            .expect("empty root RLP is one byte and always fits in RlpNode"),
+        TrieNodeV2::Leaf(leaf) => leaf_rlp_node(&leaf.key, &leaf.value, buf),
+        TrieNodeV2::Branch(branch) => branch_v2_rlp_node(branch, buf),
+        TrieNodeV2::Extension(extension) => extension_rlp_node(
+            &extension.key,
+            extension.child.as_slice(),
+            buf,
+        ),
+    }
+}
+
+/// Returns the branch-node child pointer for `stack` and `state_mask`, matching
+/// `BranchNodeRef::encode` followed by `RlpNode::from_rlp`.
+pub(crate) fn branch_rlp_node(
+    stack: &[RlpNode],
+    state_mask: TrieMask,
+    buf: &mut Vec<u8>,
+) -> RlpNode {
+    let payload_len = branch_payload_length(stack, state_mask);
+    let encoded_len = payload_len + length_of_length(payload_len);
+
+    if encoded_len < 32 {
+        buf.clear();
+        BranchNodeRef::new(stack, state_mask).encode(buf);
+        return RlpNode::from_rlp(buf)
+    }
+
+    let mut hasher = Keccak256::new();
+    update_rlp_header(&mut hasher, EMPTY_LIST_CODE, payload_len);
+
+    let first_child_idx = first_child_index(stack, state_mask);
+    let mut stack_iter = stack[first_child_idx..].iter();
+    for nibble in 0u8..16 {
+        if state_mask.is_bit_set(nibble) {
+            let child = stack_iter.next().expect("branch stack must contain all masked children");
+            hasher.update(child.as_slice());
+        } else {
+            hasher.update([EMPTY_STRING_CODE]);
+        }
+    }
+    hasher.update([EMPTY_STRING_CODE]);
+
+    RlpNode::word_rlp(&hasher.finalize())
+}
+
+fn branch_v2_rlp_node(branch: &BranchNodeV2, buf: &mut Vec<u8>) -> RlpNode {
+    if branch.key.is_empty() {
+        return branch_rlp_node(&branch.stack, branch.state_mask, buf)
+    }
+
+    let branch_rlp_node = branch
+        .branch_rlp_node
+        .as_ref()
+        .expect("branch_rlp_node must always be present for extension nodes");
+    extension_rlp_node(&branch.key, branch_rlp_node.as_slice(), buf)
+}
+
+fn leaf_rlp_node(short_key: &Nibbles, value: &[u8], buf: &mut Vec<u8>) -> RlpNode {
+    if let Some(rlp_node) = hashed_leaf_rlp_node(short_key, value) {
+        return rlp_node
+    }
+
+    buf.clear();
+    LeafNodeRef::new(short_key, value).encode(buf);
+    RlpNode::from_rlp(buf)
+}
+
+fn hashed_leaf_rlp_node(short_key: &Nibbles, value: &[u8]) -> Option<RlpNode> {
+    let encoded_path = encode_path_leaf(short_key, true);
+    let payload_len = rlp_string_len(&encoded_path) + rlp_string_len(value);
+    let encoded_len = payload_len + length_of_length(payload_len);
+
+    if encoded_len < 32 {
+        return None
+    }
+
+    let mut hasher = Keccak256::new();
+    update_rlp_header(&mut hasher, EMPTY_LIST_CODE, payload_len);
+    update_rlp_string(&mut hasher, &encoded_path);
+    update_rlp_string(&mut hasher, value);
+    Some(RlpNode::word_rlp(&hasher.finalize()))
+}
+
+fn extension_rlp_node(short_key: &Nibbles, child: &[u8], buf: &mut Vec<u8>) -> RlpNode {
+    let encoded_path = encode_path_leaf(short_key, false);
+    let payload_len = rlp_string_len(&encoded_path) + child.len();
+    let encoded_len = payload_len + length_of_length(payload_len);
+
+    if encoded_len < 32 {
+        buf.clear();
+        ExtensionNodeRef::new(short_key, child).encode(buf);
+        return RlpNode::from_rlp(buf)
+    }
+
+    let mut hasher = Keccak256::new();
+    update_rlp_header(&mut hasher, EMPTY_LIST_CODE, payload_len);
+    update_rlp_string(&mut hasher, &encoded_path);
+    hasher.update(child);
+    RlpNode::word_rlp(&hasher.finalize())
+}
+
+fn branch_payload_length(stack: &[RlpNode], state_mask: TrieMask) -> usize {
+    let first_child_idx = first_child_index(stack, state_mask);
+    let mut stack_iter = stack[first_child_idx..].iter();
+    let mut payload_len = 1;
+
+    for nibble in 0u8..16 {
+        if state_mask.is_bit_set(nibble) {
+            let child = stack_iter.next().expect("branch stack must contain all masked children");
+            payload_len += child.len();
+        } else {
+            payload_len += 1;
+        }
+    }
+
+    payload_len
+}
+
+fn first_child_index(stack: &[RlpNode], state_mask: TrieMask) -> usize {
+    stack.len().checked_sub(state_mask.count_ones() as usize).expect(
+        "branch stack length must be at least the number of children in the state mask",
+    )
+}
+
+fn rlp_string_len(bytes: &[u8]) -> usize {
+    if bytes.len() == 1 && bytes[0] < EMPTY_STRING_CODE {
+        1
+    } else {
+        bytes.len() + length_of_length(bytes.len())
+    }
+}
+
+fn update_rlp_string(hasher: &mut Keccak256, bytes: &[u8]) {
+    if bytes.len() == 1 && bytes[0] < EMPTY_STRING_CODE {
+        hasher.update(bytes);
+    } else {
+        update_rlp_header(hasher, EMPTY_STRING_CODE, bytes.len());
+        hasher.update(bytes);
+    }
+}
+
+fn update_rlp_header(hasher: &mut Keccak256, offset: u8, payload_len: usize) {
+    if payload_len < 56 {
+        hasher.update([offset + payload_len as u8]);
+        return
+    }
+
+    let len_bytes = payload_len.to_be_bytes();
+    let first_non_zero = len_bytes
+        .iter()
+        .position(|byte| *byte != 0)
+        .expect("payload length is at least 56");
+    let len_of_len = len_bytes.len() - first_non_zero;
+
+    hasher.update([offset + 55 + len_of_len as u8]);
+    hasher.update(&len_bytes[first_non_zero..]);
+}
+
 /// A single branch in the trie which is under construction. The actual child nodes of the branch
 /// will be tracked as [`ProofTrieBranchChild`]s on a stack.
 #[derive(Debug)]
@@ -165,6 +335,15 @@ pub(crate) fn trim_nibbles_prefix(n: &Nibbles, len: usize) -> Nibbles {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::B256;
+
+    fn assert_trie_node_v2_rlp_matches_canonical(node: TrieNodeV2) {
+        let mut canonical = Vec::new();
+        node.encode(&mut canonical);
+
+        let mut buf = Vec::new();
+        assert_eq!(trie_node_v2_rlp_node(&node, &mut buf), RlpNode::from_rlp(&canonical));
+    }
 
     #[test]
     fn test_trim_nibbles_prefix_basic() {
@@ -210,5 +389,38 @@ mod tests {
         // Trim zero from empty - should return empty
         let trimmed = trim_nibbles_prefix(&nibbles, 0);
         assert!(trimmed.is_empty());
+    }
+
+    #[test]
+    fn streamed_rlp_node_matches_canonical_encoding() {
+        assert_trie_node_v2_rlp_matches_canonical(TrieNodeV2::EmptyRoot);
+
+        assert_trie_node_v2_rlp_matches_canonical(TrieNodeV2::Leaf(LeafNode::new(
+            Nibbles::from_nibbles([1, 2, 3, 4]),
+            vec![0xab; 96],
+        )));
+
+        let state_mask = TrieMask::new((1 << 0) | (1 << 7) | (1 << 15));
+        let stack = vec![
+            RlpNode::word_rlp(&B256::repeat_byte(0x11)),
+            RlpNode::word_rlp(&B256::repeat_byte(0x77)),
+            RlpNode::word_rlp(&B256::repeat_byte(0xff)),
+        ];
+
+        assert_trie_node_v2_rlp_matches_canonical(TrieNodeV2::Branch(BranchNodeV2::new(
+            Nibbles::new(),
+            stack.clone(),
+            state_mask,
+            None,
+        )));
+
+        let mut branch_rlp = Vec::new();
+        BranchNodeRef::new(&stack, state_mask).encode(&mut branch_rlp);
+        assert_trie_node_v2_rlp_matches_canonical(TrieNodeV2::Branch(BranchNodeV2::new(
+            Nibbles::from_nibbles([0xa, 0xb, 0xc]),
+            stack,
+            state_mask,
+            Some(RlpNode::from_rlp(&branch_rlp)),
+        )));
     }
 }

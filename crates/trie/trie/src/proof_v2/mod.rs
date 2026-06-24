@@ -16,8 +16,8 @@ use alloy_rlp::Encodable;
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    prefix_set::PrefixSet, BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2,
-    ProofV2Target, RlpNode, TrieNodeV2,
+    prefix_set::PrefixSet, BranchNodeMasks, BranchNodeV2, Nibbles, ProofTrieNodeV2, ProofV2Target,
+    RlpNode, TrieNodeV2,
 };
 use std::cmp::Ordering;
 use tracing::{error, instrument, trace};
@@ -290,13 +290,12 @@ where
             self.rlp_encode_buf.clear();
             let proof_node = child.into_proof_trie_node(child_path, &mut self.rlp_encode_buf)?;
 
-            // Use the `ProofTrieNodeV2` to encode the `RlpNode`, and then push it onto retained
-            // nodes before returning.
-            self.rlp_encode_buf.clear();
-            proof_node.node.encode(&mut self.rlp_encode_buf);
+            // Use the `ProofTrieNodeV2` to calculate the parent child pointer, and then push it
+            // onto retained nodes before returning.
+            let proof_rlp_node = trie_node_v2_rlp_node(&proof_node.node, &mut self.rlp_encode_buf);
 
             self.retained_proofs.push(proof_node);
-            return Ok(RlpNode::from_rlp(&self.rlp_encode_buf));
+            return Ok(proof_rlp_node);
         }
 
         // If the child path is not being retained then we convert directly to an `RlpNode`
@@ -570,9 +569,7 @@ where
         let rlp_node = if short_key.is_empty() {
             None
         } else {
-            self.rlp_encode_buf.clear();
-            BranchNodeRef::new(&rlp_nodes_buf, branch.state_mask).encode(&mut self.rlp_encode_buf);
-            Some(RlpNode::from_rlp(&self.rlp_encode_buf))
+            Some(branch_rlp_node(&rlp_nodes_buf, branch.state_mask, &mut self.rlp_encode_buf))
         };
 
         // Wrap the `BranchNodeV2` so it can be pushed onto the child stack.
