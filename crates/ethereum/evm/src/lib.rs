@@ -339,8 +339,7 @@ where
     #[cfg(feature = "std")]
     fn create_executor<'a, DB>(
         &'a self,
-        db: DB,
-        env: EthEvmEnv,
+        evm: evm2::Evm<evm2::BaseEvmTypes>,
         ctx: EthBlockExecutionCtx<'a>,
         hashed_state_mode: HashedStateMode,
     ) -> Self::BlockExecutor<'a, DB>
@@ -350,12 +349,10 @@ where
         DB::Error: core::error::Error + Send + Sync + 'static,
     {
         EthBlockExecutor::new(
-            db,
-            env,
+            evm,
             ctx,
             self.chain_spec.chain_id(),
             self.chain_spec.deposit_contract_address(),
-            self.precompile_cache_map.clone(),
             hashed_state_mode,
         )
     }

@@ -7,8 +7,8 @@ use crate::{
         post_execution_system_call_state_changes, pre_execution_system_call_state_changes,
         BlockExecutionInput,
     },
-    BlockExecutionContext, BlockSystemCalls, EthBlockExecutionCtx, EthEvmEnv, EthExecutionError,
-    EthTxEnv, HashedStateMode, RethReceiptBuilder,
+    BlockExecutionContext, BlockSystemCalls, EthBlockExecutionCtx, EthExecutionError, EthTxEnv,
+    HashedStateMode, RethReceiptBuilder,
 };
 use alloc::{borrow::Cow, rc::Rc, sync::Arc, vec::Vec};
 use alloy_consensus::{transaction::Recovered, Header, TxType};
@@ -20,7 +20,8 @@ use evm2::{
         BlockStateAccumulator, CacheDB, Database, Db, DbErrorCode, DbResult, DynDatabase,
         StateChangeSource,
     },
-    BaseEvmTypes, Evm, ExecutionConfig, Version,
+    interpreter::Host,
+    BaseEvmTypes, Evm,
 };
 use reth_chainspec::{EthChainSpec, EthExecutorSpec};
 use reth_ethereum_forks::Hardforks;
@@ -197,36 +198,20 @@ where
 {
     /// Creates a configured Ethereum block executor.
     pub(crate) fn new(
-        database: DB,
-        env: EthEvmEnv,
+        mut evm: Evm<BaseEvmTypes>,
         context: EthBlockExecutionCtx<'a>,
         chain_id: u64,
         deposit_contract_address: Option<alloy_primitives::Address>,
-        precompile_cache_map: PrecompileCacheMap<evm2::SpecId>,
         hashed_state_mode: HashedStateMode,
     ) -> Self {
-        let block_number = env.block.number.to::<u64>();
-        let block_beneficiary = env.block.beneficiary;
-        let mut version = Version::new(env.spec);
-        version.chain_id = chain_id;
-
-        let evm = Evm::<BaseEvmTypes>::new_with_execution_config(
-            ExecutionConfig::for_spec_and_version(env.spec, version),
-            env.spec,
-            env.block,
-            evm2::ethereum::ethereum_tx_registry(env.spec),
-            Db::new(database),
-            alloc::boxed::Box::new(CachedPrecompileProvider::new(
-                evm2::Precompiles::base(env.spec),
-                precompile_cache_map,
-                env.spec,
-                None,
-            )),
-        );
+        let spec_id = evm.spec_id();
+        let block = *evm.block_env();
+        let block_number = block.number.to::<u64>();
+        let block_beneficiary = block.beneficiary;
 
         Self {
             evm,
-            spec_id: env.spec,
+            spec_id,
             block_number,
             block_beneficiary,
             parent_hash: context.parent_hash,

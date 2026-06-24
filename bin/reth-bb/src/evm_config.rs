@@ -137,8 +137,7 @@ where
 
     fn create_executor<'a, DB>(
         &'a self,
-        db: DB,
-        evm_env: EvmEnvFor<Self>,
+        evm: evm2::Evm<evm2::BaseEvmTypes>,
         ctx: ExecutionCtxFor<'a, Self>,
         hashed_state_mode: reth_evm::execute::HashedStateMode,
     ) -> Self::BlockExecutor<'a, DB>
@@ -147,7 +146,7 @@ where
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static,
     {
-        self.inner.create_executor(db, evm_env, ctx, hashed_state_mode)
+        self.inner.create_executor(evm, ctx, hashed_state_mode)
     }
 
     fn evm_with_env<DB>(&self, db: DB, evm_env: EvmEnvFor<Self>) -> evm2::Evm<evm2::BaseEvmTypes>

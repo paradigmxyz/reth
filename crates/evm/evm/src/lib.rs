@@ -191,8 +191,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     #[cfg(feature = "std")]
     fn create_executor<'a, DB>(
         &'a self,
-        db: DB,
-        evm_env: EvmEnvFor<Self>,
+        evm: evm2::Evm<evm2::BaseEvmTypes>,
         ctx: ExecutionCtxFor<'a, Self>,
         hashed_state_mode: HashedStateMode,
     ) -> Self::BlockExecutor<'a, DB>

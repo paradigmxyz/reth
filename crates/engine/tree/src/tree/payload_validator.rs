@@ -1151,12 +1151,13 @@ where
                 // SAFETY: The borrowed EVM database is consumed by this synchronous block
                 // execution call and cannot outlive `state_provider`.
                 let db = unsafe { BorrowedEvmStateProviderDatabase::new(&state_provider) };
-                let mut executor = self.evm_config.create_executor(
-                    db,
-                    env.evm_env.clone(),
-                    execution_ctx,
-                    hashed_state_mode,
-                );
+                let evm = self.evm_config.evm_with_env(evm2::evm::Db::new(db), env.evm_env.clone());
+                let mut executor =
+                    self.evm_config.create_executor::<BorrowedEvmStateProviderDatabase>(
+                        evm,
+                        execution_ctx,
+                        hashed_state_mode,
+                    );
                 let pre_exec_start = Instant::now();
                 executor
                     .apply_pre_execution_changes(&mut on_hashed_state_update)

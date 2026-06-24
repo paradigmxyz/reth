@@ -113,8 +113,7 @@ where
     #[cfg(feature = "std")]
     fn create_executor<'a, DB>(
         &'a self,
-        db: DB,
-        evm_env: EvmEnvFor<Self>,
+        evm: evm2::Evm<evm2::BaseEvmTypes>,
         ctx: crate::ExecutionCtxFor<'a, Self>,
         hashed_state_mode: crate::execute::HashedStateMode,
     ) -> Self::BlockExecutor<'a, DB>
@@ -123,7 +122,7 @@ where
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static,
     {
-        self.inner().create_executor(db, evm_env, ctx, hashed_state_mode)
+        self.inner().create_executor(evm, ctx, hashed_state_mode)
     }
 
     #[cfg(feature = "std")]
