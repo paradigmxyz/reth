@@ -52,11 +52,6 @@ impl Protocol {
         Self::eth(EthVersion::Eth68)
     }
 
-    /// Returns the `snap/1` capability.
-    pub const fn snap_1() -> Self {
-        Self::snap(SnapVersion::V1)
-    }
-
     /// Returns the `snap/2` capability.
     pub const fn snap_2() -> Self {
         Self::snap(SnapVersion::V2)
@@ -103,7 +98,6 @@ mod tests {
         assert_eq!(Protocol::eth(EthVersion::Eth69).messages(), 18);
         assert_eq!(Protocol::eth(EthVersion::Eth70).messages(), 18);
         assert_eq!(Protocol::eth(EthVersion::Eth71).messages(), 20);
-        assert_eq!(Protocol::snap(SnapVersion::V1).messages(), 8);
         assert_eq!(Protocol::snap(SnapVersion::V2).messages(), 10);
     }
 }
