@@ -10,7 +10,7 @@ use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
 use async_trait::async_trait;
-use evm2::{ethereum::RecoveredTxEnvelope, evm::Db};
+use evm2::evm::Db;
 use evm2_inspectors::tracing::{DebugInspector, DebugInspectorError, TransactionContext};
 use futures::Stream;
 use jsonrpsee::core::RpcResult;
@@ -30,8 +30,8 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
-    BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ProviderTx,
-    ReceiptProviderIdExt, StateProviderFactory, TransactionVariant,
+    BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
+    StateProviderFactory, TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_transaction_pool::TransactionPool;
@@ -797,8 +797,6 @@ impl<Eth> DebugApi<Eth>
 where
     Eth: TraceExt,
     Eth::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
-    TxEnvFor<Eth::Evm>: AsRef<RecoveredTxEnvelope>,
-    ProviderTx<Eth::Provider>: Clone,
 {
     async fn trace_block_impl(
         &self,
@@ -832,7 +830,7 @@ where
                                 tx_index: Some(index),
                                 tx_hash: Some(tx_hash),
                             }),
-                            tx_env.as_ref(),
+                            Eth::recovered_tx_envelope(&tx_env),
                             &evm_env.block_env(),
                             &result,
                             &mut trace_db,
@@ -936,7 +934,7 @@ where
                             tx_index: Some(index as usize),
                             tx_hash: Some(*tx.tx_hash()),
                         }),
-                        tx_env.as_ref(),
+                        Eth::recovered_tx_envelope(&tx_env),
                         &evm_env.block_env(),
                         &result,
                         &mut trace_db,
@@ -977,8 +975,6 @@ impl<Eth> DebugApiServer<RpcTxReq<Eth::NetworkTypes>> for DebugApi<Eth>
 where
     Eth: EthTransactions + TraceExt,
     Eth::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
-    TxEnvFor<Eth::Evm>: AsRef<RecoveredTxEnvelope>,
-    ProviderTx<Eth::Provider>: Clone,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {

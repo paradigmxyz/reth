@@ -11,14 +11,13 @@ use alloy_rpc_types_trace::{
     parity::{Action, CreateAction, CreateOutput, TraceOutput},
 };
 use async_trait::async_trait;
-use evm2::{ethereum::RecoveredTxEnvelope, interpreter::InstrStop, NoopInspector};
+use evm2::{interpreter::InstrStop, NoopInspector};
 use evm2_inspectors::{
     tracing::TracingInspectorConfig,
     transfer::{TransferInspector, TransferKind},
 };
 use jsonrpsee::core::RpcResult;
 use jsonrpsee_types::ErrorObjectOwned;
-use reth_evm::TxEnvFor;
 use reth_primitives_traits::TxTy;
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_convert::RpcTxReq;
@@ -28,7 +27,6 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
-use reth_storage_api::ProviderTx;
 
 const API_LEVEL: u64 = 8;
 
@@ -81,8 +79,6 @@ where
         > + EthTransactions
         + TraceExt
         + 'static,
-    TxEnvFor<Eth::Evm>: AsRef<RecoveredTxEnvelope>,
-    ProviderTx<Eth::Provider>: Clone,
 {
     /// Handler for `ots_getHeaderByNumber` and `erigon_getHeaderByNumber`
     async fn get_header_by_number(

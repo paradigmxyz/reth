@@ -10,12 +10,11 @@ use alloy_rpc_types_trace::{
     parity::*,
 };
 use async_trait::async_trait;
-use evm2::{ethereum::RecoveredTxEnvelope, evm::Db};
+use evm2::evm::Db;
 use evm2_inspectors::{opcode::OpcodeGasInspector, tracing::TracingInspectorConfig};
 use futures::StreamExt;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_evm::TxEnvFor;
 use reth_primitives_traits::BlockBody;
 #[cfg(any())]
 use reth_primitives_traits::BlockHeader;
@@ -26,7 +25,7 @@ use reth_rpc_eth_api::{
     FromEthApiError,
 };
 use reth_rpc_eth_types::{EthApiError, EthConfig};
-use reth_storage_api::{BlockNumReader, BlockReader, ProviderTx};
+use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::pool::BlockingTaskGuard;
 #[cfg(any())]
 use serde::{Deserialize, Serialize};
@@ -662,8 +661,6 @@ fn apply_trace_filter_pagination(
 impl<Eth> TraceApiServer<RpcTxReq<Eth::NetworkTypes>> for TraceApi<Eth>
 where
     Eth: TraceExt + 'static,
-    TxEnvFor<Eth::Evm>: AsRef<RecoveredTxEnvelope>,
-    ProviderTx<Eth::Provider>: Clone,
 {
     /// Executes the given call and returns a number of possible traces for it.
     ///

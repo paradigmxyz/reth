@@ -39,18 +39,21 @@ pub use receipt::LoadReceipt;
 pub use signer::EthSigner;
 pub use spec::EthApiSpec;
 pub use state::{EthState, LoadState};
-pub use trace::{Trace, TracingCtx};
+pub use trace::{Trace, TraceTxEnv, TracingCtx};
 pub use transaction::{EthTransactions, LoadTransaction};
 
 use crate::FullEthApiTypes;
 
 /// Extension trait that bundles traits needed for tracing transactions.
 pub trait TraceExt:
-    LoadTransaction + LoadBlock + SpawnBlocking + Trace + Call + GetBlockAccessList
+    LoadTransaction + LoadBlock + SpawnBlocking + Trace + TraceTxEnv + Call + GetBlockAccessList
 {
 }
 
-impl<T> TraceExt for T where T: LoadTransaction + LoadBlock + Trace + Call + GetBlockAccessList {}
+impl<T> TraceExt for T where
+    T: LoadTransaction + LoadBlock + Trace + TraceTxEnv + Call + GetBlockAccessList
+{
+}
 
 /// Helper trait to unify all `eth` rpc server building block traits, for simplicity.
 ///

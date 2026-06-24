@@ -18,12 +18,11 @@ use crate::{
 };
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
-use evm2::ethereum::RecoveredTxEnvelope;
 use jsonrpsee::RpcModule;
 use parking_lot::Mutex;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
-use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, TxEnvFor};
+use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
     NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
@@ -38,7 +37,10 @@ use reth_rpc::{
     eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer, RpcNodeCore},
     AdminApi,
 };
-use reth_rpc_api::{eth::helpers::EthTransactions, IntoEngineApiRpcModule};
+use reth_rpc_api::{
+    eth::helpers::{EthTransactions, TraceExt},
+    IntoEngineApiRpcModule,
+};
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
     config::RethRpcServerConfig,
@@ -942,8 +944,8 @@ where
     N::Evm: ConfigureEvm<Primitives = PrimitivesTy<N::Types>>,
     N::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
+    EthB::EthApi: TraceExt,
     <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
-    TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<RecoveredTxEnvelope>,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
@@ -1250,8 +1252,8 @@ where
     N::Evm: ConfigureEvm<Primitives = PrimitivesTy<N::Types>>,
     <N as FullNodeTypes>::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
+    EthB::EthApi: TraceExt,
     <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
-    TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<RecoveredTxEnvelope>,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,

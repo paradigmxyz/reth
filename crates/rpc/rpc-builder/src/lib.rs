@@ -24,7 +24,6 @@ use alloy_network::{Ethereum, IntoWallet};
 use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder};
 use core::marker::PhantomData;
 use error::{ConflictingModules, RpcError, ServerKind};
-use evm2::ethereum::RecoveredTxEnvelope;
 use http::{header::AUTHORIZATION, HeaderMap};
 use jsonrpsee::{
     core::RegisterMethodError,
@@ -34,7 +33,7 @@ use jsonrpsee::{
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::FullConsensus;
 use reth_engine_primitives::{ConsensusEngineEvent, ConsensusEngineHandle};
-use reth_evm::{ConfigureEvm, EvmEnv, TxEnvFor};
+use reth_evm::{ConfigureEvm, EvmEnv};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_payload_primitives::PayloadTypes;
 use reth_primitives_traits::{NodePrimitives, TxTy};
@@ -58,7 +57,7 @@ use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtS
 pub use reth_rpc_server_types::RethRpcModule;
 use reth_storage_api::{
     AccountReader, BlockReader, ChangeSetReader, FullRpcProvider, NodePrimitivesProvider,
-    ProviderTx, StateProviderFactory,
+    StateProviderFactory,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_tokio_util::EventSender;
@@ -345,8 +344,6 @@ where
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool> + TraceExt,
         EthApi::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
-        TxEnvFor<EthApi::Evm>: AsRef<RecoveredTxEnvelope>,
-        ProviderTx<EthApi::Provider>: Clone,
         Payload: PayloadTypes,
     {
         let config = module_config.config.clone().unwrap_or_default();
@@ -398,8 +395,6 @@ where
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool> + TraceExt,
         EthApi::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
-        TxEnvFor<EthApi::Evm>: AsRef<RecoveredTxEnvelope>,
-        ProviderTx<EthApi::Provider>: Clone,
     {
         if module_config.is_empty() {
             TransportRpcModules::default()
@@ -705,8 +700,6 @@ where
     pub fn register_ots(&mut self) -> &mut Self
     where
         EthApi: TraceExt + EthTransactions<Primitives = N>,
-        TxEnvFor<EthApi::Evm>: AsRef<RecoveredTxEnvelope>,
-        ProviderTx<EthApi::Provider>: Clone,
     {
         let otterscan_api = self.otterscan_api();
         self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());
@@ -722,8 +715,6 @@ where
     where
         EthApi: EthTransactions + TraceExt,
         EthApi::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
-        TxEnvFor<EthApi::Evm>: AsRef<RecoveredTxEnvelope>,
-        ProviderTx<EthApi::Provider>: Clone,
     {
         let debug_api = self.debug_api();
         self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
@@ -738,8 +729,6 @@ where
     pub fn register_trace(&mut self) -> &mut Self
     where
         EthApi: TraceExt,
-        TxEnvFor<EthApi::Evm>: AsRef<RecoveredTxEnvelope>,
-        ProviderTx<EthApi::Provider>: Clone,
     {
         let trace_api = self.trace_api();
         self.modules.insert(RethRpcModule::Trace, trace_api.into_rpc().into());
@@ -882,8 +871,6 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     EthApi: FullEthApiServer + TraceExt,
     EthApi::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
-    TxEnvFor<EthApi::Evm>: AsRef<RecoveredTxEnvelope>,
-    ProviderTx<EthApi::Provider>: Clone,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
     Consensus: FullConsensus<N> + Clone + 'static,
 {
