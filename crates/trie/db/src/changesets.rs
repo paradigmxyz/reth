@@ -379,7 +379,7 @@ impl ChangesetCache {
     /// Returns `None` if the block is not in the cache (either evicted or never computed).
     /// Updates hit/miss metrics accordingly.
     pub fn get(&self, block_hash: &B256) -> Option<Arc<TrieUpdatesSorted>> {
-        self.inner.read().get(block_hash)
+        self.inner.read().get_by_block_hash(block_hash)
     }
 
     /// Inserts changesets for a block into the cache.
@@ -398,7 +398,10 @@ impl ChangesetCache {
     fn insert(&self, block_hash: B256, block_number: u64, changesets: Arc<TrieUpdatesSorted>) {
         let pending = {
             let mut cache = self.inner.write();
-            cache.insert(block_hash, block_number, Arc::clone(&changesets));
+            cache.insert(
+                ChangesetRangeKey::single(block_number, block_hash),
+                Arc::clone(&changesets),
+            );
             cache.pending.remove(&block_hash)
         };
 
@@ -472,7 +475,8 @@ impl ChangesetCache {
         // Try cache first, and if missing, check for a pending computation.
         let pending = {
             let cache = self.inner.read();
-            if let Some(changesets) = cache.get(&block_hash) {
+            let key = ChangesetRangeKey::single(block_number, block_hash);
+            if let Some(changesets) = cache.get(&key) {
                 debug!(
                     target: "trie::changeset_cache",
                     ?block_hash,
@@ -559,8 +563,8 @@ impl ChangesetCache {
     /// values take precedence when there are conflicts.
     ///
     /// If any block is missing from cache, this falls back to one aggregate database computation
-    /// for the whole range. The aggregate result restores the trie to the state before the range,
-    /// but is not inserted into the per-block cache.
+    /// for the whole range. The aggregate result restores the trie to the state before the range
+    /// and is inserted into the range cache.
     ///
     /// # Arguments
     ///
@@ -632,18 +636,46 @@ impl ChangesetCache {
             return Ok(TrieUpdatesSorted::default())
         }
 
+        let end_block_hash = provider.block_hash(end_block)?.ok_or_else(|| {
+            ProviderError::other(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("block hash not found for block number {}", end_block),
+            ))
+        })?;
+        let range_key = ChangesetRangeKey::new(start_block, end_block, end_block_hash);
+
+        if let Some(accumulated_reverts) = self.inner.read().get(&range_key) {
+            let elapsed = timer.elapsed();
+
+            debug!(
+                target: "trie::changeset_cache",
+                ?elapsed,
+                start_block,
+                end_block,
+                ?end_block_hash,
+                num_blocks = end_block.saturating_sub(start_block).saturating_add(1),
+                "Changeset cache HIT for block range"
+            );
+
+            return Ok((*accumulated_reverts).clone())
+        }
+
         let mut cached_reverts =
             Vec::with_capacity(end_block.saturating_sub(start_block).saturating_add(1) as usize);
         let mut all_cached = true;
 
         for block_number in range.rev() {
             // Get the block hash for this block number
-            let block_hash = provider.block_hash(block_number)?.ok_or_else(|| {
-                ProviderError::other(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    format!("block hash not found for block number {}", block_number),
-                ))
-            })?;
+            let block_hash = if block_number == end_block {
+                end_block_hash
+            } else {
+                provider.block_hash(block_number)?.ok_or_else(|| {
+                    ProviderError::other(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        format!("block hash not found for block number {}", block_number),
+                    ))
+                })?
+            };
 
             debug!(
                 target: "trie::changeset_cache",
@@ -652,20 +684,19 @@ impl ChangesetCache {
                 "Looked up block hash for block number in range"
             );
 
-            if let Some(changesets) = self.get(&block_hash) {
+            let block_key = ChangesetRangeKey::single(block_number, block_hash);
+            if let Some(changesets) = self.inner.read().get(&block_key) {
                 cached_reverts.push(changesets);
             } else {
                 all_cached = false;
+                break
             }
         }
 
         if all_cached {
             // Merge cached reverts newest to oldest so older values take precedence when there are
             // conflicting updates.
-            let mut accumulated_reverts = TrieUpdatesSorted::default();
-            for changesets in &cached_reverts {
-                accumulated_reverts.extend_ref_and_sort(changesets);
-            }
+            let accumulated_reverts = TrieUpdatesSorted::merge_slice(&cached_reverts);
             let elapsed = timer.elapsed();
 
             let num_account_nodes = accumulated_reverts.account_nodes_ref().len();
@@ -682,6 +713,7 @@ impl ChangesetCache {
                 "Finished accumulating cached trie reverts for block range"
             );
 
+            self.inner.write().insert(range_key, Arc::new(accumulated_reverts.clone()));
             return Ok(accumulated_reverts)
         }
 
@@ -704,11 +736,14 @@ impl ChangesetCache {
             ?elapsed,
             start_block,
             end_block,
+            ?end_block_hash,
             num_blocks = end_block.saturating_sub(start_block).saturating_add(1),
             num_account_nodes,
             num_storage_tries,
             "Finished accumulating trie reverts for block range"
         );
+
+        self.inner.write().insert(range_key, Arc::new(accumulated_reverts.clone()));
 
         Ok(accumulated_reverts)
     }
@@ -768,6 +803,32 @@ impl Drop for PendingChangesetGuard {
     }
 }
 
+/// Cache key for one contiguous range of canonical trie changesets.
+///
+/// The end block hash disambiguates canonical rewrites where the same block numbers later refer to
+/// a different chain. For a single block, `start_block == end_block` and `end_block_hash` is that
+/// block's hash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct ChangesetRangeKey {
+    start_block: BlockNumber,
+    end_block: BlockNumber,
+    end_block_hash: B256,
+}
+
+impl ChangesetRangeKey {
+    const fn new(start_block: BlockNumber, end_block: BlockNumber, end_block_hash: B256) -> Self {
+        Self { start_block, end_block, end_block_hash }
+    }
+
+    const fn single(block_number: BlockNumber, block_hash: B256) -> Self {
+        Self::new(block_number, block_number, block_hash)
+    }
+
+    const fn is_single(&self) -> bool {
+        self.start_block == self.end_block
+    }
+}
+
 /// In-memory cache for trie changesets with explicit eviction policy.
 ///
 /// Holds changesets for blocks that have been validated but not yet persisted.
@@ -790,11 +851,14 @@ impl Drop for PendingChangesetGuard {
 /// - `size`: Current number of cached blocks
 #[derive(Debug)]
 struct ChangesetCacheInner {
-    /// Cache entries: block hash -> (block number, changesets)
-    entries: B256Map<(u64, Arc<TrieUpdatesSorted>)>,
+    /// Cache entries keyed by inclusive block range plus the range's canonical end hash.
+    entries: BTreeMap<ChangesetRangeKey, Arc<TrieUpdatesSorted>>,
 
-    /// Block number to hashes mapping for eviction
-    block_numbers: BTreeMap<u64, Vec<B256>>,
+    /// Lookup index for single-block ranges by block hash.
+    block_hashes: B256Map<ChangesetRangeKey>,
+
+    /// Range start block to cache keys mapping for eviction.
+    range_starts: BTreeMap<BlockNumber, Vec<ChangesetRangeKey>>,
 
     /// Pending changeset computations: block hash -> pending entry.
     /// Threads waiting on a pending entry will block until it's resolved.
@@ -839,17 +903,27 @@ impl ChangesetCacheInner {
     /// via the `evict()` method to manage memory usage.
     fn new() -> Self {
         Self {
-            entries: B256Map::default(),
-            block_numbers: BTreeMap::new(),
+            entries: BTreeMap::new(),
+            block_hashes: B256Map::default(),
+            range_starts: BTreeMap::new(),
             pending: B256Map::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
     }
 
-    fn get(&self, block_hash: &B256) -> Option<Arc<TrieUpdatesSorted>> {
-        match self.entries.get(block_hash) {
-            Some((_, changesets)) => {
+    fn get_by_block_hash(&self, block_hash: &B256) -> Option<Arc<TrieUpdatesSorted>> {
+        let Some(key) = self.block_hashes.get(block_hash) else {
+            #[cfg(feature = "metrics")]
+            self.metrics.misses.increment(1);
+            return None
+        };
+        self.get(key)
+    }
+
+    fn get(&self, key: &ChangesetRangeKey) -> Option<Arc<TrieUpdatesSorted>> {
+        match self.entries.get(key) {
+            Some(changesets) => {
                 #[cfg(feature = "metrics")]
                 self.metrics.hits.increment(1);
                 Some(Arc::clone(changesets))
@@ -862,20 +936,23 @@ impl ChangesetCacheInner {
         }
     }
 
-    fn insert(&mut self, block_hash: B256, block_number: u64, changesets: Arc<TrieUpdatesSorted>) {
+    fn insert(&mut self, key: ChangesetRangeKey, changesets: Arc<TrieUpdatesSorted>) {
         debug!(
             target: "trie::changeset_cache",
-            ?block_hash,
-            block_number,
+            ?key,
             cache_size_before = self.entries.len(),
             "Inserting changeset into cache"
         );
 
-        // Insert the entry
-        self.entries.insert(block_hash, (block_number, changesets));
+        let is_new_entry = self.entries.insert(key, changesets).is_none();
 
-        // Add block hash to block_numbers mapping
-        self.block_numbers.entry(block_number).or_default().push(block_hash);
+        if key.is_single() {
+            self.block_hashes.insert(key.end_block_hash, key);
+        }
+
+        if is_new_entry {
+            self.range_starts.entry(key.start_block).or_default().push(key);
+        }
 
         // Update size metric
         #[cfg(feature = "metrics")]
@@ -883,8 +960,7 @@ impl ChangesetCacheInner {
 
         debug!(
             target: "trie::changeset_cache",
-            ?block_hash,
-            block_number,
+            ?key,
             cache_size_after = self.entries.len(),
             "Changeset inserted into cache"
         );
@@ -899,8 +975,8 @@ impl ChangesetCacheInner {
         );
 
         // Find all block numbers that should be evicted (< up_to_block)
-        let blocks_to_evict: Vec<u64> =
-            self.block_numbers.range(..up_to_block).map(|(num, _)| *num).collect();
+        let range_starts_to_evict: Vec<u64> =
+            self.range_starts.range(..up_to_block).map(|(num, _)| *num).collect();
 
         // Remove entries for each block number below threshold
         #[cfg(feature = "metrics")]
@@ -908,16 +984,19 @@ impl ChangesetCacheInner {
         #[cfg(not(feature = "metrics"))]
         let mut evicted_count = 0;
 
-        for block_number in &blocks_to_evict {
-            if let Some(hashes) = self.block_numbers.remove(block_number) {
+        for start_block in &range_starts_to_evict {
+            if let Some(keys) = self.range_starts.remove(start_block) {
                 debug!(
                     target: "trie::changeset_cache",
-                    block_number,
-                    num_hashes = hashes.len(),
-                    "Evicting block from cache"
+                    start_block,
+                    num_ranges = keys.len(),
+                    "Evicting ranges from cache"
                 );
-                for hash in hashes {
-                    if self.entries.remove(&hash).is_some() {
+                for key in keys {
+                    if self.entries.remove(&key).is_some() {
+                        if key.is_single() {
+                            self.block_hashes.remove(&key.end_block_hash);
+                        }
                         evicted_count += 1;
                     }
                 }
@@ -967,6 +1046,15 @@ mod tests {
     // Helper function to create empty TrieUpdatesSorted for testing
     fn create_test_changesets() -> Arc<TrieUpdatesSorted> {
         Arc::new(TrieUpdatesSorted::new(vec![], B256Map::default()))
+    }
+
+    fn insert_test_changesets(
+        cache: &mut ChangesetCacheInner,
+        block_hash: B256,
+        block_number: BlockNumber,
+        changesets: Arc<TrieUpdatesSorted>,
+    ) {
+        cache.insert(ChangesetRangeKey::single(block_number, block_hash), changesets);
     }
 
     fn test_account(balance: u64) -> Account {
@@ -1212,12 +1300,12 @@ mod tests {
         let cache = ChangesetCache::new();
         let from_cache_api = cache.get_or_compute_range(&*provider, 1..=3).unwrap();
         assert_eq!(from_cache_api, actual);
-        assert!(cache.inner.read().entries.is_empty());
+        assert_eq!(cache.inner.read().entries.len(), 1);
 
         let block_hash = provider.block_hash(2).unwrap().unwrap();
         let block_changesets = cache.get_or_compute(block_hash, 2, &*provider).unwrap();
         assert_eq!(*block_changesets, legacy_compute_block_trie_changesets(&*provider, 2));
-        assert_eq!(cache.inner.read().entries.len(), 1);
+        assert_eq!(cache.inner.read().entries.len(), 2);
     }
 
     #[test]
@@ -1289,10 +1377,10 @@ mod tests {
         let hash = B256::random();
         let changesets = create_test_changesets();
 
-        cache.insert(hash, 100, Arc::clone(&changesets));
+        insert_test_changesets(&mut cache, hash, 100, Arc::clone(&changesets));
 
         // Should be able to retrieve it
-        let retrieved = cache.get(&hash);
+        let retrieved = cache.get_by_block_hash(&hash);
         assert!(retrieved.is_some());
         assert_eq!(cache.entries.len(), 1);
     }
@@ -1305,14 +1393,14 @@ mod tests {
         let mut hashes = Vec::new();
         for i in 0..10 {
             let hash = B256::random();
-            cache.insert(hash, 100 + i, create_test_changesets());
+            insert_test_changesets(&mut cache, hash, 100 + i, create_test_changesets());
             hashes.push(hash);
         }
 
         // Should be able to retrieve all
         assert_eq!(cache.entries.len(), 10);
         for hash in &hashes {
-            assert!(cache.get(hash).is_some());
+            assert!(cache.get_by_block_hash(hash).is_some());
         }
     }
 
@@ -1324,7 +1412,7 @@ mod tests {
         let mut hashes = Vec::new();
         for i in 0..15 {
             let hash = B256::random();
-            cache.insert(hash, i, create_test_changesets());
+            insert_test_changesets(&mut cache, hash, i, create_test_changesets());
             hashes.push((i, hash));
         }
 
@@ -1339,12 +1427,20 @@ mod tests {
 
         // Verify blocks 0-3 are evicted
         for i in 0..4 {
-            assert!(cache.get(&hashes[i as usize].1).is_none(), "Block {} should be evicted", i);
+            assert!(
+                cache.get_by_block_hash(&hashes[i as usize].1).is_none(),
+                "Block {} should be evicted",
+                i
+            );
         }
 
         // Verify blocks 4-14 are still present
         for i in 4..15 {
-            assert!(cache.get(&hashes[i as usize].1).is_some(), "Block {} should be present", i);
+            assert!(
+                cache.get_by_block_hash(&hashes[i as usize].1).is_some(),
+                "Block {} should be present",
+                i
+            );
         }
     }
 
@@ -1356,7 +1452,7 @@ mod tests {
         let mut hashes = HashMap::new();
         for i in 100..=165 {
             let hash = B256::random();
-            cache.insert(hash, i, create_test_changesets());
+            insert_test_changesets(&mut cache, hash, i, create_test_changesets());
             hashes.insert(i, hash);
         }
 
@@ -1376,8 +1472,8 @@ mod tests {
 
         // Blocks 101-165 should remain (65 blocks)
         assert_eq!(cache.entries.len(), 65);
-        assert!(cache.get(&hashes[&100]).is_none());
-        assert!(cache.get(&hashes[&101]).is_some());
+        assert!(cache.get_by_block_hash(&hashes[&100]).is_none());
+        assert!(cache.get_by_block_hash(&hashes[&101]).is_some());
     }
 
     #[test]
@@ -1386,16 +1482,16 @@ mod tests {
 
         // Insert blocks in random order
         let hash_10 = B256::random();
-        cache.insert(hash_10, 10, create_test_changesets());
+        insert_test_changesets(&mut cache, hash_10, 10, create_test_changesets());
 
         let hash_5 = B256::random();
-        cache.insert(hash_5, 5, create_test_changesets());
+        insert_test_changesets(&mut cache, hash_5, 5, create_test_changesets());
 
         let hash_15 = B256::random();
-        cache.insert(hash_15, 15, create_test_changesets());
+        insert_test_changesets(&mut cache, hash_15, 15, create_test_changesets());
 
         let hash_3 = B256::random();
-        cache.insert(hash_3, 3, create_test_changesets());
+        insert_test_changesets(&mut cache, hash_3, 3, create_test_changesets());
 
         // All blocks should be present (no automatic eviction)
         assert_eq!(cache.entries.len(), 4);
@@ -1403,10 +1499,10 @@ mod tests {
         // Explicitly evict blocks < 5
         cache.evict(5);
 
-        assert!(cache.get(&hash_3).is_none(), "Block 3 should be evicted");
-        assert!(cache.get(&hash_5).is_some(), "Block 5 should be present");
-        assert!(cache.get(&hash_10).is_some(), "Block 10 should be present");
-        assert!(cache.get(&hash_15).is_some(), "Block 15 should be present");
+        assert!(cache.get_by_block_hash(&hash_3).is_none(), "Block 3 should be evicted");
+        assert!(cache.get_by_block_hash(&hash_5).is_some(), "Block 5 should be present");
+        assert!(cache.get_by_block_hash(&hash_10).is_some(), "Block 10 should be present");
+        assert!(cache.get_by_block_hash(&hash_15).is_some(), "Block 15 should be present");
     }
 
     #[test]
@@ -1416,13 +1512,48 @@ mod tests {
         // Insert multiple blocks with same number (side chains)
         let hash_1a = B256::random();
         let hash_1b = B256::random();
-        cache.insert(hash_1a, 100, create_test_changesets());
-        cache.insert(hash_1b, 100, create_test_changesets());
+        insert_test_changesets(&mut cache, hash_1a, 100, create_test_changesets());
+        insert_test_changesets(&mut cache, hash_1b, 100, create_test_changesets());
 
         // Both should be retrievable
-        assert!(cache.get(&hash_1a).is_some());
-        assert!(cache.get(&hash_1b).is_some());
+        assert!(cache.get_by_block_hash(&hash_1a).is_some());
+        assert!(cache.get_by_block_hash(&hash_1b).is_some());
         assert_eq!(cache.entries.len(), 2);
+    }
+
+    #[test]
+    fn test_ranges_with_same_numbers_and_different_end_hashes_are_distinct() {
+        let mut cache = ChangesetCacheInner::new();
+        let path = Nibbles::from_nibbles_unchecked([0x01]);
+        let hash_a = B256::with_last_byte(1);
+        let hash_b = B256::with_last_byte(2);
+        let key_a = ChangesetRangeKey::new(10, 20, hash_a);
+        let key_b = ChangesetRangeKey::new(10, 20, hash_b);
+        let changesets_a = Arc::new(TrieUpdatesSorted::new(
+            vec![(path, Some(BranchNodeCompact::new(0b0001, 0, 0, vec![], None)))],
+            B256Map::default(),
+        ));
+        let changesets_b = Arc::new(TrieUpdatesSorted::new(
+            vec![(path, Some(BranchNodeCompact::new(0b0010, 0, 0, vec![], None)))],
+            B256Map::default(),
+        ));
+
+        cache.insert(key_a, Arc::clone(&changesets_a));
+        cache.insert(key_b, Arc::clone(&changesets_b));
+
+        assert_eq!(cache.entries.len(), 2);
+        assert_eq!(
+            cache.get(&key_a).unwrap().account_nodes_ref(),
+            changesets_a.account_nodes_ref()
+        );
+        assert_eq!(
+            cache.get(&key_b).unwrap().account_nodes_ref(),
+            changesets_b.account_nodes_ref()
+        );
+
+        cache.evict(11);
+        assert!(cache.get(&key_a).is_none());
+        assert!(cache.get(&key_b).is_none());
     }
 
     #[test]
@@ -1433,12 +1564,12 @@ mod tests {
         let hash_10a = B256::random();
         let hash_10b = B256::random();
         let hash_10c = B256::random();
-        cache.insert(hash_10a, 10, create_test_changesets());
-        cache.insert(hash_10b, 10, create_test_changesets());
-        cache.insert(hash_10c, 10, create_test_changesets());
+        insert_test_changesets(&mut cache, hash_10a, 10, create_test_changesets());
+        insert_test_changesets(&mut cache, hash_10b, 10, create_test_changesets());
+        insert_test_changesets(&mut cache, hash_10c, 10, create_test_changesets());
 
         let hash_20 = B256::random();
-        cache.insert(hash_20, 20, create_test_changesets());
+        insert_test_changesets(&mut cache, hash_20, 20, create_test_changesets());
 
         assert_eq!(cache.entries.len(), 4);
 
@@ -1446,9 +1577,9 @@ mod tests {
         cache.evict(15);
 
         assert_eq!(cache.entries.len(), 1);
-        assert!(cache.get(&hash_10a).is_none());
-        assert!(cache.get(&hash_10b).is_none());
-        assert!(cache.get(&hash_10c).is_none());
-        assert!(cache.get(&hash_20).is_some());
+        assert!(cache.get_by_block_hash(&hash_10a).is_none());
+        assert!(cache.get_by_block_hash(&hash_10b).is_none());
+        assert!(cache.get_by_block_hash(&hash_10c).is_none());
+        assert!(cache.get_by_block_hash(&hash_20).is_some());
     }
 }

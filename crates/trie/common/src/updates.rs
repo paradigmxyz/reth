@@ -658,8 +658,9 @@ impl TrieUpdatesSorted {
         }
 
         if k < THRESHOLD {
-            // Small k: extend loop, oldest-to-newest so newer overrides older.
-            let mut iter = items.iter().rev();
+            // Small k: extend loop in newest-to-oldest order so older reverts override newer
+            // ones for duplicate paths.
+            let mut iter = items.iter();
             let mut acc = iter.next().expect("k > 0").as_ref().clone();
             for next in iter {
                 acc.extend_ref_and_sort(next.as_ref());
@@ -669,42 +670,36 @@ impl TrieUpdatesSorted {
 
         // Large k: k-way merge.
         let account_nodes =
-            kway_merge_sorted(items.iter().map(|i| i.as_ref().account_nodes.as_slice()));
+            kway_merge_sorted(items.iter().rev().map(|i| i.as_ref().account_nodes.as_slice()));
 
         struct StorageAcc<'a> {
-            is_deleted: bool,
-            sealed: bool,
-            slices: Vec<&'a [(Nibbles, Option<BranchNodeCompact>)]>,
+            updates: Vec<&'a StorageTrieUpdatesSorted>,
         }
 
         let mut acc: B256Map<StorageAcc<'_>> = B256Map::default();
 
         for item in items {
             for (addr, storage) in &item.as_ref().storage_tries {
-                let entry = acc.entry(*addr).or_insert_with(|| StorageAcc {
-                    is_deleted: false,
-                    sealed: false,
-                    slices: Vec::new(),
-                });
-
-                if entry.sealed {
-                    continue;
-                }
-
-                entry.slices.push(storage.storage_nodes.as_slice());
-
-                if storage.is_deleted {
-                    entry.is_deleted = true;
-                    entry.sealed = true;
-                }
+                acc.entry(*addr)
+                    .or_insert_with(|| StorageAcc { updates: Vec::new() })
+                    .updates
+                    .push(storage);
             }
         }
 
         let storage_tries = acc
             .into_iter()
             .map(|(addr, entry)| {
-                let storage_nodes = kway_merge_sorted(entry.slices);
-                (addr, StorageTrieUpdatesSorted { is_deleted: entry.is_deleted, storage_nodes })
+                let last_deletion = entry.updates.iter().rposition(|storage| storage.is_deleted);
+                let relevant =
+                    last_deletion.map_or(entry.updates.as_slice(), |idx| &entry.updates[idx..]);
+                let storage_nodes = kway_merge_sorted(
+                    relevant.iter().rev().map(|storage| storage.storage_nodes.as_slice()),
+                );
+                (
+                    addr,
+                    StorageTrieUpdatesSorted { is_deleted: last_deletion.is_some(), storage_nodes },
+                )
             })
             .collect();
 
@@ -853,6 +848,10 @@ mod tests {
     use super::*;
     use alloy_primitives::B256;
 
+    fn branch_node(state_mask: u16) -> BranchNodeCompact {
+        BranchNodeCompact::new(state_mask, 0, 0, vec![], None)
+    }
+
     #[test]
     fn test_trie_updates_sorted_extend_ref() {
         // Test extending with empty updates
@@ -920,6 +919,51 @@ mod tests {
         // Check that storage trie for hashed_address1 was extended
         let merged_storage = &updates1.storage_tries[&hashed_address1];
         assert_eq!(merged_storage.storage_nodes.len(), 2);
+    }
+
+    #[test]
+    fn test_trie_updates_sorted_merge_slice_keeps_oldest_revert_value() {
+        let path = Nibbles::from_nibbles_unchecked([0x01]);
+        let newer = TrieUpdatesSorted {
+            account_nodes: vec![(path, Some(branch_node(0b0010)))],
+            storage_tries: B256Map::default(),
+        };
+        let older = TrieUpdatesSorted {
+            account_nodes: vec![(path, Some(branch_node(0b0001)))],
+            storage_tries: B256Map::default(),
+        };
+
+        let merged = TrieUpdatesSorted::merge_slice(&[newer, older]);
+
+        assert_eq!(merged.account_nodes_ref(), &[(path, Some(branch_node(0b0001)))]);
+    }
+
+    #[test]
+    fn test_trie_updates_sorted_merge_slice_kway_keeps_oldest_revert_value() {
+        let path = Nibbles::from_nibbles_unchecked([0x01]);
+        let storage_path = Nibbles::from_nibbles_unchecked([0x02]);
+        let hashed_address = B256::from([1; 32]);
+
+        let updates = (0..31)
+            .map(|idx| TrieUpdatesSorted {
+                account_nodes: vec![(path, Some(branch_node(idx + 1)))],
+                storage_tries: B256Map::from_iter([(
+                    hashed_address,
+                    StorageTrieUpdatesSorted {
+                        is_deleted: false,
+                        storage_nodes: vec![(storage_path, Some(branch_node(idx + 1)))],
+                    },
+                )]),
+            })
+            .collect::<Vec<_>>();
+
+        let merged = TrieUpdatesSorted::merge_slice(&updates);
+
+        assert_eq!(merged.account_nodes_ref(), &[(path, Some(branch_node(31)))]);
+        assert_eq!(
+            merged.storage_tries_ref()[&hashed_address].storage_nodes_ref(),
+            &[(storage_path, Some(branch_node(31)))]
+        );
     }
 
     #[test]
