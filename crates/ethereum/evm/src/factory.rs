@@ -1,6 +1,7 @@
 use alloc::sync::Arc;
 use core::{fmt::Debug, marker::PhantomData};
 
+#[cfg(feature = "std")]
 use alloy_consensus::Header;
 use reth_chainspec::ChainSpec;
 #[cfg(feature = "std")]

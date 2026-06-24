@@ -7,9 +7,9 @@ use alloy_eips::{eip4895::Withdrawals, merge::BEACON_NONCE};
 use alloy_primitives::{Bloom, B256};
 use reth_chainspec::{EthChainSpec, EthExecutorSpec, EthereumHardforks};
 use reth_ethereum_primitives::TransactionSigned;
-use reth_evm::execute::{
-    BlockAssembler, BlockAssemblerInput, BlockExecutionError, BlockExecutorFactory,
-};
+#[cfg(feature = "std")]
+use reth_evm::execute::BlockAssembler;
+use reth_evm::execute::{BlockAssemblerInput, BlockExecutionError, BlockExecutorFactory};
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::logs_bloom as calculate_logs_bloom;
 
@@ -138,6 +138,7 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
     }
 }
 
+#[cfg(feature = "std")]
 impl<ChainSpec, EvmFactory> BlockAssembler<EthBlockExecutorFactory<ChainSpec, EvmFactory>>
     for EthBlockAssembler<ChainSpec>
 where

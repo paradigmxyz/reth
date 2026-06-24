@@ -11,8 +11,12 @@
 
 extern crate alloc;
 
-use crate::execute::{Executor, HashedStateMode, IntoTxEnv};
-use alloc::{boxed::Box, string::String};
+#[cfg(feature = "std")]
+use crate::execute::HashedStateMode;
+use crate::execute::{Executor, IntoTxEnv};
+#[cfg(feature = "std")]
+use alloc::boxed::Box;
+use alloc::string::String;
 use alloy_consensus::transaction::Recovered;
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{Address, Bytes, B256};
@@ -64,8 +68,7 @@ pub mod test_utils;
 
 /// A complete configuration of EVM for Reth.
 ///
-/// The active execution path is EVM-native. The old legacy executor block executor and builder
-/// methods are intentionally parked behind stubs while BAL and payload building are ported.
+/// This trait encapsulates configuration required for EVM, block execution, and block assembly.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// The primitives type used by the EVM.

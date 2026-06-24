@@ -227,7 +227,7 @@ pub trait Executor: Sized {
     fn take_bal(&mut self) -> Option<Bytes>;
 }
 
-/// Executor returned for the parked legacy executor APIs.
+/// Executor returned by configurations that do not support block execution in the active build.
 #[expect(missing_debug_implementations)]
 pub struct UnsupportedExecutor<N> {
     _marker: core::marker::PhantomData<N>,
@@ -248,7 +248,7 @@ impl<N: NodePrimitives> Executor for UnsupportedExecutor<N> {
         _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        Err(BlockExecutionError::msg("legacy executor block execution is parked"))
+        Err(BlockExecutionError::msg("block execution is unsupported by this EVM configuration"))
     }
 
     fn execute(
@@ -256,7 +256,7 @@ impl<N: NodePrimitives> Executor for UnsupportedExecutor<N> {
         _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        Err(BlockExecutionError::msg("legacy executor block execution is parked"))
+        Err(BlockExecutionError::msg("block execution is unsupported by this EVM configuration"))
     }
 
     fn execute_batch<'a, I>(
@@ -266,7 +266,7 @@ impl<N: NodePrimitives> Executor for UnsupportedExecutor<N> {
     where
         I: IntoIterator<Item = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
     {
-        Err(BlockExecutionError::msg("legacy executor block execution is parked"))
+        Err(BlockExecutionError::msg("block execution is unsupported by this EVM configuration"))
     }
 
     fn size_hint(&self) -> usize {
@@ -481,6 +481,6 @@ mod tests {
     fn unsupported_executor_returns_error() {
         let executor = UnsupportedExecutor::<EthPrimitives>::default();
         let err = executor.execute(&Default::default()).unwrap_err();
-        assert!(err.to_string().contains("parked"));
+        assert!(err.to_string().contains("unsupported"));
     }
 }

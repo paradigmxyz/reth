@@ -34,9 +34,9 @@ use reth_primitives_traits::{SealedBlock, SealedHeader};
 #[cfg(feature = "std")]
 use reth_storage_errors::any::AnyError;
 
-use convert::{
-    block_env_with_blob_params, payload_block_env, spec_id, spec_id_by_timestamp_and_block_number,
-};
+use convert::{block_env_with_blob_params, spec_id};
+#[cfg(feature = "std")]
+use convert::{payload_block_env, spec_id_by_timestamp_and_block_number};
 
 /// Legacy Ethereum EVM type placeholder.
 pub type EthEvm<DB = (), I = (), P = ()> = PhantomData<(DB, I, P)>;
