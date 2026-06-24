@@ -23,13 +23,8 @@ use reth_trie::{
     TrieInputSorted,
 };
 use reth_trie_common::updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted};
-use std::{
-    collections::BTreeMap,
-    fmt,
-    ops::RangeInclusive,
-    sync::{Arc, OnceLock},
-};
-use tracing::{debug, debug_span, warn};
+use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
+use tracing::{debug, warn};
 
 #[cfg(test)]
 use reth_trie::changesets::compute_trie_changesets;
@@ -348,49 +343,6 @@ where
     Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))
 }
 
-/// A pending changeset computation that other threads can wait on.
-///
-/// When a deferred trie task starts computing changesets for a block, it registers
-/// a pending entry. If another thread needs the same changeset before the computation
-/// finishes, it waits on this entry instead of falling back to the expensive
-/// DB-based computation.
-struct PendingChangeset {
-    /// `None` when cancelled (e.g. due to panic), `Some(..)` when resolved with data.
-    result: OnceLock<Option<Arc<TrieUpdatesSorted>>>,
-}
-
-impl PendingChangeset {
-    const fn new() -> Self {
-        Self { result: OnceLock::new() }
-    }
-
-    /// Blocks until the computation finishes. Returns `Some` if resolved with data,
-    /// `None` if the computation was cancelled.
-    fn wait(&self) -> Option<Arc<TrieUpdatesSorted>> {
-        let _span =
-            debug_span!(target: "trie::changeset_cache", "waiting_for_pending_changeset").entered();
-        self.result.wait().clone()
-    }
-
-    /// Resolves the pending computation with the given result, waking all waiters.
-    fn resolve(&self, changesets: Arc<TrieUpdatesSorted>) {
-        let _ = self.result.set(Some(changesets));
-    }
-
-    /// Cancels the pending computation, waking all waiters so they fall through
-    /// to the DB fallback.
-    fn cancel(&self) {
-        let _ = self.result.set(None);
-    }
-}
-
-impl fmt::Debug for PendingChangeset {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let is_resolved = self.result.get().is_some();
-        f.debug_struct("PendingChangeset").field("resolved", &is_resolved).finish()
-    }
-}
-
 /// Thread-safe changeset cache.
 ///
 /// This type wraps a shared, mutable reference to the cache inner.
@@ -429,9 +381,6 @@ impl ChangesetCache {
 
     /// Inserts changesets for a block into the cache.
     ///
-    /// Also resolves any pending computation for this block hash, waking threads
-    /// that are waiting for the result.
-    ///
     /// This method does not perform any eviction. Eviction must be explicitly
     /// triggered by calling `evict()`.
     ///
@@ -441,37 +390,7 @@ impl ChangesetCache {
     /// * `block_number` - Block number for tracking and eviction
     /// * `changesets` - Trie changesets to cache
     fn insert(&self, block_hash: B256, block_number: u64, changesets: Arc<TrieUpdatesSorted>) {
-        let pending = {
-            let mut cache = self.inner.write();
-            cache.insert(
-                ChangesetRangeKey::single(block_number, block_hash),
-                Arc::clone(&changesets),
-            );
-            cache.pending.remove(&block_hash)
-        };
-
-        // Resolve pending entry outside the write lock to avoid holding it
-        // while waiters wake up.
-        if let Some(pending) = pending {
-            pending.resolve(changesets);
-        }
-    }
-
-    /// Registers a pending changeset computation for the given block hash.
-    ///
-    /// Call this before starting changeset computation so that concurrent
-    /// readers can wait for the result instead of falling back to the expensive
-    /// DB-based computation.
-    ///
-    /// The returned [`PendingChangesetGuard`] must be used to resolve or cancel
-    /// the pending entry. If dropped without resolving (e.g. due to a panic),
-    /// the pending entry is automatically removed from the cache so that
-    /// waiters fall through to the DB fallback.
-    pub fn register_pending(&self, block_hash: B256) -> PendingChangesetGuard {
-        let pending = Arc::new(PendingChangeset::new());
-        let prev = self.inner.write().pending.insert(block_hash, Arc::clone(&pending));
-        debug_assert!(prev.is_none(), "duplicate pending changeset for {block_hash:?}");
-        PendingChangesetGuard { cache: self.clone(), block_hash, pending: Some(pending) }
+        self.inner.write().insert(ChangesetRangeKey::single(block_number, block_hash), changesets);
     }
 
     /// Evicts changesets for blocks below the given block number.
@@ -489,10 +408,8 @@ impl ChangesetCache {
 
     /// Gets changesets from cache, or computes them on-the-fly if missing.
     ///
-    /// This is the primary API for retrieving changesets. It checks three sources in order:
-    /// 1. **Cache hit** — returns immediately
-    /// 2. **Pending computation** — blocks until the deferred trie task finishes
-    /// 3. **DB fallback** — computes from database state (expensive)
+    /// This is the primary API for retrieving changesets. It checks the cache first, then falls
+    /// back to computing from database state if missing.
     ///
     /// # Arguments
     ///
@@ -502,7 +419,7 @@ impl ChangesetCache {
     ///
     /// # Returns
     ///
-    /// Changesets for the block, either from cache, a pending computation, or computed on-the-fly
+    /// Changesets for the block, either from cache or computed on-the-fly.
     pub fn get_or_compute<P>(
         &self,
         block_hash: B256,
@@ -517,8 +434,8 @@ impl ChangesetCache {
             + BlockNumReader
             + StorageSettingsCache,
     {
-        // Try cache first, and if missing, check for a pending computation.
-        let pending = {
+        // Try cache first.
+        {
             let cache = self.inner.read();
             let key = ChangesetRangeKey::single(block_number, block_hash);
             if let Some(changesets) = cache.get(&key) {
@@ -530,41 +447,9 @@ impl ChangesetCache {
                 );
                 return Ok(changesets);
             }
-            cache.pending.get(&block_hash).cloned()
-        };
-
-        // If there's a pending computation, wait for it instead of computing from DB.
-        if let Some(pending) = pending {
-            debug!(
-                target: "trie::changeset_cache",
-                ?block_hash,
-                block_number,
-                "Changeset cache MISS but pending computation found, waiting"
-            );
-
-            let start = Instant::now();
-
-            if let Some(changesets) = pending.wait() {
-                debug!(
-                    target: "trie::changeset_cache",
-                    ?block_hash,
-                    block_number,
-                    elapsed = ?start.elapsed(),
-                    "Pending changeset resolved"
-                );
-                return Ok(changesets);
-            }
-
-            debug!(
-                target: "trie::changeset_cache",
-                ?block_hash,
-                block_number,
-                elapsed = ?start.elapsed(),
-                "Pending changeset was cancelled, falling through to DB computation"
-            );
         }
 
-        // No cache hit and no pending computation - compute from database
+        // No cache hit - compute from database.
         warn!(
             target: "trie::changeset_cache",
             ?block_hash,
@@ -795,60 +680,6 @@ impl ChangesetCache {
     }
 }
 
-/// Guard for a pending changeset computation.
-///
-/// Returned by [`ChangesetCache::register_pending`]. Must be resolved via [`Self::resolve`]
-/// to insert the computed changesets into the cache and wake waiting threads.
-///
-/// If dropped without resolving (e.g. due to a panic), the pending entry is automatically
-/// cancelled so waiters fall through to the DB fallback.
-#[must_use = "call .resolve() to insert changesets into the cache"]
-pub struct PendingChangesetGuard {
-    cache: ChangesetCache,
-    block_hash: B256,
-    /// `None` after [`Self::resolve`] has been called.
-    pending: Option<Arc<PendingChangeset>>,
-}
-
-impl PendingChangesetGuard {
-    /// Resolves the pending computation by inserting the changesets into the cache
-    /// and waking all waiting threads.
-    pub fn resolve(mut self, block_number: u64, changesets: Arc<TrieUpdatesSorted>) {
-        self.cache.insert(self.block_hash, block_number, changesets);
-        self.pending = None;
-    }
-}
-
-impl fmt::Debug for PendingChangesetGuard {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PendingChangesetGuard").field("block_hash", &self.block_hash).finish()
-    }
-}
-
-impl Drop for PendingChangesetGuard {
-    fn drop(&mut self) {
-        let Some(pending) = self.pending.take() else {
-            // Guard was resolved successfully already, no-op
-            return
-        };
-
-        let removed = self.cache.inner.write().pending.remove(&self.block_hash);
-        if let Some(removed) = removed {
-            if Arc::ptr_eq(&removed, &pending) {
-                debug!(
-                    target: "trie::changeset_cache",
-                    block_hash = ?self.block_hash,
-                    "Pending changeset dropped without resolution, cancelling"
-                );
-                removed.cancel();
-            } else {
-                // Put it back — it belongs to a different registration.
-                self.cache.inner.write().pending.insert(self.block_hash, removed);
-            }
-        }
-    }
-}
-
 /// Cache key for one contiguous range of canonical trie changesets.
 ///
 /// The end block hash disambiguates canonical rewrites where the same block numbers later refer to
@@ -899,10 +730,6 @@ struct ChangesetCacheInner {
     /// Range start block to cache keys mapping for eviction.
     range_starts: BTreeMap<BlockNumber, Vec<ChangesetRangeKey>>,
 
-    /// Pending changeset computations: block hash -> pending entry.
-    /// Threads waiting on a pending entry will block until it's resolved.
-    pending: B256Map<Arc<PendingChangeset>>,
-
     /// Metrics for monitoring cache behavior
     #[cfg(feature = "metrics")]
     metrics: ChangesetCacheMetrics,
@@ -944,7 +771,6 @@ impl ChangesetCacheInner {
         Self {
             entries: BTreeMap::new(),
             range_starts: BTreeMap::new(),
-            pending: B256Map::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
