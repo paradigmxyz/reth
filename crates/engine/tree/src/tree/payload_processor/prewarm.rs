@@ -654,6 +654,7 @@ where
         if !account_changes.storage_changes.is_empty() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
             let mut storage_map = reth_trie::HashedStorage::new(false);
+            storage_map.storage.reserve(account_changes.storage_changes.len());
 
             for slot_changes in &account_changes.storage_changes {
                 let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
@@ -665,6 +666,10 @@ where
             let mut hashed_state = reth_trie::HashedPostState::default();
             hashed_state.storages.insert(hashed_address, storage_map);
             let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
+        }
+
+        if account_fields.is_empty() {
+            return;
         }
 
         let existing_account = if account_fields.needs_parent_account() {
@@ -814,7 +819,7 @@ mod tests {
     }
 
     #[test]
-    fn bal_storage_change_needs_parent_account_when_leaf_fields_missing() {
+    fn bal_storage_only_change_streams_without_parent_account() {
         let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
             .with_storage_change(SlotChanges::new(
                 U256::from(1),
@@ -823,7 +828,7 @@ mod tests {
         let fields = BalAccountStateFields::from_changes(&changes);
 
         assert!(bal_account_changes_state_root(&changes, fields));
-        assert!(fields.needs_parent_account());
+        assert!(fields.is_empty());
     }
 
     #[test]
