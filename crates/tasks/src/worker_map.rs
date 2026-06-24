@@ -58,16 +58,18 @@ impl WorkerThread {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        self.pending.fetch_add(1, Ordering::AcqRel);
+        let pending_before = self.pending.fetch_add(1, Ordering::AcqRel);
 
         let (result_tx, result_rx) = oneshot::channel();
         let pending = self.pending.clone();
         let metrics = self.metrics.clone();
-        let queued_at = Instant::now();
+        let queued_at = (pending_before != 0).then(Instant::now);
 
         let task: BoxedTask = Box::new(move || {
             let started_at = Instant::now();
-            metrics.record_queue_wait(started_at.saturating_duration_since(queued_at));
+            if let Some(queued_at) = queued_at {
+                metrics.record_queue_wait(started_at.saturating_duration_since(queued_at));
+            }
             let _decrement_pending = DecrementPendingOnDrop(pending);
             let _record_task_duration = RecordTaskDurationOnDrop::new(metrics, started_at);
             let _ = result_tx.send(f());
@@ -91,11 +93,9 @@ impl WorkerThread {
         let (result_tx, result_rx) = oneshot::channel();
         let pending = self.pending.clone();
         let metrics = self.metrics.clone();
-        let queued_at = Instant::now();
 
         let task: BoxedTask = Box::new(move || {
             let started_at = Instant::now();
-            metrics.record_queue_wait(started_at.saturating_duration_since(queued_at));
             let _decrement_pending = DecrementPendingOnDrop(pending);
             let _record_task_duration = RecordTaskDurationOnDrop::new(metrics, started_at);
             let _ = result_tx.send(f());
