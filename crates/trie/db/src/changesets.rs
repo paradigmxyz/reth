@@ -694,8 +694,8 @@ impl ChangesetCache {
         }
 
         if all_cached {
-            // Merge cached reverts newest to oldest so older values take precedence when there are
-            // conflicting updates.
+            // `merge_slice` gives precedence to earlier items, so pass reverts oldest-to-newest.
+            cached_reverts.reverse();
             let accumulated_reverts = TrieUpdatesSorted::merge_slice(&cached_reverts);
             let elapsed = timer.elapsed();
 
