@@ -4,6 +4,9 @@
 //! This is a substitute for `spawn_blocking` that reuses the same OS thread for the same
 //! named task, like a 1-thread thread pool keyed by name.
 
+use crate::affinity::{
+    dedicated_core_for_name, pin_current_thread, pin_current_thread_to_general_cores,
+};
 use dashmap::DashMap;
 use std::{
     panic::AssertUnwindSafe,
@@ -34,6 +37,11 @@ impl WorkerThread {
         let handle = thread::Builder::new()
             .name(name.to_string())
             .spawn(move || {
+                if let Some(core) = dedicated_core_for_name(name) {
+                    pin_current_thread(core);
+                } else {
+                    pin_current_thread_to_general_cores();
+                }
                 while let Some(task) = rx.blocking_recv() {
                     let _ = std::panic::catch_unwind(AssertUnwindSafe(task));
                 }

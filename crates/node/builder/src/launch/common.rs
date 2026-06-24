@@ -81,7 +81,7 @@ use reth_stages::{
     StageId, StageSet,
 };
 use reth_static_file::StaticFileProducer;
-use reth_tasks::TaskExecutor;
+use reth_tasks::{affinity::configure_reserved_cores, TaskExecutor};
 use reth_tracing::{
     throttle,
     tracing::{debug, error, info, warn},
@@ -231,11 +231,13 @@ impl LaunchContext {
             Err(err) => warn!(%err, "Failed to raise file descriptor limit"),
         }
 
+        configure_reserved_cores(reserved_cpu_cores);
+
         // Configure the implicit global rayon pool for `par_iter` usage.
-        // TODO: reserved_cpu_cores is currently ignored because subtracting from thread pool
-        // sizes doesn't actually reserve CPU cores for other processes.
-        let _ = reserved_cpu_cores;
-        let num_threads = available_parallelism().map_or(1, NonZeroUsize::get);
+        let num_threads = available_parallelism()
+            .map_or(1, NonZeroUsize::get)
+            .saturating_sub(reserved_cpu_cores)
+            .max(1);
         if let Err(err) = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .thread_name(|i| format!("rayon-{i:02}"))
