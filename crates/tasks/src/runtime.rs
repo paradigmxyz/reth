@@ -216,6 +216,18 @@ impl RayonConfig {
     }
 }
 
+/// Returns the default storage and account proof worker counts for a host thread count.
+///
+/// This preserves the previous total of `default_threads * 4` proof workers, but biases the split
+/// toward account multiproofs because they drive the sparse-trie critical path in block replay.
+#[cfg(feature = "rayon")]
+fn default_proof_worker_threads(default_threads: usize) -> (usize, usize) {
+    let total_proof_workers = default_threads.saturating_mul(4);
+    let storage_worker_threads = total_proof_workers.div_ceil(3).max(1);
+    let account_worker_threads = total_proof_workers.saturating_sub(storage_worker_threads).max(1);
+    (storage_worker_threads, account_worker_threads)
+}
+
 /// Configuration for building a [`Runtime`].
 #[derive(Debug, Clone, Default)]
 pub struct RuntimeConfig {
@@ -922,13 +934,20 @@ impl RuntimeBuilder {
 
             let blocking_guard = BlockingTaskGuard::new(config.rayon.max_blocking_tasks);
 
-            let proof_storage_worker_threads =
-                config.rayon.proof_storage_worker_threads.unwrap_or(default_threads * 2);
+            let (default_proof_storage_worker_threads, default_proof_account_worker_threads) =
+                default_proof_worker_threads(default_threads);
+
+            let proof_storage_worker_threads = config
+                .rayon
+                .proof_storage_worker_threads
+                .unwrap_or(default_proof_storage_worker_threads);
             let proof_storage_worker_pool =
                 WorkerPool::new(proof_storage_worker_threads, "proof-strg");
 
-            let proof_account_worker_threads =
-                config.rayon.proof_account_worker_threads.unwrap_or(default_threads * 2);
+            let proof_account_worker_threads = config
+                .rayon
+                .proof_account_worker_threads
+                .unwrap_or(default_proof_account_worker_threads);
             let proof_account_worker_pool =
                 WorkerPool::new(proof_account_worker_threads, "proof-acct");
 
@@ -1037,6 +1056,24 @@ mod tests {
         let config = RayonConfig::default();
         let count = config.default_thread_count();
         assert!(count >= 1);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn default_proof_workers_bias_account_pool_and_preserve_total() {
+        let (storage, account) = default_proof_worker_threads(15);
+        assert_eq!(storage, 20);
+        assert_eq!(account, 40);
+        assert_eq!(storage + account, 15 * 4);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn default_proof_workers_do_not_drop_small_hosts_to_zero() {
+        let (storage, account) = default_proof_worker_threads(1);
+        assert_eq!(storage + account, 4);
+        assert!(storage >= 1);
+        assert!(account >= 1);
     }
 
     #[test]
