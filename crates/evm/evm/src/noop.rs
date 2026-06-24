@@ -53,12 +53,6 @@ where
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static;
     #[cfg(feature = "std")]
-    type PrewarmEvm<DB>
-        = Inner::PrewarmEvm<DB>
-    where
-        DB: StateProvider + Send + 'static;
-
-    #[cfg(feature = "std")]
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
         self.inner().block_executor_factory()
     }
@@ -109,6 +103,14 @@ where
         self.inner().deposit_contract_address()
     }
 
+    #[cfg(feature = "std")]
+    fn evm_tx<'a>(
+        &self,
+        tx: &'a crate::TxEnvFor<Self>,
+    ) -> &'a <evm2::BaseEvmTypes as evm2::EvmTypes>::Tx {
+        self.inner().evm_tx(tx)
+    }
+
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: evm2::evm::Database + Clone + 'static,
@@ -157,25 +159,15 @@ where
     }
 
     #[cfg(feature = "std")]
-    fn prewarm_evm<DB>(&self, state_provider: DB, env: EvmEnvFor<Self>) -> Self::PrewarmEvm<DB>
+    fn prewarm_evm<DB>(
+        &self,
+        state_provider: DB,
+        env: EvmEnvFor<Self>,
+    ) -> evm2::Evm<evm2::BaseEvmTypes>
     where
         DB: StateProvider + Send + 'static,
     {
         self.inner().prewarm_evm(state_provider, env)
-    }
-
-    #[cfg(feature = "std")]
-    fn prewarm_tx<DB, S>(
-        &self,
-        evm: &mut Self::PrewarmEvm<DB>,
-        tx: crate::TxEnvFor<Self>,
-        sink: &mut S,
-    ) -> Result<evm2::TxResult, Box<dyn core::error::Error + Send + Sync>>
-    where
-        DB: StateProvider + Send + 'static,
-        S: evm2::evm::StateChangeSink<Error = core::convert::Infallible>,
-    {
-        self.inner().prewarm_tx(evm, tx, sink)
     }
 }
 

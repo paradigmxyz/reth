@@ -33,8 +33,6 @@ use reth_primitives_traits::SignedTransaction;
 use reth_primitives_traits::{SealedBlock, SealedHeader};
 #[cfg(feature = "std")]
 use reth_storage_errors::any::AnyError;
-#[cfg(feature = "std")]
-use reth_storage_errors::provider::ProviderError;
 
 use convert::{
     block_env_with_blob_params, payload_block_env, spec_id, spec_id_by_timestamp_and_block_number,
@@ -221,12 +219,6 @@ where
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static;
     #[cfg(feature = "std")]
-    type PrewarmEvm<DB>
-        = evm2::Evm<evm2::BaseEvmTypes>
-    where
-        DB: reth_storage_api::StateProvider + Send + 'static;
-
-    #[cfg(feature = "std")]
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
         &self.executor_factory
     }
@@ -322,6 +314,11 @@ where
         self.chain_spec().deposit_contract_address()
     }
 
+    #[cfg(feature = "std")]
+    fn evm_tx<'a>(&self, tx: &'a EthTxEnv) -> &'a <evm2::BaseEvmTypes as evm2::EvmTypes>::Tx {
+        tx.as_envelope()
+    }
+
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: evm2::evm::Database + Clone + 'static,
@@ -388,52 +385,11 @@ where
     }
 
     #[cfg(feature = "std")]
-    fn prewarm_evm<DB>(&self, state_provider: DB, env: EthEvmEnv) -> Self::PrewarmEvm<DB>
+    fn prewarm_evm<DB>(&self, state_provider: DB, env: EthEvmEnv) -> evm2::Evm<evm2::BaseEvmTypes>
     where
         DB: reth_storage_api::StateProvider + Send + 'static,
     {
         self.executor_factory.prewarm_evm(state_provider, env)
-    }
-
-    #[cfg(feature = "std")]
-    fn prewarm_tx<DB, S>(
-        &self,
-        evm: &mut Self::PrewarmEvm<DB>,
-        tx: EthTxEnv,
-        sink: &mut S,
-    ) -> Result<evm2::TxResult, alloc::boxed::Box<dyn core::error::Error + Send + Sync>>
-    where
-        DB: reth_storage_api::StateProvider + Send + 'static,
-        S: evm2::evm::StateChangeSink<Error = Infallible>,
-    {
-        enum PrewarmResolution {
-            Outcome(evm2::TxResult),
-            DatabaseError(evm2::evm::DbErrorCode),
-            HandlerError(evm2::registry::HandlerError),
-        }
-
-        let resolution = match evm.transact(tx.as_envelope()) {
-            Ok(executed) => {
-                if let Some(code) = executed.result().db_error_code {
-                    let _ = executed.discard();
-                    PrewarmResolution::DatabaseError(code)
-                } else {
-                    let Ok(result) = executed.discard_with(sink);
-                    PrewarmResolution::Outcome(result)
-                }
-            }
-            Err(err) => PrewarmResolution::HandlerError(err),
-        };
-
-        match resolution {
-            PrewarmResolution::Outcome(outcome) => Ok(outcome),
-            PrewarmResolution::DatabaseError(code) => {
-                Err(alloc::boxed::Box::new(prewarm_db_error::<DB>(evm, code)))
-            }
-            PrewarmResolution::HandlerError(err) => {
-                Err(alloc::boxed::Box::new(EthExecutionError::<ProviderError>::Handler(err)))
-            }
-        }
     }
 }
 
@@ -485,20 +441,6 @@ where
 
         Ok((txs, convert))
     }
-}
-
-#[cfg(feature = "std")]
-fn prewarm_db_error<DB>(
-    evm: &mut evm2::Evm<evm2::BaseEvmTypes>,
-    code: evm2::evm::DbErrorCode,
-) -> EthExecutionError<ProviderError>
-where
-    DB: reth_storage_api::StateProvider + Send + 'static,
-{
-    evm.database_as_mut::<evm2::evm::Db<reth_storage_api::EvmStateProviderDatabase<DB>>>()
-        .and_then(evm2::evm::Db::take_result)
-        .map(EthExecutionError::Database)
-        .unwrap_or(EthExecutionError::MissingDatabaseError(code))
 }
 
 #[cfg(test)]

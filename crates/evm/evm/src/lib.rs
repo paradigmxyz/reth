@@ -17,6 +17,8 @@ use alloy_consensus::transaction::Recovered;
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{Address, Bytes, B256};
 use core::{error::Error, fmt::Debug};
+#[cfg(feature = "std")]
+use evm2::EvmTypes;
 use reth_primitives_traits::{BlockTy, HeaderTy, NodePrimitives, SealedBlock, SealedHeader, TxTy};
 
 /// Cached database adapters for payload building.
@@ -106,12 +108,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static;
 
-    /// Per-thread EVM instance used by prewarm workers.
-    #[cfg(feature = "std")]
-    type PrewarmEvm<DB>
-    where
-        DB: reth_storage_api::StateProvider + Send + 'static;
-
     /// Returns the configured block executor factory.
     #[cfg(feature = "std")]
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory;
@@ -159,6 +155,10 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     fn tx_env(&self, transaction: impl IntoTxEnv<TxEnvFor<Self>>) -> TxEnvFor<Self> {
         transaction.into_tx_env()
     }
+
+    /// Returns the transaction shape consumed by the configured EVM.
+    #[cfg(feature = "std")]
+    fn evm_tx<'a>(&self, tx: &'a TxEnvFor<Self>) -> &'a <evm2::BaseEvmTypes as EvmTypes>::Tx;
 
     /// Returns a config with JIT support enabled for subsequently created EVMs, if supported.
     #[auto_impl(keep_default_for(&, Arc))]
@@ -251,22 +251,13 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
 
     /// Creates a prewarm evm over the provided state.
     #[cfg(feature = "std")]
-    fn prewarm_evm<DB>(&self, state_provider: DB, env: EvmEnvFor<Self>) -> Self::PrewarmEvm<DB>
+    fn prewarm_evm<DB>(
+        &self,
+        state_provider: DB,
+        env: EvmEnvFor<Self>,
+    ) -> evm2::Evm<evm2::BaseEvmTypes>
     where
         DB: reth_storage_api::StateProvider + Send + 'static;
-
-    /// Executes a transaction for prewarming, streams its state changes into `sink`, and discards
-    /// them.
-    #[cfg(feature = "std")]
-    fn prewarm_tx<DB, S>(
-        &self,
-        evm: &mut Self::PrewarmEvm<DB>,
-        tx: TxEnvFor<Self>,
-        sink: &mut S,
-    ) -> Result<evm2::TxResult, Box<dyn core::error::Error + Send + Sync>>
-    where
-        DB: reth_storage_api::StateProvider + Send + 'static,
-        S: evm2::evm::StateChangeSink<Error = core::convert::Infallible>;
 }
 
 /// JIT backend controls exposed by an EVM configuration.

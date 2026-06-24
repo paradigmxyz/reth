@@ -156,7 +156,7 @@ where
             let to_sparse_trie_task = to_sparse_trie_task.as_ref();
             pool.in_place_scope(|s| {
                 s.spawn(|_| {
-                    pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
+                    pool.init::<PrewarmEvmState>(|_| ctx.evm_for_ctx());
                 });
 
                 while let Ok((index, tx)) = pending.recv() {
@@ -218,8 +218,7 @@ where
         Tx: ExecutableTxFor<Evm>,
     {
         WorkerPool::with_worker_mut(|worker| {
-            let Some(evm) =
-                worker.get_or_init::<PrewarmEvmState<Evm>>(|| ctx.evm_for_ctx()).as_mut()
+            let Some(evm) = worker.get_or_init::<PrewarmEvmState>(|| ctx.evm_for_ctx()).as_mut()
             else {
                 return;
             };
@@ -239,14 +238,46 @@ where
             // Prewarm workers must not commit speculative writes into the reused worker EVM:
             // task scheduling would otherwise make later prewarm reads observe non-canonical state.
             let mut proof_targets = PrewarmProofTargetsSink::default();
-            if let Err(err) = ctx.evm_config.prewarm_tx(evm, tx_env, &mut proof_targets) {
-                trace!(
-                    target: "engine::tree::payload_processor::prewarm",
-                    %err,
-                    "Error when executing prewarm transaction",
-                );
-                ctx.metrics.transaction_errors.increment(1);
-                return;
+
+            enum PrewarmResolution {
+                Outcome,
+                DatabaseError(evm2::evm::DbErrorCode),
+                HandlerError(evm2::registry::HandlerError),
+            }
+
+            let resolution = match evm.transact(ctx.evm_config.evm_tx(&tx_env)) {
+                Ok(executed) => {
+                    if let Some(code) = executed.result().db_error_code {
+                        let _ = executed.discard();
+                        PrewarmResolution::DatabaseError(code)
+                    } else {
+                        let Ok(_result) = executed.discard_with(&mut proof_targets);
+                        PrewarmResolution::Outcome
+                    }
+                }
+                Err(err) => PrewarmResolution::HandlerError(err),
+            };
+
+            match resolution {
+                PrewarmResolution::Outcome => {}
+                PrewarmResolution::DatabaseError(code) => {
+                    trace!(
+                        target: "engine::tree::payload_processor::prewarm",
+                        ?code,
+                        "Database error when executing prewarm transaction",
+                    );
+                    ctx.metrics.transaction_errors.increment(1);
+                    return;
+                }
+                PrewarmResolution::HandlerError(err) => {
+                    trace!(
+                        target: "engine::tree::payload_processor::prewarm",
+                        %err,
+                        "Error when executing prewarm transaction",
+                    );
+                    ctx.metrics.transaction_errors.increment(1);
+                    return;
+                }
             }
             ctx.metrics.execution_duration.record(start.elapsed());
 
@@ -578,8 +609,7 @@ where
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
-type PrewarmEvmState<Evm> =
-    Option<<Evm as ConfigureEvm>::PrewarmEvm<reth_provider::StateProviderBox>>;
+type PrewarmEvmState = Option<evm2::Evm<evm2::BaseEvmTypes>>;
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
@@ -590,7 +620,7 @@ where
 {
     /// Creates a per-thread EVM for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
-    fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
+    fn evm_for_ctx(&self) -> PrewarmEvmState {
         let mut state_provider = match self.provider.build() {
             Ok(provider) => provider,
             Err(err) => {

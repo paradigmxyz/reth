@@ -13,7 +13,7 @@ use core::{convert::Infallible, fmt};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
     ConfigureEngineEvm, ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor,
-    NextBlockEnvAttributes, TxEnvFor,
+    NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::{EthEvmConfig, EthEvmEnv, EthTxEnv};
 use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader, TxTy};
@@ -77,11 +77,6 @@ where
     where
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static;
-    type PrewarmEvm<DB>
-        = <EthEvmConfig<C> as ConfigureEvm>::PrewarmEvm<DB>
-    where
-        DB: StateProvider + Send + 'static;
-
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
         self.inner.block_executor_factory()
     }
@@ -131,6 +126,10 @@ where
         self.inner.deposit_contract_address()
     }
 
+    fn evm_tx<'a>(&self, tx: &'a EthTxEnv) -> &'a <evm2::BaseEvmTypes as evm2::EvmTypes>::Tx {
+        self.inner.evm_tx(tx)
+    }
+
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: evm2::evm::Database + Clone + 'static,
@@ -175,24 +174,15 @@ where
         self.inner.pre_block_state_changes(db, evm_env, block_number, ctx)
     }
 
-    fn prewarm_evm<DB>(&self, state_provider: DB, env: EvmEnvFor<Self>) -> Self::PrewarmEvm<DB>
+    fn prewarm_evm<DB>(
+        &self,
+        state_provider: DB,
+        env: EvmEnvFor<Self>,
+    ) -> evm2::Evm<evm2::BaseEvmTypes>
     where
         DB: StateProvider + Send + 'static,
     {
         self.inner.prewarm_evm(state_provider, env)
-    }
-
-    fn prewarm_tx<DB, S>(
-        &self,
-        evm: &mut Self::PrewarmEvm<DB>,
-        tx: TxEnvFor<Self>,
-        sink: &mut S,
-    ) -> Result<evm2::TxResult, Box<dyn core::error::Error + Send + Sync>>
-    where
-        DB: StateProvider + Send + 'static,
-        S: evm2::evm::StateChangeSink<Error = Infallible>,
-    {
-        self.inner.prewarm_tx(evm, tx, sink)
     }
 }
 
