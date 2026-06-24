@@ -113,7 +113,7 @@ async fn my_exex<Node: FullNodeComponents>(
                         let execution_outcome = new.execution_outcome();
 
                         for (address, senders) in subscriptions.iter_mut() {
-                            for (key, slot) in execution_outcome.evm2_block_state_ref().storage() {
+                            for (key, slot) in execution_outcome.execution_state_ref().storage() {
                                 let changed_address = key.address();
                                 if &changed_address == address {
                                     let diff = StorageDiff {

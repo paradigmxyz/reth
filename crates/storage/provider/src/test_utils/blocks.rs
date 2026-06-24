@@ -11,8 +11,7 @@ use alloy_primitives::Signature;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices, tables};
 use reth_ethereum_primitives::{BlockBody, Receipt, Transaction, TransactionSigned, TxType};
 use reth_execution_types::{
-    evm2_block_state_from_init, Evm2AccountInfo, Evm2BlockReverts, Evm2RevertAccount,
-    Evm2StorageReverts,
+    execution_state_from_init, BlockReverts, ExecutionAccountInfo, RevertAccount, StorageReverts,
 };
 use reth_node_types::NodeTypes;
 use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock, SealedHeader};
@@ -169,7 +168,7 @@ pub fn genesis() -> SealedBlock<reth_ethereum_primitives::Block> {
 }
 
 fn execution_state_root(execution_outcome: &ExecutionOutcome) -> B256 {
-    let block_state = execution_outcome.evm2_block_state();
+    let block_state = execution_outcome.execution_state();
     state_root_unhashed(block_state.accounts().filter_map(|(address, account)| {
         account.current.as_ref().map(|info| {
             (
@@ -189,7 +188,7 @@ const fn test_account(nonce: u64, balance: U256) -> Account {
     Account { nonce, balance, bytecode_hash: None }
 }
 
-const fn account_info_to_reth(info: &Evm2AccountInfo) -> Account {
+const fn account_info_to_reth(info: &ExecutionAccountInfo) -> Account {
     Account { nonce: info.nonce, balance: info.balance, bytecode_hash: None }
 }
 
@@ -198,10 +197,10 @@ fn execution_outcome(
     accounts: impl IntoIterator<
         Item = (Address, (Option<Account>, Option<Account>, BTreeMap<U256, (U256, U256)>)),
     >,
-    block_reverts: Evm2BlockReverts,
+    block_reverts: BlockReverts,
     receipts: Vec<Receipt>,
 ) -> ExecutionOutcome {
-    let state = evm2_block_state_from_init(accounts, []);
+    let state = execution_state_from_init(accounts, []);
     ExecutionOutcome::from_state_and_reverts(
         state,
         vec![block_reverts],
@@ -220,7 +219,7 @@ fn block1(
     let account2: Address = [0x61; 20].into();
     let slot = U256::from(5);
     let info = test_account(1, U256::from(10));
-    let mut block_reverts = Evm2BlockReverts::default();
+    let mut block_reverts = BlockReverts::default();
     block_reverts.accounts.insert(account1, None);
     block_reverts.accounts.insert(account2, None);
 
@@ -272,7 +271,7 @@ fn block2(
     let account: Address = [0x60; 20].into();
     let slot = U256::from(5);
 
-    let state = evm2_block_state_from_init(
+    let state = execution_state_from_init(
         [(
             account,
             (
@@ -283,10 +282,10 @@ fn block2(
         )],
         [],
     );
-    let block_reverts = vec![Evm2BlockReverts {
+    let block_reverts = vec![BlockReverts {
         accounts: HashMap::from_iter([(
             account,
-            Some(Evm2RevertAccount {
+            Some(RevertAccount {
                 nonce: 1,
                 balance: U256::from(10),
                 code_hash: alloy_primitives::KECCAK256_EMPTY,
@@ -295,7 +294,7 @@ fn block2(
         )]),
         storage: HashMap::from_iter([(
             account,
-            Evm2StorageReverts {
+            StorageReverts {
                 wiped: false,
                 previous_wipe: false,
                 slots: BTreeMap::from_iter([(slot, U256::from(10))]),
@@ -349,7 +348,7 @@ fn block3(
     let slot_range = 1..=100;
 
     let mut accounts = Vec::new();
-    let mut block_reverts = Evm2BlockReverts::default();
+    let mut block_reverts = BlockReverts::default();
     for idx in address_range {
         let address = Address::with_last_byte(idx);
         accounts.push((
@@ -406,7 +405,7 @@ fn block4(
     let slot_range = 1..=100;
 
     let mut accounts = Vec::new();
-    let mut block_reverts = Evm2BlockReverts::default();
+    let mut block_reverts = BlockReverts::default();
     for idx in address_range {
         let address = Address::with_last_byte(idx);
         let current = idx.is_multiple_of(2).then(|| test_account(1, U256::from(idx * 2)));
@@ -435,7 +434,7 @@ fn block4(
         ));
         block_reverts.accounts.insert(
             address,
-            Some(Evm2RevertAccount {
+            Some(RevertAccount {
                 nonce: 1,
                 balance: U256::from(idx),
                 code_hash: alloy_primitives::KECCAK256_EMPTY,
@@ -444,7 +443,7 @@ fn block4(
         );
         block_reverts.storage.insert(
             address,
-            Evm2StorageReverts {
+            StorageReverts {
                 wiped: false,
                 previous_wipe: false,
                 slots: slot_range
@@ -495,7 +494,7 @@ fn block5(
     let slot_range = 1..=100;
 
     let mut accounts = Vec::new();
-    let mut block_reverts = Evm2BlockReverts::default();
+    let mut block_reverts = BlockReverts::default();
     for idx in address_range {
         let address = Address::with_last_byte(idx);
         accounts.push((
@@ -525,7 +524,7 @@ fn block5(
         if idx.is_multiple_of(2) {
             block_reverts.accounts.insert(
                 address,
-                Some(Evm2RevertAccount {
+                Some(RevertAccount {
                     nonce: 1,
                     balance: U256::from(idx * 2),
                     code_hash: alloy_primitives::KECCAK256_EMPTY,
@@ -534,7 +533,7 @@ fn block5(
             );
             block_reverts.storage.insert(
                 address,
-                Evm2StorageReverts {
+                StorageReverts {
                     wiped: false,
                     previous_wipe: false,
                     slots: slot_range

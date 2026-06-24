@@ -352,7 +352,7 @@ pub trait LoadPendingBlock:
 
         let block_number = block.number();
         let execution_outcome = BlockExecutionOutput {
-            state: legacy_bundle_to_evm2(db.take_bundle(), block_number),
+            state: legacy_bundle_to_execution_state(db.take_bundle(), block_number),
             result: execution_result,
             hashed_state: None,
         };

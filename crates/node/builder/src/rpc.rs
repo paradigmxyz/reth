@@ -5,7 +5,7 @@ pub use jsonrpsee::{
     server::middleware::rpc::{RpcService, RpcServiceBuilder},
 };
 use reth_engine_tree::tree::{
-    AsEvm2BlockExecutionContext, Evm2PayloadExecutor, Evm2TxEnv, WaitForCaches,
+    AsBlockExecutionContext, EthPayloadExecutor, EthTxEnv, WaitForCaches,
 };
 pub use reth_engine_tree::tree::{BasicEngineValidator, EngineValidator};
 pub use reth_rpc_builder::{
@@ -26,7 +26,7 @@ use jsonrpsee::RpcModule;
 use parking_lot::Mutex;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
-use reth_evm::{ConfigureEvm, Evm2Env, EvmEnvFor, ExecutionCtxFor, TxEnvFor};
+use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, ExecutionCtxFor, TxEnvFor};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
     NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
@@ -37,7 +37,7 @@ use reth_node_core::{
     version::{version_metadata, CLIENT_CODE},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
-use reth_provider::BorrowedEvm2StateProviderDatabase;
+use reth_provider::BorrowedEvmStateProviderDatabase;
 use reth_rpc::{
     eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer, RpcNodeCore},
     AdminApi,
@@ -946,7 +946,7 @@ where
     N::Evm: ConfigureEvm<Primitives = PrimitivesTy<N::Types>>,
     N::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
-    <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm<EvmEnv: Evm2Env>,
+    <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
     TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<RecoveredTxEnvelope>,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
@@ -1254,7 +1254,7 @@ where
     N::Evm: ConfigureEvm<Primitives = PrimitivesTy<N::Types>>,
     <N as FullNodeTypes>::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
-    <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm<EvmEnv: Evm2Env>,
+    <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
     TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<RecoveredTxEnvelope>,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
@@ -1461,11 +1461,11 @@ where
     Node: FullNodeComponents<
         Evm: ConfigureEngineEvm<
             <<Node::Types as NodeTypes>::Payload as PayloadTypes>::ExecutionData,
-        > + ConfigureEvm<Primitives = PrimitivesTy<Node::Types>, TxEnv = Evm2TxEnv>,
+        > + ConfigureEvm<Primitives = PrimitivesTy<Node::Types>, TxEnv = EthTxEnv>,
     >,
-    EvmEnvFor<Node::Evm>: Evm2Env,
-    for<'a> ExecutionCtxFor<'a, Node::Evm>: AsEvm2BlockExecutionContext,
-    <Node::Evm as ConfigureEvm>::Executor<BorrowedEvm2StateProviderDatabase>: Evm2PayloadExecutor,
+    EvmEnvFor<Node::Evm>: EvmEnv,
+    for<'a> ExecutionCtxFor<'a, Node::Evm>: AsBlockExecutionContext,
+    <Node::Evm as ConfigureEvm>::Executor<BorrowedEvmStateProviderDatabase>: EthPayloadExecutor,
     PrimitivesTy<Node::Types>: reth_node_api::NodePrimitives<
         SignedTx = EthereumTxEnvelope<TxEip4844>,
         Receipt = EthereumReceipt,

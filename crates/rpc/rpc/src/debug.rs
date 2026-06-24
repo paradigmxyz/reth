@@ -17,7 +17,7 @@ use jsonrpsee::core::RpcResult;
 use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
-use reth_evm::{ConfigureEvm, Evm2Env, TxEnvFor};
+use reth_evm::{ConfigureEvm, EvmEnv, TxEnvFor};
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
 };
@@ -575,7 +575,7 @@ where
         {
             let _ = (block, mode);
             return Err(Eth::Error::from_eth_err(EthApiError::Unsupported(
-                "debug execution witnesses are unsupported by the evm2 execution path",
+                "debug execution witnesses are unsupported by the active EVM execution path",
             )))
         }
 
@@ -619,7 +619,7 @@ where
         {
             let _ = (block_id, tx_index, address);
             return Err(Eth::Error::from_eth_err(EthApiError::Unsupported(
-                "debug account replay is unsupported by the evm2 execution path",
+                "debug account replay is unsupported by the active EVM execution path",
             )))
         }
 
@@ -641,7 +641,7 @@ where
         {
             let _ = (block_id, tx_index, address);
             return Err(Eth::Error::from_eth_err(EthApiError::Unsupported(
-                "debug account replay is unsupported by the evm2 execution path",
+                "debug account replay is unsupported by the active EVM execution path",
             )))
         }
 
@@ -788,7 +788,7 @@ where
     pub async fn intermediate_roots(&self, block_hash: B256) -> Result<Vec<B256>, Eth::Error> {
         let _ = block_hash;
         Err(Eth::Error::from_eth_err(EthApiError::Unsupported(
-            "debug intermediate roots are unsupported by the evm2 execution path",
+            "debug intermediate roots are unsupported by the active EVM execution path",
         )))
     }
 }
@@ -796,18 +796,18 @@ where
 impl<Eth> DebugApi<Eth>
 where
     Eth: TraceExt,
-    Eth::Evm: ConfigureEvm<EvmEnv: Evm2Env>,
+    Eth::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
     TxEnvFor<Eth::Evm>: AsRef<RecoveredTxEnvelope>,
     ProviderTx<Eth::Provider>: Clone,
 {
-    async fn trace_block_evm2(
+    async fn trace_block_impl(
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
         evm_env: <Eth::Evm as ConfigureEvm>::EvmEnv,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
         self.eth_api()
-            .spawn_with_evm2_state_at_block(block.parent_hash().into(), move |eth_api, db| {
+            .spawn_with_state_at_block(block.parent_hash().into(), move |eth_api, db| {
                 let mut results = Vec::with_capacity(block.body().transactions().len());
                 eth_api.apply_pre_execution_changes(&block, evm_env.clone(), db.clone())?;
 
@@ -853,7 +853,7 @@ where
             .await
     }
 
-    async fn debug_trace_raw_block_evm2(
+    async fn debug_trace_raw_block_impl(
         &self,
         rlp_block: Bytes,
         opts: GethDebugTracingOptions,
@@ -877,11 +877,11 @@ where
             }
             .map_err(Eth::Error::from_eth_err)?;
 
-        self.trace_block_evm2(Arc::new(block.into_recovered_with_signers(senders)), evm_env, opts)
+        self.trace_block_impl(Arc::new(block.into_recovered_with_signers(senders)), evm_env, opts)
             .await
     }
 
-    async fn debug_trace_block_evm2(
+    async fn debug_trace_block_impl(
         &self,
         block_id: BlockId,
         opts: GethDebugTracingOptions,
@@ -893,10 +893,10 @@ where
             .ok_or(EthApiError::HeaderNotFound(block_id))?;
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
-        self.trace_block_evm2(block, evm_env, opts).await
+        self.trace_block_impl(block, evm_env, opts).await
     }
 
-    async fn debug_trace_transaction_evm2(
+    async fn debug_trace_transaction_impl(
         &self,
         tx_hash: B256,
         opts: GethDebugTracingOptions,
@@ -910,7 +910,7 @@ where
         let block_hash = block.hash();
 
         self.eth_api()
-            .spawn_with_evm2_state_at_block(block.parent_hash().into(), move |eth_api, db| {
+            .spawn_with_state_at_block(block.parent_hash().into(), move |eth_api, db| {
                 eth_api.apply_pre_execution_changes(&block, evm_env.clone(), db.clone())?;
                 let index = eth_api.replay_transactions_until(
                     db.clone(),
@@ -948,8 +948,10 @@ where
 }
 
 fn unsupported_debug<T>() -> RpcResult<T> {
-    Err(EthApiError::Unsupported("debug execution API is unsupported by the evm2 execution path")
-        .into())
+    Err(EthApiError::Unsupported(
+        "debug execution API is unsupported by the active EVM execution path",
+    )
+    .into())
 }
 
 fn debug_inspector_error<E>(err: DebugInspectorError) -> E
@@ -974,7 +976,7 @@ where
 impl<Eth> DebugApiServer<RpcTxReq<Eth::NetworkTypes>> for DebugApi<Eth>
 where
     Eth: EthTransactions + TraceExt,
-    Eth::Evm: ConfigureEvm<EvmEnv: Evm2Env>,
+    Eth::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
     TxEnvFor<Eth::Evm>: AsRef<RecoveredTxEnvelope>,
     ProviderTx<Eth::Provider>: Clone,
 {
@@ -1102,7 +1104,7 @@ where
         rlp_block: Bytes,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
-        self.debug_trace_raw_block_evm2(rlp_block, opts.unwrap_or_default())
+        self.debug_trace_raw_block_impl(rlp_block, opts.unwrap_or_default())
             .await
             .map_err(Into::into)
     }
@@ -1113,7 +1115,7 @@ where
         block: B256,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
-        self.debug_trace_block_evm2(block.into(), opts.unwrap_or_default())
+        self.debug_trace_block_impl(block.into(), opts.unwrap_or_default())
             .await
             .map_err(Into::into)
     }
@@ -1124,7 +1126,7 @@ where
         block: BlockNumberOrTag,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
-        self.debug_trace_block_evm2(block.into(), opts.unwrap_or_default())
+        self.debug_trace_block_impl(block.into(), opts.unwrap_or_default())
             .await
             .map_err(Into::into)
     }
@@ -1135,7 +1137,7 @@ where
         tx_hash: B256,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<GethTrace> {
-        self.debug_trace_transaction_evm2(tx_hash, opts.unwrap_or_default())
+        self.debug_trace_transaction_impl(tx_hash, opts.unwrap_or_default())
             .await
             .map_err(Into::into)
     }
@@ -1402,7 +1404,7 @@ where
             .map_err(Into::into)?;
         let opts = opts.map(|opts| opts.tracing_options).unwrap_or_default();
 
-        self.trace_block_evm2(block, evm_env, opts).await.map_err(Into::into)
+        self.trace_block_impl(block, evm_env, opts).await.map_err(Into::into)
     }
 }
 

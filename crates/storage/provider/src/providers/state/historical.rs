@@ -899,7 +899,7 @@ mod tests {
         BlockNumberList,
     };
     use reth_execution_types::{
-        evm2_block_state_from_init, Evm2BlockReverts, Evm2RevertAccount, Evm2StorageReverts,
+        execution_state_from_init, BlockReverts, RevertAccount, StorageReverts,
     };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{
@@ -916,8 +916,8 @@ mod tests {
     const STORAGE: B256 =
         b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
 
-    fn account_to_revert(account: Account) -> Evm2RevertAccount {
-        Evm2RevertAccount {
+    fn account_to_revert(account: Account) -> RevertAccount {
+        RevertAccount {
             balance: account.balance,
             nonce: account.nonce,
             code_hash: account.bytecode_hash.unwrap_or(KECCAK256_EMPTY),
@@ -925,9 +925,9 @@ mod tests {
         }
     }
 
-    fn evm2_revert(
+    fn block_revert(
         changes: impl IntoIterator<Item = (Address, Option<Account>, Vec<(U256, U256)>)>,
-    ) -> Evm2BlockReverts {
+    ) -> BlockReverts {
         let mut accounts = AddressMap::default();
         let mut storage = AddressMap::default();
         for (address, account, storage_revert) in changes {
@@ -935,7 +935,7 @@ mod tests {
             if !storage_revert.is_empty() {
                 storage.insert(
                     address,
-                    Evm2StorageReverts {
+                    StorageReverts {
                         slots: storage_revert.into_iter().collect(),
                         ..Default::default()
                     },
@@ -943,7 +943,7 @@ mod tests {
             }
         }
 
-        Evm2BlockReverts { accounts, storage }
+        BlockReverts { accounts, storage }
     }
 
     const fn assert_state_provider<T: StateProvider>() {}
@@ -1390,14 +1390,14 @@ mod tests {
         reverts[10] = vec![(ADDRESS, Some(account), vec![(slot, U256::from(10))])];
         reverts[15] = vec![(ADDRESS, Some(account), vec![(slot, U256::from(15))])];
 
-        let state = evm2_block_state_from_init(
+        let state = execution_state_from_init(
             [
                 (ADDRESS, (None, Some(account), addr_storage)),
                 (HIGHER_ADDRESS, (None, Some(higher_account), higher_storage)),
             ],
             [],
         );
-        let block_reverts = reverts.into_iter().map(evm2_revert).collect();
+        let block_reverts = reverts.into_iter().map(block_revert).collect();
 
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw

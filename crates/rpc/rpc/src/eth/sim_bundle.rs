@@ -279,8 +279,10 @@ where
         logs: bool,
     ) -> Result<SimBundleResponse, Eth::Error> {
         let _ = (request, overrides, logs);
-        Err(EthApiError::Unsupported("mev_simBundle is unsupported by the evm2 execution path")
-            .into())
+        Err(EthApiError::Unsupported(
+            "mev_simBundle is unsupported by the active EVM execution path",
+        )
+        .into())
     }
 }
 

@@ -50,9 +50,9 @@ use reth_db_api::{
     BlockNumberList,
 };
 use reth_execution_types::{
-    BlockExecutionOutput, BlockExecutionResult, Chain, Evm2AccountChangeRef, Evm2AccountInfo,
-    Evm2AccountInfoRef, Evm2BlockReverts, Evm2Bytecode, Evm2StateChangeSink, Evm2StateChangeSource,
-    Evm2StorageChange, ExecutionOutcome,
+    BlockExecutionOutput, BlockExecutionResult, BlockReverts, Chain, ExecutableBytecode,
+    ExecutionAccountChangeRef, ExecutionAccountInfo, ExecutionAccountInfoRef, ExecutionOutcome,
+    ExecutionStateChangeSink, ExecutionStateChangeSource, ExecutionStorageChange,
 };
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
@@ -107,15 +107,15 @@ impl CommitOrder {
     }
 }
 
-pub(crate) fn evm2_block_state_and_reverts_to_plain_state_and_reverts<S>(
+pub(crate) fn execution_state_and_reverts_to_plain_state_and_reverts<S>(
     state: &S,
-    block_reverts: &[Evm2BlockReverts],
+    block_reverts: &[BlockReverts],
     is_value_known: OriginalValuesKnown,
 ) -> (StateChangeset, PlainStateReverts)
 where
-    S: Evm2StateChangeSource,
+    S: ExecutionStateChangeSource,
 {
-    let plain_state = evm2_block_state_to_plain_state(state, is_value_known);
+    let plain_state = execution_state_to_plain_state(state, is_value_known);
 
     let mut reverts = PlainStateReverts::with_capacity(block_reverts.len());
     for block_reverts in block_reverts {
@@ -126,9 +126,9 @@ where
                 .map(|(address, account)| {
                     (
                         *address,
-                        account
-                            .as_ref()
-                            .map(|account| evm2_account_info_to_reth(&account.to_account_info())),
+                        account.as_ref().map(|account| {
+                            execution_account_info_to_reth(&account.to_account_info())
+                        }),
                     )
                 })
                 .collect(),
@@ -154,12 +154,12 @@ where
     (plain_state, reverts)
 }
 
-pub(crate) fn evm2_block_state_to_plain_state<S>(
+pub(crate) fn execution_state_to_plain_state<S>(
     state: &S,
     is_value_known: OriginalValuesKnown,
 ) -> StateChangeset
 where
-    S: Evm2StateChangeSource,
+    S: ExecutionStateChangeSource,
 {
     let mut sink = PlainStateSink::new(is_value_known);
     match state.visit(&mut sink) {
@@ -169,12 +169,12 @@ where
     sink.finish()
 }
 
-pub(crate) fn evm2_block_state_to_plain_state_and_reverts<S>(
+pub(crate) fn execution_state_to_plain_state_and_reverts<S>(
     state: &S,
     is_value_known: OriginalValuesKnown,
 ) -> (StateChangeset, PlainStateReverts)
 where
-    S: Evm2StateChangeSource,
+    S: ExecutionStateChangeSource,
 {
     let mut sink = PlainStateAndRevertsSink::new(is_value_known);
     match state.visit(&mut sink) {
@@ -184,7 +184,7 @@ where
     sink.finish()
 }
 
-fn evm2_account_info_to_reth(info: &Evm2AccountInfo) -> Account {
+fn execution_account_info_to_reth(info: &ExecutionAccountInfo) -> Account {
     Account {
         balance: info.balance,
         nonce: info.nonce,
@@ -193,7 +193,7 @@ fn evm2_account_info_to_reth(info: &Evm2AccountInfo) -> Account {
     }
 }
 
-fn evm2_account_info_ref_to_reth(info: Evm2AccountInfoRef<'_>) -> Account {
+fn execution_account_info_ref_to_reth(info: ExecutionAccountInfoRef<'_>) -> Account {
     Account {
         balance: info.balance,
         nonce: info.nonce,
@@ -253,19 +253,24 @@ impl PlainStateSink {
     }
 }
 
-impl Evm2StateChangeSink for PlainStateSink {
+impl ExecutionStateChangeSink for PlainStateSink {
     type Error = Infallible;
 
-    fn bytecode(&mut self, code_hash: B256, bytecode: &Evm2Bytecode) -> Result<(), Self::Error> {
+    fn bytecode(
+        &mut self,
+        code_hash: B256,
+        bytecode: &ExecutableBytecode,
+    ) -> Result<(), Self::Error> {
         if code_hash != KECCAK_EMPTY {
             self.contracts.push((code_hash, Bytecode::new_raw(bytecode.original_bytes())));
         }
         Ok(())
     }
 
-    fn account(&mut self, change: Evm2AccountChangeRef<'_>) -> Result<(), Self::Error> {
+    fn account(&mut self, change: ExecutionAccountChangeRef<'_>) -> Result<(), Self::Error> {
         if self.is_value_known.is_not_known() || change.original != change.current {
-            self.accounts.push((change.address, change.current.map(evm2_account_info_ref_to_reth)));
+            self.accounts
+                .push((change.address, change.current.map(execution_account_info_ref_to_reth)));
         }
         Ok(())
     }
@@ -275,7 +280,7 @@ impl Evm2StateChangeSink for PlainStateSink {
         Ok(())
     }
 
-    fn storage(&mut self, change: Evm2StorageChange) -> Result<(), Self::Error> {
+    fn storage(&mut self, change: ExecutionStorageChange) -> Result<(), Self::Error> {
         let entry = self.storage_by_address.entry(change.address).or_default();
         let wipe_and_not_zero = entry.0 && !change.current.is_zero();
         let not_wiped_and_changed = !entry.0 && change.original != change.current;
@@ -340,22 +345,27 @@ impl PlainStateAndRevertsSink {
     }
 }
 
-impl Evm2StateChangeSink for PlainStateAndRevertsSink {
+impl ExecutionStateChangeSink for PlainStateAndRevertsSink {
     type Error = Infallible;
 
-    fn bytecode(&mut self, code_hash: B256, bytecode: &Evm2Bytecode) -> Result<(), Self::Error> {
+    fn bytecode(
+        &mut self,
+        code_hash: B256,
+        bytecode: &ExecutableBytecode,
+    ) -> Result<(), Self::Error> {
         if code_hash != KECCAK_EMPTY {
             self.contracts.push((code_hash, Bytecode::new_raw(bytecode.original_bytes())));
         }
         Ok(())
     }
 
-    fn account(&mut self, change: Evm2AccountChangeRef<'_>) -> Result<(), Self::Error> {
+    fn account(&mut self, change: ExecutionAccountChangeRef<'_>) -> Result<(), Self::Error> {
         if self.is_value_known.is_not_known() || change.original != change.current {
-            self.accounts.push((change.address, change.current.map(evm2_account_info_ref_to_reth)));
+            self.accounts
+                .push((change.address, change.current.map(execution_account_info_ref_to_reth)));
         }
         self.account_reverts
-            .push((change.address, change.original.map(evm2_account_info_ref_to_reth)));
+            .push((change.address, change.original.map(execution_account_info_ref_to_reth)));
         Ok(())
     }
 
@@ -365,7 +375,7 @@ impl Evm2StateChangeSink for PlainStateAndRevertsSink {
         Ok(())
     }
 
-    fn storage(&mut self, change: Evm2StorageChange) -> Result<(), Self::Error> {
+    fn storage(&mut self, change: ExecutionStorageChange) -> Result<(), Self::Error> {
         let entry = self.storage_by_address.entry(change.address).or_default();
         let wipe_and_not_zero = entry.0 && !change.current.is_zero();
         let not_wiped_and_changed = !entry.0 && change.original != change.current;
@@ -2915,16 +2925,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let (plain_state, reverts, plain_state_order, reverts_order) = match &execution_outcome {
             WriteStateInput::Single { outcome, .. } => {
                 let (plain_state, reverts) =
-                    evm2_block_state_to_plain_state_and_reverts(&outcome.state, is_value_known);
+                    execution_state_to_plain_state_and_reverts(&outcome.state, is_value_known);
                 (plain_state, reverts, PlainStateInputOrder::Sorted, PlainStateInputOrder::Sorted)
             }
             WriteStateInput::Multiple(outcome) => {
-                let (plain_state, reverts) =
-                    evm2_block_state_and_reverts_to_plain_state_and_reverts(
-                        outcome.evm2_block_state_ref(),
-                        outcome.block_reverts(),
-                        is_value_known,
-                    );
+                let (plain_state, reverts) = execution_state_and_reverts_to_plain_state_and_reverts(
+                    outcome.execution_state_ref(),
+                    outcome.block_reverts(),
+                    is_value_known,
+                );
                 (
                     plain_state,
                     reverts,
@@ -4316,9 +4325,8 @@ mod tests {
     use reth_db_api::models::StorageSettings;
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{
-        evm2_block_state_from_init, evm2_state_source_hashed_post_state, AccountRevertInit,
-        BlockExecutionOutput, BlockExecutionResult, Evm2BlockReverts, Evm2BlockState,
-        Evm2StorageReverts,
+        execution_state_from_init, hashed_post_state_from_state_source, AccountRevertInit,
+        BlockExecutionOutput, BlockExecutionResult, BlockReverts, ExecutionState, StorageReverts,
     };
     use reth_primitives_traits::SealedBlock;
     use reth_storage_api::MetadataWriter;
@@ -4330,14 +4338,14 @@ mod tests {
         address: Address,
         account: Account,
         storage: BTreeMap<U256, (U256, U256)>,
-    ) -> (Evm2BlockState, Vec<Evm2BlockReverts>) {
+    ) -> (ExecutionState, Vec<BlockReverts>) {
         (
-            evm2_block_state_from_init([(address, (None, Some(account), storage.clone()))], []),
-            vec![Evm2BlockReverts {
+            execution_state_from_init([(address, (None, Some(account), storage.clone()))], []),
+            vec![BlockReverts {
                 accounts: AddressMap::from_iter([(address, None)]),
                 storage: AddressMap::from_iter([(
                     address,
-                    Evm2StorageReverts {
+                    StorageReverts {
                         slots: storage
                             .into_iter()
                             .map(|(slot, (original, _))| (slot, original))
@@ -4350,15 +4358,15 @@ mod tests {
     }
 
     #[test]
-    fn evm2_plain_reverts_skip_secondary_storage_wipes() {
+    fn plain_reverts_skip_secondary_storage_wipes() {
         let address = Address::random();
         let slot = U256::from(1);
         let value = U256::from(2);
-        let state = Evm2BlockState::default();
-        let block_reverts = vec![Evm2BlockReverts {
+        let state = ExecutionState::default();
+        let block_reverts = vec![BlockReverts {
             storage: AddressMap::from_iter([(
                 address,
-                Evm2StorageReverts {
+                StorageReverts {
                     wiped: true,
                     previous_wipe: true,
                     slots: BTreeMap::from([(slot, value)]),
@@ -4367,7 +4375,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let (_, reverts) = evm2_block_state_and_reverts_to_plain_state_and_reverts(
+        let (_, reverts) = execution_state_and_reverts_to_plain_state_and_reverts(
             &state,
             &block_reverts,
             OriginalValuesKnown::Yes,
@@ -4384,7 +4392,7 @@ mod tests {
     }
 
     #[test]
-    fn evm2_plain_state_conversion_streams_accounts_and_storage() {
+    fn plain_state_conversion_streams_accounts_and_storage() {
         let address = Address::random();
         let slot = U256::from(1);
         let original_slot = U256::from(2);
@@ -4393,7 +4401,7 @@ mod tests {
         let bytecode = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]));
         let original_account = Account { balance: U256::from(4), nonce: 1, bytecode_hash: None };
         let current_account = Account { balance: U256::from(5), nonce: 2, bytecode_hash: None };
-        let state = evm2_block_state_from_init(
+        let state = execution_state_from_init(
             [(
                 address,
                 (
@@ -4406,8 +4414,8 @@ mod tests {
         );
 
         let (plain_state, reverts) =
-            evm2_block_state_to_plain_state_and_reverts(&state, OriginalValuesKnown::Yes);
-        let plain_state_only = evm2_block_state_to_plain_state(&state, OriginalValuesKnown::Yes);
+            execution_state_to_plain_state_and_reverts(&state, OriginalValuesKnown::Yes);
+        let plain_state_only = execution_state_to_plain_state(&state, OriginalValuesKnown::Yes);
 
         assert_eq!(plain_state_only.accounts, plain_state.accounts);
         assert_eq!(plain_state_only.storage, plain_state.storage);
@@ -4434,7 +4442,7 @@ mod tests {
     }
 
     #[test]
-    fn evm2_plain_state_conversion_returns_sorted_changes() {
+    fn plain_state_conversion_returns_sorted_changes() {
         let low_address = Address::with_last_byte(1);
         let high_address = Address::with_last_byte(2);
         let low_code_hash = B256::with_last_byte(1);
@@ -4442,7 +4450,7 @@ mod tests {
         let bytecode = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]));
         let account = Account::default();
 
-        let state = evm2_block_state_from_init(
+        let state = execution_state_from_init(
             [
                 (
                     high_address,
@@ -4468,7 +4476,7 @@ mod tests {
         );
 
         let (plain_state, reverts) =
-            evm2_block_state_to_plain_state_and_reverts(&state, OriginalValuesKnown::Yes);
+            execution_state_to_plain_state_and_reverts(&state, OriginalValuesKnown::Yes);
 
         assert_eq!(
             plain_state.accounts.iter().map(|(address, _)| *address).collect::<Vec<_>>(),
@@ -5499,7 +5507,7 @@ mod tests {
             .unwrap();
 
         let hashed_state =
-            evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&state).into_sorted();
+            hashed_post_state_from_state_source::<KeccakKeyHasher, _>(&state).into_sorted();
         provider_rw.write_hashed_state(&hashed_state).unwrap();
 
         let plain_storage_entries = provider_rw
@@ -5610,9 +5618,9 @@ mod tests {
                 accounts.push((address, (None, Some(account), storage)));
             }
 
-            let state = evm2_block_state_from_init(accounts, []);
+            let state = execution_state_from_init(accounts, []);
             let hashed_state =
-                evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&state).into_sorted();
+                hashed_post_state_from_state_source::<KeccakKeyHasher, _>(&state).into_sorted();
 
             let header = Header {
                 number: block_num,
@@ -5894,7 +5902,7 @@ mod tests {
             .unwrap();
 
         let hashed_state =
-            evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&state).into_sorted();
+            hashed_post_state_from_state_source::<KeccakKeyHasher, _>(&state).into_sorted();
         provider_rw.write_hashed_state(&hashed_state).unwrap();
 
         let hashed_account = provider_rw

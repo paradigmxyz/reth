@@ -4,7 +4,7 @@ use alloy_network::eip2718::Decodable2718;
 use alloy_primitives::{Bytes, B256};
 use evm2::ethereum::RecoveredTxEnvelope;
 use reth_chainspec::EthereumHardforks;
-use reth_evm::{ConfigureEvm, Evm2Env, TxEnvFor};
+use reth_evm::{ConfigureEvm, EvmEnv, TxEnvFor};
 use reth_node_api::{BlockTy, FullNodeComponents, PrimitivesTy};
 use reth_node_builder::{rpc::RpcRegistry, NodeTypes};
 use reth_provider::BlockReader;
@@ -37,7 +37,7 @@ impl<Node, EthApi> RpcTestContext<Node, EthApi>
 where
     Node: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
     Node::Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
-    <EthApi as RpcNodeCore>::Evm: ConfigureEvm<EvmEnv: Evm2Env>,
+    <EthApi as RpcNodeCore>::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
     TxEnvFor<<EthApi as RpcNodeCore>::Evm>: AsRef<RecoveredTxEnvelope>,
     EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
         + EthTransactions

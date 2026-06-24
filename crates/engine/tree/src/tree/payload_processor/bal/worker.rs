@@ -1,3 +1,3 @@
 //! Parked BAL worker scaffolding.
 //!
-//! Worker execution will be reintroduced with evm2-native Amsterdam support.
+//! Worker execution will be reintroduced with EVM-native Amsterdam support.

@@ -16,7 +16,7 @@ use reth_downloaders::{
 use reth_ethereum_primitives::{Block, BlockBody, Transaction};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::EthEvmConfig;
-use reth_execution_types::evm2_block_state_hashed_post_state_sorted;
+use reth_execution_types::hashed_post_state_sorted_from_execution_state;
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
@@ -36,7 +36,7 @@ use reth_stages::sets::DefaultStages;
 use reth_stages_api::{Pipeline, StageId};
 use reth_static_file::StaticFileProducer;
 use reth_storage_api::{
-    ChangeSetReader, SharedEvm2StateProviderDatabase, StateProvider, StateWriteConfig,
+    ChangeSetReader, SharedEvmStateProviderDatabase, StateProvider, StateWriteConfig,
     StorageChangeSetReader, StorageSettings, StorageSettingsCache,
 };
 use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
@@ -341,7 +341,7 @@ async fn run_pipeline_forward_and_unwind(
             let state_provider = provider.latest();
             // SAFETY: The shared database is consumed by this synchronous execution call and does
             // not outlive the state provider borrowed here.
-            let database = unsafe { SharedEvm2StateProviderDatabase::new(&*state_provider) };
+            let database = unsafe { SharedEvmStateProviderDatabase::new(&*state_provider) };
             evm_config
                 .executor(database)
                 .execute(&block_with_senders)
@@ -352,7 +352,7 @@ async fn run_pipeline_forward_and_unwind(
 
         // Convert block state to sorted hashed post state and compute state root.
         let hashed_state =
-            evm2_block_state_hashed_post_state_sorted::<KeccakKeyHasher>(&output.state);
+            hashed_post_state_sorted_from_execution_state::<KeccakKeyHasher>(&output.state);
         type TestStateRoot<'a, TX, A> = StateRoot<
             reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
             reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,

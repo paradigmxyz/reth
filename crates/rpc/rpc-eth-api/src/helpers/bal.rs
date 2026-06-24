@@ -39,11 +39,12 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
             }
 
             Err(Self::Error::from_eth_err(EthApiError::Unsupported(
-                "block access list construction is unsupported by the evm2 execution path",
+                "block access list construction is unsupported by the active EVM execution path",
             )))
 
             // The previous live construction path is intentionally kept out of the
-            // compiled evm2 path. Restore this block when BAL execution is wired through evm2:
+            // compiled execution path. Restore this block when BAL execution is wired through the
+            // active EVM:
             //
             // self.spawn_blocking_io(move |eth_api| {
             //     let state = eth_api
@@ -108,11 +109,12 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
             }
 
             Err(Self::Error::from_eth_err(EthApiError::Unsupported(
-                "raw block access lists are unsupported by the evm2 execution path",
+                "raw block access lists are unsupported by the active EVM execution path",
             )))
 
             // The previous cached/raw BAL path is intentionally kept out of the
-            // compiled evm2 path. Restore this block when BAL execution is wired through evm2:
+            // compiled execution path. Restore this block when BAL execution is wired through the
+            // active EVM:
             //
             // Ok(self
             //     .get_block_access_list(block_id)

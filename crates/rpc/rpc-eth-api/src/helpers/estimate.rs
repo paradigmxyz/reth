@@ -21,7 +21,7 @@ pub trait EstimateCall: Call {
     ) -> Result<U256, Self::Error> {
         let _ = (evm_env, request, state, overrides);
         Err(Self::Error::from_eth_err(EthApiError::Unsupported(
-            "eth_estimateGas is unsupported by the evm2 execution path",
+            "eth_estimateGas is unsupported by the active EVM execution path",
         )))
     }
 
@@ -38,7 +38,7 @@ pub trait EstimateCall: Call {
         let _ = (request, at, overrides);
         async move {
             Err(Self::Error::from_eth_err(EthApiError::Unsupported(
-                "eth_estimateGas is unsupported by the evm2 execution path",
+                "eth_estimateGas is unsupported by the active EVM execution path",
             )))
         }
     }

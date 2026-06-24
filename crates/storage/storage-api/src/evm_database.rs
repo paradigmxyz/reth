@@ -1,4 +1,4 @@
-//! Evm2 database adapter for state providers.
+//! EVM database adapter for state providers.
 
 use crate::{
     AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
@@ -20,7 +20,7 @@ use evm2::{
     evm::{AccountInfo, CacheDB, Database, Db, DbErrorCode, DynDatabase, StateChangeSource},
     interpreter::Word,
 };
-use reth_execution_types::{Evm2AccountInfo, Evm2BlockState};
+use reth_execution_types::{ExecutionAccountInfo, ExecutionState};
 use reth_primitives_traits::{Account, Bytecode as RethBytecode};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::{
@@ -30,12 +30,12 @@ use reth_trie_common::{
 };
 use std::sync::{Arc, Mutex, MutexGuard};
 
-/// An evm2 [`Database`] implementation backed by a Reth [`StateProvider`].
+/// An EVM [`Database`] implementation backed by a Reth [`StateProvider`].
 #[derive(Clone)]
-pub struct Evm2StateProviderDatabase<DB>(pub DB);
+pub struct EvmStateProviderDatabase<DB>(pub DB);
 
-impl<DB> Evm2StateProviderDatabase<DB> {
-    /// Creates a new evm2 database adapter.
+impl<DB> EvmStateProviderDatabase<DB> {
+    /// Creates a new EVM database adapter.
     pub const fn new(db: DB) -> Self {
         Self(db)
     }
@@ -46,19 +46,19 @@ impl<DB> Evm2StateProviderDatabase<DB> {
     }
 }
 
-impl<DB> core::fmt::Debug for Evm2StateProviderDatabase<DB> {
+impl<DB> core::fmt::Debug for EvmStateProviderDatabase<DB> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Evm2StateProviderDatabase").finish_non_exhaustive()
+        f.debug_struct("EvmStateProviderDatabase").finish_non_exhaustive()
     }
 }
 
-impl<DB> AsRef<DB> for Evm2StateProviderDatabase<DB> {
+impl<DB> AsRef<DB> for EvmStateProviderDatabase<DB> {
     fn as_ref(&self) -> &DB {
         self
     }
 }
 
-impl<DB> Deref for Evm2StateProviderDatabase<DB> {
+impl<DB> Deref for EvmStateProviderDatabase<DB> {
     type Target = DB;
 
     fn deref(&self) -> &Self::Target {
@@ -66,24 +66,24 @@ impl<DB> Deref for Evm2StateProviderDatabase<DB> {
     }
 }
 
-impl<DB> DerefMut for Evm2StateProviderDatabase<DB> {
+impl<DB> DerefMut for EvmStateProviderDatabase<DB> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl<DB> Database for Evm2StateProviderDatabase<DB>
+impl<DB> Database for EvmStateProviderDatabase<DB>
 where
     DB: StateProvider + Send + 'static,
 {
     type Error = ProviderError;
 
     fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
-        Ok(<DB as AccountReader>::basic_account(&self.0, address)?.map(account_to_evm2))
+        Ok(<DB as AccountReader>::basic_account(&self.0, address)?.map(account_to_evm))
     }
 
     fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Bytecode, Self::Error> {
-        Ok(self.0.evm2_bytecode_by_hash(code_hash)?.unwrap_or_default())
+        Ok(self.0.executable_bytecode_by_hash(code_hash)?.unwrap_or_default())
     }
 
     fn get_storage(&mut self, address: &Address, key: &Word) -> Result<Word, Self::Error> {
@@ -96,22 +96,22 @@ where
     }
 }
 
-/// An evm2 [`Database`] implementation backed by a borrowed Reth [`StateProvider`].
+/// An EVM [`Database`] implementation backed by a borrowed Reth [`StateProvider`].
 ///
-/// evm2 database objects must be `'static` for downcasting. This adapter is only valid while the
+/// EVM database objects must be `'static` for downcasting. This adapter is only valid while the
 /// borrowed provider passed to [`Self::new`] is alive and must not escape the synchronous execution
 /// call that created it.
 #[derive(Clone, Copy)]
-pub struct BorrowedEvm2StateProviderDatabase {
+pub struct BorrowedEvmStateProviderDatabase {
     provider: NonNull<dyn StateProvider>,
 }
 
-impl BorrowedEvm2StateProviderDatabase {
-    /// Creates a new borrowed evm2 database adapter.
+impl BorrowedEvmStateProviderDatabase {
+    /// Creates a new borrowed EVM database adapter.
     ///
     /// # Safety
     ///
-    /// The returned adapter erases the lifetime of `provider` to satisfy evm2's [`Database`]
+    /// The returned adapter erases the lifetime of `provider` to satisfy EVM [`Database`]
     /// downcasting requirements. It must not be used after `provider` is dropped and must not
     /// escape the synchronous execution call that created it.
     pub unsafe fn new(provider: &dyn StateProvider) -> Self {
@@ -128,31 +128,31 @@ impl BorrowedEvm2StateProviderDatabase {
 
     fn provider(&self) -> &dyn StateProvider {
         // SAFETY: `provider` is created from a valid shared reference in `new`. Callers must keep
-        // that provider alive for the duration of synchronous evm2 execution.
+        // that provider alive for the duration of synchronous EVM execution.
         unsafe { self.provider.as_ref() }
     }
 }
 
-impl core::fmt::Debug for BorrowedEvm2StateProviderDatabase {
+impl core::fmt::Debug for BorrowedEvmStateProviderDatabase {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("BorrowedEvm2StateProviderDatabase").finish_non_exhaustive()
+        f.debug_struct("BorrowedEvmStateProviderDatabase").finish_non_exhaustive()
     }
 }
 
-// SAFETY: The adapter only exposes shared `StateProvider` reads and is used for synchronous evm2
+// SAFETY: The adapter only exposes shared `StateProvider` reads and is used for synchronous EVM
 // execution. Sending it is sound under the same assumptions as sending the underlying borrowed
 // provider reference for read-only access.
-unsafe impl Send for BorrowedEvm2StateProviderDatabase {}
+unsafe impl Send for BorrowedEvmStateProviderDatabase {}
 
-impl Database for BorrowedEvm2StateProviderDatabase {
+impl Database for BorrowedEvmStateProviderDatabase {
     type Error = ProviderError;
 
     fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
-        Ok(AccountReader::basic_account(self.provider(), address)?.map(account_to_evm2))
+        Ok(AccountReader::basic_account(self.provider(), address)?.map(account_to_evm))
     }
 
     fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Bytecode, Self::Error> {
-        Ok(self.provider().evm2_bytecode_by_hash(code_hash)?.unwrap_or_default())
+        Ok(self.provider().executable_bytecode_by_hash(code_hash)?.unwrap_or_default())
     }
 
     fn get_storage(&mut self, address: &Address, key: &Word) -> Result<Word, Self::Error> {
@@ -165,29 +165,29 @@ impl Database for BorrowedEvm2StateProviderDatabase {
     }
 }
 
-/// A cloneable evm2 database handle that shares one cache over a borrowed Reth state provider.
+/// A cloneable EVM database handle that shares one cache over a borrowed Reth state provider.
 ///
-/// This is intended for sequential execution of multiple short-lived evm2 instances against the
+/// This is intended for sequential execution of multiple short-lived EVM instances against the
 /// same underlying provider. Reads missed by one EVM remain cached for later EVMs, and callers can
 /// apply accepted block state with [`Self::commit_source`] to make prior writes visible.
 #[derive(Clone)]
-pub struct SharedEvm2StateProviderDatabase {
-    inner: Arc<Mutex<CacheDB<Db<BorrowedEvm2StateProviderDatabase>>>>,
+pub struct SharedEvmStateProviderDatabase {
+    inner: Arc<Mutex<CacheDB<Db<BorrowedEvmStateProviderDatabase>>>>,
 }
 
-impl SharedEvm2StateProviderDatabase {
+impl SharedEvmStateProviderDatabase {
     /// Creates a new shared cache over a borrowed state provider.
     ///
     /// # Safety
     ///
     /// This has the same lifetime erasure requirements as
-    /// [`BorrowedEvm2StateProviderDatabase::new`]. The returned handle and its clones must not
+    /// [`BorrowedEvmStateProviderDatabase::new`]. The returned handle and its clones must not
     /// outlive `provider`.
     pub unsafe fn new(provider: &dyn StateProvider) -> Self {
         Self {
             // SAFETY: The caller upholds the lifetime requirements for the borrowed provider.
             inner: Arc::new(Mutex::new(CacheDB::new(Db::new(unsafe {
-                BorrowedEvm2StateProviderDatabase::new(provider)
+                BorrowedEvmStateProviderDatabase::new(provider)
             })))),
         }
     }
@@ -201,16 +201,16 @@ impl SharedEvm2StateProviderDatabase {
 
     fn lock(
         &self,
-    ) -> ProviderResult<MutexGuard<'_, CacheDB<Db<BorrowedEvm2StateProviderDatabase>>>> {
+    ) -> ProviderResult<MutexGuard<'_, CacheDB<Db<BorrowedEvmStateProviderDatabase>>>> {
         self.inner.lock().map_err(|err| {
             ProviderError::other(std::io::Error::other(format!(
-                "shared evm2 database lock poisoned: {err}"
+                "shared EVM database lock poisoned: {err}"
             )))
         })
     }
 
     fn provider_error(
-        db: &mut CacheDB<Db<BorrowedEvm2StateProviderDatabase>>,
+        db: &mut CacheDB<Db<BorrowedEvmStateProviderDatabase>>,
         code: DbErrorCode,
     ) -> ProviderError {
         let err = db.error(code);
@@ -221,13 +221,13 @@ impl SharedEvm2StateProviderDatabase {
     }
 }
 
-impl core::fmt::Debug for SharedEvm2StateProviderDatabase {
+impl core::fmt::Debug for SharedEvmStateProviderDatabase {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("SharedEvm2StateProviderDatabase").finish_non_exhaustive()
+        f.debug_struct("SharedEvmStateProviderDatabase").finish_non_exhaustive()
     }
 }
 
-impl Database for SharedEvm2StateProviderDatabase {
+impl Database for SharedEvmStateProviderDatabase {
     type Error = ProviderError;
 
     fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
@@ -251,26 +251,27 @@ impl Database for SharedEvm2StateProviderDatabase {
     }
 }
 
-/// A borrowed [`StateProvider`] that overlays uncommitted evm2 state on top of a base provider.
-pub struct Evm2OverlayStateProvider<'a> {
+/// A borrowed [`StateProvider`] that overlays uncommitted execution state on top of a base
+/// provider.
+pub struct ExecutionStateOverlayProvider<'a> {
     base: &'a dyn StateProvider,
-    overlay: Evm2OverlayStateIndex<'a>,
+    overlay: ExecutionStateOverlayIndex<'a>,
 }
 
-impl core::fmt::Debug for Evm2OverlayStateProvider<'_> {
+impl core::fmt::Debug for ExecutionStateOverlayProvider<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Evm2OverlayStateProvider").finish_non_exhaustive()
+        f.debug_struct("ExecutionStateOverlayProvider").finish_non_exhaustive()
     }
 }
 
-impl<'a> Evm2OverlayStateProvider<'a> {
+impl<'a> ExecutionStateOverlayProvider<'a> {
     /// Creates a new overlay provider.
-    pub fn new(base: &'a dyn StateProvider, overlay: &'a Evm2BlockState) -> Self {
-        Self { base, overlay: Evm2OverlayStateIndex::new(overlay) }
+    pub fn new(base: &'a dyn StateProvider, overlay: &'a ExecutionState) -> Self {
+        Self { base, overlay: ExecutionStateOverlayIndex::new(overlay) }
     }
 }
 
-impl AccountReader for Evm2OverlayStateProvider<'_> {
+impl AccountReader for ExecutionStateOverlayProvider<'_> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if let Some(account) = self.overlay.accounts.get(address) {
             return Ok(*account)
@@ -280,7 +281,7 @@ impl AccountReader for Evm2OverlayStateProvider<'_> {
     }
 }
 
-impl BytecodeReader for Evm2OverlayStateProvider<'_> {
+impl BytecodeReader for ExecutionStateOverlayProvider<'_> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<RethBytecode>> {
         if let Some(bytecode) = self.overlay.code.get(code_hash) {
             return Ok(Some(RethBytecode::new_raw(bytecode.original_bytes())))
@@ -290,7 +291,7 @@ impl BytecodeReader for Evm2OverlayStateProvider<'_> {
     }
 }
 
-impl BlockHashReader for Evm2OverlayStateProvider<'_> {
+impl BlockHashReader for ExecutionStateOverlayProvider<'_> {
     fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
         self.base.block_hash(number)
     }
@@ -304,7 +305,7 @@ impl BlockHashReader for Evm2OverlayStateProvider<'_> {
     }
 }
 
-impl StateRootProvider for Evm2OverlayStateProvider<'_> {
+impl StateRootProvider for ExecutionStateOverlayProvider<'_> {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         self.base.state_root(hashed_state)
     }
@@ -339,7 +340,7 @@ impl StateRootProvider for Evm2OverlayStateProvider<'_> {
     }
 }
 
-impl StorageRootProvider for Evm2OverlayStateProvider<'_> {
+impl StorageRootProvider for ExecutionStateOverlayProvider<'_> {
     fn storage_root(
         &self,
         address: Address,
@@ -367,7 +368,7 @@ impl StorageRootProvider for Evm2OverlayStateProvider<'_> {
     }
 }
 
-impl StateProofProvider for Evm2OverlayStateProvider<'_> {
+impl StateProofProvider for ExecutionStateOverlayProvider<'_> {
     fn proof(
         &self,
         input: TrieInput,
@@ -395,15 +396,15 @@ impl StateProofProvider for Evm2OverlayStateProvider<'_> {
     }
 }
 
-impl HashedPostStateProvider for Evm2OverlayStateProvider<'_> {}
+impl HashedPostStateProvider for ExecutionStateOverlayProvider<'_> {}
 
-impl StateProvider for Evm2OverlayStateProvider<'_> {
-    fn evm2_bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
+impl StateProvider for ExecutionStateOverlayProvider<'_> {
+    fn executable_bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         if let Some(bytecode) = self.overlay.code.get(code_hash) {
             return Ok(Some((*bytecode).clone()))
         }
 
-        self.base.evm2_bytecode_by_hash(code_hash)
+        self.base.executable_bytecode_by_hash(code_hash)
     }
 
     fn storage(&self, account: Address, storage_key: B256) -> ProviderResult<Option<U256>> {
@@ -422,15 +423,15 @@ impl StateProvider for Evm2OverlayStateProvider<'_> {
     }
 }
 
-struct Evm2OverlayStateIndex<'a> {
+struct ExecutionStateOverlayIndex<'a> {
     accounts: AddressMap<Option<Account>>,
     code: B256Map<&'a Bytecode>,
     storage: AddressMap<U256Map<U256>>,
     storage_wipes: AddressSet,
 }
 
-impl<'a> Evm2OverlayStateIndex<'a> {
-    fn new(state: &'a Evm2BlockState) -> Self {
+impl<'a> ExecutionStateOverlayIndex<'a> {
+    fn new(state: &'a ExecutionState) -> Self {
         let accounts = state
             .accounts()
             .map(|(address, account)| (address, account.current.as_ref().map(account_info_to_reth)))
@@ -446,13 +447,13 @@ impl<'a> Evm2OverlayStateIndex<'a> {
     }
 }
 
-fn account_info_to_reth(info: &Evm2AccountInfo) -> Account {
+fn account_info_to_reth(info: &ExecutionAccountInfo) -> Account {
     let bytecode_hash =
         (!info.code_hash.is_zero() && info.code_hash != KECCAK_EMPTY).then_some(info.code_hash);
     Account { nonce: info.nonce, balance: info.balance, bytecode_hash }
 }
 
-fn account_to_evm2(account: Account) -> AccountInfo {
+fn account_to_evm(account: Account) -> AccountInfo {
     AccountInfo {
         balance: account.balance,
         nonce: account.nonce,

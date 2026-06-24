@@ -79,9 +79,7 @@ impl<N: NodePrimitives> Executor for UnsupportedExecutor<N> {
         _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        Err(BlockExecutionError::msg(
-            "legacy executor block execution is parked while evm2 support lands",
-        ))
+        Err(BlockExecutionError::msg("legacy executor block execution is parked"))
     }
 
     fn execute(
@@ -89,9 +87,7 @@ impl<N: NodePrimitives> Executor for UnsupportedExecutor<N> {
         _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        Err(BlockExecutionError::msg(
-            "legacy executor block execution is parked while evm2 support lands",
-        ))
+        Err(BlockExecutionError::msg("legacy executor block execution is parked"))
     }
 
     fn execute_batch<'a, I>(
@@ -101,9 +97,7 @@ impl<N: NodePrimitives> Executor for UnsupportedExecutor<N> {
     where
         I: IntoIterator<Item = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
     {
-        Err(BlockExecutionError::msg(
-            "legacy executor block execution is parked while evm2 support lands",
-        ))
+        Err(BlockExecutionError::msg("legacy executor block execution is parked"))
     }
 
     fn size_hint(&self) -> usize {

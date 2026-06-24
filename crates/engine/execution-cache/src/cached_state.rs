@@ -8,8 +8,8 @@ use metrics::{Counter, Gauge, Histogram};
 use parking_lot::Once;
 use reth_errors::ProviderResult;
 use reth_execution_types::{
-    Evm2AccountChangeRef, Evm2Bytecode, Evm2StateChangeSink, Evm2StateChangeSource,
-    Evm2StorageChange,
+    ExecutableBytecode, ExecutionAccountChangeRef, ExecutionStateChangeSink,
+    ExecutionStateChangeSource, ExecutionStorageChange,
 };
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
@@ -93,7 +93,7 @@ type FixedCache<K, V, H = DefaultHashBuilder> = fixed_cache::Cache<K, V, H, Epoc
 /// prewarmers and speculative execution workers that intentionally seed the cache for other
 /// readers. Canonical execution usually leaves this disabled because the EVM database `State`
 /// already caches reads during the block, and the shared cache is updated after the block from the
-/// final evm2 block state. See also [`ExecutionCache::insert_state_source`].
+/// final execution state. See also [`ExecutionCache::insert_state_source`].
 ///
 /// Normal cache hit/miss metrics are recorded when [`CachedStateMetrics`] is provided. Slow-block
 /// [`CacheStats`] are controlled separately by [`Self::new_with_mode`].
@@ -673,13 +673,16 @@ fn nonzero_storage_value(value: StorageValue) -> Option<StorageValue> {
 }
 
 impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
-    fn evm2_bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Evm2Bytecode>> {
-        match self.caches.get_or_try_insert_evm2_code_with(*code_hash, || {
+    fn executable_bytecode_by_hash(
+        &self,
+        code_hash: &B256,
+    ) -> ProviderResult<Option<ExecutableBytecode>> {
+        match self.caches.get_or_try_insert_executable_code_with(*code_hash, || {
             if let Some(code) = self.caches.0.code_cache.get(code_hash) {
-                return Ok(code.map(|code| Evm2Bytecode::new_raw(code.original_bytes())))
+                return Ok(code.map(|code| ExecutableBytecode::new_raw(code.original_bytes())))
             }
 
-            self.state_provider.evm2_bytecode_by_hash(code_hash)
+            self.state_provider.executable_bytecode_by_hash(code_hash)
         })? {
             CachedStatus::NotCached(code) => {
                 self.record_code_miss();
@@ -871,8 +874,8 @@ struct ExecutionCacheInner {
     /// Cache for contract bytecode, keyed by code hash.
     code_cache: FixedCache<B256, Option<Bytecode>, FbBuildHasher<32>>,
 
-    /// Cache for analyzed evm2 contract bytecode, keyed by code hash.
-    evm2_code_cache: FixedCache<B256, Option<Evm2Bytecode>, FbBuildHasher<32>>,
+    /// Cache for analyzed executable contract bytecode, keyed by code hash.
+    executable_code_cache: FixedCache<B256, Option<ExecutableBytecode>, FbBuildHasher<32>>,
 
     /// Flat storage cache: maps `(Address, StorageKey)` to storage value.
     storage_cache: FixedCache<(Address, StorageKey), StorageValue>,
@@ -931,7 +934,7 @@ impl ExecutionCache {
         Self(Arc::new(ExecutionCacheInner {
             code_cache: FixedCache::new(code_capacity, FbBuildHasher::<32>::default())
                 .with_stats(Some(Stats::new(code_stats.clone()))),
-            evm2_code_cache: FixedCache::new(code_capacity, FbBuildHasher::<32>::default()),
+            executable_code_cache: FixedCache::new(code_capacity, FbBuildHasher::<32>::default()),
             storage_cache: FixedCache::new(storage_capacity, DefaultHashBuilder::default())
                 .with_stats(Some(Stats::new(storage_stats.clone()))),
             account_cache: FixedCache::new(account_capacity, FbBuildHasher::<20>::default())
@@ -967,14 +970,14 @@ impl ExecutionCache {
         }
     }
 
-    /// Gets analyzed evm2 code from cache, or inserts using the provided function.
-    pub fn get_or_try_insert_evm2_code_with<E>(
+    /// Gets analyzed executable code from cache, or inserts using the provided function.
+    pub fn get_or_try_insert_executable_code_with<E>(
         &self,
         hash: B256,
-        f: impl FnOnce() -> Result<Option<Evm2Bytecode>, E>,
-    ) -> Result<CachedStatus<Option<Evm2Bytecode>>, E> {
+        f: impl FnOnce() -> Result<Option<ExecutableBytecode>, E>,
+    ) -> Result<CachedStatus<Option<ExecutableBytecode>>, E> {
         let mut miss = false;
-        let result = self.0.evm2_code_cache.get_or_try_insert_with(hash, |_| {
+        let result = self.0.executable_code_cache.get_or_try_insert_with(hash, |_| {
             miss = true;
             f()
         })?;
@@ -1035,9 +1038,9 @@ impl ExecutionCache {
         self.0.code_cache.insert(hash, code);
     }
 
-    /// Insert analyzed evm2 code into cache.
-    pub fn insert_evm2_code(&self, hash: B256, code: Option<Evm2Bytecode>) {
-        self.0.evm2_code_cache.insert(hash, code);
+    /// Insert analyzed executable code into cache.
+    pub fn insert_executable_code(&self, hash: B256, code: Option<ExecutableBytecode>) {
+        self.0.executable_code_cache.insert(hash, code);
     }
 
     /// Insert account into cache.
@@ -1045,12 +1048,12 @@ impl ExecutionCache {
         self.0.account_cache.insert(address, account);
     }
 
-    /// Inserts evm2 post-execution state changes into the cache.
+    /// Inserts post-execution state changes into the cache.
     #[instrument(level = "debug", target = "engine::caching", skip_all)]
     #[expect(clippy::result_unit_err)]
     pub fn insert_state_source<S>(&self, state_updates: &S) -> Result<(), ()>
     where
-        S: Evm2StateChangeSource,
+        S: ExecutionStateChangeSource,
     {
         let _enter = debug_span!(target: "engine::tree", "state_source").entered();
         let mut sink = ExecutionCacheInsertSink {
@@ -1099,16 +1102,20 @@ struct ExecutionCacheInsertSink<'a> {
     cleared: bool,
 }
 
-impl Evm2StateChangeSink for ExecutionCacheInsertSink<'_> {
+impl ExecutionStateChangeSink for ExecutionCacheInsertSink<'_> {
     type Error = ();
 
-    fn bytecode(&mut self, code_hash: B256, bytecode: &Evm2Bytecode) -> Result<(), Self::Error> {
+    fn bytecode(
+        &mut self,
+        code_hash: B256,
+        bytecode: &ExecutableBytecode,
+    ) -> Result<(), Self::Error> {
         if self.cleared {
             return Ok(())
         }
 
         self.cache.insert_code(code_hash, Some(Bytecode::new_raw(bytecode.original_bytes())));
-        self.cache.insert_evm2_code(code_hash, Some(bytecode.clone()));
+        self.cache.insert_executable_code(code_hash, Some(bytecode.clone()));
         Ok(())
     }
 
@@ -1121,7 +1128,7 @@ impl Evm2StateChangeSink for ExecutionCacheInsertSink<'_> {
         Ok(())
     }
 
-    fn storage(&mut self, change: Evm2StorageChange) -> Result<(), Self::Error> {
+    fn storage(&mut self, change: ExecutionStorageChange) -> Result<(), Self::Error> {
         if self.cleared {
             return Ok(())
         }
@@ -1130,7 +1137,7 @@ impl Evm2StateChangeSink for ExecutionCacheInsertSink<'_> {
         Ok(())
     }
 
-    fn account(&mut self, account: Evm2AccountChangeRef<'_>) -> Result<(), Self::Error> {
+    fn account(&mut self, account: ExecutionAccountChangeRef<'_>) -> Result<(), Self::Error> {
         if self.cleared {
             return Ok(())
         }
@@ -1242,11 +1249,11 @@ mod tests {
     use super::*;
     use alloy_primitives::U256;
     use evm2::evm::{AccountChangeRef, AccountInfo, AccountInfoRef, StateChangeSink};
-    use reth_execution_types::{Evm2BlockState, Evm2BlockStateAccumulator};
+    use reth_execution_types::{ExecutionState, ExecutionStateAccumulator};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
-    fn destroyed_account_state(address: Address, original: Option<AccountInfo>) -> Evm2BlockState {
-        let mut accumulator = Evm2BlockStateAccumulator::new();
+    fn destroyed_account_state(address: Address, original: Option<AccountInfo>) -> ExecutionState {
+        let mut accumulator = ExecutionStateAccumulator::new();
         accumulator
             .account(AccountChangeRef {
                 address,

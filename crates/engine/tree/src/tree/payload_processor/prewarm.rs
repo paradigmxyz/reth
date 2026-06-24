@@ -34,7 +34,7 @@ use evm2::evm::{AccountChangeRef, StateChangeSink, StorageChange};
 use metrics::{Counter, Gauge, Histogram};
 #[cfg(any())]
 use rayon::prelude::*;
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm2Env, EvmEnvFor};
+use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, EvmEnv, EvmEnvFor};
 use reth_metrics::Metrics;
 #[cfg(any(test, any()))]
 use reth_primitives_traits::Account;
@@ -95,7 +95,7 @@ where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
-    EvmEnvFor<Evm>: Evm2Env,
+    EvmEnvFor<Evm>: EvmEnv,
 {
     /// Initializes the task with the given transactions pending execution
     pub fn new(
@@ -336,9 +336,9 @@ where
     ///
     /// Spawns BAL prewarming.
     ///
-    /// BAL execution is Amsterdam-only and unsupported in the active evm2 pre-Amsterdam path, so
-    /// the compiled implementation is a no-op. The future Amsterdam implementation should be
-    /// evm2-native.
+    /// BAL execution is Amsterdam-only and unsupported in the active pre-Amsterdam execution path,
+    /// so the compiled implementation is a no-op. The future Amsterdam implementation should be
+    /// EVM-native.
     #[allow(dead_code)]
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn run_bal_prewarm(
@@ -348,7 +348,7 @@ where
     ) {
         warn!(
             target: "engine::tree::payload_processor::prewarm",
-            "BAL prewarm is unsupported in the evm2 pre-Amsterdam path"
+            "BAL prewarm is unsupported in the active pre-Amsterdam execution path"
         );
         if let Some(to_sparse_trie_task) = self.to_sparse_trie_task.as_ref() {
             let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
@@ -356,7 +356,8 @@ where
         let _ = actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
     }
 
-    /// Previous BAL prewarm implementation, parked until Amsterdam support is ported to evm2.
+    /// Previous BAL prewarm implementation, parked until Amsterdam support is ported to the active
+    /// EVM.
     #[cfg(any())]
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn run_bal_prewarm_legacy(
@@ -589,7 +590,7 @@ where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
-    EvmEnvFor<Evm>: Evm2Env,
+    EvmEnvFor<Evm>: EvmEnv,
 {
     /// Creates a per-thread EVM for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]

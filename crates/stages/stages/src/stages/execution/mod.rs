@@ -8,8 +8,8 @@ use reth_consensus::FullConsensus;
 use reth_db::{static_file::HeaderMask, tables};
 use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
 use reth_execution_types::{
-    evm2_block_reverts_and_accumulator_extend, evm2_block_state_hashed_post_state_sorted,
-    evm2_state_source_size_hint, Chain, Evm2BlockStateAccumulator,
+    extend_state_and_collect_reverts, hashed_post_state_sorted_from_execution_state,
+    state_source_size_hint, Chain, ExecutionStateAccumulator,
 };
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
@@ -25,7 +25,7 @@ use reth_stages_api::{
     UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_api::SharedEvm2StateProviderDatabase;
+use reth_storage_api::SharedEvmStateProviderDatabase;
 use reth_trie::KeccakKeyHasher;
 use std::{
     cmp::{max, Ordering},
@@ -332,14 +332,14 @@ where
         let batch_start = Instant::now();
 
         let mut blocks = Vec::new();
-        let mut aggregate_state = Evm2BlockStateAccumulator::new();
+        let mut aggregate_state = ExecutionStateAccumulator::new();
         let mut block_states = Vec::new();
         let mut block_reverts = Vec::new();
         let mut results = Vec::new();
         let state_provider = LatestStateProviderRef::new(provider);
         // SAFETY: The shared database is scoped to this synchronous stage execution and is dropped
         // before `state_provider`.
-        let batch_db = unsafe { SharedEvm2StateProviderDatabase::new(&state_provider) };
+        let batch_db = unsafe { SharedEvmStateProviderDatabase::new(&state_provider) };
         for block_number in start_block..=max_block {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -385,10 +385,8 @@ where
                     error,
                 )),
             })?;
-            block_reverts.push(evm2_block_reverts_and_accumulator_extend(
-                &mut aggregate_state,
-                &output.state,
-            ));
+            block_reverts
+                .push(extend_state_and_collect_reverts(&mut aggregate_state, &output.state));
             results.push(output.result);
             block_states.push(output.state.into_inner());
 
@@ -421,7 +419,7 @@ where
             // Check if we should commit now
             if self.thresholds.is_end_of_batch(
                 block_number - start_block,
-                evm2_state_source_size_hint(&aggregate_state) as u64,
+                state_source_size_hint(&aggregate_state) as u64,
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
@@ -522,8 +520,8 @@ where
         provider.write_state(&state, OriginalValuesKnown::Yes, StateWriteConfig::default())?;
 
         if provider.cached_storage_settings().use_hashed_state() {
-            let hashed_state = evm2_block_state_hashed_post_state_sorted::<KeccakKeyHasher>(
-                state.evm2_block_state_ref(),
+            let hashed_state = hashed_post_state_sorted_from_execution_state::<KeccakKeyHasher>(
+                state.execution_state_ref(),
             );
             provider.write_hashed_state(&hashed_state)?;
         }

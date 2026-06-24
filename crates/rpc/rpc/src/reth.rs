@@ -149,14 +149,14 @@ where
     ) -> EthResult<Option<ExecutionOutcome<N::Receipt>>> {
         let _ = (block_id, block_count);
         Err(EthApiError::Unsupported(
-            "reth_getBlockExecutionOutcome is unsupported by the evm2 execution path",
+            "reth_getBlockExecutionOutcome is unsupported by the active EVM execution path",
         ))
     }
 }
 
 fn unsupported_block_execution_outcome<T>() -> RpcResult<T> {
     Err(EthApiError::Unsupported(
-        "reth_getBlockExecutionOutcome is unsupported by the evm2 execution path",
+        "reth_getBlockExecutionOutcome is unsupported by the active EVM execution path",
     )
     .into())
 }

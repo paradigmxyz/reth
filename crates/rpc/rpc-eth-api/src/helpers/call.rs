@@ -43,7 +43,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         let _ = (payload, block);
         async move {
             Err(Self::Error::from_eth_err(EthApiError::Unsupported(
-                "eth_simulateV1 is unsupported by the evm2 execution path",
+                "eth_simulateV1 is unsupported by the active EVM execution path",
             )))
         }
     }
@@ -58,7 +58,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         let _ = (request, block_number, overrides);
         async move {
             Err(Self::Error::from_eth_err(EthApiError::Unsupported(
-                "eth_call is unsupported by the evm2 execution path",
+                "eth_call is unsupported by the active EVM execution path",
             )))
         }
     }
@@ -74,7 +74,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         let _ = (bundles, state_context, state_override);
         async move {
             Err(Self::Error::from_eth_err(EthApiError::Unsupported(
-                "eth_callMany is unsupported by the evm2 execution path",
+                "eth_callMany is unsupported by the active EVM execution path",
             )))
         }
     }
@@ -93,7 +93,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         let _ = (request, block_number, state_override);
         async move {
             Err(Self::Error::from_eth_err(EthApiError::Unsupported(
-                "eth_createAccessList is unsupported by the evm2 execution path",
+                "eth_createAccessList is unsupported by the active EVM execution path",
             )))
         }
     }

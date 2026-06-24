@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     changeset_walker::{StaticFileAccountChangesetWalker, StaticFileStorageChangesetWalker},
-    providers::evm2_block_state_to_plain_state_and_reverts,
+    providers::execution_state_to_plain_state_and_reverts,
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, EitherWriter,
     EitherWriterDestination, HeaderProvider, OriginalValuesKnown, ReceiptProvider,
     StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
@@ -522,7 +522,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<()> {
         for block in blocks {
             let block_number = block.recovered_block().number();
-            let (_, reverts) = evm2_block_state_to_plain_state_and_reverts(
+            let (_, reverts) = execution_state_to_plain_state_and_reverts(
                 &block.execution_outcome().state,
                 OriginalValuesKnown::Yes,
             );
@@ -546,7 +546,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<()> {
         for block in blocks {
             let block_number = block.recovered_block().number();
-            let (_, reverts) = evm2_block_state_to_plain_state_and_reverts(
+            let (_, reverts) = execution_state_to_plain_state_and_reverts(
                 &block.execution_outcome().state,
                 OriginalValuesKnown::Yes,
             );

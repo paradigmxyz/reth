@@ -12,12 +12,13 @@
 extern crate alloc;
 
 pub use evm2::{
-    bytecode::Bytecode as Evm2Bytecode,
+    bytecode::Bytecode as ExecutableBytecode,
     evm::{
-        AccountChangeRef as Evm2AccountChangeRef, AccountInfo as Evm2AccountInfo,
-        AccountInfoRef as Evm2AccountInfoRef, BlockStateAccumulator as Evm2BlockStateAccumulator,
-        BlockStateAccumulator as Evm2BlockState, StateChangeSink as Evm2StateChangeSink,
-        StateChangeSource as Evm2StateChangeSource, StorageChange as Evm2StorageChange,
+        AccountChangeRef as ExecutionAccountChangeRef, AccountInfo as ExecutionAccountInfo,
+        AccountInfoRef as ExecutionAccountInfoRef,
+        BlockStateAccumulator as ExecutionStateAccumulator,
+        BlockStateAccumulator as ExecutionState, StateChangeSink as ExecutionStateChangeSink,
+        StateChangeSource as ExecutionStateChangeSource, StorageChange as ExecutionStorageChange,
     },
 };
 
@@ -27,8 +28,8 @@ pub use chain::*;
 mod execute;
 pub use execute::*;
 
-mod evm2_state;
-pub use evm2_state::*;
+mod state;
+pub use state::*;
 
 mod execution_outcome;
 pub use execution_outcome::*;

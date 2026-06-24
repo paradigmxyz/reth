@@ -11,13 +11,13 @@ use alloy_primitives::BlockNumber;
 use reth_ethereum_primitives::Receipt;
 use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput};
 use reth_execution_types::{
-    evm2_block_state_accumulator_extend, evm2_state_source_size_hint, Evm2BlockStateAccumulator,
+    extend_execution_state, state_source_size_hint, ExecutionStateAccumulator,
 };
 use reth_node_api::{Block as _, BlockBody as _, NodePrimitives};
 use reth_primitives_traits::{format_gas_throughput, RecoveredBlock, SignedTransaction};
 use reth_provider::{
     BlockReader, Chain, ExecutionOutcome, HeaderProvider, ProviderError,
-    SharedEvm2StateProviderDatabase, StateProviderFactory, TransactionVariant,
+    SharedEvmStateProviderDatabase, StateProviderFactory, TransactionVariant,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
@@ -85,7 +85,7 @@ where
 
         let mut blocks = Vec::new();
         let mut results = Vec::new();
-        let mut state = Evm2BlockStateAccumulator::new();
+        let mut state = ExecutionStateAccumulator::new();
         let mut block_states = Vec::new();
         for block_number in self.range.clone() {
             // Fetch the block
@@ -120,11 +120,11 @@ where
                 .map_err(BlockExecutionError::other)?;
             // SAFETY: The shared database is consumed by this synchronous execution call and does
             // not outlive the state provider borrowed here.
-            let database = unsafe { SharedEvm2StateProviderDatabase::new(&*state_provider) };
+            let database = unsafe { SharedEvmStateProviderDatabase::new(&*state_provider) };
             let output = self.evm_config.executor(database).execute(&block).map_err(evm_error)?;
             execution_duration += execute_start.elapsed();
 
-            evm2_block_state_accumulator_extend(&mut state, &output.state);
+            extend_execution_state(&mut state, &output.state);
             block_states.push(output.state.into_inner());
             results.push(output.result);
 
@@ -133,7 +133,7 @@ where
             // Check if we should commit now
             if self.thresholds.is_end_of_batch(
                 block_number - *self.range.start() + 1,
-                evm2_state_source_size_hint(&state) as u64,
+                state_source_size_hint(&state) as u64,
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
@@ -228,7 +228,7 @@ where
 
         // SAFETY: The shared database is consumed by this synchronous execution call and does not
         // outlive the state provider borrowed here.
-        let database = unsafe { SharedEvm2StateProviderDatabase::new(&*state_provider) };
+        let database = unsafe { SharedEvmStateProviderDatabase::new(&*state_provider) };
         let block_execution_output =
             self.evm_config.executor(database).execute(&block_with_senders).map_err(evm_error)?;
 

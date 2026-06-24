@@ -1,3 +1,3 @@
 fn main() {
-    eprintln!("custom-evm is parked while the example is ported to evm2");
+    eprintln!("custom-evm is parked while the example is ported to the active EVM");
 }

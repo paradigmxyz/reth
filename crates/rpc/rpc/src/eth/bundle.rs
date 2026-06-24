@@ -38,8 +38,10 @@ where
         bundle: EthCallBundle,
     ) -> Result<EthCallBundleResponse, Eth::Error> {
         let _ = bundle;
-        Err(EthApiError::Unsupported("eth_callBundle is unsupported by the evm2 execution path")
-            .into())
+        Err(EthApiError::Unsupported(
+            "eth_callBundle is unsupported by the active EVM execution path",
+        )
+        .into())
     }
 }
 

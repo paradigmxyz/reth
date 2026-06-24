@@ -295,7 +295,7 @@ where
 
 /// Converts `TxReq` into `TxEnv`.
 ///
-/// The default `()` implementation is intentionally unsupported in the evm2 path because
+/// The default `()` implementation is intentionally unsupported in the active EVM path because
 /// executable RPC calls are stubbed. Sync-critical transaction conversion uses
 /// [`SimTxConverter`] instead.
 pub trait TxEnvConverter<TxReq, Evm: ConfigureEvm>:
@@ -366,8 +366,8 @@ pub enum TransactionConversionError {
     #[error("{0}")]
     Other(String),
 
-    /// Transaction environment conversion is unsupported in the evm2 RPC stub path.
-    #[error("transaction environment conversion is unsupported by the evm2 execution path")]
+    /// Transaction environment conversion is unsupported in the active EVM RPC stub path.
+    #[error("transaction environment conversion is unsupported by the active EVM execution path")]
     UnsupportedTxEnv,
 }
 /// Generic RPC response object converter for `Evm` and network `Network`.

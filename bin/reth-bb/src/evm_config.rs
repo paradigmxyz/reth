@@ -1,7 +1,8 @@
 // Stubbed big-block EVM configuration.
 //
-// Big-block execution is parked while it is ported to evm2. This wrapper keeps the node type and
-// payload shape available without retaining a direct legacy executor dependency in `reth-bb`.
+// Big-block execution is parked while it is ported to the active EVM. This wrapper keeps the node
+// type and payload shape available without retaining a direct legacy executor dependency in
+// `reth-bb`.
 
 pub(crate) use reth_engine_primitives::BigBlockData;
 
@@ -14,7 +15,7 @@ use reth_evm::{
     ConfigureEngineEvm, ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor,
     NextBlockEnvAttributes, TxEnvFor,
 };
-use reth_evm_ethereum::{EthEvmConfig, EthEvmEnv, Evm2TxEnv};
+use reth_evm_ethereum::{EthEvmConfig, EthEvmEnv, EthTxEnv};
 use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader, TxTy};
 use reth_storage_api::StateProvider;
 use reth_storage_errors::any::AnyError;
@@ -56,7 +57,7 @@ where
         Error = Infallible,
         NextBlockEnvCtx = NextBlockEnvAttributes,
         EvmEnv = EthEvmEnv,
-        TxEnv = Evm2TxEnv,
+        TxEnv = EthTxEnv,
     >,
 {
     type Primitives = EthPrimitives;
@@ -64,7 +65,7 @@ where
     type NextBlockEnvCtx = NextBlockEnvAttributes;
     type Spec = <EthEvmConfig<C> as ConfigureEvm>::Spec;
     type EvmEnv = EthEvmEnv;
-    type TxEnv = Evm2TxEnv;
+    type TxEnv = EthTxEnv;
     type ExecutionCtx<'a>
         = <EthEvmConfig<C> as ConfigureEvm>::ExecutionCtx<'a>
     where
@@ -186,14 +187,14 @@ where
         &self,
         _payload: &BigBlockData<ExecutionData>,
     ) -> Result<EvmEnvFor<Self>, Self::Error> {
-        unreachable!("big-block payload execution is parked while evm2 support lands")
+        unreachable!("big-block payload execution is unsupported by the active EVM path")
     }
 
     fn context_for_payload<'a>(
         &self,
         _payload: &'a BigBlockData<ExecutionData>,
     ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
-        unreachable!("big-block payload execution is parked while evm2 support lands")
+        unreachable!("big-block payload execution is unsupported by the active EVM path")
     }
 
     fn tx_iterator_for_payload(
@@ -202,7 +203,7 @@ where
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
         let transactions: Vec<Bytes> = Vec::new();
         let convert = |_tx: Bytes| -> Result<Recovered<TxTy<Self::Primitives>>, AnyError> {
-            unreachable!("big-block payload execution is parked while evm2 support lands")
+            unreachable!("big-block payload execution is unsupported by the active EVM path")
         };
 
         Ok((transactions, convert))

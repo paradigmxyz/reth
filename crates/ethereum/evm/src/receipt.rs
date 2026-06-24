@@ -15,8 +15,8 @@ use reth_trie_common::HashedPostState;
 pub struct RethReceiptBuilder;
 
 impl RethReceiptBuilder {
-    /// Builds a Reth receipt from an evm2 transaction result.
-    pub fn build_evm2_receipt(
+    /// Builds a Reth receipt from an transaction result.
+    pub fn build_receipt(
         &self,
         tx_type: TxType,
         result: TxResult,
@@ -25,28 +25,28 @@ impl RethReceiptBuilder {
         Receipt { tx_type, success: result.status, cumulative_gas_used, logs: result.logs }
     }
 
-    /// Builds a block execution output from evm2 transaction results.
-    pub fn build_evm2_block_output(
+    /// Builds a block execution output from transaction results.
+    pub fn build_block_output(
         &self,
         block_number: u64,
         txs: impl IntoIterator<Item = (TxType, TxResultWithState)>,
     ) -> BlockExecutionOutput<Receipt> {
-        self.build_evm2_block_output_with_state_changes(
+        self.build_block_output_with_state_changes(
             block_number,
             txs,
             core::iter::empty::<StateChanges>(),
         )
     }
 
-    /// Builds a block execution output from evm2 transaction results plus non-receipt state
+    /// Builds a block execution output from transaction results plus non-receipt state
     /// changes, such as withdrawals.
-    pub fn build_evm2_block_output_with_state_changes(
+    pub fn build_block_output_with_state_changes(
         &self,
         block_number: u64,
         txs: impl IntoIterator<Item = (TxType, TxResultWithState)>,
         extra_state_changes: impl IntoIterator<Item = StateChanges>,
     ) -> BlockExecutionOutput<Receipt> {
-        self.build_evm2_block_output_with_surrounding_state_changes(
+        self.build_block_output_with_surrounding_state_changes(
             block_number,
             core::iter::empty::<StateChanges>(),
             txs,
@@ -54,9 +54,9 @@ impl RethReceiptBuilder {
         )
     }
 
-    /// Builds a block execution output from evm2 pre-block state changes, transaction results, and
+    /// Builds a block execution output from pre-block state changes, transaction results, and
     /// post-block state changes.
-    pub fn build_evm2_block_output_with_surrounding_state_changes(
+    pub fn build_block_output_with_surrounding_state_changes(
         &self,
         _block_number: u64,
         pre_state_changes: impl IntoIterator<Item = StateChanges>,
@@ -96,9 +96,9 @@ impl RethReceiptBuilder {
         )
     }
 
-    /// Builds a block execution output from result-only evm2 transaction outcomes and an
-    /// accumulated evm2 block state source.
-    pub fn build_evm2_block_output_from_state_source<S>(
+    /// Builds a block execution output from result-only transaction outcomes and an
+    /// accumulated execution state source.
+    pub fn build_block_output_from_state_source<S>(
         &self,
         _block_number: u64,
         txs: impl IntoIterator<Item = (TxType, TxResult)>,
@@ -131,19 +131,19 @@ impl RethReceiptBuilder {
         )
     }
 
-    /// Builds a block execution output from result-only evm2 transaction outcomes and an owned
-    /// accumulated evm2 block state.
-    pub fn build_evm2_block_output_from_block_state(
+    /// Builds a block execution output from result-only transaction outcomes and an owned
+    /// accumulated execution state.
+    pub fn build_block_output_from_state(
         &self,
         txs: impl IntoIterator<Item = (TxType, TxResult)>,
         state: BlockStateAccumulator,
     ) -> BlockExecutionOutput<Receipt> {
-        self.build_evm2_block_output_from_block_state_with_hashed_state(txs, state, None)
+        self.build_block_output_from_state_with_hashed_state(txs, state, None)
     }
 
-    /// Builds a block execution output from result-only evm2 transaction outcomes, an owned
-    /// accumulated evm2 block state, and optional precomputed hashed post-state.
-    pub fn build_evm2_block_output_from_block_state_with_hashed_state(
+    /// Builds a block execution output from result-only transaction outcomes, an owned
+    /// accumulated execution state, and optional precomputed hashed post-state.
+    pub fn build_block_output_from_state_with_hashed_state(
         &self,
         txs: impl IntoIterator<Item = (TxType, TxResult)>,
         state: BlockStateAccumulator,
@@ -174,9 +174,9 @@ impl RethReceiptBuilder {
         .with_hashed_state(hashed_state)
     }
 
-    /// Builds a block execution output from already-built evm2 receipts and an owned accumulated
-    /// evm2 block state.
-    pub fn build_evm2_block_output_from_receipts_and_block_state_with_hashed_state(
+    /// Builds a block execution output from already-built receipts and an owned accumulated
+    /// execution state.
+    pub fn build_block_output_from_receipts_and_state_with_hashed_state(
         &self,
         receipts: Vec<Receipt>,
         state: BlockStateAccumulator,
@@ -229,7 +229,7 @@ mod tests {
     }
 
     #[test]
-    fn builds_receipt_from_evm2_tx_result() {
+    fn builds_receipt_from_tx_result() {
         let log = Log {
             address: address!("0000000000000000000000000000000000000001"),
             data: LogData::new_unchecked(vec![B256::ZERO], Default::default()),
@@ -237,7 +237,7 @@ mod tests {
         let mut result = TxResult { status: true, ..Default::default() };
         result.logs.push(log.clone());
 
-        let receipt = RethReceiptBuilder.build_evm2_receipt(TxType::Eip1559, result, 42);
+        let receipt = RethReceiptBuilder.build_receipt(TxType::Eip1559, result, 42);
 
         assert_eq!(receipt.tx_type, TxType::Eip1559);
         assert!(receipt.success);
@@ -246,7 +246,7 @@ mod tests {
     }
 
     #[test]
-    fn builds_block_output_from_evm2_tx_results() {
+    fn builds_block_output_from_tx_results() {
         let address = address!("0000000000000000000000000000000000000001");
         let log =
             Log { address, data: LogData::new_unchecked(vec![B256::ZERO], Default::default()) };
@@ -265,7 +265,7 @@ mod tests {
             }),
         );
 
-        let output = RethReceiptBuilder.build_evm2_block_output(7, [(TxType::Legacy, result)]);
+        let output = RethReceiptBuilder.build_block_output(7, [(TxType::Legacy, result)]);
 
         assert_eq!(output.result.gas_used, 21_000);
         assert_eq!(output.result.receipts[0].logs, vec![log]);
@@ -287,7 +287,7 @@ mod tests {
             }),
         );
 
-        let output = RethReceiptBuilder.build_evm2_block_output_with_state_changes(
+        let output = RethReceiptBuilder.build_block_output_with_state_changes(
             7,
             core::iter::empty::<(TxType, TxResultWithState)>(),
             [extra],
@@ -343,7 +343,7 @@ mod tests {
             }),
         );
 
-        let output = RethReceiptBuilder.build_evm2_block_output_with_surrounding_state_changes(
+        let output = RethReceiptBuilder.build_block_output_with_surrounding_state_changes(
             7,
             [pre],
             [(TxType::Legacy, tx)],

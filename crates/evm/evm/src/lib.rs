@@ -26,21 +26,21 @@ pub mod cancelled;
 /// Database adapters for EVM execution.
 pub mod database;
 pub mod either;
-/// evm2 precompile cache provider.
-#[cfg(feature = "std")]
-pub mod evm2_precompile_cache;
 /// EVM environment configuration.
 pub mod execute;
+/// precompile cache provider.
+#[cfg(feature = "std")]
+pub mod precompile_cache;
 
 mod aliases;
 pub use aliases::*;
 
-/// Resolved EVM environment data needed by the evm2 execution path.
-pub trait Evm2Env: Debug + Clone + Send + Sync + 'static {
-    /// Returns the active evm2 spec.
+/// Resolved EVM environment data needed by the EVM execution path.
+pub trait EvmEnv: Debug + Clone + Send + Sync + 'static {
+    /// Returns the active EVM spec.
     fn spec_id(&self) -> evm2::SpecId;
 
-    /// Returns the evm2 block environment.
+    /// Returns the EVM block environment.
     fn block_env(&self) -> evm2::env::BlockEnv;
 }
 
@@ -58,7 +58,7 @@ pub mod test_utils;
 
 /// A complete configuration of EVM for Reth.
 ///
-/// The active execution path is evm2-native. The old legacy executor block executor and builder
+/// The active execution path is EVM-native. The old legacy executor block executor and builder
 /// methods are intentionally parked behind stubs while BAL and payload building are ported.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
@@ -91,7 +91,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static;
 
-    /// Per-thread evm2 instance used by prewarm workers.
+    /// Per-thread EVM instance used by prewarm workers.
     #[cfg(feature = "std")]
     type PrewarmEvm<DB>
     where
@@ -176,13 +176,13 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         self.executor(db)
     }
 
-    /// Creates an evm2 instance for single-transaction execution with the configured environment.
+    /// Creates an EVM instance for single-transaction execution with the configured environment.
     #[cfg(feature = "std")]
     fn evm_with_env<DB>(&self, db: DB, evm_env: EvmEnvFor<Self>) -> evm2::Evm<evm2::BaseEvmTypes>
     where
         DB: evm2::evm::DynDatabase + 'static;
 
-    /// Creates an evm2 instance for single-transaction execution with an inspector.
+    /// Creates an EVM instance for single-transaction execution with an inspector.
     #[cfg(feature = "std")]
     fn evm_with_env_and_inspector<DB, I>(
         &self,

@@ -8,8 +8,8 @@ use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue, B256, U256};
 use auto_impl::auto_impl;
 #[cfg(feature = "std")]
-use reth_execution_types::Evm2Bytecode;
-use reth_execution_types::{evm2_state_source_hashed_post_state, Evm2BlockState, ExecutionOutcome};
+use reth_execution_types::ExecutableBytecode;
+use reth_execution_types::{hashed_post_state_from_state_source, ExecutionOutcome, ExecutionState};
 use reth_primitives_traits::Bytecode;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
@@ -48,11 +48,14 @@ pub trait StateProvider:
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>>;
 
-    /// Get analyzed evm2 account code by its hash.
+    /// Get analyzed executable account code by its hash.
     #[cfg(feature = "std")]
-    fn evm2_bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Evm2Bytecode>> {
+    fn executable_bytecode_by_hash(
+        &self,
+        code_hash: &B256,
+    ) -> ProviderResult<Option<ExecutableBytecode>> {
         self.bytecode_by_hash(code_hash)
-            .map(|code| code.map(|code| Evm2Bytecode::new_raw(code.original_bytes())))
+            .map(|code| code.map(|code| ExecutableBytecode::new_raw(code.original_bytes())))
     }
 
     /// Get account code by its address.
@@ -105,9 +108,9 @@ impl<T: AccountReader + BytecodeReader> AccountInfoReader for T {}
 /// Trait that provides the hashed state from various sources.
 #[auto_impl(&, Arc, Box)]
 pub trait HashedPostStateProvider {
-    /// Returns the `HashedPostState` of the provided evm2 block state.
-    fn hashed_post_state(&self, state: &Evm2BlockState) -> HashedPostState {
-        evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(state)
+    /// Returns the `HashedPostState` of the provided execution state.
+    fn hashed_post_state(&self, state: &ExecutionState) -> HashedPostState {
+        hashed_post_state_from_state_source::<KeccakKeyHasher, _>(state)
     }
 }
 

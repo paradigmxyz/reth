@@ -22,12 +22,12 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthExecutorSpec, EthereumH
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::EthEvmConfig;
-use reth_execution_types::evm2_block_state_hashed_post_state_sorted;
+use reth_execution_types::hashed_post_state_sorted_from_execution_state;
 use reth_payload_builder::{BlobSidecars, EthBuiltPayload};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadAttributes as _;
 use reth_primitives_traits::RecoveredBlock;
-use reth_storage_api::{BorrowedEvm2StateProviderDatabase, StateProviderFactory};
+use reth_storage_api::{BorrowedEvmStateProviderDatabase, StateProviderFactory};
 use reth_transaction_pool::{
     BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
     ValidPoolTransaction,
@@ -166,7 +166,7 @@ where
     if client.chain_spec().is_amsterdam_active_at_timestamp(attributes.timestamp()) {
         return Err(PayloadBuilderError::other(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
-            "Amsterdam payload building is unsupported by the evm2 pre-Amsterdam path",
+            "Amsterdam payload building is unsupported by the active pre-Amsterdam execution path",
         )))
     }
 
@@ -208,7 +208,7 @@ where
         id = %payload_id,
         parent_header = ?parent_header.hash(),
         parent_number = parent_header.number,
-        "building evm2 payload"
+        "building payload"
     );
 
     let best_txs = best_txs(BestTransactionsAttributes::new(
@@ -263,9 +263,9 @@ where
         Block { header: execution_header, body: body.clone() },
         senders.clone(),
     );
-    // SAFETY: The borrowed evm2 database is consumed by this synchronous block execution call and
+    // SAFETY: The borrowed EVM database is consumed by this synchronous block execution call and
     // cannot outlive `state_provider`.
-    let db = unsafe { BorrowedEvm2StateProviderDatabase::new(state_provider.as_ref()) };
+    let db = unsafe { BorrowedEvmStateProviderDatabase::new(state_provider.as_ref()) };
     let output =
         evm_config.executor(db).execute(&execution_block).map_err(PayloadBuilderError::evm)?;
 
@@ -275,7 +275,7 @@ where
     }
 
     let hashed_state = output.hashed_state.clone().map_or_else(
-        || evm2_block_state_hashed_post_state_sorted::<KeccakKeyHasher>(&output.state),
+        || hashed_post_state_sorted_from_execution_state::<KeccakKeyHasher>(&output.state),
         HashedPostState::into_sorted,
     );
     let state_root = state_provider.state_root_sorted(hashed_state)?;

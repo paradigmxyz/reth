@@ -15,9 +15,9 @@ use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{ParallelBridgeBuffered, RecoveredBlock, SealedBlock};
 use reth_provider::{
-    evm2_state_source_hashed_post_state, test_utils::create_test_provider_factory_with_chain_spec,
+    hashed_post_state_from_state_source, test_utils::create_test_provider_factory_with_chain_spec,
     BlockWriter, DatabaseProviderFactory, ExecutionOutcome, HistoryWriter, OriginalValuesKnown,
-    SharedEvm2StateProviderDatabase, StateWriteConfig, StateWriter, StaticFileProviderFactory,
+    SharedEvmStateProviderDatabase, StateWriteConfig, StateWriter, StaticFileProviderFactory,
     StaticFileSegment, StaticFileWriter, StorageSettingsCache,
 };
 use reth_trie::{KeccakKeyHasher, StateRoot};
@@ -246,7 +246,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
         let state_provider = provider.latest();
         // SAFETY: The shared database is consumed by this synchronous execution call and does not
         // outlive the state provider borrowed here.
-        let database = unsafe { SharedEvm2StateProviderDatabase::new(&state_provider) };
+        let database = unsafe { SharedEvmStateProviderDatabase::new(&state_provider) };
         let output = executor_provider.executor(database).execute(block).map_err(|err| {
             Error::block_failed(block_number, std::io::Error::other(err.to_string()))
         })?;
@@ -256,7 +256,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             .map_err(|err| Error::block_failed(block_number, err))?;
 
         // Compute and check the post state root
-        let hashed_state = evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&output.state);
+        let hashed_state = hashed_post_state_from_state_source::<KeccakKeyHasher, _>(&output.state);
         let sorted = hashed_state.clone_into_sorted();
         let (computed_state_root, _) = reth_trie_db::with_adapter!(provider, |A| {
             StateRoot::<reth_trie_db::DatabaseTrieCursorFactory<_, A>, _>::overlay_root_with_updates(

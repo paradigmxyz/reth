@@ -10,12 +10,12 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_evm_ethereum::EthEvmConfig;
-use reth_execution_types::evm2_block_state_hashed_post_state_sorted;
+use reth_execution_types::hashed_post_state_sorted_from_execution_state;
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProvider,
-    ProviderFactory, SharedEvm2StateProviderDatabase,
+    ProviderFactory, SharedEvmStateProviderDatabase,
 };
 use reth_testing_utils::generators::sign_tx_with_key_pair;
 use reth_trie_common::KeccakKeyHasher;
@@ -71,7 +71,7 @@ where
     let state_provider = LatestStateProvider::new(provider);
     // SAFETY: The shared database is consumed by this synchronous execution call and does not
     // outlive the state provider borrowed here.
-    let database = unsafe { SharedEvm2StateProviderDatabase::new(&state_provider) };
+    let database = unsafe { SharedEvmStateProviderDatabase::new(&state_provider) };
     let block_execution_output = EthEvmConfig::ethereum(chain_spec)
         .executor(database)
         .execute(block)
@@ -81,8 +81,9 @@ where
     let execution_outcome = to_execution_outcome(block.number(), &block_execution_output);
 
     // Commit the block's execution outcome to the database
-    let hashed_state =
-        evm2_block_state_hashed_post_state_sorted::<KeccakKeyHasher>(&block_execution_output.state);
+    let hashed_state = hashed_post_state_sorted_from_execution_state::<KeccakKeyHasher>(
+        &block_execution_output.state,
+    );
     let provider_rw = provider_factory.provider_rw()?;
     provider_rw.append_blocks_with_state(vec![block.clone()], &execution_outcome, hashed_state)?;
     provider_rw.commit()?;

@@ -8,7 +8,7 @@ use alloy_primitives::{
 use core::cell::OnceCell;
 use core::ops::Deref;
 use evm2::{
-    bytecode::Bytecode as Evm2Bytecode,
+    bytecode::Bytecode as ExecutableBytecode,
     evm::{AccountInfo, BlockStateAccumulator, StateChangeSink, StateChangeSource, Tracked},
 };
 use reth_primitives_traits::{Account, Bytecode};
@@ -90,9 +90,9 @@ impl<T> BlockExecutionOutput<T> {
         self.state.bytecode(code_hash)
     }
 
-    /// Return analyzed evm2 bytecode if known.
-    pub fn evm2_bytecode(&self, code_hash: &B256) -> Option<Evm2Bytecode> {
-        self.state.evm2_bytecode(code_hash)
+    /// Return analyzed executable bytecode if known.
+    pub fn executable_bytecode(&self, code_hash: &B256) -> Option<ExecutableBytecode> {
+        self.state.executable_bytecode(code_hash)
     }
 
     /// Return original bytecode length if known.
@@ -134,7 +134,7 @@ impl<T> Default for BlockExecutionOutput<T> {
     }
 }
 
-/// Indexed evm2 block state used by in-memory overlay providers.
+/// Indexed execution state used by in-memory overlay providers.
 #[derive(Debug, Clone)]
 pub struct IndexedBlockState {
     inner: BlockStateAccumulator,
@@ -146,21 +146,21 @@ struct BlockStateIndex {
     accounts: AddressMap<Tracked<Option<AccountInfo>>>,
     storage_wipes: AddressSet,
     storage: AddressMap<U256Map<U256>>,
-    bytecode: B256Map<Evm2Bytecode>,
+    bytecode: B256Map<ExecutableBytecode>,
 }
 
 impl IndexedBlockState {
-    /// Creates a new lazily indexed evm2 block state.
+    /// Creates a new lazily indexed execution state.
     pub const fn new(inner: BlockStateAccumulator) -> Self {
         Self { inner, index: OnceCell::new() }
     }
 
-    /// Returns the underlying evm2 block state.
+    /// Returns the underlying execution state.
     pub const fn inner(&self) -> &BlockStateAccumulator {
         &self.inner
     }
 
-    /// Consumes this wrapper and returns the underlying evm2 block state.
+    /// Consumes this wrapper and returns the underlying execution state.
     pub fn into_inner(self) -> BlockStateAccumulator {
         self.inner
     }
@@ -177,8 +177,8 @@ impl IndexedBlockState {
             .map(|bytecode| Bytecode::new_raw(bytecode.original_bytes()))
     }
 
-    /// Return analyzed evm2 bytecode if known.
-    pub fn evm2_bytecode(&self, code_hash: &B256) -> Option<Evm2Bytecode> {
+    /// Return analyzed executable bytecode if known.
+    pub fn executable_bytecode(&self, code_hash: &B256) -> Option<ExecutableBytecode> {
         self.index().bytecode.get(code_hash).cloned()
     }
 
@@ -274,7 +274,7 @@ mod tests {
         let address = Address::repeat_byte(0x42);
         let wiped_address = Address::repeat_byte(0x43);
         let code_hash = B256::repeat_byte(0x24);
-        let bytecode = Evm2Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]));
+        let bytecode = ExecutableBytecode::new_raw(Bytes::from_static(&[0x60, 0x00]));
         let mut state = BlockStateAccumulator::new();
 
         state.bytecode(code_hash, &bytecode).unwrap();
@@ -310,7 +310,7 @@ mod tests {
         assert_eq!(indexed.storage_value(&address, U256::from(9)), Some(U256::from(10)));
         assert_eq!(indexed.bytecode_len(&code_hash), Some(2));
         assert_eq!(
-            indexed.evm2_bytecode(&code_hash).unwrap().original_bytes(),
+            indexed.executable_bytecode(&code_hash).unwrap().original_bytes(),
             bytecode.original_bytes()
         );
     }

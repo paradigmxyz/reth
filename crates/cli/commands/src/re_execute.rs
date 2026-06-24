@@ -14,8 +14,8 @@ use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_execution_types::{
-    evm2_block_reverts_and_accumulator_extend, evm2_state_source_size_hint, Evm2BlockReverts,
-    Evm2BlockStateAccumulator, Evm2RevertAccount,
+    extend_state_and_collect_reverts, state_source_size_hint, BlockReverts,
+    ExecutionStateAccumulator, RevertAccount,
 };
 use reth_node_core::args::JitArgs;
 use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
@@ -25,7 +25,7 @@ use reth_provider::{
 };
 use reth_stages::stages::calculate_gas_used_from_headers;
 use reth_storage_api::{
-    ChangeSetReader, DBProvider, SharedEvm2StateProviderDatabase, StorageChangeSetReader,
+    ChangeSetReader, DBProvider, SharedEvmStateProviderDatabase, StorageChangeSetReader,
 };
 use std::{
     collections::HashMap,
@@ -161,7 +161,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     }
                     let chunk_end = (chunk_start + blocks_per_chunk).min(max_block);
 
-                    let mut state = Evm2BlockStateAccumulator::new();
+                    let mut state = ExecutionStateAccumulator::new();
                     let mut block_reverts = Vec::new();
                     let mut executor_created = Instant::now();
 
@@ -179,12 +179,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         // SAFETY: The shared database is consumed by this synchronous execution
                         // call and does not outlive the state provider borrowed here.
                         let database =
-                            unsafe { SharedEvm2StateProviderDatabase::new(&*state_provider) };
+                            unsafe { SharedEvmStateProviderDatabase::new(&*state_provider) };
                         let output = match evm_config.executor(database).execute(&block) {
                             Ok(output) => output,
                             Err(err) => {
                                 if skip_invalid_blocks {
-                                    state = Evm2BlockStateAccumulator::new();
+                                    state = ExecutionStateAccumulator::new();
                                     block_reverts.clear();
                                     let _ =
                                         info_tx.send((block, eyre::eyre!(err.to_string())));
@@ -244,7 +244,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                                         error!(number=?block.number(), ?mismatch, "Gas usage mismatch");
                                         if skip_invalid_blocks {
-                                            state = Evm2BlockStateAccumulator::new();
+                                            state = ExecutionStateAccumulator::new();
                                             block_reverts.clear();
                                             let _ = info_tx.send((block, err));
                                             continue 'blocks;
@@ -260,13 +260,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         }
                         let _ = stats_tx.send((block.number(), block.gas_used()));
 
-                        block_reverts.push(evm2_block_reverts_and_accumulator_extend(
+                        block_reverts.push(extend_state_and_collect_reverts(
                             &mut state,
                             &output.state,
                         ));
 
                         // Verify and drop accumulated state once in a while to avoid OOM.
-                        if evm2_state_source_size_hint(&state) > 5_000_000 ||
+                        if state_source_size_hint(&state) > 5_000_000 ||
                             executor_created.elapsed() > executor_lifetime
                         {
                             let last_block = block.number();
@@ -275,7 +275,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                 &block_reverts,
                                 last_block,
                             )?;
-                            state = Evm2BlockStateAccumulator::new();
+                            state = ExecutionStateAccumulator::new();
                             block_reverts.clear();
                             executor_created = Instant::now();
                         }
@@ -379,7 +379,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 /// (from DB storage wipe) absent from reverts.
 fn verify_reverts_against_changesets<P>(
     provider: &P,
-    reverts: &[Evm2BlockReverts],
+    reverts: &[BlockReverts],
     last_block: u64,
 ) -> eyre::Result<()>
 where
@@ -404,7 +404,7 @@ where
             let cs_info = cs_accounts.remove(addr).ok_or_else(|| {
                 eyre::eyre!("Block {block_number}: account {addr} in reverts but not in changeset")
             })?;
-            let revert_acct = original.as_ref().map(account_from_evm2);
+            let revert_acct = original.as_ref().map(account_from_revert);
             eyre::ensure!(
                 revert_acct == cs_info,
                 "Block {block_number}: account {addr} info mismatch: revert={revert_acct:?} cs={cs_info:?}",
@@ -449,7 +449,7 @@ where
     Ok(())
 }
 
-fn account_from_evm2(info: &Evm2RevertAccount) -> Account {
+fn account_from_revert(info: &RevertAccount) -> Account {
     Account {
         nonce: info.nonce,
         balance: info.balance,

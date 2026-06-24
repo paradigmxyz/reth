@@ -4,10 +4,12 @@ use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_execution_types::{evm2_state_source_hashed_post_state, Evm2AccountInfo, Evm2BlockState};
+use reth_execution_types::{
+    hashed_post_state_from_state_source, ExecutionAccountInfo, ExecutionState,
+};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{
-    BlockExecutionOutput, SharedEvm2StateProviderDatabase, StateProvider, StateProviderFactory,
+    BlockExecutionOutput, SharedEvmStateProviderDatabase, StateProvider, StateProviderFactory,
 };
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
@@ -16,7 +18,7 @@ use serde::Serialize;
 use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
 type CollectionResult =
-    (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, reth_trie::HashedPostState, Evm2BlockState);
+    (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, reth_trie::HashedPostState, ExecutionState);
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
 struct BlockStateSorted {
@@ -32,14 +34,14 @@ struct StorageDeltaSorted {
     pub current: U256,
 }
 
-/// Serializable version of an evm2 tracked account.
+/// Serializable version of an tracked account.
 #[derive(Debug, PartialEq, Eq, Serialize)]
 struct StateAccountSorted {
     pub current: Option<AccountInfoSorted>,
     pub original: Option<AccountInfoSorted>,
 }
 
-/// Serializable version of evm2 account info.
+/// Serializable version of account info.
 #[derive(Debug, PartialEq, Eq, Serialize)]
 struct AccountInfoSorted {
     pub balance: U256,
@@ -49,7 +51,7 @@ struct AccountInfoSorted {
 }
 
 /// Converts block state to sorted format for deterministic comparison.
-fn sort_block_state_for_comparison(block_state: &Evm2BlockState) -> BlockStateSorted {
+fn sort_block_state_for_comparison(block_state: &ExecutionState) -> BlockStateSorted {
     let mut storage = BTreeMap::<_, BTreeMap<_, _>>::new();
     for (key, delta) in block_state.storage_sorted() {
         storage.entry(key.address()).or_default().insert(
@@ -78,7 +80,7 @@ fn sort_block_state_for_comparison(block_state: &Evm2BlockState) -> BlockStateSo
     }
 }
 
-fn account_info_sorted(info: &Evm2AccountInfo) -> AccountInfoSorted {
+fn account_info_sorted(info: &ExecutionAccountInfo) -> AccountInfoSorted {
     AccountInfoSorted {
         balance: info.balance,
         nonce: info.nonce,
@@ -87,12 +89,13 @@ fn account_info_sorted(info: &Evm2AccountInfo) -> AccountInfoSorted {
     }
 }
 
-/// Extracts execution data including codes, preimages, and hashed state from evm2 state changes.
-fn collect_execution_data(block_state: Evm2BlockState) -> eyre::Result<CollectionResult> {
+/// Extracts execution data including codes, preimages, and hashed state from execution state
+/// changes.
+fn collect_execution_data(block_state: ExecutionState) -> eyre::Result<CollectionResult> {
     let mut codes = BTreeMap::new();
     let mut preimages = BTreeMap::new();
     let hashed_state =
-        evm2_state_source_hashed_post_state::<reth_trie::KeccakKeyHasher, _>(&block_state);
+        hashed_post_state_from_state_source::<reth_trie::KeccakKeyHasher, _>(&block_state);
 
     // Collect codes
     block_state.code().for_each(|(_, code)| {
@@ -180,11 +183,11 @@ where
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
         block: &RecoveredBlock<N::Block>,
-    ) -> eyre::Result<(ExecutionWitness, Evm2BlockState)> {
+    ) -> eyre::Result<(ExecutionWitness, ExecutionState)> {
         let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
         // SAFETY: The shared database is consumed by this synchronous execution call and does not
         // outlive the state provider borrowed here.
-        let database = unsafe { SharedEvm2StateProviderDatabase::new(&*state_provider) };
+        let database = unsafe { SharedEvmStateProviderDatabase::new(&*state_provider) };
         let output = self
             .evm_config
             .executor(database)
@@ -238,8 +241,8 @@ where
     /// Validates that the block state after re-execution matches the original.
     fn validate_block_state(
         &self,
-        re_executed_state: &Evm2BlockState,
-        original_state: &Evm2BlockState,
+        re_executed_state: &ExecutionState,
+        original_state: &ExecutionState,
         block_prefix: &str,
     ) -> eyre::Result<()> {
         if re_executed_state != original_state {
@@ -269,13 +272,13 @@ where
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
         block: &RecoveredBlock<N::Block>,
-        block_state: &Evm2BlockState,
+        block_state: &ExecutionState,
         trie_updates: Option<(&TrieUpdates, B256)>,
         block_prefix: &str,
     ) -> eyre::Result<()> {
         let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
         let hashed_state =
-            evm2_state_source_hashed_post_state::<reth_trie::KeccakKeyHasher, _>(block_state);
+            hashed_post_state_from_state_source::<reth_trie::KeccakKeyHasher, _>(block_state);
         let (re_executed_root, trie_output) =
             state_provider.state_root_with_updates(hashed_state)?;
 
@@ -387,7 +390,7 @@ mod tests {
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_execution_types::evm2_block_state_from_init;
+    use reth_execution_types::execution_state_from_init;
     use reth_primitives_traits::{Account, Bytecode as RethBytecode};
     use reth_provider::test_utils::MockEthProvider;
     use tempfile::TempDir;
@@ -395,7 +398,7 @@ mod tests {
     use reth_testing_utils::generators::{self, random_block, random_eoa_accounts, BlockParams};
 
     /// Creates a test block state with realistic accounts and contracts.
-    fn create_block_state() -> Evm2BlockState {
+    fn create_block_state() -> ExecutionState {
         let mut rng = generators::rng();
         let mut state_accounts = Vec::new();
 
@@ -427,7 +430,7 @@ mod tests {
             (B256::random(), RethBytecode::new_raw(bytecode))
         });
 
-        evm2_block_state_from_init(state_accounts, contracts)
+        execution_state_from_init(state_accounts, contracts)
     }
 
     #[test]
@@ -640,7 +643,7 @@ mod tests {
     fn test_validate_block_state_mismatch() {
         let (hook, output_dir, _temp_dir) = create_test_hook();
         let original_state = create_block_state();
-        let modified_state = Evm2BlockState::default();
+        let modified_state = ExecutionState::default();
 
         let block_prefix = "test_block_mismatch";
 
@@ -822,7 +825,7 @@ mod tests {
     #[test]
     fn test_validate_block_state_with_empty_states() {
         let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let empty_state = Evm2BlockState::default();
+        let empty_state = ExecutionState::default();
         let block_prefix = "empty_states_test";
 
         let result = hook.validate_block_state(&empty_state, &empty_state, block_prefix);
@@ -836,7 +839,7 @@ mod tests {
 
         // Add extra contract to state2
         let extra_contract_hash = B256::random();
-        let state2 = evm2_block_state_from_init(
+        let state2 = execution_state_from_init(
             [],
             [(
                 extra_contract_hash,

@@ -1,7 +1,7 @@
 use super::{DatabaseProviderRO, ProviderFactory, ProviderNodeTypes};
 use crate::{
     providers::{
-        evm2_block_state_to_plain_state_and_reverts, StaticFileProvider, StaticFileProviderRWRefMut,
+        execution_state_to_plain_state_and_reverts, StaticFileProvider, StaticFileProviderRWRefMut,
     },
     to_range, AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
     BlockReaderIdExt, BlockSource, ChainSpecProvider, ChangeSetReader, HeaderProvider,
@@ -1192,7 +1192,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
         if let Some(state) =
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
-            let (_, reverts) = evm2_block_state_to_plain_state_and_reverts(
+            let (_, reverts) = execution_state_to_plain_state_and_reverts(
                 &state.block().execution_output.state,
                 OriginalValuesKnown::Yes,
             );
@@ -1244,7 +1244,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
         if let Some(state) =
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
-            let (_, reverts) = evm2_block_state_to_plain_state_and_reverts(
+            let (_, reverts) = execution_state_to_plain_state_and_reverts(
                 &state.block_ref().execution_output.state,
                 OriginalValuesKnown::Yes,
             );
@@ -1292,7 +1292,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
             database_end = head_block.anchor().number;
 
             for state in head_block.chain() {
-                let (_, reverts) = evm2_block_state_to_plain_state_and_reverts(
+                let (_, reverts) = execution_state_to_plain_state_and_reverts(
                     &state.block_ref().execution_output.state,
                     OriginalValuesKnown::Yes,
                 );
@@ -1344,7 +1344,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
         if let Some(state) =
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
-            let (_, reverts) = evm2_block_state_to_plain_state_and_reverts(
+            let (_, reverts) = execution_state_to_plain_state_and_reverts(
                 &state.block_ref().execution_output.state,
                 OriginalValuesKnown::Yes,
             );
@@ -1388,7 +1388,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
             // Search in-memory state for the account changeset
-            let (_, reverts) = evm2_block_state_to_plain_state_and_reverts(
+            let (_, reverts) = execution_state_to_plain_state_and_reverts(
                 &state.block_ref().execution_output.state,
                 OriginalValuesKnown::Yes,
             );
@@ -1439,7 +1439,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
 
             for state in head_block.chain() {
                 // found block in memory, collect its changesets
-                let (_, reverts) = evm2_block_state_to_plain_state_and_reverts(
+                let (_, reverts) = execution_state_to_plain_state_and_reverts(
                     &state.block_ref().execution_output.state,
                     OriginalValuesKnown::Yes,
                 );
@@ -1529,8 +1529,8 @@ mod tests {
     use reth_db_api::models::AccountBeforeTx;
     use reth_ethereum_primitives::Block;
     use reth_execution_types::{
-        evm2_block_state_from_init, BlockExecutionOutput, BlockExecutionResult, Evm2BlockReverts,
-        Evm2BlockState, Evm2RevertAccount, Evm2StorageReverts, ExecutionOutcome,
+        execution_state_from_init, BlockExecutionOutput, BlockExecutionResult, BlockReverts,
+        ExecutionOutcome, ExecutionState, RevertAccount, StorageReverts,
     };
     use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock};
     use reth_storage_api::{BlockReader, BlockSource, ChangeSetReader, StateReader};
@@ -1578,8 +1578,8 @@ mod tests {
         (database_blocks.to_vec(), in_memory_blocks.to_vec())
     }
 
-    fn account_to_revert(account: Account) -> Evm2RevertAccount {
-        Evm2RevertAccount {
+    fn account_to_revert(account: Account) -> RevertAccount {
+        RevertAccount {
             balance: account.balance,
             nonce: account.nonce,
             code_hash: account.bytecode_hash.unwrap_or(KECCAK256_EMPTY),
@@ -1587,9 +1587,9 @@ mod tests {
         }
     }
 
-    fn evm2_revert(
+    fn block_revert(
         changes: impl IntoIterator<Item = (Address, Option<Account>, Vec<(U256, U256)>)>,
-    ) -> Evm2BlockReverts {
+    ) -> BlockReverts {
         let mut accounts = AddressMap::default();
         let mut storage = AddressMap::default();
         for (address, account, storage_revert) in changes {
@@ -1597,7 +1597,7 @@ mod tests {
             if !storage_revert.is_empty() {
                 storage.insert(
                     address,
-                    Evm2StorageReverts {
+                    StorageReverts {
                         slots: storage_revert.into_iter().collect(),
                         ..Default::default()
                     },
@@ -1605,17 +1605,17 @@ mod tests {
             }
         }
 
-        Evm2BlockReverts { accounts, storage }
+        BlockReverts { accounts, storage }
     }
 
     fn single_account_state_and_reverts(
         address: Address,
         account: Account,
         storage: impl IntoIterator<Item = (U256, (U256, U256))>,
-        reverts: impl IntoIterator<Item = Evm2BlockReverts>,
-    ) -> (Evm2BlockState, Vec<Evm2BlockReverts>) {
+        reverts: impl IntoIterator<Item = BlockReverts>,
+    ) -> (ExecutionState, Vec<BlockReverts>) {
         (
-            evm2_block_state_from_init(
+            execution_state_from_init(
                 [(address, (None, Some(account), BTreeMap::from_iter(storage)))],
                 [],
             ),
@@ -1624,8 +1624,8 @@ mod tests {
     }
 
     fn execution_outcome_from_state_and_reverts(
-        state: Evm2BlockState,
-        block_reverts: Vec<Evm2BlockReverts>,
+        state: ExecutionState,
+        block_reverts: Vec<BlockReverts>,
         first_block: u64,
     ) -> ExecutionOutcome {
         ExecutionOutcome::from_state_and_reverts(
@@ -1901,7 +1901,7 @@ mod tests {
                 .map(|b| b.try_recover().expect("failed to seal block with senders"))
                 .collect(),
             &execution_outcome_from_state_and_reverts(
-                evm2_block_state_from_init(
+                execution_state_from_init(
                     database_state.into_iter().map(|(address, (account, _))| {
                         (address, (None, Some(account), BTreeMap::default()))
                     }),
@@ -1914,7 +1914,7 @@ mod tests {
                         for (address, account, _) in block_changesets {
                             accounts.insert(*address, Some(account_to_revert(*account)));
                         }
-                        Evm2BlockReverts { accounts, storage: AddressMap::default() }
+                        BlockReverts { accounts, storage: AddressMap::default() }
                     })
                     .collect(),
                 first_database_block,
@@ -1931,7 +1931,7 @@ mod tests {
                 .first()
                 .map(|block| {
                     let senders = block.senders().expect("failed to recover senders");
-                    let state = evm2_block_state_from_init(
+                    let state = execution_state_from_init(
                         in_memory_state.into_iter().map(|(address, (account, _))| {
                             (address, (None, Some(account), BTreeMap::default()))
                         }),
@@ -2021,8 +2021,8 @@ mod tests {
                     account,
                     [(slot, (U256::ZERO, U256::from(100)))],
                     [
-                        Evm2BlockReverts::default(),
-                        evm2_revert([(address, Some(account), vec![(slot, U256::ZERO)])]),
+                        BlockReverts::default(),
+                        block_revert([(address, Some(account), vec![(slot, U256::ZERO)])]),
                     ],
                 );
                 execution_outcome_from_state_and_reverts(state, block_reverts, 0)
@@ -2088,7 +2088,7 @@ mod tests {
                     address,
                     account,
                     [(slot, (U256::ZERO, U256::from(100)))],
-                    [evm2_revert([(address, Some(account), vec![(slot, U256::ZERO)])])],
+                    [block_revert([(address, Some(account), vec![(slot, U256::ZERO)])])],
                 );
                 execution_outcome_from_state_and_reverts(state, block_reverts, 0)
             },
@@ -2104,7 +2104,7 @@ mod tests {
             address,
             account,
             [(slot, (U256::from(100), U256::from(200)))],
-            [evm2_revert([(address, Some(account), vec![(slot, U256::from(100))])])],
+            [block_revert([(address, Some(account), vec![(slot, U256::from(100))])])],
         );
         let chain = NewCanonicalChain::Commit {
             new: vec![ExecutedBlock {
@@ -2182,8 +2182,8 @@ mod tests {
                     account,
                     [(slot, (U256::ZERO, U256::from(100)))],
                     [
-                        evm2_revert([(address, Some(account), vec![(slot, U256::ZERO)])]),
-                        Evm2BlockReverts::default(),
+                        block_revert([(address, Some(account), vec![(slot, U256::ZERO)])]),
+                        BlockReverts::default(),
                     ],
                 );
                 execution_outcome_from_state_and_reverts(state, block_reverts, 0)
@@ -2200,7 +2200,7 @@ mod tests {
             address,
             account,
             [(slot, (U256::from(100), U256::from(200)))],
-            [evm2_revert([(address, Some(account), vec![(slot, U256::from(100))])])],
+            [block_revert([(address, Some(account), vec![(slot, U256::from(100))])])],
         );
         let chain = NewCanonicalChain::Commit {
             new: vec![ExecutedBlock {

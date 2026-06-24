@@ -6,7 +6,7 @@ use alloy_primitives::{
 };
 use core::{convert::Infallible, marker::PhantomData};
 use evm2::{
-    bytecode::Bytecode as Evm2Bytecode,
+    bytecode::Bytecode as ExecutableBytecode,
     evm::{
         AccountChangeRef, AccountInfo, AccountInfoRef, BlockStateAccumulator, StateChangeSink,
         StateChangeSource, StorageChange, Tee,
@@ -15,17 +15,17 @@ use evm2::{
 use reth_primitives_traits::{Account, Bytecode as RethBytecode};
 use reth_trie_common::{HashedPostState, HashedPostStateSorted, HashedStorageSorted, KeyHasher};
 
-/// Reverts for one block of evm2 state changes.
+/// Reverts for one block of execution state changes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Evm2BlockReverts {
+pub struct BlockReverts {
     /// Original accounts before the block changed them.
-    pub accounts: AddressMap<Option<Evm2RevertAccount>>,
+    pub accounts: AddressMap<Option<RevertAccount>>,
     /// Original storage before the block changed it.
-    pub storage: AddressMap<Evm2StorageReverts>,
+    pub storage: AddressMap<StorageReverts>,
 }
 
-impl Evm2BlockReverts {
+impl BlockReverts {
     /// Clears account and storage revert entries.
     pub fn clear(&mut self) {
         self.accounts.clear();
@@ -36,7 +36,7 @@ impl Evm2BlockReverts {
 /// Serializable account information used by block reverts.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Evm2RevertAccount {
+pub struct RevertAccount {
     /// Account balance.
     pub balance: U256,
     /// Account nonce.
@@ -44,11 +44,11 @@ pub struct Evm2RevertAccount {
     /// Hash of the account bytecode, or the empty code hash.
     pub code_hash: B256,
     /// Optional account bytecode.
-    pub code: Option<Evm2Bytecode>,
+    pub code: Option<ExecutableBytecode>,
 }
 
-impl Evm2RevertAccount {
-    /// Converts this account into evm2 account info.
+impl RevertAccount {
+    /// Converts this account into account info.
     pub fn to_account_info(&self) -> AccountInfo {
         AccountInfo {
             balance: self.balance,
@@ -60,7 +60,7 @@ impl Evm2RevertAccount {
     }
 }
 
-impl From<AccountInfo> for Evm2RevertAccount {
+impl From<AccountInfo> for RevertAccount {
     fn from(value: AccountInfo) -> Self {
         Self {
             balance: value.balance,
@@ -71,7 +71,7 @@ impl From<AccountInfo> for Evm2RevertAccount {
     }
 }
 
-impl From<AccountInfoRef<'_>> for Evm2RevertAccount {
+impl From<AccountInfoRef<'_>> for RevertAccount {
     fn from(value: AccountInfoRef<'_>) -> Self {
         Self {
             balance: value.balance,
@@ -82,8 +82,8 @@ impl From<AccountInfoRef<'_>> for Evm2RevertAccount {
     }
 }
 
-impl From<Evm2RevertAccount> for AccountInfo {
-    fn from(value: Evm2RevertAccount) -> Self {
+impl From<RevertAccount> for AccountInfo {
+    fn from(value: RevertAccount) -> Self {
         Self {
             balance: value.balance,
             nonce: value.nonce,
@@ -97,7 +97,7 @@ impl From<Evm2RevertAccount> for AccountInfo {
 /// Storage reverts for one account in one block.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Evm2StorageReverts {
+pub struct StorageReverts {
     /// Whether the block wiped the account storage.
     pub wiped: bool,
     /// Whether earlier aggregate state had already marked this account storage as wiped.
@@ -106,8 +106,8 @@ pub struct Evm2StorageReverts {
     pub slots: alloc::collections::BTreeMap<U256, U256>,
 }
 
-/// Returns the hashed post-state represented by an evm2 state-change source.
-pub fn evm2_state_source_hashed_post_state<KH, S>(source: &S) -> HashedPostState
+/// Returns the hashed post-state represented by an execution state-change source.
+pub fn hashed_post_state_from_state_source<KH, S>(source: &S) -> HashedPostState
 where
     KH: KeyHasher,
     S: StateChangeSource,
@@ -120,18 +120,18 @@ where
     sink.into_hashed_post_state()
 }
 
-/// Freezes any evm2 state-change source into an owned block state.
-pub fn evm2_block_state_from_state_source<S>(source: &S) -> BlockStateAccumulator
+/// Freezes any execution state-change source into an owned block state.
+pub fn execution_state_from_state_source<S>(source: &S) -> BlockStateAccumulator
 where
     S: StateChangeSource,
 {
     let mut state = BlockStateAccumulator::new();
-    evm2_block_state_accumulator_extend(&mut state, source);
+    extend_execution_state(&mut state, source);
     state
 }
 
-/// Creates an evm2 block state from Reth account, storage, and bytecode initialization data.
-pub fn evm2_block_state_from_init(
+/// Creates an execution state from Reth account, storage, and bytecode initialization data.
+pub fn execution_state_from_init(
     accounts: impl IntoIterator<
         Item = (Address, (Option<Account>, Option<Account>, BTreeMap<U256, (U256, U256)>)),
     >,
@@ -156,14 +156,14 @@ pub fn evm2_block_state_from_init(
     }
     for (code_hash, bytecode) in contracts {
         accumulator
-            .bytecode(code_hash, &Evm2Bytecode::new_raw(bytecode.original_bytes()))
+            .bytecode(code_hash, &ExecutableBytecode::new_raw(bytecode.original_bytes()))
             .expect("infallible");
     }
     accumulator
 }
 
-/// Extends an evm2 block-state accumulator with any evm2 state-change source.
-pub fn evm2_block_state_accumulator_extend<S>(accumulator: &mut BlockStateAccumulator, source: &S)
+/// Extends an execution state accumulator with any execution state-change source.
+pub fn extend_execution_state<S>(accumulator: &mut BlockStateAccumulator, source: &S)
 where
     S: StateChangeSource,
 {
@@ -174,7 +174,7 @@ where
 }
 
 /// Returns an approximate state-change size for thresholding and metrics.
-pub fn evm2_state_source_size_hint<S>(source: &S) -> usize
+pub fn state_source_size_hint<S>(source: &S) -> usize
 where
     S: StateChangeSource,
 {
@@ -186,8 +186,8 @@ where
     sink.size
 }
 
-/// Returns the per-block reverts represented by an evm2 state-change source.
-pub fn evm2_block_reverts_from_state_source<S>(source: &S) -> Evm2BlockReverts
+/// Returns the per-block reverts represented by an execution state-change source.
+pub fn block_reverts_from_state_source<S>(source: &S) -> BlockReverts
 where
     S: StateChangeSource,
 {
@@ -199,11 +199,11 @@ where
     sink.reverts
 }
 
-/// Extends an evm2 block-state accumulator and returns the per-block reverts in one source visit.
-pub fn evm2_block_reverts_and_accumulator_extend<S>(
+/// Extends an execution state accumulator and returns the per-block reverts in one source visit.
+pub fn extend_state_and_collect_reverts<S>(
     accumulator: &mut BlockStateAccumulator,
     source: &S,
-) -> Evm2BlockReverts
+) -> BlockReverts
 where
     S: StateChangeSource,
 {
@@ -216,8 +216,8 @@ where
     reverts.reverts
 }
 
-/// Returns trie-ready sorted hashed post-state for an evm2 block state.
-pub fn evm2_block_state_hashed_post_state_sorted<KH>(
+/// Returns trie-ready sorted hashed post-state for an execution state.
+pub fn hashed_post_state_sorted_from_execution_state<KH>(
     state: &BlockStateAccumulator,
 ) -> HashedPostStateSorted
 where
@@ -259,7 +259,7 @@ where
     HashedPostStateSorted::new(accounts, storages)
 }
 
-/// Evm2 state-change sink that builds trie-ready hashed post-state as changes stream in.
+/// Execution state-change sink that builds trie-ready hashed post-state as changes stream in.
 #[derive(Debug)]
 pub struct HashedPostStateSink<KH> {
     state: HashedPostState,
@@ -274,7 +274,7 @@ struct StateSizeHintSink {
 
 #[derive(Default)]
 struct BlockRevertsSink {
-    reverts: Evm2BlockReverts,
+    reverts: BlockReverts,
 }
 
 impl<KH> Default for HashedPostStateSink<KH> {
@@ -290,7 +290,11 @@ impl<KH> Default for HashedPostStateSink<KH> {
 impl StateChangeSink for StateSizeHintSink {
     type Error = Infallible;
 
-    fn bytecode(&mut self, _code_hash: B256, _code: &Evm2Bytecode) -> Result<(), Self::Error> {
+    fn bytecode(
+        &mut self,
+        _code_hash: B256,
+        _code: &ExecutableBytecode,
+    ) -> Result<(), Self::Error> {
         self.size += 1;
         Ok(())
     }
@@ -314,7 +318,11 @@ impl StateChangeSink for StateSizeHintSink {
 impl StateChangeSink for BlockRevertsSink {
     type Error = Infallible;
 
-    fn bytecode(&mut self, _code_hash: B256, _code: &Evm2Bytecode) -> Result<(), Self::Error> {
+    fn bytecode(
+        &mut self,
+        _code_hash: B256,
+        _code: &ExecutableBytecode,
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
 
@@ -322,7 +330,7 @@ impl StateChangeSink for BlockRevertsSink {
         self.reverts
             .accounts
             .entry(change.address)
-            .or_insert_with(|| change.original.map(Evm2RevertAccount::from));
+            .or_insert_with(|| change.original.map(RevertAccount::from));
         Ok(())
     }
 
@@ -373,7 +381,11 @@ where
 {
     type Error = Infallible;
 
-    fn bytecode(&mut self, _code_hash: B256, _code: &Evm2Bytecode) -> Result<(), Self::Error> {
+    fn bytecode(
+        &mut self,
+        _code_hash: B256,
+        _code: &ExecutableBytecode,
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
 
@@ -523,9 +535,9 @@ mod tests {
         )
         .unwrap();
 
-        let sorted = evm2_block_state_hashed_post_state_sorted::<KeccakKeyHasher>(&accumulator);
+        let sorted = hashed_post_state_sorted_from_execution_state::<KeccakKeyHasher>(&accumulator);
         let streaming =
-            evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&accumulator).into_sorted();
+            hashed_post_state_from_state_source::<KeccakKeyHasher, _>(&accumulator).into_sorted();
 
         assert_eq!(sorted, streaming);
     }
@@ -588,7 +600,7 @@ mod tests {
         }
 
         let recomputed =
-            evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&accumulator).into_sorted();
+            hashed_post_state_from_state_source::<KeccakKeyHasher, _>(&accumulator).into_sorted();
         let streaming = sink.into_hashed_post_state().into_sorted();
 
         assert_eq!(streaming, recomputed);
@@ -620,7 +632,7 @@ mod tests {
         }
 
         let recomputed =
-            evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&accumulator).into_sorted();
+            hashed_post_state_from_state_source::<KeccakKeyHasher, _>(&accumulator).into_sorted();
         let streaming = sink.into_hashed_post_state().into_sorted();
 
         assert_eq!(streaming, recomputed);
@@ -652,7 +664,7 @@ mod tests {
         }
 
         let recomputed =
-            evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&accumulator).into_sorted();
+            hashed_post_state_from_state_source::<KeccakKeyHasher, _>(&accumulator).into_sorted();
         let streaming = sink.into_hashed_post_state().into_sorted();
 
         assert_eq!(streaming, recomputed);
@@ -682,7 +694,7 @@ mod tests {
         }
 
         let recomputed =
-            evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&accumulator).into_sorted();
+            hashed_post_state_from_state_source::<KeccakKeyHasher, _>(&accumulator).into_sorted();
         let streaming = sink.into_hashed_post_state().into_sorted();
 
         assert_eq!(streaming, recomputed);
@@ -718,7 +730,7 @@ mod tests {
         }
 
         let recomputed =
-            evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&accumulator).into_sorted();
+            hashed_post_state_from_state_source::<KeccakKeyHasher, _>(&accumulator).into_sorted();
         let streaming = sink.into_hashed_post_state().into_sorted();
 
         assert_eq!(streaming, recomputed);

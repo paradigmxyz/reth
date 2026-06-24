@@ -2,7 +2,7 @@ use super::ExecutedBlock;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_errors::ProviderResult;
-use reth_execution_types::Evm2Bytecode;
+use reth_execution_types::ExecutableBytecode;
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
     AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
@@ -211,14 +211,17 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
 impl<N: NodePrimitives> HashedPostStateProvider for MemoryOverlayStateProviderRef<'_, N> {}
 
 impl<N: NodePrimitives> StateProvider for MemoryOverlayStateProviderRef<'_, N> {
-    fn evm2_bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Evm2Bytecode>> {
+    fn executable_bytecode_by_hash(
+        &self,
+        code_hash: &B256,
+    ) -> ProviderResult<Option<ExecutableBytecode>> {
         for block in self.in_memory.iter() {
-            if let Some(contract) = block.execution_output.evm2_bytecode(code_hash) {
+            if let Some(contract) = block.execution_output.executable_bytecode(code_hash) {
                 return Ok(Some(contract));
             }
         }
 
-        self.historical.evm2_bytecode_by_hash(code_hash)
+        self.historical.executable_bytecode_by_hash(code_hash)
     }
 
     fn storage(

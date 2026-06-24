@@ -22,8 +22,8 @@ const MAX_CACHE_SIZE: u32 = 1024 * 1024;
 /// Stores caches for each precompile.
 pub struct PrecompileCacheMap<S>(Arc<DashMap<Address, PrecompileCache<S>, FbBuildHasher<20>>>);
 
-/// evm2 precompile cache keyed by [`evm2::SpecId`].
-pub type Evm2PrecompileCacheMap = PrecompileCacheMap<evm2::SpecId>;
+/// EVM precompile cache keyed by [`evm2::SpecId`].
+pub type SpecPrecompileCacheMap = PrecompileCacheMap<evm2::SpecId>;
 
 impl<S> fmt::Debug for PrecompileCacheMap<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -117,7 +117,7 @@ impl<S> CacheEntry<S> {
     }
 }
 
-/// A caching evm2 precompile provider.
+/// A caching EVM precompile provider.
 pub struct CachedPrecompileProvider<S>
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,

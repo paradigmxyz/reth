@@ -75,7 +75,8 @@ impl<Eth, Evm, Payload: PayloadTypes> TestingApi<Eth, Evm, Payload> {
 }
 
 fn unsupported_testing<T>() -> RpcResult<T> {
-    Err(EthApiError::Unsupported("testing RPC is unsupported by the evm2 execution path").into())
+    Err(EthApiError::Unsupported("testing RPC is unsupported by the active EVM execution path")
+        .into())
 }
 
 #[async_trait]

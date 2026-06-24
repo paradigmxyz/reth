@@ -235,7 +235,7 @@ where
 {
     Err(RethError::Execution(
         BlockValidationError::msg(
-            "engine reorg simulation is unsupported by the evm2 pre-Amsterdam execution path",
+            "engine reorg simulation is unsupported by the active pre-Amsterdam execution path",
         )
         .into(),
     ))
@@ -302,13 +302,14 @@ mod legacy_reorg_head {
         if reorg_target.header().block_access_list_hash().is_some() {
             return Err(RethError::Execution(
                 BlockValidationError::msg(
-                    "block access lists are unsupported by the evm2 execution path",
+                    "block access lists are unsupported by the active EVM execution path",
                 )
                 .into(),
             ))
         }
-        // BAL execution is Amsterdam-only and remains stubbed for the evm2 pre-Amsterdam path.
-        // let has_bal = reorg_target.header().block_access_list_hash().is_some();
+        // BAL execution is Amsterdam-only and remains stubbed for the active pre-Amsterdam
+        // execution path. let has_bal =
+        // reorg_target.header().block_access_list_hash().is_some();
         let state_provider = provider.state_by_block_hash(reorg_target.header().parent_hash())?;
         let mut state = State::builder()
             .with_database_ref(StateProviderDatabase::new(&state_provider))

@@ -64,7 +64,8 @@ impl<Eth> TraceApi<Eth> {
 }
 
 fn unsupported_trace<T>() -> RpcResult<T> {
-    Err(EthApiError::Unsupported("trace API is unsupported by the evm2 execution path").into())
+    Err(EthApiError::Unsupported("trace API is unsupported by the active EVM execution path")
+        .into())
 }
 
 // === impl TraceApi === //
@@ -719,7 +720,7 @@ where
                         .into_trace_results_with_state(&result, &trace_types, &mut db)
                         .map_err(|err| {
                             Eth::Error::from_eth_err(EthApiError::EvmCustom(format!(
-                                "evm2 database error: {err:?}"
+                                "EVM database error: {err:?}"
                             )))
                         })?;
 
@@ -748,7 +749,7 @@ where
                     .into_trace_results_with_state(&res, &trace_types, &mut db)
                     .map_err(|err| {
                         Eth::Error::from_eth_err(EthApiError::EvmCustom(format!(
-                            "evm2 database error: {err:?}"
+                            "EVM database error: {err:?}"
                         )))
                     })
             })

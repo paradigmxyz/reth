@@ -357,7 +357,7 @@ mod tests {
         transaction::DbTxMut,
     };
     use reth_execution_errors::StateRootError;
-    use reth_execution_types::{evm2_block_state_from_init, evm2_state_source_hashed_post_state};
+    use reth_execution_types::{execution_state_from_init, hashed_post_state_from_state_source};
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_storage_api::StorageSettingsCache;
@@ -405,9 +405,9 @@ mod tests {
         assert!(!overlay_root.is_zero());
     }
 
-    /// Builds hashed state from evm2 block state and checks the known state root.
+    /// Builds hashed state from execution state and checks the known state root.
     #[test]
-    fn from_evm2_block_state_with_rayon() {
+    fn from_execution_state_with_rayon() {
         let address1 = Address::with_last_byte(1);
         let address2 = Address::with_last_byte(2);
         let slot1 = U256::from(1015);
@@ -416,7 +416,7 @@ mod tests {
         let account1 = Account { nonce: 1, ..Default::default() };
         let account2 = Account { nonce: 2, ..Default::default() };
 
-        let block_state = evm2_block_state_from_init(
+        let block_state = execution_state_from_init(
             [
                 (
                     address1,
@@ -438,7 +438,7 @@ mod tests {
             [],
         );
 
-        let post_state = evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&block_state);
+        let post_state = hashed_post_state_from_state_source::<KeccakKeyHasher, _>(&block_state);
         assert_eq!(post_state.accounts.len(), 2);
         assert_eq!(post_state.storages.len(), 2);
 

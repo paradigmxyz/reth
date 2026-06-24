@@ -154,7 +154,8 @@ where
     Evm: Send + Sync + 'static,
 {
     fn config(&self) -> RpcResult<EthConfig> {
-        Err(EthApiError::Unsupported("eth_config is unsupported by the evm2 execution path").into())
+        Err(EthApiError::Unsupported("eth_config is unsupported by the active EVM execution path")
+            .into())
     }
 }
 

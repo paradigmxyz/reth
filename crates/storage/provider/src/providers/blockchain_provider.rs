@@ -811,8 +811,8 @@ mod tests {
     use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Block, Receipt};
     use reth_execution_types::{
-        evm2_block_state_from_init, BlockExecutionOutput, BlockExecutionResult, Chain,
-        Evm2BlockReverts, Evm2RevertAccount, ExecutionOutcome,
+        execution_state_from_init, BlockExecutionOutput, BlockExecutionResult, BlockReverts, Chain,
+        ExecutionOutcome, RevertAccount,
     };
     use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock, SignerRecoverable};
     use reth_storage_api::{
@@ -869,8 +869,8 @@ mod tests {
         (database_blocks.to_vec(), in_memory_blocks.to_vec())
     }
 
-    fn account_to_revert(account: Account) -> Evm2RevertAccount {
-        Evm2RevertAccount {
+    fn account_to_revert(account: Account) -> RevertAccount {
+        RevertAccount {
             balance: account.balance,
             nonce: account.nonce,
             code_hash: account.bytecode_hash.unwrap_or(KECCAK256_EMPTY),
@@ -1701,7 +1701,7 @@ mod tests {
                 .map(|b| b.try_recover().expect("failed to seal block with senders"))
                 .collect(),
             &{
-                let state = evm2_block_state_from_init(
+                let state = execution_state_from_init(
                     database_state.into_iter().map(|(address, (account, _))| {
                         (address, (None, Some(account), BTreeMap::default()))
                     }),
@@ -1714,7 +1714,7 @@ mod tests {
                         for (address, account, _) in block_changesets {
                             accounts.insert(*address, Some(account_to_revert(*account)));
                         }
-                        Evm2BlockReverts { accounts, storage: AddressMap::default() }
+                        BlockReverts { accounts, storage: AddressMap::default() }
                     })
                     .collect();
                 ExecutionOutcome::from_state_and_reverts(
@@ -1737,7 +1737,7 @@ mod tests {
                 .first()
                 .map(|block| {
                     let senders = block.senders().expect("failed to recover senders");
-                    let state = evm2_block_state_from_init(
+                    let state = execution_state_from_init(
                         in_memory_state.into_iter().map(|(address, (account, _))| {
                             (address, (None, Some(account), BTreeMap::default()))
                         }),

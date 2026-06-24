@@ -6,7 +6,7 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     transaction::DbTx,
 };
-use reth_execution_types::Evm2StorageReverts;
+use reth_execution_types::StorageReverts;
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, SyncMode, WriteFlags, RO,
 };
@@ -200,7 +200,7 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
 /// into the account revert if not already present.
 fn inject_preimage_entry(
     reader: &SlotPreimagesReader,
-    revert: &mut Evm2StorageReverts,
+    revert: &mut StorageReverts,
     address: alloy_primitives::Address,
     hashed_slot: B256,
     value: alloy_primitives::U256,

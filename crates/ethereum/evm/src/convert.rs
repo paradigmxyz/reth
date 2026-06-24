@@ -1,4 +1,4 @@
-//! Conversion helpers for feeding Reth Ethereum primitives into evm2.
+//! Conversion helpers for Ethereum execution.
 
 use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_eips::eip7840::BlobParams;
@@ -13,8 +13,8 @@ use reth_chainspec::EthereumHardforks;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::execute::{ExecutableTxParts, RecoveredTx};
 
-/// Map the latest active Ethereum hardfork at `timestamp` or `block_number` to an evm2 [`SpecId`].
-pub fn evm2_spec_by_timestamp_and_block_number<C>(
+/// Map the latest active Ethereum hardfork at `timestamp` or `block_number` to a [`SpecId`].
+pub fn spec_id_by_timestamp_and_block_number<C>(
     chain_spec: &C,
     timestamp: BlockTimestamp,
     block_number: BlockNumber,
@@ -55,22 +55,22 @@ where
     }
 }
 
-/// Map the latest active hardfork at `header` to an evm2 [`SpecId`].
-pub fn evm2_spec<C, H>(chain_spec: &C, header: &H) -> SpecId
+/// Map the latest active hardfork at `header` to an [`SpecId`].
+pub fn spec_id<C, H>(chain_spec: &C, header: &H) -> SpecId
 where
     C: EthereumHardforks,
     H: BlockHeader,
 {
-    evm2_spec_by_timestamp_and_block_number(chain_spec, header.timestamp(), header.number())
+    spec_id_by_timestamp_and_block_number(chain_spec, header.timestamp(), header.number())
 }
 
-/// Converts an Ethereum header into evm2's block environment.
-pub fn evm2_block_env<H: BlockHeader>(header: &H) -> BlockEnv {
-    evm2_block_env_with_blob_params(header, None)
+/// Converts an Ethereum header into the block environment.
+pub fn block_env<H: BlockHeader>(header: &H) -> BlockEnv {
+    block_env_with_blob_params(header, None)
 }
 
-/// Converts an Ethereum header into evm2's block environment with chain blob parameters.
-pub fn evm2_block_env_with_blob_params<H: BlockHeader>(
+/// Converts an Ethereum header into the block environment with chain blob parameters.
+pub fn block_env_with_blob_params<H: BlockHeader>(
     header: &H,
     blob_params: Option<BlobParams>,
 ) -> BlockEnv {
@@ -92,11 +92,8 @@ pub fn evm2_block_env_with_blob_params<H: BlockHeader>(
     }
 }
 
-/// Converts engine execution payload data into evm2's block environment.
-pub fn evm2_payload_block_env(
-    payload: &ExecutionData,
-    blob_params: Option<BlobParams>,
-) -> BlockEnv {
+/// Converts engine execution payload data into the block environment.
+pub fn payload_block_env(payload: &ExecutionData, blob_params: Option<BlobParams>) -> BlockEnv {
     let payload = &payload.payload;
     BlockEnv {
         number: U256::from(payload.block_number()),
@@ -120,50 +117,50 @@ fn blob_basefee(excess_blob_gas: Option<u64>, blob_params: Option<BlobParams>) -
         .unwrap_or_default()
 }
 
-/// Cached evm2 transaction environment used by engine execution and prewarming.
+/// Cached transaction environment used by engine execution and prewarming.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Evm2TxEnv(RecoveredTxEnvelope);
+pub struct EthTxEnv(RecoveredTxEnvelope);
 
-impl Evm2TxEnv {
-    /// Returns the wrapped evm2 transaction envelope.
+impl EthTxEnv {
+    /// Returns the wrapped transaction envelope.
     pub const fn as_envelope(&self) -> &RecoveredTxEnvelope {
         &self.0
     }
 
-    /// Consumes the wrapper and returns the evm2 transaction envelope.
+    /// Consumes the wrapper and returns the transaction envelope.
     pub fn into_envelope(self) -> RecoveredTxEnvelope {
         self.0
     }
 }
 
-impl AsRef<RecoveredTxEnvelope> for Evm2TxEnv {
+impl AsRef<RecoveredTxEnvelope> for EthTxEnv {
     fn as_ref(&self) -> &RecoveredTxEnvelope {
         self.as_envelope()
     }
 }
 
-impl From<Recovered<TransactionSigned>> for Evm2TxEnv {
+impl From<Recovered<TransactionSigned>> for EthTxEnv {
     fn from(value: Recovered<TransactionSigned>) -> Self {
-        Self(evm2_recovered_tx(value))
+        Self(recovered_tx_envelope(value))
     }
 }
 
-/// Recovered Ethereum transaction paired with its cached evm2 transaction environment.
+/// Recovered Ethereum transaction paired with its cached transaction environment.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Evm2RecoveredTx {
-    tx_env: Evm2TxEnv,
+pub struct ExecutableRecoveredTx {
+    tx_env: EthTxEnv,
     tx: Recovered<TransactionSigned>,
 }
 
-impl Evm2RecoveredTx {
-    /// Creates a transaction wrapper and precomputes the evm2 transaction environment.
+impl ExecutableRecoveredTx {
+    /// Creates a transaction wrapper and precomputes the transaction environment.
     pub fn new(tx: Recovered<TransactionSigned>) -> Self {
         let tx_env = tx.clone().into();
         Self { tx_env, tx }
     }
 }
 
-impl RecoveredTx<TransactionSigned> for Evm2RecoveredTx {
+impl RecoveredTx<TransactionSigned> for ExecutableRecoveredTx {
     fn tx(&self) -> &TransactionSigned {
         self.tx.inner()
     }
@@ -173,16 +170,16 @@ impl RecoveredTx<TransactionSigned> for Evm2RecoveredTx {
     }
 }
 
-impl ExecutableTxParts<Evm2TxEnv, TransactionSigned> for Evm2RecoveredTx {
+impl ExecutableTxParts<EthTxEnv, TransactionSigned> for ExecutableRecoveredTx {
     type Recovered = Recovered<TransactionSigned>;
 
-    fn into_parts(self) -> (Evm2TxEnv, Self::Recovered) {
+    fn into_parts(self) -> (EthTxEnv, Self::Recovered) {
         (self.tx_env, self.tx)
     }
 }
 
-/// Converts an owned recovered Reth Ethereum transaction into evm2's recovered envelope.
-pub fn evm2_recovered_tx(tx: Recovered<TransactionSigned>) -> RecoveredTxEnvelope {
+/// Converts an owned recovered Reth Ethereum transaction into a recovered envelope.
+pub fn recovered_tx_envelope(tx: Recovered<TransactionSigned>) -> RecoveredTxEnvelope {
     let (tx, signer) = tx.into_parts();
     match tx {
         TransactionSigned::Legacy(tx) => {
@@ -205,9 +202,9 @@ pub fn evm2_recovered_tx(tx: Recovered<TransactionSigned>) -> RecoveredTxEnvelop
     }
 }
 
-/// Converts a borrowed recovered Reth Ethereum transaction into evm2's recovered envelope.
-pub fn evm2_recovered_tx_ref(tx: Recovered<&TransactionSigned>) -> RecoveredTxEnvelope {
-    evm2_recovered_tx(Recovered::new_unchecked((*tx.inner()).clone(), tx.signer()))
+/// Converts a borrowed recovered Reth Ethereum transaction into a recovered envelope.
+pub fn recovered_tx_envelope_ref(tx: Recovered<&TransactionSigned>) -> RecoveredTxEnvelope {
+    recovered_tx_envelope(Recovered::new_unchecked((*tx.inner()).clone(), tx.signer()))
 }
 
 #[cfg(test)]
@@ -217,21 +214,21 @@ mod tests {
     use alloy_eips::eip7840::BlobParams;
 
     #[test]
-    fn evm2_block_env_uses_blob_params_for_blob_basefee() {
+    fn block_env_uses_blob_params_for_blob_basefee() {
         let blob_params = BlobParams::cancun();
         let excess_blob_gas = 1_000_000;
         let header = Header { excess_blob_gas: Some(excess_blob_gas), ..Default::default() };
 
-        let env = evm2_block_env_with_blob_params(&header, Some(blob_params));
+        let env = block_env_with_blob_params(&header, Some(blob_params));
 
         assert_eq!(env.blob_basefee, U256::from(blob_params.calc_blob_fee(excess_blob_gas)));
     }
 
     #[test]
-    fn evm2_block_env_defaults_blob_basefee_without_blob_context() {
+    fn block_env_defaults_blob_basefee_without_blob_context() {
         let header = Header { excess_blob_gas: Some(1_000_000), ..Default::default() };
 
-        let env = evm2_block_env(&header);
+        let env = block_env(&header);
 
         assert_eq!(env.blob_basefee, U256::ZERO);
     }

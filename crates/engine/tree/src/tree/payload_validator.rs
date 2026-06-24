@@ -133,14 +133,13 @@ use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::{
     execute::{ExecutableTxFor, RecoveredTx},
-    ConfigureEvm, Evm2Env, EvmEnvFor, ExecutionCtxFor,
+    ConfigureEvm, EvmEnv, EvmEnvFor, ExecutionCtxFor,
 };
 use reth_evm_ethereum::{
-    AsEvm2BlockExecutionContext, Evm2HashedStateMode, Evm2PayloadExecutionError,
-    Evm2PayloadExecutor, Evm2TxEnv,
+    AsBlockExecutionContext, EthPayloadExecutor, EthTxEnv, HashedStateMode, PayloadExecutionError,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
-use reth_execution_types::evm2_state_source_hashed_post_state;
+use reth_execution_types::hashed_post_state_from_state_source;
 use reth_payload_primitives::{
     BuiltPayload, BuiltPayloadExecutedBlock, InvalidPayloadAttributesError, NewPayloadError,
     PayloadTypes,
@@ -151,7 +150,7 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     providers::{OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory},
-    BlockExecutionOutput, BlockNumReader, BlockReader, BorrowedEvm2StateProviderDatabase,
+    BlockExecutionOutput, BlockNumReader, BlockReader, BorrowedEvmStateProviderDatabase,
     ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
     ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
@@ -176,7 +175,7 @@ fn block_output_hashed_state<T>(output: &BlockExecutionOutput<T>) -> HashedPostS
     output
         .hashed_state
         .clone()
-        .unwrap_or_else(|| evm2_state_source_hashed_post_state::<KeccakKeyHasher, _>(&output.state))
+        .unwrap_or_else(|| hashed_post_state_from_state_source::<KeccakKeyHasher, _>(&output.state))
 }
 
 /// Multiplier over the parent's gas limit beyond which a block's claimed gas usage cannot be
@@ -293,7 +292,7 @@ where
     config: TreeConfig,
     /// Payload processor for state root computation.
     payload_processor: PayloadProcessor<Evm>,
-    /// Shared evm2 precompile cache for prewarming and execution.
+    /// Shared EVM precompile cache for prewarming and execution.
     precompile_cache_map: PrecompileCacheMap<evm2::SpecId>,
     /// Hook to call when invalid blocks are encountered.
     #[debug(skip)]
@@ -465,10 +464,10 @@ where
     ) -> InsertPayloadResult<N>
     where
         V: PayloadValidator<T, Block = N::Block> + Clone,
-        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N, TxEnv = Evm2TxEnv>,
-        EvmEnvFor<Evm>: Evm2Env,
-        for<'a> ExecutionCtxFor<'a, Evm>: AsEvm2BlockExecutionContext,
-        Evm::Executor<BorrowedEvm2StateProviderDatabase>: Evm2PayloadExecutor,
+        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N, TxEnv = EthTxEnv>,
+        EvmEnvFor<Evm>: EvmEnv,
+        for<'a> ExecutionCtxFor<'a, Evm>: AsBlockExecutionContext,
+        Evm::Executor<BorrowedEvmStateProviderDatabase>: EthPayloadExecutor,
         N: NodePrimitives<SignedTx = TransactionSigned, Receipt = Receipt>,
     {
         let parent_hash = input.parent_hash();
@@ -566,7 +565,7 @@ where
             return Err(InsertBlockError::new(
                 validated_block.try_into_inner().expect("sole handle")?,
                 ConsensusError::BlockAccessListInvalid(
-                    "block access lists are unsupported by the evm2 execution path".into(),
+                    "block access lists are unsupported by the active EVM execution path".into(),
                 )
                 .into(),
             )
@@ -1141,10 +1140,10 @@ where
         V: PayloadValidator<T, Block = N::Block>,
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
         T::ExecutionData: ExecutionPayload,
-        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N, TxEnv = Evm2TxEnv>,
-        EvmEnvFor<Evm>: Evm2Env,
-        for<'a> ExecutionCtxFor<'a, Evm>: AsEvm2BlockExecutionContext,
-        Evm::Executor<BorrowedEvm2StateProviderDatabase>: Evm2PayloadExecutor,
+        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N, TxEnv = EthTxEnv>,
+        EvmEnvFor<Evm>: EvmEnv,
+        for<'a> ExecutionCtxFor<'a, Evm>: AsBlockExecutionContext,
+        Evm::Executor<BorrowedEvmStateProviderDatabase>: EthPayloadExecutor,
         N: NodePrimitives<SignedTx = TransactionSigned, Receipt = Receipt>,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
@@ -1154,16 +1153,16 @@ where
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
         let execution_start = Instant::now();
         let execution_ctx = self.execution_ctx_for(input).map_err(BlockExecutionError::other)?;
-        let context = execution_ctx.as_evm2_block_execution_context(
+        let context = execution_ctx.as_block_execution_context(
             self.evm_config.chain_id(),
             self.evm_config.deposit_contract_address(),
         );
         let state_hook_sender = handle.state_hook_sender();
         let streamed_state_updates = state_hook_sender.is_some();
         let hashed_state_mode = if streamed_state_updates {
-            Evm2HashedStateMode::StreamOnly
+            HashedStateMode::StreamOnly
         } else {
-            Evm2HashedStateMode::OutputOnly
+            HashedStateMode::OutputOnly
         };
 
         let mut senders = Vec::with_capacity(transaction_count);
@@ -1174,7 +1173,7 @@ where
             Ok(tx_env.into_envelope())
         });
 
-        let output = debug_span!(target: "engine::tree", "execute_evm2_block")
+        let output = debug_span!(target: "engine::tree", "execute_block")
             .in_scope(|| {
                 let mut on_hashed_state_update = |hashed_state| {
                     if let Some(sender) = state_hook_sender.as_ref() {
@@ -1186,9 +1185,9 @@ where
                         .send(IndexedReceipt::new(index, receipt.clone()))
                         .map_err(|_| BlockExecutionError::msg("receipt root task closed"))
                 };
-                // SAFETY: The borrowed evm2 database is consumed by this synchronous block
+                // SAFETY: The borrowed EVM database is consumed by this synchronous block
                 // execution call and cannot outlive `state_provider`.
-                let db = unsafe { BorrowedEvm2StateProviderDatabase::new(&state_provider) };
+                let db = unsafe { BorrowedEvmStateProviderDatabase::new(&state_provider) };
                 self.evm_config
                     .executor(db)
                     .with_precompile_cache_map(self.precompile_cache_map.clone())
@@ -1205,9 +1204,10 @@ where
                     )
             })
             .map_err(|err| match err {
-                Evm2PayloadExecutionError::Execution(err) => BlockExecutionError::other(err),
-                Evm2PayloadExecutionError::Transaction(err) |
-                Evm2PayloadExecutionError::Receipt(err) => err,
+                PayloadExecutionError::Execution(err) => BlockExecutionError::other(err),
+                PayloadExecutionError::Transaction(err) | PayloadExecutionError::Receipt(err) => {
+                    err
+                }
             })?;
         drop(state_hook_sender);
         drop(receipt_tx);
@@ -1595,7 +1595,7 @@ where
     where
         T: ExecutableTxIterator<Evm>,
         Evm: ConfigureEvm<Primitives = N>,
-        EvmEnvFor<Evm>: Evm2Env,
+        EvmEnvFor<Evm>: EvmEnv,
     {
         let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
             options;
@@ -2076,12 +2076,12 @@ where
         + 'static,
     N: NodePrimitives<SignedTx = TransactionSigned, Receipt = Receipt>,
     V: PayloadValidator<Types, Block = N::Block> + Clone,
-    Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N, TxEnv = Evm2TxEnv>
+    Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N, TxEnv = EthTxEnv>
         + ConfigureEvm<Primitives = N>
         + 'static,
-    EvmEnvFor<Evm>: Evm2Env,
-    for<'a> ExecutionCtxFor<'a, Evm>: AsEvm2BlockExecutionContext,
-    Evm::Executor<BorrowedEvm2StateProviderDatabase>: Evm2PayloadExecutor,
+    EvmEnvFor<Evm>: EvmEnv,
+    for<'a> ExecutionCtxFor<'a, Evm>: AsBlockExecutionContext,
+    Evm::Executor<BorrowedEvmStateProviderDatabase>: EthPayloadExecutor,
     Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
 {
     fn validate_payload_attributes_against_header(
@@ -2261,9 +2261,9 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
 
     /// Decodes the payload block access list.
     ///
-    /// Amsterdam BAL execution is parked for the active evm2 pre-Amsterdam path. Keep the original
-    /// decoded handoff here so the BAL path can be re-enabled without rediscovering the boundary
-    /// between payload validation and prewarming.
+    /// Amsterdam BAL execution is parked for the active pre-Amsterdam execution path. Keep the
+    /// original decoded handoff here so the BAL path can be re-enabled without rediscovering
+    /// the boundary between payload validation and prewarming.
     #[cfg(any())]
     pub fn try_decoded_access_list(&self) -> Result<Option<Arc<DecodedBal>>, alloy_rlp::Error> {
         match self {

@@ -19,11 +19,11 @@ use evm2::{
 use futures_util::StreamExt;
 use reth_ethereum::{
     cli::{chainspec::EthereumChainSpecParser, interface::Cli},
-    evm::{primitives::ConfigureEvm, Evm2TxEnv},
+    evm::{primitives::ConfigureEvm, EthTxEnv},
     node::{builder::NodeHandle, EthereumNode},
     pool::TransactionPool,
     rpc::api::eth::helpers::Trace,
-    storage::{BlockReaderIdExt, SharedEvm2StateProviderDatabase, StateProviderFactory},
+    storage::{BlockReaderIdExt, SharedEvmStateProviderDatabase, StateProviderFactory},
 };
 
 fn main() {
@@ -74,11 +74,11 @@ fn main() {
                             Ok(env) => env,
                             Err(err) => match err {},
                         };
-                        let tx_env = Evm2TxEnv::from(tx.to_consensus());
+                        let tx_env = EthTxEnv::from(tx.to_consensus());
 
                         // SAFETY: `db` is only used for the synchronous inspection call below and
                         // is dropped before the boxed state provider.
-                        let db = unsafe { SharedEvm2StateProviderDatabase::new(&*state) };
+                        let db = unsafe { SharedEvmStateProviderDatabase::new(&*state) };
                         let result = eth_api.inspect_with_inspector(
                             db,
                             evm_env,

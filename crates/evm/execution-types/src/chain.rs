@@ -681,7 +681,7 @@ pub(super) mod serde_bincode_compat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{evm2_block_state_from_init, Evm2BlockReverts};
+    use crate::{execution_state_from_init, BlockReverts};
     use alloy_consensus::TxType;
     use alloy_primitives::{Address, B256};
     use reth_ethereum_primitives::Receipt;
@@ -721,16 +721,16 @@ mod tests {
 
     #[test]
     fn test_number_split() {
-        let reverts1 = vec![Evm2BlockReverts::default()];
-        let state1 = evm2_block_state_from_init(
+        let reverts1 = vec![BlockReverts::default()];
+        let state1 = execution_state_from_init(
             vec![(Address::new([2; 20]), (None, Some(Account::default()), BTreeMap::default()))],
             vec![],
         );
         let execution_outcome1: ExecutionOutcome =
             ExecutionOutcome::from_state_and_reverts(state1, reverts1, vec![vec![]], 1, vec![]);
 
-        let reverts2 = vec![Evm2BlockReverts::default()];
-        let state2 = evm2_block_state_from_init(
+        let reverts2 = vec![BlockReverts::default()];
+        let state2 = execution_state_from_init(
             vec![(Address::new([3; 20]), (None, Some(Account::default()), BTreeMap::default()))],
             vec![],
         );

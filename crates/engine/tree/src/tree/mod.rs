@@ -24,7 +24,7 @@ use reth_engine_primitives::{
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
-use reth_execution_types::evm2_block_state_hashed_post_state_sorted;
+use reth_execution_types::hashed_post_state_sorted_from_execution_state;
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle};
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadTypes};
 use reth_primitives_traits::{
@@ -72,7 +72,7 @@ pub use payload_processor::*;
 pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
-pub use reth_evm_ethereum::{AsEvm2BlockExecutionContext, Evm2PayloadExecutor, Evm2TxEnv};
+pub use reth_evm_ethereum::{AsBlockExecutionContext, EthPayloadExecutor, EthTxEnv};
 pub use reth_execution_cache::{
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider,
     ExecutionCache, PayloadExecutionCache, SavedCache,
@@ -2188,9 +2188,10 @@ where
             .provider
             .get_state(block.header().number())?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.header().number()))?;
-        let block_state = execution_output.evm2_block_state();
-        let hashed_state =
-            evm2_block_state_hashed_post_state_sorted::<reth_trie::KeccakKeyHasher>(&block_state);
+        let block_state = execution_output.execution_state();
+        let hashed_state = hashed_post_state_sorted_from_execution_state::<
+            reth_trie::KeccakKeyHasher,
+        >(&block_state);
 
         debug!(
             target: "engine::tree",

@@ -11,7 +11,7 @@ use reth_engine_primitives::EngineTypes;
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthBuiltPayload, EthPayloadAttributes};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
-use reth_evm::{ConfigureEvm, Evm2Env, NextBlockEnvAttributes, TxEnvFor};
+use reth_evm::{ConfigureEvm, EvmEnv, NextBlockEnvAttributes, TxEnvFor};
 use reth_network::{primitives::BasicNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives,
@@ -319,7 +319,7 @@ where
         Evm: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthB: EthApiBuilder<N>,
-    <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm<EvmEnv: Evm2Env>,
+    <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
     TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<RecoveredTxEnvelope>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
@@ -398,7 +398,7 @@ where
         Evm: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthB: EthApiBuilder<N>,
-    <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm<EvmEnv: Evm2Env>,
+    <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
     TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<RecoveredTxEnvelope>,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
@@ -487,7 +487,7 @@ pub fn build_jit_evm_config<C: EthereumHardforks>(
     _dump_dir: Option<std::path::PathBuf>,
 ) -> eyre::Result<(EthEvmConfig<C>, Option<()>)> {
     if jit.enabled {
-        warn!(target: "reth::cli", "JIT is unsupported by the evm2 execution path; ignoring --jit");
+        warn!(target: "reth::cli", "JIT is unsupported by the active EVM execution path; ignoring --jit");
     }
 
     Ok((EthEvmConfig::new(chain_spec), None))

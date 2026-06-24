@@ -34,7 +34,7 @@ use jsonrpsee::{
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::FullConsensus;
 use reth_engine_primitives::{ConsensusEngineEvent, ConsensusEngineHandle};
-use reth_evm::{ConfigureEvm, Evm2Env, TxEnvFor};
+use reth_evm::{ConfigureEvm, EvmEnv, TxEnvFor};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_payload_primitives::PayloadTypes;
 use reth_primitives_traits::{NodePrimitives, TxTy};
@@ -344,7 +344,7 @@ where
     )
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool> + TraceExt,
-        EthApi::Evm: ConfigureEvm<EvmEnv: Evm2Env>,
+        EthApi::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
         TxEnvFor<EthApi::Evm>: AsRef<RecoveredTxEnvelope>,
         ProviderTx<EthApi::Provider>: Clone,
         Payload: PayloadTypes,
@@ -397,7 +397,7 @@ where
     ) -> TransportRpcModules<()>
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool> + TraceExt,
-        EthApi::Evm: ConfigureEvm<EvmEnv: Evm2Env>,
+        EthApi::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
         TxEnvFor<EthApi::Evm>: AsRef<RecoveredTxEnvelope>,
         ProviderTx<EthApi::Provider>: Clone,
     {
@@ -721,7 +721,7 @@ where
     pub fn register_debug(&mut self) -> &mut Self
     where
         EthApi: EthTransactions + TraceExt,
-        EthApi::Evm: ConfigureEvm<EvmEnv: Evm2Env>,
+        EthApi::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
         TxEnvFor<EthApi::Evm>: AsRef<RecoveredTxEnvelope>,
         ProviderTx<EthApi::Provider>: Clone,
     {
@@ -881,7 +881,7 @@ where
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     EthApi: FullEthApiServer + TraceExt,
-    EthApi::Evm: ConfigureEvm<EvmEnv: Evm2Env>,
+    EthApi::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
     TxEnvFor<EthApi::Evm>: AsRef<RecoveredTxEnvelope>,
     ProviderTx<EthApi::Provider>: Clone,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,

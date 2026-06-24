@@ -20,7 +20,7 @@ use reth_downloaders::{
 use reth_ethereum_primitives::{Block, BlockBody, Transaction, TransactionSigned};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::EthEvmConfig;
-use reth_execution_types::evm2_block_state_hashed_post_state_sorted;
+use reth_execution_types::hashed_post_state_sorted_from_execution_state;
 use reth_libmdbx::{Environment, EnvironmentFlags, Mode};
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
@@ -43,7 +43,7 @@ use reth_stages::{
 use reth_stages_api::{Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
 use reth_storage_api::{
-    BorrowedEvm2StateProviderDatabase, StateWriteConfig, StorageChangeSetReader, StorageSettings,
+    BorrowedEvmStateProviderDatabase, StateWriteConfig, StorageChangeSetReader, StorageSettings,
     StorageSettingsCache,
 };
 use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
@@ -951,13 +951,14 @@ fn execute_and_commit_block(
         let state_provider = provider.latest();
         // SAFETY: The borrowed database is used synchronously by this executor call and does not
         // outlive `state_provider`.
-        let db = unsafe { BorrowedEvm2StateProviderDatabase::new(&*state_provider) };
+        let db = unsafe { BorrowedEvmStateProviderDatabase::new(&*state_provider) };
         let executor = evm_config.batch_executor(db);
         executor.execute(&block_with_senders)?
     };
 
     let gas_used = output.gas_used;
-    let hashed_state = evm2_block_state_hashed_post_state_sorted::<KeccakKeyHasher>(&output.state);
+    let hashed_state =
+        hashed_post_state_sorted_from_execution_state::<KeccakKeyHasher>(&output.state);
     type TestStateRoot<'a, TX, A> = StateRoot<
         reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
         reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,

@@ -500,7 +500,7 @@ where
 
 fn unsupported_builder_validation() -> RpcResult<()> {
     Err(EthApiError::Unsupported(
-        "builder submission validation is unsupported by the evm2 execution path",
+        "builder submission validation is unsupported by the active EVM execution path",
     )
     .into())
 }

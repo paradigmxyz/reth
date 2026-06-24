@@ -18,9 +18,9 @@ use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_evm::{
     execute::{ExecutableTxFor, ExecutableTxParts, WithTxEnv},
-    ConfigureEvm, ConvertTx, Evm2Env, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, TxEnvFor,
+    ConfigureEvm, ConvertTx, EvmEnv, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, TxEnvFor,
 };
-use reth_execution_types::Evm2BlockState;
+use reth_execution_types::ExecutionState;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader,
@@ -47,7 +47,7 @@ use std::{
 };
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
-// Block-level access list execution is Amsterdam-only and out of scope for the evm2
+// Block-level access list execution is Amsterdam-only and out of scope for the active EVM
 // pre-Amsterdam sync path. Keep the implementation in-tree, but do not compile it.
 #[cfg(any())]
 pub mod bal;
@@ -306,7 +306,7 @@ where
             + Sync
             + 'static,
         Evm: ConfigureEvm<Primitives = N>,
-        EvmEnvFor<Evm>: Evm2Env,
+        EvmEnvFor<Evm>: EvmEnv,
     {
         let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
             options;
@@ -355,7 +355,7 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
         Evm: ConfigureEvm<Primitives = N>,
-        EvmEnvFor<Evm>: Evm2Env,
+        EvmEnvFor<Evm>: EvmEnv,
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
@@ -552,7 +552,7 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
         Evm: ConfigureEvm<Primitives = N>,
-        EvmEnvFor<Evm>: Evm2Env,
+        EvmEnvFor<Evm>: EvmEnv,
     {
         let mode = if parallel_bal_execution {
             #[cfg(any())]
@@ -572,7 +572,7 @@ where
             {
                 warn!(
                     target: "engine::tree::payload_processor",
-                    "BAL prewarming is unsupported in the evm2 pre-Amsterdam path"
+                    "BAL prewarming is unsupported in the active pre-Amsterdam execution path"
                 );
                 PrewarmMode::Skipped
             }
@@ -777,7 +777,7 @@ where
     pub fn on_inserted_executed_block(
         &self,
         block_with_parent: BlockWithParent,
-        block_state: &Evm2BlockState,
+        block_state: &ExecutionState,
     ) {
         let cache_state_metrics = self.cache_state_metrics.clone();
         self.execution_cache.update_with_guard(|cached| {
@@ -1096,7 +1096,7 @@ mod tests {
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_cache::CachedStatus;
-    use reth_execution_types::{evm2_block_state_from_init, Evm2BlockState};
+    use reth_execution_types::{execution_state_from_init, ExecutionState};
     use reth_primitives_traits::Account;
     #[cfg(any())]
     use reth_primitives_traits::{Recovered, StorageEntry};
@@ -1210,7 +1210,7 @@ mod tests {
             block: BlockNumHash { hash: block_hash, number: 1 },
             parent: parent_hash,
         };
-        let block_state = Evm2BlockState::default();
+        let block_state = ExecutionState::default();
 
         // Cache should be empty initially
         assert!(payload_processor.execution_cache.get_cache_for(block_hash).is_none());
@@ -1246,7 +1246,7 @@ mod tests {
             block: BlockNumHash { hash: block3_hash, number: 3 },
             parent: wrong_parent,
         };
-        let block_state = Evm2BlockState::default();
+        let block_state = ExecutionState::default();
 
         payload_processor.on_inserted_executed_block(block_with_parent, &block_state);
 
@@ -1282,7 +1282,7 @@ mod tests {
             .expect("expected parent cache checkout to succeed");
 
         let polluted_address = Address::random();
-        let block_state = evm2_block_state_from_init(
+        let block_state = execution_state_from_init(
             [(
                 polluted_address,
                 (
