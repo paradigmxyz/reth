@@ -2698,12 +2698,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
         // Write hashed account updates.
-        let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
-        for (hashed_address, account) in hashed_state.accounts() {
-            if let Some(account) = account {
-                hashed_accounts_cursor.upsert(*hashed_address, account)?;
-            } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
-                hashed_accounts_cursor.delete_current()?;
+        if !hashed_state.accounts().is_empty() {
+            let mut hashed_accounts_cursor =
+                self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
+            for (hashed_address, account) in hashed_state.accounts() {
+                if let Some(account) = account {
+                    hashed_accounts_cursor.upsert(*hashed_address, account)?;
+                } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
+                    hashed_accounts_cursor.delete_current()?;
+                }
             }
         }
 
