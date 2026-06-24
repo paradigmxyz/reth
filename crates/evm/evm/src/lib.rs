@@ -42,6 +42,12 @@ pub trait EvmEnv: Debug + Clone + Send + Sync + 'static {
 
     /// Returns the EVM block environment.
     fn block_env(&self) -> evm2::env::BlockEnv;
+
+    /// Returns this environment with transaction nonce checks disabled.
+    fn with_nonce_check_disabled(self) -> Self;
+
+    /// Returns this environment with transaction balance checks disabled.
+    fn with_balance_check_disabled(self) -> Self;
 }
 
 #[cfg(feature = "std")]

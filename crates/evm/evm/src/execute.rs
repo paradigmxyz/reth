@@ -131,15 +131,6 @@ pub trait BlockExecutorFactory: Clone + Debug + Send + Sync + Unpin {
         &self,
         tx: &'a Self::Transaction,
     ) -> &'a <evm2::BaseEvmTypes as evm2::EvmTypes>::Tx;
-
-    /// Creates a prewarm EVM over the provided state.
-    fn prewarm_evm<DB>(
-        &self,
-        state_provider: DB,
-        env: Self::EvmEnv,
-    ) -> evm2::Evm<evm2::BaseEvmTypes>
-    where
-        DB: StateProvider + Send + 'static;
 }
 
 /// Input for block assembly.

@@ -20,7 +20,6 @@ reth-ethereum-primitives.workspace = true
 reth-evm.workspace = true
 reth-trie-common.workspace = true
 reth-storage-errors = { workspace = true, optional = true }
-reth-storage-api = { workspace = true, optional = true }
 evm2.workspace = true
 
 # Alloy
@@ -42,7 +41,6 @@ asm-keccak = [
     "evm2/asm-keccak",
     "reth-evm/asm-keccak",
     "reth-execution-types/asm-keccak",
-    "reth-storage-api?/asm-keccak",
     "alloy-primitives/asm-keccak",
 ]
 c-kzg = [
@@ -82,8 +80,6 @@ std = [
     "alloy-rpc-types-engine/std",
     "dep:reth-storage-errors",
     "reth-storage-errors/std",
-    "dep:reth-storage-api",
-    "reth-storage-api/std",
     "alloy-sol-types/std",
 ]
 test-utils = [

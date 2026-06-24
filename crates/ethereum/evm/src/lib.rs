@@ -42,12 +42,30 @@ use convert::{
 pub type EthEvm<DB = (), I = (), P = ()> = PhantomData<(DB, I, P)>;
 
 /// Configured Ethereum EVM environment.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct EthEvmEnv {
     /// Active EVM spec.
     pub spec: evm2::SpecId,
+    /// Runtime configuration for the active EVM spec.
+    pub version: evm2::Version,
     /// EVM block environment.
     pub block: evm2::env::BlockEnv,
+}
+
+impl EthEvmEnv {
+    /// Creates a new Ethereum EVM environment.
+    pub const fn new(spec: evm2::SpecId, block: evm2::env::BlockEnv, chain_id: u64) -> Self {
+        let mut version = evm2::Version::new(spec);
+        version.chain_id = chain_id;
+        Self { spec, version, block }
+    }
+}
+
+impl Default for EthEvmEnv {
+    fn default() -> Self {
+        let spec = evm2::SpecId::default();
+        Self { spec, version: evm2::Version::new(spec), block: Default::default() }
+    }
 }
 
 impl EvmEnv for EthEvmEnv {
@@ -57,6 +75,16 @@ impl EvmEnv for EthEvmEnv {
 
     fn block_env(&self) -> evm2::env::BlockEnv {
         self.block
+    }
+
+    fn with_nonce_check_disabled(mut self) -> Self {
+        self.version.features.remove(evm2::EvmFeatures::NONCE_CHECK);
+        self
+    }
+
+    fn with_balance_check_disabled(mut self) -> Self {
+        self.version.features.remove(evm2::EvmFeatures::BALANCE_CHECK);
+        self
     }
 }
 
@@ -228,13 +256,15 @@ where
     }
 
     fn evm_env(&self, header: &Header) -> Result<EvmEnvFor<Self>, Self::Error> {
-        Ok(EthEvmEnv {
-            spec: spec_id(self.chain_spec().as_ref(), header),
-            block: block_env_with_blob_params(
+        let spec = spec_id(self.chain_spec().as_ref(), header);
+        Ok(EthEvmEnv::new(
+            spec,
+            block_env_with_blob_params(
                 header,
                 self.chain_spec().as_ref().blob_params_at_timestamp(header.timestamp),
             ),
-        })
+            self.chain_spec().chain_id(),
+        ))
     }
 
     fn next_evm_env(
@@ -259,13 +289,15 @@ where
             ..Default::default()
         };
 
-        Ok(EthEvmEnv {
-            spec: spec_id(self.chain_spec().as_ref(), &header),
-            block: block_env_with_blob_params(
+        let spec = spec_id(self.chain_spec().as_ref(), &header);
+        Ok(EthEvmEnv::new(
+            spec,
+            block_env_with_blob_params(
                 &header,
                 self.chain_spec().as_ref().blob_params_at_timestamp(attributes.timestamp),
             ),
-        })
+            self.chain_spec().chain_id(),
+        ))
     }
 
     fn context_for_block<'a>(
@@ -386,17 +418,19 @@ where
     EvmF: Clone + Debug + Send + Sync + Unpin + 'static,
 {
     fn evm_env_for_payload(&self, payload: &ExecutionData) -> Result<EvmEnvFor<Self>, Self::Error> {
-        Ok(EthEvmEnv {
-            spec: spec_id_by_timestamp_and_block_number(
-                self.chain_spec().as_ref(),
-                payload.payload.timestamp(),
-                payload.payload.block_number(),
-            ),
-            block: payload_block_env(
+        let spec = spec_id_by_timestamp_and_block_number(
+            self.chain_spec().as_ref(),
+            payload.payload.timestamp(),
+            payload.payload.block_number(),
+        );
+        Ok(EthEvmEnv::new(
+            spec,
+            payload_block_env(
                 payload,
                 self.chain_spec().as_ref().blob_params_at_timestamp(payload.payload.timestamp()),
             ),
-        })
+            self.chain_spec().chain_id(),
+        ))
     }
 
     fn context_for_payload<'a>(

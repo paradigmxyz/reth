@@ -103,46 +103,12 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
         C: EthChainSpec<Header = Header>,
         DB: evm2::evm::DynDatabase + 'static,
     {
-        let mut version = evm2::Version::new(env.spec);
-        version.chain_id = self.chain_spec.chain_id();
-
         evm2::Evm::<evm2::BaseEvmTypes>::new_with_execution_config(
-            evm2::ExecutionConfig::for_spec_and_version(env.spec, version),
+            evm2::ExecutionConfig::for_spec_and_version(env.spec, env.version),
             env.spec,
             env.block,
             evm2::ethereum::ethereum_tx_registry(env.spec),
             db,
-            alloc::boxed::Box::new(CachedPrecompileProvider::new(
-                evm2::Precompiles::base(env.spec),
-                self.precompile_cache_map.clone(),
-                env.spec,
-                None,
-            )),
-        )
-    }
-
-    /// Creates an EVM instance for prewarming.
-    #[cfg(feature = "std")]
-    pub fn create_prewarm_evm<DB>(
-        &self,
-        state_provider: DB,
-        env: EthEvmEnv,
-    ) -> evm2::Evm<evm2::BaseEvmTypes>
-    where
-        C: EthChainSpec<Header = Header>,
-        DB: reth_storage_api::StateProvider + Send + 'static,
-    {
-        let mut version = evm2::Version::new(env.spec);
-        version.chain_id = self.chain_spec.chain_id();
-        version.features.remove(evm2::EvmFeatures::NONCE_CHECK);
-        version.features.remove(evm2::EvmFeatures::BALANCE_CHECK);
-
-        evm2::Evm::<evm2::BaseEvmTypes>::new_with_execution_config(
-            evm2::ExecutionConfig::for_spec_and_version(env.spec, version),
-            env.spec,
-            env.block,
-            evm2::ethereum::ethereum_tx_registry(env.spec),
-            evm2::evm::Db::new(reth_storage_api::EvmStateProviderDatabase::new(state_provider)),
             alloc::boxed::Box::new(CachedPrecompileProvider::new(
                 evm2::Precompiles::base(env.spec),
                 self.precompile_cache_map.clone(),
@@ -193,16 +159,5 @@ where
         tx: &'a Self::Transaction,
     ) -> &'a <evm2::BaseEvmTypes as evm2::EvmTypes>::Tx {
         tx.as_envelope()
-    }
-
-    fn prewarm_evm<DB>(
-        &self,
-        state_provider: DB,
-        env: Self::EvmEnv,
-    ) -> evm2::Evm<evm2::BaseEvmTypes>
-    where
-        DB: reth_storage_api::StateProvider + Send + 'static,
-    {
-        self.create_prewarm_evm(state_provider, env)
     }
 }

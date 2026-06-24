@@ -144,11 +144,11 @@ where
         let ctx = self.ctx.clone();
         let span = Span::current();
 
-        self.executor.spawn_blocking_named("prewarm-txs", move || {
+        self.executor.spawn_blocking_named("prewarm-transactions", move || {
             let _enter = debug_span!(
                 target: "engine::tree::payload_processor::prewarm",
                 parent: &span,
-                "prewarm_txs"
+                "prewarm_transactions"
             )
             .entered();
 
@@ -182,7 +182,7 @@ where
                         let _enter = trace_span!(
                             target: "engine::tree::payload_processor::prewarm",
                             parent: parent_span,
-                            "prewarm_tx",
+                            "prewarm_transaction",
                             i = index,
                         )
                         .entered();
@@ -643,11 +643,13 @@ where
             state_provider = Box::new(CachedStateProvider::new_prewarm(state_provider, caches));
         }
 
-        Some(
-            self.evm_config
-                .block_executor_factory()
-                .prewarm_evm(state_provider, self.env.evm_env.clone()),
-        )
+        let evm_env =
+            self.env.evm_env.clone().with_nonce_check_disabled().with_balance_check_disabled();
+
+        Some(self.evm_config.evm_with_env(
+            evm2::evm::Db::new(reth_storage_api::EvmStateProviderDatabase::new(state_provider)),
+            evm_env,
+        ))
     }
 
     /// Returns `true` if prewarming should stop.
