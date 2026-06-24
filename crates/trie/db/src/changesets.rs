@@ -415,12 +415,16 @@ impl ChangesetCache {
         Self { inner: Arc::new(RwLock::new(ChangesetCacheInner::new())) }
     }
 
-    /// Retrieves changesets for a block by hash.
+    /// Retrieves changesets for a block.
     ///
     /// Returns `None` if the block is not in the cache (either evicted or never computed).
     /// Updates hit/miss metrics accordingly.
-    pub fn get(&self, block_hash: &B256) -> Option<Arc<TrieUpdatesSorted>> {
-        self.inner.read().get_by_block_hash(block_hash)
+    pub fn get(
+        &self,
+        block_hash: B256,
+        block_number: BlockNumber,
+    ) -> Option<Arc<TrieUpdatesSorted>> {
+        self.inner.read().get(&ChangesetRangeKey::single(block_number, block_hash))
     }
 
     /// Inserts changesets for a block into the cache.
@@ -865,16 +869,12 @@ impl ChangesetRangeKey {
     const fn single(block_number: BlockNumber, block_hash: B256) -> Self {
         Self::new(block_number, block_number, block_hash)
     }
-
-    const fn is_single(&self) -> bool {
-        self.start_block == self.end_block
-    }
 }
 
 /// In-memory cache for trie changesets with explicit eviction policy.
 ///
-/// Holds changesets for blocks that have been validated but not yet persisted.
-/// Keyed by block hash for fast lookup during reorgs. Eviction is controlled
+/// Holds changesets for blocks or block ranges that have been validated but not yet persisted.
+/// Keyed by canonical block range. Eviction is controlled
 /// explicitly by the engine API tree handler when persistence completes.
 ///
 /// ## Eviction Policy
@@ -895,9 +895,6 @@ impl ChangesetRangeKey {
 struct ChangesetCacheInner {
     /// Cache entries keyed by inclusive block range plus the range's canonical end hash.
     entries: BTreeMap<ChangesetRangeKey, Arc<TrieUpdatesSorted>>,
-
-    /// Lookup index for single-block ranges by block hash.
-    block_hashes: B256Map<ChangesetRangeKey>,
 
     /// Range start block to cache keys mapping for eviction.
     range_starts: BTreeMap<BlockNumber, Vec<ChangesetRangeKey>>,
@@ -946,21 +943,11 @@ impl ChangesetCacheInner {
     fn new() -> Self {
         Self {
             entries: BTreeMap::new(),
-            block_hashes: B256Map::default(),
             range_starts: BTreeMap::new(),
             pending: B256Map::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
-    }
-
-    fn get_by_block_hash(&self, block_hash: &B256) -> Option<Arc<TrieUpdatesSorted>> {
-        let Some(key) = self.block_hashes.get(block_hash) else {
-            #[cfg(feature = "metrics")]
-            self.metrics.misses.increment(1);
-            return None
-        };
-        self.get(key)
     }
 
     fn get(&self, key: &ChangesetRangeKey) -> Option<Arc<TrieUpdatesSorted>> {
@@ -987,10 +974,6 @@ impl ChangesetCacheInner {
         );
 
         let is_new_entry = self.entries.insert(key, changesets).is_none();
-
-        if key.is_single() {
-            self.block_hashes.insert(key.end_block_hash, key);
-        }
 
         if is_new_entry {
             self.range_starts.entry(key.start_block).or_default().push(key);
@@ -1036,9 +1019,6 @@ impl ChangesetCacheInner {
                 );
                 for key in keys {
                     if self.entries.remove(&key).is_some() {
-                        if key.is_single() {
-                            self.block_hashes.remove(&key.end_block_hash);
-                        }
                         evicted_count += 1;
                     }
                 }
@@ -1097,6 +1077,14 @@ mod tests {
         changesets: Arc<TrieUpdatesSorted>,
     ) {
         cache.insert(ChangesetRangeKey::single(block_number, block_hash), changesets);
+    }
+
+    fn get_test_changesets(
+        cache: &ChangesetCacheInner,
+        block_hash: B256,
+        block_number: BlockNumber,
+    ) -> Option<Arc<TrieUpdatesSorted>> {
+        cache.get(&ChangesetRangeKey::single(block_number, block_hash))
     }
 
     fn test_account(balance: u64) -> Account {
@@ -1422,7 +1410,7 @@ mod tests {
         insert_test_changesets(&mut cache, hash, 100, Arc::clone(&changesets));
 
         // Should be able to retrieve it
-        let retrieved = cache.get_by_block_hash(&hash);
+        let retrieved = get_test_changesets(&cache, hash, 100);
         assert!(retrieved.is_some());
         assert_eq!(cache.entries.len(), 1);
     }
@@ -1436,13 +1424,13 @@ mod tests {
         for i in 0..10 {
             let hash = B256::random();
             insert_test_changesets(&mut cache, hash, 100 + i, create_test_changesets());
-            hashes.push(hash);
+            hashes.push((100 + i, hash));
         }
 
         // Should be able to retrieve all
         assert_eq!(cache.entries.len(), 10);
-        for hash in &hashes {
-            assert!(cache.get_by_block_hash(hash).is_some());
+        for (block_number, hash) in hashes {
+            assert!(get_test_changesets(&cache, hash, block_number).is_some());
         }
     }
 
@@ -1470,7 +1458,7 @@ mod tests {
         // Verify blocks 0-3 are evicted
         for i in 0..4 {
             assert!(
-                cache.get_by_block_hash(&hashes[i as usize].1).is_none(),
+                get_test_changesets(&cache, hashes[i as usize].1, i).is_none(),
                 "Block {} should be evicted",
                 i
             );
@@ -1479,7 +1467,7 @@ mod tests {
         // Verify blocks 4-14 are still present
         for i in 4..15 {
             assert!(
-                cache.get_by_block_hash(&hashes[i as usize].1).is_some(),
+                get_test_changesets(&cache, hashes[i as usize].1, i).is_some(),
                 "Block {} should be present",
                 i
             );
@@ -1514,8 +1502,8 @@ mod tests {
 
         // Blocks 101-165 should remain (65 blocks)
         assert_eq!(cache.entries.len(), 65);
-        assert!(cache.get_by_block_hash(&hashes[&100]).is_none());
-        assert!(cache.get_by_block_hash(&hashes[&101]).is_some());
+        assert!(get_test_changesets(&cache, hashes[&100], 100).is_none());
+        assert!(get_test_changesets(&cache, hashes[&101], 101).is_some());
     }
 
     #[test]
@@ -1541,10 +1529,10 @@ mod tests {
         // Explicitly evict blocks < 5
         cache.evict(5);
 
-        assert!(cache.get_by_block_hash(&hash_3).is_none(), "Block 3 should be evicted");
-        assert!(cache.get_by_block_hash(&hash_5).is_some(), "Block 5 should be present");
-        assert!(cache.get_by_block_hash(&hash_10).is_some(), "Block 10 should be present");
-        assert!(cache.get_by_block_hash(&hash_15).is_some(), "Block 15 should be present");
+        assert!(get_test_changesets(&cache, hash_3, 3).is_none(), "Block 3 should be evicted");
+        assert!(get_test_changesets(&cache, hash_5, 5).is_some(), "Block 5 should be present");
+        assert!(get_test_changesets(&cache, hash_10, 10).is_some(), "Block 10 should be present");
+        assert!(get_test_changesets(&cache, hash_15, 15).is_some(), "Block 15 should be present");
     }
 
     #[test]
@@ -1558,8 +1546,8 @@ mod tests {
         insert_test_changesets(&mut cache, hash_1b, 100, create_test_changesets());
 
         // Both should be retrievable
-        assert!(cache.get_by_block_hash(&hash_1a).is_some());
-        assert!(cache.get_by_block_hash(&hash_1b).is_some());
+        assert!(get_test_changesets(&cache, hash_1a, 100).is_some());
+        assert!(get_test_changesets(&cache, hash_1b, 100).is_some());
         assert_eq!(cache.entries.len(), 2);
     }
 
@@ -1619,9 +1607,9 @@ mod tests {
         cache.evict(15);
 
         assert_eq!(cache.entries.len(), 1);
-        assert!(cache.get_by_block_hash(&hash_10a).is_none());
-        assert!(cache.get_by_block_hash(&hash_10b).is_none());
-        assert!(cache.get_by_block_hash(&hash_10c).is_none());
-        assert!(cache.get_by_block_hash(&hash_20).is_some());
+        assert!(get_test_changesets(&cache, hash_10a, 10).is_none());
+        assert!(get_test_changesets(&cache, hash_10b, 10).is_none());
+        assert!(get_test_changesets(&cache, hash_10c, 10).is_none());
+        assert!(get_test_changesets(&cache, hash_20, 20).is_some());
     }
 }
