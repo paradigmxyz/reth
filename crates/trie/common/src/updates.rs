@@ -10,6 +10,7 @@ use alloy_primitives::{
     map::{B256Map, B256Set, HashMap, HashSet},
     FixedBytes, B256,
 };
+use smallvec::SmallVec;
 
 /// The aggregation of trie updates.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
@@ -674,7 +675,7 @@ impl TrieUpdatesSorted {
         struct StorageAcc<'a> {
             is_deleted: bool,
             sealed: bool,
-            slices: Vec<&'a [(Nibbles, Option<BranchNodeCompact>)]>,
+            slices: SmallVec<[&'a [(Nibbles, Option<BranchNodeCompact>)]; 4]>,
         }
 
         let mut acc: B256Map<StorageAcc<'_>> = B256Map::default();
@@ -684,7 +685,7 @@ impl TrieUpdatesSorted {
                 let entry = acc.entry(*addr).or_insert_with(|| StorageAcc {
                     is_deleted: false,
                     sealed: false,
-                    slices: Vec::new(),
+                    slices: SmallVec::new(),
                 });
 
                 if entry.sealed {

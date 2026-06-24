@@ -16,6 +16,7 @@ use itertools::Itertools;
 #[cfg(feature = "rayon")]
 pub use rayon::*;
 use reth_primitives_traits::Account;
+use smallvec::SmallVec;
 
 #[cfg(feature = "rayon")]
 use rayon::prelude::{FromParallelIterator, IntoParallelIterator, ParallelIterator};
@@ -655,7 +656,7 @@ impl HashedPostStateSorted {
         struct StorageAcc<'a> {
             wiped: bool,
             sealed: bool,
-            slices: Vec<&'a [(B256, U256)]>,
+            slices: SmallVec<[&'a [(B256, U256)]; 4]>,
         }
 
         let mut acc: B256Map<StorageAcc<'_>> = B256Map::default();
@@ -665,7 +666,7 @@ impl HashedPostStateSorted {
                 let entry = acc.entry(*addr).or_insert_with(|| StorageAcc {
                     wiped: false,
                     sealed: false,
-                    slices: Vec::new(),
+                    slices: SmallVec::new(),
                 });
 
                 if entry.sealed {

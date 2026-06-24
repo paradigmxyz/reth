@@ -10638,6 +10638,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "smallvec",
 ]
 
 [[package]]
