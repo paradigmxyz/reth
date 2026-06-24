@@ -281,9 +281,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
         if storage_v2 {
             let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
-            for batch in batches {
-                self.rocksdb_provider.commit_batch(batch)?;
-            }
+            self.rocksdb_provider.commit_batches(batches)?;
         }
 
         self.static_file_provider.commit()?;
@@ -385,10 +383,7 @@ impl<TX, N: NodeTypes> RocksDBProviderFactory for DatabaseProvider<TX, N> {
 
     fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()> {
         let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
-        for batch in batches {
-            self.rocksdb_provider.commit_batch(batch)?;
-        }
-        Ok(())
+        self.rocksdb_provider.commit_batches(batches)
     }
 }
 
@@ -3901,9 +3896,7 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
 
             let start = Instant::now();
             let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
-            for batch in batches {
-                self.rocksdb_provider.commit_batch(batch)?;
-            }
+            self.rocksdb_provider.commit_batches(batches)?;
             timings.rocksdb = start.elapsed();
 
             let start = Instant::now();

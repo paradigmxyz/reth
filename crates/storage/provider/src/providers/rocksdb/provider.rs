@@ -46,6 +46,48 @@ fn synced_write_options() -> WriteOptions {
     opts
 }
 
+/// RocksDB write batch header: sequence number (u64) + record count (u32).
+const WRITE_BATCH_HEADER_LEN: usize = 12;
+
+fn coalesce_write_batches(
+    batches: Vec<WriteBatchWithTransaction<true>>,
+) -> Result<Option<WriteBatchWithTransaction<true>>, Vec<WriteBatchWithTransaction<true>>> {
+    let mut record_count = 0u32;
+    for idx in 0..batches.len() {
+        let Ok(batch_record_count) = u32::try_from(batches[idx].len()) else {
+            return Err(batches);
+        };
+        let Some(next_record_count) = record_count.checked_add(batch_record_count) else {
+            return Err(batches);
+        };
+        record_count = next_record_count;
+    }
+
+    if record_count == 0 {
+        return Ok(None);
+    }
+
+    let mut combined = Vec::new();
+
+    for batch in batches {
+        if batch.is_empty() {
+            continue;
+        }
+
+        let data = batch.data();
+        debug_assert!(data.len() >= WRITE_BATCH_HEADER_LEN);
+
+        if combined.is_empty() {
+            combined.extend_from_slice(data);
+        } else {
+            combined.extend_from_slice(&data[WRITE_BATCH_HEADER_LEN..]);
+        }
+    }
+
+    combined[8..WRITE_BATCH_HEADER_LEN].copy_from_slice(&record_count.to_le_bytes());
+    Ok(Some(WriteBatchWithTransaction::from_data(&combined)))
+}
+
 /// Pending `RocksDB` batches type alias.
 pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
 
@@ -1286,6 +1328,38 @@ impl RocksDBProvider {
     /// Panics if the provider is in read-only mode.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = batch.len(), batch_size = batch.size_in_bytes()))]
     pub fn commit_batch(&self, batch: WriteBatchWithTransaction<true>) -> ProviderResult<()> {
+        self.0.db_rw().write_opt(batch, &synced_write_options()).map_err(|e| {
+            ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
+        })
+    }
+
+    /// Commits multiple raw `WriteBatchWithTransaction` values to `RocksDB` with one synced write.
+    ///
+    /// The pending storage-v2 batches are already committed together at provider commit time.
+    /// Coalescing their serialized records preserves the same write order while avoiding a WAL
+    /// sync per logical sub-batch.
+    ///
+    /// # Panics
+    /// Panics if the provider is in read-only mode.
+    #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_count = batches.len()))]
+    pub fn commit_batches(
+        &self,
+        batches: Vec<WriteBatchWithTransaction<true>>,
+    ) -> ProviderResult<()> {
+        let batch = match coalesce_write_batches(batches) {
+            Ok(Some(batch)) => batch,
+            Ok(None) => return Ok(()),
+            Err(batches) => {
+                for batch in batches {
+                    self.commit_batch(batch)?;
+                }
+                return Ok(());
+            }
+        };
+
         self.0.db_rw().write_opt(batch, &synced_write_options()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                 message: e.to_string().into(),
@@ -2832,6 +2906,51 @@ mod tests {
         const DUPSORT: bool = false;
         type Key = u64;
         type Value = Vec<u8>;
+    }
+
+    #[derive(Default)]
+    struct BatchOps(Vec<(Vec<u8>, Option<Vec<u8>>)>);
+
+    impl rocksdb::WriteBatchIterator for BatchOps {
+        fn put(&mut self, key: &[u8], value: &[u8]) {
+            self.0.push((key.to_vec(), Some(value.to_vec())));
+        }
+
+        fn delete(&mut self, key: &[u8]) {
+            self.0.push((key.to_vec(), None));
+        }
+    }
+
+    #[test]
+    fn test_coalesce_write_batches_preserves_record_order() {
+        let mut first = WriteBatchWithTransaction::<true>::default();
+        first.put(b"account-history", b"one");
+
+        let empty = WriteBatchWithTransaction::<true>::default();
+
+        let mut second = WriteBatchWithTransaction::<true>::default();
+        second.delete(b"storage-history-old");
+        second.put(b"storage-history-new", b"two");
+
+        let combined = match coalesce_write_batches(vec![first, empty, second]) {
+            Ok(Some(batch)) => batch,
+            Ok(None) => panic!("expected coalesced batch"),
+            Err(_) => panic!("coalescing should not overflow"),
+        };
+
+        assert_eq!(combined.len(), 3);
+
+        let mut ops = BatchOps::default();
+        combined.iterate(&mut ops);
+
+        assert_eq!(
+            ops.0,
+            vec![
+                (b"account-history".to_vec(), Some(b"one".to_vec())),
+                (b"storage-history-old".to_vec(), None),
+                (b"storage-history-new".to_vec(), Some(b"two".to_vec())),
+            ]
+        );
     }
 
     #[test]
