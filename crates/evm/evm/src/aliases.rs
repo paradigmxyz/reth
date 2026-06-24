@@ -2,9 +2,6 @@
 
 use crate::ConfigureEvm;
 
-/// Helper to access the EVM spec for a given [`ConfigureEvm`].
-pub type SpecFor<Evm> = <Evm as ConfigureEvm>::Spec;
-
 /// Type alias for the configured EVM environment.
 pub type EvmEnvFor<Evm> = <Evm as ConfigureEvm>::EvmEnv;
 

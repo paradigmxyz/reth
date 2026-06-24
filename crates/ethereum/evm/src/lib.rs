@@ -195,7 +195,6 @@ where
     type Primitives = EthPrimitives;
     type Error = Infallible;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
-    type Spec = evm2::SpecId;
     type EvmEnv = EthEvmEnv;
     type TxEnv = EthTxEnv;
     type ExecutionCtx<'a>
@@ -314,11 +313,6 @@ where
         self.chain_spec().deposit_contract_address()
     }
 
-    #[cfg(feature = "std")]
-    fn evm_tx<'a>(&self, tx: &'a EthTxEnv) -> &'a <evm2::BaseEvmTypes as evm2::EvmTypes>::Tx {
-        tx.as_envelope()
-    }
-
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: evm2::evm::Database + Clone + 'static,
@@ -382,14 +376,6 @@ where
             ),
         )
         .map_err(Into::into)
-    }
-
-    #[cfg(feature = "std")]
-    fn prewarm_evm<DB>(&self, state_provider: DB, env: EthEvmEnv) -> evm2::Evm<evm2::BaseEvmTypes>
-    where
-        DB: reth_storage_api::StateProvider + Send + 'static,
-    {
-        self.executor_factory.prewarm_evm(state_provider, env)
     }
 }
 

@@ -17,7 +17,6 @@ use reth_evm::{
 };
 use reth_evm_ethereum::{EthEvmConfig, EthEvmEnv, EthTxEnv};
 use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader, TxTy};
-use reth_storage_api::StateProvider;
 use reth_storage_errors::any::AnyError;
 
 /// EVM configuration for big-block execution.
@@ -63,7 +62,6 @@ where
     type Primitives = EthPrimitives;
     type Error = Infallible;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
-    type Spec = <EthEvmConfig<C> as ConfigureEvm>::Spec;
     type EvmEnv = EthEvmEnv;
     type TxEnv = EthTxEnv;
     type ExecutionCtx<'a>
@@ -126,10 +124,6 @@ where
         self.inner.deposit_contract_address()
     }
 
-    fn evm_tx<'a>(&self, tx: &'a EthTxEnv) -> &'a <evm2::BaseEvmTypes as evm2::EvmTypes>::Tx {
-        self.inner.evm_tx(tx)
-    }
-
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: evm2::evm::Database + Clone + 'static,
@@ -172,17 +166,6 @@ where
         DB::Error: core::error::Error + Send + Sync + 'static,
     {
         self.inner.pre_block_state_changes(db, evm_env, block_number, ctx)
-    }
-
-    fn prewarm_evm<DB>(
-        &self,
-        state_provider: DB,
-        env: EvmEnvFor<Self>,
-    ) -> evm2::Evm<evm2::BaseEvmTypes>
-    where
-        DB: StateProvider + Send + 'static,
-    {
-        self.inner.prewarm_evm(state_provider, env)
     }
 }
 

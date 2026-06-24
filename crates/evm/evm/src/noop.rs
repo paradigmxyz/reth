@@ -4,8 +4,6 @@ use crate::{ConfigureEvm, EvmEnvFor};
 #[cfg(feature = "std")]
 use alloc::boxed::Box;
 use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader};
-#[cfg(feature = "std")]
-use reth_storage_api::StateProvider;
 
 /// A no-op EVM config that panics on any call. Used as a typesystem hack to satisfy
 /// [`ConfigureEvm`] bounds.
@@ -36,7 +34,6 @@ where
     type Primitives = Inner::Primitives;
     type Error = Inner::Error;
     type NextBlockEnvCtx = Inner::NextBlockEnvCtx;
-    type Spec = Inner::Spec;
     type EvmEnv = Inner::EvmEnv;
     type TxEnv = Inner::TxEnv;
     type ExecutionCtx<'a>
@@ -103,14 +100,6 @@ where
         self.inner().deposit_contract_address()
     }
 
-    #[cfg(feature = "std")]
-    fn evm_tx<'a>(
-        &self,
-        tx: &'a crate::TxEnvFor<Self>,
-    ) -> &'a <evm2::BaseEvmTypes as evm2::EvmTypes>::Tx {
-        self.inner().evm_tx(tx)
-    }
-
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: evm2::evm::Database + Clone + 'static,
@@ -156,18 +145,6 @@ where
         DB::Error: core::error::Error + Send + Sync + 'static,
     {
         self.inner().pre_block_state_changes(db, evm_env, block_number, ctx)
-    }
-
-    #[cfg(feature = "std")]
-    fn prewarm_evm<DB>(
-        &self,
-        state_provider: DB,
-        env: EvmEnvFor<Self>,
-    ) -> evm2::Evm<evm2::BaseEvmTypes>
-    where
-        DB: StateProvider + Send + 'static,
-    {
-        self.inner().prewarm_evm(state_provider, env)
     }
 }
 

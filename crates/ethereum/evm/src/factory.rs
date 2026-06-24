@@ -123,7 +123,7 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
 
     /// Creates an EVM instance for prewarming.
     #[cfg(feature = "std")]
-    pub fn prewarm_evm<DB>(
+    pub fn create_prewarm_evm<DB>(
         &self,
         state_provider: DB,
         env: EthEvmEnv,
@@ -186,5 +186,23 @@ where
         DB::Error: core::error::Error + Send + Sync + 'static,
     {
         Self::create_executor(self, evm, ctx, hashed_state_mode)
+    }
+
+    fn evm_tx<'a>(
+        &self,
+        tx: &'a Self::Transaction,
+    ) -> &'a <evm2::BaseEvmTypes as evm2::EvmTypes>::Tx {
+        tx.as_envelope()
+    }
+
+    fn prewarm_evm<DB>(
+        &self,
+        state_provider: DB,
+        env: Self::EvmEnv,
+    ) -> evm2::Evm<evm2::BaseEvmTypes>
+    where
+        DB: reth_storage_api::StateProvider + Send + 'static,
+    {
+        self.create_prewarm_evm(state_provider, env)
     }
 }

@@ -17,8 +17,6 @@ use alloy_consensus::transaction::Recovered;
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{Address, Bytes, B256};
 use core::{error::Error, fmt::Debug};
-#[cfg(feature = "std")]
-use evm2::EvmTypes;
 use reth_primitives_traits::{BlockTy, HeaderTy, NodePrimitives, SealedBlock, SealedHeader, TxTy};
 
 /// Cached database adapters for payload building.
@@ -72,9 +70,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
 
     /// Context required for configuring next block environment.
     type NextBlockEnvCtx: Debug + Clone;
-
-    /// Configured EVM spec type.
-    type Spec: Debug + Default + Clone + Send + Sync + 'static;
 
     /// Configured EVM environment type.
     type EvmEnv: Debug + Clone + Send + Sync + 'static;
@@ -155,10 +150,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     fn tx_env(&self, transaction: impl IntoTxEnv<TxEnvFor<Self>>) -> TxEnvFor<Self> {
         transaction.into_tx_env()
     }
-
-    /// Returns the transaction shape consumed by the configured EVM.
-    #[cfg(feature = "std")]
-    fn evm_tx<'a>(&self, tx: &'a TxEnvFor<Self>) -> &'a <evm2::BaseEvmTypes as EvmTypes>::Tx;
 
     /// Returns a config with JIT support enabled for subsequently created EVMs, if supported.
     #[auto_impl(keep_default_for(&, Arc))]
@@ -248,16 +239,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         Self: 'a,
         DB: evm2::evm::Database + 'static,
         DB::Error: Error + Send + Sync + 'static;
-
-    /// Creates a prewarm evm over the provided state.
-    #[cfg(feature = "std")]
-    fn prewarm_evm<DB>(
-        &self,
-        state_provider: DB,
-        env: EvmEnvFor<Self>,
-    ) -> evm2::Evm<evm2::BaseEvmTypes>
-    where
-        DB: reth_storage_api::StateProvider + Send + 'static;
 }
 
 /// JIT backend controls exposed by an EVM configuration.
