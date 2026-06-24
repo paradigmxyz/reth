@@ -14,6 +14,8 @@ use reth_db::{
 };
 use reth_storage_errors::db::LogLevel;
 
+const DEFAULT_RETH_SYNC_MODE: SyncMode = SyncMode::NoMetaSync;
+
 /// Parameters for database configuration
 #[derive(Debug, Args, PartialEq, Eq, Default, Clone, Copy)]
 #[command(next_help_heading = "Database")]
@@ -55,6 +57,9 @@ pub struct DatabaseArgs {
     #[arg(long = "db.max-readers")]
     pub max_readers: Option<u64>,
     /// Controls how aggressively the database synchronizes data to disk.
+    ///
+    /// Defaults to `no-meta-sync`, which preserves database integrity but may roll back the latest
+    /// transaction after a system crash. Use `durable` for full per-commit durability.
     #[arg(
         long = "db.sync-mode",
         value_parser = value_parser!(SyncMode),
@@ -101,7 +106,7 @@ impl DatabaseArgs {
             .with_geometry_page_size(self.page_size)
             .with_growth_step(self.growth_step)
             .with_max_readers(self.max_readers)
-            .with_sync_mode(self.sync_mode)
+            .with_sync_mode(Some(self.sync_mode.unwrap_or(DEFAULT_RETH_SYNC_MODE)))
     }
 
     /// Returns whether built-in database metrics are enabled.
@@ -455,6 +460,17 @@ mod tests {
         ])
         .unwrap();
         assert!(matches!(cmd.args.sync_mode, Some(SyncMode::SafeNoSync)));
+    }
+
+    #[test]
+    fn test_command_parser_with_valid_sync_mode_no_meta_sync() {
+        let cmd = CommandParser::<DatabaseArgs>::try_parse_from([
+            "reth",
+            "--db.sync-mode",
+            "no-meta-sync",
+        ])
+        .unwrap();
+        assert!(matches!(cmd.args.sync_mode, Some(SyncMode::NoMetaSync)));
     }
 
     #[test]

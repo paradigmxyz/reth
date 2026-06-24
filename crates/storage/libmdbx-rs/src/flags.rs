@@ -128,9 +128,10 @@ impl FromStr for SyncMode {
         let val = s.trim().to_ascii_lowercase();
         match val.as_str() {
             "durable" => Ok(Self::Durable),
+            "no-meta-sync" | "nometasync" | "no_meta_sync" => Ok(Self::NoMetaSync),
             "safe-no-sync" | "safenosync" | "safe_no_sync" => Ok(Self::SafeNoSync),
             _ => Err(format!(
-                "invalid value '{s}' for sync mode. valid values: durable, safe-no-sync"
+                "invalid value '{s}' for sync mode. valid values: durable, no-meta-sync, safe-no-sync"
             )),
         }
     }
