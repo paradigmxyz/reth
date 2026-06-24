@@ -568,7 +568,6 @@ mod tests {
     use super::*;
     use alloy_eips::eip7685::Requests;
     use metrics_util::debugging::{DebuggingRecorder, Snapshotter};
-    use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{BlockExecutionResult, ExecutionState};
 
     fn setup_test_recorder() -> Snapshotter {
@@ -588,7 +587,7 @@ mod tests {
         metrics.executor.gas_per_second.set(0.0);
         metrics.executor.gas_used_histogram.record(0.0);
 
-        let output = BlockExecutionOutput::<Receipt> {
+        let output = BlockExecutionOutput::<()> {
             state: ExecutionState::default().into(),
             hashed_state: None,
             result: BlockExecutionResult {

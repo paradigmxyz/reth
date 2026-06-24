@@ -1082,8 +1082,6 @@ mod tests {
     use reth_chainspec::ChainSpec;
     #[cfg(any())]
     use reth_db_common::init::init_genesis;
-    #[cfg(any())]
-    use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_cache::CachedStatus;
     use reth_execution_types::{execution_state_from_init, ExecutionState};
