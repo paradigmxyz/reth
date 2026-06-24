@@ -22,7 +22,7 @@ on:
         default: "false"
         type: string
       reorg:
-        description: "Enable reorg mode with optional depth (default: 5)"
+        description: "Enable reorg mode with the given depth"
         required: false
         default: ""
         type: string
