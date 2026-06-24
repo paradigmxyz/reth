@@ -243,18 +243,13 @@ if [ "${BENCH_CORES:-0}" -gt 0 ] && [ "$BENCH_CORES" -lt "$MAX_RETH" ]; then
 fi
 RETH_CPUS="1-${MAX_RETH}"
 
-HTTP_API="eth,net,web3,debug,reth"
-if [ -n "${BENCH_REORG:-}" ]; then
-  HTTP_API="${HTTP_API},testing"
-fi
-
 RETH_ARGS=(
   node
   --datadir "$DATADIR"
   --log.file.directory "$OUTPUT_DIR/reth-logs"
   --engine.accept-execution-requests-hash
   --http
-  --http.api "$HTTP_API"
+  --http.api eth,net,web3,debug,reth,testing
   --http.port 8545
   --ws
   --ws.api all
