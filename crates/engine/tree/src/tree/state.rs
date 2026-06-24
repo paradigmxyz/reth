@@ -93,16 +93,26 @@ impl<N: NodePrimitives> TreeState<N> {
         self.warm_accesses.apply_item_transition(add, del);
     }
 
-    /// Finds the hash at `target_number` on the in-memory chain ending at `hash`.
-    pub fn block_hash_on_chain(&self, mut hash: B256, target_number: BlockNumber) -> Option<B256> {
+    /// Finds the hash at `target_number` on the chain ending at `hash`.
+    pub fn block_hash_on_chain(
+        &self,
+        mut hash: B256,
+        target_number: BlockNumber,
+        mut canonical_hash: impl FnMut() -> Option<B256>,
+    ) -> Option<B256> {
         loop {
-            let block = self.blocks_by_hash.get(&hash)?;
+            if hash == self.canonical_block_hash() {
+                return canonical_hash()
+            }
+
+            let Some(block) = self.blocks_by_hash.get(&hash) else { return canonical_hash() };
+
             let number = block.block_number();
             if number == target_number {
                 return Some(hash)
             }
             if number < target_number {
-                return None
+                return canonical_hash()
             }
             hash = block.recovered_block().parent_hash();
         }

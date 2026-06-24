@@ -2996,17 +2996,12 @@ where
 
         if let Some(wam_items) = wam_items {
             let block_number = executed.recovered_block().number();
-            let extends_canonical = executed.recovered_block().parent_hash() ==
-                self.state.tree_state.canonical_block_hash();
             let leaving_items = block_number.checked_sub(WARMING_WINDOW).and_then(|number| {
-                let hash = if extends_canonical {
-                    self.provider.block_hash(number).ok().flatten()
-                } else {
-                    self.state
-                        .tree_state
-                        .block_hash_on_chain(executed.recovered_block().parent_hash(), number)
-                        .or_else(|| self.provider.block_hash(number).ok().flatten())
-                }?;
+                let hash = self.state.tree_state.block_hash_on_chain(
+                    executed.recovered_block().parent_hash(),
+                    number,
+                    || self.provider.block_hash(number).ok().flatten(),
+                )?;
 
                 match self.provider.bal_store().get_decoded_by_hash(hash) {
                     Ok(Some(bal)) => Some(WamItems::from_accounts(bal.as_bal().as_slice())),
