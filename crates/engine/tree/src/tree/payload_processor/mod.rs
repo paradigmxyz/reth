@@ -580,6 +580,9 @@ where
             PrewarmMode::Transactions(transactions)
         };
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
+        let bal_prewarm_pool =
+            (parallel_bal_execution && !self.disable_bal_batch_io && saved_cache.is_some())
+                .then(|| self.bal_prewarm_pool());
 
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
         // configure prewarming
@@ -588,7 +591,7 @@ where
             evm_config: self.evm_config.clone(),
             saved_cache: saved_cache.clone(),
             provider: provider_builder,
-            bal_prewarm_pool: parallel_bal_execution.then(|| self.bal_prewarm_pool()),
+            bal_prewarm_pool,
             metrics: PrewarmMetrics::default(),
             cache_metrics: self.cache_metrics.clone(),
             cache_state_metrics: self.cache_state_metrics.clone(),
