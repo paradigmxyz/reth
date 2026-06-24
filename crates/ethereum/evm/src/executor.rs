@@ -1,9 +1,9 @@
 //! EVM-backed Ethereum executor.
 
 use crate::{
-    block_env_with_blob_params,
+    convert::{block_env_with_blob_params, spec_id},
     execution::{BlockExecutionInput, ExecutionHooks},
-    spec_id, BlockExecutionContext, BlockSystemCalls, EthExecutionError, HashedStateMode,
+    BlockExecutionContext, BlockSystemCalls, EthExecutionError, HashedStateMode,
     PayloadExecutionError,
 };
 use alloc::{rc::Rc, sync::Arc, vec::Vec};

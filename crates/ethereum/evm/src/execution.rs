@@ -1,6 +1,6 @@
 //! EVM-backed Ethereum execution helpers.
 
-use crate::{recovered_tx_envelope, RethReceiptBuilder};
+use crate::{convert::recovered_tx_envelope, RethReceiptBuilder};
 use alloc::{
     boxed::Box,
     format,

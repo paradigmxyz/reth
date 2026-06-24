@@ -14,7 +14,7 @@ use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::execute::{ExecutableTxParts, RecoveredTx};
 
 /// Map the latest active Ethereum hardfork at `timestamp` or `block_number` to a [`SpecId`].
-pub fn spec_id_by_timestamp_and_block_number<C>(
+pub(crate) fn spec_id_by_timestamp_and_block_number<C>(
     chain_spec: &C,
     timestamp: BlockTimestamp,
     block_number: BlockNumber,
@@ -56,7 +56,7 @@ where
 }
 
 /// Map the latest active hardfork at `header` to an [`SpecId`].
-pub fn spec_id<C, H>(chain_spec: &C, header: &H) -> SpecId
+pub(crate) fn spec_id<C, H>(chain_spec: &C, header: &H) -> SpecId
 where
     C: EthereumHardforks,
     H: BlockHeader,
@@ -65,12 +65,13 @@ where
 }
 
 /// Converts an Ethereum header into the block environment.
-pub fn block_env<H: BlockHeader>(header: &H) -> BlockEnv {
+#[cfg(test)]
+pub(crate) fn block_env<H: BlockHeader>(header: &H) -> BlockEnv {
     block_env_with_blob_params(header, None)
 }
 
 /// Converts an Ethereum header into the block environment with chain blob parameters.
-pub fn block_env_with_blob_params<H: BlockHeader>(
+pub(crate) fn block_env_with_blob_params<H: BlockHeader>(
     header: &H,
     blob_params: Option<BlobParams>,
 ) -> BlockEnv {
@@ -93,7 +94,10 @@ pub fn block_env_with_blob_params<H: BlockHeader>(
 }
 
 /// Converts engine execution payload data into the block environment.
-pub fn payload_block_env(payload: &ExecutionData, blob_params: Option<BlobParams>) -> BlockEnv {
+pub(crate) fn payload_block_env(
+    payload: &ExecutionData,
+    blob_params: Option<BlobParams>,
+) -> BlockEnv {
     let payload = &payload.payload;
     BlockEnv {
         number: U256::from(payload.block_number()),
@@ -179,7 +183,7 @@ impl ExecutableTxParts<EthTxEnv, TransactionSigned> for ExecutableRecoveredTx {
 }
 
 /// Converts an owned recovered Reth Ethereum transaction into a recovered envelope.
-pub fn recovered_tx_envelope(tx: Recovered<TransactionSigned>) -> RecoveredTxEnvelope {
+pub(crate) fn recovered_tx_envelope(tx: Recovered<TransactionSigned>) -> RecoveredTxEnvelope {
     let (tx, signer) = tx.into_parts();
     match tx {
         TransactionSigned::Legacy(tx) => {
@@ -200,11 +204,6 @@ pub fn recovered_tx_envelope(tx: Recovered<TransactionSigned>) -> RecoveredTxEnv
             signer,
         )),
     }
-}
-
-/// Converts a borrowed recovered Reth Ethereum transaction into a recovered envelope.
-pub fn recovered_tx_envelope_ref(tx: Recovered<&TransactionSigned>) -> RecoveredTxEnvelope {
-    recovered_tx_envelope(Recovered::new_unchecked((*tx.inner()).clone(), tx.signer()))
 }
 
 #[cfg(test)]

@@ -39,6 +39,10 @@ use reth_storage_errors::any::AnyError;
 #[cfg(feature = "std")]
 use reth_storage_errors::provider::ProviderError;
 
+use convert::{
+    block_env_with_blob_params, payload_block_env, spec_id, spec_id_by_timestamp_and_block_number,
+};
+
 /// Legacy Ethereum EVM type placeholder.
 pub type EthEvm<DB = (), I = (), P = ()> = PhantomData<(DB, I, P)>;
 
@@ -127,11 +131,7 @@ mod executor;
 pub use executor::{EthExecutor, EthPayloadExecutor};
 
 mod convert;
-pub use convert::{
-    block_env, block_env_with_blob_params, payload_block_env, recovered_tx_envelope,
-    recovered_tx_envelope_ref, spec_id, spec_id_by_timestamp_and_block_number, EthTxEnv,
-    ExecutableRecoveredTx,
-};
+pub use convert::{EthTxEnv, ExecutableRecoveredTx};
 
 mod execution;
 pub use execution::{
