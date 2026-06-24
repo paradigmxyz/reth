@@ -29,7 +29,7 @@ use reth_trie_db::{
 };
 use std::{
     ops::RangeInclusive,
-    sync::Arc,
+    sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
 use tracing::{debug, debug_span, instrument};
@@ -202,7 +202,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     return Err(ProviderError::other(std::io::Error::other(format!(
                         "anchor_hash {anchor_hash} doesn't match OverlayBuilder's configured parent ({})",
                         self.parent_hash
-                    ))))
+                    ))));
                 }
                 Ok((Arc::clone(trie), Arc::clone(state)))
             }
@@ -249,7 +249,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     {
         // If the anchor is the DB tip then there won't be any reverts necessary.
         if db_tip_block.hash == anchor_hash {
-            return Ok(None)
+            return Ok(None);
         }
 
         let anchor_number = provider
@@ -446,7 +446,7 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     overlay_builder: OverlayBuilder<N>,
     /// A cache which maps `db_tip -> Overlay`. If the db tip changes during usage of the factory
     /// then a new entry will get added to this, but in most cases only one entry is present.
-    overlay_cache: Arc<DashMap<BlockHash, Overlay>>,
+    overlay_cache: Arc<DashMap<BlockHash, Arc<OnceLock<Overlay>>>>,
 }
 
 impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
@@ -487,15 +487,30 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     {
         let db_tip_block = self.overlay_builder.get_db_tip_block(provider)?;
 
-        let overlay = match self.overlay_cache.entry(db_tip_block.hash) {
-            dashmap::Entry::Occupied(entry) => entry.get().clone(),
+        if let Some(entry) = self.overlay_cache.get(&db_tip_block.hash)
+            && let Some(overlay) = entry.get()
+        {
+            return Ok(overlay.clone());
+        }
+
+        let overlay_cell = match self.overlay_cache.entry(db_tip_block.hash) {
+            dashmap::Entry::Occupied(entry) => Arc::clone(entry.get()),
             dashmap::Entry::Vacant(entry) => {
                 self.overlay_builder.metrics.overlay_cache_misses.increment(1);
-                let overlay = self.overlay_builder.build_overlay(provider)?;
-                entry.insert(overlay.clone());
-                overlay
+                Arc::clone(&entry.insert(Arc::new(OnceLock::new())))
             }
         };
+
+        if let Some(overlay) = overlay_cell.get() {
+            return Ok(overlay.clone());
+        }
+
+        let overlay = self.overlay_builder.calculate_overlay(provider, db_tip_block)?;
+        if overlay_cell.set(overlay.clone()).is_err()
+            && let Some(overlay) = overlay_cell.get()
+        {
+            return Ok(overlay.clone());
+        }
 
         Ok(overlay)
     }
