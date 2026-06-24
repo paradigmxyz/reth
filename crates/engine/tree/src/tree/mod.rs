@@ -3182,12 +3182,13 @@ where
                 if Some(finalized.num_hash()) !=
                     self.canonical_in_memory_state.get_finalized_num_hash()
                 {
+                    let finalized_number = finalized.number();
                     // we're also persisting the finalized block on disk so we can reload it on
                     // restart this is required by optimism which queries the finalized block: <https://github.com/ethereum-optimism/optimism/blob/c383eb880f307caa3ca41010ec10f30f08396b2e/op-node/rollup/sync/start.go#L65-L65>
-                    let _ = self.persistence.save_finalized_block_number(finalized.number());
-                    self.canonical_in_memory_state.set_finalized(finalized.clone());
+                    let _ = self.persistence.save_finalized_block_number(finalized_number);
+                    self.canonical_in_memory_state.set_finalized(finalized);
                     // Update finalized block height metric
-                    self.metrics.tree.finalized_block_height.set(finalized.number() as f64);
+                    self.metrics.tree.finalized_block_height.set(finalized_number as f64);
                 }
             }
             Err(err) => {
@@ -3212,12 +3213,13 @@ where
             }
             Ok(Some(safe)) => {
                 if Some(safe.num_hash()) != self.canonical_in_memory_state.get_safe_num_hash() {
+                    let safe_number = safe.number();
                     // we're also persisting the safe block on disk so we can reload it on
                     // restart this is required by optimism which queries the safe block: <https://github.com/ethereum-optimism/optimism/blob/c383eb880f307caa3ca41010ec10f30f08396b2e/op-node/rollup/sync/start.go#L65-L65>
-                    let _ = self.persistence.save_safe_block_number(safe.number());
-                    self.canonical_in_memory_state.set_safe(safe.clone());
+                    let _ = self.persistence.save_safe_block_number(safe_number);
+                    self.canonical_in_memory_state.set_safe(safe);
                     // Update safe block height metric
-                    self.metrics.tree.safe_block_height.set(safe.number() as f64);
+                    self.metrics.tree.safe_block_height.set(safe_number as f64);
                 }
             }
             Err(err) => {
