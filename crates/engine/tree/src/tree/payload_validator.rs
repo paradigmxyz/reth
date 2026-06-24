@@ -556,6 +556,7 @@ where
                 .validate_gas_limit(input.gas_limit())
                 .map_err(ConsensusError::from));
         }
+        let raw_bal = decoded_bal.as_ref().map(|decoded_bal| decoded_bal.as_raw_bal().clone());
 
         let env = ExecutionEnv {
             evm_env,
@@ -565,7 +566,7 @@ where
             transaction_count: input.transaction_count(),
             gas_used: input.gas_used(),
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
-            decoded_bal: decoded_bal.as_ref().map(Arc::clone),
+            decoded_bal,
         };
 
         // Plan the strategy used for state root computation.
@@ -1013,7 +1014,6 @@ where
             trie_output,
             changeset_provider,
         );
-        let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
         Ok(ValidationOutput::new(executed_block, timing_stats).with_raw_bal(raw_bal))
     }
 
