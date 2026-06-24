@@ -30,7 +30,7 @@ pub(crate) async fn dump_execution_stage<N, E, C>(
 where
     N: ProviderNodeTypes<DB = DatabaseEnv>,
     E: ConfigureEvm<Primitives = N::Primitives> + 'static,
-    C: FullConsensus<N::Primitives> + 'static,
+    C: FullConsensus<E::Primitives> + 'static,
 {
     let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
 
@@ -172,7 +172,7 @@ fn dry_run<N, E, C>(
 where
     N: ProviderNodeTypes,
     E: ConfigureEvm<Primitives = N::Primitives> + 'static,
-    C: FullConsensus<N::Primitives> + 'static,
+    C: FullConsensus<E::Primitives> + 'static,
 {
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 
