@@ -826,12 +826,18 @@ impl Runtime {
     fn do_graceful_shutdown(&self, timeout: Option<Duration>) -> bool {
         let _ = self.0.task_events_tx.send(TaskEvent::GracefulShutdown);
         let deadline = timeout.map(|t| Instant::now() + t);
+        let mut yields = 0usize;
         while self.0.graceful_tasks.load(Ordering::SeqCst) > 0 {
             if deadline.is_some_and(|d| Instant::now() > d) {
                 debug!("graceful shutdown timed out");
                 return false;
             }
-            std::thread::yield_now();
+            if yields < 64 {
+                yields += 1;
+                std::thread::yield_now();
+            } else {
+                std::thread::sleep(Duration::from_micros(50));
+            }
         }
         debug!("gracefully shut down");
         true
