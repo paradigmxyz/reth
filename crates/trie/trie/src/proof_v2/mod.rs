@@ -19,6 +19,7 @@ use reth_trie_common::{
     prefix_set::PrefixSet, BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2,
     ProofV2Target, RlpNode, TrieNodeV2,
 };
+use smallvec::SmallVec;
 use std::cmp::Ordering;
 use tracing::{error, instrument, trace};
 
@@ -52,7 +53,7 @@ pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
     hashed_cursor: HC,
     /// Branches which are currently in the process of being constructed, each being a child of
     /// the previous one.
-    branch_stack: Vec<ProofTrieBranch>,
+    branch_stack: SmallVec<[ProofTrieBranch; 16]>,
     /// The path of the last branch in `branch_stack`.
     branch_path: Nibbles,
     /// Children of branches in the `branch_stack`.
@@ -97,7 +98,7 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
         Self {
             trie_cursor,
             hashed_cursor,
-            branch_stack: Vec::<_>::with_capacity(64),
+            branch_stack: SmallVec::new(),
             branch_path: Nibbles::new(),
             child_stack: Vec::<_>::with_capacity(64),
             cached_branch_stack: Vec::<_>::with_capacity(64),
@@ -148,7 +149,7 @@ where
     // if the new branch has a parent branch (ie `branch_stack` is not empty) then 1 is subtracted
     // from the `ext_len` to account for the child's nibble on the parent.
     #[inline]
-    const fn maybe_parent_nibble(&self) -> usize {
+    fn maybe_parent_nibble(&self) -> usize {
         !self.branch_stack.is_empty() as usize
     }
 
