@@ -8770,6 +8770,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-storage-api",
  "reth-storage-errors",
+ "reth-trie-common",
  "tracing",
 ]
 

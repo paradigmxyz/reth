@@ -27,7 +27,7 @@ use reth_chainspec::{EthChainSpec, EthExecutorSpec};
 use reth_ethereum_forks::Hardforks;
 use reth_ethereum_primitives::{Block, EthPrimitives, Receipt, TransactionSigned};
 use reth_evm::{
-    execute::{BlockExecutionOutput, BlockExecutor, ExecutionOutcome, Executor},
+    execute::{BlockExecutionOutput, BlockExecutor, ExecutionOutcome, Executor, GasOutput},
     precompile_cache::{CachedPrecompileProvider, PrecompileCacheMap},
 };
 use reth_execution_types::{BlockExecutionResult, HashedPostStateSink};
@@ -256,7 +256,16 @@ where
 {
     type Primitives = EthPrimitives;
     type Transaction = EthTxEnv;
+    type TransactionOutput = GasOutput;
     type Error = EthExecutionError<DB::Error>;
+
+    fn evm(&self) -> &Evm<BaseEvmTypes> {
+        &self.evm
+    }
+
+    fn evm_mut(&mut self) -> &mut Evm<BaseEvmTypes> {
+        &mut self.evm
+    }
 
     fn apply_pre_execution_changes<H>(
         &mut self,
@@ -289,7 +298,7 @@ where
         &mut self,
         transaction: Self::Transaction,
         on_hashed_state_update: &mut H,
-    ) -> Result<(), Self::Error>
+    ) -> Result<Self::TransactionOutput, Self::Error>
     where
         H: FnMut(HashedPostState),
     {
@@ -304,13 +313,14 @@ where
             on_hashed_state_update,
             &transaction,
         )?;
-        self.cumulative_gas_used += outcome.gas_used;
+        let gas_used = outcome.gas_used;
+        self.cumulative_gas_used += gas_used;
         self.receipts.push(RethReceiptBuilder.build_receipt(
             tx_type,
             outcome,
             self.cumulative_gas_used,
         ));
-        Ok(())
+        Ok(GasOutput::from(gas_used))
     }
 
     fn receipts(&self) -> &[Receipt] {

@@ -13,6 +13,8 @@ extern crate alloc;
 
 #[cfg(feature = "std")]
 use crate::execute::HashedStateMode;
+#[cfg(feature = "std")]
+use crate::execute::{BasicBlockBuilder, BlockBuilder};
 use crate::execute::{Executor, IntoTxEnv};
 #[cfg(feature = "std")]
 use alloc::boxed::Box;
@@ -212,11 +214,101 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static;
 
+    /// Creates a block executor for the given block.
+    #[cfg(feature = "std")]
+    fn executor_for_block<'a, DB>(
+        &'a self,
+        db: DB,
+        block: &'a SealedBlock<BlockTy<Self::Primitives>>,
+        hashed_state_mode: HashedStateMode,
+    ) -> Result<crate::BlockExecutorFor<'a, Self, DB>, Self::Error>
+    where
+        Self: 'a,
+        Self::BlockExecutorFactory:
+            crate::execute::BlockExecutorFactory<ExecutionCtx<'a> = ExecutionCtxFor<'a, Self>>,
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static,
+    {
+        let evm = self.evm_for_block(evm2::evm::Db::new(db), block.header())?;
+        let ctx = self.context_for_block(block)?;
+        Ok(self.create_executor::<DB>(evm, ctx, hashed_state_mode))
+    }
+
     /// Creates an EVM instance for single-transaction execution with the configured environment.
     #[cfg(feature = "std")]
     fn evm_with_env<DB>(&self, db: DB, evm_env: EvmEnvFor<Self>) -> evm2::Evm<evm2::BaseEvmTypes>
     where
         DB: evm2::evm::DynDatabase + 'static;
+
+    /// Creates an EVM instance for the given block.
+    #[cfg(feature = "std")]
+    fn evm_for_block<DB>(
+        &self,
+        db: DB,
+        header: &HeaderTy<Self::Primitives>,
+    ) -> Result<evm2::Evm<evm2::BaseEvmTypes>, Self::Error>
+    where
+        DB: evm2::evm::DynDatabase + 'static,
+    {
+        let evm_env = self.evm_env(header)?;
+        Ok(self.evm_with_env(db, evm_env))
+    }
+
+    /// Creates a block builder for a configured EVM and execution context.
+    #[cfg(feature = "std")]
+    fn create_block_builder<'a, DB>(
+        &'a self,
+        evm: evm2::Evm<evm2::BaseEvmTypes>,
+        evm_env: EvmEnvFor<Self>,
+        parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
+        ctx: ExecutionCtxFor<'a, Self>,
+        hashed_state_mode: HashedStateMode,
+    ) -> impl BlockBuilder<Primitives = Self::Primitives, Executor = crate::BlockExecutorFor<'a, Self, DB>>
+    where
+        Self: 'a,
+        Self::BlockExecutorFactory:
+            crate::execute::BlockExecutorFactory<ExecutionCtx<'a> = ExecutionCtxFor<'a, Self>>,
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static,
+    {
+        BasicBlockBuilder {
+            executor: self.create_executor::<DB>(evm, ctx.clone(), hashed_state_mode),
+            evm_env,
+            transactions: Vec::new(),
+            senders: Vec::new(),
+            ctx,
+            parent,
+            assembler: self.block_assembler().clone(),
+        }
+    }
+
+    /// Creates a block builder for `parent + 1`.
+    #[cfg(feature = "std")]
+    fn builder_for_next_block<'a, DB>(
+        &'a self,
+        db: DB,
+        parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
+        attributes: Self::NextBlockEnvCtx,
+        hashed_state_mode: HashedStateMode,
+    ) -> Result<
+        impl BlockBuilder<
+            Primitives = Self::Primitives,
+            Executor = crate::BlockExecutorFor<'a, Self, DB>,
+        >,
+        Self::Error,
+    >
+    where
+        Self: 'a,
+        Self::BlockExecutorFactory:
+            crate::execute::BlockExecutorFactory<ExecutionCtx<'a> = ExecutionCtxFor<'a, Self>>,
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static,
+    {
+        let evm_env = self.next_evm_env(parent, &attributes)?;
+        let evm = self.evm_with_env(evm2::evm::Db::new(db), evm_env.clone());
+        let ctx = self.context_for_next_block(parent, attributes)?;
+        Ok(self.create_block_builder::<DB>(evm, evm_env, parent, ctx, hashed_state_mode))
+    }
 
     /// Creates an EVM instance for single-transaction execution with an inspector.
     #[cfg(feature = "std")]
