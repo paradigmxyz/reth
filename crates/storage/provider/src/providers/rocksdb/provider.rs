@@ -127,6 +127,9 @@ const DEFAULT_MAX_OPEN_FILES: i32 = 512;
 /// Default bytes per sync for `RocksDB` WAL writes (1 MB).
 const DEFAULT_BYTES_PER_SYNC: u64 = 1_048_576;
 
+/// Default number of `RocksDB` WAL files to recycle.
+const DEFAULT_RECYCLE_LOG_FILE_NUM: usize = 4;
+
 /// Default write buffer size for `RocksDB` memtables (128 MB).
 ///
 /// Larger memtables reduce flush frequency during burst writes, providing more consistent
@@ -232,6 +235,7 @@ impl RocksDBBuilder {
         // Both set to 0 means "delete ASAP, no archival".
         options.set_wal_ttl_seconds(0);
         options.set_wal_size_limit_mb(0);
+        options.set_recycle_log_file_num(DEFAULT_RECYCLE_LOG_FILE_NUM);
 
         // Statistics can view from RocksDB log file
         if enable_statistics {
