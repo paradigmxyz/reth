@@ -14,8 +14,7 @@ use alloy_primitives::{map::B256Map, BlockNumber, B256};
 use parking_lot::RwLock;
 use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_api::{
-    BlockNumReader, ChangeSetReader, DBProvider, StageCheckpointReader, StorageChangeSetReader,
-    StorageSettingsCache,
+    BlockNumReader, ChangeSetReader, DBProvider, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
@@ -61,7 +60,7 @@ use reth_metrics::{
 /// # Errors
 ///
 /// Returns error if:
-/// - Block number exceeds database tip (based on Finish stage checkpoint)
+/// - Block number exceeds database tip
 /// - Database access fails
 /// - State root computation fails
 pub fn compute_block_trie_changesets<Provider>(
@@ -70,13 +69,12 @@ pub fn compute_block_trie_changesets<Provider>(
 ) -> Result<TrieUpdatesSorted, ProviderError>
 where
     Provider: DBProvider
-        + StageCheckpointReader
         + ChangeSetReader
         + StorageChangeSetReader
         + BlockNumReader
         + StorageSettingsCache,
 {
-    let db_tip_block = get_db_tip_block(provider, block_number)?;
+    let db_tip_block = provider.best_block_number()?;
     crate::with_adapter!(provider, |A| {
         compute_range_trie_changesets_inner::<_, A>(
             provider,
@@ -93,7 +91,6 @@ fn compute_range_trie_changesets<Provider>(
 ) -> Result<TrieUpdatesSorted, ProviderError>
 where
     Provider: DBProvider
-        + StageCheckpointReader
         + ChangeSetReader
         + StorageChangeSetReader
         + BlockNumReader
@@ -111,7 +108,6 @@ fn compute_range_trie_changesets_inner<Provider, A>(
 ) -> Result<TrieUpdatesSorted, ProviderError>
 where
     Provider: DBProvider
-        + StageCheckpointReader
         + ChangeSetReader
         + StorageChangeSetReader
         + BlockNumReader
@@ -207,17 +203,6 @@ where
     Ok(range_trie_revert)
 }
 
-fn get_db_tip_block(
-    provider: &impl StageCheckpointReader,
-    requested: BlockNumber,
-) -> ProviderResult<BlockNumber> {
-    provider
-        .get_stage_checkpoint(reth_stages_types::StageId::Finish)?
-        .as_ref()
-        .map(|chk| chk.block_number)
-        .ok_or_else(|| ProviderError::InsufficientChangesets { requested, available: 0..=0 })
-}
-
 /// Computes block trie updates using the changeset cache.
 ///
 /// # Algorithm
@@ -254,7 +239,6 @@ pub fn compute_block_trie_updates<Provider>(
 ) -> ProviderResult<TrieUpdatesSorted>
 where
     Provider: DBProvider
-        + StageCheckpointReader
         + ChangeSetReader
         + StorageChangeSetReader
         + BlockNumReader
@@ -272,7 +256,6 @@ fn compute_block_trie_updates_inner<Provider, A>(
 ) -> ProviderResult<TrieUpdatesSorted>
 where
     Provider: DBProvider
-        + StageCheckpointReader
         + ChangeSetReader
         + StorageChangeSetReader
         + BlockNumReader
@@ -281,15 +264,7 @@ where
 {
     let tx = provider.tx_ref();
 
-    // Get the database tip block number
-    let db_tip_block = provider
-        .get_stage_checkpoint(reth_stages_types::StageId::Finish)?
-        .as_ref()
-        .map(|chk| chk.block_number)
-        .ok_or_else(|| ProviderError::InsufficientChangesets {
-            requested: block_number,
-            available: 0..=0,
-        })?;
+    let db_tip_block = provider.best_block_number()?;
 
     // Step 1: Get the trie changesets for the target block from cache
     let changesets = cache.get_or_compute(provider, block_number)?;
@@ -408,7 +383,6 @@ impl ChangesetCache {
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
         P: DBProvider
-            + StageCheckpointReader
             + ChangeSetReader
             + StorageChangeSetReader
             + BlockNumReader
@@ -450,21 +424,12 @@ impl ChangesetCache {
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
         P: DBProvider
-            + StageCheckpointReader
             + ChangeSetReader
             + StorageChangeSetReader
             + BlockNumReader
             + StorageSettingsCache,
     {
-        // Get the database tip block number
-        let db_tip_block = provider
-            .get_stage_checkpoint(reth_stages_types::StageId::Finish)?
-            .as_ref()
-            .map(|chk| chk.block_number)
-            .ok_or_else(|| ProviderError::InsufficientChangesets {
-                requested: *range.start(),
-                available: 0..=0,
-            })?;
+        let db_tip_block = provider.best_block_number()?;
 
         let start_block = *range.start();
         let end_block = *range.end();
@@ -879,7 +844,6 @@ mod tests {
     ) -> TrieUpdatesSorted
     where
         Provider: DBProvider
-            + StageCheckpointReader
             + ChangeSetReader
             + StorageChangeSetReader
             + BlockNumReader
@@ -899,7 +863,6 @@ mod tests {
     ) -> TrieUpdatesSorted
     where
         Provider: DBProvider
-            + StageCheckpointReader
             + ChangeSetReader
             + StorageChangeSetReader
             + BlockNumReader
@@ -916,7 +879,6 @@ mod tests {
     ) -> TrieUpdatesSorted
     where
         Provider: DBProvider
-            + StageCheckpointReader
             + ChangeSetReader
             + StorageChangeSetReader
             + BlockNumReader
