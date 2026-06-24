@@ -743,27 +743,35 @@ where
                     }
                 }
 
-                // Get the current account state either from the trie or from latest account update.
+                // Get the current encoded account leaf either from the trie or from latest account
+                // update.
                 let trie_account = match self.account_updates.get(addr) {
                     Some(LeafUpdate::Changed(encoded)) => {
-                        Some(encoded).filter(|encoded| !encoded.is_empty())
+                        if encoded.is_empty() {
+                            None
+                        } else {
+                            Some(encoded.as_slice())
+                        }
                     }
                     // Needs to be revealed first
                     Some(LeafUpdate::Touched) => return true,
-                    None => self.trie.get_account_value(addr),
+                    None => self.trie.get_account_value(addr).map(Vec::as_slice),
                 };
-
-                let trie_account = trie_account.map(|value| TrieAccount::decode(&mut &value[..]).expect("invalid account RLP"));
 
                 let (account, storage_root) = if let Some(account) = account.take() {
                     // If account is Some(_) here it means it didn't have any storage updates
                     // and we can fetch the storage root directly from the account trie.
                     //
                     // If it did have storage updates, we would've had processed it above when iterating over storage tries.
-                    let storage_root = trie_account.map(|account| account.storage_root).unwrap_or(EMPTY_ROOT_HASH);
+                    let storage_root = trie_account
+                        .map(decode_account_storage_root)
+                        .unwrap_or(EMPTY_ROOT_HASH);
 
                     (account, storage_root)
                 } else {
+                    let trie_account = trie_account.map(|value| {
+                        TrieAccount::decode(&mut &value[..]).expect("invalid account RLP")
+                    });
                     (trie_account.map(Into::into), self.trie.storage_root(addr).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
                 };
 
@@ -834,6 +842,17 @@ fn encode_account_leaf_value(
     account_rlp_buf.clear();
     account.unwrap_or_default().into_trie_account(storage_root).encode(account_rlp_buf);
     account_rlp_buf.clone()
+}
+
+/// Decodes only the storage root field from an encoded [`TrieAccount`] leaf.
+fn decode_account_storage_root(mut encoded: &[u8]) -> B256 {
+    let mut payload = alloy_rlp::Header::decode_bytes(&mut encoded, true)
+        .expect("invalid account RLP list");
+    let _nonce = alloy_rlp::Header::decode_bytes(&mut payload, false)
+        .expect("invalid account nonce RLP");
+    let _balance = alloy_rlp::Header::decode_bytes(&mut payload, false)
+        .expect("invalid account balance RLP");
+    B256::decode(&mut payload).expect("invalid account storage root RLP")
 }
 
 /// Pending proof targets queued for dispatch to proof workers, along with their count.
@@ -974,6 +993,24 @@ mod tests {
         assert_eq!(decoded.balance, U256::from(42));
         assert_eq!(decoded.storage_root, storage_root);
         assert_eq!(account_rlp_buf, encoded);
+    }
+
+    #[test]
+    fn test_decode_account_storage_root_matches_full_decode() {
+        let account = TrieAccount {
+            nonce: 9,
+            balance: U256::from(123_456),
+            storage_root: B256::from([0x42; 32]),
+            code_hash: B256::from([0x24; 32]),
+        };
+        let mut encoded = Vec::new();
+        account.encode(&mut encoded);
+
+        assert_eq!(decode_account_storage_root(&encoded), account.storage_root);
+        assert_eq!(
+            decode_account_storage_root(&alloy_rlp::encode(TrieAccount::default())),
+            EMPTY_ROOT_HASH
+        );
     }
 
     #[test]
