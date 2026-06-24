@@ -274,11 +274,9 @@ impl WorkerPool {
     pub fn install<R: Send>(&self, f: impl FnOnce(&Worker) -> R + Send) -> R {
         let pool = self.pool();
         let metrics = self.metrics().clone();
-        let queued_at = Instant::now();
 
         pool.install(move || {
             let started_at = Instant::now();
-            metrics.record_job_queue_wait(started_at.saturating_duration_since(queued_at));
             let _record_job_duration = RecordWorkerPoolJobDurationOnDrop::new(metrics, started_at);
             WORKER.with_borrow(|worker| f(worker))
         })
@@ -291,11 +289,9 @@ impl WorkerPool {
     pub fn install_fn<R: Send>(&self, f: impl FnOnce() -> R + Send) -> R {
         let pool = self.pool();
         let metrics = self.metrics().clone();
-        let queued_at = Instant::now();
 
         pool.install(move || {
             let started_at = Instant::now();
-            metrics.record_job_queue_wait(started_at.saturating_duration_since(queued_at));
             let _record_job_duration = RecordWorkerPoolJobDurationOnDrop::new(metrics, started_at);
             f()
         })
