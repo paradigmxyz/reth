@@ -357,9 +357,11 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         };
         let actual_rows = self.writer.rows() as u64;
         let pruned_rows = expected_rows.saturating_sub(actual_rows);
-        if pruned_rows > 0 {
-            self.user_header_mut().prune(pruned_rows);
+        if pruned_rows == 0 {
+            return Ok(());
         }
+
+        self.user_header_mut().prune(pruned_rows);
 
         debug!(
             target: "providers::static_file",
