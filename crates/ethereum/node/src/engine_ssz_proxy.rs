@@ -13,12 +13,13 @@ use alloy_primitives::{Bytes, B128, B256};
 use alloy_rpc_types_engine::{
     ssz_engine_types::{
         BodiesByHashRequest, BodiesResponse, BodiesResponseCancun, BodiesResponseOsaka,
-        BodiesResponsePrague, BodyEntry, ExecutionPayloadBodyAmsterdam, ExecutionPayloadBodyParis,
+        BodiesResponsePrague, ExecutionPayloadBodyAmsterdam, ExecutionPayloadBodyParis,
         ExecutionPayloadBodyShanghai,
     },
-    CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
-    ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ExecutionPayloadV4,
-    ForkchoiceState, PayloadAttributes, PraguePayloadFields,
+    CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadBodiesV1,
+    ExecutionPayloadBodiesV2, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV2,
+    ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, PayloadAttributes,
+    PraguePayloadFields,
 };
 use http_body_util::BodyExt;
 use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
@@ -537,149 +538,130 @@ where
 {
     match fork {
         EngineSszFork::Paris => {
-            let response = match request {
-                PayloadBodiesRequest::Hash(hashes) => {
-                    engine_api.get_payload_bodies_by_hash_v1_metered(hashes).await
-                }
-                PayloadBodiesRequest::Range { start, count } => {
-                    engine_api.get_payload_bodies_by_range_v1_metered(start, count).await
-                }
-            };
-            match response {
-                Ok(bodies) => match payload_bodies_response(bodies, |body| {
-                    ExecutionPayloadBodyParis::try_from(body).ok()
-                }) {
-                    Ok(response) => ssz_response(response),
-                    Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err),
-                },
-                Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
-            }
+            let response = fetch_payload_bodies_v1(engine_api, request).await;
+            payload_bodies_http_response(response, |body| {
+                ExecutionPayloadBodyParis::try_from(body).ok()
+            })
         }
         EngineSszFork::Shanghai => {
-            let response = match request {
-                PayloadBodiesRequest::Hash(hashes) => {
-                    engine_api.get_payload_bodies_by_hash_v1_metered(hashes).await
-                }
-                PayloadBodiesRequest::Range { start, count } => {
-                    engine_api.get_payload_bodies_by_range_v1_metered(start, count).await
-                }
-            };
-            match response {
-                Ok(bodies) => match payload_bodies_response(bodies, |body| {
-                    ExecutionPayloadBodyShanghai::try_from(body).ok()
-                }) {
-                    Ok(response) => ssz_response(response),
-                    Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err),
-                },
-                Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
-            }
+            let response = fetch_payload_bodies_v1(engine_api, request).await;
+            payload_bodies_http_response(response, |body| {
+                ExecutionPayloadBodyShanghai::try_from(body).ok()
+            })
         }
         EngineSszFork::Cancun => {
-            let response = match request {
-                PayloadBodiesRequest::Hash(hashes) => {
-                    engine_api.get_payload_bodies_by_hash_v1_metered(hashes).await
-                }
-                PayloadBodiesRequest::Range { start, count } => {
-                    engine_api.get_payload_bodies_by_range_v1_metered(start, count).await
-                }
+            let response = fetch_payload_bodies_v1(engine_api, request).await;
+            let response: BodiesResponseCancun = match payload_bodies_response(response, |body| {
+                ExecutionPayloadBodyShanghai::try_from(body).ok()
+            }) {
+                Ok(response) => response,
+                Err(err) => return text_response(STATUS_INTERNAL_SERVER_ERROR, err),
             };
-            match response {
-                Ok(bodies) => match payload_bodies_response(bodies, |body| {
-                    ExecutionPayloadBodyShanghai::try_from(body).ok()
-                }) {
-                    Ok(response) => {
-                        let response: BodiesResponseCancun = response;
-                        ssz_response(response)
-                    }
-                    Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err),
-                },
-                Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
-            }
+            ssz_response(response)
         }
         EngineSszFork::Prague => {
-            let response = match request {
-                PayloadBodiesRequest::Hash(hashes) => {
-                    engine_api.get_payload_bodies_by_hash_v1_metered(hashes).await
-                }
-                PayloadBodiesRequest::Range { start, count } => {
-                    engine_api.get_payload_bodies_by_range_v1_metered(start, count).await
-                }
+            let response = fetch_payload_bodies_v1(engine_api, request).await;
+            let response: BodiesResponsePrague = match payload_bodies_response(response, |body| {
+                ExecutionPayloadBodyShanghai::try_from(body).ok()
+            }) {
+                Ok(response) => response,
+                Err(err) => return text_response(STATUS_INTERNAL_SERVER_ERROR, err),
             };
-            match response {
-                Ok(bodies) => match payload_bodies_response(bodies, |body| {
-                    ExecutionPayloadBodyShanghai::try_from(body).ok()
-                }) {
-                    Ok(response) => {
-                        let response: BodiesResponsePrague = response;
-                        ssz_response(response)
-                    }
-                    Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err),
-                },
-                Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
-            }
+            ssz_response(response)
         }
         EngineSszFork::Osaka => {
-            let response = match request {
-                PayloadBodiesRequest::Hash(hashes) => {
-                    engine_api.get_payload_bodies_by_hash_v1_metered(hashes).await
-                }
-                PayloadBodiesRequest::Range { start, count } => {
-                    engine_api.get_payload_bodies_by_range_v1_metered(start, count).await
-                }
+            let response = fetch_payload_bodies_v1(engine_api, request).await;
+            let response: BodiesResponseOsaka = match payload_bodies_response(response, |body| {
+                ExecutionPayloadBodyShanghai::try_from(body).ok()
+            }) {
+                Ok(response) => response,
+                Err(err) => return text_response(STATUS_INTERNAL_SERVER_ERROR, err),
             };
-            match response {
-                Ok(bodies) => match payload_bodies_response(bodies, |body| {
-                    ExecutionPayloadBodyShanghai::try_from(body).ok()
-                }) {
-                    Ok(response) => {
-                        let response: BodiesResponseOsaka = response;
-                        ssz_response(response)
-                    }
-                    Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err),
-                },
-                Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
-            }
+            ssz_response(response)
         }
         EngineSszFork::Amsterdam => {
-            let response = match request {
-                PayloadBodiesRequest::Hash(hashes) => {
-                    engine_api.get_payload_bodies_by_hash_v2_metered(hashes).await
-                }
-                PayloadBodiesRequest::Range { start, count } => {
-                    engine_api.get_payload_bodies_by_range_v2_metered(start, count).await
-                }
-            };
-            match response {
-                Ok(bodies) => match payload_bodies_response(bodies, |body| {
-                    ExecutionPayloadBodyAmsterdam::try_from(body).ok()
-                }) {
-                    Ok(response) => ssz_response(response),
-                    Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err),
-                },
-                Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
-            }
+            let response = fetch_payload_bodies_v2(engine_api, request).await;
+            payload_bodies_http_response(response, |body| {
+                ExecutionPayloadBodyAmsterdam::try_from(body).ok()
+            })
         }
     }
 }
 
+async fn fetch_payload_bodies_v1<Provider, Pool, Validator, ChainSpec>(
+    engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
+    request: PayloadBodiesRequest,
+) -> Result<ExecutionPayloadBodiesV1, String>
+where
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
+    Pool: TransactionPool + 'static,
+    Validator: EngineApiValidator<EthEngineTypes>,
+    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+{
+    match request {
+        PayloadBodiesRequest::Hash(hashes) => {
+            engine_api.get_payload_bodies_by_hash_v1_metered(hashes).await
+        }
+        PayloadBodiesRequest::Range { start, count } => {
+            engine_api.get_payload_bodies_by_range_v1_metered(start, count).await
+        }
+    }
+    .map_err(|err| err.to_string())
+}
+
+async fn fetch_payload_bodies_v2<Provider, Pool, Validator, ChainSpec>(
+    engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
+    request: PayloadBodiesRequest,
+) -> Result<ExecutionPayloadBodiesV2, String>
+where
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
+    Pool: TransactionPool + 'static,
+    Validator: EngineApiValidator<EthEngineTypes>,
+    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+{
+    match request {
+        PayloadBodiesRequest::Hash(hashes) => {
+            engine_api.get_payload_bodies_by_hash_v2_metered(hashes).await
+        }
+        PayloadBodiesRequest::Range { start, count } => {
+            engine_api.get_payload_bodies_by_range_v2_metered(start, count).await
+        }
+    }
+    .map_err(|err| err.to_string())
+}
+
 fn payload_bodies_response<LegacyBody, ForkBody>(
+    response: Result<Vec<Option<LegacyBody>>, String>,
+    convert: impl Fn(LegacyBody) -> Option<ForkBody>,
+) -> Result<BodiesResponse<ForkBody>, String>
+where
+    ForkBody: Default,
+{
+    let bodies = response?;
+    BodiesResponse::from_optional_bodies(bodies, convert).map_err(|err| err.to_string())
+}
+
+fn payload_bodies_http_response<LegacyBody, ForkBody>(
+    response: Result<Vec<Option<LegacyBody>>, String>,
+    convert: impl Fn(LegacyBody) -> Option<ForkBody>,
+) -> HttpResponse
+where
+    ForkBody: Default + ssz::Encode,
+{
+    match payload_bodies_response(response, convert) {
+        Ok(response) => ssz_response(response),
+        Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err),
+    }
+}
+
+fn payload_bodies_response_from_bodies<LegacyBody, ForkBody>(
     bodies: Vec<Option<LegacyBody>>,
     convert: impl Fn(LegacyBody) -> Option<ForkBody>,
 ) -> Result<BodiesResponse<ForkBody>, String>
 where
     ForkBody: Default,
 {
-    let entries = bodies
-        .into_iter()
-        .map(|body| match body.and_then(|body| convert(body)) {
-            Some(body) => BodyEntry { available: true, body },
-            None => BodyEntry { available: false, body: ForkBody::default() },
-        })
-        .collect::<Vec<_>>()
-        .try_into()
-        .map_err(|_| "too many payload body entries".to_string())?;
-
-    Ok(BodiesResponse { entries })
+    BodiesResponse::from_optional_bodies(bodies, convert).map_err(|err| err.to_string())
 }
 
 /// Handles SSZ `engine_getBlobsV*` requests with the node's blob store.
@@ -1000,7 +982,7 @@ mod tests {
 
     #[test]
     fn encodes_payload_body_availability_for_selected_fork() {
-        let response: BodiesResponseParis = payload_bodies_response(
+        let response: BodiesResponseParis = payload_bodies_response_from_bodies(
             vec![
                 Some(ExecutionPayloadBodyV1 { transactions: vec![], withdrawals: None }),
                 Some(ExecutionPayloadBodyV1 { transactions: vec![], withdrawals: Some(vec![]) }),
@@ -1015,7 +997,7 @@ mod tests {
         assert!(!response.entries[1].available);
         assert!(!response.entries[2].available);
 
-        let response: BodiesResponseAmsterdam = payload_bodies_response(
+        let response: BodiesResponseAmsterdam = payload_bodies_response_from_bodies(
             vec![
                 Some(ExecutionPayloadBodyV2 {
                     transactions: vec![],
