@@ -7,7 +7,7 @@
 # Usage: bench-txgen-run.sh <label> <binary> <output-dir>
 #
 # Required env: SCHELK_MOUNT, BENCH_RPC_URL, BENCH_BLOCKS, BENCH_WARMUP_BLOCKS
-# Optional env: BENCH_BIG_BLOCKS, BENCH_BIG_BLOCKS_TARGET_GAS, BENCH_BAL,
+# Optional env: BENCH_BIG_BLOCKS, BENCH_BIG_BLOCKS_TARGET_GAS, BENCH_REORG, BENCH_BAL,
 #               BENCH_WORK_DIR, BENCH_WAIT_TIME, BENCH_BASELINE_ARGS,
 #               BENCH_FEATURE_ARGS, BENCH_OTLP_TRACES_ENDPOINT,
 #               BENCH_OTLP_LOGS_ENDPOINT, BENCH_OTLP_DISABLED,
@@ -249,7 +249,8 @@ RETH_ARGS=(
   --log.file.directory "$OUTPUT_DIR/reth-logs"
   --engine.accept-execution-requests-hash
   --http
-  --http.api eth,net,web3,debug,reth
+  # txgen reorg mode builds synthetic side-fork blocks via testing_buildBlockV1.
+  --http.api eth,net,web3,debug,reth,testing
   --http.port 8545
   --ws
   --ws.api all
@@ -398,6 +399,9 @@ BENCH_NICE="sudo nice -n -20 sudo -u $(id -un)"
 TXGEN_SEND_ARGS=()
 if [ -n "${BENCH_WAIT_TIME:-}" ]; then
   TXGEN_SEND_ARGS+=(--wait-time "$BENCH_WAIT_TIME")
+fi
+if [ -n "${BENCH_REORG:-}" ]; then
+  TXGEN_SEND_ARGS+=(--reorg "$BENCH_REORG")
 fi
 
 WARMUP="${BENCH_WARMUP_BLOCKS:-0}"
