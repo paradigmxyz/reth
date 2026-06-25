@@ -536,6 +536,9 @@ where
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
+    // TODO: Enforce PR-793 fork-era filtering for /{fork}/bodies responses.
+    // The URL fork selects both the SSZ body schema and the valid timestamp range.
+    // Blocks outside the URL fork era should be returned as available=false.
     match fork {
         EngineSszFork::Paris => {
             let response = fetch_payload_bodies_v1(engine_api, request).await;
