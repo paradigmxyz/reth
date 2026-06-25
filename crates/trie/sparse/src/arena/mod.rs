@@ -256,7 +256,7 @@ impl ArenaSparseSubtrie {
         }
 
         while let Some(frame) = stack.last_mut() {
-            let Some((child_pos, nibble, old_child_idx)) = frame.next_child() else {
+            let Some((child_pos, nibble, old_child_idx)) = frame.next_child(&new_arena) else {
                 stack.pop();
                 continue;
             };
@@ -317,15 +317,23 @@ impl ArenaSparseSubtrie {
         struct CopyFrame {
             new_idx: Index,
             branch_logical_path: Nibbles,
-            children: SmallVec<[(usize, u8, Index); 16]>,
+            state_mask: TrieMask,
             next_child_idx: usize,
         }
 
         impl CopyFrame {
-            fn next_child(&mut self) -> Option<(usize, u8, Index)> {
-                let child = self.children.get(self.next_child_idx).copied()?;
-                self.next_child_idx += 1;
-                Some(child)
+            fn next_child(&mut self, new_arena: &NodeArena) -> Option<(usize, u8, Index)> {
+                let ArenaSparseNode::Branch(b) = &new_arena[self.new_idx] else { unreachable!() };
+
+                loop {
+                    let (child_idx, nibble) =
+                        BranchChildIter::new(self.state_mask).nth(self.next_child_idx)?;
+                    self.next_child_idx += 1;
+
+                    if let ArenaSparseNodeBranchChild::Revealed(old_idx) = b.children[child_idx] {
+                        return Some((child_idx.get(), nibble, old_idx))
+                    }
+                }
             }
         }
 
@@ -351,16 +359,12 @@ impl ArenaSparseSubtrie {
             let mut branch_logical_path = node_path;
             branch_logical_path.extend(&b.short_key);
 
-            // Collect (dense_pos, nibble, old_child_idx) for revealed children.
-            let children: SmallVec<[(usize, u8, Index); 16]> = BranchChildIter::new(b.state_mask)
-                .filter_map(|(dense_idx, nibble)| match &b.children[dense_idx] {
-                    ArenaSparseNodeBranchChild::Revealed(old_idx) => {
-                        Some((dense_idx.get(), nibble, *old_idx))
-                    }
-                    _ => None,
-                })
-                .collect();
-            Some(CopyFrame { new_idx, branch_logical_path, children, next_child_idx: 0 })
+            Some(CopyFrame {
+                new_idx,
+                branch_logical_path,
+                state_mask: b.state_mask,
+                next_child_idx: 0,
+            })
         }
     }
 
