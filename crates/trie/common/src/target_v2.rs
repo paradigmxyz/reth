@@ -112,12 +112,18 @@ impl MultiProofTargetsV2 {
 
             storage_target_count += storage_slots.len();
             if !storage_slots.is_empty() {
+                sort_storage_targets_for_chunking(&mut storage_slots);
                 targets.storage_targets.insert(hashed_address, storage_slots);
             }
         }
 
         (targets, storage_target_count)
     }
+}
+
+#[inline]
+fn sort_storage_targets_for_chunking(storage_slots: &mut [ProofV2Target]) {
+    storage_slots.sort_unstable_by_key(|target| target.key_nibbles);
 }
 
 /// An iterator that yields chunks of V2 proof targets of at most `size` account and storage
@@ -148,6 +154,43 @@ impl ChunkedMultiProofTargetsV2 {
             current_account_storage: None,
             size,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn target_last_byte(target: &ProofV2Target) -> u8 {
+        target.key().as_slice()[31]
+    }
+
+    #[test]
+    fn storage_targets_are_sorted_before_chunking() {
+        let hashed_address = B256::with_last_byte(0xaa);
+        let mut storage_slots = vec![
+            ProofV2Target::new(B256::with_last_byte(4)),
+            ProofV2Target::new(B256::with_last_byte(1)),
+            ProofV2Target::new(B256::with_last_byte(3)),
+            ProofV2Target::new(B256::with_last_byte(0)),
+            ProofV2Target::new(B256::with_last_byte(2)),
+        ];
+
+        sort_storage_targets_for_chunking(&mut storage_slots);
+
+        let mut targets = MultiProofTargetsV2::default();
+        targets.storage_targets.insert(hashed_address, storage_slots);
+
+        let chunks = targets.chunks(2).collect::<Vec<_>>();
+        assert_eq!(chunks.len(), 3);
+
+        let first = chunks[0].storage_targets.get(&hashed_address).unwrap();
+        let second = chunks[1].storage_targets.get(&hashed_address).unwrap();
+        let third = chunks[2].storage_targets.get(&hashed_address).unwrap();
+
+        assert_eq!(first.iter().map(target_last_byte).collect::<Vec<_>>(), vec![0, 1]);
+        assert_eq!(second.iter().map(target_last_byte).collect::<Vec<_>>(), vec![2, 3]);
+        assert_eq!(third.iter().map(target_last_byte).collect::<Vec<_>>(), vec![4]);
     }
 }
 
