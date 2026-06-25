@@ -39,9 +39,13 @@
 //! let root = builder.finalize();
 //! ```
 
-use crate::{HashBuilder, Nibbles, EMPTY_ROOT_HASH};
+use crate::{
+    BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, RlpNode, TrieMask, EMPTY_ROOT_HASH,
+};
 use alloc::vec::Vec;
-use alloy_primitives::B256;
+use alloy_primitives::{keccak256_uncached, B256};
+use alloy_rlp::Encodable;
+use core::cmp;
 
 /// First index whose RLP-encoded key sorts after index 0.
 ///
@@ -57,7 +61,7 @@ const ZERO_KEY_FLUSH_INDEX: usize = 0x80;
 ///
 /// This builder is intended for transaction and receipt root computation while a block is still
 /// being built. It buffers only index `0`, then streams all other leaves directly into the
-/// [`HashBuilder`] in the same order as `alloy_trie::root::ordered_trie_root_encoded`.
+/// ordered-root hash builder in the same order as `alloy_trie::root::ordered_trie_root_encoded`.
 #[derive(Debug, Default)]
 pub struct OrderedTrieRootEncodedBuilder {
     /// Number of items pushed so far. This is also the next append-only index.
@@ -66,7 +70,7 @@ pub struct OrderedTrieRootEncodedBuilder {
     /// arrive.
     zero: Option<Vec<u8>>,
     /// The underlying hash builder.
-    hb: HashBuilder,
+    hb: OrderedRootHashBuilder,
 }
 
 impl OrderedTrieRootEncodedBuilder {
@@ -138,6 +142,141 @@ impl OrderedTrieRootEncodedBuilder {
     fn add_leaf(&mut self, index: usize, bytes: &[u8]) {
         let index_buffer = alloy_rlp::encode_fixed_size(&index);
         self.hb.add_leaf(Nibbles::unpack(&index_buffer), bytes);
+    }
+}
+
+/// Minimal hash builder for append-only ordered transaction and receipt roots.
+///
+/// Ordered roots only insert fresh leaves, so they do not need the general `HashBuilder` support for
+/// proof retention or database branch updates. Keeping the builder local also lets these one-shot
+/// block roots avoid the global Keccak cache used by trie state/proof paths.
+#[derive(Debug, Default)]
+struct OrderedRootHashBuilder {
+    key: Nibbles,
+    value: Vec<u8>,
+    stack: Vec<RlpNode>,
+    state_masks: Vec<TrieMask>,
+    rlp_buf: Vec<u8>,
+}
+
+impl OrderedRootHashBuilder {
+    fn add_leaf(&mut self, key: Nibbles, value: &[u8]) {
+        assert!(key > self.key, "add_leaf key {:?} self.key {:?}", key, self.key);
+        if !self.key.is_empty() {
+            self.update(&key);
+        }
+        self.key = key;
+        self.value.clear();
+        self.value.extend_from_slice(value);
+    }
+
+    fn root(&mut self) -> B256 {
+        if !self.key.is_empty() {
+            self.update(&Nibbles::default());
+            self.key.clear();
+            self.value.clear();
+        }
+        self.current_root()
+    }
+
+    #[inline]
+    fn current_root(&self) -> B256 {
+        if let Some(node_ref) = self.stack.last() {
+            if let Some(hash) = node_ref.as_hash() {
+                hash
+            } else {
+                keccak256_uncached(node_ref)
+            }
+        } else {
+            EMPTY_ROOT_HASH
+        }
+    }
+
+    fn update(&mut self, succeeding: &Nibbles) {
+        let mut build_extensions = false;
+        let mut current = self.key;
+        debug_assert!(!current.is_empty());
+
+        loop {
+            let preceding_exists = !self.state_masks.is_empty();
+            let preceding_len = self.state_masks.len().saturating_sub(1);
+
+            let common_prefix_len = succeeding.common_prefix_length(&current);
+            let len = cmp::max(preceding_len, common_prefix_len);
+            assert!(len < current.len(), "len {} current.len {}", len, current.len());
+
+            let extra_digit = current.get_unchecked(len);
+            if self.state_masks.len() <= len {
+                self.state_masks.resize(len + 1, TrieMask::default());
+            }
+            self.state_masks[len] |= TrieMask::from_nibble(extra_digit);
+
+            let mut len_from = len;
+            if !succeeding.is_empty() || preceding_exists {
+                len_from += 1;
+            }
+            let short_node_key = current.slice(len_from..);
+
+            if !build_extensions {
+                let leaf_node = LeafNodeRef::new(&short_node_key, &self.value);
+                self.rlp_buf.clear();
+                leaf_node.encode(&mut self.rlp_buf);
+                self.stack.push(rlp_node_from_rlp_uncached(&self.rlp_buf));
+            }
+
+            if build_extensions && !short_node_key.is_empty() {
+                let stack_last = self.stack.pop().expect("there should be at least one stack item");
+                let extension_node = ExtensionNodeRef::new(&short_node_key, &stack_last);
+
+                self.rlp_buf.clear();
+                extension_node.encode(&mut self.rlp_buf);
+                self.stack.push(rlp_node_from_rlp_uncached(&self.rlp_buf));
+            }
+
+            if preceding_len <= common_prefix_len && !succeeding.is_empty() {
+                return;
+            }
+
+            if !succeeding.is_empty() || preceding_exists {
+                self.push_branch_node(len);
+            }
+
+            self.state_masks.resize(len, TrieMask::default());
+
+            if preceding_len == 0 {
+                return;
+            }
+
+            current.truncate(preceding_len);
+
+            while self.state_masks.last() == Some(&TrieMask::default()) {
+                self.state_masks.pop();
+            }
+
+            build_extensions = true;
+        }
+    }
+
+    fn push_branch_node(&mut self, len: usize) {
+        let state_mask = self.state_masks[len];
+        let first_child_idx = self.stack.len() - state_mask.count_ones() as usize;
+        let branch_node = BranchNodeRef::new(&self.stack, state_mask);
+
+        self.rlp_buf.clear();
+        branch_node.encode(&mut self.rlp_buf);
+        let rlp = rlp_node_from_rlp_uncached(&self.rlp_buf);
+
+        self.stack.truncate(first_child_idx);
+        self.stack.push(rlp);
+    }
+}
+
+#[inline]
+fn rlp_node_from_rlp_uncached(rlp: &[u8]) -> RlpNode {
+    if rlp.len() < 32 {
+        RlpNode::from_raw(rlp).expect("short RLP nodes fit in RlpNode")
+    } else {
+        RlpNode::word_rlp(&keccak256_uncached(rlp))
     }
 }
 
