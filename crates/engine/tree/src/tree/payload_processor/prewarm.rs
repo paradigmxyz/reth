@@ -356,11 +356,52 @@ where
         let to_sparse_trie_task = self.to_sparse_trie_task.clone();
         let executor = self.executor.clone();
         let parent_span = Span::current();
-        let stream_parent_span = parent_span;
         let prefetch_bal = raw_bal.clone();
         let stream_bal = raw_bal.clone();
-        let (stream_tx, stream_rx) = oneshot::channel();
 
+        if let Some(saved_cache) = ctx.saved_cache.as_ref()
+            && !ctx.disable_bal_batch_io
+            && let Some(pool) = ctx.bal_prewarm_pool.as_ref()
+        {
+            // If
+            //
+            // - BAL path is enabled (and so bal_prewarm_pool is present),
+            // - dispatch_bal_batch_io is false
+            // - execution cache is not disabled
+            //
+            // we launch prewarming sequence of the BAL read set here. The BAL read-set consists
+            // of the accounts, their code if present, and declared storages (both storage_reads
+            // and storage_changes).
+            //
+            // This runs side-by-side with the parallel transaction execution reducing the time it
+            // spends blocking on the data.
+            let caches = saved_cache.cache().clone();
+            let provider_builder = ctx.provider.clone();
+            let build = Arc::new(move || provider_builder.build());
+
+            pool.begin_block(build, caches);
+            match peek_raw_bal_prewarm_targets(&prefetch_bal) {
+                Ok(targets) => {
+                    for target in targets {
+                        pool.warm_account(target.address);
+                        for slot in target.storage_slots {
+                            pool.warm_storage(target.address, slot.into());
+                        }
+                    }
+                }
+                Err(err) => {
+                    warn!(
+                        target: "engine::tree::payload_processor::prewarm",
+                        ?err,
+                        "Failed to peek raw BAL prewarm targets"
+                    );
+                }
+            }
+            pool.end_block();
+        }
+
+        let stream_parent_span = parent_span;
+        let (stream_tx, stream_rx) = oneshot::channel();
         if let Some(to_sparse_trie_task) = to_sparse_trie_task {
             let ctx = ctx.clone();
             executor.bal_streaming_pool().spawn(move || {
@@ -402,47 +443,6 @@ where
             });
         } else {
             let _ = stream_tx.send(());
-        }
-
-        if let Some(saved_cache) = ctx.saved_cache
-            && !ctx.disable_bal_batch_io
-            && let Some(pool) = ctx.bal_prewarm_pool.as_ref()
-        {
-            // If
-            //
-            // - BAL path is enabled (and so bal_prewarm_pool is present),
-            // - dispatch_bal_batch_io is false
-            // - execution cache is not disabled
-            //
-            // we launch prewarming sequence of the BAL read set here. The BAL read-set consists
-            // of the accounts, their code if present, and declared storages (both storage_reads
-            // and storage_changes).
-            //
-            // This runs side-by-side with the parallel transaction execution reducing the time it
-            // spends blocking on the data.
-            let caches = saved_cache.cache().clone();
-            let provider_builder = ctx.provider.clone();
-            let build = Arc::new(move || provider_builder.build());
-
-            pool.begin_block(build, caches);
-            match peek_raw_bal_prewarm_targets(&prefetch_bal) {
-                Ok(targets) => {
-                    for target in targets {
-                        pool.warm_account(target.address);
-                        for slot in target.storage_slots {
-                            pool.warm_storage(target.address, slot.into());
-                        }
-                    }
-                }
-                Err(err) => {
-                    warn!(
-                        target: "engine::tree::payload_processor::prewarm",
-                        ?err,
-                        "Failed to peek raw BAL prewarm targets"
-                    );
-                }
-            }
-            pool.end_block();
         }
 
         stream_rx
