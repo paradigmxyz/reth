@@ -380,22 +380,16 @@ where
             let build = Arc::new(move || provider_builder.build());
 
             pool.begin_block(build, caches);
-            match peek_raw_bal_prewarm_targets(&prefetch_bal) {
-                Ok(targets) => {
-                    for target in targets {
-                        pool.warm_account(target.address);
-                        for slot in target.storage_slots {
-                            pool.warm_storage(target.address, slot.into());
-                        }
-                    }
-                }
-                Err(err) => {
-                    warn!(
-                        target: "engine::tree::payload_processor::prewarm",
-                        ?err,
-                        "Failed to peek raw BAL prewarm targets"
-                    );
-                }
+            if let Err(err) = stream_raw_bal_prewarm_targets(
+                &prefetch_bal,
+                |address| pool.warm_account(address),
+                |address, slot| pool.warm_storage(address, slot.into()),
+            ) {
+                warn!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    ?err,
+                    "Failed to peek raw BAL prewarm targets"
+                );
             }
             pool.end_block();
         }
@@ -523,22 +517,17 @@ where
     }
 }
 
-#[derive(Debug)]
-struct RawBalPrewarmTarget {
-    address: Address,
-    storage_slots: Vec<U256>,
-}
-
-fn peek_raw_bal_prewarm_targets(
+fn stream_raw_bal_prewarm_targets(
     raw_bal: &RawBal,
-) -> Result<Vec<RawBalPrewarmTarget>, alloy_rlp::Error> {
+    mut warm_account: impl FnMut(Address),
+    mut warm_storage: impl FnMut(Address, U256),
+) -> Result<(), alloy_rlp::Error> {
     let mut buf = raw_bal.as_raw().as_ref();
     let header = alloy_rlp::Header::decode(&mut buf)?;
     if !header.list {
         return Err(alloy_rlp::Error::UnexpectedString);
     }
     let mut accounts = take_payload(&mut buf, header.payload_length)?;
-    let mut targets = Vec::new();
 
     while !accounts.is_empty() {
         let account_header = alloy_rlp::Header::decode(&mut accounts)?;
@@ -548,7 +537,7 @@ fn peek_raw_bal_prewarm_targets(
         let mut account = take_payload(&mut accounts, account_header.payload_length)?;
 
         let address = Address::decode(&mut account)?;
-        let mut storage_slots = Vec::new();
+        warm_account(address);
 
         let storage_changes_header = alloy_rlp::Header::decode(&mut account)?;
         if !storage_changes_header.list {
@@ -563,7 +552,7 @@ fn peek_raw_bal_prewarm_targets(
             }
             let mut slot_changes =
                 take_payload(&mut storage_changes, slot_changes_header.payload_length)?;
-            storage_slots.push(U256::decode(&mut slot_changes)?);
+            warm_storage(address, U256::decode(&mut slot_changes)?);
         }
 
         let storage_reads_header = alloy_rlp::Header::decode(&mut account)?;
@@ -572,13 +561,11 @@ fn peek_raw_bal_prewarm_targets(
         }
         let mut storage_reads = take_payload(&mut account, storage_reads_header.payload_length)?;
         while !storage_reads.is_empty() {
-            storage_slots.push(U256::decode(&mut storage_reads)?);
+            warm_storage(address, U256::decode(&mut storage_reads)?);
         }
-
-        targets.push(RawBalPrewarmTarget { address, storage_slots });
     }
 
-    Ok(targets)
+    Ok(())
 }
 
 fn take_payload<'a>(
