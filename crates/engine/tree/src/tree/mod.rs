@@ -43,7 +43,7 @@ use revm::interpreter::debug_unreachable;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
 
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     oneshot,
@@ -1687,27 +1687,41 @@ where
                                 let explicit_persistence_wait = if wait_for_persistence {
                                     let pending_persistence = self.persistence_state.rx.take();
                                     if let Some((rx, start_time, _action)) = pending_persistence {
-                                        let (persistence_tx, persistence_rx) =
-                                            std::sync::mpsc::channel();
-                                        self.runtime.spawn_blocking_named(
-                                            "wait-persist",
-                                            move || {
-                                                let start = Instant::now();
-                                                let result = rx
-                                                    .recv()
-                                                    .expect("persistence state channel closed");
-                                                let _ = persistence_tx.send((
-                                                    result,
-                                                    start_time,
-                                                    start.elapsed(),
-                                                ));
-                                            },
-                                        );
-                                        let (result, start_time, wait_duration) = persistence_rx
-                                            .recv()
-                                            .expect("persistence result channel closed");
-                                        let _ = self.on_persistence_complete(result, start_time);
-                                        wait_duration
+                                        match rx.try_recv() {
+                                            Ok(result) => {
+                                                let _ = self
+                                                    .on_persistence_complete(result, start_time);
+                                                Duration::ZERO
+                                            }
+                                            Err(TryRecvError::Empty) => {
+                                                let (persistence_tx, persistence_rx) =
+                                                    std::sync::mpsc::channel();
+                                                self.runtime.spawn_blocking_named(
+                                                    "wait-persist",
+                                                    move || {
+                                                        let start = Instant::now();
+                                                        let result = rx.recv().expect(
+                                                            "persistence state channel closed",
+                                                        );
+                                                        let _ = persistence_tx.send((
+                                                            result,
+                                                            start_time,
+                                                            start.elapsed(),
+                                                        ));
+                                                    },
+                                                );
+                                                let (result, start_time, wait_duration) =
+                                                    persistence_rx.recv().expect(
+                                                        "persistence result channel closed",
+                                                    );
+                                                let _ = self
+                                                    .on_persistence_complete(result, start_time);
+                                                wait_duration
+                                            }
+                                            Err(TryRecvError::Disconnected) => {
+                                                panic!("persistence state channel closed")
+                                            }
+                                        }
                                     } else {
                                         Duration::ZERO
                                     }
