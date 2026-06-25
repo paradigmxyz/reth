@@ -3142,7 +3142,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
     /// Writes trie updates to the database with already sorted updates.
     ///
     /// Returns the number of entries modified.
-    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    #[instrument(level = "trace", target = "providers::db", skip_all)]
     fn write_trie_updates_sorted(&self, trie_updates: &TrieUpdatesSorted) -> ProviderResult<usize> {
         if trie_updates.is_empty() {
             return Ok(0)
