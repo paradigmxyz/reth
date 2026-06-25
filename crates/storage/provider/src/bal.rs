@@ -86,6 +86,17 @@ struct InMemoryBalStoreInner {
 impl InMemoryBalStoreInner {
     // Inserts a BAL and keeps the block-number index in sync.
     fn insert(&mut self, block_hash: BlockHash, block_number: BlockNumber, bal: Bytes) {
+        if let Some(entry) = self.entries.get_mut(&block_hash) {
+            if entry.block_number == block_number {
+                entry.bal = bal;
+                self.highest_block_number = Some(
+                    self.highest_block_number
+                        .map_or(block_number, |highest| highest.max(block_number)),
+                );
+                return;
+            }
+        }
+
         let empty_block_number =
             self.entries.insert(block_hash, BalEntry { block_number, bal }).and_then(|entry| {
                 let hashes = self.hashes_by_number.get_mut(&entry.block_number)?;
@@ -110,7 +121,7 @@ impl InMemoryBalStoreInner {
         let mut pruned = 0;
         while let Some((&block_number, _)) = self.hashes_by_number.first_key_value() {
             if !prune_mode.should_prune(block_number, tip) {
-                break
+                break;
             }
 
             let Some((_, hashes)) = self.hashes_by_number.pop_first() else { break };
@@ -142,7 +153,7 @@ impl BalStore for InMemoryBalStore {
 
     fn insert_many(&self, entries: Vec<(NumHash, RawBal)>) -> ProviderResult<()> {
         if entries.is_empty() {
-            return Ok(())
+            return Ok(());
         }
 
         let mut inner = self.inner.write();
@@ -195,7 +206,7 @@ impl BalStore for InMemoryBalStore {
             out.push(bal);
 
             if limit.exceeds(size) {
-                break
+                break;
             }
         }
 
