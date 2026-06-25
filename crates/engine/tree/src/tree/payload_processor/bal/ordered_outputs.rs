@@ -100,9 +100,16 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
                 "BAL worker returned out-of-bounds transaction index {index}; total={}",
                 self.total
             );
+            assert!(index >= self.next, "BAL worker returned duplicate transaction index {index}");
+
+            if index == self.next {
+                self.next += 1;
+                return Some(Ok(output));
+            }
+
             assert!(
-                index >= self.next && self.pending[index].is_none(),
-                "BAL worker returned duplicate transaction index {index}",
+                self.pending[index].is_none(),
+                "BAL worker returned duplicate transaction index {index}"
             );
 
             self.pending[index] = Some(output);
