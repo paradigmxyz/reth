@@ -42,7 +42,7 @@ use std::{
     sync::{
         atomic::{AtomicBool, AtomicUsize},
         mpsc::{self, channel},
-        Arc, OnceLock,
+        Arc, LazyLock, OnceLock,
     },
 };
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
@@ -60,6 +60,12 @@ use preserved_sparse_trie::{PreservedSparseTrie, SharedPreservedSparseTrie};
 /// Blocks with fewer transactions than this skip prewarming, since the fixed overhead of spawning
 /// prewarm workers exceeds the execution time saved.
 pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
+
+/// Lazily decoded BAL carried through the execution environment.
+pub type LazyBal = LazyLock<Bal, Box<dyn FnOnce() -> Bal + Send + Sync>>;
+
+/// A decoded BAL wrapper whose BAL body is decoded on first use.
+pub type LazyDecodedBal = DecodedBal<LazyBal>;
 
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorTx<Evm, I> = RecoveredTx<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
@@ -1042,7 +1048,7 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     pub withdrawals: Option<Vec<Withdrawal>>,
     /// Optional decoded BAL for the block.
     /// Used to validate and optimize execution.
-    pub decoded_bal: Option<Arc<DecodedBal<std::sync::OnceLock<Bal>>>>,
+    pub decoded_bal: Option<Arc<LazyDecodedBal>>,
 }
 
 impl<Evm: ConfigureEvm> ExecutionEnv<Evm>

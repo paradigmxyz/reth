@@ -102,7 +102,7 @@ use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     multiproof::{StateRootComputeOutcome, StateRootHandle},
-    payload_processor::{PayloadProcessor, PayloadProcessorSpawnOptions},
+    payload_processor::{LazyBal, LazyDecodedBal, PayloadProcessor, PayloadProcessorSpawnOptions},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
@@ -110,7 +110,7 @@ use crate::tree::{
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{
-    bal::{Bal, DecodedBal, RawBal},
+    bal::{DecodedBal, RawBal},
     compute_block_access_list_hash, BlockAccessList,
 };
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
@@ -2341,9 +2341,7 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     }
 
     /// Returns the decoded block access list, if present and successfully decoded.
-    pub fn try_lazy_decoded_access_list(
-        &self,
-    ) -> Result<Option<DecodedBal<std::sync::OnceLock<Bal>>>, alloy_rlp::Error> {
+    pub fn try_lazy_decoded_access_list(&self) -> Result<Option<LazyDecodedBal>, alloy_rlp::Error> {
         match self {
             Self::Payload(payload) => payload
                 .block_access_list()
@@ -2354,7 +2352,14 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
                     if !header.list || !raw.is_empty() && raw.len() != header.payload_length {
                         return Err(alloy_rlp::Error::UnexpectedString);
                     }
-                    Ok(DecodedBal::with_raw_bal(std::sync::OnceLock::new(), raw_bal))
+                    let decode_raw_bal = raw_bal.clone();
+                    let lazy_bal: LazyBal = std::sync::LazyLock::new(Box::new(move || {
+                        DecodedBal::from_raw_bal(decode_raw_bal)
+                            .expect("validated BAL must decode")
+                            .split()
+                            .0
+                    }));
+                    Ok(DecodedBal::with_raw_bal(lazy_bal, raw_bal))
                 })
                 .transpose(),
             Self::Block(_) => Ok(None),

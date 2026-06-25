@@ -15,11 +15,11 @@ use super::bal_prewarm_pool::BalPrewarmPool;
 use crate::tree::{
     payload_processor::multiproof::StateRootMessage,
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
-    CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
+    CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv, LazyDecodedBal,
     PayloadExecutionCache, SavedCache, StateProviderBuilder,
 };
 use alloy_consensus::transaction::TxHashRef;
-use alloy_eip7928::bal::{Bal, DecodedBal, RawBal};
+use alloy_eip7928::bal::RawBal;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{keccak256, Address, B256, U256};
 use alloy_rlp::Decodable;
@@ -38,7 +38,7 @@ use reth_trie_common::MultiProofTargetsV2;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc::{self, channel, Receiver, Sender},
-    Arc, OnceLock,
+    Arc,
 };
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
@@ -49,7 +49,7 @@ pub enum PrewarmMode<Tx> {
     /// Prewarm by executing transactions from a stream, each paired with its block index.
     Transactions(Receiver<(usize, Tx)>),
     /// Prewarm by prefetching slots from a Block Access List.
-    BlockAccessList(Arc<DecodedBal<OnceLock<Bal>>>),
+    BlockAccessList(Arc<LazyDecodedBal>),
     /// Transaction prewarming is skipped (e.g. small blocks where the overhead exceeds the
     /// benefit). No workers are spawned.
     Skipped,
@@ -333,7 +333,7 @@ where
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn run_bal_prewarm(
         &self,
-        decoded_bal: Arc<DecodedBal<OnceLock<Bal>>>,
+        decoded_bal: Arc<LazyDecodedBal>,
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
     ) {
         // TODO: testing - restore the empty BAL fast path after raw BAL prewarm is covered.
@@ -407,14 +407,7 @@ where
                 let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
 
-                let account_changes = stream_bal.as_bal().get_or_init(|| {
-                    DecodedBal::from_raw_bal(stream_bal.as_raw_bal().clone())
-                        .expect("validated BAL must decode")
-                        .split()
-                        .0
-                });
-
-                account_changes.par_iter().for_each(|account_changes| {
+                stream_bal.as_bal().par_iter().for_each(|account_changes| {
                     WorkerPool::with_worker_mut(|worker| {
                         let provider =
                             worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
