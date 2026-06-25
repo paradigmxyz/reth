@@ -310,10 +310,14 @@ where
         let this = self.get_mut();
         match item {
             EthSnapMessage::Eth(msg) => this.eth.start_send_unpin(msg),
-            EthSnapMessage::Snap(msg) => this
-                .snap_outbound
-                .send(BytesMut::from(msg.encode().as_ref()))
-                .map_err(|_| io::Error::from(io::ErrorKind::BrokenPipe).into()),
+            EthSnapMessage::Snap(msg) => {
+                // Reclaim the freshly-encoded buffer as mutable without copying the payload.
+                let bytes =
+                    msg.encode().0.try_into_mut().unwrap_or_else(|b| BytesMut::from(b.as_ref()));
+                this.snap_outbound
+                    .send(bytes)
+                    .map_err(|_| io::Error::from(io::ErrorKind::BrokenPipe).into())
+            }
         }
     }
 
@@ -335,59 +339,6 @@ where
         ready!(this.poll_service_outbound(cx))?;
         this.conn.poll_close_unpin(cx).map_err(Into::into)
     }
-}
-
-/// Resolves the `snap/2` message-id offset and count from the negotiated capabilities, rejecting
-/// any layout other than `eth` at relative offset 0 immediately followed by `snap/2`.
-///
-/// [`route_inbound`] forwards every combined id below the snap offset to the eth decoder verbatim,
-/// so a capability before `eth`, or between `eth` and `snap/2`, would feed non-eth ids into it.
-fn eth_snap_layout(caps: &SharedCapabilities) -> Result<(u8, u8), EthStreamError> {
-    let snap = caps
-        .ensure_matching_capability(&Capability::snap_2())
-        .map_err(|_| EthStreamError::from(P2PStreamError::CapabilityNotShared))?;
-    let snap_offset = snap.relative_message_id_offset();
-    let snap_messages = snap.num_messages();
-
-    let eth = caps.eth()?;
-    if eth.relative_message_id_offset() != 0 || eth.num_messages() != snap_offset {
-        return Err(P2PStreamError::CapabilityNotShared.into())
-    }
-    Ok((snap_offset, snap_messages))
-}
-
-/// Routes an inbound combined-id message to the `eth` primary or buffers it for `snap/2`.
-///
-/// The combined id space is partitioned as `eth = 0..snap_offset` and
-/// `snap = snap_offset..snap_offset + snap_messages`. `eth` ids pass through unchanged; `snap` ids
-/// are rebased to snap-relative (`0x00..`) before buffering. An id beyond the `snap/2` range is a
-/// protocol violation (the connection carries only `eth` and `snap/2`).
-fn route_inbound(
-    mut msg: BytesMut,
-    snap_offset: u8,
-    snap_messages: u8,
-    to_eth: &mpsc::UnboundedSender<BytesMut>,
-    to_snap: &mpsc::UnboundedSender<BytesMut>,
-) -> Result<(), EthStreamError> {
-    let id = *msg.first().ok_or(P2PStreamError::EmptyProtocolMessage)?;
-    if id < snap_offset {
-        let _ = to_eth.send(msg);
-    } else if id - snap_offset < snap_messages {
-        msg[0] = id - snap_offset;
-        let _ = to_snap.send(msg);
-    } else {
-        return Err(P2PStreamError::UnknownReservedMessageId(id).into())
-    }
-    Ok(())
-}
-
-/// Rebases a snap-relative message id to the combined message space.
-#[inline]
-fn mask_snap(bytes: &mut BytesMut, snap_offset: u8) -> Result<(), io::Error> {
-    let id = bytes.first().ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
-    bytes[0] =
-        id.checked_add(snap_offset).ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
-    Ok(())
 }
 
 /// In-memory transport handed to the inner [`EthStream`] so it frames `eth` messages without owning
@@ -492,6 +443,65 @@ impl CanDisconnect<Bytes> for UnauthEthProxy {
         let fut = self.inner.disconnect(reason);
         Box::pin(async move { fut.await.map_err(P2PStreamError::from) })
     }
+}
+
+/// Resolves the `snap/2` message-id offset and count from the negotiated capabilities, rejecting
+/// any layout other than `eth` at relative offset 0 immediately followed by `snap/2`.
+///
+/// [`route_inbound`] forwards every combined id below the snap offset to the eth decoder verbatim,
+/// so a capability before `eth`, or between `eth` and `snap/2`, would feed non-eth ids into it.
+fn eth_snap_layout(caps: &SharedCapabilities) -> Result<(u8, u8), EthStreamError> {
+    let snap = caps
+        .ensure_matching_capability(&Capability::snap_2())
+        .map_err(|_| EthStreamError::from(P2PStreamError::CapabilityNotShared))?;
+    let snap_offset = snap.relative_message_id_offset();
+    let snap_messages = snap.num_messages();
+
+    let eth = caps.eth()?;
+    if eth.relative_message_id_offset() != 0 || eth.num_messages() != snap_offset {
+        return Err(P2PStreamError::CapabilityNotShared.into())
+    }
+    Ok((snap_offset, snap_messages))
+}
+
+/// Routes an inbound combined-id message to the `eth` primary or buffers it for `snap/2`.
+///
+/// The combined id space is partitioned as `eth = 0..snap_offset` and
+/// `snap = snap_offset..snap_offset + snap_messages`. `eth` ids pass through unchanged; `snap` ids
+/// are rebased to snap-relative (`0x00..`) before buffering. An id beyond the `snap/2` range is a
+/// protocol violation (the connection carries only `eth` and `snap/2`).
+fn route_inbound(
+    mut msg: BytesMut,
+    snap_offset: u8,
+    snap_messages: u8,
+    to_eth: &mpsc::UnboundedSender<BytesMut>,
+    to_snap: &mpsc::UnboundedSender<BytesMut>,
+) -> Result<(), EthStreamError> {
+    let id = *msg.first().ok_or(P2PStreamError::EmptyProtocolMessage)?;
+
+    // A send fails only once the consumer half is dropped, i.e. the stream is being torn down;
+    // dropping the frame then is correct, so the send results are intentionally ignored.
+    let Some(snap_id) = id.checked_sub(snap_offset) else {
+        // Below the snap offset: an `eth` id, forwarded unchanged.
+        let _ = to_eth.send(msg);
+        return Ok(())
+    };
+    if snap_id >= snap_messages {
+        return Err(P2PStreamError::UnknownReservedMessageId(id).into())
+    }
+    // A `snap/2` id, rebased to snap-relative (`0x00..`) before buffering.
+    msg[0] = snap_id;
+    let _ = to_snap.send(msg);
+    Ok(())
+}
+
+/// Rebases a snap-relative message id to the combined message space.
+#[inline]
+fn mask_snap(bytes: &mut BytesMut, snap_offset: u8) -> Result<(), io::Error> {
+    let id = bytes.first().ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    bytes[0] =
+        id.checked_add(snap_offset).ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    Ok(())
 }
 
 #[cfg(test)]
