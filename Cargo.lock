@@ -8620,6 +8620,7 @@ dependencies = [
  "reth-ethereum-primitives",
  "reth-primitives-traits",
  "serde",
+ "test-case",
  "thiserror 2.0.18",
 ]
 
@@ -9213,6 +9214,7 @@ dependencies = [
  "reth-network-types",
  "reth-primitives-traits",
  "reth-storage-errors",
+ "test-case",
  "tokio",
  "tracing",
 ]
