@@ -332,7 +332,12 @@ where
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.get_mut().conn.poll_close_unpin(cx).map_err(Into::into)
+        let this = self.get_mut();
+        // Flush before closing: drain the eth stream and the proxy channels onto the wire first, so
+        // a close after start_send/feed cannot silently drop queued eth or snap frames.
+        ready!(this.eth.poll_flush_unpin(cx))?;
+        ready!(this.poll_service_outbound(cx))?;
+        this.conn.poll_close_unpin(cx).map_err(Into::into)
     }
 }
 
