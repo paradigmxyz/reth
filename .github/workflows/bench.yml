@@ -217,28 +217,35 @@ jobs:
               content: 'eyes',
             });
 
-            const derekCommentAuthors = new Set(['decofe']);
+            const shouldHideComment = (comment) => {
+              const body = comment.body.trim();
+              return comment.user.login === 'decofe' || body.startsWith('derek') || body.startsWith('@decofe');
+            };
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
               per_page: 100,
             });
-            const triggerCommentId = context.payload.comment.id;
-            let deleted = 0;
+            let hidden = 0;
             for (const comment of comments) {
-              if (comment.id === triggerCommentId) continue;
-              if (!derekCommentAuthors.has(comment.user.login)) continue;
+              if (!shouldHideComment(comment)) continue;
 
-              await github.rest.issues.deleteComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: comment.id,
+              await github.graphql(`
+                mutation($subjectId: ID!) {
+                  minimizeComment(input: {subjectId: $subjectId, classifier: OUTDATED}) {
+                    minimizedComment {
+                      isMinimized
+                    }
+                  }
+                }
+              `, {
+                subjectId: comment.node_id,
               });
-              deleted += 1;
+              hidden += 1;
             }
 
-            core.notice(`Deleted ${deleted} benchmark comment(s).`);
+            core.notice(`Hid ${hidden} Derek comment(s).`);
 
       - name: Parse arguments
         id: args
