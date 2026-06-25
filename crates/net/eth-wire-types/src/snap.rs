@@ -22,7 +22,8 @@ pub enum SnapVersion {
 }
 
 impl SnapVersion {
-    /// Returns the number of messages supported by this version.
+    /// Returns the protocol message slot length for this version (not the count of valid ids; use
+    /// [`Self::supports_message_id`] to check validity).
     pub const fn message_count(self) -> u8 {
         match self {
             Self::V2 => 10,
@@ -228,6 +229,21 @@ pub enum SnapProtocolMessage {
     BlockAccessLists(BlockAccessListsMessage),
 }
 
+/// Error decoding an inbound `snap` protocol message from its framed bytes.
+#[derive(thiserror::Error, Debug)]
+pub enum SnapProtocolError {
+    /// The payload was empty and carried no message id.
+    #[error("empty snap message")]
+    Empty,
+    /// The message id is not valid for the negotiated snap version (e.g. the removed trie-node
+    /// messages `0x06`/`0x07` under snap/2).
+    #[error("message id {0:#x} is invalid for snap/{1:?}")]
+    UnsupportedMessageId(u8, SnapVersion),
+    /// Decoding the RLP message body failed.
+    #[error("RLP error: {0}")]
+    Rlp(#[from] alloy_rlp::Error),
+}
+
 impl SnapProtocolMessage {
     /// Returns the protocol message ID for this message type.
     ///
@@ -242,6 +258,46 @@ impl SnapProtocolMessage {
             Self::ByteCodes(_) => SnapMessageId::ByteCodes,
             Self::GetBlockAccessLists(_) => SnapMessageId::GetBlockAccessLists,
             Self::BlockAccessLists(_) => SnapMessageId::BlockAccessLists,
+        }
+    }
+
+    /// Returns the `request_id` used to correlate this message with its request/response pair.
+    pub const fn request_id(&self) -> u64 {
+        match self {
+            Self::GetAccountRange(m) => m.request_id,
+            Self::AccountRange(m) => m.request_id,
+            Self::GetStorageRanges(m) => m.request_id,
+            Self::StorageRanges(m) => m.request_id,
+            Self::GetByteCodes(m) => m.request_id,
+            Self::ByteCodes(m) => m.request_id,
+            Self::GetBlockAccessLists(m) => m.request_id,
+            Self::BlockAccessLists(m) => m.request_id,
+        }
+    }
+
+    /// Returns `true` if this is a response message (as opposed to a request).
+    pub const fn is_response(&self) -> bool {
+        matches!(
+            self,
+            Self::AccountRange(_) |
+                Self::StorageRanges(_) |
+                Self::ByteCodes(_) |
+                Self::BlockAccessLists(_)
+        )
+    }
+
+    /// Overwrites the `request_id`, e.g. so a session can assign a connection-unique id before
+    /// sending a request.
+    pub const fn set_request_id(&mut self, request_id: u64) {
+        match self {
+            Self::GetAccountRange(m) => m.request_id = request_id,
+            Self::AccountRange(m) => m.request_id = request_id,
+            Self::GetStorageRanges(m) => m.request_id = request_id,
+            Self::StorageRanges(m) => m.request_id = request_id,
+            Self::GetByteCodes(m) => m.request_id = request_id,
+            Self::ByteCodes(m) => m.request_id = request_id,
+            Self::GetBlockAccessLists(m) => m.request_id = request_id,
+            Self::BlockAccessLists(m) => m.request_id = request_id,
         }
     }
 
@@ -337,11 +393,28 @@ impl SnapProtocolMessage {
 
         Err(alloy_rlp::Error::Custom("Unknown message ID"))
     }
+
+    /// Decodes a framed snap message (`[id, body..]`), validating the id against `version`.
+    ///
+    /// Empty payload, invalid id, and malformed body are reported as distinct
+    /// [`SnapProtocolError`] variants.
+    pub fn decode_versioned(version: SnapVersion, bytes: &[u8]) -> Result<Self, SnapProtocolError> {
+        let (&id, mut body) = bytes.split_first().ok_or(SnapProtocolError::Empty)?;
+        if !version.supports_message_id(id) {
+            return Err(SnapProtocolError::UnsupportedMessageId(id, version));
+        }
+        let msg = Self::decode(id, &mut body)?;
+        if !body.is_empty() {
+            return Err(SnapProtocolError::Rlp(alloy_rlp::Error::UnexpectedLength));
+        }
+        Ok(msg)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_case::test_case;
 
     // Helper function to create a B256 from a u64 for testing
     fn b256_from_u64(value: u64) -> B256 {
@@ -457,5 +530,151 @@ mod tests {
         assert!(v2.supports_message_id(SnapMessageId::BlockAccessLists as u8));
         assert!(!v2.supports_message_id(0x0a));
         assert!(!v2.supports_message_id(0xff));
+    }
+
+    #[test_case(
+        SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
+            request_id: 1, root_hash: B256::ZERO, starting_hash: B256::ZERO,
+            limit_hash: B256::ZERO, response_bytes: 0,
+        }), 1, false ; "get_account_range is a request"
+    )]
+    #[test_case(
+        SnapProtocolMessage::AccountRange(AccountRangeMessage {
+            request_id: 2, accounts: vec![], proof: vec![],
+        }), 2, true ; "account_range is a response"
+    )]
+    #[test_case(
+        SnapProtocolMessage::GetStorageRanges(GetStorageRangesMessage {
+            request_id: 3, root_hash: B256::ZERO, account_hashes: vec![],
+            starting_hash: B256::ZERO, limit_hash: B256::ZERO, response_bytes: 0,
+        }), 3, false ; "get_storage_ranges is a request"
+    )]
+    #[test_case(
+        SnapProtocolMessage::StorageRanges(StorageRangesMessage {
+            request_id: 4, slots: vec![], proof: vec![],
+        }), 4, true ; "storage_ranges is a response"
+    )]
+    #[test_case(
+        SnapProtocolMessage::GetByteCodes(GetByteCodesMessage {
+            request_id: 5, hashes: vec![], response_bytes: 0,
+        }), 5, false ; "get_byte_codes is a request"
+    )]
+    #[test_case(
+        SnapProtocolMessage::ByteCodes(ByteCodesMessage { request_id: 6, codes: vec![] }),
+        6, true ; "byte_codes is a response"
+    )]
+    #[test_case(
+        SnapProtocolMessage::GetBlockAccessLists(GetBlockAccessListsMessage {
+            request_id: 7, block_hashes: vec![], response_bytes: 0,
+        }), 7, false ; "get_block_access_lists is a request"
+    )]
+    #[test_case(
+        SnapProtocolMessage::BlockAccessLists(BlockAccessListsMessage {
+            request_id: 8, block_access_lists: BlockAccessLists(vec![]),
+        }), 8, true ; "block_access_lists is a response"
+    )]
+    fn request_id_and_is_response(msg: SnapProtocolMessage, expected_id: u64, is_response: bool) {
+        assert_eq!(msg.request_id(), expected_id);
+        assert_eq!(msg.is_response(), is_response);
+    }
+
+    #[test_case(
+        SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
+            request_id: 1, root_hash: B256::ZERO, starting_hash: B256::ZERO,
+            limit_hash: B256::ZERO, response_bytes: 0,
+        }) ; "get_account_range"
+    )]
+    #[test_case(
+        SnapProtocolMessage::AccountRange(AccountRangeMessage {
+            request_id: 1, accounts: vec![], proof: vec![],
+        }) ; "account_range"
+    )]
+    #[test_case(
+        SnapProtocolMessage::GetStorageRanges(GetStorageRangesMessage {
+            request_id: 1, root_hash: B256::ZERO, account_hashes: vec![],
+            starting_hash: B256::ZERO, limit_hash: B256::ZERO, response_bytes: 0,
+        }) ; "get_storage_ranges"
+    )]
+    #[test_case(
+        SnapProtocolMessage::StorageRanges(StorageRangesMessage {
+            request_id: 1, slots: vec![], proof: vec![],
+        }) ; "storage_ranges"
+    )]
+    #[test_case(
+        SnapProtocolMessage::GetByteCodes(GetByteCodesMessage {
+            request_id: 1, hashes: vec![], response_bytes: 0,
+        }) ; "get_byte_codes"
+    )]
+    #[test_case(
+        SnapProtocolMessage::ByteCodes(ByteCodesMessage { request_id: 1, codes: vec![] }) ;
+        "byte_codes"
+    )]
+    #[test_case(
+        SnapProtocolMessage::GetBlockAccessLists(GetBlockAccessListsMessage {
+            request_id: 1, block_hashes: vec![], response_bytes: 0,
+        }) ; "get_block_access_lists"
+    )]
+    #[test_case(
+        SnapProtocolMessage::BlockAccessLists(BlockAccessListsMessage {
+            request_id: 1, block_access_lists: BlockAccessLists(vec![]),
+        }) ; "block_access_lists"
+    )]
+    fn per_variant_request_id_and_round_trip(mut msg: SnapProtocolMessage) {
+        // set_request_id overwrites the id for every variant.
+        msg.set_request_id(42);
+        assert_eq!(msg.request_id(), 42);
+
+        // decode_versioned round-trips every valid snap/2 id.
+        let decoded =
+            SnapProtocolMessage::decode_versioned(SnapVersion::V2, &msg.encode()).unwrap();
+        assert_eq!(decoded, msg);
+    }
+
+    #[test]
+    fn decode_versioned_rejects_empty() {
+        // An empty payload carries no message id and is distinct from an invalid id.
+        assert!(matches!(
+            SnapProtocolMessage::decode_versioned(SnapVersion::V2, &[]),
+            Err(SnapProtocolError::Empty)
+        ));
+    }
+
+    #[test]
+    fn decode_versioned_rejects_trie_node_ids_in_v2() {
+        // snap/2 (EIP-8189) removes trie nodes (`0x06`/`0x07`); decoding must reject them as an
+        // unsupported id rather than a malformed body.
+        for id in [0x06u8, 0x07] {
+            assert!(matches!(
+                SnapProtocolMessage::decode_versioned(SnapVersion::V2, &[id]),
+                Err(SnapProtocolError::UnsupportedMessageId(got, SnapVersion::V2)) if got == id
+            ));
+        }
+    }
+
+    #[test]
+    fn decode_versioned_reports_malformed_body() {
+        // A valid id (GetBlockAccessLists, 0x08) with a non-decodable body is an RLP error, not an
+        // unsupported id.
+        assert!(matches!(
+            SnapProtocolMessage::decode_versioned(SnapVersion::V2, &[0x08, 0xff]),
+            Err(SnapProtocolError::Rlp(_))
+        ));
+    }
+
+    #[test]
+    fn decode_versioned_rejects_trailing_bytes() {
+        // A valid framed message with junk appended after the RLP body must be rejected rather
+        // than silently decoded.
+        let original = SnapProtocolMessage::GetBlockAccessLists(GetBlockAccessListsMessage {
+            request_id: 7,
+            block_hashes: vec![b256_from_u64(1)],
+            response_bytes: 1024,
+        });
+        let mut framed = original.encode().to_vec();
+        framed.push(0xff);
+        assert!(matches!(
+            SnapProtocolMessage::decode_versioned(SnapVersion::V2, &framed),
+            Err(SnapProtocolError::Rlp(alloy_rlp::Error::UnexpectedLength))
+        ));
     }
 }
