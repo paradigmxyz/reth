@@ -81,6 +81,16 @@ where
         let snap_offset = snap_cap.relative_message_id_offset();
         let snap_messages = snap_cap.num_messages();
 
+        // route_inbound forwards every combined id below `snap_offset` to the eth decoder verbatim,
+        // which is only correct when the connection carries exactly `eth` followed by `snap/2`:
+        // `eth` at relative offset 0 and `snap/2` directly after it. Reject any other layout (a
+        // capability before eth, or between eth and snap) so non-eth ids never reach the eth
+        // decoder.
+        let eth_cap = conn.shared_capabilities().eth()?;
+        if eth_cap.relative_message_id_offset() != 0 || eth_cap.num_messages() != snap_offset {
+            return Err(P2PStreamError::CapabilityNotShared.into());
+        }
+
         // eth bytes flow conn <-> demux <-> EthProxy <-> EthStream.
         let (to_eth, eth_from_wire) = mpsc::unbounded_channel();
         let (eth_to_wire, mut from_eth) = mpsc::unbounded_channel();
