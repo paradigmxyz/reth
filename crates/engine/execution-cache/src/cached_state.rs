@@ -255,12 +255,12 @@ struct CacheMetricSnapshot {
 
 impl CacheMetricSnapshot {
     const fn is_empty(&self) -> bool {
-        self.account_hits == 0 &&
-            self.account_misses == 0 &&
-            self.storage_hits == 0 &&
-            self.storage_misses == 0 &&
-            self.code_hits == 0 &&
-            self.code_misses == 0
+        self.account_hits == 0
+            && self.account_misses == 0
+            && self.storage_hits == 0
+            && self.storage_misses == 0
+            && self.code_hits == 0
+            && self.code_misses == 0
     }
 }
 
@@ -978,6 +978,11 @@ impl ExecutionCache {
         self.0.storage_cache.insert((address, key), value.unwrap_or_default());
     }
 
+    /// Remove a storage value from cache.
+    fn remove_storage(&self, address: Address, key: StorageKey) {
+        self.0.storage_cache.remove(&(address, key));
+    }
+
     /// Insert code into cache.
     pub fn insert_code(&self, hash: B256, code: Option<Bytecode>) {
         self.0.code_cache.insert(hash, code);
@@ -1030,7 +1035,7 @@ impl ExecutionCache {
             // If the account was not modified, as in not changed and not destroyed, then we have
             // nothing to do w.r.t. this particular account and can move on
             if account.status.is_not_modified() {
-                continue
+                continue;
             }
 
             // If the original account had code (was a contract), we must clear the entire cache
@@ -1053,7 +1058,7 @@ impl ExecutionCache {
                         );
                     });
                     self.clear();
-                    return Ok(())
+                    return Ok(());
                 }
 
                 self.0.account_cache.remove(addr);
@@ -1065,12 +1070,18 @@ impl ExecutionCache {
             // `None` current info, should be destroyed.
             let Some(ref account_info) = account.info else {
                 trace!(target: "engine::caching", ?account, "Account with None account info found in state updates");
-                return Err(())
+                return Err(());
             };
 
             // Now we iterate over all storage and make updates to the cached storage values
             for (key, slot) in &account.storage {
-                self.insert_storage(*addr, (*key).into(), Some(slot.present_value));
+                let key = (*key).into();
+                if slot.present_value.is_zero() {
+                    // Zero values only need to invalidate stale nonzero cache entries.
+                    self.remove_storage(*addr, key);
+                } else {
+                    self.insert_storage(*addr, key, Some(slot.present_value));
+                }
             }
 
             // Insert will update if present, so we just use the new account info as the new value
@@ -1178,7 +1189,7 @@ mod tests {
     use super::*;
     use alloy_primitives::{map::HashMap, U256};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-    use reth_revm::db::{AccountStatus, BundleAccount};
+    use reth_revm::db::{states::StorageSlot, AccountStatus, BundleAccount};
     use revm_state::AccountInfo;
 
     #[test]
@@ -1439,6 +1450,42 @@ mod tests {
         assert!(caches.insert_state(&bundle).is_ok());
         assert_eq!(caches.0.account_stats.size(), 0);
         assert!(caches.0.account_cache.get(&addr).is_none());
+    }
+
+    #[test]
+    fn test_insert_state_zero_storage_removes_stale_cache_entry() {
+        let caches = ExecutionCache::new(1000);
+        let address = Address::random();
+        let storage_key = StorageKey::random();
+
+        caches.insert_storage(address, storage_key, Some(U256::from(42)));
+        let cached = caches
+            .get_or_try_insert_storage_with(address, storage_key, || Ok::<_, ()>(U256::from(999)));
+        assert_eq!(cached.unwrap(), CachedStatus::Cached(U256::from(42)));
+
+        let account_info = AccountInfo::default();
+        let mut storage = HashMap::default();
+        storage.insert(storage_key.into(), StorageSlot::new_changed(U256::from(42), U256::ZERO));
+        let bundle = BundleState {
+            state: HashMap::from_iter([(
+                address,
+                BundleAccount::new(
+                    Some(account_info.clone()),
+                    Some(account_info),
+                    storage,
+                    AccountStatus::Changed,
+                ),
+            )]),
+            contracts: Default::default(),
+            reverts: Default::default(),
+            state_size: 0,
+            reverts_size: 0,
+        };
+
+        assert!(caches.insert_state(&bundle).is_ok());
+        let loaded = caches
+            .get_or_try_insert_storage_with(address, storage_key, || Ok::<_, ()>(U256::from(999)));
+        assert_eq!(loaded.unwrap(), CachedStatus::NotCached(U256::from(999)));
     }
 
     #[test]
