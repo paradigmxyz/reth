@@ -312,10 +312,14 @@ where
                 // If we don't have any pending messages, we can spend some time on computing
                 // storage roots and promoting account updates.
                 self.dispatch_pending_targets();
-                t = Instant::now();
-                self.process_new_updates()?;
-                self.promote_pending_account_updates()?;
-                self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
+                if self.pending_updates != 0 {
+                    t = Instant::now();
+                    self.process_new_updates()?;
+                    self.promote_pending_account_updates()?;
+                    self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
+                } else {
+                    self.promote_pending_account_updates()?;
+                }
 
                 if self.finished_state_updates &&
                     self.account_updates.is_empty() &&
@@ -332,10 +336,12 @@ where
                     self.trie.calculate_subtries();
                 }
             } else if self.updates.is_empty() {
-                // If we don't have any pending updates, apply them to the trie,
-                t = Instant::now();
-                self.process_new_updates()?;
-                self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
+                // If no more update messages are queued, apply any received updates to the trie.
+                if self.pending_updates != 0 {
+                    t = Instant::now();
+                    self.process_new_updates()?;
+                    self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
+                }
                 self.dispatch_pending_targets();
             } else if self.pending_targets.len() > self.chunk_size {
                 // Make sure to dispatch targets if we've accumulated a lot of them.
