@@ -345,9 +345,10 @@ where
             return;
         }
 
+        let bal_accounts = bal.len();
         trace!(
             target: "engine::tree::payload_processor::prewarm",
-            accounts = bal.len(),
+            accounts = bal_accounts,
             "Starting BAL prewarm"
         );
 
@@ -356,7 +357,6 @@ where
         let executor = self.executor.clone();
         let parent_span = Span::current();
         let stream_parent_span = parent_span;
-        let prefetch_bal = Arc::clone(&decoded_bal);
         let stream_bal = Arc::clone(&decoded_bal);
         let (stream_tx, stream_rx) = oneshot::channel();
 
@@ -367,7 +367,7 @@ where
                     target: "engine::tree::payload_processor::prewarm",
                     parent: &stream_parent_span,
                     "bal_hashed_state_stream",
-                    bal_accounts = stream_bal.as_bal().len(),
+                    bal_accounts,
                 );
                 let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
@@ -413,7 +413,7 @@ where
             let build = Arc::new(move || provider_builder.build());
 
             pool.begin_block(build, caches);
-            for account in prefetch_bal.as_bal() {
+            for account in decoded_bal.as_bal() {
                 pool.warm_account(account.address);
                 for change in &account.storage_changes {
                     pool.warm_storage(account.address, change.slot.into());
