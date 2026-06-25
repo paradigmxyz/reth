@@ -64,8 +64,17 @@ impl<K: Ord, V> ForwardInMemoryCursor<'_, K, V> {
     /// Returns the first entry from the current cursor position that's greater than the provided
     /// key. This method advances the cursor forward.
     pub fn first_after(&mut self, key: &K) -> Option<&(K, V)> {
-        if self.current().is_some_and(|(k, _)| k > key) {
-            return self.current()
+        if let Some((current, _)) = self.current() {
+            match current.cmp(key) {
+                core::cmp::Ordering::Greater => return self.current(),
+                core::cmp::Ordering::Equal => {
+                    self.idx += 1;
+                    if self.current().is_some_and(|(k, _)| k > key) {
+                        return self.current()
+                    }
+                }
+                core::cmp::Ordering::Less => {}
+            }
         }
 
         self.advance_while(|k| k <= key)
