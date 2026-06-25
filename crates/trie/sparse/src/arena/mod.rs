@@ -256,7 +256,8 @@ impl ArenaSparseSubtrie {
         }
 
         while let Some(frame) = stack.last_mut() {
-            let Some((child_pos, nibble, old_child_idx)) = frame.next_child(&new_arena) else {
+            let Some((child_pos, nibble, old_child_idx)) = frame.next_revealed_child(&new_arena)
+            else {
                 stack.pop();
                 continue;
             };
@@ -322,7 +323,7 @@ impl ArenaSparseSubtrie {
         }
 
         impl CopyFrame {
-            fn next_child(&mut self, new_arena: &NodeArena) -> Option<(usize, u8, Index)> {
+            fn next_revealed_child(&mut self, new_arena: &NodeArena) -> Option<(usize, u8, Index)> {
                 let ArenaSparseNode::Branch(b) = &new_arena[self.new_idx] else { unreachable!() };
 
                 loop {
