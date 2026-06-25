@@ -30,6 +30,9 @@ pub(super) fn test_changed_paths_record_base_paths_for_branches_and_leaves<T: Sp
     assert!(!changed_paths.contains(&Nibbles::from_nibbles([0x01, 0x02, 0x03])));
     assert!(!changed_paths.contains(&Nibbles::unpack(key_a)));
     assert!(!changed_paths.contains(&Nibbles::unpack(key_b)));
+
+    let _ = trie.root();
+    assert!(trie.take_changed_paths().is_empty());
 }
 
 pub(super) fn test_changed_paths_skip_dirty_ancestor_branch_when_descendant_changed<
@@ -64,6 +67,18 @@ pub(super) fn test_changed_paths_skip_dirty_ancestor_branch_when_descendant_chan
     assert!(changed_paths.contains(&Nibbles::from_nibbles([0x0f, 0x0f, 0x01])));
     assert!(!changed_paths.contains(&Nibbles::from_nibbles([0x0f])));
     assert!(!changed_paths.contains(&Nibbles::default()));
+
+    let mut updates = B256Map::from_iter([(key_b, LeafUpdate::Changed(vec![0x05; 64]))]);
+    trie.update_leaves(&mut updates, |_, _| {}).expect("update should succeed");
+    assert!(updates.is_empty());
+
+    let _ = trie.root();
+
+    let changed_paths = trie.take_changed_paths();
+    assert!(changed_paths.contains(&Nibbles::from_nibbles([0x0f, 0x0f, 0x02])));
+    assert!(!changed_paths.contains(&Nibbles::from_nibbles([0x0f, 0x0f, 0x01])));
+    assert!(!changed_paths.contains(&Nibbles::from_nibbles([0x0f])));
+    assert!(!changed_paths.contains(&Nibbles::default()));
 }
 
 pub(super) fn test_changed_paths_record_removed_subtrie_leaf_and_collapsed_parent_branch<
@@ -89,7 +104,12 @@ pub(super) fn test_changed_paths_record_removed_subtrie_leaf_and_collapsed_paren
     trie.update_leaves(&mut removals, |_, _| {}).expect("removal should succeed");
     assert!(removals.is_empty());
 
+    let _ = trie.root();
+
     let changed_paths = trie.take_changed_paths();
     assert!(changed_paths.contains(&Nibbles::from_nibbles([0x01, 0x02])));
     assert!(changed_paths.contains(&Nibbles::default()));
+
+    let _ = trie.root();
+    assert!(trie.take_changed_paths().is_empty());
 }

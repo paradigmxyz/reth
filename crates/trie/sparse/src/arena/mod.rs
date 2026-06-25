@@ -703,7 +703,7 @@ impl ArenaParallelSparseTrie {
         fn state_to_record(state: &ArenaSparseNodeState) -> NodeStateRecord {
             match state {
                 ArenaSparseNodeState::Revealed => NodeStateRecord::Revealed,
-                ArenaSparseNodeState::Cached { rlp_node } => {
+                ArenaSparseNodeState::Cached { rlp_node, .. } => {
                     NodeStateRecord::Cached { rlp_node: hex::encode(rlp_node.as_ref()) }
                 }
                 ArenaSparseNodeState::Dirty => NodeStateRecord::Dirty,
@@ -1224,16 +1224,18 @@ impl ArenaParallelSparseTrie {
         match &arena[root] {
             ArenaSparseNode::EmptyRoot => return RlpNode::word_rlp(&EMPTY_ROOT_HASH),
             ArenaSparseNode::Leaf { .. } => {
-                if Self::encode_leaf(arena, root, rlp_buf, rlp_node_buf) &&
-                    let Some(changed_paths) = changed_paths.as_mut()
-                {
+                Self::encode_leaf(arena, root, rlp_buf, rlp_node_buf);
+                let was_dirty = arena[root].state_mut().take_cached_was_dirty();
+                if was_dirty && let Some(changed_paths) = changed_paths.as_mut() {
                     changed_paths.insert(base_path);
                 }
                 return rlp_node_buf.pop().expect("encode_leaf must push an RlpNode");
             }
             ArenaSparseNode::Branch(b) => {
                 if let ArenaSparseNodeState::Cached { rlp_node, .. } = &b.state {
-                    return rlp_node.clone();
+                    let rlp_node = rlp_node.clone();
+                    arena[root].state_mut().take_cached_was_dirty();
+                    return rlp_node;
                 }
             }
             ArenaSparseNode::Subtrie(_) | ArenaSparseNode::TakenSubtrie => {
@@ -1285,6 +1287,7 @@ impl ArenaParallelSparseTrie {
                 path.extend(&branch.short_key);
                 path
             };
+            let mut child_subtree_emitted_changed_path = false;
             for (child_idx, nibble) in BranchChildIter::new(state_mask) {
                 match &arena[head_idx].branch_ref().children[child_idx] {
                     ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
@@ -1296,15 +1299,12 @@ impl ArenaParallelSparseTrie {
                             ArenaSparseNode::Leaf { .. } => {
                                 let mut child_path = branch_logical_path;
                                 child_path.push(nibble);
-                                if Self::encode_leaf(arena, child_idx, rlp_buf, rlp_node_buf) &&
-                                    let Some(changed_paths) = changed_paths.as_mut()
-                                {
-                                    changed_paths.insert(child_path);
-                                    cursor
-                                        .stack
-                                        .last_mut()
-                                        .expect("cursor is non-empty")
-                                        .subtree_emitted_changed_path = true;
+                                Self::encode_leaf(arena, child_idx, rlp_buf, rlp_node_buf);
+                                if arena[child_idx].state_mut().take_cached_was_dirty() {
+                                    child_subtree_emitted_changed_path = true;
+                                    if let Some(changed_paths) = changed_paths.as_mut() {
+                                        changed_paths.insert(child_path);
+                                    }
                                 }
                             }
                             ArenaSparseNode::Branch(child_b) => {
@@ -1312,7 +1312,11 @@ impl ArenaParallelSparseTrie {
                                 else {
                                     panic!("child branch must be cached after DFS");
                                 };
-                                rlp_node_buf.push(rlp_node.clone());
+                                let rlp_node = rlp_node.clone();
+                                if arena[child_idx].state_mut().take_cached_was_dirty() {
+                                    child_subtree_emitted_changed_path = true;
+                                }
+                                rlp_node_buf.push(rlp_node);
                             }
                             ArenaSparseNode::Subtrie(subtrie) => {
                                 let subtrie_root = &subtrie.arena[subtrie.root];
@@ -1366,28 +1370,14 @@ impl ArenaParallelSparseTrie {
             );
 
             let branch = arena[head_idx].branch_mut();
-            branch.state = ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone() };
+            branch.state = ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), was_dirty };
             branch.branch_masks = new_branch_masks;
 
-            let subtree_emitted_changed_path =
-                cursor.stack.last().expect("cursor is non-empty").subtree_emitted_changed_path;
-
-            let branch_emitted_changed_path = if was_dirty && !subtree_emitted_changed_path {
-                if let Some(changed_paths) = changed_paths.as_mut() {
-                    changed_paths.insert(head_path);
-                    true
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
-
-            if subtree_emitted_changed_path || branch_emitted_changed_path {
-                let stack_len = cursor.stack.len();
-                if stack_len >= 2 {
-                    cursor.stack[stack_len - 2].subtree_emitted_changed_path = true;
-                }
+            if was_dirty &&
+                !child_subtree_emitted_changed_path &&
+                let Some(changed_paths) = changed_paths.as_mut()
+            {
+                changed_paths.insert(head_path);
             }
 
             // Record trie updates for dirty branches only.
@@ -1412,7 +1402,9 @@ impl ArenaParallelSparseTrie {
         let ArenaSparseNodeState::Cached { rlp_node, .. } = &arena[root].branch_ref().state else {
             panic!("root must be cached after update_cached_rlp");
         };
-        rlp_node.clone()
+        let rlp_node = rlp_node.clone();
+        arena[root].state_mut().take_cached_was_dirty();
+        rlp_node
     }
 
     /// Immutable traversal to find a leaf value at `full_path` starting from `root` in `arena`.
@@ -1539,14 +1531,13 @@ impl ArenaParallelSparseTrie {
 
     /// Encodes a leaf node's RLP and pushes it onto `rlp_node_buf`.
     ///
-    /// If the leaf is already cached, its existing `RlpNode` is reused. Returns true if the leaf
-    /// was dirty before encoding.
+    /// If the leaf is already cached, its existing `RlpNode` is reused.
     fn encode_leaf(
         arena: &mut NodeArena,
         idx: Index,
         rlp_buf: &mut Vec<u8>,
         rlp_node_buf: &mut Vec<RlpNode>,
-    ) -> bool {
+    ) {
         let (key, value, state) = match &arena[idx] {
             ArenaSparseNode::Leaf { key, value, state } => (key, value, state),
             _ => unreachable!("encode_leaf called on non-Leaf node"),
@@ -1554,7 +1545,7 @@ impl ArenaParallelSparseTrie {
 
         if let ArenaSparseNodeState::Cached { rlp_node, .. } = state {
             rlp_node_buf.push(rlp_node.clone());
-            return false;
+            return;
         }
 
         let was_dirty = matches!(state, ArenaSparseNodeState::Dirty);
@@ -1562,9 +1553,9 @@ impl ArenaParallelSparseTrie {
         rlp_buf.clear();
         let rlp_node = LeafNodeRef { key, value }.rlp(rlp_buf);
 
-        *arena[idx].state_mut() = ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone() };
+        *arena[idx].state_mut() =
+            ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), was_dirty };
         rlp_node_buf.push(rlp_node);
-        was_dirty
     }
 
     /// Creates a new leaf and a new branch that splits an existing child from the new leaf at
@@ -2261,7 +2252,7 @@ impl ArenaParallelSparseTrie {
         let mut arena_node = ArenaSparseNode::from_proof_node(proof_node);
 
         let state = arena_node.state_mut();
-        *state = ArenaSparseNodeState::Cached { rlp_node: cached_rlp };
+        *state = ArenaSparseNodeState::Cached { rlp_node: cached_rlp, was_dirty: false };
 
         let child_idx = arena.insert(arena_node);
         arena[head_idx].branch_mut().children[dense_child_idx] =
