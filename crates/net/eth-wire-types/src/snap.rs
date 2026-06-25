@@ -22,7 +22,8 @@ pub enum SnapVersion {
 }
 
 impl SnapVersion {
-    /// Returns the number of messages supported by this version.
+    /// Returns the protocol message slot length for this version (not the count of valid ids; use
+    /// [`Self::supports_message_id`] to check validity).
     pub const fn message_count(self) -> u8 {
         match self {
             Self::V2 => 10,
@@ -398,11 +399,15 @@ impl SnapProtocolMessage {
     /// Empty payload, invalid id, and malformed body are reported as distinct
     /// [`SnapProtocolError`] variants.
     pub fn decode_versioned(version: SnapVersion, bytes: &[u8]) -> Result<Self, SnapProtocolError> {
-        let (&id, body) = bytes.split_first().ok_or(SnapProtocolError::Empty)?;
+        let (&id, mut body) = bytes.split_first().ok_or(SnapProtocolError::Empty)?;
         if !version.supports_message_id(id) {
             return Err(SnapProtocolError::UnsupportedMessageId(id, version));
         }
-        Self::decode(id, &mut &body[..]).map_err(SnapProtocolError::Rlp)
+        let msg = Self::decode(id, &mut body)?;
+        if !body.is_empty() {
+            return Err(SnapProtocolError::Rlp(alloy_rlp::Error::UnexpectedLength));
+        }
+        Ok(msg)
     }
 }
 
