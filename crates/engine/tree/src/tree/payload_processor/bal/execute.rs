@@ -25,7 +25,9 @@ use alloy_evm::{
 };
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
+use reth_evm::{
+    execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor, SpecFor,
+};
 use reth_primitives_traits::ReceiptTy;
 use reth_provider::BlockExecutionOutput;
 use reth_tasks::Runtime;
@@ -36,7 +38,10 @@ use revm::{
 use revm_state::bal::Bal as RevmBal;
 use std::sync::Arc;
 
-use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
+use crate::tree::{
+    payload_processor::receipt_root_task::IndexedReceipt,
+    precompile_cache::{CachedPrecompile, PrecompileCacheMap},
+};
 
 /// Executes one block on the BAL path using the runtime's persistent BAL worker pool.
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
@@ -47,6 +52,8 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     input_bal: Arc<DecodedBal>,
     evm_env: EvmEnvFor<Evm>,
     ctx: ExecutionCtxFor<'a, Evm>,
+    precompile_cache_disabled: bool,
+    precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     transaction_count: usize,
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
@@ -73,6 +80,8 @@ where
             input_bal,
             evm_env,
             ctx,
+            precompile_cache_disabled,
+            precompile_cache_map,
             transaction_count,
             txs,
             receipt_tx,
@@ -89,6 +98,8 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     input_bal: Arc<DecodedBal>,
     evm_env: EvmEnvFor<Evm>,
     ctx: ExecutionCtxFor<'scope, Evm>,
+    precompile_cache_disabled: bool,
+    precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     transaction_count: usize,
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
@@ -132,13 +143,26 @@ where
                 Arc::clone(&input_bal_revm),
                 evm_env.clone(),
                 ctx.clone(),
+                precompile_cache_disabled,
+                precompile_cache_map.clone(),
             );
         }
         drop(result_tx);
 
         let mut gas_tracker =
             BlockGasTracker::new(block_gas_limit, enable_amsterdam_eip8037, tx_gas_limit_cap);
-        let evm = evm_config.evm_with_env(&mut canonical_state, evm_env);
+        let spec_id = *evm_env.spec_id();
+        let mut evm = evm_config.evm_with_env(&mut canonical_state, evm_env);
+        if !precompile_cache_disabled {
+            evm.precompiles_mut().map_cacheable_precompiles(|address, precompile| {
+                CachedPrecompile::wrap(
+                    precompile,
+                    precompile_cache_map.cache_for_address(*address),
+                    spec_id,
+                    None,
+                )
+            });
+        }
         let mut canonical_executor = evm_config.create_executor_with_state(evm, ctx.clone());
 
         canonical_executor.apply_pre_execution_changes()?;
@@ -506,6 +530,8 @@ mod tests {
             input_bal,
             evm_env,
             execution_ctx,
+            false,
+            PrecompileCacheMap::default(),
             transaction_count,
             tx_stream(txs),
             receipt_tx,
@@ -1133,6 +1159,8 @@ mod tests {
             to_arc_decoded(BlockAccessList::default()),
             evm_env,
             execution_ctx,
+            false,
+            PrecompileCacheMap::default(),
             1, // transaction_count = 1 → exactly one worker spawned
             tx_rx,
             receipt_tx,

@@ -1265,6 +1265,8 @@ where
             input_bal,
             env.evm_env,
             ctx,
+            self.config.precompile_cache_disabled(),
+            self.precompile_cache_map.clone(),
             env.transaction_count,
             handle.clone_transaction_receiver(),
             receipt_tx,
