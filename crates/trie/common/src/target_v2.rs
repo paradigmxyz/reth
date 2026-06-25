@@ -141,7 +141,11 @@ pub struct ChunkedMultiProofTargetsV2 {
 
 impl ChunkedMultiProofTargetsV2 {
     /// Creates a new chunked iterator for the given targets.
-    pub fn new(targets: MultiProofTargetsV2, size: usize) -> Self {
+    pub fn new(mut targets: MultiProofTargetsV2, size: usize) -> Self {
+        // Group account proof chunks by hashed account key so each proof job walks a narrower
+        // section of the account trie.
+        targets.account_targets.sort_unstable_by_key(|target| target.key_nibbles);
+
         Self {
             account_targets: targets.account_targets.into_iter(),
             storage_targets: targets.storage_targets,
@@ -244,5 +248,43 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
         } else {
             Some(chunk)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn target(last_byte: u8) -> ProofV2Target {
+        ProofV2Target::new(B256::with_last_byte(last_byte))
+    }
+
+    fn target_keys(targets: &[ProofV2Target]) -> Vec<B256> {
+        targets.iter().map(ProofV2Target::key).collect()
+    }
+
+    #[test]
+    fn account_targets_are_sorted_before_chunking() {
+        let account_a = target(0x10);
+        let account_b = target(0x20);
+        let account_c = target(0x30);
+        let storage_for_b = target(0x40);
+
+        let mut targets = MultiProofTargetsV2::default();
+        targets.account_targets = vec![account_c, account_a, account_b];
+        targets.storage_targets.insert(account_b.key(), vec![storage_for_b]);
+
+        let chunks = targets.chunks(3).collect::<Vec<_>>();
+
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(
+            target_keys(&chunks[0].account_targets),
+            vec![account_a.key(), account_b.key()]
+        );
+        assert_eq!(
+            target_keys(chunks[0].storage_targets.get(&account_b.key()).expect("storage for b")),
+            vec![storage_for_b.key()]
+        );
+        assert_eq!(target_keys(&chunks[1].account_targets), vec![account_c.key()]);
     }
 }
