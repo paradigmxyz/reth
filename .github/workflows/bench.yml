@@ -119,14 +119,21 @@ permissions: {}
 jobs:
   bench-ack:
     if: |
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request && (startsWith(github.event.comment.body, '@decofe bench') || startsWith(github.event.comment.body, 'derek bench'))) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && (
+        startsWith(github.event.comment.body, '@decofe bench') ||
+        startsWith(github.event.comment.body, 'derek bench') ||
+        startsWith(github.event.comment.body, '@decofe clear') ||
+        startsWith(github.event.comment.body, 'derek clear')
+      )) ||
       github.event_name == 'workflow_dispatch'
     name: bench-ack
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      issues: write
       pull-requests: write
     outputs:
+      command: ${{ steps.command.outputs.command }}
       pr: ${{ steps.args.outputs.pr }}
       actor: ${{ steps.args.outputs.actor }}
       blocks: ${{ steps.args.outputs.blocks }}
@@ -156,6 +163,15 @@ jobs:
       pr-head-ref: ${{ steps.args.outputs.pr-head-ref }}
       pr-head-repo: ${{ steps.args.outputs.pr-head-repo }}
     steps:
+      - name: Detect command
+        id: command
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const body = context.payload.comment?.body?.trim() || '';
+            const isClearCommand = context.eventName === 'issue_comment' && (body.startsWith('derek clear') || body.startsWith('@decofe clear'));
+            core.setOutput('command', isClearCommand ? 'clear' : 'bench');
+
       - name: Check org membership
         if: github.event_name == 'issue_comment'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -188,8 +204,45 @@ jobs:
               core.setFailed(`PR author @${prAuthor} is not a member of ${org}`);
             }
 
+      - name: Clear benchmark comments
+        if: steps.command.outputs.command == 'clear'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ secrets.DEREK_PAT }}
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'eyes',
+            });
+
+            const derekCommentAuthors = new Set(['decofe']);
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const triggerCommentId = context.payload.comment.id;
+            let deleted = 0;
+            for (const comment of comments) {
+              if (comment.id === triggerCommentId) continue;
+              if (!derekCommentAuthors.has(comment.user.login)) continue;
+
+              await github.rest.issues.deleteComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: comment.id,
+              });
+              deleted += 1;
+            }
+
+            core.notice(`Deleted ${deleted} benchmark comment(s).`);
+
       - name: Parse arguments
         id: args
+        if: steps.command.outputs.command == 'bench'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ secrets.DEREK_PAT }}
@@ -482,6 +535,7 @@ jobs:
 
       - name: Acknowledge request
         id: ack
+        if: steps.command.outputs.command == 'bench'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ secrets.DEREK_PAT }}
@@ -660,6 +714,7 @@ jobs:
 
   bench-txgen:
     needs: bench-ack
+    if: needs.bench-ack.outputs.command == 'bench'
     name: bench-txgen
     runs-on: [self-hosted, Linux, X64, available]
     permissions:
