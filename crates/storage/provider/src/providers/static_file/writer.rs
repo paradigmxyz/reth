@@ -549,9 +549,11 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             return Err(StaticFileWriterError::FinalizeWithPruneQueued.into());
         }
 
-        // Write the final block's offset and sync the sidecar for changeset segments
+        // Write the final block's offset and sync the sidecar for changeset segments.
+        let sync_changeset_offsets =
+            self.current_changeset_offset.is_some() || self.writer.is_dirty();
         self.flush_current_changeset_offset()?;
-        if let Some(writer) = &mut self.changeset_offsets {
+        if sync_changeset_offsets && let Some(writer) = &mut self.changeset_offsets {
             writer.sync().map_err(ProviderError::other)?;
             // Update the header with the actual number of offsets written
             self.writer.user_header_mut().set_changeset_offsets_len(writer.len());
@@ -631,9 +633,11 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         }
 
         // For changeset segments, flush and sync the sidecar file before committing the main file.
-        // This ensures crash consistency: the sidecar is durable before the header references it.
+        // This ensures crash consistency when the header references newly written sidecar entries.
+        let sync_changeset_offsets =
+            self.current_changeset_offset.is_some() || self.writer.is_dirty();
         self.flush_current_changeset_offset()?;
-        if let Some(writer) = &mut self.changeset_offsets {
+        if sync_changeset_offsets && let Some(writer) = &mut self.changeset_offsets {
             writer.sync().map_err(ProviderError::other)?;
             // Update the header with the actual number of offsets written
             self.writer.user_header_mut().set_changeset_offsets_len(writer.len());
