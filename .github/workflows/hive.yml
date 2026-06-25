@@ -4,6 +4,7 @@ name: hive
 
 on:
   workflow_dispatch:
+  pull_request:
   schedule:
     - cron: "0 0 * * *"
 
@@ -28,9 +29,9 @@ jobs:
     secrets: inherit
 
   prepare-hive:
-    if: github.repository == 'paradigmxyz/reth'
+    if: ${{ contains(fromJSON('["paradigmxyz/reth","paradigmxyz/reth-oss"]'), github.repository) }}
     timeout-minutes: 45
-    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-16' || 'ubuntu-latest' }}
+    runs-on: ${{ contains(fromJSON('["paradigmxyz/reth","paradigmxyz/reth-oss"]'), github.repository) && 'depot-ubuntu-latest-16' || 'ubuntu-latest' }}
     permissions:
       contents: read
     strategy:
@@ -152,6 +153,8 @@ jobs:
               - eth_syncing
               # debug_ rpc methods
               - debug_
+              # testing_ rpc methods
+              - testing_buildBlockV1
 
           # consume-engine
           - sim: ethereum/eels/consume-engine
@@ -201,7 +204,7 @@ jobs:
       - prepare-hive
     name: Hive-Amsterdam / ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
     # Use larger runners for eels tests to avoid OOM runner crashes
-    runs-on: ${{ github.repository == 'paradigmxyz/reth' && (contains(matrix.scenario.sim, 'eels') && 'depot-ubuntu-latest-8' || 'depot-ubuntu-latest-4') || 'ubuntu-latest' }}
+    runs-on: ${{ contains(fromJSON('["paradigmxyz/reth","paradigmxyz/reth-oss"]'), github.repository) && (contains(matrix.scenario.sim, 'eels') && 'depot-ubuntu-latest-8' || 'depot-ubuntu-latest-4') || 'ubuntu-latest' }}
     permissions:
       contents: read
       issues: write
@@ -335,6 +338,8 @@ jobs:
               - eth_syncing
               # debug_ rpc methods
               - debug_
+              # testing_ rpc methods
+              - testing_buildBlockV1
 
           # consume-engine
           - sim: ethereum/eels/consume-engine
@@ -380,7 +385,7 @@ jobs:
       - prepare-hive
     name: Hive-Osaka / ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
     # Use larger runners for eels tests to avoid OOM runner crashes
-    runs-on: ${{ github.repository == 'paradigmxyz/reth' && (contains(matrix.scenario.sim, 'eels') && 'depot-ubuntu-latest-8' || 'depot-ubuntu-latest-4') || 'ubuntu-latest' }}
+    runs-on: ${{ contains(fromJSON('["paradigmxyz/reth","paradigmxyz/reth-oss"]'), github.repository) && (contains(matrix.scenario.sim, 'eels') && 'depot-ubuntu-latest-8' || 'depot-ubuntu-latest-4') || 'ubuntu-latest' }}
     permissions:
       contents: read
       issues: write
