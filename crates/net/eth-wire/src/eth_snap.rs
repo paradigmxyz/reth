@@ -4,6 +4,7 @@
 //! side-channel over a single `RLPx` connection.
 
 use crate::{
+    capability::SharedCapabilities,
     errors::{EthStreamError, P2PStreamError},
     handshake::EthRlpxHandshake,
     CanDisconnect, Capability, DisconnectReason, EthMessage, EthStream, P2PStream, UnifiedStatus,
@@ -74,22 +75,7 @@ where
         eth_max_message_size: usize,
     ) -> Result<(Self, UnifiedStatus), EthStreamError> {
         let eth_version = conn.shared_capabilities().eth_version()?;
-        let snap_cap = conn
-            .shared_capabilities()
-            .ensure_matching_capability(&Capability::snap_2())
-            .map_err(|_| P2PStreamError::CapabilityNotShared)?;
-        let snap_offset = snap_cap.relative_message_id_offset();
-        let snap_messages = snap_cap.num_messages();
-
-        // route_inbound forwards every combined id below `snap_offset` to the eth decoder verbatim,
-        // which is only correct when the connection carries exactly `eth` followed by `snap/2`:
-        // `eth` at relative offset 0 and `snap/2` directly after it. Reject any other layout (a
-        // capability before eth, or between eth and snap) so non-eth ids never reach the eth
-        // decoder.
-        let eth_cap = conn.shared_capabilities().eth()?;
-        if eth_cap.relative_message_id_offset() != 0 || eth_cap.num_messages() != snap_offset {
-            return Err(P2PStreamError::CapabilityNotShared.into());
-        }
+        let (snap_offset, snap_messages) = eth_snap_layout(conn.shared_capabilities())?;
 
         // eth bytes flow conn <-> demux <-> EthProxy <-> EthStream.
         let (to_eth, eth_from_wire) = mpsc::unbounded_channel();
@@ -351,6 +337,25 @@ where
     }
 }
 
+/// Resolves the `snap/2` message-id offset and count from the negotiated capabilities, rejecting
+/// any layout other than `eth` at relative offset 0 immediately followed by `snap/2`.
+///
+/// [`route_inbound`] forwards every combined id below the snap offset to the eth decoder verbatim,
+/// so a capability before `eth`, or between `eth` and `snap/2`, would feed non-eth ids into it.
+fn eth_snap_layout(caps: &SharedCapabilities) -> Result<(u8, u8), EthStreamError> {
+    let snap = caps
+        .ensure_matching_capability(&Capability::snap_2())
+        .map_err(|_| EthStreamError::from(P2PStreamError::CapabilityNotShared))?;
+    let snap_offset = snap.relative_message_id_offset();
+    let snap_messages = snap.num_messages();
+
+    let eth = caps.eth()?;
+    if eth.relative_message_id_offset() != 0 || eth.num_messages() != snap_offset {
+        return Err(P2PStreamError::CapabilityNotShared.into())
+    }
+    Ok((snap_offset, snap_messages))
+}
+
 /// Routes an inbound combined-id message to the `eth` primary or buffers it for `snap/2`.
 ///
 /// The combined id space is partitioned as `eth = 0..snap_offset` and
@@ -495,10 +500,14 @@ mod tests {
     use crate::{
         handshake::EthHandshake,
         message::MAX_MESSAGE_SIZE,
+        protocol::Protocol,
         test_utils::{connect_passthrough, eth_handshake, eth_hello},
         UnauthedP2PStream,
     };
-    use reth_eth_wire_types::snap::{BlockAccessListsMessage, GetBlockAccessListsMessage};
+    use reth_eth_wire_types::{
+        snap::{BlockAccessListsMessage, GetBlockAccessListsMessage},
+        EthVersion,
+    };
     use tokio::net::TcpListener;
     use tokio_util::codec::Decoder;
 
@@ -548,6 +557,52 @@ mod tests {
         let (to_snap, mut snap_rx) = mpsc::unbounded_channel();
         route_inbound(bytes, SNAP_OFFSET, SNAP_MESSAGES, &to_eth, &to_snap).unwrap();
         assert_eq!(snap_rx.try_recv().unwrap()[0], 8);
+    }
+
+    /// Builds shared capabilities from matching local protocols and peer capabilities.
+    fn shared_caps(local: Vec<Protocol>, peer: Vec<Capability>) -> SharedCapabilities {
+        SharedCapabilities::try_new(local, peer).unwrap()
+    }
+
+    #[test]
+    fn eth_snap_layout_accepts_eth_then_snap() {
+        let caps = shared_caps(
+            vec![EthVersion::Eth68.into(), Protocol::snap_2()],
+            vec![EthVersion::Eth68.into(), Capability::snap_2()],
+        );
+        let (offset, messages) = eth_snap_layout(&caps).unwrap();
+        // eth occupies `0..offset`, snap directly follows it and reserves 10 ids.
+        assert_eq!(offset, caps.eth().unwrap().num_messages());
+        assert_eq!(messages, SnapVersion::V2.message_count());
+    }
+
+    #[test]
+    fn eth_snap_layout_rejects_missing_snap() {
+        let caps = shared_caps(vec![EthVersion::Eth68.into()], vec![EthVersion::Eth68.into()]);
+        assert!(eth_snap_layout(&caps).is_err());
+    }
+
+    #[test]
+    fn eth_snap_layout_rejects_capability_before_eth() {
+        // "aaa" sorts before "eth", so it takes relative offset 0 and eth no longer starts at 0.
+        let cap = Capability::new_static("aaa", 1);
+        let caps = shared_caps(
+            vec![Protocol::new(cap.clone(), 5), EthVersion::Eth68.into(), Protocol::snap_2()],
+            vec![cap, EthVersion::Eth68.into(), Capability::snap_2()],
+        );
+        assert!(eth_snap_layout(&caps).is_err());
+    }
+
+    #[test]
+    fn eth_snap_layout_rejects_capability_between_eth_and_snap() {
+        // "les" sorts between "eth" and "snap", leaving a gap so snap no longer directly follows
+        // eth.
+        let cap = Capability::new_static("les", 1);
+        let caps = shared_caps(
+            vec![EthVersion::Eth68.into(), Protocol::new(cap.clone(), 5), Protocol::snap_2()],
+            vec![EthVersion::Eth68.into(), cap, Capability::snap_2()],
+        );
+        assert!(eth_snap_layout(&caps).is_err());
     }
 
     #[test]
