@@ -115,10 +115,11 @@ where
 
     /// Streams pending transactions and executes them in parallel on the prewarming pool.
     ///
-    /// Kicks off EVM init on every pool thread, then uses `in_place_scope` to dispatch
-    /// transactions as they arrive and wait for all spawned tasks to complete before
-    /// clearing per-thread state. Workers that start via work-stealing lazily initialise
-    /// their EVM state on first access via [`get_or_init`](reth_tasks::pool::Worker::get_or_init).
+    /// Kicks off EVM init on every pool thread once there is work to prewarm, then uses
+    /// `in_place_scope` to dispatch transactions as they arrive and wait for all spawned tasks to
+    /// complete before clearing per-thread state. Workers that start via work-stealing lazily
+    /// initialise their EVM state on first access via
+    /// [`get_or_init`](reth_tasks::pool::Worker::get_or_init).
     fn spawn_txs_prewarm<Tx>(
         &self,
         pending: mpsc::Receiver<(usize, Tx)>,
@@ -143,12 +144,9 @@ where
             let pool = executor.prewarming_pool();
 
             let mut tx_count = 0usize;
+            let mut initialized_pool = false;
             let to_sparse_trie_task = to_sparse_trie_task.as_ref();
             pool.in_place_scope(|s| {
-                s.spawn(|_| {
-                    pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
-                });
-
                 while let Ok((index, tx)) = pending.recv() {
                     if ctx.should_stop() {
                         trace!(
@@ -161,6 +159,13 @@ where
                     // skip transactions already executed by the main loop
                     if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
                         continue;
+                    }
+
+                    if !initialized_pool {
+                        s.spawn(|_| {
+                            pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
+                        });
+                        initialized_pool = true;
                     }
 
                     tx_count += 1;
