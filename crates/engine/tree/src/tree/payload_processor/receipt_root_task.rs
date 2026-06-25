@@ -8,13 +8,15 @@
 
 use alloy_eips::Encodable2718;
 use alloy_primitives::{map::HashMap, Bloom, B256};
-use crossbeam_channel::Receiver;
+use crossbeam_channel::{bounded, Receiver};
 use reth_primitives_traits::Receipt;
 use reth_trie_common::ordered_root::OrderedTrieRootEncodedBuilder;
 use tokio::sync::oneshot;
 use tracing::debug_span;
 
 const RECEIPT_ENCODE_BUF_INITIAL_CAPACITY: usize = 512;
+const PARALLEL_RECEIPT_ENCODE_THRESHOLD: usize = 1024;
+const MAX_RECEIPT_ENCODE_WORKERS: usize = 4;
 
 /// Receipt with index, ready to be sent to the background task for encoding and trie building.
 #[derive(Debug, Clone)]
@@ -31,6 +33,13 @@ impl<R> IndexedReceipt<R> {
     pub const fn new(index: usize, receipt: R) -> Self {
         Self { index, receipt }
     }
+}
+
+#[derive(Debug)]
+struct EncodedReceipt {
+    index: usize,
+    bytes: Vec<u8>,
+    bloom: Bloom,
 }
 
 /// Handle for running the receipt root computation in a background task.
@@ -53,7 +62,9 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
     ) -> Self {
         Self { receipt_rx, result_tx }
     }
+}
 
+impl<R: Receipt + Send> ReceiptRootTaskHandle<R> {
     /// Runs the receipt root computation, consuming the handle.
     ///
     /// This method receives indexed receipts from the channel, encodes them,
@@ -77,29 +88,39 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
         )
         .entered();
 
+        if let Some(receipts_len) =
+            receipts_len.filter(|receipts_len| *receipts_len >= PARALLEL_RECEIPT_ENCODE_THRESHOLD)
+        {
+            self.run_parallel(receipts_len);
+        } else {
+            self.run_serial(receipts_len);
+        }
+    }
+
+    fn run_serial(self, receipts_len: Option<usize>) {
         let mut builder = OrderedTrieRootEncodedBuilder::new();
         let mut aggregated_bloom = Bloom::ZERO;
         let mut encode_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
         let mut next = 0usize;
         let mut pending = HashMap::new();
 
-        let mut push = |receipt: R| {
-            let receipt_with_bloom = receipt.with_bloom_ref();
-
-            encode_buf.clear();
-            receipt_with_bloom.encode_2718(&mut encode_buf);
-
-            aggregated_bloom |= *receipt_with_bloom.bloom_ref();
-            builder.push_next(&encode_buf);
-        };
-
         for indexed_receipt in self.receipt_rx {
             if indexed_receipt.index == next {
-                push(indexed_receipt.receipt);
+                Self::push_receipt(
+                    &mut builder,
+                    &mut aggregated_bloom,
+                    &mut encode_buf,
+                    indexed_receipt.receipt,
+                );
                 next += 1;
 
                 while let Some(receipt) = pending.remove(&next) {
-                    push(receipt);
+                    Self::push_receipt(
+                        &mut builder,
+                        &mut aggregated_bloom,
+                        &mut encode_buf,
+                        receipt,
+                    );
                     next += 1;
                 }
             } else {
@@ -128,6 +149,130 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
         }
 
         let _ = self.result_tx.send((builder.finalize(), aggregated_bloom));
+    }
+
+    fn run_parallel(self, receipts_len: usize) {
+        let worker_count = Self::parallel_encode_worker_count(receipts_len);
+        self.run_parallel_with_worker_count(receipts_len, worker_count);
+    }
+
+    fn run_parallel_with_worker_count(self, receipts_len: usize, worker_count: usize) {
+        if worker_count <= 1 {
+            self.run_serial(Some(receipts_len));
+            return;
+        }
+
+        let Self { receipt_rx, result_tx } = self;
+        let (encoded_tx, encoded_rx) = bounded(worker_count * 16);
+
+        let mut builder = OrderedTrieRootEncodedBuilder::new();
+        let mut aggregated_bloom = Bloom::ZERO;
+        let mut next = 0usize;
+        let mut pending = HashMap::new();
+
+        std::thread::scope(|scope| {
+            for _ in 0..worker_count {
+                let receipt_rx = receipt_rx.clone();
+                let encoded_tx = encoded_tx.clone();
+                scope.spawn(move || {
+                    for indexed_receipt in receipt_rx {
+                        if encoded_tx.send(Self::encode_receipt(indexed_receipt)).is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+
+            drop(receipt_rx);
+            drop(encoded_tx);
+
+            for encoded_receipt in encoded_rx {
+                if encoded_receipt.index == next {
+                    Self::push_encoded_receipt(
+                        &mut builder,
+                        &mut aggregated_bloom,
+                        encoded_receipt,
+                    );
+                    next += 1;
+
+                    while let Some(encoded_receipt) = pending.remove(&next) {
+                        Self::push_encoded_receipt(
+                            &mut builder,
+                            &mut aggregated_bloom,
+                            encoded_receipt,
+                        );
+                        next += 1;
+                    }
+                } else {
+                    pending.insert(encoded_receipt.index, encoded_receipt);
+                }
+            }
+        });
+
+        if receipts_len != next {
+            tracing::error!(
+                target: "engine::tree::payload_processor",
+                expected = receipts_len,
+                received = next,
+                "Receipt root task received incomplete receipts, execution likely aborted"
+            );
+            return;
+        }
+
+        if !pending.is_empty() {
+            tracing::error!(
+                target: "engine::tree::payload_processor",
+                received = next,
+                pending = pending.len(),
+                "Receipt root task received gapped receipts"
+            );
+            return;
+        }
+
+        let _ = result_tx.send((builder.finalize(), aggregated_bloom));
+    }
+
+    fn parallel_encode_worker_count(receipts_len: usize) -> usize {
+        std::thread::available_parallelism()
+            .map_or(1, |parallelism| parallelism.get())
+            .min(receipts_len)
+            .min(MAX_RECEIPT_ENCODE_WORKERS)
+    }
+
+    fn encode_receipt(indexed_receipt: IndexedReceipt<R>) -> EncodedReceipt {
+        let receipt_with_bloom = indexed_receipt.receipt.with_bloom_ref();
+        let mut bytes = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
+        receipt_with_bloom.encode_2718(&mut bytes);
+
+        EncodedReceipt {
+            index: indexed_receipt.index,
+            bytes,
+            bloom: *receipt_with_bloom.bloom_ref(),
+        }
+    }
+
+    fn push_receipt(
+        builder: &mut OrderedTrieRootEncodedBuilder,
+        aggregated_bloom: &mut Bloom,
+        encode_buf: &mut Vec<u8>,
+        receipt: R,
+    ) {
+        let receipt_with_bloom = receipt.with_bloom_ref();
+
+        encode_buf.clear();
+        receipt_with_bloom.encode_2718(encode_buf);
+
+        *aggregated_bloom |= *receipt_with_bloom.bloom_ref();
+        builder.push_next(encode_buf);
+    }
+
+    fn push_encoded_receipt(
+        builder: &mut OrderedTrieRootEncodedBuilder,
+        aggregated_bloom: &mut Bloom,
+        encoded_receipt: EncodedReceipt,
+    ) {
+        *aggregated_bloom |= encoded_receipt.bloom;
+        builder.push_next(&encoded_receipt.bytes);
     }
 }
 
@@ -289,5 +434,52 @@ mod tests {
         let (root, _bloom) = result_rx.await.unwrap();
 
         assert_eq!(root, expected_root);
+    }
+
+    #[tokio::test]
+    async fn test_receipt_root_task_parallel_large_out_of_order() {
+        let receipts: Vec<Receipt> = (0..PARALLEL_RECEIPT_ENCODE_THRESHOLD + 3)
+            .map(|i| Receipt {
+                tx_type: TxType::Eip1559,
+                cumulative_gas_used: (i as u64 + 1) * 21_000,
+                success: i % 7 != 0,
+                logs: if i % 257 == 0 {
+                    vec![Log {
+                        address: Address::ZERO,
+                        data: alloy_primitives::LogData::new_unchecked(
+                            vec![B256::ZERO],
+                            Bytes::new(),
+                        ),
+                    }]
+                } else {
+                    vec![]
+                },
+            })
+            .collect();
+
+        let receipts_with_bloom: Vec<_> = receipts.iter().map(|r| r.with_bloom_ref()).collect();
+        let expected_root = calculate_receipt_root(&receipts_with_bloom);
+        let expected_bloom =
+            receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom_ref());
+
+        let (tx, rx) = bounded(64);
+        let (result_tx, result_rx) = oneshot::channel();
+        let receipts_len = receipts.len();
+
+        let handle = ReceiptRootTaskHandle::new(rx, result_tx);
+        let join_handle = tokio::task::spawn_blocking(move || {
+            handle.run_parallel_with_worker_count(receipts_len, MAX_RECEIPT_ENCODE_WORKERS)
+        });
+
+        for (i, receipt) in receipts.into_iter().enumerate().rev() {
+            tx.send(IndexedReceipt::new(i, receipt)).unwrap();
+        }
+        drop(tx);
+
+        join_handle.await.unwrap();
+        let (root, bloom) = result_rx.await.unwrap();
+
+        assert_eq!(root, expected_root);
+        assert_eq!(bloom, expected_bloom);
     }
 }
