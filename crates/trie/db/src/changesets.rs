@@ -32,9 +32,6 @@ use tracing::{debug, warn};
 #[cfg(test)]
 use reth_trie::changesets::compute_trie_changesets;
 
-#[cfg(test)]
-use reth_trie::changesets::compute_trie_changesets;
-
 #[cfg(feature = "metrics")]
 use reth_metrics::{
     metrics::{Counter, Gauge},
@@ -99,7 +96,6 @@ where
         + BlockNumReader
         + StorageSettingsCache,
 {
-    let db_tip_block = get_db_tip_block(provider, block_number)?;
     crate::with_adapter!(provider, |A| {
         compute_range_trie_changesets_inner::<_, A>(provider, range, db_tip_block)
     })
@@ -602,32 +598,6 @@ impl ChangesetRangeKey {
 
     const fn single(block_number: BlockNumber, block_hash: B256) -> Self {
         Self::new(block_number, block_number, block_hash)
-    }
-}
-
-/// Cache key for one contiguous range of canonical trie changesets.
-///
-/// The end block hash disambiguates canonical rewrites where the same block numbers later refer to
-/// a different chain. For a single block, `start_block == end_block` and `end_block_hash` is that
-/// block's hash.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct ChangesetRangeKey {
-    start_block: BlockNumber,
-    end_block: BlockNumber,
-    end_block_hash: B256,
-}
-
-impl ChangesetRangeKey {
-    const fn new(start_block: BlockNumber, end_block: BlockNumber, end_block_hash: B256) -> Self {
-        Self { start_block, end_block, end_block_hash }
-    }
-
-    const fn single(block_number: BlockNumber, block_hash: B256) -> Self {
-        Self::new(block_number, block_number, block_hash)
-    }
-
-    const fn is_single(&self) -> bool {
-        self.start_block == self.end_block
     }
 }
 

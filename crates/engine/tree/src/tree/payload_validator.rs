@@ -148,7 +148,7 @@ use reth_provider::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie::{updates::TrieUpdates, HashedPostState, TrieChangedPaths};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::{Address, KECCAK_EMPTY};
@@ -607,7 +607,7 @@ where
             env.clone(),
             txs,
             provider_builder.clone(),
-            proof_overlay_factory,
+            overlay_factory,
             &strategy,
             processor_options,
         ));
@@ -1017,8 +1017,13 @@ where
             let _ = valid_block_tx.send(());
         }
 
-        let executed_block =
-            self.spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output);
+        let executed_block = self.spawn_deferred_trie_task(
+            Arc::new(block),
+            output,
+            hashed_state,
+            trie_output,
+            changed_paths,
+        );
         let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
         Ok(ValidationOutput::new(executed_block, timing_stats).with_raw_bal(raw_bal))
     }
@@ -1922,6 +1927,7 @@ where
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         hashed_state: LazyHashedPostState,
         trie_output: Arc<TrieUpdates>,
+        changed_paths: Arc<TrieChangedPaths>,
     ) -> ExecutedBlock<N> {
         // Create deferred handle and task that owns the unsorted inputs.
         // Resolve the lazy handle into Arc<HashedPostState>. By this point the hashed state has
@@ -2260,6 +2266,7 @@ where
             block.execution_output,
             LazyHashedPostState::ready(block.hashed_state),
             block.trie_updates,
+            block.changed_paths,
         ))
     }
 
@@ -2275,8 +2282,7 @@ where
     ) -> Option<StateRootHandle> {
         let overlay_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
-            Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone())
-                .with_reusable_sparse_trie_state_root(parent_state_root),
+            Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone()),
         );
 
         Some(self.payload_processor.spawn_state_root(

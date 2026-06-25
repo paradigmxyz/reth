@@ -1,13 +1,13 @@
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{BlockHash, BlockNumber, B256, U256};
+use alloy_primitives::{BlockHash, BlockNumber, B256};
 use metrics::{Counter, Histogram};
-use reth_chain_state::{EthPrimitives, StateTrieOverlayLayer, StateTrieOverlayManager};
+use reth_chain_state::{EthPrimitives, StateTrieOverlayManager};
 use reth_db_api::{tables, transaction::DbTx, DatabaseError};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{
     dashmap::{self, DashMap},
-    Account, NodePrimitives,
+    NodePrimitives,
 };
 use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
@@ -17,9 +17,7 @@ use reth_storage_api::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_trie::{
-    hashed_cursor::{
-        HashedCursor, HashedCursorFactory, HashedPostStateCursor, HashedStorageCursor,
-    },
+    hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     trie_cursor::{InMemoryTrieCursor, TrieCursor, TrieCursorFactory, TrieStorageCursor},
     updates::TrieUpdatesSorted,
     HashedPostStateSorted,
@@ -46,9 +44,9 @@ pub(crate) struct OverlayStateProviderMetrics {
     retrieve_trie_reverts_duration: Histogram,
     /// Duration of retrieving hashed state from the database
     retrieve_hashed_state_reverts_duration: Histogram,
-    /// Total trie update entries across overlay layers.
+    /// Size of trie updates (number of entries)
     trie_updates_size: Histogram,
-    /// Total hashed state entries across overlay layers.
+    /// Size of hashed state (number of entries)
     hashed_state_size: Histogram,
     /// Overall duration of the [`OverlayStateProviderFactory::database_provider_ro`] call
     database_provider_ro_duration: Histogram,
@@ -57,58 +55,10 @@ pub(crate) struct OverlayStateProviderMetrics {
 }
 
 /// Contains all fields required to initialize an [`OverlayStateProvider`].
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(super) struct Overlay {
-    pub(super) trie_updates: Vec<Arc<TrieUpdatesSorted>>,
-    pub(super) hashed_post_states: Vec<Arc<HashedPostStateSorted>>,
-}
-
-impl Overlay {
-    fn new(
-        trie_updates: Arc<TrieUpdatesSorted>,
-        hashed_post_state: Arc<HashedPostStateSorted>,
-    ) -> Self {
-        let mut overlay = Self::default();
-        overlay.push_trie_updates(trie_updates);
-        overlay.push_hashed_post_state(hashed_post_state);
-        overlay
-    }
-
-    fn empty_with_hashed_post_state(hashed_post_state: Arc<HashedPostStateSorted>) -> Self {
-        let mut overlay = Self::default();
-        overlay.push_hashed_post_state(hashed_post_state);
-        overlay
-    }
-
-    fn push_trie_updates(&mut self, trie_updates: Arc<TrieUpdatesSorted>) {
-        if !trie_updates.is_empty() {
-            self.trie_updates.push(trie_updates);
-        }
-    }
-
-    fn push_hashed_post_state(&mut self, hashed_post_state: Arc<HashedPostStateSorted>) {
-        if !hashed_post_state.is_empty() {
-            self.hashed_post_states.push(hashed_post_state);
-        }
-    }
-
-    fn push_manager_layer(&mut self, layer: StateTrieOverlayLayer) {
-        self.push_trie_updates(layer.trie_updates);
-        self.push_hashed_post_state(layer.hashed_state);
-    }
-
-    fn extend(&mut self, other: Self) {
-        self.trie_updates.extend(other.trie_updates);
-        self.hashed_post_states.extend(other.hashed_post_states);
-    }
-
-    fn trie_updates_total_len(&self) -> usize {
-        self.trie_updates.iter().map(|updates| updates.total_len()).sum()
-    }
-
-    fn hashed_post_state_total_len(&self) -> usize {
-        self.hashed_post_states.iter().map(|state| state.total_len()).sum()
-    }
+    pub(super) trie_updates: Arc<TrieUpdatesSorted>,
+    pub(super) hashed_post_state: Arc<HashedPostStateSorted>,
 }
 
 /// Source of overlay data for [`OverlayStateProviderFactory`].
@@ -145,8 +95,6 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     parent_hash: B256,
     /// Optional overlay source.
     overlay_source: Option<OverlaySource<N>>,
-    /// State root of the requested parent when the reusable sparse trie fast path is allowed.
-    reusable_sparse_trie_state_root: Option<B256>,
     /// Changeset cache handle for retrieving trie changesets
     changeset_cache: ChangesetCache,
     /// Metrics for tracking provider operations
@@ -159,7 +107,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         Self {
             parent_hash,
             overlay_source: None,
-            reusable_sparse_trie_state_root: None,
             changeset_cache,
             metrics: OverlayStateProviderMetrics::default(),
         }
@@ -170,12 +117,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// This overlay will be applied on top of any reverts.
     pub(super) fn with_overlay_source(mut self, source: Option<OverlaySource<N>>) -> Self {
         self.overlay_source = source;
-        self
-    }
-
-    /// Allows managed overlays to be skipped when the reusable sparse trie represents this root.
-    pub const fn with_reusable_sparse_trie_state_root(mut self, state_root: B256) -> Self {
-        self.reusable_sparse_trie_state_root = Some(state_root);
         self
     }
 
@@ -230,25 +171,31 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self
     }
 
-    /// Resolves the effective overlay layers.
-    fn resolve_overlay_layers(&self, anchor_hash: BlockHash) -> ProviderResult<Overlay> {
+    /// Resolves the effective overlay (trie updates, hashed state).
+    fn resolve_overlays(
+        &self,
+        anchor_hash: BlockHash,
+    ) -> ProviderResult<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>)> {
         match &self.overlay_source {
             Some(OverlaySource::Managed { manager, state }) => {
-                if self.can_use_reusable_sparse_trie_parent(manager) {
-                    return Ok(Overlay::empty_with_hashed_post_state(Arc::clone(state)))
-                }
-
-                let mut overlay = Overlay::default();
-                if anchor_hash != self.parent_hash {
+                let (trie, mut overlay_state) = if anchor_hash == self.parent_hash {
+                    (
+                        Arc::new(TrieUpdatesSorted::default()),
+                        Arc::new(HashedPostStateSorted::default()),
+                    )
+                } else {
                     manager
-                        .overlay_layers_for_parent(self.parent_hash, anchor_hash)
+                        .overlay_for_parent(self.parent_hash, anchor_hash)
                         .map_err(ProviderError::other)?
-                        .into_iter()
-                        .for_each(|layer| overlay.push_manager_layer(layer));
+                };
+
+                if overlay_state.is_empty() {
+                    overlay_state = Arc::clone(state);
+                } else if !state.is_empty() {
+                    Arc::make_mut(&mut overlay_state).extend_ref_and_sort(state);
                 }
 
-                overlay.push_hashed_post_state(Arc::clone(state));
-                Ok(overlay)
+                Ok((trie, overlay_state))
             }
             Some(OverlaySource::Immediate { trie, state }) => {
                 if anchor_hash != self.parent_hash {
@@ -257,24 +204,13 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                         self.parent_hash
                     ))))
                 }
-                Ok(Overlay::new(Arc::clone(trie), Arc::clone(state)))
+                Ok((Arc::clone(trie), Arc::clone(state)))
             }
-            None => Ok(Overlay::default()),
+            None => Ok((
+                Arc::new(TrieUpdatesSorted::default()),
+                Arc::new(HashedPostStateSorted::default()),
+            )),
         }
-    }
-
-    fn reusable_sparse_trie_parent_overlay(&self) -> Option<Overlay> {
-        let Some(OverlaySource::Managed { manager, state }) = &self.overlay_source else {
-            return None
-        };
-
-        self.can_use_reusable_sparse_trie_parent(manager)
-            .then(|| Overlay::empty_with_hashed_post_state(Arc::clone(state)))
-    }
-
-    fn can_use_reusable_sparse_trie_parent(&self, manager: &StateTrieOverlayManager<N>) -> bool {
-        self.reusable_sparse_trie_state_root
-            .is_some_and(|state_root| manager.reusable_sparse_trie_state_root() == Some(state_root))
     }
 
     /// Returns the block which is at the tip of the DB, i.e. the block which the state tables of
@@ -363,10 +299,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             + PruneCheckpointReader
             + StorageSettingsCache,
     {
-        if let Some(overlay) = self.reusable_sparse_trie_parent_overlay() {
-            return Ok(overlay)
-        }
-
         //
         // Set up variables we'll use for recording metrics. There's two different code-paths here,
         // and we want to make sure both record metrics, so we do metrics recording after.
@@ -391,7 +323,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         };
 
         // Collect any reverts which are required to bring the DB view back to the anchor hash.
-        let overlay = if let Some(revert_blocks) =
+        let (trie_updates, hashed_post_state) = if let Some(revert_blocks) =
             self.reverts_required(provider, db_tip_block, anchor_hash)?
         {
             debug!(
@@ -418,7 +350,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             };
 
             // Collect state reverts
-            let hashed_state_reverts = {
+            let mut hashed_state_reverts = {
                 let _guard = debug_span!(target: "providers::state::overlay", "retrieving_hashed_state_reverts").entered();
 
                 let start = Instant::now();
@@ -427,10 +359,9 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 res
             };
 
-            let mut overlay = Overlay::default();
-            overlay.push_trie_updates(Arc::new(trie_reverts));
-            overlay.push_hashed_post_state(Arc::new(hashed_state_reverts));
-            overlay.extend(self.resolve_overlay_layers(anchor_hash)?);
+            // Resolve overlays and extend reverts with them.
+            // If reverts are empty, use overlays directly to avoid cloning.
+            let (overlay_trie, overlay_state) = self.resolve_overlays(anchor_hash)?;
 
             let trie_updates = if trie_reverts.is_empty() {
                 overlay_trie
@@ -461,17 +392,17 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 "Reverted to anchor block",
             );
 
-            overlay
+            (trie_updates, hashed_state_updates)
         } else {
             // If no reverts are needed then the db tip is the anchor hash. Use overlays directly.
-            let overlay = self.resolve_overlay_layers(db_tip_block.hash)?;
+            let (trie_updates, hashed_state) = self.resolve_overlays(db_tip_block.hash)?;
 
             retrieve_trie_reverts_duration = Duration::ZERO;
             retrieve_hashed_state_reverts_duration = Duration::ZERO;
-            trie_updates_total_len = overlay.trie_updates_total_len();
-            hashed_state_updates_total_len = overlay.hashed_post_state_total_len();
+            trie_updates_total_len = trie_updates.total_len();
+            hashed_state_updates_total_len = hashed_state.total_len();
 
-            overlay
+            (trie_updates, hashed_state)
         };
 
         // Record metrics
@@ -484,7 +415,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self.metrics.trie_updates_size.record(trie_updates_total_len as f64);
         self.metrics.hashed_state_size.record(hashed_state_updates_total_len as f64);
 
-        Ok(overlay)
+        Ok(Overlay { trie_updates, hashed_post_state })
     }
 
     /// Builds the effective overlay for the given provider.
@@ -499,10 +430,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             + BlockNumReader
             + StorageSettingsCache,
     {
-        if let Some(overlay) = self.reusable_sparse_trie_parent_overlay() {
-            return Ok(overlay)
-        }
-
         let db_tip_block = self.get_db_tip_block(provider)?;
         self.calculate_overlay(provider, db_tip_block)
     }
@@ -559,10 +486,6 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
             + BlockNumReader
             + StorageSettingsCache,
     {
-        if let Some(overlay) = self.overlay_builder.reusable_sparse_trie_parent_overlay() {
-            return Ok(overlay)
-        }
-
         let db_tip_block = self.overlay_builder.get_db_tip_block(provider)?;
 
         let overlay = match self.overlay_cache.entry(db_tip_block.hash) {
@@ -606,24 +529,24 @@ where
             res
         };
 
-        let Overlay { trie_updates, hashed_post_states } = self.get_overlay(&provider)?;
+        let Overlay { trie_updates, hashed_post_state } = self.get_overlay(&provider)?;
 
         let is_v2 = provider.cached_storage_settings().is_v2();
         self.overlay_builder.metrics.database_provider_ro_duration.record(overall_start.elapsed());
-        Ok(OverlayStateProvider::new(provider, trie_updates, hashed_post_states, is_v2))
+        Ok(OverlayStateProvider::new(provider, trie_updates, hashed_post_state, is_v2))
     }
 }
 
-/// State provider with in-memory overlay layers from trie updates and hashed post state.
+/// State provider with in-memory overlay from trie updates and hashed post state.
 ///
-/// This provider uses in-memory trie updates and hashed post state as overlays
+/// This provider uses in-memory trie updates and hashed post state as an overlay
 /// on top of a database provider, implementing [`TrieCursorFactory`] and [`HashedCursorFactory`]
 /// using the in-memory overlay factories.
 #[derive(Debug)]
 pub struct OverlayStateProvider<Provider: DBProvider> {
     provider: Provider,
-    trie_updates: Vec<Arc<TrieUpdatesSorted>>,
-    hashed_post_states: Vec<Arc<HashedPostStateSorted>>,
+    trie_updates: Arc<TrieUpdatesSorted>,
+    hashed_post_state: Arc<HashedPostStateSorted>,
     is_v2: bool,
 }
 
@@ -633,13 +556,13 @@ where
 {
     /// Create new overlay state provider. The `Provider` must be cloneable, which generally means
     /// it should be wrapped in an `Arc`.
-    pub fn new(
+    pub const fn new(
         provider: Provider,
-        trie_updates: Vec<Arc<TrieUpdatesSorted>>,
-        hashed_post_states: Vec<Arc<HashedPostStateSorted>>,
+        trie_updates: Arc<TrieUpdatesSorted>,
+        hashed_post_state: Arc<HashedPostStateSorted>,
         is_v2: bool,
     ) -> Self {
-        Self { provider, trie_updates, hashed_post_states, is_v2 }
+        Self { provider, trie_updates, hashed_post_state, is_v2 }
     }
 }
 
@@ -649,18 +572,19 @@ where
     Provider::Tx: DbTx,
 {
     type AccountTrieCursor<'a>
-        = Box<dyn TrieCursor + Send + 'a>
+        = InMemoryTrieCursor<'a, Box<dyn TrieCursor + Send + 'a>>
     where
         Self: 'a;
 
     type StorageTrieCursor<'a>
-        = Box<dyn TrieStorageCursor + Send + 'a>
+        = InMemoryTrieCursor<'a, Box<dyn TrieStorageCursor + Send + 'a>>
     where
         Self: 'a;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
         let tx = self.provider.tx_ref();
-        let mut cursor: Box<dyn TrieCursor + Send> = if self.is_v2 {
+        let trie_updates = self.trie_updates.as_ref();
+        let cursor: Box<dyn TrieCursor + Send> = if self.is_v2 {
             Box::new(DatabaseAccountTrieCursor::<_, PackedKeyAdapter>::new(
                 tx.cursor_read::<PackedAccountsTrie>()?,
             ))
@@ -669,10 +593,7 @@ where
                 tx.cursor_read::<tables::AccountsTrie>()?,
             ))
         };
-        for trie_updates in &self.trie_updates {
-            cursor = Box::new(InMemoryTrieCursor::new_account(cursor, trie_updates.as_ref()));
-        }
-        Ok(cursor)
+        Ok(InMemoryTrieCursor::new_account(cursor, trie_updates))
     }
 
     fn storage_trie_cursor(
@@ -680,7 +601,8 @@ where
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         let tx = self.provider.tx_ref();
-        let mut cursor: Box<dyn TrieStorageCursor + Send> = if self.is_v2 {
+        let trie_updates = self.trie_updates.as_ref();
+        let cursor: Box<dyn TrieStorageCursor + Send> = if self.is_v2 {
             Box::new(DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
                 tx.cursor_dup_read::<PackedStoragesTrie>()?,
                 hashed_address,
@@ -691,14 +613,7 @@ where
                 hashed_address,
             ))
         };
-        for trie_updates in &self.trie_updates {
-            cursor = Box::new(InMemoryTrieCursor::new_storage(
-                cursor,
-                trie_updates.as_ref(),
-                hashed_address,
-            ));
-        }
-        Ok(cursor)
+        Ok(InMemoryTrieCursor::new_storage(cursor, trie_updates, hashed_address))
     }
 }
 
@@ -707,24 +622,26 @@ where
     Provider: DBProvider,
 {
     type AccountCursor<'a>
-        = Box<dyn HashedCursor<Value = Account> + Send + 'a>
+        = <HashedPostStateCursorFactory<
+        DatabaseHashedCursorFactory<&'a Provider::Tx>,
+        &'a Arc<HashedPostStateSorted>,
+    > as HashedCursorFactory>::AccountCursor<'a>
     where
         Self: 'a;
 
     type StorageCursor<'a>
-        = Box<dyn HashedStorageCursor<Value = U256> + Send + 'a>
+        = <HashedPostStateCursorFactory<
+        DatabaseHashedCursorFactory<&'a Provider::Tx>,
+        &'a Arc<HashedPostStateSorted>,
+    > as HashedCursorFactory>::StorageCursor<'a>
     where
         Self: 'a;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
         let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(self.provider.tx_ref());
-        let mut cursor: Box<dyn HashedCursor<Value = Account> + Send> =
-            Box::new(db_hashed_cursor_factory.hashed_account_cursor()?);
-        for hashed_post_state in &self.hashed_post_states {
-            cursor =
-                Box::new(HashedPostStateCursor::new_account(cursor, hashed_post_state.as_ref()));
-        }
-        Ok(cursor)
+        let hashed_cursor_factory =
+            HashedPostStateCursorFactory::new(db_hashed_cursor_factory, &self.hashed_post_state);
+        hashed_cursor_factory.hashed_account_cursor()
     }
 
     fn hashed_storage_cursor(
@@ -732,22 +649,16 @@ where
         hashed_address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
         let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(self.provider.tx_ref());
-        let mut cursor: Box<dyn HashedStorageCursor<Value = U256> + Send> =
-            Box::new(db_hashed_cursor_factory.hashed_storage_cursor(hashed_address)?);
-        for hashed_post_state in &self.hashed_post_states {
-            cursor = Box::new(HashedPostStateCursor::new_storage(
-                cursor,
-                hashed_post_state.as_ref(),
-                hashed_address,
-            ));
-        }
-        Ok(cursor)
+        let hashed_cursor_factory =
+            HashedPostStateCursorFactory::new(db_hashed_cursor_factory, &self.hashed_post_state);
+        hashed_cursor_factory.hashed_storage_cursor(hashed_address)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_primitives_traits::Account;
     use reth_trie::HashedPostState;
 
     #[test]
@@ -756,62 +667,9 @@ mod tests {
         let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
             .with_state_trie_overlay_manager(StateTrieOverlayManager::default());
 
-        let overlay = builder.resolve_overlay_layers(parent_hash).unwrap();
-        assert!(overlay.trie_updates.is_empty());
-        assert!(overlay.hashed_post_states.is_empty());
-    }
-
-    #[test]
-    fn managed_overlay_skips_manager_for_reusable_sparse_trie_parent() {
-        let parent_hash = B256::with_last_byte(1);
-        let parent_state_root = B256::with_last_byte(3);
-        let anchor_hash = B256::with_last_byte(2);
-        let manager = StateTrieOverlayManager::default();
-        manager.set_reusable_sparse_trie_state_root_for_testing(parent_state_root);
-        let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
-            .with_state_trie_overlay_manager(manager)
-            .with_reusable_sparse_trie_state_root(parent_state_root);
-
-        let overlay = builder.resolve_overlay_layers(anchor_hash).unwrap();
-
-        assert!(overlay.trie_updates.is_empty());
-        assert!(overlay.hashed_post_states.is_empty());
-    }
-
-    #[test]
-    fn managed_overlay_does_not_skip_reusable_sparse_trie_parent_without_fast_path() {
-        let parent_hash = B256::with_last_byte(1);
-        let parent_state_root = B256::with_last_byte(3);
-        let anchor_hash = B256::with_last_byte(2);
-        let manager = StateTrieOverlayManager::default();
-        manager.set_reusable_sparse_trie_state_root_for_testing(parent_state_root);
-        let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
-            .with_state_trie_overlay_manager(manager);
-
-        let err = builder.resolve_overlay_layers(anchor_hash).unwrap_err();
-
-        assert!(err.to_string().contains("cannot be anchored"));
-    }
-
-    #[test]
-    fn reusable_sparse_trie_parent_preserves_explicit_hashed_state_overlay() {
-        let parent_hash = B256::with_last_byte(1);
-        let parent_state_root = B256::with_last_byte(4);
-        let anchor_hash = B256::with_last_byte(2);
-        let manager = StateTrieOverlayManager::default();
-        manager.set_reusable_sparse_trie_state_root_for_testing(parent_state_root);
-        let hashed_state = HashedPostState::default()
-            .with_accounts([(B256::with_last_byte(3), Some(Account::default()))])
-            .into_sorted();
-        let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
-            .with_state_trie_overlay_manager(manager)
-            .with_extended_hashed_state_overlay(hashed_state)
-            .with_reusable_sparse_trie_state_root(parent_state_root);
-
-        let overlay = builder.resolve_overlay_layers(anchor_hash).unwrap();
-
-        assert!(overlay.trie_updates.is_empty());
-        assert_eq!(overlay.hashed_post_state_total_len(), 1);
+        let (trie, state) = builder.resolve_overlays(parent_hash).unwrap();
+        assert!(trie.is_empty());
+        assert!(state.is_empty());
     }
 
     #[test]
@@ -821,7 +679,7 @@ mod tests {
         let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
             .with_state_trie_overlay_manager(StateTrieOverlayManager::default());
 
-        let err = builder.resolve_overlay_layers(anchor_hash).unwrap_err();
+        let err = builder.resolve_overlays(anchor_hash).unwrap_err();
 
         assert!(err.to_string().contains("cannot be anchored"));
     }
