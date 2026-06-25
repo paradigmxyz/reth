@@ -693,7 +693,7 @@ where
                 .with_max_tx_gas_limit(ctx.config().txpool.max_tx_gas_limit)
                 .with_minimum_priority_fee(ctx.config().txpool.minimum_priority_fee)
                 .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
-                .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
+                .build_with_tasks(ctx.rpc_task_executor().clone(), blob_store.clone());
 
         if validator.validator().eip4844() {
             // initializing the KZG settings can be expensive, this should be done upfront so that

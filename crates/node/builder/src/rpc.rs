@@ -957,7 +957,7 @@ where
         F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
     {
         let rpc_middleware = self.rpc_middleware.clone();
-        let tokio_runtime = self.tokio_runtime.clone();
+        let explicit_tokio_runtime = self.tokio_runtime.clone();
         let setup_ctx = self.setup_rpc_components(ctx, ext).await?;
         let RpcSetupContext {
             node,
@@ -970,6 +970,8 @@ where
             engine_events,
             engine_handle,
         } = setup_ctx;
+
+        let tokio_runtime = resolve_tokio_runtime(explicit_tokio_runtime, &node);
 
         let server_config = config
             .rpc
@@ -1029,7 +1031,7 @@ where
     {
         let rpc_middleware = self.rpc_middleware.clone();
         let auth_http_middleware = self.auth_http_middleware.clone();
-        let tokio_runtime = self.tokio_runtime.clone();
+        let explicit_tokio_runtime = self.tokio_runtime.clone();
         let setup_ctx = self.setup_rpc_components(ctx, ext).await?;
         let RpcSetupContext {
             node,
@@ -1042,6 +1044,8 @@ where
             engine_events,
             engine_handle,
         } = setup_ctx;
+
+        let tokio_runtime = resolve_tokio_runtime(explicit_tokio_runtime, &node);
 
         let server_config = config
             .rpc
@@ -1281,6 +1285,17 @@ where
     }
 }
 
+/// Resolves the tokio runtime handle for jsonrpsee.
+///
+/// An explicit handle from [`RpcAddOns::with_tokio_runtime`] takes precedence. Otherwise, when
+/// latency isolation is enabled, the node's RPC executor handle is used automatically.
+fn resolve_tokio_runtime<N: FullNodeComponents>(
+    explicit: Option<tokio::runtime::Handle>,
+    node: &N,
+) -> Option<tokio::runtime::Handle> {
+    explicit.or_else(|| node.latency_isolated().then(|| node.rpc_task_executor().handle().clone()))
+}
+
 /// `EthApiCtx` struct
 /// This struct is used to pass the necessary context to the `EthApiBuilder` to build the `EthApi`.
 #[derive(Debug)]
@@ -1303,6 +1318,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumH
         reth_rpc::EthApiBuilder::new_with_components(self.components.clone())
             .eth_cache(self.cache)
             .task_spawner(self.components.task_executor().clone())
+            .rpc_task_spawner(self.components.rpc_task_executor().clone())
             .gas_cap(self.config.rpc_gas_cap.into())
             .max_simulate_blocks(self.config.rpc_max_simulate_blocks)
             .compute_state_root_for_eth_simulate(self.config.compute_state_root_for_eth_simulate)

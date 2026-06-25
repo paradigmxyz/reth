@@ -7,7 +7,9 @@ use reth_cli_commands::import_core::{import_blocks_from_file, ImportConfig};
 use reth_config::Config;
 use reth_db::DatabaseEnv;
 use reth_node_api::{NodeTypesWithDBAdapter, TreeConfig};
-use reth_node_builder::{EngineNodeLauncher, Node, NodeBuilder, NodeConfig, NodeHandle};
+use reth_node_builder::{
+    EngineNodeLauncher, LaunchExecutors, Node, NodeBuilder, NodeConfig, NodeHandle,
+};
 use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
 use reth_node_ethereum::EthereumNode;
 use reth_provider::{
@@ -222,7 +224,7 @@ pub async fn setup_engine_with_chain_import(
             .with_add_ons(node.add_ons())
             .launch_with_fn(|builder| {
                 let launcher = EngineNodeLauncher::new(
-                    builder.task_executor().clone(),
+                    LaunchExecutors::single(builder.task_executor().clone()),
                     builder.config().datadir(),
                     tree_config.clone(),
                 );

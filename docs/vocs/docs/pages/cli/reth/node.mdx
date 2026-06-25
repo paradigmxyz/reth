@@ -447,6 +447,13 @@ RPC:
 
           [default: 256]
 
+      --rpc.latency-worker-threads <LATENCY_WORKER_THREADS>
+          Number of worker threads for the latency-sensitive RPC tokio runtime.
+
+          When set to a value greater than 0, the public RPC server (HTTP/WS/IPC) and the sendRaw transaction backend (tx-batcher and pool validation) run on a dedicated tokio runtime isolated from sync, P2P, and engine work. Defaults to 0 (disabled).
+
+          [default: 0]
+
       --rpc.max-trace-filter-blocks <COUNT>
           Maximum number of blocks for `trace_filter` requests
 
