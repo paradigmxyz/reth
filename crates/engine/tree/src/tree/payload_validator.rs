@@ -148,7 +148,7 @@ use reth_provider::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_trie::{updates::TrieUpdates, HashedPostState, TrieChangedPaths};
+use reth_trie::{updates::TrieUpdates, HashedPostState};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::{Address, KECCAK_EMPTY};
@@ -587,10 +587,8 @@ where
             ctx.state(),
             self.changeset_cache.clone(),
         );
-        let proof_overlay_factory = OverlayStateProviderFactory::new(
-            provider_factory.clone(),
-            overlay_builder.clone().with_reusable_sparse_trie_state_root(parent_block.state_root()),
-        );
+        let overlay_factory =
+            OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
 
         let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
 
@@ -1019,13 +1017,8 @@ where
             let _ = valid_block_tx.send(());
         }
 
-        let executed_block = self.spawn_deferred_trie_task(
-            Arc::new(block),
-            output,
-            hashed_state,
-            trie_output,
-            changed_paths,
-        );
+        let executed_block =
+            self.spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output);
         let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
         Ok(ValidationOutput::new(executed_block, timing_stats).with_raw_bal(raw_bal))
     }
@@ -1929,7 +1922,6 @@ where
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         hashed_state: LazyHashedPostState,
         trie_output: Arc<TrieUpdates>,
-        changed_paths: Arc<TrieChangedPaths>,
     ) -> ExecutedBlock<N> {
         // Create deferred handle and task that owns the unsorted inputs.
         // Resolve the lazy handle into Arc<HashedPostState>. By this point the hashed state has
@@ -2185,7 +2177,6 @@ pub trait EngineValidator<
     fn on_inserted_executed_block(
         &self,
         block: BuiltPayloadExecutedBlock<N>,
-        state: &EngineApiTreeState<N>,
     ) -> ProviderResult<ExecutedBlock<N>>;
 
     /// Returns [`SavedCache`] for the given block hash.
@@ -2258,7 +2249,6 @@ where
     fn on_inserted_executed_block(
         &self,
         block: BuiltPayloadExecutedBlock<N>,
-        _state: &EngineApiTreeState<N>,
     ) -> ProviderResult<ExecutedBlock<N>> {
         self.payload_processor.on_inserted_executed_block(
             block.recovered_block.block_with_parent(),
@@ -2270,7 +2260,6 @@ where
             block.execution_output,
             LazyHashedPostState::ready(block.hashed_state),
             block.trie_updates,
-            block.changed_paths,
         ))
     }
 

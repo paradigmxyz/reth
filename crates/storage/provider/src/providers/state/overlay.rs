@@ -432,8 +432,27 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             overlay.push_hashed_post_state(Arc::new(hashed_state_reverts));
             overlay.extend(self.resolve_overlay_layers(anchor_hash)?);
 
-            trie_updates_total_len = overlay.trie_updates_total_len();
-            hashed_state_updates_total_len = overlay.hashed_post_state_total_len();
+            let trie_updates = if trie_reverts.is_empty() {
+                overlay_trie
+            } else if !overlay_trie.is_empty() {
+                let mut trie_reverts = (*trie_reverts).clone();
+                trie_reverts.extend_ref_and_sort(&overlay_trie);
+                Arc::new(trie_reverts)
+            } else {
+                trie_reverts
+            };
+
+            let hashed_state_updates = if hashed_state_reverts.is_empty() {
+                overlay_state
+            } else if !overlay_state.is_empty() {
+                hashed_state_reverts.extend_ref_and_sort(&overlay_state);
+                Arc::new(hashed_state_reverts)
+            } else {
+                Arc::new(hashed_state_reverts)
+            };
+
+            trie_updates_total_len = trie_updates.total_len();
+            hashed_state_updates_total_len = hashed_state_updates.total_len();
 
             debug!(
                 target: "providers::state::overlay",
