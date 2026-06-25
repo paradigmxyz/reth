@@ -281,7 +281,15 @@ where
 
     fn reseed_block_hashes_for(&mut self, block_number: u64) {
         let Some(seeder) = self.block_hash_seeder else { return };
+        if self.plan.block_hashes_to_seed.is_empty() {
+            return;
+        }
+
         let hashes = self.plan.hashes_for_block(block_number);
+        if hashes.is_empty() {
+            return;
+        }
+
         seeder(self.inner_mut().evm_mut().db_mut(), &hashes);
     }
 
