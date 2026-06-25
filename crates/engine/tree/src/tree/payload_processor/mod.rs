@@ -572,8 +572,8 @@ where
             PrewarmMode::BlockAccessList(
                 env.decoded_bal.clone().expect("BAL dispatch implies decoded BAL"),
             )
-        } else if self.disable_transaction_prewarming
-            || env.transaction_count < SMALL_BLOCK_TX_THRESHOLD
+        } else if self.disable_transaction_prewarming ||
+            env.transaction_count < SMALL_BLOCK_TX_THRESHOLD
         {
             PrewarmMode::Skipped
         } else {

@@ -179,9 +179,9 @@ where
                 }
 
                 // Send withdrawal prefetch targets after all transactions dispatched
-                if let Some(to_sparse_trie_task) = to_sparse_trie_task
-                    && let Some(withdrawals) = &ctx.env.withdrawals
-                    && !withdrawals.is_empty()
+                if let Some(to_sparse_trie_task) = to_sparse_trie_task &&
+                    let Some(withdrawals) = &ctx.env.withdrawals &&
+                    !withdrawals.is_empty()
                 {
                     let targets = multiproof_targets_from_withdrawals(withdrawals);
                     let _ = to_sparse_trie_task.send(StateRootMessage::PrefetchProofs(targets));
@@ -342,8 +342,8 @@ where
         //         let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
         //     }
         //     let _ =
-        //         actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
-        //     return;
+        //         actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0
+        // });     return;
         // }
 
         let raw_bal = decoded_bal.as_raw_bal();
@@ -359,9 +359,9 @@ where
         let prefetch_bal = raw_bal.clone();
         let stream_bal = raw_bal.clone();
 
-        if let Some(saved_cache) = ctx.saved_cache.as_ref()
-            && !ctx.disable_bal_batch_io
-            && let Some(pool) = ctx.bal_prewarm_pool.as_ref()
+        if let Some(saved_cache) = ctx.saved_cache.as_ref() &&
+            !ctx.disable_bal_batch_io &&
+            let Some(pool) = ctx.bal_prewarm_pool.as_ref()
         {
             // If
             //
