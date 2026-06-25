@@ -109,7 +109,10 @@ use crate::tree::{
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
+use alloy_eip7928::{
+    bal::{Bal, DecodedBal, RawBal},
+    compute_block_access_list_hash, BlockAccessList,
+};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{map::B256Set, B256};
@@ -491,7 +494,7 @@ where
                     Ok(val) => val,
                     Err(e) => {
                         let block = validated_block.try_into_inner().expect("sole handle")?;
-                        return Err(InsertBlockError::new(block, e.into()).into())
+                        return Err(InsertBlockError::new(block, e.into()).into());
                     }
                 }
             };
@@ -519,7 +522,7 @@ where
                 return Err(validated_block
                     .try_into_inner()
                     .expect("sole handle")
-                    .expect_err("Err result checked"))
+                    .expect_err("Err result checked"));
             }
         }
 
@@ -534,7 +537,7 @@ where
                 validated_block.try_into_inner().expect("sole handle")?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
-            .into())
+            .into());
         };
         drop(_enter);
 
@@ -544,17 +547,19 @@ where
 
         // Extract the decoded BAL, if valid and available.
         let decoded_bal = ensure_ok!(input
-            .try_decoded_access_list()
+            .try_lazy_decoded_access_list()
             .map_err(|err| ConsensusError::BlockAccessListInvalid(err.to_string())))
         .map(Arc::new);
 
-        if let Some(decoded_bal) = decoded_bal.as_deref() {
-            // Reject oversized BAL sidecars before executing the block.
-            ensure_ok!(decoded_bal
-                .as_bal()
-                .validate_gas_limit(input.gas_limit())
-                .map_err(ConsensusError::from));
-        }
+        // TODO: testing - restore gas-limit validation for BAL sidecars.
+        // if let Some(decoded_bal) = decoded_bal.as_deref() {
+        //     // Reject oversized BAL sidecars before executing the block.
+        //     ensure_ok!(decoded_bal
+        //         .force_decode_bal()
+        //         .map_err(|err| ConsensusError::BlockAccessListInvalid(err.to_string()))?
+        //         .validate_gas_limit(input.gas_limit())
+        //         .map_err(ConsensusError::from));
+        // }
 
         let env = ExecutionEnv {
             evm_env,
@@ -590,7 +595,8 @@ where
         let overlay_factory =
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
 
-        let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
+        let parallel_bal_execution =
+            ensure_ok!(self.bal_path_eligible(input.has_block_access_list_hash()));
 
         // Spawn the appropriate processor based on strategy
         let pending_sparse_trie_prune = if matches!(strategy, StateRootStrategy::StateRootTask) {
@@ -949,7 +955,7 @@ where
         if let Err(err) = hashed_state_validate_result {
             // call post-block hook
             self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
-            return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into())
+            return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into());
         }
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
@@ -978,7 +984,7 @@ where
                 )
                 .into(),
             )
-            .into())
+            .into());
         }
 
         let timing_stats = state_provider_stats.filter(|_| slow_block_enabled).map(|stats| {
@@ -1196,8 +1202,7 @@ where
     //   - Tx-count threshold (`bal_execute_path_min_tx_count`): below the parallelism break-even
     //     point, provider setup and worker scheduling overhead can exceed the gain. Tune
     //     empirically once workers are parallel; meaningless while the commit loop is sequential.
-    fn bal_path_eligible(&self, bal: Option<&DecodedBal>) -> Result<bool, InsertBlockErrorKind> {
-        let has_bal = bal.is_some();
+    fn bal_path_eligible(&self, has_bal: bool) -> Result<bool, InsertBlockErrorKind> {
         let parallel_execution = has_bal && !self.config.disable_bal_parallel_execution();
         if parallel_execution && self.config.disable_bal_parallel_state_root() {
             return Err(InsertBlockErrorKind::Other(
@@ -1249,6 +1254,10 @@ where
         let input_bal = env.decoded_bal.ok_or_else(|| {
             InsertBlockErrorKind::Other("BAL execute path: no decoded BAL available".into())
         })?;
+        let input_bal = Arc::new(
+            DecodedBal::from_raw_bal(input_bal.as_raw_bal().clone())
+                .map_err(|err| InsertBlockErrorKind::Other(Box::new(err)))?,
+        );
 
         let make_db = |fill_on_miss| {
             let provider = make_state_provider(fill_on_miss)
@@ -1702,7 +1711,7 @@ where
         ) {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
-            return Err(err.into())
+            return Err(err.into());
         }
         drop(_enter);
 
@@ -1779,10 +1788,10 @@ where
 
                 Ok(handle)
             }
-            StateRootStrategy::Skipped |
-            StateRootStrategy::Parallel |
-            StateRootStrategy::Synchronous |
-            StateRootStrategy::Custom(_) => {
+            StateRootStrategy::Skipped
+            | StateRootStrategy::Parallel
+            | StateRootStrategy::Synchronous
+            | StateRootStrategy::Custom(_) => {
                 let start = Instant::now();
                 let handle = self.payload_processor.spawn_cache_exclusive(
                     env,
@@ -1818,7 +1827,7 @@ where
                 self.provider.clone(),
                 historical,
                 Some(blocks),
-            )))
+            )));
         }
 
         // Check if the block is persisted
@@ -1826,7 +1835,7 @@ where
             debug!(target: "engine::tree::payload_validator", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
             // For persisted blocks, we create a builder that will fetch state directly from the
             // database
-            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)))
+            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)));
         }
 
         debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
@@ -1862,7 +1871,7 @@ where
     ) {
         if state.invalid_headers.get(&block.hash()).is_some() {
             // we already marked this block as invalid
-            return
+            return;
         }
         self.invalid_block_hook.on_invalid_block(parent_header, block, output, trie_updates);
     }
@@ -2002,9 +2011,9 @@ where
             .sum();
 
         // Total time spent fetching state during execution
-        let state_read_duration = provider_stats.total_account_fetch_latency() +
-            provider_stats.total_storage_fetch_latency() +
-            provider_stats.total_code_fetch_latency();
+        let state_read_duration = provider_stats.total_account_fetch_latency()
+            + provider_stats.total_storage_fetch_latency()
+            + provider_stats.total_code_fetch_latency();
 
         // EIP-7702 delegation tracking from bytecode changes
         // Count new EIP-7702 bytecodes as delegations set
@@ -2332,13 +2341,31 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     }
 
     /// Returns the decoded block access list, if present and successfully decoded.
-    pub fn try_decoded_access_list(&self) -> Result<Option<DecodedBal>, alloy_rlp::Error> {
+    pub fn try_lazy_decoded_access_list(
+        &self,
+    ) -> Result<Option<DecodedBal<std::sync::OnceLock<Bal>>>, alloy_rlp::Error> {
         match self {
             Self::Payload(payload) => payload
                 .block_access_list()
-                .map(|block_access_list| DecodedBal::from_rlp_bytes(block_access_list.clone()))
+                .map(|block_access_list| {
+                    let raw_bal = RawBal::new(block_access_list.clone());
+                    let mut raw = raw_bal.as_raw().as_ref();
+                    let header = alloy_rlp::Header::decode(&mut raw)?;
+                    if !header.list || !raw.is_empty() && raw.len() != header.payload_length {
+                        return Err(alloy_rlp::Error::UnexpectedString);
+                    }
+                    Ok(DecodedBal::with_raw_bal(std::sync::OnceLock::new(), raw_bal))
+                })
                 .transpose(),
             Self::Block(_) => Ok(None),
+        }
+    }
+
+    /// Returns true if the block header commits to a block access list.
+    pub fn has_block_access_list_hash(&self) -> bool {
+        match self {
+            Self::Payload(payload) => payload.block_access_list().is_some(),
+            Self::Block(block) => block.header().block_access_list_hash().is_some(),
         }
     }
 

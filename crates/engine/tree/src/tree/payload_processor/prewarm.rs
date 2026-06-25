@@ -19,9 +19,10 @@ use crate::tree::{
     PayloadExecutionCache, SavedCache, StateProviderBuilder,
 };
 use alloy_consensus::transaction::TxHashRef;
-use alloy_eip7928::bal::DecodedBal;
+use alloy_eip7928::bal::{Bal, DecodedBal, RawBal};
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, B256, U256};
+use alloy_primitives::{keccak256, Address, B256, U256};
+use alloy_rlp::Decodable;
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
@@ -37,7 +38,7 @@ use reth_trie_common::MultiProofTargetsV2;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc::{self, channel, Receiver, Sender},
-    Arc,
+    Arc, OnceLock,
 };
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
@@ -48,7 +49,7 @@ pub enum PrewarmMode<Tx> {
     /// Prewarm by executing transactions from a stream, each paired with its block index.
     Transactions(Receiver<(usize, Tx)>),
     /// Prewarm by prefetching slots from a Block Access List.
-    BlockAccessList(Arc<DecodedBal>),
+    BlockAccessList(Arc<DecodedBal<OnceLock<Bal>>>),
     /// Transaction prewarming is skipped (e.g. small blocks where the overhead exceeds the
     /// benefit). No workers are spawned.
     Skipped,
@@ -178,9 +179,9 @@ where
                 }
 
                 // Send withdrawal prefetch targets after all transactions dispatched
-                if let Some(to_sparse_trie_task) = to_sparse_trie_task &&
-                    let Some(withdrawals) = &ctx.env.withdrawals &&
-                    !withdrawals.is_empty()
+                if let Some(to_sparse_trie_task) = to_sparse_trie_task
+                    && let Some(withdrawals) = &ctx.env.withdrawals
+                    && !withdrawals.is_empty()
                 {
                     let targets = multiproof_targets_from_withdrawals(withdrawals);
                     let _ = to_sparse_trie_task.send(StateRootMessage::PrefetchProofs(targets));
@@ -332,22 +333,22 @@ where
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn run_bal_prewarm(
         &self,
-        decoded_bal: Arc<DecodedBal>,
+        decoded_bal: Arc<DecodedBal<OnceLock<Bal>>>,
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
     ) {
-        let bal = decoded_bal.as_bal();
-        if bal.is_empty() {
-            if let Some(to_sparse_trie_task) = self.to_sparse_trie_task.as_ref() {
-                let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
-            }
-            let _ =
-                actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
-            return;
-        }
+        // TODO: testing - restore the empty BAL fast path after raw BAL prewarm is covered.
+        // if decoded_bal.force_decode_bal().map_or(false, Bal::is_empty) {
+        //     if let Some(to_sparse_trie_task) = self.to_sparse_trie_task.as_ref() {
+        //         let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
+        //     }
+        //     let _ =
+        //         actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
+        //     return;
+        // }
 
+        let raw_bal = decoded_bal.as_raw_bal();
         trace!(
             target: "engine::tree::payload_processor::prewarm",
-            accounts = bal.len(),
             "Starting BAL prewarm"
         );
 
@@ -356,8 +357,8 @@ where
         let executor = self.executor.clone();
         let parent_span = Span::current();
         let stream_parent_span = parent_span;
-        let prefetch_bal = Arc::clone(&decoded_bal);
-        let stream_bal = Arc::clone(&decoded_bal);
+        let prefetch_bal = raw_bal.clone();
+        let stream_bal = raw_bal.clone();
         let (stream_tx, stream_rx) = oneshot::channel();
 
         if let Some(to_sparse_trie_task) = to_sparse_trie_task {
@@ -367,12 +368,23 @@ where
                     target: "engine::tree::payload_processor::prewarm",
                     parent: &stream_parent_span,
                     "bal_hashed_state_stream",
-                    bal_accounts = stream_bal.as_bal().len(),
                 );
                 let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
 
-                stream_bal.as_bal().par_iter().for_each(|account_changes| {
+                let Ok(account_changes) =
+                    DecodedBal::from_raw_bal(stream_bal).map(|decoded| decoded.split().0)
+                else {
+                    warn!(
+                        target: "engine::tree::payload_processor::prewarm",
+                        "Failed to decode BAL for hashed-state streaming"
+                    );
+                    let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
+                    let _ = stream_tx.send(());
+                    return;
+                };
+
+                account_changes.par_iter().for_each(|account_changes| {
                     WorkerPool::with_worker_mut(|worker| {
                         let provider =
                             worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
@@ -392,9 +404,9 @@ where
             let _ = stream_tx.send(());
         }
 
-        if let Some(saved_cache) = ctx.saved_cache &&
-            !ctx.disable_bal_batch_io &&
-            let Some(pool) = ctx.bal_prewarm_pool.as_ref()
+        if let Some(saved_cache) = ctx.saved_cache
+            && !ctx.disable_bal_batch_io
+            && let Some(pool) = ctx.bal_prewarm_pool.as_ref()
         {
             // If
             //
@@ -413,13 +425,21 @@ where
             let build = Arc::new(move || provider_builder.build());
 
             pool.begin_block(build, caches);
-            for account in prefetch_bal.as_bal() {
-                pool.warm_account(account.address);
-                for change in &account.storage_changes {
-                    pool.warm_storage(account.address, change.slot.into());
+            match peek_raw_bal_prewarm_targets(&prefetch_bal) {
+                Ok(targets) => {
+                    for target in targets {
+                        pool.warm_account(target.address);
+                        for slot in target.storage_slots {
+                            pool.warm_storage(target.address, slot.into());
+                        }
+                    }
                 }
-                for &slot in &account.storage_reads {
-                    pool.warm_storage(account.address, slot.into());
+                Err(err) => {
+                    warn!(
+                        target: "engine::tree::payload_processor::prewarm",
+                        ?err,
+                        "Failed to peek raw BAL prewarm targets"
+                    );
                 }
             }
             pool.end_block();
@@ -481,7 +501,7 @@ where
 
                     if finished_execution {
                         // all tasks are done, we can exit, which will save caches and exit
-                        break
+                        break;
                     }
                 }
                 PrewarmTaskEvent::FinishedTxExecution { executed_transactions } => {
@@ -493,7 +513,7 @@ where
 
                     if final_execution_outcome.is_some() {
                         // all tasks are done, we can exit, which will save caches and exit
-                        break
+                        break;
                     }
                 }
             }
@@ -506,6 +526,76 @@ where
             self.save_cache(execution_outcome, valid_block_rx);
         }
     }
+}
+
+#[derive(Debug)]
+struct RawBalPrewarmTarget {
+    address: Address,
+    storage_slots: Vec<U256>,
+}
+
+fn peek_raw_bal_prewarm_targets(
+    raw_bal: &RawBal,
+) -> Result<Vec<RawBalPrewarmTarget>, alloy_rlp::Error> {
+    let mut buf = raw_bal.as_raw().as_ref();
+    let header = alloy_rlp::Header::decode(&mut buf)?;
+    if !header.list {
+        return Err(alloy_rlp::Error::UnexpectedString);
+    }
+    let mut accounts = take_payload(&mut buf, header.payload_length)?;
+    let mut targets = Vec::new();
+
+    while !accounts.is_empty() {
+        let account_header = alloy_rlp::Header::decode(&mut accounts)?;
+        if !account_header.list {
+            return Err(alloy_rlp::Error::UnexpectedString);
+        }
+        let mut account = take_payload(&mut accounts, account_header.payload_length)?;
+
+        let address = Address::decode(&mut account)?;
+        let mut storage_slots = Vec::new();
+
+        let storage_changes_header = alloy_rlp::Header::decode(&mut account)?;
+        if !storage_changes_header.list {
+            return Err(alloy_rlp::Error::UnexpectedString);
+        }
+        let mut storage_changes =
+            take_payload(&mut account, storage_changes_header.payload_length)?;
+        while !storage_changes.is_empty() {
+            let slot_changes_header = alloy_rlp::Header::decode(&mut storage_changes)?;
+            if !slot_changes_header.list {
+                return Err(alloy_rlp::Error::UnexpectedString);
+            }
+            let mut slot_changes =
+                take_payload(&mut storage_changes, slot_changes_header.payload_length)?;
+            storage_slots.push(U256::decode(&mut slot_changes)?);
+        }
+
+        let storage_reads_header = alloy_rlp::Header::decode(&mut account)?;
+        if !storage_reads_header.list {
+            return Err(alloy_rlp::Error::UnexpectedString);
+        }
+        let mut storage_reads = take_payload(&mut account, storage_reads_header.payload_length)?;
+        while !storage_reads.is_empty() {
+            storage_slots.push(U256::decode(&mut storage_reads)?);
+        }
+
+        targets.push(RawBalPrewarmTarget { address, storage_slots });
+    }
+
+    Ok(targets)
+}
+
+fn take_payload<'a>(
+    buf: &mut &'a [u8],
+    payload_length: usize,
+) -> Result<&'a [u8], alloy_rlp::Error> {
+    if buf.len() < payload_length {
+        return Err(alloy_rlp::Error::InputTooShort);
+    }
+    let (payload, rest) = buf.split_at(payload_length);
+    *buf = rest;
+    Ok(payload)
 }
 
 /// Context required by tx execution tasks.
@@ -572,7 +662,7 @@ where
                     %err,
                     "Failed to build state provider in prewarm thread"
                 );
-                return None
+                return None;
             }
         };
 

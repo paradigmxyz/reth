@@ -8,7 +8,7 @@ use crate::tree::{
     ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
     WaitForCaches,
 };
-use alloy_eip7928::bal::DecodedBal;
+use alloy_eip7928::bal::{Bal, DecodedBal};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
@@ -572,8 +572,8 @@ where
             PrewarmMode::BlockAccessList(
                 env.decoded_bal.clone().expect("BAL dispatch implies decoded BAL"),
             )
-        } else if self.disable_transaction_prewarming ||
-            env.transaction_count < SMALL_BLOCK_TX_THRESHOLD
+        } else if self.disable_transaction_prewarming
+            || env.transaction_count < SMALL_BLOCK_TX_THRESHOLD
         {
             PrewarmMode::Skipped
         } else {
@@ -1042,7 +1042,7 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     pub withdrawals: Option<Vec<Withdrawal>>,
     /// Optional decoded BAL for the block.
     /// Used to validate and optimize execution.
-    pub decoded_bal: Option<Arc<DecodedBal>>,
+    pub decoded_bal: Option<Arc<DecodedBal<std::sync::OnceLock<Bal>>>>,
 }
 
 impl<Evm: ConfigureEvm> ExecutionEnv<Evm>
