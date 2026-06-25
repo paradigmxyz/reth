@@ -120,7 +120,8 @@ fn compact_arena(arena: &mut NodeArena, root: &mut Index) {
     *root = new_root;
 }
 
-/// Reusable buffers shared by both [`ArenaSparseSubtrie`] and [`ArenaParallelSparseTrie`].
+/// Reusable traversal state and optional accumulators shared by
+/// [`ArenaSparseSubtrie`] and [`ArenaParallelSparseTrie`].
 #[derive(Debug, Default, Clone)]
 struct ArenaTrieBuffers {
     /// Reusable cursor for trie traversals.
@@ -629,10 +630,6 @@ pub struct ArenaParallelSparseTrie {
     upper_arena: NodeArena,
     /// The root node of the upper trie.
     root: Index,
-    /// Optional tracking of trie updates for database persistence.
-    updates: Option<SparseTrieUpdates>,
-    /// Optional tracking of changed node base paths during hashing.
-    changed_paths: Option<HashSet<Nibbles>>,
     /// Reusable buffers for traversal, RLP encoding, and update actions.
     buffers: ArenaTrieBuffers,
     /// Thresholds controlling when parallelism is enabled for different operations.
@@ -654,7 +651,6 @@ impl ArenaParallelSparseTrie {
 
     /// Set whether changed node base paths should be retained during hashing.
     pub fn set_changed_paths(&mut self, retain_changed_paths: bool) {
-        self.changed_paths = retain_changed_paths.then(HashSet::default);
         if retain_changed_paths {
             self.buffers.changed_paths.get_or_insert_with(HashSet::default).clear();
         } else {
@@ -681,11 +677,9 @@ impl ArenaParallelSparseTrie {
 
     /// Takes all retained changed node base paths, preserving allocation capacity for reuse.
     pub fn take_changed_paths(&mut self) -> HashSet<Nibbles> {
-        Self::merge_subtrie_changed_paths(&mut self.changed_paths, &mut self.buffers.changed_paths);
-
-        match self.changed_paths.take() {
+        match self.buffers.changed_paths.take() {
             Some(changed_paths) => {
-                self.changed_paths = Some(HashSet::with_capacity_and_hasher(
+                self.buffers.changed_paths = Some(HashSet::with_capacity_and_hasher(
                     changed_paths.len(),
                     Default::default(),
                 ));
@@ -867,8 +861,10 @@ impl ArenaParallelSparseTrie {
         }
 
         trace!(target: TRACE_TARGET, ?child_path, "Wrapping child into subtrie");
-        let mut subtrie =
-            ArenaSparseSubtrie::new(self.updates.is_some(), self.changed_paths.is_some());
+        let mut subtrie = ArenaSparseSubtrie::new(
+            self.buffers.updates.is_some(),
+            self.buffers.changed_paths.is_some(),
+        );
         subtrie.path = *child_path;
         let mut root_node =
             mem::replace(&mut self.upper_arena[child_idx], ArenaSparseNode::TakenSubtrie);
@@ -2343,8 +2339,6 @@ impl Default for ArenaParallelSparseTrie {
         Self {
             upper_arena,
             root,
-            updates: None,
-            changed_paths: None,
             buffers: ArenaTrieBuffers::default(),
             parallelism_thresholds: ArenaParallelismThresholds::default(),
             #[cfg(feature = "trie-debug")]
@@ -2433,7 +2427,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn set_updates(&mut self, retain_updates: bool) {
-        self.updates = retain_updates.then(Default::default);
         if retain_updates {
             self.buffers.updates.get_or_insert_with(SparseTrieUpdates::default).clear();
         } else {
@@ -2592,11 +2585,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         self.update_subtrie_hashes();
 
-        // Merge buffered subtrie updates into self.updates before hashing the upper trie,
-        // which will add its own updates directly into self.updates.
-        Self::merge_subtrie_updates(&mut self.updates, &mut self.buffers.updates);
-        Self::merge_subtrie_changed_paths(&mut self.changed_paths, &mut self.buffers.changed_paths);
-
         let rlp_node = Self::update_cached_rlp(
             &mut self.upper_arena,
             self.root,
@@ -2604,8 +2592,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
             &mut self.buffers.rlp_buf,
             &mut self.buffers.rlp_node_buf,
             Nibbles::default(),
-            &mut self.updates,
-            &mut self.changed_paths,
+            &mut self.buffers.updates,
+            &mut self.buffers.changed_paths,
         );
 
         rlp_node.as_hash().expect("root RlpNode must be a hash")
@@ -2720,13 +2708,16 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates> {
-        self.updates.as_ref().map_or(Cow::Owned(SparseTrieUpdates::default()), Cow::Borrowed)
+        self.buffers
+            .updates
+            .as_ref()
+            .map_or(Cow::Owned(SparseTrieUpdates::default()), Cow::Borrowed)
     }
 
     fn take_updates(&mut self) -> SparseTrieUpdates {
-        match self.updates.take() {
+        match self.buffers.updates.take() {
             Some(updates) => {
-                self.updates = Some(SparseTrieUpdates::with_capacity(
+                self.buffers.updates = Some(SparseTrieUpdates::with_capacity(
                     updates.updated_nodes.len(),
                     updates.removed_nodes.len(),
                 ));
@@ -2744,7 +2735,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
     fn wipe(&mut self) {
         trace!(target: TRACE_TARGET, "Wiping arena trie");
         self.clear();
-        self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
+        self.buffers.updates = self.buffers.updates.is_some().then(SparseTrieUpdates::wiped);
     }
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
@@ -2754,12 +2745,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         self.upper_arena = SlotMap::new();
         self.root = self.upper_arena.insert(ArenaSparseNode::EmptyRoot);
-        if let Some(updates) = self.updates.as_mut() {
-            updates.clear()
-        }
-        if let Some(changed_paths) = self.changed_paths.as_mut() {
-            changed_paths.clear();
-        }
         self.buffers.clear();
     }
 
