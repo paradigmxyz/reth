@@ -21,7 +21,7 @@ use std::{
     time::Duration,
 };
 use thiserror::Error;
-use tracing::{debug, error, instrument, warn};
+use tracing::{debug, error, instrument, trace, warn};
 
 /// Unified result of any persistence operation.
 #[derive(Debug)]
@@ -157,7 +157,7 @@ where
         let pending_finalized = self.pending_finalized_block.take();
         let pending_safe = self.pending_safe_block.take();
 
-        debug!(target: "engine::persistence", ?block_count, first=?first_block, last=?last_block, "Saving range of blocks");
+        trace!(target: "engine::persistence", ?block_count, first=?first_block, last=?last_block, "Saving range of blocks");
 
         let start_time = Instant::now();
 
@@ -182,7 +182,7 @@ where
             let _ = self.provider.bal_store().flush().inspect_err(|err| {
                 warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
             });
-            debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
+            trace!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
         }
 
         let elapsed = start_time.elapsed();
