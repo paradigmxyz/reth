@@ -5,7 +5,7 @@ use crate::{
     hooks::NodeHooks,
     rpc::{EngineShutdown, EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
-    AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, Node, NodeAdapter,
+    AddOns, AddOnsContext, FullNode, LaunchContext, LaunchExecutors, LaunchNode, Node, NodeAdapter,
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
     RethFullAdapter,
 };
@@ -37,7 +37,6 @@ use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
     BlockNumReader, StorageSettingsCache,
 };
-use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
 use reth_trie_db::ChangesetCache;
@@ -59,11 +58,11 @@ pub struct EngineNodeLauncher {
 impl EngineNodeLauncher {
     /// Create a new instance of the ethereum node launcher.
     pub const fn new(
-        task_executor: TaskExecutor,
+        executors: LaunchExecutors,
         data_dir: ChainPath<DataDirPath>,
         engine_tree_config: TreeConfig,
     ) -> Self {
-        Self { ctx: LaunchContext::new(task_executor, data_dir), engine_tree_config }
+        Self { ctx: LaunchContext::new(executors, data_dir), engine_tree_config }
     }
 
     async fn launch_node<N, DB, T, CB, AO>(

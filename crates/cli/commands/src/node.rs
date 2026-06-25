@@ -6,7 +6,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_db::init_db;
-use reth_node_builder::NodeBuilder;
+use reth_node_builder::{LaunchExecutors, NodeBuilder};
 use reth_node_core::{
     args::{
         DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, EraArgs, JitArgs, MetricArgs,
@@ -218,9 +218,17 @@ where
             node_config = node_config.with_unused_ports();
         }
 
-        let builder = NodeBuilder::new(node_config)
-            .with_database(database)
-            .with_launch_context(ctx.task_executor);
+        let executors = if node_config.rpc.latency_worker_threads > 0 {
+            LaunchExecutors::with_latency(
+                ctx.task_executor.clone(),
+                node_config.rpc.latency_worker_threads,
+            )?
+        } else {
+            LaunchExecutors::single(ctx.task_executor.clone())
+        };
+
+        let builder =
+            NodeBuilder::new(node_config).with_database(database).with_launch_executors(executors);
 
         launcher.entrypoint(builder, ext).await
     }

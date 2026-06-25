@@ -82,8 +82,12 @@ impl<T: FullNodeTypes> fmt::Debug for NodeTypesAdapter<T> {
 pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T> = ComponentsFor<T>> {
     /// The components of the node.
     pub components: C,
-    /// The task executor for the node.
+    /// The main task executor for the node.
     pub task_executor: TaskExecutor,
+    /// The RPC/latency task executor for the node.
+    pub rpc_task_executor: TaskExecutor,
+    /// Whether a dedicated latency runtime is configured.
+    pub latency_isolated: bool,
     /// The provider of the node.
     pub provider: T::Provider,
 }
@@ -131,6 +135,14 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
     fn task_executor(&self) -> &TaskExecutor {
         &self.task_executor
     }
+
+    fn rpc_task_executor(&self) -> &TaskExecutor {
+        &self.rpc_task_executor
+    }
+
+    fn latency_isolated(&self) -> bool {
+        self.latency_isolated
+    }
 }
 
 impl<T: FullNodeTypes, C: NodeComponents<T>> Clone for NodeAdapter<T, C> {
@@ -138,6 +150,8 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> Clone for NodeAdapter<T, C> {
         Self {
             components: self.components.clone(),
             task_executor: self.task_executor.clone(),
+            rpc_task_executor: self.rpc_task_executor.clone(),
+            latency_isolated: self.latency_isolated,
             provider: self.provider.clone(),
         }
     }
@@ -352,8 +366,15 @@ mod test {
         };
 
         let task_executor = Runtime::test();
+        let rpc_task_executor = task_executor.clone();
 
-        let node = NodeAdapter { components, task_executor, provider: NoopProvider::default() };
+        let node = NodeAdapter {
+            components,
+            task_executor,
+            rpc_task_executor,
+            latency_isolated: false,
+            provider: NoopProvider::default(),
+        };
 
         // test that node implements `FullNodeComponents``
         <NodeAdapter<_, _> as FullNodeComponents>::pool(&node);

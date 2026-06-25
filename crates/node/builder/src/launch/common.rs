@@ -32,7 +32,7 @@
 use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::OnComponentInitializedHook,
-    BuilderContext, ExExLauncher, NodeAdapter, PrimitivesTy,
+    BuilderContext, ExExLauncher, LaunchExecutors, NodeAdapter, PrimitivesTy,
 };
 use alloy_eips::eip2124::Head;
 use alloy_primitives::{BlockNumber, B256};
@@ -118,16 +118,30 @@ use reth_node_events::{cl::ConsensusLayerHealthEvents, node::NodeEvent};
 /// ```
 #[derive(Debug, Clone)]
 pub struct LaunchContext {
-    /// The task executor for the node.
-    pub task_executor: TaskExecutor,
+    executors: LaunchExecutors,
     /// The data directory for the node.
     pub data_dir: ChainPath<DataDirPath>,
 }
 
 impl LaunchContext {
     /// Create a new instance of the default node launcher.
-    pub const fn new(task_executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> Self {
-        Self { task_executor, data_dir }
+    pub const fn new(executors: LaunchExecutors, data_dir: ChainPath<DataDirPath>) -> Self {
+        Self { executors, data_dir }
+    }
+
+    /// Returns the main task executor.
+    pub const fn task_executor(&self) -> &TaskExecutor {
+        self.executors.main()
+    }
+
+    /// Returns the RPC/latency task executor.
+    pub const fn rpc_task_executor(&self) -> &TaskExecutor {
+        self.executors.rpc()
+    }
+
+    /// Returns `true` if a dedicated latency runtime is configured.
+    pub const fn latency_isolated(&self) -> bool {
+        self.executors.latency_isolated()
     }
 
     /// Create launch context with attachment.
@@ -280,7 +294,17 @@ impl<T> LaunchContextWith<T> {
 
     /// Returns the task executor.
     pub const fn task_executor(&self) -> &TaskExecutor {
-        &self.inner.task_executor
+        self.inner.task_executor()
+    }
+
+    /// Returns the RPC/latency task executor.
+    pub const fn rpc_task_executor(&self) -> &TaskExecutor {
+        self.inner.rpc_task_executor()
+    }
+
+    /// Returns `true` if a dedicated latency runtime is configured.
+    pub const fn latency_isolated(&self) -> bool {
+        self.inner.latency_isolated()
     }
 
     /// Attaches another value to the launch context.
@@ -848,6 +872,7 @@ where
             head,
             self.blockchain_db().clone(),
             self.task_executor().clone(),
+            self.rpc_task_executor().clone(),
             self.configs().clone(),
         );
 
@@ -859,6 +884,8 @@ where
         let node_adapter = NodeAdapter {
             components,
             task_executor: self.task_executor().clone(),
+            rpc_task_executor: self.rpc_task_executor().clone(),
+            latency_isolated: self.latency_isolated(),
             provider: blockchain_db,
         };
 

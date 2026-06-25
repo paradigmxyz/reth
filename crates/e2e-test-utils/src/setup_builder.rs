@@ -7,8 +7,8 @@ use crate::{node::NodeTestContext, wallet::Wallet, NodeBuilderHelper, NodeHelper
 use futures_util::future::TryJoinAll;
 use reth_chainspec::EthChainSpec;
 use reth_node_builder::{
-    EngineNodeLauncher, NodeBuilder, NodeConfig, NodeHandle, NodeTypes, NodeTypesWithDBAdapter,
-    PayloadTypes,
+    EngineNodeLauncher, LaunchExecutors, NodeBuilder, NodeConfig, NodeHandle, NodeTypes,
+    NodeTypesWithDBAdapter, PayloadTypes,
 };
 use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
 use reth_primitives_traits::AlloyBlockHeader;
@@ -162,7 +162,7 @@ where
                     .with_add_ons(node.add_ons())
                     .launch_with_fn(|builder| {
                         let launcher = EngineNodeLauncher::new(
-                            builder.task_executor().clone(),
+                            LaunchExecutors::single(builder.task_executor().clone()),
                             builder.config().datadir(),
                             tree_config.clone(),
                         );

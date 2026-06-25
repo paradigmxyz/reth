@@ -1,6 +1,7 @@
 //! Abstraction for launching a node.
 
 pub mod common;
+mod executors;
 mod exex;
 pub mod invalid_block_hook;
 
@@ -8,6 +9,7 @@ pub(crate) mod debug;
 pub(crate) mod engine;
 
 pub use common::LaunchContext;
+pub use executors::LaunchExecutors;
 pub use exex::ExExLauncher;
 
 use std::future::IntoFuture;
