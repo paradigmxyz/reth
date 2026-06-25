@@ -96,6 +96,19 @@ impl HelloMessageWithProtocols {
             Ok(())
         }
     }
+
+    /// Toggles advertisement of the `snap/2` satellite protocol (EIP-8189).
+    ///
+    /// snap/2 is negotiated as an `RLPx` capability and rides alongside `eth` on the same
+    /// connection. Disabling removes any advertised `snap` capability of any version.
+    pub fn with_snap(mut self, enable: bool) -> Self {
+        if enable {
+            let _ = self.try_add_protocol(Protocol::snap_2());
+        } else {
+            self.protocols.retain(|p| p.cap.name != "snap");
+        }
+        self
+    }
 }
 
 // TODO: determine if we should allow for the extra fields at the end like EIP-706 suggests
@@ -274,6 +287,33 @@ mod tests {
             .iter()
             .any(|p| p.cap.name == "eth" && p.cap.version == EthVersion::Eth69 as usize);
         assert!(has_eth69, "Default protocols should include Eth69");
+    }
+
+    #[test]
+    fn default_build_advertises_no_snap() {
+        // reth must not advertise any snap capability unless explicitly enabled.
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let id = pk2id(&secret_key.public_key(SECP256K1));
+        let hello = HelloMessageWithProtocols::builder(id).build();
+        assert!(hello.protocols.iter().all(|p| p.cap.name != "snap"));
+    }
+
+    #[test]
+    fn test_with_snap_toggle() {
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let id = pk2id(&secret_key.public_key(SECP256K1));
+
+        // enabling advertises snap/2 exactly once and leaves eth intact
+        let hello = HelloMessageWithProtocols::builder(id).build().with_snap(true);
+        let snap_count = hello.protocols.iter().filter(|p| p.cap.name == "snap").count();
+        assert_eq!(snap_count, 1);
+        assert_eq!(hello.protocols.iter().find(|p| p.cap.name == "snap").unwrap().cap.version, 2);
+        assert!(hello.protocols.iter().any(|p| p.cap.name == "eth"));
+
+        // idempotent and reversible
+        let hello = hello.with_snap(true).with_snap(false);
+        assert!(hello.protocols.iter().all(|p| p.cap.name != "snap"));
+        assert!(hello.protocols.iter().any(|p| p.cap.name == "eth"));
     }
 
     #[test]
