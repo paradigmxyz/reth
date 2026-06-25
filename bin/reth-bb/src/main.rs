@@ -80,36 +80,45 @@ impl PayloadValidator<BbPayloadTypes> for BbEngineValidator {
         &self,
         payload: BigBlockData<ExecutionData>,
     ) -> Result<SealedBlock<Block>, NewPayloadError> {
-        let mut blocks = payload
-            .env_switches
-            .into_iter()
-            .map(|data| {
-                PayloadValidator::<EthPayloadTypes>::convert_payload_to_block(&self.inner, data)
-            })
-            .collect::<Result<Vec<SealedBlock<Block>>, NewPayloadError>>()?;
+        let mut env_switches = payload.env_switches.into_iter();
+        let first_payload = env_switches.next().expect("big-block payload must have a segment");
+        let mut last_block = PayloadValidator::<EthPayloadTypes>::convert_payload_to_block(
+            &self.inner,
+            first_payload,
+        )?;
+        let parent_hash = last_block.parent_hash;
+        let mut gas_used = last_block.gas_used;
+        let mut gas_limit = last_block.gas_limit;
+        let mut preceding_transactions = Vec::new();
 
-        let (mut block, hash) = blocks.pop().unwrap().split();
+        for data in env_switches {
+            let segment_block =
+                PayloadValidator::<EthPayloadTypes>::convert_payload_to_block(&self.inner, data)?;
+            gas_used += segment_block.gas_used;
+            gas_limit += segment_block.gas_limit;
+            let previous_block = core::mem::replace(&mut last_block, segment_block);
+            preceding_transactions.extend(previous_block.into_body().transactions);
+        }
+
+        let (mut block, hash) = last_block.split();
 
         // Override the block number
         block.header.number = payload.block_number;
 
         // Set block's parent hash to the parent of the first block in this batch so that engine
         // tree state is consistent.
-        if let Some(first) = blocks.first() {
-            block.header.parent_hash = first.parent_hash;
-        }
+        block.header.parent_hash = parent_hash;
 
         // Update block's gas usage to make sure metrics are correct
-        block.header.gas_used += blocks.iter().map(|b| b.gas_used).sum::<u64>();
-        block.header.gas_limit += blocks.iter().map(|b| b.gas_limit).sum::<u64>();
+        block.header.gas_used = gas_used;
+        block.header.gas_limit = gas_limit;
 
         // Prepend transactions from previous blocks to make sure that persistence indices are
         // correct.
-        block.body.transactions = blocks
-            .into_iter()
-            .flat_map(|b| b.into_body().transactions)
-            .chain(core::mem::take(&mut block.body.transactions))
-            .collect();
+        if !preceding_transactions.is_empty() {
+            preceding_transactions.extend(core::mem::take(&mut block.body.transactions));
+            block.body.transactions = preceding_transactions;
+        }
 
         // Use `new_unchecked` to preserve the hash
         Ok(SealedBlock::new_unchecked(block, hash))
