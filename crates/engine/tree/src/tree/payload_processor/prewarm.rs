@@ -42,6 +42,12 @@ use std::sync::{
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
+/// Maximum BAL account count for optional read-set prefetch.
+///
+/// Oversized BALs fan out provider construction across the BAL prewarm pool. The required
+/// hashed-state stream still runs for larger BALs; this only skips speculative cache warming.
+const MAX_BAL_BATCH_IO_ACCOUNTS: usize = 8 * 1024;
+
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 #[derive(Debug)]
 pub enum PrewarmMode<Tx> {
@@ -392,8 +398,23 @@ where
             let _ = stream_tx.send(());
         }
 
-        if let Some(saved_cache) = ctx.saved_cache &&
-            !ctx.disable_bal_batch_io &&
+        let bal_account_count = bal.len();
+        let run_bal_batch_io = should_run_bal_batch_io(
+            ctx.disable_bal_batch_io,
+            ctx.saved_cache.is_some(),
+            bal_account_count,
+        );
+        if !ctx.disable_bal_batch_io && ctx.saved_cache.is_some() && !run_bal_batch_io {
+            debug!(
+                target: "engine::tree::payload_processor::prewarm",
+                bal_accounts = bal_account_count,
+                limit = MAX_BAL_BATCH_IO_ACCOUNTS,
+                "Skipping oversized BAL batch IO prefetch"
+            );
+        }
+
+        if run_bal_batch_io &&
+            let Some(saved_cache) = ctx.saved_cache &&
             let Some(pool) = ctx.bal_prewarm_pool.as_ref()
         {
             // If
@@ -714,6 +735,14 @@ where
     }
 }
 
+const fn should_run_bal_batch_io(
+    disabled: bool,
+    has_saved_cache: bool,
+    bal_accounts: usize,
+) -> bool {
+    !disabled && has_saved_cache && bal_accounts <= MAX_BAL_BATCH_IO_ACCOUNTS
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct BalAccountStateFields {
     balance: Option<U256>,
@@ -840,6 +869,14 @@ mod tests {
         assert_eq!(account.balance, U256::from(10));
         assert_eq!(account.nonce, 3);
         assert_eq!(account.bytecode_hash, Some(B256::repeat_byte(0xaa)));
+    }
+
+    #[test]
+    fn oversized_bal_batch_io_prefetch_is_skipped() {
+        assert!(should_run_bal_batch_io(false, true, MAX_BAL_BATCH_IO_ACCOUNTS));
+        assert!(!should_run_bal_batch_io(false, true, MAX_BAL_BATCH_IO_ACCOUNTS + 1));
+        assert!(!should_run_bal_batch_io(true, true, 1));
+        assert!(!should_run_bal_batch_io(false, false, 1));
     }
 }
 
