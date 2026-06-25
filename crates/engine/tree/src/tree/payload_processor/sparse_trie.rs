@@ -831,9 +831,11 @@ fn encode_account_leaf_value(
         return Vec::new();
     }
 
-    account_rlp_buf.clear();
-    account.unwrap_or_default().into_trie_account(storage_root).encode(account_rlp_buf);
-    account_rlp_buf.clone()
+    let mut encoded = core::mem::take(account_rlp_buf);
+    encoded.clear();
+    account.unwrap_or_default().into_trie_account(storage_root).encode(&mut encoded);
+    *account_rlp_buf = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
+    encoded
 }
 
 /// Pending proof targets queued for dispatch to proof workers, along with their count.
