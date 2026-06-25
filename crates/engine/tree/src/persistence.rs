@@ -103,10 +103,16 @@ where
                     let _ = sender.send(PersistenceResult { last_block, commit_duration: None });
                 }
                 PersistenceAction::SaveBlocks(blocks, sender) => {
+                    let block_count = blocks.len();
                     let result = self.on_save_blocks(blocks)?;
                     let result_number = result.last_block.map(|b| b.number);
+                    let commit_duration = result.commit_duration;
 
                     let _ = sender.send(result);
+                    if let Some(elapsed) = commit_duration {
+                        self.metrics.save_blocks_batch_size.record(block_count as f64);
+                        self.metrics.save_blocks_duration_seconds.record(elapsed);
+                    }
 
                     if let Some(block_number) = result_number {
                         // send new sync metrics based on saved blocks
@@ -186,8 +192,6 @@ where
         }
 
         let elapsed = start_time.elapsed();
-        self.metrics.save_blocks_batch_size.record(block_count as f64);
-        self.metrics.save_blocks_duration_seconds.record(elapsed);
 
         Ok(PersistenceResult { last_block, commit_duration: Some(elapsed) })
     }
