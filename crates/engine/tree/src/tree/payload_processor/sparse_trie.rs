@@ -447,6 +447,8 @@ where
     )]
     fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
         for (&address, storage) in &hashed_state_update.storages {
+            let has_account_update = hashed_state_update.accounts.contains_key(&address);
+
             if !storage.storage.is_empty() {
                 // Look up outer maps once per address instead of once per slot.
                 let new_updates = self.new_storage_updates.entry(address).or_default();
@@ -469,13 +471,15 @@ where
                 }
             }
 
-            // Make sure account is tracked in `account_updates` so that it is revealed in accounts
-            // trie for storage root update.
-            self.new_account_updates.entry(address).or_insert(LeafUpdate::Touched);
+            if !has_account_update {
+                // Make sure account is tracked in `account_updates` so that it is revealed in
+                // accounts trie for storage root update.
+                self.new_account_updates.entry(address).or_insert(LeafUpdate::Touched);
 
-            // Make sure account is tracked in `pending_account_updates` so that once storage root
-            // is computed, it will be updated in the accounts trie.
-            self.pending_account_updates.entry(address).or_insert(None);
+                // Make sure account is tracked in `pending_account_updates` so that once storage
+                // root is computed, it will be updated in the accounts trie.
+                self.pending_account_updates.entry(address).or_insert(None);
+            }
         }
 
         for (&address, &account) in &hashed_state_update.accounts {
