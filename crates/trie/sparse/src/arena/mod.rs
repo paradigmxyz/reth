@@ -318,7 +318,7 @@ impl ArenaSparseSubtrie {
             new_idx: Index,
             branch_logical_path: Nibbles,
             state_mask: TrieMask,
-            next_child_idx: usize,
+            remaining_child_mask: TrieMask,
         }
 
         impl CopyFrame {
@@ -326,9 +326,10 @@ impl ArenaSparseSubtrie {
                 let ArenaSparseNode::Branch(b) = &new_arena[self.new_idx] else { unreachable!() };
 
                 loop {
-                    let (child_idx, nibble) =
-                        BranchChildIter::new(self.state_mask).nth(self.next_child_idx)?;
-                    self.next_child_idx += 1;
+                    let nibble = self.remaining_child_mask.first_set_bit_index()?;
+                    self.remaining_child_mask.unset_bit(nibble);
+                    let child_idx = BranchChildIdx::new(self.state_mask, nibble)
+                        .expect("remaining_child_mask must be a subset of state_mask");
 
                     if let ArenaSparseNodeBranchChild::Revealed(old_idx) = b.children[child_idx] {
                         return Some((child_idx.get(), nibble, old_idx))
@@ -363,7 +364,7 @@ impl ArenaSparseSubtrie {
                 new_idx,
                 branch_logical_path,
                 state_mask: b.state_mask,
-                next_child_idx: 0,
+                remaining_child_mask: b.state_mask,
             })
         }
     }
