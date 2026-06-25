@@ -359,7 +359,7 @@ where
         let prefetch_bal = raw_bal.clone();
         let stream_bal = Arc::clone(&decoded_bal);
 
-        if let Some(saved_cache) = ctx.saved_cache.as_ref() &&
+        let bal_prewarm_pool = if let Some(saved_cache) = ctx.saved_cache.as_ref() &&
             !ctx.disable_bal_batch_io &&
             let Some(pool) = ctx.bal_prewarm_pool.as_ref()
         {
@@ -391,8 +391,10 @@ where
                     "Failed to peek raw BAL prewarm targets"
                 );
             }
-            pool.end_block();
-        }
+            Some(pool)
+        } else {
+            None
+        };
 
         let stream_parent_span = parent_span;
         let (stream_tx, stream_rx) = oneshot::channel();
@@ -430,6 +432,10 @@ where
         stream_rx
             .blocking_recv()
             .expect("BAL hashed-state streaming task dropped without signaling completion");
+
+        if let Some(pool) = bal_prewarm_pool {
+            pool.end_block();
+        }
 
         // Drop the per-thread providers
         executor.bal_streaming_pool().clear();
