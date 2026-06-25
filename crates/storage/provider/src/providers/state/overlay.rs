@@ -29,7 +29,7 @@ use reth_trie_db::{
 };
 use std::{
     ops::RangeInclusive,
-    sync::Arc,
+    sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
 use tracing::{debug, debug_span, instrument};
@@ -447,12 +447,19 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     /// A cache which maps `db_tip -> Overlay`. If the db tip changes during usage of the factory
     /// then a new entry will get added to this, but in most cases only one entry is present.
     overlay_cache: Arc<DashMap<BlockHash, Overlay>>,
+    /// Cached storage layout mode for overlay providers built by this factory.
+    is_v2: Arc<OnceLock<bool>>,
 }
 
 impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     /// Create a new overlay state provider factory
     pub fn new(factory: F, overlay_builder: OverlayBuilder<N>) -> Self {
-        Self { factory, overlay_builder, overlay_cache: Default::default() }
+        Self {
+            factory,
+            overlay_builder,
+            overlay_cache: Default::default(),
+            is_v2: Default::default(),
+        }
     }
 
     /// Set the hashed state overlay.
@@ -530,7 +537,7 @@ where
 
         let Overlay { trie_updates, hashed_post_state } = self.get_overlay(&provider)?;
 
-        let is_v2 = provider.cached_storage_settings().is_v2();
+        let is_v2 = *self.is_v2.get_or_init(|| provider.cached_storage_settings().is_v2());
         self.overlay_builder.metrics.database_provider_ro_duration.record(overall_start.elapsed());
         Ok(OverlayStateProvider::new(provider, trie_updates, hashed_post_state, is_v2))
     }
