@@ -2,7 +2,7 @@
 
 use super::utils::*;
 use crate::{
-    metrics::{Operation, TableOperationMetrics},
+    metrics::{Operation, OperationMetrics, TableOperationMetrics},
     DatabaseError,
 };
 use reth_db_api::{
@@ -16,6 +16,7 @@ use reth_db_api::{
 use reth_libmdbx::{Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
 use reth_storage_errors::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
 use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds};
+use strum::EnumCount;
 
 /// Read only Cursor.
 pub type CursorRO<T> = Cursor<RO, T>;
@@ -31,6 +32,8 @@ pub struct Cursor<K: TransactionKind, T: Table> {
     buf: Vec<u8>,
     /// Per-table operation metrics. If `None`, metrics are not recorded.
     metrics: Option<TableOperationMetrics>,
+    /// Batched per-operation metric calls for small cursor operations.
+    pending_operation_counts: [u64; Operation::COUNT],
     /// Phantom data to enforce encoding/decoding.
     _dbi: PhantomData<T>,
 }
@@ -40,7 +43,24 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
         inner: reth_libmdbx::Cursor<K>,
         metrics: Option<TableOperationMetrics>,
     ) -> Self {
-        Self { inner, buf: Vec::new(), metrics, _dbi: PhantomData }
+        Self {
+            inner,
+            buf: Vec::new(),
+            metrics,
+            pending_operation_counts: [0; Operation::COUNT],
+            _dbi: PhantomData,
+        }
+    }
+
+    fn flush_operation_metrics(&mut self) {
+        if let Some(metrics) = &self.metrics {
+            for (index, count) in self.pending_operation_counts.iter_mut().enumerate() {
+                if *count != 0 {
+                    metrics[index].record_calls(*count);
+                    *count = 0;
+                }
+            }
+        }
     }
 
     /// If `self.metrics` is `Some(...)`, record a metric with the provided operation and value
@@ -53,11 +73,23 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
         value_size: Option<usize>,
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
-        if let Some(metrics) = self.metrics.clone() {
+        if self.metrics.is_none() {
+            return f(self);
+        }
+
+        if OperationMetrics::records_large_value_duration(value_size) {
+            let metrics = self.metrics.clone().expect("checked above");
             metrics[operation.index()].record(value_size, || f(self))
         } else {
+            self.pending_operation_counts[operation.index()] += 1;
             f(self)
         }
+    }
+}
+
+impl<K: TransactionKind, T: Table> Drop for Cursor<K, T> {
+    fn drop(&mut self) {
+        self.flush_operation_metrics();
     }
 }
 
