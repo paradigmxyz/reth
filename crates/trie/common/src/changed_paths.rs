@@ -2,6 +2,8 @@ use crate::Nibbles;
 use alloy_primitives::map::{B256Map, HashSet};
 
 /// Changed trie node base paths accumulated by sparse state tries.
+///
+/// Ancestor paths may be excluded when a descendant path is already present.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct TrieChangedPaths {
     /// Changed account trie node base paths.

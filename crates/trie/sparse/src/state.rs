@@ -177,7 +177,7 @@ impl<A: SparseTrieTrait, S: SparseTrieTrait> SparseStateTrie<A, S> {
     }
 
     /// Returns storage trie changed paths for tries that have been revealed.
-    pub fn storage_trie_changed_paths(&mut self) -> B256Map<HashSet<Nibbles>> {
+    fn storage_trie_changed_paths(&mut self) -> B256Map<HashSet<Nibbles>> {
         self.storage
             .tries
             .iter_mut()
