@@ -14,7 +14,7 @@ use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_tasks::spawn_os_thread;
 use std::{
     sync::{
-        mpsc::{Receiver, SendError, Sender},
+        mpsc::{Receiver, SendError, Sender, TryRecvError},
         Arc,
     },
     thread::JoinHandle,
@@ -92,8 +92,18 @@ where
     /// This is the main loop, that will listen to database events and perform the requested
     /// database actions
     pub fn run(mut self) -> Result<(), PersistenceError> {
+        let mut deferred_action = None;
+
         // If the receiver errors then senders have disconnected, so the loop should then end.
-        while let Ok(action) = self.incoming.recv() {
+        loop {
+            let action = match deferred_action.take() {
+                Some(action) => action,
+                None => match self.incoming.recv() {
+                    Ok(action) => action,
+                    Err(_) => break,
+                },
+            };
+
             match action {
                 PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
                     let last_block = self.on_remove_blocks_above(new_tip_num)?;
@@ -103,6 +113,8 @@ where
                     let _ = sender.send(PersistenceResult { last_block, commit_duration: None });
                 }
                 PersistenceAction::SaveBlocks(blocks, sender) => {
+                    self.drain_queued_chain_markers(&mut deferred_action);
+
                     let result = self.on_save_blocks(blocks)?;
                     let result_number = result.last_block.map(|b| b.number);
 
@@ -125,6 +137,29 @@ where
             }
         }
         Ok(())
+    }
+
+    fn drain_queued_chain_markers(
+        &mut self,
+        deferred_action: &mut Option<PersistenceAction<N::Primitives>>,
+    ) {
+        debug_assert!(deferred_action.is_none());
+
+        loop {
+            match self.incoming.try_recv() {
+                Ok(PersistenceAction::SaveFinalizedBlock(finalized_block)) => {
+                    self.pending_finalized_block = Some(finalized_block);
+                }
+                Ok(PersistenceAction::SaveSafeBlock(safe_block)) => {
+                    self.pending_safe_block = Some(safe_block);
+                }
+                Ok(action) => {
+                    *deferred_action = Some(action);
+                    break;
+                }
+                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+            }
+        }
     }
 
     #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(%new_tip_num))]
