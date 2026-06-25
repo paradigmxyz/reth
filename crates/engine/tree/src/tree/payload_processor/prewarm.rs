@@ -357,7 +357,7 @@ where
         let executor = self.executor.clone();
         let parent_span = Span::current();
         let prefetch_bal = raw_bal.clone();
-        let stream_bal = raw_bal.clone();
+        let stream_bal = Arc::clone(&decoded_bal);
 
         if let Some(saved_cache) = ctx.saved_cache.as_ref() &&
             !ctx.disable_bal_batch_io &&
@@ -413,17 +413,12 @@ where
                 let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
 
-                let Ok(account_changes) =
-                    DecodedBal::from_raw_bal(stream_bal).map(|decoded| decoded.split().0)
-                else {
-                    warn!(
-                        target: "engine::tree::payload_processor::prewarm",
-                        "Failed to decode BAL for hashed-state streaming"
-                    );
-                    let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
-                    let _ = stream_tx.send(());
-                    return;
-                };
+                let account_changes = stream_bal.as_bal().get_or_init(|| {
+                    DecodedBal::from_raw_bal(stream_bal.as_raw_bal().clone())
+                        .expect("validated BAL must decode")
+                        .split()
+                        .0
+                });
 
                 account_changes.par_iter().for_each(|account_changes| {
                     WorkerPool::with_worker_mut(|worker| {
