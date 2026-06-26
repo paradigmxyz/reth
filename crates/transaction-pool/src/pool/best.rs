@@ -48,6 +48,10 @@ impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransaction
     fn set_skip_blobs(&mut self, skip_blobs: bool) {
         self.best.set_skip_blobs(skip_blobs)
     }
+
+    fn set_strict_priority_ordering(&mut self, strict: bool) {
+        self.best.set_strict_priority_ordering(strict)
+    }
 }
 
 impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
@@ -107,8 +111,14 @@ pub struct BestTransactions<T: TransactionOrdering> {
     pub(crate) new_transaction_receiver: Option<Receiver<PendingTransaction<T>>>,
     /// The priority value of most recently yielded transaction.
     ///
-    /// This is required if new pending transactions are fed in while it yields new values.
+    /// This is required to enforce strict priority ordering if new pending transactions are fed in
+    /// while it yields new values.
     pub(crate) last_priority: Option<Priority<T::PriorityValue>>,
+    /// Whether live transaction updates should preserve strict priority ordering.
+    ///
+    /// When disabled, newly received transactions with a higher priority than transactions that
+    /// were already yielded can be yielded later in the iterator.
+    pub(crate) strict_priority_ordering: bool,
     /// Flag to control whether to skip blob transactions (EIP4844).
     pub(crate) skip_blobs: bool,
 }
@@ -131,12 +141,24 @@ impl<T: TransactionOrdering> BestTransactions<T> {
         self.all.get(&id.unchecked_ancestor()?)
     }
 
+    /// Controls whether live transaction updates preserve strict priority ordering.
+    ///
+    /// Enabled by default. If disabled, newly received transactions with a higher priority than
+    /// transactions that were already yielded can be yielded later in the iterator.
+    pub fn set_strict_priority_ordering(&mut self, strict: bool) {
+        self.strict_priority_ordering = strict;
+        if !strict {
+            self.last_priority.take();
+        }
+    }
+
     /// Non-blocking read on the new pending transactions subscription channel
     fn try_recv(&mut self) -> Option<IncomingTransaction<T>> {
         loop {
             match self.new_transaction_receiver.as_mut()?.try_recv() {
                 Ok(tx) => {
-                    if let Some(last_priority) = &self.last_priority &&
+                    if self.strict_priority_ordering &&
+                        let Some(last_priority) = &self.last_priority &&
                         &tx.priority > last_priority
                     {
                         // we skip transactions if we already yielded a transaction with lower
@@ -232,7 +254,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
                     ),
                 )
             } else {
-                if self.new_transaction_receiver.is_some() {
+                if self.new_transaction_receiver.is_some() && self.strict_priority_ordering {
                     self.last_priority = Some(best.priority.clone())
                 }
                 return Some((best.transaction, best.priority))
@@ -244,20 +266,20 @@ impl<T: TransactionOrdering> BestTransactions<T> {
 /// Result of attempting to receive a new transaction from the channel during iteration.
 ///
 /// This enum determines how a newly received transaction should be handled based on its priority
-/// relative to transactions already yielded by the iterator.
+/// relative to transactions already yielded by the iterator when strict priority ordering is
+/// enabled.
 enum IncomingTransaction<T: TransactionOrdering> {
     /// Process the transaction normally: add to both `all` map and potentially to `independent`
     /// set (if it has no ancestor).
     ///
-    /// This variant is used when the transaction's priority is lower than or equal to the last
-    /// yielded transaction, meaning it can be safely processed without breaking the descending
-    /// priority order.
+    /// This variant is used when strict priority ordering is disabled or the transaction's
+    /// priority is lower than or equal to the last yielded transaction.
     Process(PendingTransaction<T>),
 
     /// Stash the transaction: add only to the `all` map, but NOT to the `independent` set.
     ///
-    /// This variant is used when the transaction has a higher priority than the last yielded
-    /// transaction. We cannot yield it immediately (to maintain strict priority ordering), but we
+    /// This variant is used when strict priority ordering is enabled and the transaction has a
+    /// higher priority than the last yielded transaction. We cannot yield it immediately, but we
     /// must still track it so that:
     /// - Its descendants can find it via `ancestor()` lookups
     /// - We prevent those descendants from being incorrectly promoted to `independent`
@@ -284,6 +306,10 @@ impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransaction
 
     fn set_skip_blobs(&mut self, skip_blobs: bool) {
         self.skip_blobs = skip_blobs;
+    }
+
+    fn set_strict_priority_ordering(&mut self, strict: bool) {
+        Self::set_strict_priority_ordering(self, strict);
     }
 }
 
@@ -361,6 +387,10 @@ where
 
     fn set_skip_blobs(&mut self, skip_blobs: bool) {
         self.best.set_skip_blobs(skip_blobs)
+    }
+
+    fn set_strict_priority_ordering(&mut self, strict: bool) {
+        self.best.set_strict_priority_ordering(strict)
     }
 }
 
@@ -459,6 +489,10 @@ where
             self.buffer.retain(|tx| !tx.transaction.is_eip4844())
         }
         self.inner.set_skip_blobs(skip_blobs)
+    }
+
+    fn set_strict_priority_ordering(&mut self, strict: bool) {
+        self.inner.set_strict_priority_ordering(strict)
     }
 }
 
@@ -1149,6 +1183,48 @@ mod tests {
             assert_eq!(tx.sender_id(), first.sender_id());
             assert_ne!(tx.sender_id(), valid_new_higher_fee_tx.sender_id());
         }
+    }
+
+    #[test]
+    fn test_best_transactions_without_strict_priority_ordering() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        // Add 5 transactions with increasing nonces to the pool
+        let num_tx = 5;
+        let tx = MockTransaction::eip1559();
+        for nonce in 0..num_tx {
+            let tx = tx.clone().rng_hash().with_nonce(nonce);
+            let valid_tx = f.validated(tx);
+            pool.add_transaction(Arc::new(valid_tx), 0);
+        }
+
+        // Create a BestTransactions iterator from the pool
+        let mut best = pool.best().without_strict_priority_ordering();
+
+        // Use a broadcast channel for transaction updates
+        let (tx_sender, tx_receiver) =
+            tokio::sync::broadcast::channel::<PendingTransaction<MockOrdering>>(1000);
+        best.new_transaction_receiver = Some(tx_receiver);
+
+        // yield one tx before receiving a higher priority update
+        let first = best.next().unwrap();
+
+        // Create a new transaction with a higher priority than the already-yielded one
+        let new_higher_fee_tx = MockTransaction::eip1559().with_nonce(0);
+        let valid_new_higher_fee_tx = f.validated(new_higher_fee_tx);
+
+        // Send the new transaction through the broadcast channel
+        let pending_tx = PendingTransaction {
+            submission_id: 10,
+            transaction: Arc::new(valid_new_higher_fee_tx.clone()),
+            priority: Priority::Value(u128::MAX),
+        };
+        tx_sender.send(pending_tx).unwrap();
+
+        let next = best.next().expect("higher priority update should be yielded");
+        assert_ne!(next.sender_id(), first.sender_id());
+        assert_eq!(next.sender_id(), valid_new_higher_fee_tx.sender_id());
     }
 
     /// Reproduces the "Blob Transaction Ordering, Multiple Clients" Hive scenario.

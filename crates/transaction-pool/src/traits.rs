@@ -1154,6 +1154,23 @@ pub trait BestTransactions: Iterator + Send {
         self
     }
 
+    /// Controls whether live transaction updates enforce strict priority ordering.
+    ///
+    /// This is enabled by default for iterators that support live updates. If disabled, a
+    /// transaction received after iteration starts can be yielded even if it has a higher priority
+    /// than transactions that were already yielded.
+    fn set_strict_priority_ordering(&mut self, _strict: bool) {}
+
+    /// Convenience function for [`Self::set_strict_priority_ordering`] that returns the iterator
+    /// again with strict priority ordering disabled.
+    fn without_strict_priority_ordering(mut self) -> Self
+    where
+        Self: Sized,
+    {
+        self.set_strict_priority_ordering(false);
+        self
+    }
+
     /// Creates an iterator which uses a closure to determine whether a transaction should be
     /// returned by the iterator.
     ///
@@ -1186,6 +1203,10 @@ where
 
     fn set_skip_blobs(&mut self, skip_blobs: bool) {
         (**self).set_skip_blobs(skip_blobs);
+    }
+
+    fn set_strict_priority_ordering(&mut self, strict: bool) {
+        (**self).set_strict_priority_ordering(strict);
     }
 }
 
