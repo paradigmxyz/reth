@@ -1158,7 +1158,13 @@ jobs:
           }
 
           derek_cmd=(derek bench)
-          [ "$BENCH_BIG_BLOCKS" = "true" ] && derek_cmd+=(big-blocks="${BENCH_BIG_BLOCKS_TARGET_GAS:-true}")
+          if [ "$BENCH_BIG_BLOCKS" = "true" ]; then
+            if [ -n "$BENCH_BIG_BLOCKS_TARGET_GAS" ]; then
+              derek_cmd+=(big-blocks="$BENCH_BIG_BLOCKS_TARGET_GAS")
+            else
+              derek_cmd+=(big-blocks)
+            fi
+          fi
           [ -n "$BENCH_REORG" ] && derek_cmd+=(reorg="$BENCH_REORG")
           derek_cmd+=(
             blocks="$BENCH_BLOCKS"
