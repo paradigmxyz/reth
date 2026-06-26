@@ -74,7 +74,7 @@ impl<Pool, Client, EvmConfig> EthereumPayloadBuilder<Pool, Client, EvmConfig> {
 // Default implementation of [PayloadBuilder] for unit type
 impl<Pool, Client, EvmConfig> PayloadBuilder for EthereumPayloadBuilder<Pool, Client, EvmConfig>
 where
-    EvmConfig: ConfigureEvm<Primitives = EthPrimitives> + Clone + Send + Sync,
+    EvmConfig: ConfigureEvm<Primitives = EthPrimitives>,
     Client: StateProviderFactory
         + ChainSpecProvider<
             ChainSpec: EthereumHardforks + EthExecutorSpec + EthChainSpec<Header = Header>,
@@ -150,7 +150,7 @@ pub fn default_ethereum_payload<EvmConfig, Client, Pool, F>(
     best_txs: F,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
-    EvmConfig: ConfigureEvm<Primitives = EthPrimitives> + Clone + Send + Sync,
+    EvmConfig: ConfigureEvm<Primitives = EthPrimitives>,
     Client: StateProviderFactory
         + ChainSpecProvider<
             ChainSpec: EthereumHardforks + EthExecutorSpec + EthChainSpec<Header = Header>,

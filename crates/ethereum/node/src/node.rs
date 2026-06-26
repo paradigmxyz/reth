@@ -34,10 +34,7 @@ use reth_node_core::args::JitArgs;
 use reth_payload_primitives::PayloadTypes;
 use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
 use reth_rpc::{
-    eth::{
-        core::{EthApiFor, EthRpcConverterFor},
-        RpcNodeCore,
-    },
+    eth::core::{EthApiFor, EthRpcConverterFor},
     TestingApi, ValidationApi,
 };
 use reth_rpc_api::servers::{BlockSubmissionValidationApiServer, TestingApiServer};
@@ -146,10 +143,7 @@ impl<N, NetworkT> EthApiBuilder<N> for EthereumEthApiBuilder<NetworkT>
 where
     N: FullNodeComponents<
         Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks>,
-        Evm: ConfigureEvm<
-            Primitives = PrimitivesTy<N::Types>,
-            NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>>,
-        >,
+        Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>>>,
     >,
     NetworkT: RpcTypes<TransactionRequest: SignableTxRequest<TxTy<N::Types>>>,
     EthRpcConverterFor<N, NetworkT>: RpcConvert<
@@ -315,10 +309,9 @@ where
             Primitives = EthPrimitives,
             Payload: EngineTypes<ExecutionData = ExecutionData>,
         >,
-        Evm: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
+        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthB: EthApiBuilder<N>,
-    <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm,
     PVB: Send,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
@@ -393,10 +386,9 @@ where
             Primitives = EthPrimitives,
             Payload: EngineTypes<ExecutionData = ExecutionData>,
         >,
-        Evm: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
+        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthB: EthApiBuilder<N>,
-    <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
@@ -420,7 +412,7 @@ where
             Primitives = EthPrimitives,
             Payload: EngineTypes<ExecutionData = ExecutionData>,
         >,
-        Evm: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
+        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthB: EthApiBuilder<N>,
     PVB: Send,

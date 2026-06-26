@@ -4,7 +4,6 @@ use alloy_eips::{eip2124::Head, BlockNumHash};
 use futures::future;
 use reth_chain_state::ForkChoiceSubscriptions;
 use reth_chainspec::EthChainSpec;
-use reth_evm::ConfigureEvm;
 use reth_exex::{
     ExExContext, ExExHandle, ExExManager, ExExManagerHandle, ExExNotificationSource, Wal,
     DEFAULT_EXEX_MANAGER_CAPACITY, DEFAULT_WAL_BLOCKS_WARNING,
@@ -21,7 +20,6 @@ use crate::{common::WithConfigs, exex::BoxedLaunchExEx};
 pub struct ExExLauncher<Node>
 where
     Node: FullNodeComponents,
-    Node::Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
 {
     head: Head,
     extensions: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
@@ -36,7 +34,6 @@ where
 impl<Node> ExExLauncher<Node>
 where
     Node: FullNodeComponents + Clone,
-    Node::Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
 {
     /// Create a new `ExExLauncher` with the given extensions.
     pub const fn new(
@@ -187,7 +184,6 @@ where
 impl<Node> Debug for ExExLauncher<Node>
 where
     Node: FullNodeComponents,
-    Node::Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ExExLauncher")

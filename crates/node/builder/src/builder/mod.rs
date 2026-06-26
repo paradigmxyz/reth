@@ -5,7 +5,7 @@
 
 use crate::{
     common::WithConfigs,
-    components::{NodeComponents, NodeComponentsBuilder},
+    components::NodeComponentsBuilder,
     node::FullNode,
     rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
     BlockReaderFor, DebugNode, DebugNodeLauncher, EngineNodeLauncher, LaunchNode, Node,
@@ -14,7 +14,6 @@ use alloy_eips::eip4844::env_settings::EnvKzgSettings;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
-use reth_evm::ConfigureEvm;
 use reth_exex::ExExContext;
 use reth_network::{
     transactions::{
@@ -645,8 +644,6 @@ where
     /// The `ExEx` ID must be unique.
     pub fn install_exex<F, R, E>(self, exex_id: impl Into<String>, exex: F) -> Self
     where
-        <CB::Components as NodeComponents<T>>::Evm:
-            ConfigureEvm<Primitives = <T::Types as NodeTypes>::Primitives>,
         F: FnOnce(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
@@ -664,8 +661,6 @@ where
     /// The `ExEx` ID must be unique.
     pub fn install_exex_if<F, R, E>(self, cond: bool, exex_id: impl Into<String>, exex: F) -> Self
     where
-        <CB::Components as NodeComponents<T>>::Evm:
-            ConfigureEvm<Primitives = <T::Types as NodeTypes>::Primitives>,
         F: FnOnce(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,

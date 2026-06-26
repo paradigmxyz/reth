@@ -1,6 +1,5 @@
 use crate::{ExExContextDyn, ExExEvent, ExExNotifications, ExExNotificationsStream};
 use alloy_eips::BlockNumHash;
-use reth_evm::ConfigureEvm;
 use reth_exex_types::ExExHead;
 use reth_node_api::{FullNodeComponents, NodePrimitives, NodeTypes, PrimitivesTy};
 use reth_node_core::node_config::NodeConfig;
@@ -16,7 +15,6 @@ use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 pub struct ExExContext<Node>
 where
     Node: FullNodeComponents,
-    Node::Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
 {
     /// The current head of the blockchain at launch.
     pub head: BlockNumHash,
@@ -47,7 +45,6 @@ where
 impl<Node> Debug for ExExContext<Node>
 where
     Node: FullNodeComponents,
-    Node::Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
     Node::Provider: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -65,7 +62,6 @@ where
 impl<Node> ExExContext<Node>
 where
     Node: FullNodeComponents,
-    Node::Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
     Node::Provider: Debug + BlockReader,
     Node::Types: NodeTypes<Primitives: NodePrimitives>,
 {
@@ -78,7 +74,6 @@ where
 impl<Node> ExExContext<Node>
 where
     Node: FullNodeComponents,
-    Node::Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
     Node::Types: NodeTypes<Primitives: NodePrimitives>,
 {
     /// Returns the transaction pool of the node.
@@ -142,9 +137,8 @@ where
 #[cfg(test)]
 mod tests {
     use crate::ExExContext;
-    use reth_evm::ConfigureEvm;
     use reth_exex_types::ExExHead;
-    use reth_node_api::{FullNodeComponents, PrimitivesTy};
+    use reth_node_api::FullNodeComponents;
     use reth_provider::BlockReader;
 
     /// <https://github.com/paradigmxyz/reth/issues/12054>
@@ -154,14 +148,12 @@ mod tests {
         struct ExEx<Node>
         where
             Node: FullNodeComponents,
-            Node::Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
         {
             ctx: ExExContext<Node>,
         }
 
         impl<Node: FullNodeComponents> ExEx<Node>
         where
-            Node::Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
             Node::Provider: BlockReader,
         {
             async fn _test_bounds(mut self) -> eyre::Result<()> {

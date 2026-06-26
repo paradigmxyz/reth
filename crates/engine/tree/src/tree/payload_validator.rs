@@ -1586,7 +1586,6 @@ where
     >
     where
         T: ExecutableTxIterator<Evm>,
-        Evm: ConfigureEvm<Primitives = N>,
     {
         let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
             options;
@@ -2067,9 +2066,7 @@ where
         + 'static,
     N: NodePrimitives,
     V: PayloadValidator<Types, Block = N::Block> + Clone,
-    Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N>
-        + ConfigureEvm<Primitives = N>
-        + 'static,
+    Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N> + 'static,
     Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
 {
     fn validate_payload_attributes_against_header(

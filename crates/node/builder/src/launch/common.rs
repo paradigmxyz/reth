@@ -890,8 +890,6 @@ impl<T, CB>
 where
     T: FullNodeTypes<Types: NodeTypesForProvider>,
     CB: NodeComponentsBuilder<T>,
-    <CB::Components as NodeComponents<T>>::Evm:
-        ConfigureEvm<Primitives = <T::Types as NodeTypes>::Primitives>,
 {
     /// Returns the configured `ProviderFactory`.
     pub const fn provider_factory(

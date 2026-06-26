@@ -3,14 +3,13 @@ use alloy_eips::eip7594::BlobTransactionSidecarVariant;
 use alloy_network::eip2718::Decodable2718;
 use alloy_primitives::{Bytes, B256};
 use reth_chainspec::EthereumHardforks;
-use reth_evm::{ConfigureEvm, EvmEnv};
-use reth_node_api::{BlockTy, FullNodeComponents, PrimitivesTy};
+use reth_node_api::{BlockTy, FullNodeComponents};
 use reth_node_builder::{rpc::RpcRegistry, NodeTypes};
 use reth_provider::BlockReader;
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
     helpers::{EthApiSpec, EthTransactions, TraceExt},
-    EthApiTypes, RpcNodeCore,
+    EthApiTypes,
 };
 
 #[expect(missing_debug_implementations)]
@@ -38,8 +37,6 @@ where
 impl<Node, EthApi> RpcTestContext<Node, EthApi>
 where
     Node: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
-    Node::Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
-    <EthApi as RpcNodeCore>::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
     EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
         + EthTransactions
         + TraceExt,

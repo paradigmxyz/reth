@@ -22,7 +22,6 @@ use jsonrpsee::RpcModule;
 use parking_lot::Mutex;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
-use reth_evm::ConfigureEvm;
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
     NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
@@ -34,7 +33,7 @@ use reth_node_core::{
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
 use reth_rpc::{
-    eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer, RpcNodeCore},
+    eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer},
     AdminApi,
 };
 use reth_rpc_api::{
@@ -417,7 +416,6 @@ impl<Node: FullNodeComponents, EthApi: EthApiTypes> RpcHandle<Node, EthApi> {
     ) -> AdminApi<Node::Network, <Node::Types as NodeTypes>::ChainSpec, Node::Pool>
     where
         <Node::Types as NodeTypes>::ChainSpec: EthereumHardforks,
-        Node::Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
     {
         self.rpc_registry.registry.admin_api()
     }
@@ -941,11 +939,9 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
     RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
 where
     N: FullNodeComponents,
-    N::Evm: ConfigureEvm<Primitives = PrimitivesTy<N::Types>>,
     N::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
     EthB::EthApi: TraceExt,
-    <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
@@ -1249,11 +1245,9 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware> NodeAddOns<N>
     for RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, AuthHttpMiddleware>
 where
     N: FullNodeComponents,
-    N::Evm: ConfigureEvm<Primitives = PrimitivesTy<N::Types>>,
     <N as FullNodeTypes>::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
     EthB::EthApi: TraceExt,
-    <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
@@ -1309,7 +1303,6 @@ pub struct EthApiCtx<'a, N: FullNodeTypes> {
 impl<'a, N> EthApiCtx<'a, N>
 where
     N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks>>,
-    N::Evm: ConfigureEvm<Primitives = PrimitivesTy<N::Types>>,
 {
     /// Provides a [`EthApiBuilder`] with preconfigured config and components.
     pub fn eth_api_builder(self) -> reth_rpc::EthApiBuilder<N, EthRpcConverterFor<N>> {
@@ -1459,7 +1452,7 @@ where
     Node: FullNodeComponents<
         Evm: ConfigureEngineEvm<
             <<Node::Types as NodeTypes>::Payload as PayloadTypes>::ExecutionData,
-        > + ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
+        >,
     >,
     EV: PayloadValidatorBuilder<Node>,
     EV::Validator: reth_engine_primitives::PayloadValidator<

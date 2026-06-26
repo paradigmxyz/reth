@@ -33,7 +33,6 @@ pub trait InvalidBlockHookExt {
 impl<N> InvalidBlockHookExt for AddOnsContext<'_, N>
 where
     N: FullNodeComponents,
-    N::Evm: ConfigureEvm<Primitives = <N::Types as NodeTypes>::Primitives>,
 {
     type Primitives = <N::Types as NodeTypes>::Primitives;
 

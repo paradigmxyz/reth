@@ -3,15 +3,13 @@
 use std::future::Future;
 
 use futures::{future::BoxFuture, FutureExt};
-use reth_evm::ConfigureEvm;
 use reth_exex::ExExContext;
-use reth_node_api::{FullNodeComponents, PrimitivesTy};
+use reth_node_api::FullNodeComponents;
 
 /// A trait for launching an `ExEx`.
 pub trait LaunchExEx<Node>: Send
 where
     Node: FullNodeComponents,
-    Node::Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
 {
     /// Launches the `ExEx`.
     ///
@@ -30,7 +28,6 @@ pub type BoxExEx = BoxFuture<'static, eyre::Result<()>>;
 pub trait BoxedLaunchExEx<Node>: Send
 where
     Node: FullNodeComponents,
-    Node::Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
 {
     /// Launches the `ExEx` and returns a boxed future.
     fn launch(self: Box<Self>, ctx: ExExContext<Node>)
@@ -44,7 +41,6 @@ impl<E, Node> BoxedLaunchExEx<Node> for E
 where
     E: LaunchExEx<Node> + Send + 'static,
     Node: FullNodeComponents,
-    Node::Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
 {
     fn launch(
         self: Box<Self>,
@@ -63,7 +59,6 @@ where
 impl<Node, F, Fut, E> LaunchExEx<Node> for F
 where
     Node: FullNodeComponents,
-    Node::Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
     F: FnOnce(ExExContext<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<E>> + Send,
     E: Future<Output = eyre::Result<()>> + Send,

@@ -20,7 +20,6 @@ use reth_engine_tree::{
     tree::TreeConfig,
 };
 use reth_engine_util::EngineMessageStreamExt;
-use reth_evm::ConfigureEvm;
 use reth_exex::ExExManagerHandle;
 use reth_network::{types::BlockRangeUpdate, NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
@@ -80,7 +79,6 @@ impl EngineNodeLauncher {
             DB = DB,
         >,
         CB: NodeComponentsBuilder<T>,
-        <CB::Components as NodeComponents<T>>::Evm: ConfigureEvm<Primitives = N::Primitives>,
         AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
             + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
     {
@@ -452,7 +450,6 @@ where
     N: Node<RethFullAdapter<DB, N>> + NodeTypesForProvider,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
     CB: NodeComponentsBuilder<T> + 'static,
-    <CB::Components as NodeComponents<T>>::Evm: ConfigureEvm<Primitives = N::Primitives>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
         + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
         + 'static,
