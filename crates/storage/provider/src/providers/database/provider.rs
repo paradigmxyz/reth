@@ -3097,19 +3097,27 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         TX: DbTxMut,
     {
         let mut account_trie_cursor = tx.cursor_write::<A::AccountTrieTable>()?;
+        let last_account_key = account_trie_cursor.last()?.map(|(key, _)| key);
+
         // Process sorted account nodes
         for (key, updated_node) in trie_updates.account_nodes_ref() {
             let nibbles = A::AccountKey::from(*key);
+            let past_table_tail =
+                last_account_key.as_ref().map_or(true, |last| &nibbles > last);
             match updated_node {
                 Some(node) => {
                     if !key.is_empty() {
                         *num_entries += 1;
-                        account_trie_cursor.upsert(nibbles, node)?;
+                        if past_table_tail {
+                            account_trie_cursor.append(nibbles, node)?;
+                        } else {
+                            account_trie_cursor.upsert(nibbles, node)?;
+                        }
                     }
                 }
                 None => {
                     *num_entries += 1;
-                    if account_trie_cursor.seek_exact(nibbles)?.is_some() {
+                    if !past_table_tail && account_trie_cursor.seek_exact(nibbles)?.is_some() {
                         account_trie_cursor.delete_current()?;
                     }
                 }
@@ -4378,6 +4386,7 @@ mod tests {
                     None,
                 )),
             ),
+            (Nibbles::from_nibbles([0x7, 0x8]), None), // Missing tail deletion
         ];
 
         // Create sorted storage trie updates
@@ -4412,9 +4421,9 @@ mod tests {
         // Write the sorted trie updates
         let num_entries = provider_rw.write_trie_updates_sorted(&trie_updates).unwrap();
 
-        // We should have 2 account insertions + 1 account deletion + 1 storage insertion + 1
-        // storage deletion = 5
-        assert_eq!(num_entries, 5);
+        // We should have 2 account insertions + 2 account deletions + 1 storage insertion + 1
+        // storage deletion = 6
+        assert_eq!(num_entries, 6);
 
         // Verify account trie updates were written correctly
         let tx = provider_rw.tx_ref();
@@ -4440,6 +4449,11 @@ mod tests {
         let nibbles3 = StoredNibbles(Nibbles::from_nibbles([0x5, 0x6]));
         let entry3 = cursor.seek_exact(nibbles3).unwrap();
         assert!(entry3.is_some(), "New account node should exist");
+
+        // Check missing tail deletion remains absent
+        let nibbles4 = StoredNibbles(Nibbles::from_nibbles([0x7, 0x8]));
+        let entry4 = cursor.seek_exact(nibbles4).unwrap();
+        assert!(entry4.is_none(), "Missing tail account node should remain absent");
 
         // Verify storage trie updates were written correctly
         let mut storage_cursor = tx.cursor_dup_read::<tables::StoragesTrie>().unwrap();
