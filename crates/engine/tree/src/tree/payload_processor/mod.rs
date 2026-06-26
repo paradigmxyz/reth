@@ -530,14 +530,12 @@ where
                         .enumerate()
                         .map(|(i, tx)| {
                             let idx = i + prefetch;
-                            let tx = convert.convert(tx);
+                            let tx = convert.convert(tx).map(WithTxEnv::new);
                             (idx, tx)
                         })
                         .for_each_ordered_in(executor.cpu_pool(), |(idx, tx)| {
-                            let tx = tx.map(|tx| {
-                                let tx = WithTxEnv::new(tx);
+                            let tx = tx.inspect(|tx| {
                                 let _ = prewarm_tx.send((idx, tx.clone()));
-                                tx
                             });
                             let _ = execute_tx.send((idx, tx));
                             trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
