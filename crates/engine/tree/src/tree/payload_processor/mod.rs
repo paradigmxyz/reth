@@ -461,7 +461,7 @@ where
     /// Non-BAL execution must consume transactions in block order, while rayon may recover
     /// individual chunks in any order. Chunking keeps each rayon task large enough to amortize
     /// scheduling overhead while preserving ordered delivery to execution.
-    const PARALLEL_TX_CHUNK_SIZE: usize = 64;
+    const PARALLEL_TX_CHUNK_SIZE: usize = 10;
 
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     ///
