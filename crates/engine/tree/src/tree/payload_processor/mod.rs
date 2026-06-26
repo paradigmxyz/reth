@@ -38,6 +38,7 @@ use reth_trie_sparse::{
     ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie, SparseTrieRetainedPaths,
 };
 use std::{
+    collections::BTreeMap,
     ops::Not,
     sync::{
         atomic::{AtomicBool, AtomicUsize},
@@ -455,12 +456,12 @@ where
     /// waiting for rayon scheduling.
     const PARALLEL_PREFETCH_COUNT: usize = 4;
 
-    /// Number of transactions recovered per ordered parallel window in the non-BAL path.
+    /// Number of transactions recovered per FIFO chunk in the non-BAL path.
     ///
     /// Non-BAL execution must consume transactions in block order, while rayon may recover
-    /// individual transactions in any order. Windowing prioritizes the next contiguous range while
-    /// still using parallel recovery inside that range.
-    const PARALLEL_TX_WINDOW_SIZE: usize = 64;
+    /// individual chunks in any order. Chunking keeps each rayon task large enough to amortize
+    /// scheduling overhead while preserving ordered delivery to execution.
+    const PARALLEL_TX_CHUNK_SIZE: usize = 64;
 
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     ///
@@ -532,37 +533,62 @@ where
                     // start immediately without waiting for rayon work-stealing.
                     convert_serial(iter.by_ref().take(prefetch), &convert, &prewarm_tx, &execute_tx);
 
-                    let mut iter = iter.enumerate();
+                    let convert = Arc::new(convert);
+                    let iter = iter.enumerate();
 
                     // Without BALs, we need to preserve the initial order of transactions.
-                    // Process contiguous windows in order so recovery prioritizes the next
-                    // transaction range execution will request. Each window still recovers in
-                    // parallel, then drains in block order.
-                    executor.cpu_pool().install(move || {
+                    // Spawn all remaining transactions as FIFO-scheduled chunks, then drain
+                    // completed transactions in order so execution still sees block order.
+                    executor.cpu_pool().in_place_scope_fifo(move |scope| {
+                        let (tx_tx, tx_rx) = crossbeam_channel::unbounded();
+                        let mut iter = iter;
+
                         loop {
-                            let chunk = iter
-                                .by_ref()
-                                .take(Self::PARALLEL_TX_WINDOW_SIZE)
-                                .collect::<Vec<_>>();
+                            let chunk =
+                                iter.by_ref().take(Self::PARALLEL_TX_CHUNK_SIZE).collect::<Vec<_>>();
                             if chunk.is_empty() {
                                 break;
                             }
 
-                            let chunk = chunk
-                                .into_par_iter()
-                                .map(|(i, tx)| {
+                            let tx_tx = tx_tx.clone();
+                            let convert = Arc::clone(&convert);
+
+                            scope.spawn_fifo(move |_| {
+                                for (i, tx) in chunk {
                                     let idx = i + prefetch;
                                     let tx = convert.convert(tx).map(WithTxEnv::new);
-                                    (idx, tx)
-                                })
-                                .collect::<Vec<_>>();
+                                    let _ = tx_tx.send((idx, tx));
+                                }
+                            });
+                        }
+                        drop(tx_tx);
 
-                            for (idx, tx) in chunk {
+                        let mut next_tx = prefetch;
+                        let mut pending = BTreeMap::new();
+                        let send_converted_tx =
+                            |idx, tx: Result<IteratorTx<Evm, I>, <I as ExecutableTxTuple>::Error>| {
                                 if let Ok(tx) = &tx {
                                     let _ = prewarm_tx.send((idx, tx.clone()));
                                 }
                                 let _ = execute_tx.send((idx, tx));
                                 trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+                            };
+
+                        while next_tx < transaction_count {
+                            let Ok((idx, tx)) = tx_rx.recv() else {
+                                break;
+                            };
+
+                            if idx == next_tx {
+                                send_converted_tx(idx, tx);
+                                next_tx += 1;
+
+                                while let Some(tx) = pending.remove(&next_tx) {
+                                    send_converted_tx(next_tx, tx);
+                                    next_tx += 1;
+                                }
+                            } else {
+                                pending.insert(idx, tx);
                             }
                         }
                     });
