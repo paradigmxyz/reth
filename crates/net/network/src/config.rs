@@ -228,6 +228,8 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     required_block_hashes: Vec<BlockNumHash>,
     /// Optional network id
     network_id: Option<u64>,
+    /// Whether to advertise the `snap/2` satellite protocol (EIP-8189) in the handshake.
+    snap_enabled: bool,
 }
 
 impl NetworkConfigBuilder<EthNetworkPrimitives> {
@@ -271,6 +273,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             eth_max_message_size: MAX_MESSAGE_SIZE,
             required_block_hashes: Vec::new(),
             network_id: None,
+            snap_enabled: false,
         }
     }
 
@@ -547,6 +550,14 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self
     }
 
+    /// Toggles advertisement of the `snap/2` satellite protocol (EIP-8189).
+    ///
+    /// Default off: snap/2 is only negotiated with peers when explicitly enabled.
+    pub const fn with_snap(mut self, snap_enabled: bool) -> Self {
+        self.snap_enabled = snap_enabled;
+        self
+    }
+
     /// Sets whether tx gossip is disabled.
     pub const fn disable_tx_gossip(mut self, disable_tx_gossip: bool) -> Self {
         self.tx_gossip_disabled = disable_tx_gossip;
@@ -647,6 +658,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             eth_max_message_size,
             required_block_hashes,
             network_id,
+            snap_enabled,
         } = self;
 
         let head = head.unwrap_or_else(|| Head {
@@ -679,6 +691,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         let mut hello_message =
             hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
         hello_message.port = listener_addr.port();
+        hello_message = hello_message.with_snap(snap_enabled);
 
         // set the status
         let mut status = UnifiedStatus::spec_builder(&chain_spec, &head);
@@ -772,6 +785,34 @@ mod tests {
     fn builder() -> NetworkConfigBuilder {
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         NetworkConfigBuilder::new(secret_key, Runtime::test())
+    }
+
+    #[test]
+    fn test_snap_advertisement_default_off() {
+        // snap/2 must not be advertised unless explicitly enabled.
+        let config = builder().build(NoopProvider::default());
+        assert!(config.hello_message.protocols.iter().all(|p| p.cap.name != "snap"));
+    }
+
+    #[test]
+    fn test_snap_advertisement_when_enabled() {
+        let config = builder().with_snap(true).build(NoopProvider::default());
+        let snap_caps =
+            config.hello_message.protocols.iter().filter(|p| p.cap.name == "snap").count();
+        assert_eq!(snap_caps, 1);
+        assert_eq!(
+            config
+                .hello_message
+                .protocols
+                .iter()
+                .find(|p| p.cap.name == "snap")
+                .unwrap()
+                .cap
+                .version,
+            2
+        );
+        // eth is still advertised alongside snap.
+        assert!(config.hello_message.protocols.iter().any(|p| p.cap.name == "eth"));
     }
 
     #[test]
