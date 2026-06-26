@@ -695,7 +695,6 @@ where
                         .with_default_storage_trie(default_trie)
                         .with_updates(true)
                 });
-            sparse_state_trie.set_changed_paths(true);
             sparse_state_trie.set_hot_cache_capacities(max_hot_slots, max_hot_accounts);
 
             let mut task = SparseTrieCacheTask::new_with_trie(
