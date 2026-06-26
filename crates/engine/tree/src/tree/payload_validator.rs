@@ -845,7 +845,6 @@ where
                         if state_root == block.header().state_root() {
                             maybe_state_root = Some((state_root, trie_updates, elapsed))
                         } else {
-                            ctx.state().tree_state.state_trie_overlays.clear_reusable_sparse_trie();
                             warn!(
                                 target: "engine::tree::payload_validator",
                                 ?state_root,
@@ -872,9 +871,6 @@ where
                 // If the state root task failed or we got a new hashed state from the fallback that
                 // won the race, we need to replace the hashed state handle and re-run the
                 // validation.
-                if maybe_new_hashed_state.is_some() {
-                    ctx.state().tree_state.state_trie_overlays.clear_reusable_sparse_trie();
-                }
                 if maybe_new_hashed_state.is_some() || state_root_task_failed {
                     hashed_state = maybe_new_hashed_state.unwrap_or_else(|| {
                         LazyHandle::ready(Arc::new(self.provider.hashed_post_state(&output.state)))
@@ -966,7 +962,6 @@ where
 
         // ensure state root matches
         if state_root != block.header().state_root() {
-            ctx.state().tree_state.state_trie_overlays.clear_reusable_sparse_trie();
             #[cfg(feature = "trie-debug")]
             Self::write_trie_debug_recorders(block.header().number(), &trie_debug_recorders);
 

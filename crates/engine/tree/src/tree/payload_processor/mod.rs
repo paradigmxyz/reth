@@ -709,15 +709,8 @@ where
 
             let result = task.run();
 
-            // Acquire the guard before sending the result to prevent a race condition:
-            // Without this, the next block could start after send() but before store(),
-            // causing take() to return None and forcing it to create a new empty trie
-            // instead of reusing the preserved one. Holding the guard ensures the next
-            // block's take() blocks until we've stored the trie for reuse.
-            let mut guard = reusable_sparse_trie.lock();
-
             let task_result = result.as_ref().ok().cloned();
-            // Send state root computation result - next block may start but will block on take()
+            // Send state root computation result before pruning/preserving the trie.
             if state_root_tx.send(result).is_err() {
                 // Receiver dropped - payload was likely invalid or cancelled.
                 // Clear the trie instead of preserving potentially invalid state.
@@ -726,8 +719,7 @@ where
                     "State root receiver dropped, clearing trie"
                 );
                 let (trie, deferred) = task.into_cleared_trie();
-                guard.store_cleared_if_current(trie, parent_state_root);
-                drop(guard);
+                reusable_sparse_trie.store_cleared(trie);
                 executor.spawn_drop(deferred);
                 return;
             }
@@ -757,7 +749,7 @@ where
                 trie_metrics
                     .sparse_trie_retained_storage_tries
                     .set(trie.retained_storage_tries_count() as f64);
-                guard.store_anchored_if_current(trie, result.state_root, parent_state_root);
+                reusable_sparse_trie.store_anchored(trie, result.state_root);
                 deferred
             } else {
                 debug!(
@@ -765,10 +757,9 @@ where
                     "State root computation failed, clearing trie"
                 );
                 let (trie, deferred) = task.into_cleared_trie();
-                guard.store_cleared_if_current(trie, parent_state_root);
+                reusable_sparse_trie.store_cleared(trie);
                 deferred
             };
-            drop(guard);
             executor.spawn_drop(deferred);
         });
     }
