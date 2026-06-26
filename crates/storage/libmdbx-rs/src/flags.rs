@@ -235,3 +235,20 @@ bitflags! {
         const MULTIPLE = MDBX_MULTIPLE;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn environment_flags_include_liforeclaim() {
+        let flags = EnvironmentFlags {
+            mode: Mode::ReadWrite { sync_mode: SyncMode::Durable },
+            liforeclaim: true,
+            ..Default::default()
+        }
+        .make_flags();
+
+        assert_ne!(flags & MDBX_LIFORECLAIM, 0);
+    }
+}
