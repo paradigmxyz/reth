@@ -11,7 +11,7 @@
 //! 2. Prewarming tasks execute transactions in parallel using shared caches
 //! 3. When actual block execution happens, it benefits from the warmed cache
 
-use super::bal_prewarm_pool::BalPrewarmPool;
+use super::{bal_prewarm_pool::BalPrewarmPool, TxIteratorProgress};
 use crate::tree::{
     payload_processor::multiproof::StateRootMessage,
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
@@ -151,6 +151,7 @@ where
 
                 while let Ok((index, tx)) = pending.recv() {
                     if ctx.should_stop() {
+                        ctx.tx_iterator_progress.mark_prewarm_done();
                         trace!(
                             target: "engine::tree::payload_processor::prewarm",
                             "Termination requested, stopping transaction distribution"
@@ -160,12 +161,15 @@ where
 
                     // skip transactions already executed by the main loop
                     if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
+                        ctx.tx_iterator_progress.mark_prewarm_done();
                         continue;
                     }
 
                     tx_count += 1;
                     let parent_span = Span::current();
+                    let tx_iterator_progress = ctx.tx_iterator_progress.clone();
                     s.spawn(move |_| {
+                        let _progress = TxPrewarmProgressGuard(tx_iterator_progress);
                         let _enter = trace_span!(
                             target: "engine::tree::payload_processor::prewarm",
                             parent: parent_span,
@@ -539,6 +543,8 @@ where
     /// loop. Prewarm workers skip transactions with `index < counter` since those have already
     /// been executed.
     pub executed_tx_index: Arc<AtomicUsize>,
+    /// Shared progress used to wake transaction recovery when prewarm runway opens.
+    pub(crate) tx_iterator_progress: TxIteratorProgress,
     /// Whether the precompile cache is disabled.
     pub precompile_cache_disabled: bool,
     /// The precompile cache map.
@@ -548,6 +554,15 @@ where
     pub disable_bal_parallel_state_root: bool,
     /// Whether BAL state prefetching during prewarm is disabled.
     pub disable_bal_batch_io: bool,
+}
+
+/// Marks a prewarm input as no longer queued once the worker exits.
+struct TxPrewarmProgressGuard(TxIteratorProgress);
+
+impl Drop for TxPrewarmProgressGuard {
+    fn drop(&mut self) {
+        self.0.mark_prewarm_done();
+    }
 }
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in

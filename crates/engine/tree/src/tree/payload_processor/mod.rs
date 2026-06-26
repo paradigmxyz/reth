@@ -41,7 +41,7 @@ use std::{
     collections::BTreeMap,
     ops::Not,
     sync::{
-        atomic::{AtomicBool, AtomicUsize},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::{self, channel},
         Arc, OnceLock,
     },
@@ -306,9 +306,15 @@ where
     {
         let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
             options;
+        let tx_iterator_progress = TxIteratorProgress::new();
+
         // start preparing transactions immediately
-        let (prewarm_rx, execution_rx) =
-            self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
+        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(
+            transactions,
+            env.transaction_count,
+            parallel_bal_execution,
+            tx_iterator_progress.clone(),
+        );
 
         let span = Span::current();
 
@@ -335,6 +341,7 @@ where
             provider_builder,
             Some(state_root_handle.updates_tx().clone()),
             parallel_bal_execution,
+            tx_iterator_progress,
         );
 
         PayloadHandle {
@@ -360,14 +367,20 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let (prewarm_rx, execution_rx) =
-            self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
+        let tx_iterator_progress = TxIteratorProgress::new();
+        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(
+            transactions,
+            env.transaction_count,
+            parallel_bal_execution,
+            tx_iterator_progress.clone(),
+        );
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
             provider_builder,
             None,
             parallel_bal_execution,
+            tx_iterator_progress,
         );
         PayloadHandle {
             state_root_handle: None,
@@ -463,6 +476,12 @@ where
     /// scheduling overhead while preserving ordered delivery to execution.
     const PARALLEL_TX_CHUNK_SIZE: usize = 64;
 
+    /// Downstream transaction runway at which recovery pauses.
+    const PARALLEL_TX_BACKLOG_HIGH_WATERMARK: usize = 1024;
+
+    /// Downstream transaction runway at which recovery resumes.
+    const PARALLEL_TX_BACKLOG_LOW_WATERMARK: usize = 512;
+
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     ///
     /// For blocks with fewer than [`Self::SMALL_BLOCK_TX_THRESHOLD`] transactions, uses
@@ -477,9 +496,11 @@ where
         transactions: I,
         transaction_count: usize,
         parallel_bal_execution: bool,
+        tx_iterator_progress: TxIteratorProgress,
     ) -> (IteratorPrewarmTxReceiver<Evm, I>, IteratorExecuteTxReceiver<Evm, I>) {
         let (prewarm_tx, prewarm_rx) = mpsc::sync_channel(transaction_count);
         let (execute_tx, execute_rx) = crossbeam_channel::bounded(transaction_count);
+        let backpressure_prewarm = !self.disable_transaction_prewarming;
 
         if transaction_count == 0 {
             // Empty block — nothing to do.
@@ -534,57 +555,101 @@ where
                     convert_serial(iter.by_ref().take(prefetch), &convert, &prewarm_tx, &execute_tx);
 
                     let convert = Arc::new(convert);
-                    let iter = iter.enumerate();
+                    let mut iter = iter.enumerate();
 
-                    let (tx_tx, tx_rx) = crossbeam_channel::unbounded();
-
-                    // Without BALs, we need to preserve the initial order of transactions.
-                    // Seed one Rayon worker from the external thread, then spawn the remaining
-                    // transactions as FIFO-scheduled chunks from inside the pool so chunk jobs use
-                    // the worker-local FIFO path instead of the external injector.
-                    executor.cpu_pool().spawn_fifo(move || {
-                        rayon::scope_fifo(move |scope| {
-                            let mut iter = iter;
-
-                            loop {
-                                let chunk = iter
-                                    .by_ref()
-                                    .take(Self::PARALLEL_TX_CHUNK_SIZE)
-                                    .collect::<Vec<_>>();
-                                if chunk.is_empty() {
-                                    break;
-                                }
-
-                                let tx_tx = tx_tx.clone();
-                                let convert = Arc::clone(&convert);
-
-                                scope.spawn_fifo(move |_| {
-                                    for (i, tx) in chunk {
-                                        let idx = i + prefetch;
-                                        let tx = convert.convert(tx).map(WithTxEnv::new);
-                                        let _ = tx_tx.send((idx, tx));
-                                    }
-                                });
-                            }
-                            drop(tx_tx);
-                        });
-                    });
-
+                    let (tx_tx, tx_rx) =
+                        crossbeam_channel::bounded(Self::PARALLEL_TX_BACKLOG_HIGH_WATERMARK);
+                    let mut tx_tx = Some(tx_tx);
+                    let progress_rx = tx_iterator_progress.progress_rx();
                     let mut next_tx = prefetch;
+                    let mut next_scheduled_tx = prefetch;
+                    let mut throttled = false;
                     let mut pending = BTreeMap::new();
                     let send_converted_tx =
                         |idx, tx: Result<IteratorTx<Evm, I>, <I as ExecutableTxTuple>::Error>| {
                             if let Ok(tx) = &tx {
-                                let _ = prewarm_tx.send((idx, tx.clone()));
+                                if prewarm_tx.send((idx, tx.clone())).is_err() &&
+                                    backpressure_prewarm
+                                {
+                                    tx_iterator_progress.mark_prewarm_done();
+                                }
+                            } else if backpressure_prewarm {
+                                tx_iterator_progress.mark_prewarm_done();
                             }
                             let _ = execute_tx.send((idx, tx));
                             trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
                         };
 
                     while next_tx < transaction_count {
-                        let Ok((idx, tx)) = tx_rx.recv() else {
-                            break;
+                        while next_scheduled_tx < transaction_count {
+                            let recovery_in_flight = next_scheduled_tx.saturating_sub(next_tx);
+                            if recovery_in_flight >= Self::PARALLEL_TX_BACKLOG_HIGH_WATERMARK {
+                                break;
+                            }
+
+                            let engine_backlog =
+                                next_tx.saturating_sub(tx_iterator_progress.executed_tx_count());
+                            let prewarm_backlog = backpressure_prewarm.then(|| {
+                                next_tx.saturating_sub(tx_iterator_progress.prewarmed_tx_count())
+                            });
+
+                            if throttled {
+                                let engine_needs_tx =
+                                    engine_backlog <= Self::PARALLEL_TX_BACKLOG_LOW_WATERMARK;
+                                let prewarm_needs_tx = prewarm_backlog
+                                    .is_some_and(|backlog| {
+                                        backlog <= Self::PARALLEL_TX_BACKLOG_LOW_WATERMARK
+                                    });
+                                throttled = !(engine_needs_tx || prewarm_needs_tx);
+                            } else {
+                                let engine_has_runway =
+                                    engine_backlog >= Self::PARALLEL_TX_BACKLOG_HIGH_WATERMARK;
+                                let prewarm_has_runway = prewarm_backlog
+                                    .map(|backlog| {
+                                        backlog >= Self::PARALLEL_TX_BACKLOG_HIGH_WATERMARK
+                                    })
+                                    .unwrap_or(true);
+                                throttled = engine_has_runway && prewarm_has_runway;
+                            }
+
+                            if throttled {
+                                break;
+                            }
+
+                            let chunk = iter
+                                .by_ref()
+                                .take(Self::PARALLEL_TX_CHUNK_SIZE)
+                                .collect::<Vec<_>>();
+                            if chunk.is_empty() {
+                                next_scheduled_tx = transaction_count;
+                                tx_tx.take();
+                                break;
+                            }
+
+                            next_scheduled_tx += chunk.len();
+                            let Some(tx_tx) = tx_tx.as_ref().cloned() else {
+                                break;
+                            };
+                            let convert = Arc::clone(&convert);
+
+                            executor.cpu_pool().spawn_fifo(move || {
+                                for (i, tx) in chunk {
+                                    let idx = i + prefetch;
+                                    let tx = convert.convert(tx).map(WithTxEnv::new);
+                                    let _ = tx_tx.send((idx, tx));
+                                }
+                            });
+                        }
+
+                        if next_scheduled_tx >= transaction_count {
+                            tx_tx.take();
+                        }
+
+                        let msg = crossbeam_channel::select! {
+                            recv(tx_rx) -> msg => msg,
+                            recv(progress_rx) -> _ => continue,
                         };
+                        let Ok((idx, tx)) = msg else { break };
 
                         if idx == next_tx {
                             send_converted_tx(idx, tx);
@@ -618,6 +683,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
         parallel_bal_execution: bool,
+        tx_iterator_progress: TxIteratorProgress,
     ) -> CacheTaskHandle<N::Receipt>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -635,7 +701,7 @@ where
         };
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
-        let executed_tx_index = Arc::new(AtomicUsize::new(0));
+        let executed_tx_index = Arc::clone(tx_iterator_progress.executed_tx_index());
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
@@ -648,6 +714,7 @@ where
             cache_state_metrics: self.cache_state_metrics.clone(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::clone(&executed_tx_index),
+            tx_iterator_progress: tx_iterator_progress.clone(),
             precompile_cache_disabled: self.precompile_cache_disabled,
             precompile_cache_map: self.precompile_cache_map.clone(),
             disable_bal_parallel_state_root: self.disable_bal_parallel_state_root,
@@ -671,6 +738,7 @@ where
             saved_cache,
             to_prewarm_task: Some(to_prewarm_task),
             executed_tx_index,
+            tx_iterator_progress,
             cache_metrics: self.cache_metrics.clone(),
         }
     }
@@ -895,6 +963,59 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     }
 }
 
+/// Shared progress used to throttle transaction recovery against downstream runway.
+#[derive(Debug, Clone)]
+pub(crate) struct TxIteratorProgress {
+    executed_tx_index: Arc<AtomicUsize>,
+    prewarmed_tx_count: Arc<AtomicUsize>,
+    wake_tx: CrossbeamSender<()>,
+    wake_rx: CrossbeamReceiver<()>,
+}
+
+impl TxIteratorProgress {
+    /// Creates a new progress handle.
+    fn new() -> Self {
+        let (wake_tx, wake_rx) = crossbeam_channel::bounded(1);
+        Self {
+            executed_tx_index: Arc::new(AtomicUsize::new(0)),
+            prewarmed_tx_count: Arc::new(AtomicUsize::new(0)),
+            wake_tx,
+            wake_rx,
+        }
+    }
+
+    /// Returns the shared execution progress counter.
+    pub(crate) const fn executed_tx_index(&self) -> &Arc<AtomicUsize> {
+        &self.executed_tx_index
+    }
+
+    /// Returns the number of transactions executed by the main engine loop.
+    fn executed_tx_count(&self) -> usize {
+        self.executed_tx_index.load(Ordering::Relaxed)
+    }
+
+    /// Returns the number of prewarm transactions that have completed or been skipped.
+    fn prewarmed_tx_count(&self) -> usize {
+        self.prewarmed_tx_count.load(Ordering::Relaxed)
+    }
+
+    /// Marks one prewarm input as done and wakes the recovery controller.
+    pub(crate) fn mark_prewarm_done(&self) {
+        self.prewarmed_tx_count.fetch_add(1, Ordering::Relaxed);
+        self.notify();
+    }
+
+    /// Wakes the recovery controller if it is waiting for downstream progress.
+    pub(crate) fn notify(&self) {
+        let _ = self.wake_tx.try_send(());
+    }
+
+    /// Returns a receiver for coalesced downstream progress notifications.
+    fn progress_rx(&self) -> CrossbeamReceiver<()> {
+        self.wake_rx.clone()
+    }
+}
+
 /// Handle to all the spawned tasks.
 ///
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the
@@ -975,6 +1096,11 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
         &self.prewarm_handle.executed_tx_index
     }
 
+    /// Returns the shared progress used by transaction recovery backpressure.
+    pub(crate) const fn tx_iterator_progress(&self) -> &TxIteratorProgress {
+        &self.prewarm_handle.tx_iterator_progress
+    }
+
     /// Terminates the pre-warming transaction processing.
     ///
     /// Note: This does not terminate the task yet.
@@ -1025,6 +1151,8 @@ pub struct CacheTaskHandle<R> {
     /// Shared counter tracking the next transaction index to be executed by the main execution
     /// loop. Prewarm workers skip transactions below this index.
     executed_tx_index: Arc<AtomicUsize>,
+    /// Shared progress used by transaction recovery backpressure.
+    tx_iterator_progress: TxIteratorProgress,
     /// Metrics for the execution cache.
     cache_metrics: Option<CachedStateMetrics>,
 }

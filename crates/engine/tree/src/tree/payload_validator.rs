@@ -102,7 +102,7 @@ use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     multiproof::{StateRootComputeOutcome, StateRootHandle},
-    payload_processor::{PayloadProcessor, PayloadProcessorSpawnOptions},
+    payload_processor::{PayloadProcessor, PayloadProcessorSpawnOptions, TxIteratorProgress},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
@@ -1149,6 +1149,7 @@ where
         let transaction_count = input.transaction_count();
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
+        let tx_iterator_progress = handle.tx_iterator_progress().clone();
         executor.evm_mut().db_mut().set_state_hook(
             handle.state_hook().map(|hook| Box::new(hook) as Box<dyn OnStateHook + 'static>),
         );
@@ -1162,6 +1163,7 @@ where
             handle.iter_transactions(),
             &receipt_tx,
             &executed_tx_index,
+            &tx_iterator_progress,
             has_bal,
         )?;
         drop(receipt_tx);
@@ -1313,6 +1315,7 @@ where
         transactions: impl Iterator<Item = Result<Tx, Err>>,
         receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
         executed_tx_index: &AtomicUsize,
+        tx_iterator_progress: &TxIteratorProgress,
         has_bal: bool,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
@@ -1373,6 +1376,7 @@ where
 
             // advance the shared counter so prewarm workers skip already-executed txs
             executed_tx_index.store(senders.len(), Ordering::Relaxed);
+            tx_iterator_progress.notify();
 
             let current_len = executor.receipts().len();
             if current_len > last_sent_len {
