@@ -154,6 +154,9 @@ impl<S> CachedStateProvider<S> {
     }
 
     fn record_account_hit(&self) {
+        if !self.has_access_observers() {
+            return;
+        }
         self.record_metric(CacheMetricKind::AccountHit);
         if let Some(stats) = &self.cache_stats {
             stats.record_account_hit();
@@ -161,6 +164,9 @@ impl<S> CachedStateProvider<S> {
     }
 
     fn record_account_miss(&self) {
+        if !self.has_access_observers() {
+            return;
+        }
         self.record_metric(CacheMetricKind::AccountMiss);
         if let Some(stats) = &self.cache_stats {
             stats.record_account_miss();
@@ -168,6 +174,9 @@ impl<S> CachedStateProvider<S> {
     }
 
     fn record_storage_hit(&self) {
+        if !self.has_access_observers() {
+            return;
+        }
         self.record_metric(CacheMetricKind::StorageHit);
         if let Some(stats) = &self.cache_stats {
             stats.record_storage_hit();
@@ -175,6 +184,9 @@ impl<S> CachedStateProvider<S> {
     }
 
     fn record_storage_miss(&self) {
+        if !self.has_access_observers() {
+            return;
+        }
         self.record_metric(CacheMetricKind::StorageMiss);
         if let Some(stats) = &self.cache_stats {
             stats.record_storage_miss();
@@ -182,6 +194,9 @@ impl<S> CachedStateProvider<S> {
     }
 
     fn record_code_hit(&self) {
+        if !self.has_access_observers() {
+            return;
+        }
         self.record_metric(CacheMetricKind::CodeHit);
         if let Some(stats) = &self.cache_stats {
             stats.record_code_hit();
@@ -189,10 +204,18 @@ impl<S> CachedStateProvider<S> {
     }
 
     fn record_code_miss(&self) {
+        if !self.has_access_observers() {
+            return;
+        }
         self.record_metric(CacheMetricKind::CodeMiss);
         if let Some(stats) = &self.cache_stats {
             stats.record_code_miss();
         }
+    }
+
+    #[inline]
+    fn has_access_observers(&self) -> bool {
+        self.metrics.is_some() || self.cache_stats.is_some()
     }
 
     #[inline]
