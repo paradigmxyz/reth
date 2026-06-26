@@ -220,8 +220,9 @@ impl<N: NodePrimitives> StateProvider for MemoryOverlayStateProviderRef<'_, N> {
         address: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
+        let overlay_storage_key = storage_key.into();
         for block in self.in_memory.iter() {
-            if let Some(value) = block.execution_output.storage(&address, storage_key.into()) {
+            if let Some(value) = block.execution_output.storage(&address, overlay_storage_key) {
                 return Ok(Some(value));
             }
         }
