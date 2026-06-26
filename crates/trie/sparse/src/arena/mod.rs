@@ -2893,26 +2893,32 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
                     let num_subtrie_updates = update_idx - subtrie_start;
 
+                    let wants_parallel_subtrie =
+                        num_subtrie_updates >= threshold || parallelize_distributed_updates;
+
                     // If all updates are removals and could empty the subtrie,
                     // force inline processing so the upper-arena collapse logic
-                    // can detect blinded siblings and request proofs.
-                    let all_removals = subtrie_updates
-                        .iter()
-                        // Filter out Touched, as they don't affect the structure of the trie. So an
-                        // update set with 2 removals and one Touched could still result in an empty
-                        // sub trie.
-                        .filter(|(_, _, u)| matches!(u, LeafUpdate::Changed(_)))
-                        .all(|(_, _, u)| matches!(u, LeafUpdate::Changed(v) if v.is_empty()));
-                    let subtrie_num_leaves = match &self.upper_arena[child_idx] {
-                        ArenaSparseNode::Subtrie(s) => s.num_leaves,
-                        _ => 0,
-                    };
-                    let might_empty_subtrie =
-                        all_removals && num_subtrie_updates as u64 >= subtrie_num_leaves;
+                    // can detect blinded siblings and request proofs. Small batches
+                    // are inline either way, so only scan them when parallelism is possible.
+                    let might_empty_subtrie = wants_parallel_subtrie && {
+                        let all_removals = subtrie_updates
+                            .iter()
+                            // Filter out Touched, as they don't affect the structure of the trie. So an
+                            // update set with 2 removals and one Touched could still result in an empty
+                            // sub trie.
+                            .filter(|(_, _, u)| matches!(u, LeafUpdate::Changed(_)))
+                            .all(|(_, _, u)| matches!(u, LeafUpdate::Changed(v) if v.is_empty()));
 
-                    if (num_subtrie_updates >= threshold || parallelize_distributed_updates) &&
-                        !might_empty_subtrie
-                    {
+                        all_removals && {
+                            let subtrie_num_leaves = match &self.upper_arena[child_idx] {
+                                ArenaSparseNode::Subtrie(s) => s.num_leaves,
+                                _ => 0,
+                            };
+                            num_subtrie_updates as u64 >= subtrie_num_leaves
+                        }
+                    };
+
+                    if wants_parallel_subtrie && !might_empty_subtrie {
                         // Take subtrie for parallel update.
                         trace!(target: TRACE_TARGET, ?subtrie_root_path, num_subtrie_updates, "Taking subtrie for parallel update");
                         let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
