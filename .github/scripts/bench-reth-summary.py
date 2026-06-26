@@ -85,6 +85,15 @@ def parse_combined_csv(path: str) -> list[dict]:
     return rows
 
 
+def parse_run_metadata(csv_path: str) -> dict:
+    """Read optional metadata emitted next to a run CSV."""
+    metadata_path = Path(csv_path).with_name("run-metadata.json")
+    if not metadata_path.is_file():
+        return {}
+    with open(metadata_path) as f:
+        return json.load(f)
+
+
 def stddev(values: list[float], mean: float) -> float:
     if len(values) < 2:
         return 0.0
@@ -284,6 +293,16 @@ def compute_point_stats(runs: list[list[dict]]) -> dict:
     for key in ("p50_ms", "p90_ms", "p99_ms"):
         stats[key] = _mean([run_stats[key] for run_stats in per_run_stats])
     return stats
+
+
+def add_memory_stats(stats: dict, metadata: list[dict]) -> None:
+    max_rss_values = [
+        item["max_rss_bytes"]
+        for item in metadata
+        if isinstance(item.get("max_rss_bytes"), int)
+    ]
+    if max_rss_values:
+        stats["max_rss_bytes"] = max(max_rss_values)
 
 
 def compute_wait_stats(combined: list[dict], field: str) -> dict:
@@ -517,6 +536,18 @@ def fmt_mgas(v: float) -> str:
 
 def fmt_s(v: float) -> str:
     return f"{v:.2f}s"
+
+
+def fmt_bytes(v: float) -> str:
+    units = ["B", "KiB", "MiB", "GiB", "TiB"]
+    value = float(v)
+    for unit in units:
+        if abs(value) < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{value:.0f}{unit}"
+            return f"{value:.2f}{unit}"
+        value /= 1024
+    return f"{value:.2f}TiB"
 
 
 def fmt_metric_value(v: float) -> str:
@@ -1712,9 +1743,16 @@ def generate_comparison_table(
         f"| P99 | {fmt_ms(run1['p99_ms'])} | {fmt_ms(run2['p99_ms'])} | {change_str(p99_pct, p99_ci_pct, p99_floor, lower_is_better=True, informational=p99_informational)} |",
         f"| Mgas/s | {fmt_mgas(run1['mean_mgas_s'])} | {fmt_mgas(run2['mean_mgas_s'])} | {change_str(gas_pct, mgas_ci_pct, mgas_floor, lower_is_better=False)} |",
         f"| Wall Clock | {fmt_s(run1['wall_clock_s'])} | {fmt_s(run2['wall_clock_s'])} | {change_str(wall_pct, wall_ci_pct, wall_floor, lower_is_better=True)} |",
+    ]
+    if run1.get("max_rss_bytes") is not None and run2.get("max_rss_bytes") is not None:
+        rss_pct = pct(run1["max_rss_bytes"], run2["max_rss_bytes"])
+        lines.append(
+            f"| Max RSS | {fmt_bytes(run1['max_rss_bytes'])} | {fmt_bytes(run2['max_rss_bytes'])} | {rss_pct:+.2f}% |"
+        )
+    lines.extend([
         f"| Persist Wait | {fmt_ms(run1['mean_persist_ms'])} | {fmt_ms(run2['mean_persist_ms'])} | {change_str(persist_pct, persist_ci_pct, persist_floor, lower_is_better=True, informational=persist_informational)} |",
         "",
-    ]
+    ])
     meta_parts = [f"{n} {'big blocks' if big_blocks else 'blocks'}"]
     if warmup_blocks:
         meta_parts.append(f"{warmup_blocks} warmup")
@@ -1991,24 +2029,30 @@ def main():
 
     baseline_runs = []
     feature_runs = []
+    baseline_metadata = []
+    feature_metadata = []
     for path in args.baseline_csv:
         data = parse_combined_csv(path)
         if not data:
             print(f"No results in {path}", file=sys.stderr)
             sys.exit(1)
         baseline_runs.append(data)
+        baseline_metadata.append(parse_run_metadata(path))
     for path in args.feature_csv:
         data = parse_combined_csv(path)
         if not data:
             print(f"No results in {path}", file=sys.stderr)
             sys.exit(1)
         feature_runs.append(data)
+        feature_metadata.append(parse_run_metadata(path))
 
     all_baseline = [r for run in baseline_runs for r in run]
     all_feature = [r for run in feature_runs for r in run]
 
     baseline_stats = compute_point_stats(baseline_runs)
     feature_stats = compute_point_stats(feature_runs)
+    add_memory_stats(baseline_stats, baseline_metadata)
+    add_memory_stats(feature_stats, feature_metadata)
     ci_stats = compute_ci_stats(baseline_runs, feature_runs)
 
     if not ci_stats:

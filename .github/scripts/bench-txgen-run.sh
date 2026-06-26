@@ -52,6 +52,7 @@ DATADIR="$SCHELK_MOUNT/$DATADIR_NAME"
 mkdir -p "$OUTPUT_DIR"
 LOG="${OUTPUT_DIR}/node.log"
 TARGET_METRICS_RANGE="$OUTPUT_DIR/target-metrics-range.json"
+RUN_METADATA="$OUTPUT_DIR/run-metadata.json"
 
 RETH_SCOPE="${RETH_SCOPE:-reth-bench.scope}"
 BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS="${BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS:-}"
@@ -87,6 +88,28 @@ with open(output_path, "w") as f:
         f,
         indent=2,
     )
+    f.write("\n")
+PY
+}
+
+record_run_metadata() {
+  local max_rss_bytes=""
+  max_rss_bytes="$(systemctl show "$RETH_SCOPE" -p MemoryPeak --value 2>/dev/null || true)"
+  if ! [[ "$max_rss_bytes" =~ ^[0-9]+$ ]] || [ "$max_rss_bytes" -le 0 ]; then
+    max_rss_bytes=""
+  fi
+
+  python3 - "$RUN_METADATA" "$max_rss_bytes" <<'PY'
+import json
+import sys
+
+output_path, max_rss_bytes = sys.argv[1:3]
+metadata = {}
+if max_rss_bytes:
+    metadata["max_rss_bytes"] = int(max_rss_bytes)
+
+with open(output_path, "w") as f:
+    json.dump(metadata, f, indent=2)
     f.write("\n")
 PY
 }
@@ -586,6 +609,8 @@ $BENCH_NICE "$TXGEN_BENCH" send-blocks \
   -m "bal-mode=${BENCH_BAL:-false}" \
   -m "bal-enabled=$USE_BAL" \
   "${PROMETHEUS_METADATA[@]}" 2>&1 | sed -u "s/^/[bench] /"
+
+record_run_metadata
 
 if [ -n "$TARGET_METRICS_START_MS" ]; then
   TARGET_METRICS_END_MS="$(capture_unix_time_ms)"
