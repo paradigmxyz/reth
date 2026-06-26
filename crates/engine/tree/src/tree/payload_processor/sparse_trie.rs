@@ -23,6 +23,7 @@ use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use reth_trie_parallel::{
     proof_task::{
         AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
+        StorageProofInput,
     },
     root::ParallelStateRootError,
 };
@@ -804,6 +805,18 @@ where
             self.proof_worker_handle.has_multiple_idle_storage_workers(),
             MultiProofTargetsV2::chunks,
             |proof_targets| {
+                if proof_targets.account_targets.is_empty() {
+                    for (hashed_address, targets) in proof_targets.storage_targets {
+                        if let Err(e) = self.proof_worker_handle.dispatch_storage_multiproof(
+                            StorageProofInput::new(hashed_address, targets),
+                            self.proof_result_tx.clone(),
+                        ) {
+                            error!("failed to dispatch storage multiproof: {e:?}");
+                        }
+                    }
+                    return;
+                }
+
                 if let Err(e) =
                     self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput {
                         targets: proof_targets,
