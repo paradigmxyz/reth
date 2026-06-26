@@ -439,7 +439,8 @@ where
         );
         let _span_guard = span.enter();
 
-        let proof_start = Instant::now();
+        let proof_start =
+            tracing::enabled!(target: "trie::proof_task", tracing::Level::TRACE).then(Instant::now);
 
         // If targets is empty it means the caller only wants the root node.
         let proof = if targets.is_empty() {
@@ -451,14 +452,16 @@ where
 
         let root = calculator.compute_root_hash(&proof)?;
 
-        trace!(
-            target: "trie::proof_task",
-            hashed_address = ?hashed_address,
-            proof_time_us = proof_start.elapsed().as_micros(),
-            ?root,
-            worker_id = self.id,
-            "Completed V2 storage proof calculation"
-        );
+        if let Some(proof_start) = proof_start {
+            trace!(
+                target: "trie::proof_task",
+                hashed_address = ?hashed_address,
+                proof_time_us = proof_start.elapsed().as_micros(),
+                ?root,
+                worker_id = self.id,
+                "Completed V2 storage proof calculation"
+            );
+        }
 
         Ok(StorageProofResult { proof, root })
     }
@@ -718,7 +721,8 @@ where
         HC: HashedStorageCursor<Value = U256>,
     {
         let hashed_address = input.hashed_address;
-        let proof_start = Instant::now();
+        let proof_start =
+            tracing::enabled!(target: "trie::proof_task", tracing::Level::TRACE).then(Instant::now);
 
         trace!(
             target: "trie::proof_task",
@@ -730,7 +734,6 @@ where
 
         let result = proof_tx.compute_v2_storage_proof(input, v2_calculator);
 
-        let proof_elapsed = proof_start.elapsed();
         *storage_proofs_processed += 1;
 
         let root = result.as_ref().ok().and_then(|result| result.root());
@@ -749,15 +752,17 @@ where
             self.cached_storage_roots.insert(hashed_address, root);
         }
 
-        trace!(
-            target: "trie::proof_task",
-            worker_id = self.worker_id,
-            hashed_address = ?hashed_address,
-            proof_time_us = proof_elapsed.as_micros(),
-            total_processed = storage_proofs_processed,
-            ?root,
-            "Storage proof completed"
-        );
+        if let Some(proof_start) = proof_start {
+            trace!(
+                target: "trie::proof_task",
+                worker_id = self.worker_id,
+                hashed_address = ?hashed_address,
+                proof_time_us = proof_start.elapsed().as_micros(),
+                total_processed = storage_proofs_processed,
+                ?root,
+                "Storage proof completed"
+            );
+        }
     }
 }
 
@@ -1011,7 +1016,8 @@ where
     where
         Provider: TrieCursorFactory + HashedCursorFactory + 'a,
     {
-        let proof_start = Instant::now();
+        let proof_start =
+            tracing::enabled!(target: "trie::proof_task", tracing::Level::TRACE).then(Instant::now);
 
         let AccountMultiproofInput { targets, proof_result_sender } = input;
         let (result, value_encoder_stats) = match self.compute_v2_account_multiproof::<Provider>(
@@ -1026,7 +1032,6 @@ where
         let ProofResultContext { sender: result_tx, state, start_time: start } =
             proof_result_sender;
 
-        let proof_elapsed = proof_start.elapsed();
         let total_elapsed = start.elapsed();
         *account_proofs_processed += 1;
 
@@ -1040,13 +1045,15 @@ where
             );
         }
 
-        trace!(
-            target: "trie::proof_task",
-            proof_time_us = proof_elapsed.as_micros(),
-            total_elapsed_us = total_elapsed.as_micros(),
-            total_processed = account_proofs_processed,
-            "Account multiproof completed"
-        );
+        if let Some(proof_start) = proof_start {
+            trace!(
+                target: "trie::proof_task",
+                proof_time_us = proof_start.elapsed().as_micros(),
+                total_elapsed_us = total_elapsed.as_micros(),
+                total_processed = account_proofs_processed,
+                "Account multiproof completed"
+            );
+        }
 
         value_encoder_stats
     }
