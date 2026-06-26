@@ -12,9 +12,9 @@ use alloy_network::{NetworkTransactionBuilder, TransactionBuilder};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimCallResult, SimulateError, SimulatedBlock},
     state::StateOverride,
-    BlockOverrides, BlockTransactionsKind,
+    BlockId, BlockOverrides, BlockTransactionsKind,
 };
-use jsonrpsee_types::ErrorObject;
+use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
     Evm, HaltReasonFor,
@@ -23,8 +23,8 @@ use reth_primitives_traits::{
     BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock, SealedHeader,
 };
 use reth_rpc_convert::{RpcBlock, RpcConvert, RpcTxReq};
-use reth_rpc_server_types::result::rpc_err;
-use reth_storage_api::noop::NoopProvider;
+use reth_rpc_server_types::result::{block_id_to_str, rpc_err};
+use reth_storage_api::{noop::NoopProvider, StateProvider};
 use revm::{
     context::Block,
     context_interface::result::ExecutionResult,
@@ -60,6 +60,12 @@ pub enum EthSimulateError {
     /// Max gas limit for entire operation exceeded.
     #[error("Client adjustable limit reached")]
     GasLimitReached,
+    /// Base block for the simulation was not found.
+    #[error("block not found: {}", block_id_to_str(*block))]
+    BlockNotFound {
+        /// The block id that was requested.
+        block: BlockId,
+    },
     /// Block number in sequence did not increase.
     #[error("block numbers must be in order: {got} <= {parent}")]
     BlockNumberInvalid {
@@ -87,6 +93,9 @@ pub enum EthSimulateError {
     /// Transaction nonce is too high.
     #[error("nonce too high")]
     NonceTooHigh,
+    /// Transaction nonce cannot be incremented.
+    #[error("nonce has max value")]
+    NonceMaxValue,
     /// Transaction's baseFeePerGas is too low.
     #[error("max fee per gas less than block base fee")]
     BaseFeePerGasTooLow,
@@ -121,6 +130,7 @@ impl EthSimulateError {
         match self {
             Self::NonceTooLow { .. } => -38010,
             Self::NonceTooHigh => -38011,
+            Self::NonceMaxValue => INTERNAL_ERROR_CODE,
             Self::BaseFeePerGasTooLow => -38012,
             Self::IntrinsicGasTooLow => -38013,
             Self::InsufficientFunds { .. } => -38014,
@@ -131,7 +141,7 @@ impl EthSimulateError {
             Self::MaxInitCodeSizeExceeded => -38025,
             Self::TooManyBlocks | Self::GasLimitReached => -38026,
             Self::MovePrecompileToSelf(_) => -38022,
-            Self::NotAPrecompile(_) => -32000,
+            Self::BlockNotFound { .. } | Self::NotAPrecompile(_) => -32000,
         }
     }
 }
@@ -291,9 +301,11 @@ pub fn apply_precompile_overrides(
 #[expect(clippy::type_complexity)]
 pub fn execute_transactions<S, T>(
     mut builder: S,
+    state_provider: impl StateProvider,
     calls: Vec<RpcTxReq<T::Network>>,
     remaining_call_gas_limit: &mut Option<u64>,
     chain_id: u64,
+    compute_state_root: bool,
     converter: &T,
 ) -> Result<
     (
@@ -358,6 +370,7 @@ where
             default_gas_limit,
             builder.evm().block().basefee(),
             chain_id,
+            builder.evm().cfg_env().disable_nonce_check,
             builder.evm_mut().db_mut(),
             converter,
         )?;
@@ -384,8 +397,11 @@ where
         block_state_gas_used = block_state_gas_used.saturating_add(gas_output.state_gas_used());
     }
 
-    // Pass noop provider to skip state root calculations.
-    let result = builder.finish(NoopProvider::default(), None)?;
+    let result = if compute_state_root {
+        builder.finish(state_provider, None)?
+    } else {
+        builder.finish(NoopProvider::default(), None)?
+    };
 
     Ok((result, results))
 }
@@ -401,6 +417,7 @@ pub fn resolve_transaction<DB: Database, Tx, T>(
     default_gas_limit: u64,
     block_base_fee_per_gas: u64,
     chain_id: u64,
+    disable_nonce_check: bool,
     db: &mut DB,
     converter: &T,
 ) -> Result<Recovered<Tx>, EthApiError>
@@ -423,6 +440,10 @@ where
         tx.as_mut().set_nonce(
             db.basic(from).map_err(Into::into)?.map(|acc| acc.nonce).unwrap_or_default(),
         );
+    }
+    // eth_simulateV1 validation-off mode behaves like eth_call; avoid revm's max-nonce guard.
+    if disable_nonce_check && tx.as_ref().nonce() == Some(u64::MAX) {
+        tx.as_mut().set_nonce(0);
     }
 
     if tx.as_ref().gas_limit().is_none() {
@@ -553,8 +574,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_precompile_overrides, sanitize_chain, EthSimulateError};
-    use crate::EthApiError;
+    use super::{
+        apply_precompile_overrides, sanitize_chain, EthSimulateError, INTERNAL_ERROR_CODE,
+    };
+    use crate::{error::ToRpcError, EthApiError};
     use alloy_chains::Chain;
     use alloy_consensus::Header;
     use alloy_evm::precompiles::PrecompilesMap;
@@ -566,6 +589,22 @@ mod tests {
     };
     use reth_primitives_traits::SealedHeader;
     use revm::precompile::Precompiles;
+
+    #[test]
+    fn nonce_max_value_error_uses_internal_error_code() {
+        let err = EthSimulateError::NonceMaxValue.to_rpc_error();
+
+        assert_eq!(err.code(), INTERNAL_ERROR_CODE);
+        assert_eq!(err.message(), "nonce has max value");
+    }
+
+    #[test]
+    fn block_not_found_error_uses_simulate_code() {
+        let err = EthSimulateError::BlockNotFound { block: 100000.into() }.to_rpc_error();
+
+        assert_eq!(err.code(), -32000);
+        assert_eq!(err.message(), "block not found: 0x186a0");
+    }
 
     fn parent_at(number: u64, timestamp: u64) -> SealedHeader<Header> {
         SealedHeader::seal_slow(Header { number, timestamp, ..Default::default() })

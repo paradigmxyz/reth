@@ -52,17 +52,17 @@
 
 use crate::{
     blobstore::{BlobStore, BlobStoreError},
-    error::{InvalidPoolTransactionError, PoolError, PoolResult},
+    error::{InvalidPoolTransactionError, PoolError, PoolResult, RawPoolTransactionError},
     pool::{
         state::SubPool, BestTransactionFilter, NewTransactionEvent, TransactionEvents,
         TransactionListenerKind,
     },
-    validate::ValidPoolTransaction,
+    validate::{TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction},
     AddedTransactionOutcome, AllTransactionsEvents,
 };
 use alloy_consensus::{error::ValueError, transaction::TxHashRef, BlockHeader, Signed, Typed2718};
 use alloy_eips::{
-    eip2718::{Encodable2718, WithEncoded},
+    eip2718::{Decodable2718, Encodable2718, WithEncoded},
     eip2930::AccessList,
     eip4844::{
         env_settings::KzgSettings, BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1,
@@ -748,6 +748,14 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         indices_bitarray: B128,
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError>;
 
+    /// Return whether each requested blob versioned hash is available.
+    ///
+    /// The response is always the same length and order as the request.
+    fn has_blobs_for_versioned_hashes(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<bool>, BlobStoreError>;
+
     /// Returns the blob store used by the pool.
     fn blob_store(&self) -> Box<dyn BlobStore>;
 }
@@ -789,6 +797,30 @@ pub trait TransactionPoolExt: TransactionPool {
 
     /// Maintenance function to cleanup blobs that are no longer needed.
     fn cleanup_blobs(&self);
+}
+
+/// Extension for [`TransactionPool`] that exposes the pool's underlying [`TransactionValidator`].
+///
+/// This is implemented by pools that validate transactions through a single validator before
+/// insertion (e.g. [`Pool`](crate::Pool)). It lets consumers and wrapper pools reach the validator
+/// directly, for example to validate a transaction without inserting it into the pool.
+pub trait ValidatingPool: TransactionPool {
+    /// The validator used to validate transactions before they are inserted into the pool.
+    type Validator: TransactionValidator<Transaction = Self::Transaction>;
+
+    /// Returns a reference to the pool's transaction validator.
+    fn validator(&self) -> &Self::Validator;
+
+    /// Validates the given transaction without inserting it into the pool.
+    ///
+    /// This is a convenience wrapper around [`TransactionValidator::validate_transaction`].
+    fn validate(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> impl Future<Output = TransactionValidationOutcome<Self::Transaction>> + Send {
+        self.validator().validate_transaction(origin, transaction)
+    }
 }
 
 /// A Helper type that bundles all transactions in the pool.
@@ -1334,6 +1366,24 @@ pub trait PoolTransaction:
 
     /// Define a method to convert from the `Pooled` type to `Self`
     fn from_pooled(pooled: Recovered<Self::Pooled>) -> Self;
+
+    /// Decodes and recovers a raw transaction into this pool transaction type.
+    ///
+    /// Implementations can override this to avoid constructing the pooled transaction as an
+    /// intermediate value when the raw representation can be converted directly into `Self`.
+    fn recover_raw_transaction(data: &[u8]) -> Result<Self, RawPoolTransactionError> {
+        if data.is_empty() {
+            return Err(RawPoolTransactionError::EmptyRawTransactionData)
+        }
+
+        let transaction = Self::Pooled::decode_2718_exact(data)
+            .map_err(|_| RawPoolTransactionError::FailedToDecodeSignedTransaction)?;
+
+        transaction
+            .try_into_recovered()
+            .map(Self::from_pooled)
+            .map_err(|_| RawPoolTransactionError::InvalidTransactionSignature)
+    }
 
     /// Tries to convert the `Consensus` type into the `Pooled` type.
     fn try_into_pooled(self) -> Result<Recovered<Self::Pooled>, Self::TryFromConsensusError> {

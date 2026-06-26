@@ -69,6 +69,8 @@ pub struct BasicPayloadJobGenerator<Client, Builder> {
     builder: Builder,
     /// Stored `cached_reads` for new payload jobs.
     pre_cached: Option<PrecachedState>,
+    /// Stored parent block information for new payload jobs.
+    pre_cached_parent_block_info: Option<PrecachedParentBlockInfo>,
 }
 
 // === impl BasicPayloadJobGenerator ===
@@ -89,6 +91,7 @@ impl<Client, Builder> BasicPayloadJobGenerator<Client, Builder> {
             config,
             builder,
             pre_cached: None,
+            pre_cached_parent_block_info: None,
         }
     }
 
@@ -125,7 +128,19 @@ impl<Client, Builder> BasicPayloadJobGenerator<Client, Builder> {
     /// Returns the pre-cached reads for the given parent header if it matches the cached state's
     /// block.
     fn maybe_pre_cached(&self, parent: B256) -> Option<CachedReads> {
+        if !self.config.pre_cache_state {
+            return None
+        }
+
         self.pre_cached.as_ref().filter(|pc| pc.block == parent).map(|pc| pc.cached.clone())
+    }
+
+    /// Returns the cached parent block information if it matches the requested parent.
+    fn maybe_parent_block_info(&self, parent: B256) -> Option<PayloadParentBlockInfo> {
+        self.pre_cached_parent_block_info
+            .as_ref()
+            .filter(|info| info.block == parent)
+            .map(|info| info.parent_block_info)
     }
 }
 
@@ -163,9 +178,12 @@ where
                 .ok_or_else(|| PayloadBuilderError::MissingParentHeader(input.parent_hash))?
         };
 
-        let cached_reads = self.maybe_pre_cached(parent_header.hash());
+        let parent_hash = parent_header.hash();
+        let cached_reads = self.maybe_pre_cached(parent_hash);
+        let parent_block_info = self.maybe_parent_block_info(parent_hash);
 
-        let config = PayloadConfig::new(Arc::new(parent_header), input.attributes, id);
+        let config = PayloadConfig::new(Arc::new(parent_header), input.attributes, id)
+            .with_parent_block_info(parent_block_info);
 
         let until = self.job_deadline(config.attributes.timestamp());
         let deadline = Box::pin(tokio::time::sleep_until(until));
@@ -193,6 +211,11 @@ where
     }
 
     fn on_new_state<N: NodePrimitives>(&mut self, new_state: CanonStateNotification<N>) {
+        if !self.config.pre_cache_state {
+            self.pre_cached = None;
+            return
+        }
+
         let mut cached = CachedReads::default();
 
         // extract the state from the notification and put it into the cache
@@ -208,7 +231,14 @@ where
             }
         }
 
-        self.pre_cached = Some(PrecachedState { block: committed.tip().hash(), cached });
+        let tip = committed.tip();
+        let block = tip.hash();
+        let parent_block_info =
+            PayloadParentBlockInfo { transaction_count: tip.transaction_count() };
+
+        self.pre_cached = Some(PrecachedState { block, cached });
+        self.pre_cached_parent_block_info =
+            Some(PrecachedParentBlockInfo { block, parent_block_info });
     }
 }
 
@@ -221,6 +251,15 @@ pub struct PrecachedState {
     pub block: B256,
     /// Cached state for the block.
     pub cached: CachedReads,
+}
+
+/// Pre-filled parent block information for a specific block.
+#[derive(Debug, Clone, Copy)]
+struct PrecachedParentBlockInfo {
+    /// The block for which the parent block information is cached.
+    block: B256,
+    /// Cached parent block information.
+    parent_block_info: PayloadParentBlockInfo,
 }
 
 /// Restricts how many generator tasks can be executed at once.
@@ -260,6 +299,8 @@ pub struct BasicPayloadJobGeneratorConfig {
     deadline: Duration,
     /// Maximum number of tasks to spawn for building a payload.
     max_payload_tasks: usize,
+    /// Whether to pre-cache changed state from canonical state notifications.
+    pre_cache_state: bool,
 }
 
 // === impl BasicPayloadJobGeneratorConfig ===
@@ -287,6 +328,15 @@ impl BasicPayloadJobGeneratorConfig {
         self.max_payload_tasks = max_payload_tasks;
         self
     }
+
+    /// Sets whether to pre-cache changed state from canonical state notifications.
+    ///
+    /// This keeps the parent block's state changes in memory so payload jobs building on top of it
+    /// can reuse those reads.
+    pub const fn pre_cache_state(mut self, pre_cache_state: bool) -> Self {
+        self.pre_cache_state = pre_cache_state;
+        self
+    }
 }
 
 impl Default for BasicPayloadJobGeneratorConfig {
@@ -296,6 +346,7 @@ impl Default for BasicPayloadJobGeneratorConfig {
             // 12s slot time
             deadline: SLOT_DURATION,
             max_payload_tasks: 3,
+            pre_cache_state: true,
         }
     }
 }
@@ -703,10 +754,19 @@ impl<P> Future for PendingPayload<P> {
 pub struct PayloadConfig<Attributes, Header = alloy_consensus::Header> {
     /// The parent header.
     pub parent_header: Arc<SealedHeader<Header>>,
+    /// Additional parent block information, if available.
+    pub parent_block_info: Option<PayloadParentBlockInfo>,
     /// Requested attributes for the payload.
     pub attributes: Attributes,
     /// The payload id.
     pub payload_id: PayloadId,
+}
+
+/// Additional information about the parent block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PayloadParentBlockInfo {
+    /// Number of transactions in the parent block.
+    pub transaction_count: usize,
 }
 
 impl<Attributes, Header> PayloadConfig<Attributes, Header>
@@ -719,7 +779,16 @@ where
         attributes: Attributes,
         payload_id: PayloadId,
     ) -> Self {
-        Self { parent_header, attributes, payload_id }
+        Self { parent_header, parent_block_info: None, attributes, payload_id }
+    }
+
+    /// Attaches cached parent block information.
+    pub const fn with_parent_block_info(
+        mut self,
+        parent_block_info: Option<PayloadParentBlockInfo>,
+    ) -> Self {
+        self.parent_block_info = parent_block_info;
+        self
     }
 
     /// Returns the payload id.

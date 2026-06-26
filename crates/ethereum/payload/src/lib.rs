@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use alloy_consensus::Transaction;
+use alloy_consensus::{BlockHeader, Transaction};
 use alloy_primitives::{Bytes, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::PayloadAttributes as EthPayloadAttributes;
@@ -166,7 +166,8 @@ where
         cancel,
         best_payload,
     } = args;
-    let PayloadConfig { parent_header, attributes, payload_id } = config;
+    let PayloadConfig { parent_header, attributes, payload_id, .. } = config;
+    let skip_state_root = builder_config.skip_state_root;
 
     let mut state_provider = client.state_by_block_hash(parent_header.hash())?;
     if let Some(execution_cache) = execution_cache {
@@ -187,6 +188,7 @@ where
         .with_bal_builder_if(is_amsterdam)
         .build();
 
+    let evm_config = evm_config.with_jit_support();
     let mut builder = evm_config
         .builder_for_next_block(
             &mut db,
@@ -195,10 +197,11 @@ where
                 timestamp: attributes.timestamp(),
                 suggested_fee_recipient: attributes.suggested_fee_recipient,
                 prev_randao: attributes.prev_randao,
-                gas_limit: builder_config.gas_limit(parent_header.gas_limit),
+                gas_limit: builder_config
+                    .gas_limit_with_target(parent_header.gas_limit, attributes.target_gas_limit()),
                 parent_beacon_block_root: attributes.parent_beacon_block_root(),
                 withdrawals: attributes.withdrawals.clone().map(Into::into),
-                extra_data: builder_config.extra_data,
+                extra_data: builder_config.extra_data.clone(),
                 slot_number: attributes.slot_number(),
             },
         )
@@ -446,10 +449,19 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let BlockBuilderOutcome { execution_result, block, block_access_list, .. } = if let Some(
-        mut handle,
-    ) = trie_handle
+    let BlockBuilderOutcome { execution_result, block, block_access_list, .. } = if skip_state_root
     {
+        debug!(
+            target: "payload_builder",
+            id = %payload_id,
+            state_root = ?parent_header.state_root(),
+            "skipping payload state-root computation"
+        );
+        builder.finish(
+            state_provider.as_ref(),
+            Some((parent_header.state_root(), Default::default())),
+        )?
+    } else if let Some(mut handle) = trie_handle {
         // Drop the state hook, which drops the StateHookSender and triggers
         // FinishedStateUpdates via its Drop impl, signaling the trie task to finalize.
         builder.evm_mut().db_mut().set_state_hook(None);

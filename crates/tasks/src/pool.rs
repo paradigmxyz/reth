@@ -1,5 +1,6 @@
 //! Additional helpers for executing tracing calls
 
+use crate::metrics::WorkerPoolMetrics;
 use std::{
     any::Any,
     cell::RefCell,
@@ -12,6 +13,7 @@ use std::{
     },
     task::{ready, Context, Poll},
     thread,
+    time::Instant,
 };
 use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit, Semaphore};
 
@@ -173,6 +175,7 @@ thread_local! {
 #[derive(Debug)]
 pub struct WorkerPool {
     pool: OnceLock<rayon::ThreadPool>,
+    metrics: OnceLock<WorkerPoolMetrics>,
     num_threads: usize,
     thread_name_prefix: &'static str,
 }
@@ -183,7 +186,7 @@ impl WorkerPool {
     /// The underlying rayon pool is not created until the first method that requires it is called.
     /// Thread names follow the pattern `"{prefix}-{index:02}"`.
     pub const fn new(num_threads: usize, thread_name_prefix: &'static str) -> Self {
-        Self { pool: OnceLock::new(), num_threads, thread_name_prefix }
+        Self { pool: OnceLock::new(), metrics: OnceLock::new(), num_threads, thread_name_prefix }
     }
 
     /// Returns a reference to the underlying rayon pool, creating it on first access.
@@ -197,6 +200,11 @@ impl WorkerPool {
             )
             .unwrap_or_else(|err| panic!("failed to build {prefix} worker pool: {err}"))
         })
+    }
+
+    /// Returns metrics for this worker pool.
+    fn metrics(&self) -> &WorkerPoolMetrics {
+        self.metrics.get_or_init(|| WorkerPoolMetrics::new(self.thread_name_prefix))
     }
 
     /// Returns `true` if the underlying rayon pool has been initialized.
@@ -264,7 +272,16 @@ impl WorkerPool {
     /// Each thread can access its own [`Worker`] via the provided reference or through additional
     /// [`WorkerPool::with_worker`] calls.
     pub fn install<R: Send>(&self, f: impl FnOnce(&Worker) -> R + Send) -> R {
-        self.pool().install(|| WORKER.with_borrow(|worker| f(worker)))
+        let pool = self.pool();
+        let metrics = self.metrics().clone();
+        let queued_at = Instant::now();
+
+        pool.install(move || {
+            let started_at = Instant::now();
+            metrics.record_job_queue_wait(started_at.saturating_duration_since(queued_at));
+            let _record_job_duration = RecordWorkerPoolJobDurationOnDrop::new(metrics, started_at);
+            WORKER.with_borrow(|worker| f(worker))
+        })
     }
 
     /// Runs a closure on the pool without worker state access.
@@ -272,12 +289,30 @@ impl WorkerPool {
     /// Like [`install`](Self::install) but for closures that don't need per-thread [`Worker`]
     /// state.
     pub fn install_fn<R: Send>(&self, f: impl FnOnce() -> R + Send) -> R {
-        self.pool().install(f)
+        let pool = self.pool();
+        let metrics = self.metrics().clone();
+        let queued_at = Instant::now();
+
+        pool.install(move || {
+            let started_at = Instant::now();
+            metrics.record_job_queue_wait(started_at.saturating_duration_since(queued_at));
+            let _record_job_duration = RecordWorkerPoolJobDurationOnDrop::new(metrics, started_at);
+            f()
+        })
     }
 
     /// Spawns a closure on the pool.
     pub fn spawn(&self, f: impl FnOnce() + Send + 'static) {
-        self.pool().spawn(f);
+        let pool = self.pool();
+        let metrics = self.metrics().clone();
+        let queued_at = Instant::now();
+
+        pool.spawn(move || {
+            let started_at = Instant::now();
+            metrics.record_job_queue_wait(started_at.saturating_duration_since(queued_at));
+            let _record_job_duration = RecordWorkerPoolJobDurationOnDrop::new(metrics, started_at);
+            f();
+        });
     }
 
     /// Executes `f` on this pool using [`rayon::in_place_scope`], which converts the calling
@@ -298,6 +333,24 @@ impl WorkerPool {
     /// Mutably access the current thread's [`Worker`] from within a pool closure.
     pub fn with_worker_mut<R>(f: impl FnOnce(&mut Worker) -> R) -> R {
         WORKER.with_borrow_mut(|worker| f(worker))
+    }
+}
+
+/// Records a worker pool job's run time when the job finishes or unwinds.
+struct RecordWorkerPoolJobDurationOnDrop {
+    metrics: WorkerPoolMetrics,
+    started_at: Instant,
+}
+
+impl RecordWorkerPoolJobDurationOnDrop {
+    const fn new(metrics: WorkerPoolMetrics, started_at: Instant) -> Self {
+        Self { metrics, started_at }
+    }
+}
+
+impl Drop for RecordWorkerPoolJobDurationOnDrop {
+    fn drop(&mut self) {
+        self.metrics.record_job_duration(self.started_at.elapsed());
     }
 }
 

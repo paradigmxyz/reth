@@ -20,7 +20,6 @@ reth-trie.workspace = true
 reth-trie-common.workspace = true
 reth-storage-api = { workspace = true, features = ["db-api"] }
 reth-storage-errors.workspace = true
-reth-stages-types.workspace = true
 reth-metrics = { workspace = true, optional = true }
 
 # alloy
@@ -41,6 +40,7 @@ reth-chainspec.workspace = true
 reth-primitives-traits = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-stages-types.workspace = true
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
 
@@ -65,13 +65,13 @@ serde = [
     "alloy-consensus/serde",
     "alloy-primitives/serde",
     "parking_lot/serde",
-    "reth-stages-types/serde",
     "reth-storage-api/serde",
     "reth-trie/serde",
     "reth-trie-common/serde",
     "reth-primitives-traits/serde",
     "revm-database/serde",
     "revm/serde",
+    "reth-stages-types/serde",
 ]
 test-utils = [
     "reth-trie-common/test-utils",
@@ -80,6 +80,6 @@ test-utils = [
     "reth-db/test-utils",
     "reth-db-api/test-utils",
     "reth-provider/test-utils",
-    "reth-stages-types/test-utils",
     "reth-trie/test-utils",
+    "reth-stages-types/test-utils",
 ]

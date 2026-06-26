@@ -5,11 +5,10 @@ ARG PROFILE
 ARG VERSION
 # Switch to snapshot repository to pin dependencies
 RUN sed -i '/^# http/{N;s|^# \(http[^ ]*\)\nURIs: .*|# \1\nURIs: \1|}' /etc/apt/sources.list.d/debian.sources
+COPY .github/scripts/install_llvm_ubuntu.sh /tmp/install_llvm.sh
 RUN apt-get -o Acquire::Check-Valid-Until=false update && \
-    apt-get install -y \
-        libjemalloc-dev \
-        libclang-dev \
-        mold
+    apt-get install -y libjemalloc-dev libclang-dev mold pkg-config && \
+    /tmp/install_llvm.sh && rm /tmp/install_llvm.sh
 WORKDIR /app
 COPY . .
 RUN RUSTFLAGS_REPRODUCIBLE_EXTRA="-Clink-arg=-fuse-ld=mold" make build-reth-reproducible && \
