@@ -4,6 +4,7 @@
 //! This is a substitute for `spawn_blocking` that reuses the same OS thread for the same
 //! named task, like a 1-thread thread pool keyed by name.
 
+use crate::metrics::WorkerThreadMetrics;
 use dashmap::DashMap;
 use std::{
     panic::AssertUnwindSafe,
@@ -12,6 +13,7 @@ use std::{
         Arc,
     },
     thread,
+    time::Instant,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -21,6 +23,8 @@ type BoxedTask = Box<dyn FnOnce() + Send + 'static>;
 struct WorkerThread {
     /// Sender to submit work to this worker's thread.
     tx: mpsc::UnboundedSender<BoxedTask>,
+    /// Metrics labeled with this worker's name.
+    metrics: WorkerThreadMetrics,
     /// Number of tasks currently running or queued on this worker.
     pending: Arc<AtomicUsize>,
     /// The OS thread handle. Taken during shutdown to join.
@@ -40,7 +44,12 @@ impl WorkerThread {
             })
             .unwrap_or_else(|e| panic!("failed to spawn worker thread {name:?}: {e}"));
 
-        Self { tx, pending: Arc::new(AtomicUsize::new(0)), handle: Some(handle) }
+        Self {
+            tx,
+            metrics: WorkerThreadMetrics::new(name),
+            pending: Arc::new(AtomicUsize::new(0)),
+            handle: Some(handle),
+        }
     }
 
     /// Spawns a closure on this worker.
@@ -53,9 +62,14 @@ impl WorkerThread {
 
         let (result_tx, result_rx) = oneshot::channel();
         let pending = self.pending.clone();
+        let metrics = self.metrics.clone();
+        let queued_at = Instant::now();
 
         let task: BoxedTask = Box::new(move || {
+            let started_at = Instant::now();
+            metrics.record_queue_wait(started_at.saturating_duration_since(queued_at));
             let _decrement_pending = DecrementPendingOnDrop(pending);
+            let _record_task_duration = RecordTaskDurationOnDrop::new(metrics, started_at);
             let _ = result_tx.send(f());
         });
 
@@ -76,9 +90,14 @@ impl WorkerThread {
 
         let (result_tx, result_rx) = oneshot::channel();
         let pending = self.pending.clone();
+        let metrics = self.metrics.clone();
+        let queued_at = Instant::now();
 
         let task: BoxedTask = Box::new(move || {
+            let started_at = Instant::now();
+            metrics.record_queue_wait(started_at.saturating_duration_since(queued_at));
             let _decrement_pending = DecrementPendingOnDrop(pending);
+            let _record_task_duration = RecordTaskDurationOnDrop::new(metrics, started_at);
             let _ = result_tx.send(f());
         });
 
@@ -97,6 +116,24 @@ struct DecrementPendingOnDrop(Arc<AtomicUsize>);
 impl Drop for DecrementPendingOnDrop {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// Records a worker task's run time when the task finishes or unwinds.
+struct RecordTaskDurationOnDrop {
+    metrics: WorkerThreadMetrics,
+    started_at: Instant,
+}
+
+impl RecordTaskDurationOnDrop {
+    const fn new(metrics: WorkerThreadMetrics, started_at: Instant) -> Self {
+        Self { metrics, started_at }
+    }
+}
+
+impl Drop for RecordTaskDurationOnDrop {
+    fn drop(&mut self) {
+        self.metrics.record_task_duration(self.started_at.elapsed());
     }
 }
 
