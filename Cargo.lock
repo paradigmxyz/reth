@@ -7889,7 +7889,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.5.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=91865ee865cd124696021d8b3e1abfb2a4eef4a0#91865ee865cd124696021d8b3e1abfb2a4eef4a0"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=bc56df3e14d7b107aa3d9818634dd6ecda45dd4a#bc56df3e14d7b107aa3d9818634dd6ecda45dd4a"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7909,7 +7909,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.5.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=91865ee865cd124696021d8b3e1abfb2a4eef4a0#91865ee865cd124696021d8b3e1abfb2a4eef4a0"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=bc56df3e14d7b107aa3d9818634dd6ecda45dd4a#bc56df3e14d7b107aa3d9818634dd6ecda45dd4a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9596,7 +9596,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "0.5.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=91865ee865cd124696021d8b3e1abfb2a4eef4a0#91865ee865cd124696021d8b3e1abfb2a4eef4a0"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=bc56df3e14d7b107aa3d9818634dd6ecda45dd4a#bc56df3e14d7b107aa3d9818634dd6ecda45dd4a"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10113,7 +10113,7 @@ dependencies = [
 [[package]]
 name = "reth-rpc-traits"
 version = "0.5.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=91865ee865cd124696021d8b3e1abfb2a4eef4a0#91865ee865cd124696021d8b3e1abfb2a4eef4a0"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=bc56df3e14d7b107aa3d9818634dd6ecda45dd4a#bc56df3e14d7b107aa3d9818634dd6ecda45dd4a"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -10635,7 +10635,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.5.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=91865ee865cd124696021d8b3e1abfb2a4eef4a0#91865ee865cd124696021d8b3e1abfb2a4eef4a0"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=bc56df3e14d7b107aa3d9818634dd6ecda45dd4a#bc56df3e14d7b107aa3d9818634dd6ecda45dd4a"
 dependencies = [
  "zstd",
 ]
