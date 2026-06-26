@@ -12,6 +12,7 @@
 extern crate alloc;
 
 use alloy_consensus::BlockHeader;
+use alloy_primitives::B256;
 use reth_errors::ConsensusError;
 use reth_payload_primitives::{
     EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
@@ -195,6 +196,18 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
         &self,
         payload: Types::ExecutionData,
     ) -> Result<SealedBlock<Self::Block>, NewPayloadError>;
+
+    /// Converts the given payload into a sealed block and returns the transaction root when the
+    /// conversion path already calculated it from the payload transactions.
+    ///
+    /// Implementations may return `None` to let consensus validation calculate the root from the
+    /// converted block body.
+    fn convert_payload_to_block_with_tx_root(
+        &self,
+        payload: Types::ExecutionData,
+    ) -> Result<(SealedBlock<Self::Block>, Option<B256>), NewPayloadError> {
+        self.convert_payload_to_block(payload).map(|block| (block, None))
+    }
 
     /// Ensures that the given payload does not violate any consensus rules that concern the block's
     /// layout.

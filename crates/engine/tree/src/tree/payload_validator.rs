@@ -1025,10 +1025,10 @@ where
                 "convert_and_validate",
             )
             .entered();
-            let block = match input {
-                BlockOrPayload::Block(block) => block,
+            let (block, transaction_root) = match input {
+                BlockOrPayload::Block(block) => (block, None),
                 BlockOrPayload::Payload(payload) => {
-                    validator.convert_payload_to_block(payload)?
+                    validator.convert_payload_to_block_with_tx_root(payload)?
                 }
             };
 
@@ -1047,7 +1047,7 @@ where
             drop(_enter);
 
             if let Err(e) =
-                consensus.validate_block_pre_execution_with_tx_root(&block, None)
+                consensus.validate_block_pre_execution_with_tx_root(&block, transaction_root)
             {
                 error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
                 return Err(InsertBlockError::consensus_error(e, block).into())

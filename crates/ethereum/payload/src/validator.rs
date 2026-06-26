@@ -1,6 +1,10 @@
 //! Validates execution payload wrt Ethereum consensus rules
 
-use alloy_consensus::Block;
+use alloy_consensus::{
+    constants::MAXIMUM_EXTRA_DATA_SIZE, proofs::ordered_trie_root_encoded, Block,
+};
+use alloy_eips::eip2718::Decodable2718;
+use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ExecutionData, PayloadError};
 use reth_chainspec::EthereumHardforks;
 use reth_payload_validator::{cancun, prague, shanghai};
@@ -38,6 +42,15 @@ impl<ChainSpec: EthereumHardforks> EthereumExecutionPayloadValidator<ChainSpec> 
     ) -> Result<SealedBlock<Block<T>>, PayloadError> {
         ensure_well_formed_payload(&self.chain_spec, payload)
     }
+
+    /// Ensures the payload is well formed and returns the transaction root calculated from the raw
+    /// EIP-2718 transaction bytes during conversion.
+    pub fn ensure_well_formed_payload_with_tx_root<T: SignedTransaction>(
+        &self,
+        payload: ExecutionData,
+    ) -> Result<(SealedBlock<Block<T>>, B256), PayloadError> {
+        ensure_well_formed_payload_with_tx_root(&self.chain_spec, payload)
+    }
 }
 
 /// Ensures that the given payload does not violate any consensus rules that concern the block's
@@ -71,12 +84,51 @@ where
     ChainSpec: EthereumHardforks,
     T: SignedTransaction,
 {
+    ensure_well_formed_payload_with_optional_tx_root(chain_spec, payload, false)
+        .map(|(block, _)| block)
+}
+
+/// Ensures that the given payload is well formed and returns the transaction root calculated from
+/// the raw EIP-2718 transaction bytes.
+pub fn ensure_well_formed_payload_with_tx_root<ChainSpec, T>(
+    chain_spec: ChainSpec,
+    payload: ExecutionData,
+) -> Result<(SealedBlock<Block<T>>, B256), PayloadError>
+where
+    ChainSpec: EthereumHardforks,
+    T: SignedTransaction,
+{
+    let (sealed_block, tx_root) =
+        ensure_well_formed_payload_with_optional_tx_root(chain_spec, payload, true)?;
+    Ok((sealed_block, tx_root.expect("transaction root requested")))
+}
+
+fn ensure_well_formed_payload_with_optional_tx_root<ChainSpec, T>(
+    chain_spec: ChainSpec,
+    payload: ExecutionData,
+    reuse_tx_root: bool,
+) -> Result<(SealedBlock<Block<T>>, Option<B256>), PayloadError>
+where
+    ChainSpec: EthereumHardforks,
+    T: SignedTransaction,
+{
     let ExecutionData { payload, sidecar } = payload;
 
+    if payload.as_v1().extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
+        return Err(PayloadError::ExtraData(payload.as_v1().extra_data.clone()))
+    }
+
     let expected_hash = payload.block_hash();
+    let transactions_root =
+        reuse_tx_root.then(|| ordered_trie_root_encoded(payload.transactions()));
 
     // First parse the block
-    let sealed_block = payload.try_into_block_with_sidecar(&sidecar)?.seal_slow();
+    let raw_block = if let Some(transactions_root) = transactions_root {
+        payload.into_block_with_sidecar_raw_with_transactions_root(&sidecar, transactions_root)?
+    } else {
+        payload.into_block_with_sidecar_raw(&sidecar)?
+    };
+    let sealed_block = raw_block.try_map_transactions(decode_transaction)?.seal_slow();
 
     // Ensure the hash included in the payload matches the block hash
     if expected_hash != sealed_block.hash() {
@@ -103,5 +155,11 @@ where
         chain_spec.is_prague_active_at_timestamp(sealed_block.timestamp),
     )?;
 
-    Ok(sealed_block)
+    Ok((sealed_block, transactions_root))
+}
+
+fn decode_transaction<T: Decodable2718>(tx: alloy_primitives::Bytes) -> Result<T, PayloadError> {
+    T::decode_2718_exact(tx.as_ref())
+        .map_err(alloy_rlp::Error::from)
+        .map_err(PayloadError::from)
 }
