@@ -664,27 +664,31 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 let start = Instant::now();
                 let total_tx_count: usize =
                     blocks.iter().map(|b| b.recovered_block().body().transaction_count()).sum();
-                let mut all_tx_hashes = Vec::with_capacity(total_tx_count);
-                for (i, block) in blocks.iter().enumerate() {
-                    let recovered_block = block.recovered_block();
-                    for (tx_num, transaction) in
-                        (tx_nums[i]..).zip(recovered_block.body().transactions_iter())
-                    {
-                        all_tx_hashes.push((*transaction.tx_hash(), tx_num));
+                if total_tx_count > 0 {
+                    let mut all_tx_hashes = Vec::with_capacity(total_tx_count);
+                    for (i, block) in blocks.iter().enumerate() {
+                        let recovered_block = block.recovered_block();
+                        for (tx_num, transaction) in
+                            (tx_nums[i]..).zip(recovered_block.body().transactions_iter())
+                        {
+                            all_tx_hashes.push((*transaction.tx_hash(), tx_num));
+                        }
                     }
+
+                    // Sort by hash for optimal MDBX insertion performance
+                    if all_tx_hashes.len() > 1 {
+                        all_tx_hashes.sort_unstable_by_key(|(hash, _)| *hash);
+                    }
+
+                    // Write all transaction hash numbers in a single batch
+                    self.with_rocksdb_batch(|batch| {
+                        let mut tx_hash_writer =
+                            EitherWriter::new_transaction_hash_numbers(self, batch)?;
+                        tx_hash_writer.put_transaction_hash_numbers_batch(all_tx_hashes, false)?;
+                        let raw_batch = tx_hash_writer.into_raw_rocksdb_batch();
+                        Ok(((), raw_batch))
+                    })?;
                 }
-
-                // Sort by hash for optimal MDBX insertion performance
-                all_tx_hashes.sort_unstable_by_key(|(hash, _)| *hash);
-
-                // Write all transaction hash numbers in a single batch
-                self.with_rocksdb_batch(|batch| {
-                    let mut tx_hash_writer =
-                        EitherWriter::new_transaction_hash_numbers(self, batch)?;
-                    tx_hash_writer.put_transaction_hash_numbers_batch(all_tx_hashes, false)?;
-                    let raw_batch = tx_hash_writer.into_raw_rocksdb_batch();
-                    Ok(((), raw_batch))
-                })?;
                 self.metrics.record_duration(
                     metrics::Action::InsertTransactionHashNumbers,
                     start.elapsed(),
