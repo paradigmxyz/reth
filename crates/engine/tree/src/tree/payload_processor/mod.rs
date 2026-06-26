@@ -38,6 +38,7 @@ use reth_trie_sparse::{
     ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie, SparseTrieRetainedPaths,
 };
 use std::{
+    collections::BTreeMap,
     ops::Not,
     sync::{
         atomic::{AtomicBool, AtomicUsize},
@@ -455,13 +456,6 @@ where
     /// waiting for rayon scheduling.
     const PARALLEL_PREFETCH_COUNT: usize = 4;
 
-    /// Number of transactions recovered per ordered parallel window in the non-BAL path.
-    ///
-    /// Non-BAL execution must consume transactions in block order, while rayon may recover
-    /// individual transactions in any order. Windowing prioritizes the next contiguous range while
-    /// still using parallel recovery inside that range.
-    const PARALLEL_TX_WINDOW_SIZE: usize = 64;
-
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     ///
     /// For blocks with fewer than [`Self::SMALL_BLOCK_TX_THRESHOLD`] transactions, uses
@@ -532,37 +526,50 @@ where
                     // start immediately without waiting for rayon work-stealing.
                     convert_serial(iter.by_ref().take(prefetch), &convert, &prewarm_tx, &execute_tx);
 
-                    let mut iter = iter.enumerate();
+                    let remaining = transaction_count - prefetch;
+                    let worker_count = executor.cpu_pool().current_num_threads().max(1).min(remaining);
+                    let worker_lanes =
+                        round_robin_worker_lanes(iter, prefetch, remaining, worker_count);
+                    let (result_tx, result_rx) =
+                        crossbeam_channel::bounded::<IndexedTxResult<IteratorTx<Evm, I>, I::Error>>(
+                            worker_count,
+                        );
 
                     // Without BALs, we need to preserve the initial order of transactions.
-                    // Process contiguous windows in order so recovery prioritizes the next
-                    // transaction range execution will request. Each window still recovers in
-                    // parallel, then drains in block order.
-                    executor.cpu_pool().install(move || {
-                        loop {
-                            let chunk = iter
-                                .by_ref()
-                                .take(Self::PARALLEL_TX_WINDOW_SIZE)
-                                .collect::<Vec<_>>();
-                            if chunk.is_empty() {
-                                break;
+                    // Assigning fixed index-strided lanes keeps workers evenly fed while making
+                    // adjacent transaction results available together (2 workers: 1,3,5 and
+                    // 2,4,6).
+                    executor.cpu_pool().in_place_scope(|scope| {
+                        for lane in worker_lanes {
+                            let result_tx = result_tx.clone();
+                            let convert = &convert;
+                            scope.spawn(move |_| {
+                                for (idx, tx) in lane {
+                                    let tx = convert.convert(tx).map(WithTxEnv::new);
+                                    if result_tx.send((idx, tx)).is_err() {
+                                        break;
+                                    }
+                                }
+                            });
+                        }
+                        drop(result_tx);
+
+                        let mut next_idx = prefetch;
+                        let mut pending = BTreeMap::new();
+
+                        while next_idx < transaction_count {
+                            if let Some(tx) = pending.remove(&next_idx) {
+                                send_converted_tx(next_idx, tx, &prewarm_tx, &execute_tx);
+                                next_idx += 1;
+                                continue;
                             }
 
-                            let chunk = chunk
-                                .into_par_iter()
-                                .map(|(i, tx)| {
-                                    let idx = i + prefetch;
-                                    let tx = convert.convert(tx).map(WithTxEnv::new);
-                                    (idx, tx)
-                                })
-                                .collect::<Vec<_>>();
-
-                            for (idx, tx) in chunk {
-                                if let Ok(tx) = &tx {
-                                    let _ = prewarm_tx.send((idx, tx.clone()));
-                                }
-                                let _ = execute_tx.send((idx, tx));
-                                trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+                            let Ok((idx, tx)) = result_rx.recv() else { break };
+                            if idx == next_idx {
+                                send_converted_tx(idx, tx, &prewarm_tx, &execute_tx);
+                                next_idx += 1;
+                            } else {
+                                pending.insert(idx, tx);
                             }
                         }
                     });
@@ -855,12 +862,46 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     for (idx, raw_tx) in iter.enumerate() {
         let tx = convert.convert(raw_tx);
         let tx = tx.map(|tx| WithTxEnv::new(tx));
-        if let Ok(tx) = &tx {
-            let _ = prewarm_tx.send((idx, tx.clone()));
-        }
-        let _ = execute_tx.send((idx, tx));
-        trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+        send_converted_tx(idx, tx, prewarm_tx, execute_tx);
     }
+}
+
+/// Splits an iterator into fixed worker lanes by index modulo the worker count.
+fn round_robin_worker_lanes<I>(
+    iter: I,
+    start_index: usize,
+    item_count: usize,
+    worker_count: usize,
+) -> Vec<Vec<(usize, I::Item)>>
+where
+    I: IntoIterator,
+{
+    let worker_count = worker_count.max(1);
+    let base_capacity = item_count / worker_count;
+    let extra_capacity_lanes = item_count % worker_count;
+    let mut lanes = (0..worker_count)
+        .map(|lane| Vec::with_capacity(base_capacity + usize::from(lane < extra_capacity_lanes)))
+        .collect::<Vec<_>>();
+    for (offset, tx) in iter.into_iter().enumerate() {
+        lanes[offset % worker_count].push((start_index + offset, tx));
+    }
+    lanes
+}
+
+/// Sends a converted transaction result to the prewarm and execute channels.
+fn send_converted_tx<TxEnv, Recovered, Err>(
+    idx: usize,
+    tx: Result<WithTxEnv<TxEnv, Recovered>, Err>,
+    prewarm_tx: &mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>,
+    execute_tx: &ExecuteTxSender<TxEnv, Recovered, Err>,
+) where
+    WithTxEnv<TxEnv, Recovered>: Clone,
+{
+    if let Ok(tx) = &tx {
+        let _ = prewarm_tx.send((idx, tx.clone()));
+    }
+    let _ = execute_tx.send((idx, tx));
+    trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
 }
 
 /// Handle to all the spawned tasks.
@@ -1122,6 +1163,16 @@ mod tests {
     fn make_saved_cache(hash: B256) -> SavedCache {
         let execution_cache = ExecutionCache::new(1_000);
         SavedCache::new(hash, execution_cache)
+    }
+
+    #[test]
+    fn round_robin_worker_lanes_distributes_and_preallocates() {
+        let lanes = super::round_robin_worker_lanes(1..=6, 1, 6, 2);
+
+        assert_eq!(lanes[0], vec![(1, 1), (3, 3), (5, 5)]);
+        assert_eq!(lanes[1], vec![(2, 2), (4, 4), (6, 6)]);
+        assert!(lanes[0].capacity() >= 3);
+        assert!(lanes[1].capacity() >= 3);
     }
 
     #[test]
