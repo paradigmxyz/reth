@@ -127,12 +127,9 @@ impl OrderedTrieRootEncodedBuilder {
     }
 
     fn flush_zero(&mut self) {
-        if self.zero.is_none() {
-            return;
+        if let Some(zero) = self.zero.take() {
+            self.add_leaf(0, &zero);
         }
-
-        let zero = self.zero.take().expect("index 0 must be buffered before it is flushed");
-        self.add_leaf(0, &zero);
     }
 
     fn add_leaf(&mut self, index: usize, bytes: &[u8]) {
