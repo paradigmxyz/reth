@@ -11,6 +11,14 @@ use crate::TrieType;
 #[cfg(feature = "metrics")]
 use reth_metrics::metrics::{self, Histogram};
 
+const CURSOR_DURATION_SAMPLE_RATE: u32 = 16;
+const CURSOR_DURATION_SAMPLE_MASK: usize = CURSOR_DURATION_SAMPLE_RATE as usize - 1;
+
+#[inline]
+const fn should_sample_duration(count: usize) -> bool {
+    count & CURSOR_DURATION_SAMPLE_MASK == 1
+}
+
 /// Prometheus metrics for trie cursor operations.
 ///
 /// Tracks the number of cursor operations for monitoring and performance analysis.
@@ -107,6 +115,11 @@ impl TrieCursorMetricsCache {
         self.total_duration += other.total_duration;
     }
 
+    /// Add a sampled cursor operation duration scaled up to the sampling rate.
+    pub fn record_sampled_duration(&mut self, elapsed: Duration) {
+        self.total_duration += elapsed.saturating_mul(CURSOR_DURATION_SAMPLE_RATE);
+    }
+
     /// Record the span for metrics.
     pub fn record_span(&self, name: &'static str) {
         let _span = trace_span!(
@@ -148,30 +161,42 @@ impl<'metrics, C: TrieCursor> TrieCursor for InstrumentedTrieCursor<'metrics, C>
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let start = Instant::now();
         self.metrics.seek_exact_count += 1;
-        let result = self.cursor.seek_exact(key);
-        self.metrics.total_duration += start.elapsed();
-        result
+        if should_sample_duration(self.metrics.seek_exact_count) {
+            let start = Instant::now();
+            let result = self.cursor.seek_exact(key);
+            self.metrics.record_sampled_duration(start.elapsed());
+            result
+        } else {
+            self.cursor.seek_exact(key)
+        }
     }
 
     fn seek(
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let start = Instant::now();
         self.metrics.seek_count += 1;
-        let result = self.cursor.seek(key);
-        self.metrics.total_duration += start.elapsed();
-        result
+        if should_sample_duration(self.metrics.seek_count) {
+            let start = Instant::now();
+            let result = self.cursor.seek(key);
+            self.metrics.record_sampled_duration(start.elapsed());
+            result
+        } else {
+            self.cursor.seek(key)
+        }
     }
 
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let start = Instant::now();
         self.metrics.next_count += 1;
-        let result = self.cursor.next();
-        self.metrics.total_duration += start.elapsed();
-        result
+        if should_sample_duration(self.metrics.next_count) {
+            let start = Instant::now();
+            let result = self.cursor.next();
+            self.metrics.record_sampled_duration(start.elapsed());
+            result
+        } else {
+            self.cursor.next()
+        }
     }
 
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {

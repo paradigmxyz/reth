@@ -10,6 +10,14 @@ use crate::TrieType;
 #[cfg(feature = "metrics")]
 use reth_metrics::metrics::{self, Histogram};
 
+const CURSOR_DURATION_SAMPLE_RATE: u32 = 16;
+const CURSOR_DURATION_SAMPLE_MASK: usize = CURSOR_DURATION_SAMPLE_RATE as usize - 1;
+
+#[inline]
+const fn should_sample_duration(count: usize) -> bool {
+    count & CURSOR_DURATION_SAMPLE_MASK == 1
+}
+
 /// Prometheus metrics for hashed cursor operations.
 ///
 /// Tracks the number of cursor operations for monitoring and performance analysis.
@@ -111,6 +119,11 @@ impl HashedCursorMetricsCache {
         self.total_duration += other.total_duration;
     }
 
+    /// Add a sampled cursor operation duration scaled up to the sampling rate.
+    pub fn record_sampled_duration(&mut self, elapsed: Duration) {
+        self.total_duration += elapsed.saturating_mul(CURSOR_DURATION_SAMPLE_RATE);
+    }
+
     /// Record the span for metrics.
     pub fn record_span(&self, name: &'static str) {
         let _span = trace_span!(
@@ -153,19 +166,27 @@ where
     type Value = C::Value;
 
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        let start = Instant::now();
         self.metrics.seek_count += 1;
-        let result = self.cursor.seek(key);
-        self.metrics.total_duration += start.elapsed();
-        result
+        if should_sample_duration(self.metrics.seek_count) {
+            let start = Instant::now();
+            let result = self.cursor.seek(key);
+            self.metrics.record_sampled_duration(start.elapsed());
+            result
+        } else {
+            self.cursor.seek(key)
+        }
     }
 
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        let start = Instant::now();
         self.metrics.next_count += 1;
-        let result = self.cursor.next();
-        self.metrics.total_duration += start.elapsed();
-        result
+        if should_sample_duration(self.metrics.next_count) {
+            let start = Instant::now();
+            let result = self.cursor.next();
+            self.metrics.record_sampled_duration(start.elapsed());
+            result
+        } else {
+            self.cursor.next()
+        }
     }
 
     fn reset(&mut self) {
@@ -178,11 +199,15 @@ where
     C: HashedStorageCursor,
 {
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
-        let start = Instant::now();
         self.metrics.is_storage_empty_count += 1;
-        let result = self.cursor.is_storage_empty();
-        self.metrics.total_duration += start.elapsed();
-        result
+        if should_sample_duration(self.metrics.is_storage_empty_count) {
+            let start = Instant::now();
+            let result = self.cursor.is_storage_empty();
+            self.metrics.record_sampled_duration(start.elapsed());
+            result
+        } else {
+            self.cursor.is_storage_empty()
+        }
     }
 
     fn set_hashed_address(&mut self, hashed_address: B256) {
