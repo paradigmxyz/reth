@@ -1,5 +1,5 @@
 use crate::proof_task::StorageProofResultMessage;
-use alloy_primitives::{map::B256Map, B256};
+use alloy_primitives::{map::B256Map, B256, U256};
 use alloy_rlp::Encodable;
 use core::cell::RefCell;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
@@ -48,7 +48,7 @@ impl ValueEncoderStats {
 }
 
 /// Returned from [`AsyncAccountValueEncoder`], used to track an async storage root calculation.
-pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
+pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC: HashedStorageCursor<Value = U256>> {
     /// A storage proof job was dispatched to the worker pool.
     Dispatched {
         hashed_address: B256,
@@ -81,7 +81,9 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
     },
 }
 
-impl<TC, HC> Drop for AsyncAccountDeferredValueEncoder<TC, HC> {
+impl<TC, HC: HashedStorageCursor<Value = U256>> Drop
+    for AsyncAccountDeferredValueEncoder<TC, HC>
+{
     fn drop(&mut self) {
         // If this is a Dispatched encoder that was never consumed via encode(), we need to
         // receive the storage proof result to avoid losing it.
@@ -210,7 +212,7 @@ where
 /// For accounts without pre-dispatched proofs or cached roots, uses a shared
 /// [`StorageProofCalculator`] to compute storage roots synchronously, reusing cursors across
 /// multiple accounts.
-pub(crate) struct AsyncAccountValueEncoder<TC, HC> {
+pub(crate) struct AsyncAccountValueEncoder<TC, HC: HashedStorageCursor<Value = U256>> {
     /// Storage proof jobs which were dispatched ahead of time.
     dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
     /// Storage roots which have already been computed. This can be used only if a storage proof
@@ -226,7 +228,7 @@ pub(crate) struct AsyncAccountValueEncoder<TC, HC> {
     stats: Rc<RefCell<ValueEncoderStats>>,
 }
 
-impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
+impl<TC, HC: HashedStorageCursor<Value = U256>> AsyncAccountValueEncoder<TC, HC> {
     /// Initializes a [`Self`] using a storage proof calculator which will be reused to calculate
     /// storage roots synchronously.
     ///

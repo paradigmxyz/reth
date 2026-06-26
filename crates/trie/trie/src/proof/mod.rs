@@ -182,7 +182,7 @@ where
             if let Some(prefix_set) = storage_prefix_sets.get(&hashed_address) {
                 storage_calculator = storage_calculator.with_prefix_set(prefix_set.clone());
             }
-            let proofs = storage_calculator.storage_proof(hashed_address, &mut targets)?;
+            let proofs = storage_calculator.storage_proof_inline(hashed_address, &mut targets)?;
             storage_proofs.insert(hashed_address, proofs);
         }
 
