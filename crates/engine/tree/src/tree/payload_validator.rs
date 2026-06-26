@@ -1258,9 +1258,10 @@ where
         let execution_start = Instant::now();
         let ctx =
             self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
+        let evm_config = self.evm_config.clone().with_jit_support();
         let (output, senders, built_bal) = crate::tree::payload_processor::bal::execute_block(
             &self.runtime,
-            &self.evm_config,
+            &evm_config,
             &make_db,
             input_bal,
             env.evm_env,
