@@ -6,9 +6,14 @@ use clap::{builder::RangedU64ValueParser, Args};
 use reth_chainspec::EthereumHardforks;
 use reth_config::config::PruneConfig;
 use reth_prune_types::{
-    PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_DISTANCE, MINIMUM_UNWIND_SAFE_DISTANCE,
+    PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_UNWIND_SAFE_DISTANCE,
 };
 use std::{collections::BTreeMap, ops::Not, sync::OnceLock};
+
+/// Blocks kept by `--minimal` for data needed to serve recent block sync requests.
+///
+/// This covers three Tempo mainnet epochs at 21,600 blocks per epoch.
+const MINIMAL_PEER_SYNC_DISTANCE: u64 = 64_800;
 
 /// Global static pruning defaults
 static PRUNING_DEFAULTS: OnceLock<DefaultPruningValues> = OnceLock::new();
@@ -81,10 +86,10 @@ impl Default for DefaultPruningValues {
             minimal_prune_modes: PruneModes {
                 sender_recovery: Some(PruneMode::Full),
                 transaction_lookup: Some(PruneMode::Full),
-                receipts: Some(PruneMode::Distance(MINIMUM_DISTANCE)),
-                account_history: Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
-                storage_history: Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
-                bodies_history: Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
+                receipts: Some(PruneMode::Distance(MINIMAL_PEER_SYNC_DISTANCE)),
+                account_history: Some(PruneMode::Distance(MINIMAL_PEER_SYNC_DISTANCE)),
+                storage_history: Some(PruneMode::Distance(MINIMAL_PEER_SYNC_DISTANCE)),
+                bodies_history: Some(PruneMode::Distance(MINIMAL_PEER_SYNC_DISTANCE)),
                 receipts_log_filter: Default::default(),
             },
         }
@@ -121,18 +126,18 @@ impl PruneConfigKind {
         ChainSpec: EthereumHardforks,
     {
         if config.is_default() {
-            return Self::Archive
+            return Self::Archive;
         }
 
         let full_config = PruningArgs { full: true, ..Default::default() }.prune_config(chain_spec);
         if full_config.as_ref() == Some(config) {
-            return Self::Full
+            return Self::Full;
         }
 
         let minimal_config =
             PruningArgs { minimal: true, ..Default::default() }.prune_config(chain_spec);
         if minimal_config.as_ref() == Some(config) {
-            return Self::Minimal
+            return Self::Minimal;
         }
 
         Self::Custom
@@ -151,8 +156,8 @@ pub struct PruningArgs {
     /// Run minimal storage mode with maximum pruning and smaller static files.
     ///
     /// This mode configures the node to use minimal disk space by:
-    /// - Fully pruning sender recovery, transaction lookup, receipts
-    /// - Leaving 10,064 blocks for account, storage history and block bodies
+    /// - Fully pruning sender recovery and transaction lookup
+    /// - Leaving 64,800 blocks for receipts, account history, storage history and block bodies
     /// - Using 10,000 blocks per static file segment
     #[arg(long, default_value_t = false, conflicts_with = "full")]
     pub minimal: bool,

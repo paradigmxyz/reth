@@ -31,27 +31,25 @@ pub struct SelectorOutput {
 }
 
 /// All distance presets. Groups filter this to only valid options.
-const DISTANCE_PRESETS: [ComponentSelection; 6] = [
+const DISTANCE_PRESETS: [ComponentSelection; 5] = [
     ComponentSelection::None,
-    ComponentSelection::Distance(64),
-    ComponentSelection::Distance(10_064),
+    ComponentSelection::Distance(64_800),
     ComponentSelection::Distance(100_000),
     ComponentSelection::Distance(1_000_000),
     ComponentSelection::All,
 ];
 
-/// Presets for components that require at least 64 blocks (receipts).
-const RECEIPTS_PRESETS: [ComponentSelection; 5] = [
-    ComponentSelection::Distance(64),
-    ComponentSelection::Distance(10_064),
+/// Presets for components that require at least 64,800 blocks (receipts).
+const RECEIPTS_PRESETS: [ComponentSelection; 4] = [
+    ComponentSelection::Distance(64_800),
     ComponentSelection::Distance(100_000),
     ComponentSelection::Distance(1_000_000),
     ComponentSelection::All,
 ];
 
-/// Presets for components that require at least 10064 blocks (account/storage history).
+/// Presets for components that require at least 64,800 blocks (account/storage history).
 const HISTORY_PRESETS: [ComponentSelection; 4] = [
-    ComponentSelection::Distance(10_064),
+    ComponentSelection::Distance(64_800),
     ComponentSelection::Distance(100_000),
     ComponentSelection::Distance(1_000_000),
     ComponentSelection::All,
@@ -311,9 +309,9 @@ fn event_loop(
         let timeout =
             tick_rate.checked_sub(last_tick.elapsed()).unwrap_or_else(|| Duration::from_secs(0));
 
-        if crossterm::event::poll(timeout)? &&
-            let Event::Key(key) = event::read()? &&
-            key.kind == event::KeyEventKind::Press
+        if crossterm::event::poll(timeout)?
+            && let Event::Key(key) = event::read()?
+            && key.kind == event::KeyEventKind::Press
         {
             match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => {

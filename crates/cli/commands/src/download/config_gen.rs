@@ -13,11 +13,11 @@ use std::{collections::BTreeMap, path::Path};
 use tracing::info;
 
 /// Minimum blocks to keep for receipts, matching `--minimal` prune settings.
-const MINIMUM_RECEIPTS_DISTANCE: u64 = 64;
+const MINIMUM_RECEIPTS_DISTANCE: u64 = MINIMUM_HISTORY_DISTANCE;
 
 /// Minimum blocks to keep for history/bodies, matching `--minimal` prune settings
-/// (`MINIMUM_UNWIND_SAFE_DISTANCE`).
-const MINIMUM_HISTORY_DISTANCE: u64 = 10064;
+/// (three Tempo mainnet epochs at 21,600 blocks per epoch).
+const MINIMUM_HISTORY_DISTANCE: u64 = 64_800;
 
 /// Writes a [`Config`] as TOML to `<data_dir>/reth.toml`.
 ///
@@ -430,12 +430,12 @@ mod tests {
         selections.insert(SnapshotComponentType::State, ComponentSelection::All);
         selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
         selections
-            .insert(SnapshotComponentType::Transactions, ComponentSelection::Distance(10_064));
+            .insert(SnapshotComponentType::Transactions, ComponentSelection::Distance(64_800));
         selections.insert(SnapshotComponentType::Receipts, ComponentSelection::None);
         selections
-            .insert(SnapshotComponentType::AccountChangesets, ComponentSelection::Distance(10_064));
+            .insert(SnapshotComponentType::AccountChangesets, ComponentSelection::Distance(64_800));
         selections
-            .insert(SnapshotComponentType::StorageChangesets, ComponentSelection::Distance(10_064));
+            .insert(SnapshotComponentType::StorageChangesets, ComponentSelection::Distance(64_800));
         let config = config_for_selections(
             &selections,
             &empty_manifest(),
@@ -446,13 +446,13 @@ mod tests {
         assert_eq!(config.prune.segments.transaction_lookup, Some(PruneMode::Full));
         assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
         // Bodies follows tx selection
-        assert_eq!(config.prune.segments.bodies_history, Some(PruneMode::Distance(10_064)));
+        assert_eq!(config.prune.segments.bodies_history, Some(PruneMode::Distance(64_800)));
         assert_eq!(
             config.prune.segments.receipts,
             Some(PruneMode::Distance(MINIMUM_RECEIPTS_DISTANCE))
         );
-        assert_eq!(config.prune.segments.account_history, Some(PruneMode::Distance(10_064)));
-        assert_eq!(config.prune.segments.storage_history, Some(PruneMode::Distance(10_064)));
+        assert_eq!(config.prune.segments.account_history, Some(PruneMode::Distance(64_800)));
+        assert_eq!(config.prune.segments.storage_history, Some(PruneMode::Distance(64_800)));
     }
 
     #[test]
@@ -492,7 +492,7 @@ mod tests {
         selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
         selections
             .insert(SnapshotComponentType::Transactions, ComponentSelection::Distance(500_000));
-        selections.insert(SnapshotComponentType::Receipts, ComponentSelection::Distance(10_064));
+        selections.insert(SnapshotComponentType::Receipts, ComponentSelection::Distance(64_800));
 
         let chain_spec = reth_chainspec::MAINNET.clone();
         let config = config_for_selections(
@@ -504,18 +504,9 @@ mod tests {
 
         assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
         assert_eq!(config.prune.segments.transaction_lookup, None);
-        assert_eq!(
-            config.prune.segments.receipts,
-            Some(PruneMode::Distance(MINIMUM_HISTORY_DISTANCE))
-        );
-        assert_eq!(
-            config.prune.segments.account_history,
-            Some(PruneMode::Distance(MINIMUM_HISTORY_DISTANCE))
-        );
-        assert_eq!(
-            config.prune.segments.storage_history,
-            Some(PruneMode::Distance(MINIMUM_HISTORY_DISTANCE))
-        );
+        assert_eq!(config.prune.segments.receipts, Some(PruneMode::Distance(10_064)));
+        assert_eq!(config.prune.segments.account_history, Some(PruneMode::Distance(10_064)));
+        assert_eq!(config.prune.segments.storage_history, Some(PruneMode::Distance(10_064)));
 
         let paris_block = chain_spec
             .ethereum_fork_activation(EthereumHardfork::Paris)
@@ -547,7 +538,7 @@ mod tests {
         selections.insert(SnapshotComponentType::State, ComponentSelection::All);
         selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
         selections
-            .insert(SnapshotComponentType::Transactions, ComponentSelection::Distance(10_064));
+            .insert(SnapshotComponentType::Transactions, ComponentSelection::Distance(64_800));
         selections.insert(SnapshotComponentType::Receipts, ComponentSelection::None);
         let config = config_for_selections(
             &selections,
@@ -558,8 +549,8 @@ mod tests {
         let desc = describe_prune_config(&config);
         assert!(desc.contains(&"sender_recovery=\"full\"".to_string()));
         // Bodies follows tx selection
-        assert!(desc.contains(&"bodies_history={ distance = 10064 }".to_string()));
-        assert!(desc.contains(&"receipts={ distance = 64 }".to_string()));
+        assert!(desc.contains(&"bodies_history={ distance = 64800 }".to_string()));
+        assert!(desc.contains(&"receipts={ distance = 64800 }".to_string()));
     }
 
     #[test]

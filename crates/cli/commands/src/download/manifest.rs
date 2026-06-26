@@ -234,8 +234,8 @@ impl SnapshotComponentType {
     ///
     /// Matches the `--minimal` prune configuration:
     /// - State/Headers: always All (required)
-    /// - Transactions/Changesets: Distance(10_064) (`MINIMUM_UNWIND_SAFE_DISTANCE`)
-    /// - Receipts: Distance(64) (`MINIMUM_DISTANCE`)
+    /// - Transactions/Changesets: Distance(64_800) (3 Tempo mainnet epochs)
+    /// - Receipts: Distance(64_800) (3 Tempo mainnet epochs)
     /// - TransactionSenders: None (only downloaded for archive nodes)
     /// - RocksdbIndices: None (only downloaded for archive nodes)
     ///
@@ -243,10 +243,10 @@ impl SnapshotComponentType {
     pub const fn minimal_selection(&self) -> ComponentSelection {
         match self {
             Self::State | Self::Headers => ComponentSelection::All,
-            Self::Transactions | Self::AccountChangesets | Self::StorageChangesets => {
-                ComponentSelection::Distance(10_064)
-            }
-            Self::Receipts => ComponentSelection::Distance(64),
+            Self::Transactions
+            | Self::Receipts
+            | Self::AccountChangesets
+            | Self::StorageChangesets => ComponentSelection::Distance(64_800),
             Self::TransactionSenders => ComponentSelection::None,
             Self::RocksdbIndices => ComponentSelection::None,
         }
