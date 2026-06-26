@@ -21,7 +21,7 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, B256, U256};
+use alloy_primitives::{keccak256, B256, StorageKey, U256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
@@ -403,8 +403,9 @@ where
             // - execution cache is not disabled
             //
             // we launch prewarming sequence of the BAL read set here. The BAL read-set consists
-            // of the accounts, their code if present, and declared storages (both storage_reads
-            // and storage_changes).
+            // of accounts, their code if present, and declared storage reads. Storage changes are
+            // already streamed to the sparse trie from the BAL and can still fill the cache on
+            // actual execution misses.
             //
             // This runs side-by-side with the parallel transaction execution reducing the time it
             // spends blocking on the data.
@@ -415,11 +416,8 @@ where
             pool.begin_block(build, caches);
             for account in prefetch_bal.as_bal() {
                 pool.warm_account(account.address);
-                for change in &account.storage_changes {
-                    pool.warm_storage(account.address, change.slot.into());
-                }
-                for &slot in &account.storage_reads {
-                    pool.warm_storage(account.address, slot.into());
+                for slot in bal_batch_io_storage_slots(account) {
+                    pool.warm_storage(account.address, slot);
                 }
             }
             pool.end_block();
@@ -771,6 +769,12 @@ const fn bal_account_changes_state_root(
     !account_fields.is_empty() || !account_changes.storage_changes.is_empty()
 }
 
+fn bal_batch_io_storage_slots(
+    account_changes: &alloy_eip7928::AccountChanges,
+) -> impl Iterator<Item = StorageKey> + '_ {
+    account_changes.storage_reads.iter().map(|slot| (*slot).into())
+}
+
 /// Returns [`MultiProofTargetsV2`] for withdrawal addresses.
 ///
 /// Withdrawals only modify account balances (no storage), so the targets contain
@@ -840,6 +844,21 @@ mod tests {
         assert_eq!(account.balance, U256::from(10));
         assert_eq!(account.nonce, 3);
         assert_eq!(account.bytecode_hash, Some(B256::repeat_byte(0xaa)));
+    }
+
+    #[test]
+    fn bal_batch_io_prefetches_reads_not_changes() {
+        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
+            .with_storage_change(SlotChanges::new(
+                U256::from(1),
+                vec![StorageChange::new(BlockAccessIndex::new(1), U256::from(2))],
+            ))
+            .with_storage_read(U256::from(3));
+
+        let slots = bal_batch_io_storage_slots(&changes).collect::<Vec<_>>();
+        let expected: StorageKey = U256::from(3).into();
+
+        assert_eq!(slots, vec![expected]);
     }
 }
 
