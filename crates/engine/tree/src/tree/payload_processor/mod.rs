@@ -306,8 +306,15 @@ where
         let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
             options;
         // start preparing transactions immediately
-        let (prewarm_rx, execution_rx) =
-            self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
+        let prewarm_transactions = !parallel_bal_execution &&
+            !self.disable_transaction_prewarming &&
+            env.transaction_count >= SMALL_BLOCK_TX_THRESHOLD;
+        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(
+            transactions,
+            env.transaction_count,
+            parallel_bal_execution,
+            prewarm_transactions,
+        );
 
         let span = Span::current();
 
@@ -359,8 +366,15 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let (prewarm_rx, execution_rx) =
-            self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
+        let prewarm_transactions = !parallel_bal_execution &&
+            !self.disable_transaction_prewarming &&
+            env.transaction_count >= SMALL_BLOCK_TX_THRESHOLD;
+        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(
+            transactions,
+            env.transaction_count,
+            parallel_bal_execution,
+            prewarm_transactions,
+        );
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
@@ -469,6 +483,7 @@ where
         transactions: I,
         transaction_count: usize,
         parallel_bal_execution: bool,
+        prewarm_transactions: bool,
     ) -> (IteratorPrewarmTxReceiver<Evm, I>, IteratorExecuteTxReceiver<Evm, I>) {
         let (prewarm_tx, prewarm_rx) = mpsc::sync_channel(transaction_count);
         let (execute_tx, execute_rx) = crossbeam_channel::bounded(transaction_count);
@@ -485,7 +500,13 @@ where
             );
             self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
-                convert_serial(transactions.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                convert_serial(
+                    transactions.into_iter(),
+                    &convert,
+                    &prewarm_tx,
+                    &execute_tx,
+                    prewarm_transactions,
+                );
             });
         } else {
             // Parallel path — recover signatures in parallel on rayon, stream results
@@ -507,7 +528,9 @@ where
                             .for_each(|(idx, tx)| {
                                 let tx = tx.map(|tx| {
                                     let tx = WithTxEnv::new(tx);
-                                    let _ = prewarm_tx.send((idx, tx.clone()));
+                                    if prewarm_transactions {
+                                        let _ = prewarm_tx.send((idx, tx.clone()));
+                                    }
                                     tx
                                 });
                                 let _ = execute_tx.send((idx, tx));
@@ -524,7 +547,13 @@ where
 
                     // Convert the first few transactions sequentially so execution can
                     // start immediately without waiting for rayon work-stealing.
-                    convert_serial(all.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                    convert_serial(
+                        all.into_iter(),
+                        &convert,
+                        &prewarm_tx,
+                        &execute_tx,
+                        prewarm_transactions,
+                    );
 
                     // Without BALs, we need to preserve the initial order of transactions,
                     // so we have to use `for_each_ordered_in`.
@@ -538,7 +567,9 @@ where
                         .for_each_ordered_in(executor.cpu_pool(), |(idx, tx)| {
                             let tx = tx.map(|tx| {
                                 let tx = WithTxEnv::new(tx);
-                                let _ = prewarm_tx.send((idx, tx.clone()));
+                                if prewarm_transactions {
+                                    let _ = prewarm_tx.send((idx, tx.clone()));
+                                }
                                 tx
                             });
                             let _ = execute_tx.send((idx, tx));
@@ -825,6 +856,7 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     convert: &C,
     prewarm_tx: &mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>,
     execute_tx: &ExecuteTxSender<TxEnv, Recovered, Err>,
+    prewarm_transactions: bool,
 ) where
     Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = Recovered>,
     TxEnv: Clone,
@@ -833,7 +865,7 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     for (idx, raw_tx) in iter.enumerate() {
         let tx = convert.convert(raw_tx);
         let tx = tx.map(|tx| WithTxEnv::new(tx));
-        if let Ok(tx) = &tx {
+        if prewarm_transactions && let Ok(tx) = &tx {
             let _ = prewarm_tx.send((idx, tx.clone()));
         }
         let _ = execute_tx.send((idx, tx));
