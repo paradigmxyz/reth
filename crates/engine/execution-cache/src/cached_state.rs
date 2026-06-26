@@ -1068,8 +1068,13 @@ impl ExecutionCache {
                 return Err(())
             };
 
-            // Now we iterate over all storage and make updates to the cached storage values
+            // Now we iterate over changed storage and make updates to the cached storage values.
+            // Unchanged loaded slots already match the parent cache state if present, and can be
+            // fetched from the provider on miss.
             for (key, slot) in &account.storage {
+                if !slot.is_changed() {
+                    continue;
+                }
                 self.insert_storage(*addr, (*key).into(), Some(slot.present_value));
             }
 
@@ -1179,7 +1184,7 @@ mod tests {
     use alloy_primitives::{map::HashMap, U256};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_revm::db::{AccountStatus, BundleAccount};
-    use revm_state::AccountInfo;
+    use revm_state::{AccountInfo, EvmStorageSlot, TransactionId};
 
     #[test]
     fn test_empty_storage_cached_state_provider() {
@@ -1439,6 +1444,66 @@ mod tests {
         assert!(caches.insert_state(&bundle).is_ok());
         assert_eq!(caches.0.account_stats.size(), 0);
         assert!(caches.0.account_cache.get(&addr).is_none());
+    }
+
+    #[test]
+    fn test_insert_state_skips_unchanged_storage_slots() {
+        let caches = ExecutionCache::new(1000);
+
+        let address = Address::random();
+        let unchanged_slot = U256::from(1);
+        let changed_slot = U256::from(2);
+        let unchanged_key = StorageKey::from(unchanged_slot);
+        let changed_key = StorageKey::from(changed_slot);
+        let unchanged_value = U256::from(7);
+        let stale_changed_value = U256::from(9);
+        let changed_value = U256::from(11);
+
+        caches.insert_storage(address, unchanged_key, Some(unchanged_value));
+        caches.insert_storage(address, changed_key, Some(stale_changed_value));
+
+        let bundle = BundleState {
+            state: HashMap::from_iter([(
+                address,
+                BundleAccount::new(
+                    Some(AccountInfo::default()),
+                    Some(AccountInfo { nonce: 1, ..Default::default() }),
+                    HashMap::from_iter([
+                        (
+                            unchanged_slot,
+                            EvmStorageSlot::new(unchanged_value, TransactionId::ZERO).into(),
+                        ),
+                        (
+                            changed_slot,
+                            EvmStorageSlot::new_changed(
+                                stale_changed_value,
+                                changed_value,
+                                TransactionId::ZERO,
+                            )
+                            .into(),
+                        ),
+                    ]),
+                    AccountStatus::Changed,
+                ),
+            )]),
+            contracts: Default::default(),
+            reverts: Default::default(),
+            state_size: 0,
+            reverts_size: 0,
+        };
+
+        assert!(caches.insert_state(&bundle).is_ok());
+
+        assert_eq!(
+            caches.0.storage_cache.get(&(address, unchanged_key)),
+            Some(unchanged_value),
+            "unchanged loaded storage should keep the parent cache entry"
+        );
+        assert_eq!(
+            caches.0.storage_cache.get(&(address, changed_key)),
+            Some(changed_value),
+            "changed storage should update stale cache entries"
+        );
     }
 
     #[test]
