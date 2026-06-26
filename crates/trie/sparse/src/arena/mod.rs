@@ -150,12 +150,6 @@ impl ArenaTrieBuffers {
     }
 }
 
-/// Mutable accumulators updated while hashing or structurally changing trie nodes.
-struct RetainedNodeChanges<'a> {
-    updates: &'a mut Option<SparseTrieUpdates>,
-    changed_paths: &'a mut Option<HashSet<Nibbles>>,
-}
-
 /// A subtrie within the arena-based parallel sparse trie.
 ///
 /// Each subtrie owns its own arena, allowing parallel mutations across subtries.
@@ -374,14 +368,15 @@ impl ArenaSparseSubtrie {
             "subtrie root must not be EmptyRoot at start of update_leaves"
         );
 
-        self.buffers.cursor.reset(&self.arena, self.root, self.path);
+        let mut cursor = mem::take(&mut self.buffers.cursor);
+        cursor.reset(&self.arena, self.root, self.path);
 
         for (idx, &(key, ref full_path, ref update)) in sorted_updates.iter().enumerate() {
-            let find_result = self.buffers.cursor.seek(&mut self.arena, full_path);
+            let find_result = cursor.seek(&mut self.arena, full_path);
 
             // If the path hits a blinded node, request a proof regardless of update type.
             if matches!(find_result, SeekResult::Blinded) {
-                let logical_len = self.buffers.cursor.head_logical_branch_path_len(&self.arena);
+                let logical_len = cursor.head_logical_branch_path_len(&self.arena);
                 self.required_proofs.push((
                     idx,
                     ArenaRequiredProof { key, min_len: (logical_len as u8 + 1).min(64) },
@@ -394,7 +389,7 @@ impl ArenaSparseSubtrie {
                     // Upsert: insert or update a leaf with the given value.
                     let (_result, deltas) = ArenaParallelSparseTrie::upsert_leaf(
                         &mut self.arena,
-                        &mut self.buffers.cursor,
+                        &mut cursor,
                         &mut self.root,
                         full_path,
                         value,
@@ -407,15 +402,12 @@ impl ArenaSparseSubtrie {
                 LeafUpdate::Changed(_) => {
                     let (result, deltas) = ArenaParallelSparseTrie::remove_leaf(
                         &mut self.arena,
-                        &mut self.buffers.cursor,
+                        &mut cursor,
                         &mut self.root,
                         key,
                         full_path,
                         find_result,
-                        RetainedNodeChanges {
-                            updates: &mut self.buffers.updates,
-                            changed_paths: &mut self.buffers.changed_paths,
-                        },
+                        &mut self.buffers,
                     );
                     self.num_leaves = (self.num_leaves as i64 + deltas.num_leaves_delta) as u64;
                     self.num_dirty_leaves =
@@ -432,7 +424,8 @@ impl ArenaSparseSubtrie {
         }
 
         // Drain remaining cursor entries, propagating dirty state.
-        self.buffers.cursor.drain(&mut self.arena);
+        cursor.drain(&mut self.arena);
+        self.buffers.cursor = cursor;
 
         #[cfg(debug_assertions)]
         self.debug_assert_counters();
@@ -1788,7 +1781,7 @@ impl ArenaParallelSparseTrie {
         key: B256,
         full_path: &Nibbles,
         find_result: SeekResult,
-        changes: RetainedNodeChanges<'_>,
+        buffers: &mut ArenaTrieBuffers,
     ) -> (RemoveLeafResult, SubtrieCounterDeltas) {
         match find_result {
             SeekResult::Blinded | SeekResult::RevealedSubtrie => {
@@ -1843,7 +1836,7 @@ impl ArenaParallelSparseTrie {
                 let removed_was_dirty =
                     matches!(arena[head_idx].state_ref(), Some(ArenaSparseNodeState::Dirty));
 
-                if let Some(changed_paths) = changes.changed_paths.as_mut() {
+                if let Some(changed_paths) = buffers.changed_paths.as_mut() {
                     changed_paths.insert(head_path);
                 }
 
@@ -1882,8 +1875,8 @@ impl ArenaParallelSparseTrie {
                         arena,
                         cursor,
                         root,
-                        changes.updates,
-                        changes.changed_paths,
+                        &mut buffers.updates,
+                        &mut buffers.changed_paths,
                     )
                 } else {
                     false
@@ -3097,10 +3090,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             key,
                             full_path,
                             find_result,
-                            RetainedNodeChanges {
-                                updates: &mut self.buffers.updates,
-                                changed_paths: &mut self.buffers.changed_paths,
-                            },
+                            &mut self.buffers,
                         );
                         match result {
                             RemoveLeafResult::NeedsProof { key, proof_key, min_len } => {
