@@ -1494,17 +1494,18 @@ impl RocksDBProvider {
 
         last_shard.append(indices).map_err(ProviderError::other)?;
 
-        if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
+        let last_shard_len = last_shard.len();
+        if last_shard_len <= NUM_OF_INDICES_IN_SHARD as u64 {
             return Ok(vec![(last_key, last_shard)]);
         }
 
+        let shard_count = last_shard_len.div_ceil(NUM_OF_INDICES_IN_SHARD as u64);
         let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
-        let mut chunks_peekable = chunks.into_iter().peekable();
         let mut shards = Vec::new();
 
-        while let Some(chunk) = chunks_peekable.next() {
+        for (chunk_index, chunk) in chunks.into_iter().enumerate() {
             let shard = BlockNumberList::new_pre_sorted(chunk);
-            let highest_block_number = if chunks_peekable.peek().is_some() {
+            let highest_block_number = if chunk_index as u64 + 1 < shard_count {
                 shard.iter().next_back().expect("`chunks` does not return empty list")
             } else {
                 u64::MAX
@@ -1920,18 +1921,19 @@ impl<'a> RocksDBBatch<'a> {
         last_shard.append(indices).map_err(ProviderError::other)?;
 
         // Fast path: all indices fit in one shard
-        if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
+        let last_shard_len = last_shard.len();
+        if last_shard_len <= NUM_OF_INDICES_IN_SHARD as u64 {
             self.put::<tables::AccountsHistory>(last_key, &last_shard)?;
             return Ok(());
         }
 
         // Slow path: rechunk into multiple shards
+        let shard_count = last_shard_len.div_ceil(NUM_OF_INDICES_IN_SHARD as u64);
         let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
-        let mut chunks_peekable = chunks.into_iter().peekable();
 
-        while let Some(chunk) = chunks_peekable.next() {
+        for (chunk_index, chunk) in chunks.into_iter().enumerate() {
             let shard = BlockNumberList::new_pre_sorted(chunk);
-            let highest_block_number = if chunks_peekable.peek().is_some() {
+            let highest_block_number = if chunk_index as u64 + 1 < shard_count {
                 shard.iter().next_back().expect("`chunks` does not return empty list")
             } else {
                 u64::MAX
