@@ -466,9 +466,8 @@ impl DatabaseEnv {
 
         inner_env.set_flags(EnvironmentFlags {
             mode,
-            // We disable readahead because it improves performance for linear scans, but
-            // worsens it for random access (which is our access pattern outside of sync)
-            no_rdahead: true,
+            // Keep readahead enabled for workloads that benefit from sequential access.
+            no_rdahead: false,
             coalesce: true,
             exclusive: args.exclusive.unwrap_or_default(),
             ..Default::default()
