@@ -313,15 +313,14 @@ pub trait CliNodeTypes: Node<FullTypesAdapter<Self>> + NodeTypesForProvider {
 impl<N> CliNodeTypes for N
 where
     N: Node<FullTypesAdapter<Self>> + NodeTypesForProvider,
-    <<N::ComponentsBuilder as NodeComponentsBuilder<FullTypesAdapter<Self>>>::Components as NodeComponents<
-        FullTypesAdapter<Self>,
-    >>::Evm: ConfigureEvm<Primitives = Self::Primitives>,
 {
     type Evm = <<N::ComponentsBuilder as NodeComponentsBuilder<FullTypesAdapter<Self>>>::Components as NodeComponents<FullTypesAdapter<Self>>>::Evm;
     type NetworkPrimitives = <<<N::ComponentsBuilder as NodeComponentsBuilder<FullTypesAdapter<Self>>>::Components as NodeComponents<FullTypesAdapter<Self>>>::Network as NetworkEventListenerProvider>::Primitives;
 }
 
-type EvmFor<N> = <N as CliNodeTypes>::Evm;
+type EvmFor<N> = <<<N as Node<FullTypesAdapter<N>>>::ComponentsBuilder as NodeComponentsBuilder<
+    FullTypesAdapter<N>,
+>>::Components as NodeComponents<FullTypesAdapter<N>>>::Evm;
 
 type ConsensusFor<N> =
     <<<N as Node<FullTypesAdapter<N>>>::ComponentsBuilder as NodeComponentsBuilder<
@@ -329,20 +328,14 @@ type ConsensusFor<N> =
     >>::Components as NodeComponents<FullTypesAdapter<N>>>::Consensus;
 
 /// Helper trait aggregating components required for the CLI.
-pub trait CliNodeComponents<N: CliNodeTypes>: Send + Sync + 'static
-where
-    EvmFor<N>: ConfigureEvm<Primitives = N::Primitives>,
-{
+pub trait CliNodeComponents<N: CliNodeTypes>: Send + Sync + 'static {
     /// Returns the configured EVM.
     fn evm_config(&self) -> &EvmFor<N>;
     /// Returns the consensus implementation.
     fn consensus(&self) -> &ConsensusFor<N>;
 }
 
-impl<N: CliNodeTypes> CliNodeComponents<N> for (EvmFor<N>, ConsensusFor<N>)
-where
-    EvmFor<N>: ConfigureEvm<Primitives = N::Primitives>,
-{
+impl<N: CliNodeTypes> CliNodeComponents<N> for (EvmFor<N>, ConsensusFor<N>) {
     fn evm_config(&self) -> &EvmFor<N> {
         &self.0
     }
@@ -355,8 +348,6 @@ where
 /// Helper trait alias for an [`FnOnce`] producing [`CliNodeComponents`].
 pub trait CliComponentsBuilder<N: CliNodeTypes>:
     FnOnce(Arc<N::ChainSpec>) -> Self::Components + Send + Sync + 'static
-where
-    EvmFor<N>: ConfigureEvm<Primitives = N::Primitives>,
 {
     type Components: CliNodeComponents<N>;
 }
@@ -365,7 +356,6 @@ impl<N: CliNodeTypes, F, Comp> CliComponentsBuilder<N> for F
 where
     F: FnOnce(Arc<N::ChainSpec>) -> Comp + Send + Sync + 'static,
     Comp: CliNodeComponents<N>,
-    EvmFor<N>: ConfigureEvm<Primitives = N::Primitives>,
 {
     type Components = Comp;
 }
