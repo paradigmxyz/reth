@@ -89,7 +89,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
             encode_buf.clear();
             receipt_with_bloom.encode_2718(&mut encode_buf);
 
-            aggregated_bloom |= *receipt_with_bloom.bloom_ref();
+            aggregated_bloom |= receipt_with_bloom.bloom_ref();
             builder.push_next(&encode_buf);
         };
 
