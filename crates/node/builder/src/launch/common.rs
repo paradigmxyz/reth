@@ -988,8 +988,8 @@ where
         Ok(())
     }
 
-    /// Check if the pipeline is consistent (all stages have the checkpoint block numbers no less
-    /// than the checkpoint of the first stage).
+    /// Check if the pipeline is consistent (every stage's checkpoint block number is no less than
+    /// the checkpoint of the furthest-reached stage).
     ///
     /// This will return the pipeline target if:
     ///  * the pipeline was interrupted during its previous run
@@ -1005,50 +1005,32 @@ where
     ) -> ProviderResult<Option<B256>> {
         // We skip the era stage if it's not enabled
         let era_enabled = self.era_import_source().is_some();
-        let mut all_stages = StageId::ALL
+        let active_stages = StageId::ALL
             .into_iter()
             .filter(|id| (era_enabled || id != &StageId::Era) && !disabled_stages.contains(id));
 
-        // Get the expected first stage based on config.
-        let first_stage = all_stages.next().expect("there must be at least one stage");
-
-        // If no target was provided, check if the stages are congruent - check if the
-        // checkpoint of the last stage matches the checkpoint of the first.
-        let first_stage_checkpoint = self
-            .blockchain_db()
-            .get_stage_checkpoint(first_stage)?
-            .unwrap_or_default()
-            .block_number;
-
-        // Compare all other stages against the first
-        for stage_id in all_stages {
-            let stage_checkpoint = self
+        // Collect each active stage's checkpoint block number.
+        let mut checkpoints = Vec::new();
+        for stage_id in active_stages {
+            let checkpoint = self
                 .blockchain_db()
                 .get_stage_checkpoint(stage_id)?
                 .unwrap_or_default()
                 .block_number;
+            checkpoints.push((stage_id, checkpoint));
+        }
 
-            // If the checkpoint of any stage is less than the checkpoint of the first stage,
-            // retrieve and return the block hash of the latest header and use it as the target.
+        // If any stage lags behind the furthest-reached one, the pipeline was interrupted, a new
+        // stage was added, or stage data was dropped. Use the block at that checkpoint as the
+        // target so the lagging stages get backfilled back up to the rest of the pipeline.
+        if let Some(target) = inconsistent_pipeline_target(&checkpoints) {
             debug!(
                 target: "consensus::engine",
-                first_stage_id = %first_stage,
-                first_stage_checkpoint,
-                stage_id = %stage_id,
-                stage_checkpoint = stage_checkpoint,
-                "Checking stage against first stage",
+                reference_checkpoint = target,
+                ?checkpoints,
+                "Pipeline sync progress is inconsistent"
             );
-            if stage_checkpoint < first_stage_checkpoint {
-                debug!(
-                    target: "consensus::engine",
-                    first_stage_id = %first_stage,
-                    first_stage_checkpoint,
-                    inconsistent_stage_id = %stage_id,
-                    inconsistent_stage_checkpoint = stage_checkpoint,
-                    "Pipeline sync progress is inconsistent"
-                );
-                return self.blockchain_db().block_hash(first_stage_checkpoint);
-            }
+            return self.blockchain_db().block_hash(target);
         }
 
         self.ensure_chain_specific_db_checks()?;
@@ -1323,13 +1305,57 @@ pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) 
         .build()
 }
 
+/// Returns the checkpoint that lagging stages should be backfilled to, or `None` if every stage
+/// has reached the same block.
+///
+/// The reference is the furthest-reached stage rather than the first stage in [`StageId::ALL`].
+/// The first stage is not necessarily the most advanced one — with era import enabled, `Era` is
+/// first but its checkpoint can be `0` — so using it as the reference would mask a later stage
+/// that is behind and skip the backfill needed to bring it up to the rest of the pipeline.
+fn inconsistent_pipeline_target(checkpoints: &[(StageId, u64)]) -> Option<u64> {
+    let reference = checkpoints.iter().map(|(_, checkpoint)| *checkpoint).max()?;
+    checkpoints.iter().any(|(_, checkpoint)| *checkpoint < reference).then_some(reference)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{LaunchContext, NodeConfig};
+    use super::{inconsistent_pipeline_target, LaunchContext, NodeConfig, StageId};
     use reth_config::Config;
     use reth_node_core::args::PruningArgs;
 
     const EXTENSION: &str = "toml";
+
+    #[test]
+    fn pipeline_target_none_when_congruent() {
+        let checkpoints =
+            [(StageId::Headers, 100), (StageId::Bodies, 100), (StageId::Execution, 100)];
+        assert_eq!(inconsistent_pipeline_target(&checkpoints), None);
+    }
+
+    #[test]
+    fn pipeline_target_detects_execution_behind_headers() {
+        let checkpoints =
+            [(StageId::Headers, 100), (StageId::Bodies, 100), (StageId::Execution, 50)];
+        assert_eq!(inconsistent_pipeline_target(&checkpoints), Some(100));
+    }
+
+    #[test]
+    fn pipeline_target_not_masked_by_lagging_first_stage() {
+        // `Era` is first in `StageId::ALL` and can sit at 0 while later stages have advanced; the
+        // furthest-reached stage must still be used as the reference so the lag is not masked.
+        let checkpoints = [
+            (StageId::Era, 0),
+            (StageId::Headers, 100),
+            (StageId::Bodies, 100),
+            (StageId::Execution, 50),
+        ];
+        assert_eq!(inconsistent_pipeline_target(&checkpoints), Some(100));
+    }
+
+    #[test]
+    fn pipeline_target_none_when_empty() {
+        assert_eq!(inconsistent_pipeline_target(&[]), None);
+    }
 
     fn with_tempdir(filename: &str, proc: fn(&std::path::Path)) {
         let temp_dir = tempfile::tempdir().unwrap();
