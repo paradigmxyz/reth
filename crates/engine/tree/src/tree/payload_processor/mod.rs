@@ -526,21 +526,21 @@ where
                     // few transactions are recovered sequentially and sent immediately before
                     // entering the parallel iterator for the remainder.
                     let prefetch = Self::PARALLEL_PREFETCH_COUNT.min(transaction_count);
-                    let mut all: Vec<_> = transactions.into_iter().collect();
-                    let rest = all.split_off(prefetch);
+                    let mut iter = transactions.into_iter();
 
                     // Convert the first few transactions sequentially so execution can
                     // start immediately without waiting for rayon work-stealing.
-                    convert_serial(all.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                    convert_serial(iter.by_ref().take(prefetch), &convert, &prewarm_tx, &execute_tx);
+
+                    let mut iter = iter.enumerate();
 
                     // Without BALs, we need to preserve the initial order of transactions.
                     // Process contiguous windows in order so recovery prioritizes the next
                     // transaction range execution will request. Each window still recovers in
                     // parallel, then drains in block order.
                     executor.cpu_pool().install(move || {
-                        let mut rest = rest.into_iter().enumerate();
                         loop {
-                            let chunk = rest
+                            let chunk = iter
                                 .by_ref()
                                 .take(Self::PARALLEL_TX_WINDOW_SIZE)
                                 .collect::<Vec<_>>();

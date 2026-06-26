@@ -83,7 +83,7 @@ pub trait ExecutableTxTuple: Send + 'static {
 
     /// Iterator over [`ExecutableTxTuple::Tx`].
     type IntoIter: IntoParallelIterator<Item = Self::RawTx, Iter: IndexedParallelIterator>
-        + IntoIterator<Item = Self::RawTx>
+        + IntoIterator<Item = Self::RawTx, IntoIter: Send>
         + Send
         + 'static;
     /// Converter that can be used to convert a [`ExecutableTxTuple::RawTx`] to a
@@ -101,7 +101,7 @@ where
     Tx: Clone + Send + Sync + 'static,
     Err: core::error::Error + Send + Sync + 'static,
     I: IntoParallelIterator<Item = RawTx, Iter: IndexedParallelIterator>
-        + IntoIterator<Item = RawTx>
+        + IntoIterator<Item = RawTx, IntoIter: Send>
         + Send
         + 'static,
     F: Fn(RawTx) -> Result<Tx, Err> + Send + Sync + 'static,
