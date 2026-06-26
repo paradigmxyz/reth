@@ -7,8 +7,6 @@ use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue, B256, U256};
 use auto_impl::auto_impl;
-#[cfg(feature = "std")]
-use reth_execution_types::ExecutableBytecode;
 use reth_execution_types::{hashed_post_state_from_state_source, ExecutionOutcome, ExecutionState};
 use reth_primitives_traits::Bytecode;
 use reth_storage_errors::provider::ProviderResult;
@@ -47,16 +45,6 @@ pub trait StateProvider:
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>>;
-
-    /// Get analyzed executable account code by its hash.
-    #[cfg(feature = "std")]
-    fn executable_bytecode_by_hash(
-        &self,
-        code_hash: &B256,
-    ) -> ProviderResult<Option<ExecutableBytecode>> {
-        self.bytecode_by_hash(code_hash)
-            .map(|code| code.map(|code| ExecutableBytecode::new_raw(code.original_bytes())))
-    }
 
     /// Get account code by its address.
     ///

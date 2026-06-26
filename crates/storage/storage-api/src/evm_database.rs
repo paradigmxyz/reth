@@ -83,7 +83,7 @@ where
     }
 
     fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Bytecode, Self::Error> {
-        Ok(self.0.executable_bytecode_by_hash(code_hash)?.unwrap_or_default())
+        Ok(self.0.bytecode_by_hash(code_hash)?.map(Into::into).unwrap_or_default())
     }
 
     fn get_storage(&mut self, address: &Address, key: &Word) -> Result<Word, Self::Error> {
@@ -152,7 +152,7 @@ impl Database for BorrowedEvmStateProviderDatabase {
     }
 
     fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Bytecode, Self::Error> {
-        Ok(self.provider().executable_bytecode_by_hash(code_hash)?.unwrap_or_default())
+        Ok(self.provider().bytecode_by_hash(code_hash)?.map(Into::into).unwrap_or_default())
     }
 
     fn get_storage(&mut self, address: &Address, key: &Word) -> Result<Word, Self::Error> {
@@ -284,7 +284,7 @@ impl AccountReader for ExecutionStateOverlayProvider<'_> {
 impl BytecodeReader for ExecutionStateOverlayProvider<'_> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<RethBytecode>> {
         if let Some(bytecode) = self.overlay.code.get(code_hash) {
-            return Ok(Some(RethBytecode::new_raw(bytecode.original_bytes())))
+            return Ok(Some((*bytecode).clone().into()))
         }
 
         self.base.bytecode_by_hash(code_hash)
@@ -399,14 +399,6 @@ impl StateProofProvider for ExecutionStateOverlayProvider<'_> {
 impl HashedPostStateProvider for ExecutionStateOverlayProvider<'_> {}
 
 impl StateProvider for ExecutionStateOverlayProvider<'_> {
-    fn executable_bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
-        if let Some(bytecode) = self.overlay.code.get(code_hash) {
-            return Ok(Some((*bytecode).clone()))
-        }
-
-        self.base.executable_bytecode_by_hash(code_hash)
-    }
-
     fn storage(&self, account: Address, storage_key: B256) -> ProviderResult<Option<U256>> {
         let slot = U256::from_be_bytes(storage_key.0);
         if let Some(value) =

@@ -162,9 +162,7 @@ impl<T> ExecutionOutcome<T> {
             }
         }
         for (code_hash, bytecode) in contracts_init {
-            accumulator
-                .bytecode(code_hash, &evm2::bytecode::Bytecode::new_raw(bytecode.original_bytes()))
-                .expect("infallible");
+            accumulator.bytecode(code_hash, &bytecode.into()).expect("infallible");
         }
 
         let block_reverts = reverts
@@ -292,7 +290,7 @@ impl<T> ExecutionOutcome<T> {
         self.state
             .code()
             .filter(|(hash, _)| **hash != alloy_consensus::constants::KECCAK_EMPTY)
-            .map(|(hash, bytecode)| (*hash, Bytecode::new_raw(bytecode.original_bytes())))
+            .map(|(hash, bytecode)| (*hash, bytecode.clone().into()))
     }
 
     /// Returns the number of changed accounts.

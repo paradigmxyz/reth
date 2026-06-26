@@ -155,9 +155,7 @@ pub fn execution_state_from_init(
         }
     }
     for (code_hash, bytecode) in contracts {
-        accumulator
-            .bytecode(code_hash, &ExecutableBytecode::new_raw(bytecode.original_bytes()))
-            .expect("infallible");
+        accumulator.bytecode(code_hash, &bytecode.into()).expect("infallible");
     }
     accumulator
 }

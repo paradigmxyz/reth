@@ -171,10 +171,7 @@ impl IndexedBlockState {
 
     /// Return bytecode if known.
     pub fn bytecode(&self, code_hash: &B256) -> Option<Bytecode> {
-        self.index()
-            .bytecode
-            .get(code_hash)
-            .map(|bytecode| Bytecode::new_raw(bytecode.original_bytes()))
+        self.index().bytecode.get(code_hash).cloned().map(Into::into)
     }
 
     /// Return analyzed executable bytecode if known.

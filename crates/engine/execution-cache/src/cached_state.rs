@@ -673,28 +673,6 @@ fn nonzero_storage_value(value: StorageValue) -> Option<StorageValue> {
 }
 
 impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
-    fn executable_bytecode_by_hash(
-        &self,
-        code_hash: &B256,
-    ) -> ProviderResult<Option<ExecutableBytecode>> {
-        match self.caches.get_or_try_insert_executable_code_with(*code_hash, || {
-            if let Some(code) = self.caches.0.code_cache.get(code_hash) {
-                return Ok(code.map(|code| ExecutableBytecode::new_raw(code.original_bytes())))
-            }
-
-            self.state_provider.executable_bytecode_by_hash(code_hash)
-        })? {
-            CachedStatus::NotCached(code) => {
-                self.record_code_miss();
-                Ok(code)
-            }
-            CachedStatus::Cached(code) => {
-                self.record_code_hit();
-                Ok(code)
-            }
-        }
-    }
-
     fn storage(
         &self,
         account: Address,
@@ -874,9 +852,6 @@ struct ExecutionCacheInner {
     /// Cache for contract bytecode, keyed by code hash.
     code_cache: FixedCache<B256, Option<Bytecode>, FbBuildHasher<32>>,
 
-    /// Cache for analyzed executable contract bytecode, keyed by code hash.
-    executable_code_cache: FixedCache<B256, Option<ExecutableBytecode>, FbBuildHasher<32>>,
-
     /// Flat storage cache: maps `(Address, StorageKey)` to storage value.
     storage_cache: FixedCache<(Address, StorageKey), StorageValue>,
 
@@ -934,7 +909,6 @@ impl ExecutionCache {
         Self(Arc::new(ExecutionCacheInner {
             code_cache: FixedCache::new(code_capacity, FbBuildHasher::<32>::default())
                 .with_stats(Some(Stats::new(code_stats.clone()))),
-            executable_code_cache: FixedCache::new(code_capacity, FbBuildHasher::<32>::default()),
             storage_cache: FixedCache::new(storage_capacity, DefaultHashBuilder::default())
                 .with_stats(Some(Stats::new(storage_stats.clone()))),
             account_cache: FixedCache::new(account_capacity, FbBuildHasher::<20>::default())
@@ -959,25 +933,6 @@ impl ExecutionCache {
     ) -> Result<CachedStatus<Option<Bytecode>>, E> {
         let mut miss = false;
         let result = self.0.code_cache.get_or_try_insert_with(hash, |_| {
-            miss = true;
-            f()
-        })?;
-
-        if miss {
-            Ok(CachedStatus::NotCached(result))
-        } else {
-            Ok(CachedStatus::Cached(result))
-        }
-    }
-
-    /// Gets analyzed executable code from cache, or inserts using the provided function.
-    pub fn get_or_try_insert_executable_code_with<E>(
-        &self,
-        hash: B256,
-        f: impl FnOnce() -> Result<Option<ExecutableBytecode>, E>,
-    ) -> Result<CachedStatus<Option<ExecutableBytecode>>, E> {
-        let mut miss = false;
-        let result = self.0.executable_code_cache.get_or_try_insert_with(hash, |_| {
             miss = true;
             f()
         })?;
@@ -1036,11 +991,6 @@ impl ExecutionCache {
     /// Insert code into cache.
     pub fn insert_code(&self, hash: B256, code: Option<Bytecode>) {
         self.0.code_cache.insert(hash, code);
-    }
-
-    /// Insert analyzed executable code into cache.
-    pub fn insert_executable_code(&self, hash: B256, code: Option<ExecutableBytecode>) {
-        self.0.executable_code_cache.insert(hash, code);
     }
 
     /// Insert account into cache.
@@ -1114,8 +1064,7 @@ impl ExecutionStateChangeSink for ExecutionCacheInsertSink<'_> {
             return Ok(())
         }
 
-        self.cache.insert_code(code_hash, Some(Bytecode::new_raw(bytecode.original_bytes())));
-        self.cache.insert_executable_code(code_hash, Some(bytecode.clone()));
+        self.cache.insert_code(code_hash, Some(bytecode.clone().into()));
         Ok(())
     }
 

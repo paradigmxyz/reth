@@ -262,7 +262,7 @@ impl ExecutionStateChangeSink for PlainStateSink {
         bytecode: &ExecutableBytecode,
     ) -> Result<(), Self::Error> {
         if code_hash != KECCAK_EMPTY {
-            self.contracts.push((code_hash, Bytecode::new_raw(bytecode.original_bytes())));
+            self.contracts.push((code_hash, bytecode.clone().into()));
         }
         Ok(())
     }
@@ -354,7 +354,7 @@ impl ExecutionStateChangeSink for PlainStateAndRevertsSink {
         bytecode: &ExecutableBytecode,
     ) -> Result<(), Self::Error> {
         if code_hash != KECCAK_EMPTY {
-            self.contracts.push((code_hash, Bytecode::new_raw(bytecode.original_bytes())));
+            self.contracts.push((code_hash, bytecode.clone().into()));
         }
         Ok(())
     }
@@ -2908,10 +2908,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             match &execution_outcome {
                 WriteStateInput::Single { outcome, .. } => {
                     self.write_bytecodes(
-                        outcome
-                            .state
-                            .code()
-                            .map(|(h, b)| (*h, Bytecode::new_raw(b.original_bytes()))),
+                        outcome.state.code().map(|(h, b)| (*h, b.clone().into())),
                     )?;
                 }
                 WriteStateInput::Multiple(outcome) => {
