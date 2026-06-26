@@ -150,6 +150,12 @@ impl ArenaTrieBuffers {
     }
 }
 
+/// Mutable accumulators updated while hashing or structurally changing trie nodes.
+struct RetainedNodeChanges<'a> {
+    updates: &'a mut Option<SparseTrieUpdates>,
+    changed_paths: &'a mut Option<HashSet<Nibbles>>,
+}
+
 /// A subtrie within the arena-based parallel sparse trie.
 ///
 /// Each subtrie owns its own arena, allowing parallel mutations across subtries.
@@ -406,8 +412,10 @@ impl ArenaSparseSubtrie {
                         key,
                         full_path,
                         find_result,
-                        &mut self.buffers.updates,
-                        &mut self.buffers.changed_paths,
+                        RetainedNodeChanges {
+                            updates: &mut self.buffers.updates,
+                            changed_paths: &mut self.buffers.changed_paths,
+                        },
                     );
                     self.num_leaves = (self.num_leaves as i64 + deltas.num_leaves_delta) as u64;
                     self.num_dirty_leaves =
@@ -476,12 +484,8 @@ impl ArenaSparseSubtrie {
         ArenaParallelSparseTrie::update_cached_rlp(
             &mut self.arena,
             self.root,
-            &mut self.buffers.cursor,
-            &mut self.buffers.rlp_buf,
-            &mut self.buffers.rlp_node_buf,
             self.path,
-            &mut self.buffers.updates,
-            &mut self.buffers.changed_paths,
+            &mut self.buffers,
         );
         self.num_dirty_leaves = 0;
         #[cfg(debug_assertions)]
@@ -1209,13 +1213,15 @@ impl ArenaParallelSparseTrie {
     fn update_cached_rlp(
         arena: &mut NodeArena,
         root: Index,
-        cursor: &mut ArenaCursor,
-        rlp_buf: &mut Vec<u8>,
-        rlp_node_buf: &mut Vec<RlpNode>,
         base_path: Nibbles,
-        updates: &mut Option<SparseTrieUpdates>,
-        changed_paths: &mut Option<HashSet<Nibbles>>,
+        buffers: &mut ArenaTrieBuffers,
     ) -> RlpNode {
+        let cursor = &mut buffers.cursor;
+        let rlp_buf = &mut buffers.rlp_buf;
+        let rlp_node_buf = &mut buffers.rlp_node_buf;
+        let updates = &mut buffers.updates;
+        let changed_paths = &mut buffers.changed_paths;
+
         rlp_node_buf.clear();
 
         // Step 1: Handle trivial roots that don't need the stack-based walk.
@@ -1297,12 +1303,12 @@ impl ArenaParallelSparseTrie {
                         let child_idx = *child_idx;
                         match &arena[child_idx] {
                             ArenaSparseNode::Leaf { .. } => {
-                                let mut child_path = branch_logical_path;
-                                child_path.push(nibble);
                                 Self::encode_leaf(arena, child_idx, rlp_buf, rlp_node_buf);
                                 if arena[child_idx].state_mut().take_cached_was_dirty() {
                                     child_subtree_emitted_changed_path = true;
                                     if let Some(changed_paths) = changed_paths.as_mut() {
+                                        let mut child_path = branch_logical_path;
+                                        child_path.push(nibble);
                                         changed_paths.insert(child_path);
                                     }
                                 }
@@ -1403,6 +1409,7 @@ impl ArenaParallelSparseTrie {
             panic!("root must be cached after update_cached_rlp");
         };
         let rlp_node = rlp_node.clone();
+        // The root has no parent to consume this one-shot marker, so clear it before returning.
         arena[root].state_mut().take_cached_was_dirty();
         rlp_node
     }
@@ -1781,8 +1788,7 @@ impl ArenaParallelSparseTrie {
         key: B256,
         full_path: &Nibbles,
         find_result: SeekResult,
-        updates: &mut Option<SparseTrieUpdates>,
-        changed_paths: &mut Option<HashSet<Nibbles>>,
+        changes: RetainedNodeChanges<'_>,
     ) -> (RemoveLeafResult, SubtrieCounterDeltas) {
         match find_result {
             SeekResult::Blinded | SeekResult::RevealedSubtrie => {
@@ -1837,7 +1843,7 @@ impl ArenaParallelSparseTrie {
                 let removed_was_dirty =
                     matches!(arena[head_idx].state_ref(), Some(ArenaSparseNodeState::Dirty));
 
-                if let Some(changed_paths) = changed_paths.as_mut() {
+                if let Some(changed_paths) = changes.changed_paths.as_mut() {
                     changed_paths.insert(head_path);
                 }
 
@@ -1872,7 +1878,13 @@ impl ArenaParallelSparseTrie {
                 // If the branch now has only one child, collapse it. The blinded sibling
                 // case was already handled above before any mutations.
                 let collapse_dirtied_leaf = if parent_branch.state_mask.count_bits() == 1 {
-                    Self::collapse_branch(arena, cursor, root, updates, changed_paths)
+                    Self::collapse_branch(
+                        arena,
+                        cursor,
+                        root,
+                        changes.updates,
+                        changes.changed_paths,
+                    )
                 } else {
                     false
                 };
@@ -2414,7 +2426,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn set_changed_paths(&mut self, retain_changed_paths: bool) {
-        ArenaParallelSparseTrie::set_changed_paths(self, retain_changed_paths);
+        Self::set_changed_paths(self, retain_changed_paths);
     }
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all, fields(num_nodes = nodes.len()))]
@@ -2567,12 +2579,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
         let rlp_node = Self::update_cached_rlp(
             &mut self.upper_arena,
             self.root,
-            &mut self.buffers.cursor,
-            &mut self.buffers.rlp_buf,
-            &mut self.buffers.rlp_node_buf,
             Nibbles::default(),
-            &mut self.buffers.updates,
-            &mut self.buffers.changed_paths,
+            &mut self.buffers,
         );
 
         rlp_node.as_hash().expect("root RlpNode must be a hash")
@@ -2707,7 +2715,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn take_changed_paths(&mut self) -> HashSet<Nibbles> {
-        ArenaParallelSparseTrie::take_changed_paths(self)
+        Self::take_changed_paths(self)
     }
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
@@ -3089,8 +3097,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             key,
                             full_path,
                             find_result,
-                            &mut self.buffers.updates,
-                            &mut self.buffers.changed_paths,
+                            RetainedNodeChanges {
+                                updates: &mut self.buffers.updates,
+                                changed_paths: &mut self.buffers.changed_paths,
+                            },
                         );
                         match result {
                             RemoveLeafResult::NeedsProof { key, proof_key, min_len } => {
