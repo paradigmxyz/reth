@@ -16,11 +16,13 @@ use crate::{
     invalid_block_hook::InvalidBlockHookExt, ConfigureEngineEvm, ConsensusEngineEvent,
     ConsensusEngineHandle,
 };
+use alloy_consensus::BlockHeader;
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
+use futures::StreamExt;
 use jsonrpsee::RpcModule;
 use parking_lot::Mutex;
-use reth_chain_state::CanonStateSubscriptions;
+use reth_chain_state::{CanonStateNotification, CanonStateSubscriptions};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
@@ -43,7 +45,9 @@ use reth_rpc_builder::{
     RpcModuleBuilder, RpcRegistryInner, RpcServerConfig, RpcServerHandle, TransportRpcModules,
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
-use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
+use reth_rpc_eth_types::{
+    bal::build_revm_bal_for_block, cache::cache_new_blocks_task, EthConfig, EthStateCache,
+};
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};
 use std::{
@@ -1115,6 +1119,26 @@ where
             cache_new_blocks_task(c, new_canonical_blocks).await;
         });
 
+        if config.rpc.eth_config().cache.prewarm_bals {
+            let new_canonical_blocks = node.provider().canonical_state_stream();
+            let provider = node.provider().clone();
+            let chain_spec = provider.chain_spec();
+            let evm_config = node.evm_config().clone();
+            let executor = node.task_executor().clone();
+            let c = cache.clone();
+            node.task_executor().spawn_task(async move {
+                prewarm_new_block_bals_task(
+                    provider,
+                    chain_spec,
+                    evm_config,
+                    executor,
+                    c,
+                    new_canonical_blocks,
+                )
+                .await;
+            });
+        }
+
         let eth_config = config.rpc.eth_config().max_batch_size(config.txpool.max_batch_size());
         let ctx = EthApiCtx {
             components: &node,
@@ -1253,6 +1277,158 @@ where
 
     async fn launch_add_ons(self, ctx: AddOnsContext<'_, N>) -> eyre::Result<Self::Handle> {
         self.launch_add_ons_with(ctx, |_| Ok(())).await
+    }
+}
+
+async fn prewarm_new_block_bals_task<Provider, Evm, N, St>(
+    provider: Provider,
+    chain_spec: Arc<Provider::ChainSpec>,
+    evm_config: Evm,
+    executor: reth_tasks::Runtime,
+    eth_state_cache: EthStateCache<N>,
+    mut events: St,
+) where
+    Provider: reth_chainspec::ChainSpecProvider<ChainSpec: EthereumHardforks>
+        + reth_provider::StateProviderFactory
+        + reth_provider::NodePrimitivesProvider<Primitives = N>
+        + reth_provider::BalProvider
+        + reth_provider::BlockHashReader
+        + Clone
+        + 'static,
+    Evm: reth_evm::ConfigureEvm<Primitives = N> + 'static,
+    N: reth_node_api::NodePrimitives,
+    St: futures::Stream<Item = CanonStateNotification<N>> + Unpin + 'static,
+{
+    while let Some(event) = events.next().await {
+        let committed = event.committed();
+        let mut store_entries = Vec::new();
+        let mut cached_bals = Vec::new();
+
+        for block in committed.blocks_iter() {
+            let block_hash = block.hash();
+            let block_number = block.number();
+
+            if !should_prewarm_bal(chain_spec.as_ref(), block.header()) {
+                continue
+            }
+
+            match eth_state_cache.get_bal(block_hash).await {
+                Ok(Some(_)) => continue,
+                Ok(None) => {}
+                Err(err) => {
+                    debug!(
+                        target: "reth::cli",
+                        %err,
+                        ?block_hash,
+                        block_number,
+                        "Failed to read cached BAL before prewarm",
+                    );
+                }
+            }
+
+            let provider_for_replay = provider.clone();
+            let evm_config = evm_config.clone();
+            let block = block.clone();
+            match executor
+                .spawn_blocking(move || {
+                    build_revm_bal_for_block(&provider_for_replay, &evm_config, &block)
+                })
+                .await
+            {
+                Ok(Ok(bal)) => {
+                    let raw = bal.as_raw().clone();
+                    let sealed = alloy_primitives::Sealed::new_unchecked(raw, bal.hash());
+                    store_entries
+                        .push((alloy_eips::NumHash::new(block_number, block_hash), sealed));
+                    cached_bals.push((block_hash, bal));
+                }
+                Ok(Err(err)) => {
+                    debug!(
+                        target: "reth::cli",
+                        %err,
+                        ?block_hash,
+                        block_number,
+                        "Failed to prewarm BAL for canonical block",
+                    );
+                }
+                Err(err) => {
+                    debug!(
+                        target: "reth::cli",
+                        %err,
+                        ?block_hash,
+                        block_number,
+                        "BAL prewarm task failed",
+                    );
+                }
+            }
+        }
+
+        if store_entries.is_empty() {
+            continue
+        }
+
+        store_entries.retain(|(num_hash, _)| match provider.block_hash(num_hash.number) {
+            Ok(Some(canonical_hash)) => canonical_hash == num_hash.hash,
+            Ok(None) => false,
+            Err(err) => {
+                debug!(
+                    target: "reth::cli",
+                    %err,
+                    block_number = num_hash.number,
+                    block_hash = ?num_hash.hash,
+                    "Failed to verify canonical hash before storing prewarmed BAL",
+                );
+                false
+            }
+        });
+        cached_bals.retain(|(block_hash, _)| {
+            store_entries.iter().any(|(num_hash, _)| num_hash.hash == *block_hash)
+        });
+
+        if store_entries.is_empty() {
+            continue
+        }
+
+        let count = store_entries.len();
+        if let Err(err) = provider.bal_store().insert_many(store_entries) {
+            debug!(
+                target: "reth::cli",
+                %err,
+                count,
+                "Failed to store prewarmed BALs",
+            );
+            continue
+        }
+
+        for (block_hash, bal) in cached_bals {
+            eth_state_cache.insert_bal(block_hash, bal);
+        }
+    }
+}
+
+fn should_prewarm_bal<ChainSpec, Header>(chain_spec: &ChainSpec, header: &Header) -> bool
+where
+    ChainSpec: EthereumHardforks,
+    Header: BlockHeader,
+{
+    chain_spec.is_amsterdam_active_at_timestamp(header.timestamp())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::Header;
+    use reth_chainspec::ChainSpecBuilder;
+
+    #[test]
+    fn should_prewarm_bal_requires_amsterdam_activation() {
+        let chain_spec = ChainSpecBuilder::mainnet().with_amsterdam_at(10).build();
+
+        let pre_amsterdam = Header { timestamp: 9, ..Default::default() };
+        assert!(!should_prewarm_bal(&chain_spec, &pre_amsterdam));
+
+        let amsterdam = Header { timestamp: 10, ..Default::default() };
+        assert!(should_prewarm_bal(&chain_spec, &amsterdam));
     }
 }
 

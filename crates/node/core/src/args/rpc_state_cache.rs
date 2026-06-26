@@ -37,6 +37,10 @@ pub struct RpcStateCacheArgs {
     )]
     pub max_bals: u32,
 
+    /// Fetch and prewarm block access lists for new canonical blocks in the RPC cache.
+    #[arg(long = "rpc-cache.prewarm-bals", default_value_t = false)]
+    pub prewarm_bals: bool,
+
     /// Max number of concurrent database requests.
     #[arg(
         long = "rpc-cache.max-concurrent-db-requests",
@@ -59,6 +63,7 @@ impl RpcStateCacheArgs {
         self.max_receipts = 0;
         self.max_headers = 0;
         self.max_bals = 0;
+        self.prewarm_bals = false;
     }
 }
 
@@ -69,6 +74,7 @@ impl Default for RpcStateCacheArgs {
             max_receipts: DEFAULT_RECEIPT_CACHE_MAX_LEN,
             max_headers: DEFAULT_HEADER_CACHE_MAX_LEN,
             max_bals: DEFAULT_BAL_CACHE_MAX_LEN,
+            prewarm_bals: false,
             max_concurrent_db_requests: DEFAULT_CONCURRENT_DB_REQUESTS,
             max_cached_tx_hashes: DEFAULT_MAX_CACHED_TX_HASHES,
         }
