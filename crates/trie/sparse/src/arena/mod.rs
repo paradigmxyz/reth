@@ -669,10 +669,6 @@ pub struct ArenaParallelSparseTrie {
     upper_arena: NodeArena,
     /// The root node of the upper trie.
     root: Index,
-    /// Optional tracking of trie updates for database persistence.
-    updates: Option<SparseTrieUpdates>,
-    /// Optional tracking of changed node base paths during hashing.
-    changed_paths: Option<HashSet<Nibbles>>,
     /// Reusable buffers for traversal, RLP encoding, and update actions.
     buffers: ArenaTrieBuffers,
     /// Thresholds controlling when parallelism is enabled for different operations.
@@ -694,7 +690,6 @@ impl ArenaParallelSparseTrie {
 
     /// Set whether changed node base paths should be retained during hashing.
     pub fn set_changed_paths(&mut self, retain_changed_paths: bool) {
-        self.changed_paths = retain_changed_paths.then(HashSet::default);
         if retain_changed_paths {
             self.buffers.changed_paths.get_or_insert_with(HashSet::default).clear();
         } else {
@@ -721,11 +716,9 @@ impl ArenaParallelSparseTrie {
 
     /// Takes all retained changed node base paths, preserving allocation capacity for reuse.
     pub fn take_changed_paths(&mut self) -> HashSet<Nibbles> {
-        Self::merge_subtrie_changed_paths(&mut self.changed_paths, &mut self.buffers.changed_paths);
-
-        match self.changed_paths.take() {
+        match self.buffers.changed_paths.take() {
             Some(changed_paths) => {
-                self.changed_paths = Some(HashSet::with_capacity_and_hasher(
+                self.buffers.changed_paths = Some(HashSet::with_capacity_and_hasher(
                     changed_paths.len(),
                     Default::default(),
                 ));
@@ -749,7 +742,7 @@ impl ArenaParallelSparseTrie {
         fn state_to_record(state: &ArenaSparseNodeState) -> NodeStateRecord {
             match state {
                 ArenaSparseNodeState::Revealed => NodeStateRecord::Revealed,
-                ArenaSparseNodeState::Cached { rlp_node } => {
+                ArenaSparseNodeState::Cached { rlp_node, .. } => {
                     NodeStateRecord::Cached { rlp_node: hex::encode(rlp_node.as_ref()) }
                 }
                 ArenaSparseNodeState::Dirty => NodeStateRecord::Dirty,
@@ -907,8 +900,10 @@ impl ArenaParallelSparseTrie {
         }
 
         trace!(target: TRACE_TARGET, ?child_path, "Wrapping child into subtrie");
-        let mut subtrie =
-            ArenaSparseSubtrie::new(self.updates.is_some(), self.changed_paths.is_some());
+        let mut subtrie = ArenaSparseSubtrie::new(
+            self.buffers.updates.is_some(),
+            self.buffers.changed_paths.is_some(),
+        );
         subtrie.path = *child_path;
         let mut root_node =
             mem::replace(&mut self.upper_arena[child_idx], ArenaSparseNode::TakenSubtrie);
@@ -1271,12 +1266,18 @@ impl ArenaParallelSparseTrie {
         match &arena[root] {
             ArenaSparseNode::EmptyRoot => return RlpNode::word_rlp(&EMPTY_ROOT_HASH),
             ArenaSparseNode::Leaf { .. } => {
-                Self::encode_leaf(arena, root, rlp_buf, rlp_node_buf, base_path, changed_paths);
+                Self::encode_leaf(arena, root, rlp_buf, rlp_node_buf);
+                let was_dirty = arena[root].state_mut().take_cached_was_dirty();
+                if was_dirty && let Some(changed_paths) = changed_paths.as_mut() {
+                    changed_paths.insert(base_path);
+                }
                 return rlp_node_buf.pop().expect("encode_leaf must push an RlpNode");
             }
             ArenaSparseNode::Branch(b) => {
                 if let ArenaSparseNodeState::Cached { rlp_node, .. } = &b.state {
-                    return rlp_node.clone();
+                    let rlp_node = rlp_node.clone();
+                    arena[root].state_mut().take_cached_was_dirty();
+                    return rlp_node;
                 }
             }
             ArenaSparseNode::Subtrie(_) | ArenaSparseNode::TakenSubtrie => {
@@ -1328,6 +1329,7 @@ impl ArenaParallelSparseTrie {
                 path.extend(&branch.short_key);
                 path
             };
+            let mut child_subtree_emitted_changed_path = false;
             for (child_idx, nibble) in BranchChildIter::new(state_mask) {
                 match &arena[head_idx].branch_ref().children[child_idx] {
                     ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
@@ -1339,19 +1341,12 @@ impl ArenaParallelSparseTrie {
                             ArenaSparseNode::Leaf { .. } => {
                                 let mut child_path = branch_logical_path;
                                 child_path.push(nibble);
-                                if Self::encode_leaf(
-                                    arena,
-                                    child_idx,
-                                    rlp_buf,
-                                    rlp_node_buf,
-                                    child_path,
-                                    changed_paths,
-                                ) {
-                                    cursor
-                                        .stack
-                                        .last_mut()
-                                        .expect("cursor is non-empty")
-                                        .subtree_emitted_changed_path = true;
+                                Self::encode_leaf(arena, child_idx, rlp_buf, rlp_node_buf);
+                                if arena[child_idx].state_mut().take_cached_was_dirty() {
+                                    child_subtree_emitted_changed_path = true;
+                                    if let Some(changed_paths) = changed_paths.as_mut() {
+                                        changed_paths.insert(child_path);
+                                    }
                                 }
                             }
                             ArenaSparseNode::Branch(child_b) => {
@@ -1359,7 +1354,11 @@ impl ArenaParallelSparseTrie {
                                 else {
                                     panic!("child branch must be cached after DFS");
                                 };
-                                rlp_node_buf.push(rlp_node.clone());
+                                let rlp_node = rlp_node.clone();
+                                if arena[child_idx].state_mut().take_cached_was_dirty() {
+                                    child_subtree_emitted_changed_path = true;
+                                }
+                                rlp_node_buf.push(rlp_node);
                             }
                             ArenaSparseNode::Subtrie(subtrie) => {
                                 let subtrie_root = &subtrie.arena[subtrie.root];
@@ -1413,28 +1412,14 @@ impl ArenaParallelSparseTrie {
             );
 
             let branch = arena[head_idx].branch_mut();
-            branch.state = ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone() };
+            branch.state = ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), was_dirty };
             branch.branch_masks = new_branch_masks;
 
-            let subtree_emitted_changed_path =
-                cursor.stack.last().expect("cursor is non-empty").subtree_emitted_changed_path;
-
-            let branch_emitted_changed_path = if was_dirty && !subtree_emitted_changed_path {
-                if let Some(changed_paths) = changed_paths.as_mut() {
-                    changed_paths.insert(head_path);
-                    true
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
-
-            if subtree_emitted_changed_path || branch_emitted_changed_path {
-                let stack_len = cursor.stack.len();
-                if stack_len >= 2 {
-                    cursor.stack[stack_len - 2].subtree_emitted_changed_path = true;
-                }
+            if was_dirty &&
+                !child_subtree_emitted_changed_path &&
+                let Some(changed_paths) = changed_paths.as_mut()
+            {
+                changed_paths.insert(head_path);
             }
 
             // Record trie updates for dirty branches only.
@@ -1459,7 +1444,9 @@ impl ArenaParallelSparseTrie {
         let ArenaSparseNodeState::Cached { rlp_node, .. } = &arena[root].branch_ref().state else {
             panic!("root must be cached after update_cached_rlp");
         };
-        rlp_node.clone()
+        let rlp_node = rlp_node.clone();
+        arena[root].state_mut().take_cached_was_dirty();
+        rlp_node
     }
 
     /// Immutable traversal to find a leaf value at `full_path` starting from `root` in `arena`.
@@ -1591,9 +1578,7 @@ impl ArenaParallelSparseTrie {
         idx: Index,
         rlp_buf: &mut Vec<u8>,
         rlp_node_buf: &mut Vec<RlpNode>,
-        path: Nibbles,
-        changed_paths: &mut Option<HashSet<Nibbles>>,
-    ) -> bool {
+    ) {
         let (key, value, state) = match &arena[idx] {
             ArenaSparseNode::Leaf { key, value, state } => (key, value, state),
             _ => unreachable!("encode_leaf called on non-Leaf node"),
@@ -1601,26 +1586,17 @@ impl ArenaParallelSparseTrie {
 
         if let ArenaSparseNodeState::Cached { rlp_node, .. } = state {
             rlp_node_buf.push(rlp_node.clone());
-            return false;
+            return;
         }
 
-        let emitted_changed_path = if matches!(state, ArenaSparseNodeState::Dirty) {
-            if let Some(changed_paths) = changed_paths.as_mut() {
-                changed_paths.insert(path);
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        };
+        let was_dirty = matches!(state, ArenaSparseNodeState::Dirty);
 
         rlp_buf.clear();
         let rlp_node = LeafNodeRef { key, value }.rlp(rlp_buf);
 
-        *arena[idx].state_mut() = ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone() };
+        *arena[idx].state_mut() =
+            ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), was_dirty };
         rlp_node_buf.push(rlp_node);
-        emitted_changed_path
     }
 
     /// Creates a new leaf and a new branch that splits an existing child from the new leaf at
@@ -2317,7 +2293,7 @@ impl ArenaParallelSparseTrie {
         let mut arena_node = ArenaSparseNode::from_proof_node(proof_node);
 
         let state = arena_node.state_mut();
-        *state = ArenaSparseNodeState::Cached { rlp_node: cached_rlp };
+        *state = ArenaSparseNodeState::Cached { rlp_node: cached_rlp, was_dirty: false };
 
         let child_idx = arena.insert(arena_node);
         arena[head_idx].branch_mut().children[dense_child_idx] =
@@ -2383,8 +2359,6 @@ impl Default for ArenaParallelSparseTrie {
         Self {
             upper_arena,
             root,
-            updates: None,
-            changed_paths: None,
             buffers: ArenaTrieBuffers::default(),
             parallelism_thresholds: ArenaParallelismThresholds::default(),
             #[cfg(feature = "trie-debug")]
@@ -2473,7 +2447,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn set_updates(&mut self, retain_updates: bool) {
-        self.updates = retain_updates.then(Default::default);
         if retain_updates {
             self.buffers.updates.get_or_insert_with(SparseTrieUpdates::default).clear();
         } else {
@@ -2632,11 +2605,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         self.update_subtrie_hashes();
 
-        // Merge buffered subtrie updates into self.updates before hashing the upper trie,
-        // which will add its own updates directly into self.updates.
-        Self::merge_subtrie_updates(&mut self.updates, &mut self.buffers.updates);
-        Self::merge_subtrie_changed_paths(&mut self.changed_paths, &mut self.buffers.changed_paths);
-
         let rlp_node = Self::update_cached_rlp(
             &mut self.upper_arena,
             self.root,
@@ -2644,8 +2612,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
             &mut self.buffers.rlp_buf,
             &mut self.buffers.rlp_node_buf,
             Nibbles::default(),
-            &mut self.updates,
-            &mut self.changed_paths,
+            &mut self.buffers.updates,
+            &mut self.buffers.changed_paths,
         );
 
         rlp_node.as_hash().expect("root RlpNode must be a hash")
@@ -2760,13 +2728,16 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates> {
-        self.updates.as_ref().map_or(Cow::Owned(SparseTrieUpdates::default()), Cow::Borrowed)
+        self.buffers
+            .updates
+            .as_ref()
+            .map_or(Cow::Owned(SparseTrieUpdates::default()), Cow::Borrowed)
     }
 
     fn take_updates(&mut self) -> SparseTrieUpdates {
-        match self.updates.take() {
+        match self.buffers.updates.take() {
             Some(updates) => {
-                self.updates = Some(SparseTrieUpdates::with_capacity(
+                self.buffers.updates = Some(SparseTrieUpdates::with_capacity(
                     updates.updated_nodes.len(),
                     updates.removed_nodes.len(),
                 ));
@@ -2784,7 +2755,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
     fn wipe(&mut self) {
         trace!(target: TRACE_TARGET, "Wiping arena trie");
         self.clear();
-        self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
+        self.buffers.updates = self.buffers.updates.is_some().then(SparseTrieUpdates::wiped);
     }
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
@@ -2794,12 +2765,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         self.upper_arena = SlotMap::new();
         self.root = self.upper_arena.insert(ArenaSparseNode::EmptyRoot);
-        if let Some(updates) = self.updates.as_mut() {
-            updates.clear()
-        }
-        if let Some(changed_paths) = self.changed_paths.as_mut() {
-            changed_paths.clear();
-        }
         self.buffers.clear();
     }
 
@@ -3424,72 +3389,6 @@ mod tests {
     }
 
     #[test]
-    fn changed_paths_record_base_paths_for_branches_and_leaves() {
-        let mut trie = ArenaParallelSparseTrie::default().with_changed_paths(true);
-
-        let leaf_base_path = Nibbles::from_nibbles([0x01, 0x02, 0x03]);
-        let leaf_logical_path = Nibbles::from_nibbles([0x01, 0x02, 0x03, 0x04]);
-        let branch_logical_path = Nibbles::from_nibbles([0x01, 0x02]);
-
-        let leaf_idx = trie.upper_arena.insert(ArenaSparseNode::Leaf {
-            state: ArenaSparseNodeState::Dirty,
-            value: vec![0x01; 64],
-            key: Nibbles::from_nibbles([0x04]),
-        });
-        trie.upper_arena[trie.root] = ArenaSparseNode::Branch(ArenaSparseNodeBranch {
-            state: ArenaSparseNodeState::Dirty,
-            children: smallvec![ArenaSparseNodeBranchChild::Revealed(leaf_idx)],
-            state_mask: TrieMask::new(1 << 0x03),
-            short_key: branch_logical_path,
-            branch_masks: Default::default(),
-        });
-
-        let _ = trie.root();
-
-        let changed_paths = trie.take_changed_paths();
-        assert!(!changed_paths.contains(&Nibbles::default()));
-        assert!(changed_paths.contains(&leaf_base_path));
-        assert!(!changed_paths.contains(&branch_logical_path));
-        assert!(!changed_paths.contains(&leaf_logical_path));
-    }
-
-    #[test]
-    fn changed_paths_skip_dirty_ancestor_branch_when_descendant_changed() {
-        let mut trie = ArenaParallelSparseTrie::default().with_changed_paths(true);
-
-        let ancestor_branch_base_path = Nibbles::from_nibbles([0x0f]);
-        let leaf_base_path = Nibbles::from_nibbles([0x0f, 0x0f]);
-
-        let leaf_idx = trie.upper_arena.insert(ArenaSparseNode::Leaf {
-            state: ArenaSparseNodeState::Dirty,
-            value: vec![0x01; 64],
-            key: Nibbles::from_nibbles([0x01]),
-        });
-        let ancestor_branch_idx =
-            trie.upper_arena.insert(ArenaSparseNode::Branch(ArenaSparseNodeBranch {
-                state: ArenaSparseNodeState::Dirty,
-                children: smallvec![ArenaSparseNodeBranchChild::Revealed(leaf_idx)],
-                state_mask: TrieMask::new(1 << 0x0f),
-                short_key: Nibbles::default(),
-                branch_masks: Default::default(),
-            }));
-        trie.upper_arena[trie.root] = ArenaSparseNode::Branch(ArenaSparseNodeBranch {
-            state: ArenaSparseNodeState::Dirty,
-            children: smallvec![ArenaSparseNodeBranchChild::Revealed(ancestor_branch_idx)],
-            state_mask: TrieMask::new(1 << 0x0f),
-            short_key: Nibbles::default(),
-            branch_masks: Default::default(),
-        });
-
-        let _ = trie.root();
-
-        let changed_paths = trie.take_changed_paths();
-        assert!(changed_paths.contains(&leaf_base_path));
-        assert!(!changed_paths.contains(&ancestor_branch_base_path));
-        assert!(!changed_paths.contains(&Nibbles::default()));
-    }
-
-    #[test]
     fn prune_retains_upper_node_by_base_path_not_logical_path() {
         let mut trie = ArenaParallelSparseTrie::default();
 
@@ -3583,34 +3482,6 @@ mod tests {
             panic!("retained base-path child should remain revealed")
         };
         assert!(matches!(&subtrie.arena[child_idx], ArenaSparseNode::Branch(_)));
-    }
-
-    #[test]
-    fn changed_paths_record_removed_subtrie_leaf_and_collapsed_parent_branch() {
-        fn key_with_prefix(byte: u8) -> B256 {
-            let mut key = B256::ZERO;
-            key.0[0] = byte;
-            key
-        }
-
-        let mut trie = ArenaParallelSparseTrie::default().with_changed_paths(true);
-        let removed_key = key_with_prefix(0x12);
-        let retained_key = key_with_prefix(0x13);
-
-        let mut updates = B256Map::default();
-        updates.insert(removed_key, LeafUpdate::Changed(vec![0x01]));
-        updates.insert(retained_key, LeafUpdate::Changed(vec![0x02]));
-        trie.update_leaves(&mut updates, |_, _| {}).expect("insertion should succeed");
-
-        assert!(trie.take_changed_paths().is_empty());
-
-        let mut removals = B256Map::default();
-        removals.insert(removed_key, LeafUpdate::Changed(Vec::new()));
-        trie.update_leaves(&mut removals, |_, _| {}).expect("removal should succeed");
-
-        let changed_paths = trie.take_changed_paths();
-        assert!(changed_paths.contains(&Nibbles::from_nibbles([0x01, 0x02])));
-        assert!(changed_paths.contains(&Nibbles::default()));
     }
 
     use proptest::prelude::*;

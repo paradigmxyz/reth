@@ -179,6 +179,8 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
 
     /// Consumes and returns the currently accumulated changed node base paths.
     ///
+    /// Ancestor paths may be excluded when a descendant path is already present.
+    ///
     /// Returns an empty set if changed paths weren't being tracked.
     fn take_changed_paths(&mut self) -> HashSet<Nibbles>;
 
