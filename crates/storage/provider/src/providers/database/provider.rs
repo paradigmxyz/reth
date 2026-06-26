@@ -3170,10 +3170,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
     /// Returns the number of entries modified.
     fn write_storage_trie_updates_sorted<'a>(
         &self,
-        storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdatesSorted)>,
+        storage_tries_iter: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdatesSorted)>,
     ) -> ProviderResult<usize> {
         let mut num_entries = 0;
-        let mut storage_tries = storage_tries.collect::<Vec<_>>();
+        let (lower, upper) = storage_tries_iter.size_hint();
+        let mut storage_tries = Vec::with_capacity(upper.unwrap_or(lower));
+        storage_tries.extend(storage_tries_iter);
+        if storage_tries.is_empty() {
+            return Ok(0)
+        }
         storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
         reth_trie_db::with_adapter!(self, |A| {
             Self::write_storage_tries::<A>(self.tx_ref(), storage_tries, &mut num_entries)?;
