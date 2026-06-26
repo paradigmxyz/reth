@@ -858,7 +858,9 @@ impl PendingTargets {
 
     /// Takes the pending targets, replacing with empty defaults.
     fn take(&mut self) -> (MultiProofTargetsV2, usize) {
-        (std::mem::take(&mut self.targets), std::mem::take(&mut self.len))
+        let len = self.len;
+        self.len = 0;
+        (std::mem::take(&mut self.targets), len)
     }
 
     /// Adds a target to the account targets.
