@@ -45,6 +45,7 @@ impl Environment {
             sync_bytes: None,
             sync_period: None,
             rp_augment_limit: None,
+            prefault_write: None,
             loose_limit: None,
             dp_reserve_limit: None,
             txn_dp_limit: None,
@@ -613,6 +614,7 @@ pub struct EnvironmentBuilder {
     sync_bytes: Option<u64>,
     sync_period: Option<u64>,
     rp_augment_limit: Option<u64>,
+    prefault_write: Option<u64>,
     loose_limit: Option<u64>,
     dp_reserve_limit: Option<u64>,
     txn_dp_limit: Option<u64>,
@@ -686,6 +688,7 @@ impl EnvironmentBuilder {
                 for (opt, v) in [
                     (ffi::MDBX_opt_max_db, self.max_dbs),
                     (ffi::MDBX_opt_rp_augment_limit, self.rp_augment_limit),
+                    (ffi::MDBX_opt_prefault_write_enable, self.prefault_write),
                     (ffi::MDBX_opt_loose_limit, self.loose_limit),
                     (ffi::MDBX_opt_dp_reserve_limit, self.dp_reserve_limit),
                     (ffi::MDBX_opt_txn_dp_limit, self.txn_dp_limit),
@@ -845,6 +848,13 @@ impl EnvironmentBuilder {
 
     pub const fn set_rp_augment_limit(&mut self, v: u64) -> &mut Self {
         self.rp_augment_limit = Some(v);
+        self
+    }
+
+    /// Sets whether MDBX should prefault allocated/reclaimed writemap pages by writing through the
+    /// file handle before touching them through the mmap.
+    pub const fn set_prefault_write_enable(&mut self, enabled: bool) -> &mut Self {
+        self.prefault_write = Some(enabled as u64);
         self
     }
 
@@ -1026,5 +1036,15 @@ mod tests {
 
         // Expect the HSR to be called
         assert!(CALLED.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn test_prefault_write_option_can_be_configured() {
+        let tempdir = tempfile::tempdir().unwrap();
+        Environment::builder()
+            .write_map()
+            .set_prefault_write_enable(false)
+            .open(tempdir.path())
+            .unwrap();
     }
 }
