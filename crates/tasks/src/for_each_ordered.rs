@@ -124,7 +124,7 @@ where
         // Producer: compute items in parallel and write them into their slots.
         s.spawn(|_| {
             let res = catch_unwind(AssertUnwindSafe(|| {
-                iter.enumerate().by_exponential_blocks().for_each(|(i, item)| {
+                iter.enumerate().by_uniform_blocks(64).for_each(|(i, item)| {
                     shared.write(i, item);
                 });
             }));
