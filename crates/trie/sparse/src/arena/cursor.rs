@@ -60,7 +60,7 @@ pub(super) enum NextResult {
 /// reference, so the caller retains full ownership of the arena between calls.
 #[derive(Debug, Default, Clone)]
 pub(super) struct ArenaCursor {
-    pub(super) stack: Vec<ArenaCursorStackEntry>,
+    stack: Vec<ArenaCursorStackEntry>,
     /// Whether the head entry should be popped at the start of the next [`Self::next`] call.
     /// Set when `next` returns [`NextResult::NonBranch`] or [`NextResult::Branch`].
     needs_pop: bool,
