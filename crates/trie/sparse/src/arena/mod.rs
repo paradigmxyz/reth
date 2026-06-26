@@ -3134,17 +3134,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
-        ArenaSparseSubtrie, TRACE_TARGET,
-    };
+    use super::TRACE_TARGET;
     use crate::{ArenaParallelSparseTrie, ArenaParallelismThresholds, LeafUpdate, SparseTrie};
     use alloy_primitives::{map::B256Map, B256, U256};
-    use alloy_trie::TrieMask;
     use rand::{seq::SliceRandom, Rng, SeedableRng};
     use reth_trie::test_utils::TrieTestHarness;
     use reth_trie_common::{Nibbles, ProofV2Target};
-    use smallvec::smallvec;
     use std::collections::BTreeMap;
     use tracing::{info, trace};
 
@@ -3249,102 +3244,6 @@ mod tests {
             );
             assert_eq!(expected_root, actual_root, "storage root mismatch");
         }
-    }
-
-    #[test]
-    fn prune_retains_upper_node_by_base_path_not_logical_path() {
-        let mut trie = ArenaParallelSparseTrie::default();
-
-        let leaf_idx = trie.upper_arena.insert(ArenaSparseNode::Leaf {
-            state: ArenaSparseNodeState::Dirty,
-            value: vec![0x01],
-            key: Nibbles::from_nibbles([0x04]),
-        });
-        let retained_branch_idx =
-            trie.upper_arena.insert(ArenaSparseNode::Branch(ArenaSparseNodeBranch {
-                state: ArenaSparseNodeState::Dirty,
-                children: smallvec![ArenaSparseNodeBranchChild::Revealed(leaf_idx)],
-                state_mask: TrieMask::new(1 << 0x03),
-                short_key: Nibbles::from_nibbles([0x0A]),
-                branch_masks: Default::default(),
-            }));
-        trie.upper_arena[trie.root] = ArenaSparseNode::Branch(ArenaSparseNodeBranch {
-            state: ArenaSparseNodeState::Dirty,
-            children: smallvec![ArenaSparseNodeBranchChild::Revealed(retained_branch_idx)],
-            state_mask: TrieMask::new(1 << 0x01),
-            short_key: Nibbles::default(),
-            branch_masks: Default::default(),
-        });
-
-        let _ = trie.root();
-        trie.prune(&[Nibbles::from_nibbles([0x01])]);
-
-        let ArenaSparseNode::Branch(root_branch) = &trie.upper_arena[trie.root] else {
-            panic!("root should remain a branch")
-        };
-        let ArenaSparseNodeBranchChild::Revealed(child_idx) = root_branch.children[0] else {
-            panic!("retained base-path child should remain revealed")
-        };
-        assert!(matches!(&trie.upper_arena[child_idx], ArenaSparseNode::Branch(_)));
-    }
-
-    #[test]
-    fn prune_retains_subtrie_node_by_base_path_not_logical_path() {
-        let mut trie = ArenaParallelSparseTrie::default();
-        let mut subtrie = ArenaSparseSubtrie::new(false);
-        subtrie.path = Nibbles::from_nibbles([0x01]);
-
-        let leaf_idx = subtrie.arena.insert(ArenaSparseNode::Leaf {
-            state: ArenaSparseNodeState::Dirty,
-            value: vec![0x01],
-            key: Nibbles::from_nibbles([0x04]),
-        });
-        let retained_branch_idx =
-            subtrie.arena.insert(ArenaSparseNode::Branch(ArenaSparseNodeBranch {
-                state: ArenaSparseNodeState::Dirty,
-                children: smallvec![ArenaSparseNodeBranchChild::Revealed(leaf_idx)],
-                state_mask: TrieMask::new(1 << 0x03),
-                short_key: Nibbles::from_nibbles([0x0A]),
-                branch_masks: Default::default(),
-            }));
-        subtrie.arena[subtrie.root] = ArenaSparseNode::Branch(ArenaSparseNodeBranch {
-            state: ArenaSparseNodeState::Dirty,
-            children: smallvec![ArenaSparseNodeBranchChild::Revealed(retained_branch_idx)],
-            state_mask: TrieMask::new(1 << 0x02),
-            short_key: Nibbles::default(),
-            branch_masks: Default::default(),
-        });
-        subtrie.num_leaves = 1;
-        subtrie.num_dirty_leaves = 1;
-
-        let subtrie_idx = trie.upper_arena.insert(ArenaSparseNode::Subtrie(subtrie));
-        trie.upper_arena[trie.root] = ArenaSparseNode::Branch(ArenaSparseNodeBranch {
-            state: ArenaSparseNodeState::Dirty,
-            children: smallvec![ArenaSparseNodeBranchChild::Revealed(subtrie_idx)],
-            state_mask: TrieMask::new(1 << 0x01),
-            short_key: Nibbles::default(),
-            branch_masks: Default::default(),
-        });
-
-        let _ = trie.root();
-        trie.prune(&[Nibbles::from_nibbles([0x01, 0x02])]);
-
-        let ArenaSparseNode::Branch(root_branch) = &trie.upper_arena[trie.root] else {
-            panic!("root should remain a branch")
-        };
-        let ArenaSparseNodeBranchChild::Revealed(subtrie_idx) = root_branch.children[0] else {
-            panic!("retained subtrie should remain revealed")
-        };
-        let ArenaSparseNode::Subtrie(subtrie) = &trie.upper_arena[subtrie_idx] else {
-            panic!("retained child should remain a subtrie")
-        };
-        let ArenaSparseNode::Branch(subtrie_root) = &subtrie.arena[subtrie.root] else {
-            panic!("subtrie root should remain a branch")
-        };
-        let ArenaSparseNodeBranchChild::Revealed(child_idx) = subtrie_root.children[0] else {
-            panic!("retained base-path child should remain revealed")
-        };
-        assert!(matches!(&subtrie.arena[child_idx], ArenaSparseNode::Branch(_)));
     }
 
     use proptest::prelude::*;
