@@ -162,19 +162,18 @@ where
     // filter it. It is guaranteed that further shards for this sharded key will not
     // contain the target block number, as it's in this shard.
     else {
-        let blocks = raw_blocks.value()?;
-        let higher_blocks =
-            blocks.iter().skip_while(|block| *block <= to_block).collect::<Vec<_>>();
+        let mut blocks = raw_blocks.value()?;
+        let removed = blocks.0.remove_range(..=to_block);
 
-        // If there were blocks less than or equal to the target one
-        // (so the shard has changed), update the shard.
-        if blocks.len() as usize == higher_blocks.len() {
+        // If there were no blocks less than or equal to the target one,
+        // the shard is unchanged.
+        if removed == 0 {
             return Ok(PruneShardOutcome::Unchanged);
         }
 
         // If there will be no more blocks in the shard after pruning blocks below target
         // block, we need to remove it, as empty shards are not allowed.
-        if higher_blocks.is_empty() {
+        if blocks.is_empty() {
             if key.as_ref().highest_block_number == u64::MAX {
                 let prev_row = cursor
                     .prev()?
@@ -211,10 +210,7 @@ where
                 Ok(PruneShardOutcome::Deleted)
             }
         } else {
-            cursor.upsert(
-                RawKey::new(key),
-                &RawValue::new(BlockNumberList::new_pre_sorted(higher_blocks)),
-            )?;
+            cursor.upsert(RawKey::new(key), &RawValue::new(blocks))?;
             Ok(PruneShardOutcome::Updated)
         }
     }
