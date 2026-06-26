@@ -1374,11 +1374,12 @@ where
             // advance the shared counter so prewarm workers skip already-executed txs
             executed_tx_index.store(senders.len(), Ordering::Relaxed);
 
-            let current_len = executor.receipts().len();
+            let receipts = executor.receipts();
+            let current_len = receipts.len();
             if current_len > last_sent_len {
                 last_sent_len = current_len;
                 // Send the latest receipt to the background task for incremental root computation.
-                if let Some(receipt) = executor.receipts().last() {
+                if let Some(receipt) = receipts.last() {
                     let tx_index = current_len - 1;
                     let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
                 }
