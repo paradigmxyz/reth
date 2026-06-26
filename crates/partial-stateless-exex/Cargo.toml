@@ -1,0 +1,36 @@
+[package]
+name = "partial-stateless-exex"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "ExEx that maintains a network-level state cache for Partial Statelessness PoC"
+
+[[bin]]
+name = "reth-partial-stateless"
+path = "src/main.rs"
+
+[dependencies]
+# reth
+reth-ethereum = { workspace = true, features = ["full", "cli"] }
+reth-trie-common = { workspace = true }
+reth-provider = { workspace = true }
+reth-evm = { workspace = true }
+reth-revm = { workspace = true }
+revm = { workspace = true }
+
+# our cache crate
+partial-stateless = { path = "../partial-stateless" }
+
+# alloy
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+
+# async
+futures.workspace = true
+tokio = { workspace = true, features = ["full"] }
+
+# utilities
+eyre.workspace = true
+tracing.workspace = true
+serde_json.workspace = true
+bincode = { workspace = true }

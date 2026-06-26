@@ -151,6 +151,8 @@ members = [
     "testing/testing-utils",
     "testing/runner",
     "crates/tracing-otlp",
+    "crates/partial-stateless",
+    "crates/partial-stateless-exex",
 ]
 default-members = ["bin/reth"]
 exclude = ["docs/cli"]
