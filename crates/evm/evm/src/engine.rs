@@ -81,7 +81,7 @@ pub trait ExecutableTxTuple: Send + 'static {
     /// Errors that may occur while recovering or decoding transactions.
     type Error: core::error::Error + Send + Sync + 'static;
 
-    /// Iterator over [`ExecutableTxTuple::Tx`].
+    /// Iterator over [`ExecutableTxTuple::RawTx`].
     type IntoIter: IntoParallelIterator<Item = Self::RawTx, Iter: IndexedParallelIterator>
         + IntoIterator<Item = Self::RawTx>
         + Send
@@ -119,6 +119,9 @@ where
 }
 
 /// Iterator over executable transactions.
+///
+/// See also [`ExecutableTxTuple`] for the raw transaction iterator and converter this extension
+/// trait builds on.
 pub trait ExecutableTxIterator<Evm: ConfigureEvm>:
     ExecutableTxTuple<Tx: ExecutableTxFor<Evm, Recovered = Self::Recovered>>
 {
