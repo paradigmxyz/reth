@@ -48,6 +48,12 @@ pub const TERABYTE: usize = GIGABYTE * 1024;
 /// MDBX allows up to 32767 readers (`MDBX_READERS_LIMIT`), but we limit it to slightly below that
 const DEFAULT_MAX_READERS: u64 = 32_000;
 
+/// Reclaimed-page search cap in pages.
+///
+/// Lower values bound write-transaction page-list scans sooner and prefer extending the database
+/// over walking large reclaimed lists.
+const RECLAIMED_PAGE_SEARCH_LIMIT: u64 = 32 * 1024;
+
 /// Space that a read-only transaction can occupy until the warning is emitted.
 /// See [`reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers`] for more information.
 const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
@@ -497,10 +503,12 @@ impl DatabaseEnv {
         // database, the larger is `rp augment limit`.
         // https://github.com/paradigmxyz/reth/blob/2a4c78759178f66e30c8976ec5d243b53102fc9a/crates/storage/libmdbx-rs/mdbx-sys/libmdbx/mdbx.c#L10018-L10024.
         //
-        // Previously, MDBX set this value as `256 * 1024` constant. Let's fallback to this,
-        // because we want to prioritize freelist lookup speed over database growth.
+        // Keep this intentionally below MDBX's historical `256 * 1024` fallback. Replay writes
+        // spend a material amount of time searching and touching reclaimed pages, so prefer
+        // extending the database earlier over carrying very large reclaimed-page lists through
+        // hot write transactions.
         // https://github.com/paradigmxyz/reth/blob/fa2b9b685ed9787636d962f4366caf34a9186e66/crates/storage/libmdbx-rs/mdbx-sys/libmdbx/mdbx.c#L16017.
-        inner_env.set_rp_augment_limit(256 * 1024);
+        inner_env.set_rp_augment_limit(RECLAIMED_PAGE_SEARCH_LIMIT);
 
         if let Some(log_level) = args.log_level {
             // Levels higher than [LogLevel::Notice] require libmdbx built with `MDBX_DEBUG` option.
