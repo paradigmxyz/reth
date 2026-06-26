@@ -308,7 +308,7 @@ pub(crate) fn streaming_download_and_extract(
         }
 
         let result = if let Some(progress) = shared {
-            let reader = SharedProgressReader { inner: response, progress: Arc::clone(progress) };
+            let reader = SharedProgressReader::new(response, Arc::clone(progress));
             extract_archive_raw(reader, format, target_dir, None)
         } else {
             let total_size = response.content_length().unwrap_or(0);
