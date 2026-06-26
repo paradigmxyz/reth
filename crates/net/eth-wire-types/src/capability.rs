@@ -125,11 +125,6 @@ impl Capability {
         Self::eth(EthVersion::Eth72)
     }
 
-    /// Returns the `snap/1` capability.
-    pub const fn snap_1() -> Self {
-        Self::snap(SnapVersion::V1)
-    }
-
     /// Returns the `snap/2` capability.
     pub const fn snap_2() -> Self {
         Self::snap(SnapVersion::V2)

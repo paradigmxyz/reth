@@ -306,6 +306,10 @@ pub trait EngineApi<Engine: EngineTypes> {
     #[method(name = "exchangeCapabilities")]
     async fn exchange_capabilities(&self, capabilities: Vec<String>) -> RpcResult<Vec<String>>;
 
+    /// Report blob availability for the requested blob versioned hashes.
+    #[method(name = "hasBlobs")]
+    async fn has_blobs(&self, versioned_hashes: Vec<B256>) -> RpcResult<Vec<bool>>;
+
     /// Fetch blobs for the consensus layer from the blob store.
     #[method(name = "getBlobsV1")]
     async fn get_blobs_v1(
