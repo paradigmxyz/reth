@@ -129,8 +129,11 @@ impl FromStr for SyncMode {
         match val.as_str() {
             "durable" => Ok(Self::Durable),
             "safe-no-sync" | "safenosync" | "safe_no_sync" => Ok(Self::SafeNoSync),
+            "utterly-no-sync" | "utterlynosync" | "utterly_no_sync" => {
+                Ok(Self::UtterlyNoSync)
+            }
             _ => Err(format!(
-                "invalid value '{s}' for sync mode. valid values: durable, safe-no-sync"
+                "invalid value '{s}' for sync mode. valid values: durable, safe-no-sync, utterly-no-sync"
             )),
         }
     }

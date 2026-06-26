@@ -458,6 +458,17 @@ mod tests {
     }
 
     #[test]
+    fn test_command_parser_with_valid_sync_mode_utterly_no_sync() {
+        let cmd = CommandParser::<DatabaseArgs>::try_parse_from([
+            "reth",
+            "--db.sync-mode",
+            "utterly-no-sync",
+        ])
+        .unwrap();
+        assert!(matches!(cmd.args.sync_mode, Some(SyncMode::UtterlyNoSync)));
+    }
+
+    #[test]
     fn test_command_parser_with_invalid_sync_mode() {
         let result =
             CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.sync-mode", "ultra-fast"]);

@@ -5,7 +5,7 @@ use clap::{value_parser, Args, Parser};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
-use reth_db::init_db;
+use reth_db::{init_db, mdbx::SyncMode};
 use reth_node_builder::NodeBuilder;
 use reth_node_core::{
     args::{
@@ -172,7 +172,7 @@ where
             txpool,
             builder,
             debug,
-            db,
+            mut db,
             dev,
             pruning,
             engine,
@@ -184,6 +184,10 @@ where
         } = self;
 
         engine.validate()?;
+
+        if debug.startup_sync_state_idle && db.sync_mode.is_none() {
+            db.sync_mode = Some(SyncMode::UtterlyNoSync);
+        }
 
         // set up node config
         let mut node_config = NodeConfig {
@@ -211,8 +215,8 @@ where
         let db_path = data_dir.db();
 
         tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let database = init_db(db_path.clone(), self.db.database_args())?
-            .with_metrics_if(self.db.metrics_enabled());
+        let database = init_db(db_path.clone(), node_config.db.database_args())?
+            .with_metrics_if(node_config.db.metrics_enabled());
 
         if with_unused_ports {
             node_config = node_config.with_unused_ports();
