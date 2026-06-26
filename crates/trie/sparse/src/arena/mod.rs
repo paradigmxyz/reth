@@ -244,7 +244,7 @@ impl ArenaSparseSubtrie {
         // Root is always retained.
         let root_node = self.arena.remove(self.root).expect("root exists");
         let new_root = new_arena.insert(root_node);
-        let mut stack = Vec::new();
+        let mut stack = SmallVec::<[CopyFrame; 64]>::new();
         if let Some(frame) = prepare_retained_node(
             &new_arena,
             new_root,
