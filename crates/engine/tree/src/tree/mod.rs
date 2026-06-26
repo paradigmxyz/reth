@@ -6,8 +6,9 @@ use crate::{
     tree::{error::InsertPayloadError, payload_validator::TreeCtx},
 };
 use alloy_consensus::BlockHeader;
+use alloy_eip7928::bal::RawBal;
 use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
-use alloy_primitives::{map::B256Map, B256};
+use alloy_primitives::{map::B256Map, Bytes, B256};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
@@ -23,6 +24,7 @@ use reth_engine_primitives::{
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
+use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle};
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadTypes};
 use reth_primitives_traits::{
@@ -669,7 +671,7 @@ where
     /// block request processing isn't blocked for a long time.
     fn on_downloaded(
         &mut self,
-        mut blocks: Vec<SealedBlock<N::Block>>,
+        mut blocks: Vec<SealedBlockWithAccessList<N::Block>>,
     ) -> Result<Option<TreeEvent>, InsertBlockFatalError> {
         if blocks.is_empty() {
             // nothing to execute
@@ -853,10 +855,13 @@ where
     ) -> Result<PayloadStatus, InsertBlockFatalError> {
         let parent_hash = payload.parent_hash();
         let num_hash = payload.num_hash();
+        let access_list = payload.block_access_list().cloned();
 
         match self.payload_validator.convert_payload_to_block(payload) {
             // if the block is well-formed, buffer it for later
             Ok(block) => {
+                let access_list = Self::seal_access_list_for_block(&block, access_list);
+                let block = SealedBlockWithAccessList::new(block, access_list);
                 if let Err(error) = self.buffer_block(block) {
                     Ok(self.on_insert_block_error(error)?)
                 } else {
@@ -1358,7 +1363,10 @@ where
         Ok(TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
             PayloadStatusEnum::Syncing,
         )))
-        .with_event(TreeEvent::Download(DownloadRequest::single_block(target))))
+        .with_event(TreeEvent::Download(
+            DownloadRequest::single_block(target)
+                .with_access_lists(self.should_download_access_lists()),
+        )))
     }
 
     /// Helper method to remove blocks and set the persistence state. This ensures we keep track of
@@ -1902,10 +1910,10 @@ where
                     "Backfill complete, downloading remaining blocks to reach FCU target"
                 );
 
-                self.emit_event(EngineApiEvent::Download(DownloadRequest::BlockRange(
-                    lowest_buffered.parent_hash(),
-                    distance,
-                )));
+                self.emit_event(EngineApiEvent::Download(
+                    DownloadRequest::block_range(lowest_buffered.parent_hash(), distance)
+                        .with_access_lists(self.should_download_access_lists()),
+                ));
                 return Ok(());
             }
         } else {
@@ -1916,9 +1924,10 @@ where
                 head_hash = %sync_target_state.head_block_hash,
                 "Backfill complete but head block not buffered, requesting download"
             );
-            self.emit_event(EngineApiEvent::Download(DownloadRequest::single_block(
-                sync_target_state.head_block_hash,
-            )));
+            self.emit_event(EngineApiEvent::Download(
+                DownloadRequest::single_block(sync_target_state.head_block_hash)
+                    .with_access_lists(self.should_download_access_lists()),
+            ));
             return Ok(());
         }
 
@@ -2260,6 +2269,17 @@ where
             .unwrap_or_else(|| hash)
     }
 
+    /// Returns whether block downloads should also attempt to fetch the blocks' access lists.
+    ///
+    /// This is the case once amsterdam is active at the current canonical head, indicated by the
+    /// head header carrying a block access list hash.
+    ///
+    /// The head-based gate is deliberately conservative: range downloads that cross Amsterdam may
+    /// skip BALs for the activating block, and later validation remains per-header best effort.
+    fn should_download_access_lists(&self) -> bool {
+        self.canonical_in_memory_state.get_canonical_head().block_access_list_hash().is_some()
+    }
+
     /// If validation fails, the response MUST contain the latest valid hash:
     ///
     ///   - The block hash of the ancestor of the invalid payload satisfying the following two
@@ -2513,9 +2533,10 @@ where
     /// Pre-validates the block and inserts it into the buffer.
     fn buffer_block(
         &mut self,
-        block: SealedBlock<N::Block>,
+        block: SealedBlockWithAccessList<N::Block>,
     ) -> Result<(), InsertBlockError<N::Block>> {
         if let Err(err) = self.validate_block(&block) {
+            let (block, _) = block.split();
             return Err(InsertBlockError::consensus_error(err, block))
         }
         self.state.buffer.insert_block(block);
@@ -2775,7 +2796,7 @@ where
             self.distance_from_local_tip(head.number, missing_parent.number)
         {
             trace!(target: "engine::tree", %distance, missing=?missing_parent, "downloading missing parent block range");
-            DownloadRequest::BlockRange(missing_parent.hash, distance)
+            DownloadRequest::block_range(missing_parent.hash, distance)
         } else {
             trace!(target: "engine::tree", missing=?missing_parent, "downloading missing parent block");
             // This happens when the missing parent is on an outdated
@@ -2783,7 +2804,7 @@ where
             DownloadRequest::single_block(missing_parent.hash)
         };
 
-        Some(TreeEvent::Download(request))
+        Some(TreeEvent::Download(request.with_access_lists(self.should_download_access_lists())))
     }
 
     /// Handles a downloaded block that was successfully inserted as valid.
@@ -2821,7 +2842,10 @@ where
             if self.state.tree_state.canonical_block_hash() != sync_target.head_block_hash {
                 let target = self.lowest_buffered_ancestor_or(sync_target.head_block_hash);
                 trace!(target: "engine::tree", %target, "sync target head not yet reached, downloading head block");
-                return Ok(Some(TreeEvent::Download(DownloadRequest::single_block(target))))
+                return Ok(Some(TreeEvent::Download(
+                    DownloadRequest::single_block(target)
+                        .with_access_lists(self.should_download_access_lists()),
+                )))
             }
 
             return Ok(None)
@@ -2839,7 +2863,7 @@ where
     #[instrument(level = "debug", target = "engine::tree", skip_all, fields(block_hash = %block.hash(), block_num = %block.number()))]
     fn on_downloaded_block(
         &mut self,
-        block: SealedBlock<N::Block>,
+        block: SealedBlockWithAccessList<N::Block>,
     ) -> Result<Option<TreeEvent>, InsertBlockFatalError> {
         let block_num_hash = block.num_hash();
         let lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_num_hash.hash);
@@ -2897,13 +2921,18 @@ where
             payload.block_with_parent(),
             payload,
             |validator, payload, ctx| validator.validate_payload(payload, ctx),
-            |this, payload| Ok(this.payload_validator.convert_payload_to_block(payload)?),
+            |this, payload| {
+                let access_list = payload.block_access_list().cloned();
+                let block = this.payload_validator.convert_payload_to_block(payload)?;
+                let access_list = Self::seal_access_list_for_block(&block, access_list);
+                Ok(SealedBlockWithAccessList::new(block, access_list))
+            },
         )
     }
 
     fn insert_block(
         &mut self,
-        block: SealedBlock<N::Block>,
+        block: SealedBlockWithAccessList<N::Block>,
     ) -> Result<InsertPayloadOk, InsertPayloadError<N::Block>> {
         self.insert_block_or_payload(
             block.block_with_parent(),
@@ -2911,6 +2940,20 @@ where
             |validator, block, ctx| validator.validate_block(block, ctx),
             |_, block| Ok(block),
         )
+    }
+
+    /// Seals the raw access list against the block's header commitment.
+    ///
+    /// Returns `None` if the block has no access list hash, no access list is given, or the
+    /// access list doesn't match the header commitment. Mismatches are not an error here because
+    /// they are rejected during block validation.
+    fn seal_access_list_for_block(
+        block: &SealedBlock<N::Block>,
+        access_list: Option<Bytes>,
+    ) -> Option<RawBal> {
+        let expected = block.header().block_access_list_hash()?;
+        let raw = RawBal::from(access_list?);
+        raw.ensure_hash(expected).is_ok().then_some(raw)
     }
 
     /// Inserts a block or payload into the blockchain tree with full execution.
@@ -2935,7 +2978,10 @@ where
         block_id: BlockWithParent,
         input: Input,
         execute: impl FnOnce(&mut V, Input, TreeCtx<'_, N>) -> Result<ValidationOutput<N>, Err>,
-        convert_to_block: impl FnOnce(&mut Self, Input) -> Result<SealedBlock<N::Block>, Err>,
+        convert_to_block: impl FnOnce(
+            &mut Self,
+            Input,
+        ) -> Result<SealedBlockWithAccessList<N::Block>, Err>,
     ) -> Result<InsertPayloadOk, Err>
     where
         Err: From<InsertBlockError<N::Block>>,
@@ -2956,7 +3002,7 @@ where
             match self.provider.sealed_header_by_hash(block_num_hash.hash) {
                 Err(err) => {
                     let block = convert_to_block(self, input)?;
-                    return Err(InsertBlockError::new(block, err.into()).into());
+                    return Err(InsertBlockError::new(block.split().0, err.into()).into());
                 }
                 Ok(Some(_)) => {
                     convert_to_block(self, input)?;
@@ -2970,7 +3016,7 @@ where
         match self.state_provider_builder(block_id.parent) {
             Err(err) => {
                 let block = convert_to_block(self, input)?;
-                return Err(InsertBlockError::new(block, err.into()).into());
+                return Err(InsertBlockError::new(block.split().0, err.into()).into());
             }
             Ok(None) => {
                 let block = convert_to_block(self, input)?;

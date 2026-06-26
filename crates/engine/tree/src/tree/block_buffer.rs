@@ -2,6 +2,7 @@ use crate::tree::metrics::BlockBufferMetrics;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber};
 use indexmap::IndexSet;
+use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_primitives_traits::{Block, SealedBlock};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
@@ -19,7 +20,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 #[derive(Debug)]
 pub struct BlockBuffer<B: Block> {
     /// All blocks in the buffer stored by their block hash.
-    pub(crate) blocks: HashMap<BlockHash, SealedBlock<B>>,
+    pub(crate) blocks: HashMap<BlockHash, SealedBlockWithAccessList<B>>,
     /// Map of any parent block hash (even the ones not currently in the buffer)
     /// to the buffered children.
     /// Allows connecting buffered blocks by parent.
@@ -51,12 +52,12 @@ impl<B: Block> BlockBuffer<B> {
 
     /// Return reference to the requested block.
     pub fn block(&self, hash: &BlockHash) -> Option<&SealedBlock<B>> {
-        self.blocks.get(hash)
+        self.blocks.get(hash).map(|block| &**block)
     }
 
     /// Return a reference to the lowest ancestor of the given block in the buffer.
     pub fn lowest_ancestor(&self, hash: &BlockHash) -> Option<&SealedBlock<B>> {
-        let mut current_block = self.blocks.get(hash)?;
+        let mut current_block: &SealedBlock<B> = self.blocks.get(hash)?;
         while let Some(parent) = self.blocks.get(&current_block.parent_hash()) {
             current_block = parent;
         }
@@ -64,11 +65,17 @@ impl<B: Block> BlockBuffer<B> {
     }
 
     /// Insert a correct block inside the buffer.
-    pub fn insert_block(&mut self, block: SealedBlock<B>) {
+    pub fn insert_block(&mut self, block: SealedBlockWithAccessList<B>) {
         let hash = block.hash();
 
         match self.blocks.entry(hash) {
-            std::collections::hash_map::Entry::Occupied(_) => return,
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                // a duplicate that includes access list data is preferred over one without
+                if entry.get().data().is_none() && block.data().is_some() {
+                    entry.insert(block);
+                }
+                return
+            }
             std::collections::hash_map::Entry::Vacant(entry) => {
                 self.parent_to_child.entry(block.parent_hash()).or_default().insert(hash);
                 self.earliest_blocks.entry(block.number()).or_default().insert(hash);
@@ -93,7 +100,10 @@ impl<B: Block> BlockBuffer<B> {
     ///
     /// Note: that order of returned blocks is important and the blocks with lower block number
     /// in the chain will come first so that they can be executed in the correct order.
-    pub fn remove_block_with_children(&mut self, parent_hash: &BlockHash) -> Vec<SealedBlock<B>> {
+    pub fn remove_block_with_children(
+        &mut self,
+        parent_hash: &BlockHash,
+    ) -> Vec<SealedBlockWithAccessList<B>> {
         let removed = self
             .remove_block(parent_hash)
             .into_iter()
@@ -152,7 +162,7 @@ impl<B: Block> BlockBuffer<B> {
     /// This method will only remove the block if it's present inside `self.blocks`.
     /// The block might be missing from other collections, the method will only ensure that it has
     /// been removed.
-    fn remove_block(&mut self, hash: &BlockHash) -> Option<SealedBlock<B>> {
+    fn remove_block(&mut self, hash: &BlockHash) -> Option<SealedBlockWithAccessList<B>> {
         let block = self.blocks.remove(hash)?;
         self.remove_from_earliest_blocks(block.number(), hash);
         self.remove_from_parent(block.parent_hash(), hash);
@@ -161,7 +171,10 @@ impl<B: Block> BlockBuffer<B> {
     }
 
     /// Remove all children and their descendants for the given blocks and return them.
-    fn remove_children(&mut self, parent_hashes: Vec<BlockHash>) -> Vec<SealedBlock<B>> {
+    fn remove_children(
+        &mut self,
+        parent_hashes: Vec<BlockHash>,
+    ) -> Vec<SealedBlockWithAccessList<B>> {
         // remove all parent child connection and all the child children blocks that are connected
         // to the discarded parent blocks.
         let mut remove_parent_children = parent_hashes;
@@ -238,9 +251,53 @@ mod tests {
         let block1 = create_block(&mut rng, 10, parent);
         let mut buffer = BlockBuffer::new(3);
 
-        buffer.insert_block(block1.clone());
+        buffer.insert_block(block1.clone().into());
         assert_buffer_lengths(&buffer, 1);
         assert_eq!(buffer.block(&block1.hash()), Some(&block1));
+    }
+
+    /// Creates raw access list bytes.
+    fn raw_bal() -> alloy_eip7928::bal::RawBal {
+        alloy_eip7928::bal::RawBal::from(alloy_primitives::Bytes::from_static(&[
+            alloy_rlp::EMPTY_LIST_CODE,
+        ]))
+    }
+
+    #[test]
+    fn preserves_access_list_for_buffered_blocks() {
+        let mut rng = generators::rng();
+
+        let access_list = raw_bal();
+        let parent = rng.random();
+        let block = create_block(&mut rng, 10, parent);
+
+        let mut buffer = BlockBuffer::new(1);
+        buffer
+            .insert_block(SealedBlockWithAccessList::new(block.clone(), Some(access_list.clone())));
+
+        let blocks = buffer.remove_block_with_children(&parent);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(&*blocks[0], &block);
+        assert_eq!(blocks[0].data().as_ref(), Some(&access_list));
+    }
+
+    #[test]
+    fn updates_buffered_duplicate_with_access_list() {
+        let mut rng = generators::rng();
+
+        let access_list = raw_bal();
+        let parent = rng.random();
+        let block = create_block(&mut rng, 10, parent);
+
+        let mut buffer = BlockBuffer::new(1);
+        buffer.insert_block(block.clone().into());
+        buffer
+            .insert_block(SealedBlockWithAccessList::new(block.clone(), Some(access_list.clone())));
+
+        let blocks = buffer.remove_block_with_children(&parent);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(&*blocks[0], &block);
+        assert_eq!(blocks[0].data().as_ref(), Some(&access_list));
     }
 
     #[test]
@@ -256,10 +313,10 @@ mod tests {
 
         let mut buffer = BlockBuffer::new(5);
 
-        buffer.insert_block(block1.clone());
-        buffer.insert_block(block2.clone());
-        buffer.insert_block(block3.clone());
-        buffer.insert_block(block4.clone());
+        buffer.insert_block(block1.clone().into());
+        buffer.insert_block(block2.clone().into());
+        buffer.insert_block(block3.clone().into());
+        buffer.insert_block(block4.clone().into());
 
         assert_buffer_lengths(&buffer, 4);
         assert_eq!(buffer.block(&block4.hash()), Some(&block4));
@@ -270,7 +327,11 @@ mod tests {
         assert_eq!(buffer.lowest_ancestor(&block3.hash()), Some(&block1));
         assert_eq!(buffer.lowest_ancestor(&block1.hash()), Some(&block1));
         assert_eq!(
-            buffer.remove_block_with_children(&main_parent_hash),
+            buffer
+                .remove_block_with_children(&main_parent_hash)
+                .into_iter()
+                .map(|b| b.split().0)
+                .collect::<Vec<_>>(),
             vec![block1, block2, block3]
         );
         assert_buffer_lengths(&buffer, 1);
@@ -288,17 +349,17 @@ mod tests {
 
         let mut buffer = BlockBuffer::new(5);
 
-        buffer.insert_block(block1.clone());
-        buffer.insert_block(block2.clone());
-        buffer.insert_block(block3.clone());
-        buffer.insert_block(block4.clone());
+        buffer.insert_block(block1.clone().into());
+        buffer.insert_block(block2.clone().into());
+        buffer.insert_block(block3.clone().into());
+        buffer.insert_block(block4.clone().into());
 
         assert_buffer_lengths(&buffer, 4);
         assert_eq!(
             buffer
                 .remove_block_with_children(&main_parent_hash)
                 .into_iter()
-                .map(|b| (b.hash(), b))
+                .map(|b| (b.hash(), b.split().0))
                 .collect::<HashMap<_, _>>(),
             HashMap::from([
                 (block1.hash(), block1),
@@ -322,17 +383,17 @@ mod tests {
 
         let mut buffer = BlockBuffer::new(5);
 
-        buffer.insert_block(block1.clone());
-        buffer.insert_block(block2.clone());
-        buffer.insert_block(block3.clone());
-        buffer.insert_block(block4.clone());
+        buffer.insert_block(block1.clone().into());
+        buffer.insert_block(block2.clone().into());
+        buffer.insert_block(block3.clone().into());
+        buffer.insert_block(block4.clone().into());
 
         assert_buffer_lengths(&buffer, 4);
         assert_eq!(
             buffer
                 .remove_block_with_children(&block1.hash())
                 .into_iter()
-                .map(|b| (b.hash(), b))
+                .map(|b| (b.hash(), b.split().0))
                 .collect::<HashMap<_, _>>(),
             HashMap::from([
                 (block1.hash(), block1),
@@ -357,10 +418,10 @@ mod tests {
 
         let mut buffer = BlockBuffer::new(5);
 
-        buffer.insert_block(block1.clone());
-        buffer.insert_block(block2);
-        buffer.insert_block(block3);
-        buffer.insert_block(block4);
+        buffer.insert_block(block1.clone().into());
+        buffer.insert_block(block2.into());
+        buffer.insert_block(block3.into());
+        buffer.insert_block(block4.into());
 
         assert_buffer_lengths(&buffer, 4);
         buffer.remove_old_blocks(block1.number);
@@ -379,10 +440,10 @@ mod tests {
 
         let mut buffer = BlockBuffer::new(5);
 
-        buffer.insert_block(block1.clone());
-        buffer.insert_block(block2);
-        buffer.insert_block(block3);
-        buffer.insert_block(block4);
+        buffer.insert_block(block1.clone().into());
+        buffer.insert_block(block2.into());
+        buffer.insert_block(block3.into());
+        buffer.insert_block(block4.into());
 
         assert_buffer_lengths(&buffer, 4);
         buffer.remove_old_blocks(block1.number);
@@ -407,13 +468,13 @@ mod tests {
 
         let mut buffer = BlockBuffer::new(10);
 
-        buffer.insert_block(block1.clone());
-        buffer.insert_block(block1a.clone());
-        buffer.insert_block(block2.clone());
-        buffer.insert_block(block2a.clone());
-        buffer.insert_block(random_block1.clone());
-        buffer.insert_block(random_block2.clone());
-        buffer.insert_block(random_block3.clone());
+        buffer.insert_block(block1.clone().into());
+        buffer.insert_block(block1a.clone().into());
+        buffer.insert_block(block2.clone().into());
+        buffer.insert_block(block2a.clone().into());
+        buffer.insert_block(random_block1.clone().into());
+        buffer.insert_block(random_block2.clone().into());
+        buffer.insert_block(random_block3.clone().into());
 
         // check that random blocks are their own ancestor, and that chains have proper ancestors
         assert_eq!(buffer.lowest_ancestor(&random_block1.hash()), Some(&random_block1));
@@ -446,16 +507,16 @@ mod tests {
 
         let mut buffer = BlockBuffer::new(3);
 
-        buffer.insert_block(block1.clone());
-        buffer.insert_block(block2.clone());
-        buffer.insert_block(block3.clone());
+        buffer.insert_block(block1.clone().into());
+        buffer.insert_block(block2.clone().into());
+        buffer.insert_block(block3.clone().into());
 
         // pre-eviction block1 is the root
         assert_eq!(buffer.lowest_ancestor(&block3.hash()), Some(&block1));
         assert_eq!(buffer.lowest_ancestor(&block2.hash()), Some(&block1));
         assert_eq!(buffer.lowest_ancestor(&block1.hash()), Some(&block1));
 
-        buffer.insert_block(block4.clone());
+        buffer.insert_block(block4.clone().into());
 
         assert_eq!(buffer.lowest_ancestor(&block4.hash()), Some(&block4));
 
@@ -483,10 +544,10 @@ mod tests {
 
         let mut buffer = BlockBuffer::new(3);
 
-        buffer.insert_block(block1.clone());
-        buffer.insert_block(block2);
-        buffer.insert_block(block3);
-        buffer.insert_block(block4);
+        buffer.insert_block(block1.clone().into());
+        buffer.insert_block(block2.into());
+        buffer.insert_block(block3.into());
+        buffer.insert_block(block4.into());
 
         // block3 gets evicted
         assert_block_removal(&buffer, &block1);
@@ -508,8 +569,8 @@ mod tests {
         // Capacity 2 so third insert evicts the oldest (block1)
         let mut buffer = BlockBuffer::new(2);
 
-        buffer.insert_block(block1.clone());
-        buffer.insert_block(block2.clone());
+        buffer.insert_block(block1.clone().into());
+        buffer.insert_block(block2.clone().into());
 
         // Pre-eviction: parent_to_child contains main_parent -> {block1}, block1 -> {block2}
         assert!(buffer
@@ -524,7 +585,7 @@ mod tests {
             .is_some());
 
         // Insert unrelated block to evict block1
-        buffer.insert_block(unrelated_block);
+        buffer.insert_block(unrelated_block.into());
 
         // Evicted block1 should be fully removed from collections
         assert_block_removal(&buffer, &block1);
