@@ -15,7 +15,7 @@ pub struct ReusableSparseTrie {
 
 impl ReusableSparseTrie {
     /// Takes the preserved trie if present, applying continuation logic for the parent state root.
-    pub fn take_for_parent(&self, parent_state_root: B256) -> (Option<SparseStateTrie>, B256) {
+    pub fn take_for_parent(&self, parent_state_root: B256) -> Option<SparseStateTrie> {
         let mut state = self.state.lock();
 
         match std::mem::take(&mut *state) {
@@ -28,7 +28,7 @@ impl ReusableSparseTrie {
                     %state_root,
                     "Reusing anchored sparse trie for continuation payload"
                 );
-                (Some(trie), parent_state_root)
+                Some(trie)
             }
             ReusableSparseTrieState::Ready { mut trie, state_root } => {
                 debug!(
@@ -38,8 +38,8 @@ impl ReusableSparseTrie {
                     "Clearing anchored sparse trie - parent state root mismatch"
                 );
                 trie.clear();
-                *state = ReusableSparseTrieState::Taken { parent_state_root: B256::ZERO };
-                (Some(trie), B256::ZERO)
+                *state = ReusableSparseTrieState::Taken { parent_state_root };
+                Some(trie)
             }
             ReusableSparseTrieState::Cleared { trie } => {
                 debug!(
@@ -47,8 +47,8 @@ impl ReusableSparseTrie {
                     %parent_state_root,
                     "Using cleared sparse trie with preserved allocations"
                 );
-                *state = ReusableSparseTrieState::Taken { parent_state_root: B256::ZERO };
-                (trie, B256::ZERO)
+                *state = ReusableSparseTrieState::Taken { parent_state_root };
+                trie
             }
             taken @ ReusableSparseTrieState::Taken { parent_state_root } => {
                 debug!(
@@ -57,7 +57,7 @@ impl ReusableSparseTrie {
                     "Reusable sparse trie already taken"
                 );
                 *state = taken;
-                (None, B256::ZERO)
+                None
             }
         }
     }
@@ -154,7 +154,7 @@ enum ReusableSparseTrieState {
     },
     /// The trie was handed to an in-flight sparse trie task.
     Taken {
-        /// Parent state root this task started from, or [`B256::ZERO`] for cleared tries.
+        /// Parent state root this task started from.
         parent_state_root: B256,
     },
     /// Trie with a computed state root that can be reused for continuation payloads.
@@ -176,10 +176,8 @@ impl ReusableSparseTrieState {
     fn state_root(&self) -> Option<B256> {
         match self {
             Self::Ready { state_root, .. } => Some(*state_root),
-            Self::Taken { parent_state_root } if !parent_state_root.is_zero() => {
-                Some(*parent_state_root)
-            }
-            Self::Taken { .. } | Self::Cleared { .. } => None,
+            Self::Taken { parent_state_root } => Some(*parent_state_root),
+            Self::Cleared { .. } => None,
         }
     }
 
@@ -200,15 +198,15 @@ mod tests {
         reusable.set_state_root_for_testing(state_root);
         assert_eq!(reusable.state_root(), Some(state_root));
 
-        let (Some(trie), taken) = reusable.take_for_parent(state_root) else {
+        let Some(trie) = reusable.take_for_parent(state_root) else {
             panic!("anchored trie should be available")
         };
 
         reusable.clear();
-        reusable.lock().store_anchored_if_current(trie, state_root, taken);
+        reusable.lock().store_anchored_if_current(trie, state_root, state_root);
 
         assert_eq!(reusable.state_root(), None);
-        assert!(reusable.take_for_parent(state_root).0.is_none());
+        assert!(reusable.take_for_parent(state_root).is_none());
     }
 
     #[test]
@@ -217,26 +215,40 @@ mod tests {
         let state_root = B256::with_last_byte(1);
 
         reusable.set_state_root_for_testing(state_root);
-        let (Some(_trie), taken) = reusable.take_for_parent(state_root) else {
+        let Some(_trie) = reusable.take_for_parent(state_root) else {
             panic!("anchored trie should be available")
         };
 
-        assert_eq!(taken, state_root);
         assert_eq!(reusable.state_root(), Some(state_root));
     }
 
     #[test]
-    fn taking_cleared_trie_clears_state_root_marker() {
+    fn taking_mismatched_ready_trie_tracks_parent_root() {
         let reusable = ReusableSparseTrie::default();
         let ready_root = B256::with_last_byte(1);
         let parent_root = B256::with_last_byte(2);
 
         reusable.set_state_root_for_testing(ready_root);
-        let (Some(_trie), taken) = reusable.take_for_parent(parent_root) else {
+        let Some(_trie) = reusable.take_for_parent(parent_root) else {
             panic!("cleared trie should be available")
         };
 
-        assert_eq!(taken, B256::ZERO);
-        assert_eq!(reusable.state_root(), None);
+        assert_eq!(reusable.state_root(), Some(parent_root));
+    }
+
+    #[test]
+    fn taking_empty_trie_allows_storing_fresh_result() {
+        let reusable = ReusableSparseTrie::default();
+        let parent_root = B256::with_last_byte(1);
+        let result_root = B256::with_last_byte(2);
+
+        assert!(reusable.take_for_parent(parent_root).is_none());
+        reusable.lock().store_anchored_if_current(
+            SparseStateTrie::default(),
+            result_root,
+            parent_root,
+        );
+
+        assert_eq!(reusable.state_root(), Some(result_root));
     }
 }

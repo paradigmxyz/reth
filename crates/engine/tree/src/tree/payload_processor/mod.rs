@@ -676,8 +676,7 @@ where
             // we can reuse the preserved trie structure. Otherwise, we clear the trie but
             // keep allocations.
             let start = Instant::now();
-            let (preserved, taken_parent_root) =
-                reusable_sparse_trie.take_for_parent(parent_state_root);
+            let preserved = reusable_sparse_trie.take_for_parent(parent_state_root);
             trie_metrics
                 .sparse_trie_cache_wait_duration_histogram
                 .record(start.elapsed().as_secs_f64());
@@ -727,7 +726,7 @@ where
                     "State root receiver dropped, clearing trie"
                 );
                 let (trie, deferred) = task.into_cleared_trie();
-                guard.store_cleared_if_current(trie, taken_parent_root);
+                guard.store_cleared_if_current(trie, parent_state_root);
                 drop(guard);
                 executor.spawn_drop(deferred);
                 return;
@@ -758,7 +757,7 @@ where
                 trie_metrics
                     .sparse_trie_retained_storage_tries
                     .set(trie.retained_storage_tries_count() as f64);
-                guard.store_anchored_if_current(trie, result.state_root, taken_parent_root);
+                guard.store_anchored_if_current(trie, result.state_root, parent_state_root);
                 deferred
             } else {
                 debug!(
@@ -766,7 +765,7 @@ where
                     "State root computation failed, clearing trie"
                 );
                 let (trie, deferred) = task.into_cleared_trie();
-                guard.store_cleared_if_current(trie, taken_parent_root);
+                guard.store_cleared_if_current(trie, parent_state_root);
                 deferred
             };
             drop(guard);
