@@ -17,10 +17,11 @@ use tracing::trace;
 /// generic over the provider factory; each worker builds its own per block.
 type BuildProviderFn = dyn Fn() -> ProviderResult<StateProviderBox> + Send + Sync;
 
-/// A single warm request: a whole account (basic account + its bytecode) or one storage slot.
+/// A single warm request: a whole account (basic account + its bytecode) or storage slots.
 enum PrewarmTarget {
     Account(Address),
     Storage(Address, StorageKey),
+    StorageBatch(Address, Vec<StorageKey>),
 }
 
 /// A message in a worker's queue. The per-block lifecycle is explicit and ordered (the queue is
@@ -83,6 +84,44 @@ impl BalPrewarmPool {
         self.send_warm(PrewarmTarget::Storage(addr, slot));
     }
 
+    /// Fire-and-forget: warm storage slots for one account in small batches.
+    pub(crate) fn warm_storage_slots(
+        &self,
+        addr: Address,
+        slots: impl IntoIterator<Item = StorageKey>,
+    ) {
+        const STORAGE_BATCH_SIZE: usize = 32;
+
+        let mut first_slot = None;
+        let mut batch: Option<Vec<StorageKey>> = None;
+        for slot in slots {
+            match batch.as_mut() {
+                Some(batch) => {
+                    batch.push(slot);
+                    if batch.len() == STORAGE_BATCH_SIZE {
+                        self.send_storage_batch(addr, batch, STORAGE_BATCH_SIZE);
+                    }
+                }
+                None => {
+                    if let Some(first) = first_slot.take() {
+                        let mut next_batch = Vec::with_capacity(STORAGE_BATCH_SIZE);
+                        next_batch.push(first);
+                        next_batch.push(slot);
+                        batch = Some(next_batch);
+                    } else {
+                        first_slot = Some(slot);
+                    }
+                }
+            }
+        }
+
+        if let Some(mut batch) = batch {
+            self.send_storage_batch(addr, &mut batch, STORAGE_BATCH_SIZE);
+        } else if let Some(slot) = first_slot {
+            self.warm_storage(addr, slot);
+        }
+    }
+
     /// Ends the block: every worker drops its provider (and read txn) once it has drained the warm
     /// requests queued ahead of this message.
     ///
@@ -102,6 +141,21 @@ impl BalPrewarmPool {
     fn send_warm(&self, target: PrewarmTarget) {
         let i = self.next.fetch_add(1, Ordering::Relaxed) % self.workers.len();
         let _ = self.workers[i].send(PrewarmMsg::Warm(target));
+    }
+
+    fn send_storage_batch(&self, addr: Address, batch: &mut Vec<StorageKey>, capacity: usize) {
+        match batch.len() {
+            0 => {}
+            1 => {
+                let slot = batch[0];
+                batch.clear();
+                self.warm_storage(addr, slot);
+            }
+            _ => {
+                let slots = std::mem::replace(batch, Vec::with_capacity(capacity));
+                self.send_warm(PrewarmTarget::StorageBatch(addr, slots));
+            }
+        }
     }
 }
 
@@ -157,6 +211,11 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                     }
                     PrewarmTarget::Storage(addr, slot) => {
                         let _ = provider.storage(addr, slot);
+                    }
+                    PrewarmTarget::StorageBatch(addr, slots) => {
+                        for slot in slots {
+                            let _ = provider.storage(addr, slot);
+                        }
                     }
                 }
             }
