@@ -651,6 +651,8 @@ where
             return;
         }
 
+        let needs_parent_account = account_fields.needs_parent_account();
+
         if !account_changes.storage_changes.is_empty() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
             let mut storage_map = reth_trie::HashedStorage::new(false);
@@ -662,12 +664,22 @@ where
                 }
             }
 
+            if !needs_parent_account {
+                let account = account_fields.into_account(None);
+                let mut hashed_state = reth_trie::HashedPostState::default();
+                hashed_state.storages.insert(hashed_address, storage_map);
+                hashed_state.accounts.insert(hashed_address, Some(account));
+                let _ =
+                    to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
+                return;
+            }
+
             let mut hashed_state = reth_trie::HashedPostState::default();
             hashed_state.storages.insert(hashed_address, storage_map);
             let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
         }
 
-        let existing_account = if account_fields.needs_parent_account() {
+        let existing_account = if needs_parent_account {
             if provider.is_none() {
                 let _span = debug_span!(
                     target: "engine::tree::payload_processor::prewarm",
