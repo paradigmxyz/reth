@@ -522,6 +522,11 @@ where
                 }
                 Entry::Occupied(mut entry) => {
                     let updates = entry.get_mut();
+                    if updates.is_empty() {
+                        *updates = new;
+                        continue;
+                    }
+
                     for (slot, new) in new.drain() {
                         match updates.entry(slot) {
                             Entry::Occupied(mut slot_entry) => {
