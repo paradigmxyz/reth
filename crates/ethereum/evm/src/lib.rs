@@ -26,7 +26,7 @@ use reth_ethereum_forks::Hardforks;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 #[cfg(feature = "std")]
-use reth_evm::{precompile_cache::PrecompileCacheMap, ConfigureEngineEvm, ExecutableTxIterator};
+use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
 use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, NextBlockEnvAttributes};
 #[cfg(feature = "std")]
 use reth_primitives_traits::SignedTransaction;
@@ -202,12 +202,6 @@ impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory> {
     /// Returns the chain spec associated with this configuration.
     pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
         self.executor_factory.chain_spec()
-    }
-
-    /// Returns the shared precompile cache map.
-    #[cfg(feature = "std")]
-    pub const fn precompile_cache_map(&self) -> &PrecompileCacheMap<evm2::SpecId> {
-        self.executor_factory.precompile_cache_map()
     }
 }
 

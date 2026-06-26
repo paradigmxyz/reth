@@ -59,12 +59,6 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
         &self.chain_spec
     }
 
-    /// Returns the shared precompile cache map.
-    #[cfg(feature = "std")]
-    pub const fn precompile_cache_map(&self) -> &PrecompileCacheMap<evm2::SpecId> {
-        &self.precompile_cache_map
-    }
-
     /// Creates a configured Ethereum block executor.
     #[cfg(feature = "std")]
     pub fn create_executor<'a, DB>(
