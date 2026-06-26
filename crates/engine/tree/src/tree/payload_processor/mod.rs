@@ -460,7 +460,7 @@ where
     /// Non-BAL execution must consume transactions in block order, while rayon may recover
     /// individual transactions in any order. Windowing prioritizes the next contiguous range while
     /// still using parallel recovery inside that range.
-    const PARALLEL_TX_WINDOW_SIZE: usize = 128;
+    const PARALLEL_TX_WINDOW_SIZE: usize = 32;
 
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     ///
