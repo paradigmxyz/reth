@@ -324,6 +324,11 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         blocks: Vec<ExecutedBlock<T>>,
         tx: CrossbeamSender<PersistenceResult>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
+        if blocks.is_empty() {
+            let _ = tx.send(PersistenceResult { last_block: None, commit_duration: None });
+            return Ok(())
+        }
+
         self.send_action(PersistenceAction::SaveBlocks(blocks, tx))
     }
 
