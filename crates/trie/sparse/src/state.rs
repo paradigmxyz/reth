@@ -14,7 +14,8 @@ use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
 use reth_trie_common::{
     changed_paths::TrieChangedPaths,
     updates::{StorageTrieUpdates, TrieUpdates},
-    DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2,
+    DecodedMultiProof, HashedPostState, HashedPostStateSorted, MultiProof, Nibbles,
+    ProofTrieNodeV2,
 };
 #[cfg(feature = "std")]
 use tracing::debug;
@@ -656,11 +657,32 @@ impl SparseTrieRetainedPaths {
         self.storage_slots.entry(hashed_address).or_default().extend(slots);
     }
 
-    /// Extends the retained paths with changed trie node base paths.
-    pub fn extend_from_changed_paths(&mut self, changed_paths: &TrieChangedPaths) {
-        self.account_paths.extend(changed_paths.account_paths.iter().cloned());
-        for (address, paths) in &changed_paths.storage_paths {
-            self.storage_slots.entry(*address).or_default().extend(paths.iter().cloned());
+    /// Extends the retained paths with every account and storage slot touched by the hashed state.
+    pub fn extend_from_hashed_state(&mut self, hashed_state: &HashedPostState) {
+        self.account_paths
+            .extend(hashed_state.accounts.keys().map(|address| Nibbles::unpack(*address)));
+
+        for (address, storage) in &hashed_state.storages {
+            self.retain_account(*address);
+            self.retain_storage_slots(
+                *address,
+                storage.storage.keys().map(|slot| Nibbles::unpack(*slot)),
+            );
+        }
+    }
+
+    /// Extends the retained paths with every account and storage slot touched by sorted hashed
+    /// state.
+    pub fn extend_from_sorted_hashed_state(&mut self, hashed_state: &HashedPostStateSorted) {
+        self.account_paths
+            .extend(hashed_state.accounts().iter().map(|(address, _)| Nibbles::unpack(*address)));
+
+        for (address, storage) in hashed_state.account_storages() {
+            self.retain_account(*address);
+            self.retain_storage_slots(
+                *address,
+                storage.storage_slots_ref().iter().map(|(slot, _)| Nibbles::unpack(*slot)),
+            );
         }
     }
 
@@ -951,24 +973,54 @@ mod tests {
     }
 
     #[test]
-    fn retained_paths_extend_from_changed_paths() {
-        let account_path = Nibbles::from_nibbles([0x01]);
+    fn retained_paths_extend_from_sorted_hashed_state() {
+        let account = B256::with_last_byte(0x01);
         let storage_account = B256::with_last_byte(0x02);
-        let storage_path = Nibbles::from_nibbles([0x03]);
-        let changed_paths = TrieChangedPaths {
-            account_paths: HashSet::from_iter([account_path.clone()]),
-            storage_paths: B256Map::from_iter([(
+        let slot = B256::with_last_byte(0x03);
+        let hashed_state = HashedPostStateSorted::new(
+            vec![(account, Some(Account::default()))],
+            B256Map::from_iter([(
                 storage_account,
-                HashSet::from_iter([storage_path.clone()]),
+                reth_trie_common::HashedStorageSorted {
+                    storage_slots: vec![(slot, U256::from(1))],
+                    wiped: false,
+                },
+            )]),
+        );
+
+        let mut retained_paths = SparseTrieRetainedPaths::default();
+        retained_paths.extend_from_sorted_hashed_state(&hashed_state);
+        retained_paths.sort_and_dedup();
+
+        assert_eq!(
+            retained_paths.account_paths,
+            vec![Nibbles::unpack(account), Nibbles::unpack(storage_account)]
+        );
+        assert_eq!(retained_paths.storage_slots[&storage_account], vec![Nibbles::unpack(slot)]);
+    }
+
+    #[test]
+    fn retained_paths_extend_from_hashed_state() {
+        let account = B256::with_last_byte(0x01);
+        let storage_account = B256::with_last_byte(0x02);
+        let slot = B256::with_last_byte(0x03);
+        let hashed_state = HashedPostState {
+            accounts: B256Map::from_iter([(account, Some(Account::default()))]),
+            storages: B256Map::from_iter([(
+                storage_account,
+                reth_trie_common::HashedStorage::from_iter(false, [(slot, U256::from(1))]),
             )]),
         };
 
         let mut retained_paths = SparseTrieRetainedPaths::default();
-        retained_paths.extend_from_changed_paths(&changed_paths);
+        retained_paths.extend_from_hashed_state(&hashed_state);
         retained_paths.sort_and_dedup();
 
-        assert_eq!(retained_paths.account_paths, vec![account_path]);
-        assert_eq!(retained_paths.storage_slots[&storage_account], vec![storage_path]);
+        assert_eq!(
+            retained_paths.account_paths,
+            vec![Nibbles::unpack(account), Nibbles::unpack(storage_account)]
+        );
+        assert_eq!(retained_paths.storage_slots[&storage_account], vec![Nibbles::unpack(slot)]);
     }
 
     #[test]
