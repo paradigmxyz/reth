@@ -17,7 +17,7 @@ use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_evm::{
     execute::{ExecutableTxFor, ExecutableTxParts, WithTxEnv},
-    ConfigureEvm, ConvertTx, EvmEnv, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, TxEnvFor,
+    ConfigureEvm, ConvertTx, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, TxEnvFor,
 };
 use reth_execution_types::ExecutionState;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
@@ -297,7 +297,6 @@ where
             + Sync
             + 'static,
         Evm: ConfigureEvm<Primitives = N>,
-        EvmEnvFor<Evm>: EvmEnv,
     {
         let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
             options;
@@ -346,7 +345,6 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
         Evm: ConfigureEvm<Primitives = N>,
-        EvmEnvFor<Evm>: EvmEnv,
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
@@ -543,7 +541,6 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
         Evm: ConfigureEvm<Primitives = N>,
-        EvmEnvFor<Evm>: EvmEnv,
     {
         let mode = if parallel_bal_execution {
             #[cfg(any())]

@@ -80,7 +80,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     type NextBlockEnvCtx: Debug + Clone;
 
     /// Configured EVM environment type.
-    type EvmEnv: Debug + Clone + Send + Sync + 'static;
+    type EvmEnv: crate::EvmEnv;
 
     /// Configured transaction environment type.
     type TxEnv: From<Recovered<TxTy<Self::Primitives>>> + Clone + Send + Sync + 'static;

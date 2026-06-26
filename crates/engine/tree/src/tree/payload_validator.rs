@@ -131,7 +131,7 @@ use reth_engine_primitives::{
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
     execute::{BlockExecutor, ExecutableTxFor, HashedStateMode, RecoveredTx},
-    ConfigureEvm, EvmEnv, EvmEnvFor, ExecutionCtxFor,
+    ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
 use reth_execution_types::hashed_post_state_from_state_source;
@@ -451,7 +451,6 @@ where
     where
         V: PayloadValidator<T, Block = N::Block> + Clone,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
-        EvmEnvFor<Evm>: EvmEnv,
     {
         let parent_hash = input.parent_hash();
         let _jit_pause = JitPauseGuard::new(&self.evm_config);
@@ -1124,7 +1123,6 @@ where
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
         T::ExecutionData: ExecutionPayload,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
-        EvmEnvFor<Evm>: EvmEnv,
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
@@ -1589,7 +1587,6 @@ where
     where
         T: ExecutableTxIterator<Evm>,
         Evm: ConfigureEvm<Primitives = N>,
-        EvmEnvFor<Evm>: EvmEnv,
     {
         let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
             options;
@@ -2073,7 +2070,6 @@ where
     Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N>
         + ConfigureEvm<Primitives = N>
         + 'static,
-    EvmEnvFor<Evm>: EvmEnv,
     Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
 {
     fn validate_payload_attributes_against_header(

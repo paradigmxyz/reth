@@ -796,7 +796,7 @@ where
 impl<Eth> DebugApi<Eth>
 where
     Eth: TraceExt,
-    Eth::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
+    Eth::Evm: ConfigureEvm,
 {
     async fn trace_block_impl(
         &self,
@@ -974,7 +974,7 @@ where
 impl<Eth> DebugApiServer<RpcTxReq<Eth::NetworkTypes>> for DebugApi<Eth>
 where
     Eth: EthTransactions + TraceExt,
-    Eth::Evm: ConfigureEvm<EvmEnv: EvmEnv>,
+    Eth::Evm: ConfigureEvm,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {

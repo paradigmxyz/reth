@@ -34,7 +34,7 @@ use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{
     execute::{BlockExecutorFactory, ExecutableTxFor},
-    ConfigureEvm, EvmEnv, EvmEnvFor,
+    ConfigureEvm, EvmEnv,
 };
 use reth_metrics::Metrics;
 #[cfg(any(test, any()))]
@@ -96,7 +96,6 @@ where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
-    EvmEnvFor<Evm>: EvmEnv,
 {
     /// Initializes the task with the given transactions pending execution
     pub fn new(
@@ -620,7 +619,6 @@ where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
-    EvmEnvFor<Evm>: EvmEnv,
 {
     /// Creates a per-thread EVM for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
