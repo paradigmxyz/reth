@@ -3,12 +3,13 @@
 //! Converts `MissResult` into `MultiProofTargets` and provides helpers
 //! for measuring witness (Merkle proof) size.
 
-use crate::network_cache::MissResult;
-use alloy_primitives::{keccak256, Address};
+use crate::{network_cache::MissResult, BlockAccessedState, StateTargetSet, WitnessTargets};
+use alloy_primitives::{keccak256, Address, B256};
 use reth_trie_common::{MultiProof, MultiProofTargets};
+use std::collections::HashSet;
 
 /// Result of witness computation for a single block.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WitnessResult {
     /// Total size of witness in bytes (account trie nodes + storage trie nodes + bytecode bytes).
     pub total_size_bytes: usize,
@@ -51,6 +52,65 @@ pub fn miss_to_proof_targets(miss: &MissResult) -> MultiProofTargets {
     }
 
     targets
+}
+
+/// Convert the complete block accessed universe into benchmark target metadata.
+pub fn accessed_to_state_targets(accessed: &BlockAccessedState) -> StateTargetSet {
+    let mut targets = StateTargetSet {
+        accounts: accessed.accounts.keys().copied().collect(),
+        storage: accessed.storage.keys().copied().collect(),
+        code_hashes: accessed.codes.keys().copied().collect(),
+    };
+    targets.sort_dedup();
+    targets
+}
+
+/// Compute the cache-hit side of `accessed == cache_hit ∪ sidecar_miss`.
+pub fn cache_hit_targets(accessed: &BlockAccessedState, miss: &MissResult) -> StateTargetSet {
+    let missed_accounts: HashSet<Address> = miss.missed_accounts.iter().copied().collect();
+    let missed_storage: HashSet<(Address, B256)> = miss.missed_storage.iter().copied().collect();
+    let missed_codes: HashSet<B256> = miss.missed_codes.iter().copied().collect();
+
+    let mut targets = StateTargetSet {
+        accounts: accessed
+            .accounts
+            .keys()
+            .filter(|address| !missed_accounts.contains(*address))
+            .copied()
+            .collect(),
+        storage: accessed
+            .storage
+            .keys()
+            .filter(|key| !missed_storage.contains(*key))
+            .copied()
+            .collect(),
+        code_hashes: accessed
+            .codes
+            .keys()
+            .filter(|code_hash| !missed_codes.contains(*code_hash))
+            .copied()
+            .collect(),
+    };
+    targets.sort_dedup();
+    targets
+}
+
+/// Convert raw state targets into hashed `MultiProofTargets`.
+pub fn state_targets_to_proof_targets(targets: &StateTargetSet) -> MultiProofTargets {
+    let mut multiproof_targets = MultiProofTargets::with_capacity(targets.accounts.len());
+
+    for address in &targets.accounts {
+        let hashed_address = keccak256(address);
+        multiproof_targets.entry(hashed_address).or_default();
+    }
+
+    for (address, slot) in &targets.storage {
+        let hashed_address = keccak256(address);
+        let hashed_slot = keccak256(slot);
+        multiproof_targets.entry(hashed_address).or_default().insert(hashed_slot);
+    }
+
+    multiproof_targets
 }
 
 /// Measure the total byte size of a `MultiProof`, adding the size of any missed bytecodes.
@@ -139,4 +199,36 @@ pub struct WitnessTargetsSummary {
     pub accounts_with_storage: usize,
     /// Maximum number of missed slots for a single account.
     pub max_slots_per_account: usize,
+}
+
+/// Builds raw `WitnessTargets` (for Sidecar data payload) and hashed `MultiProofTargets` (for Trie Provider)
+/// in a single pass from `MissResult`.
+pub fn build_sidecar_targets(miss: &MissResult) -> (WitnessTargets, MultiProofTargets) {
+    let mut multiproof_targets = MultiProofTargets::with_capacity(miss.missed_accounts.len());
+
+    // 1. Convert missed accounts to WitnessTargets & hashed multiproof targets
+    let missed_accounts = miss.missed_accounts.clone();
+    for address in &missed_accounts {
+        let hashed_address = keccak256(address);
+        multiproof_targets.entry(hashed_address).or_default();
+    }
+
+    // 2. Convert missed storage to WitnessTargets & hashed multiproof targets
+    let missed_storage = miss.missed_storage.clone();
+    for (address, slot) in &missed_storage {
+        let hashed_address = keccak256(address);
+        let hashed_slot = keccak256(slot);
+        multiproof_targets.entry(hashed_address).or_default().insert(hashed_slot);
+    }
+
+    // 3. Convert missed codes to WitnessTargets
+    let missed_code_hashes = miss.missed_codes.clone();
+
+    let raw_targets = WitnessTargets {
+        missed_accounts,
+        missed_storage,
+        missed_code_hashes,
+    };
+
+    (raw_targets, multiproof_targets)
 }

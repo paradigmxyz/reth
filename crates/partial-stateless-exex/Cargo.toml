@@ -13,12 +13,17 @@ path = "src/main.rs"
 # reth
 reth-ethereum = { workspace = true, features = ["full", "cli"] }
 reth-trie-common = { workspace = true }
+reth-provider = { workspace = true }
+reth-evm = { workspace = true }
+reth-revm = { workspace = true }
+revm = { workspace = true }
 
 # our cache crate
 partial-stateless = { path = "../partial-stateless" }
 
 # alloy
 alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 
 # async
 futures.workspace = true
@@ -28,3 +33,4 @@ tokio = { workspace = true, features = ["full"] }
 eyre.workspace = true
 tracing.workspace = true
 serde_json.workspace = true
+bincode = { workspace = true }
