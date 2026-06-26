@@ -11,14 +11,10 @@
 //! execution actually produced.
 //!
 //! The rebuilt BAL is returned to the outer payload validator for consensus post-execution
-//! validation. This module only logs the first divergence between the received BAL and the BAL
-//! rebuilt from canonical execution.
+//! validation.
 
-use super::{ordered_outputs::ordered_worker_outputs, worker, BalExecutionError};
-use alloy_eip7928::{
-    bal::{Bal as AlloyBal, DecodedBal},
-    compute_block_access_list_hash, BlockAccessList,
-};
+use super::{ordered_outputs::ordered_worker_outputs, worker, BalExecutionError, ReceivedBal};
+use alloy_eip7928::BlockAccessList;
 use alloy_evm::{
     block::{BlockExecutionError, BlockExecutor, BlockValidationError, TxResult},
     Evm,
@@ -44,7 +40,7 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     runtime: &Runtime,
     evm_config: &'a Evm,
     make_db: &'a MakeDb,
-    input_bal: Arc<DecodedBal>,
+    input_bal: Arc<ReceivedBal>,
     evm_env: EvmEnvFor<Evm>,
     ctx: ExecutionCtxFor<'a, Evm>,
     transaction_count: usize,
@@ -86,7 +82,7 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     scope: &rayon::Scope<'scope>,
     evm_config: &'scope Evm,
     make_db: &'scope MakeDb,
-    input_bal: Arc<DecodedBal>,
+    input_bal: Arc<ReceivedBal>,
     evm_env: EvmEnvFor<Evm>,
     ctx: ExecutionCtxFor<'scope, Evm>,
     transaction_count: usize,
@@ -105,8 +101,7 @@ where
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'scope,
     ReceiptTy<Evm::Primitives>: Clone,
 {
-    let bal = input_bal.as_bal();
-    let input_bal_revm = convert_alloy_to_revm_bal(bal)?;
+    let input_bal_revm = input_bal.revm();
 
     let block_gas_limit = evm_env.block_env.gas_limit();
     let enable_amsterdam_eip8037 = evm_env.cfg_env.enable_amsterdam_eip8037;
@@ -170,7 +165,7 @@ where
         (block_result, senders)
     };
 
-    let built_bal = take_built_bal_and_log_divergence(&mut canonical_state, bal);
+    let built_bal = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
 
     canonical_state.merge_transitions(BundleRetention::Reverts);
     Ok((
@@ -178,53 +173,6 @@ where
         senders,
         built_bal,
     ))
-}
-
-fn convert_alloy_to_revm_bal(alloy_bal: &AlloyBal) -> Result<Arc<RevmBal>, BalExecutionError> {
-    // Convert the BAL from alloy to a BAL that can be consumed by revm, that is more amenable
-    // for state lookups.
-    //
-    // This is failable.
-    //
-    // This is due to bytecodes. A transaction can attempt to deploy illegal bytecodes, e.g. due to
-    // EIP-3541 or more specifically due to EIP-7702.
-    //
-    // During serial execution this check happens before the bytecode is deployed and if the check
-    // is triggered then the execution is reverted, and as such no actual code change event takes
-    // place. Therefore, if we do observe such a bytecode in a BAL then that means the BAL is
-    // invalid as no legal execution should've led to this bytecode deployment.
-    let received_bal_revm = RevmBal::clone_from_alloy(alloy_bal.as_vec()).map_err(|e| {
-        BalExecutionError::Consensus(reth_consensus::ConsensusError::BlockAccessListInvalid(
-            format!("{e:?}"),
-        ))
-    })?;
-    Ok(Arc::new(received_bal_revm))
-}
-
-fn take_built_bal_and_log_divergence<DB>(
-    canonical_state: &mut State<DB>,
-    received_bal: &AlloyBal,
-) -> BlockAccessList
-where
-    DB: Database,
-{
-    let built_bal = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
-    if tracing::enabled!(target: "engine::tree::payload_processor::bal", tracing::Level::DEBUG) &&
-        built_bal.as_slice() != received_bal.as_slice()
-    {
-        let rebuilt = compute_block_access_list_hash(built_bal.as_slice());
-        let expected = compute_block_access_list_hash(received_bal.as_slice());
-        let div = received_bal.diff(built_bal.as_slice());
-        tracing::debug!(
-            target: "engine::tree::payload_processor::bal",
-            %rebuilt,
-            %expected,
-            %div,
-            "first BAL divergence",
-        );
-    }
-
-    built_bal
 }
 
 /// Closes the abort channel on drop, waking scoped workers before the scope exits.
@@ -315,11 +263,11 @@ mod tests {
     };
     use std::convert::Infallible;
 
-    /// Wraps a `BlockAccessList` into an `Arc<DecodedBal>` by RLP-encoding the BAL.
-    fn to_arc_decoded(bal: BlockAccessList) -> Arc<DecodedBal> {
+    /// Wraps a `BlockAccessList` into a received BAL by RLP-encoding the BAL.
+    fn to_received_bal(bal: BlockAccessList) -> Arc<ReceivedBal> {
         let alloy_bal: AlloyBal = bal.into();
         let raw = alloy_rlp::encode(&alloy_bal).into();
-        Arc::new(DecodedBal::new(alloy_bal, raw))
+        Arc::new(ReceivedBal::from_rlp_bytes(raw).expect("valid BAL"))
     }
 
     /// Builds an in-memory canonical DB pre-populated with the post-Cancun system contracts
@@ -437,7 +385,7 @@ mod tests {
             &Runtime::test(),
             evm_config,
             db_factory(system_contracts_db()),
-            to_arc_decoded(input_bal),
+            to_received_bal(input_bal),
             &block,
             Vec::<Recovered<TransactionSigned>>::new(),
         );
@@ -468,7 +416,7 @@ mod tests {
         runtime: &Runtime,
         evm_config: EthEvmConfig,
         make_db: MakeDb,
-        input_bal: Arc<DecodedBal>,
+        input_bal: Arc<ReceivedBal>,
         block: &SealedBlock<Block>,
         txs: Vec<Tx>,
     ) -> Result<BlockExecutionOutput<Receipt>, BalExecutionError>
@@ -485,7 +433,7 @@ mod tests {
         runtime: &Runtime,
         evm_config: EthEvmConfig,
         make_db: MakeDb,
-        input_bal: Arc<DecodedBal>,
+        input_bal: Arc<ReceivedBal>,
         block: &SealedBlock<Block>,
         txs: Vec<Tx>,
     ) -> Result<(BlockExecutionOutput<Receipt>, BlockAccessList), BalExecutionError>
@@ -658,7 +606,7 @@ mod tests {
             &Runtime::test(),
             evm_config,
             db_factory(pre_block_db),
-            to_arc_decoded(reference_bal),
+            to_received_bal(reference_bal),
             &block,
             vec![recovered1, recovered2],
         );
@@ -754,7 +702,7 @@ mod tests {
             &Runtime::test(),
             evm_config,
             db_factory(canonical_db_template),
-            to_arc_decoded(reference_bal),
+            to_received_bal(reference_bal),
             &block,
             txs,
         )
@@ -900,7 +848,7 @@ mod tests {
             &Runtime::test(),
             evm_config,
             db_factory(pre_block_db),
-            to_arc_decoded(reference_bal),
+            to_received_bal(reference_bal),
             &low_gas_block,
             vec![tx1, tx2],
         );
@@ -1056,7 +1004,7 @@ mod tests {
 
         let received = {
             let raw = alloy_rlp::encode(&tampered_bal).into();
-            Arc::new(DecodedBal::new(tampered_bal, raw))
+            Arc::new(ReceivedBal::from_rlp_bytes(raw).expect("valid tampered BAL"))
         };
 
         let result = run_execute_block_full(
@@ -1092,7 +1040,7 @@ mod tests {
             &Runtime::test(),
             evm_config,
             failing_make_db,
-            to_arc_decoded(BlockAccessList::default()),
+            to_received_bal(BlockAccessList::default()),
             &block,
             Vec::<Recovered<TransactionSigned>>::new(),
         );
@@ -1128,7 +1076,7 @@ mod tests {
             &Runtime::test(),
             &evm_config,
             &make_db,
-            to_arc_decoded(BlockAccessList::default()),
+            to_received_bal(BlockAccessList::default()),
             evm_env,
             execution_ctx,
             1, // transaction_count = 1 → exactly one worker spawned

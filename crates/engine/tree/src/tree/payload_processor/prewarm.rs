@@ -11,7 +11,7 @@
 //! 2. Prewarming tasks execute transactions in parallel using shared caches
 //! 3. When actual block execution happens, it benefits from the warmed cache
 
-use super::bal_prewarm_pool::BalPrewarmPool;
+use super::{bal::ReceivedBal, bal_prewarm_pool::BalPrewarmPool};
 use crate::tree::{
     payload_processor::multiproof::StateRootMessage,
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
@@ -19,9 +19,8 @@ use crate::tree::{
     PayloadExecutionCache, SavedCache, StateProviderBuilder,
 };
 use alloy_consensus::transaction::TxHashRef;
-use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, B256, U256};
+use alloy_primitives::{keccak256, Address, B256, U256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
@@ -34,6 +33,7 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::MultiProofTargetsV2;
+use revm_state::bal::AccountBal as RevmAccountBal;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc::{self, channel, Receiver, Sender},
@@ -48,7 +48,7 @@ pub enum PrewarmMode<Tx> {
     /// Prewarm by executing transactions from a stream, each paired with its block index.
     Transactions(Receiver<(usize, Tx)>),
     /// Prewarm by prefetching slots from a Block Access List.
-    BlockAccessList(Arc<DecodedBal>),
+    BlockAccessList(Arc<ReceivedBal>),
     /// Transaction prewarming is skipped (e.g. small blocks where the overhead exceeds the
     /// benefit). No workers are spawned.
     Skipped,
@@ -332,11 +332,10 @@ where
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn run_bal_prewarm(
         &self,
-        decoded_bal: Arc<DecodedBal>,
+        received_bal: Arc<ReceivedBal>,
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
     ) {
-        let bal = decoded_bal.as_bal();
-        if bal.is_empty() {
+        if received_bal.is_empty() {
             if let Some(to_sparse_trie_task) = self.to_sparse_trie_task.as_ref() {
                 let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
             }
@@ -347,7 +346,7 @@ where
 
         trace!(
             target: "engine::tree::payload_processor::prewarm",
-            accounts = bal.len(),
+            accounts = received_bal.len(),
             "Starting BAL prewarm"
         );
 
@@ -356,8 +355,8 @@ where
         let executor = self.executor.clone();
         let parent_span = Span::current();
         let stream_parent_span = parent_span;
-        let prefetch_bal = Arc::clone(&decoded_bal);
-        let stream_bal = Arc::clone(&decoded_bal);
+        let prefetch_bal = Arc::clone(&received_bal);
+        let stream_bal = Arc::clone(&received_bal);
         let (stream_tx, stream_rx) = oneshot::channel();
 
         if let Some(to_sparse_trie_task) = to_sparse_trie_task {
@@ -367,18 +366,20 @@ where
                     target: "engine::tree::payload_processor::prewarm",
                     parent: &stream_parent_span,
                     "bal_hashed_state_stream",
-                    bal_accounts = stream_bal.as_bal().len(),
+                    bal_accounts = stream_bal.len(),
                 );
                 let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
 
-                stream_bal.as_bal().par_iter().for_each(|account_changes| {
+                let accounts = stream_bal.revm_ref().accounts.iter().collect::<Vec<_>>();
+                accounts.into_par_iter().for_each(|(address, account_changes)| {
                     WorkerPool::with_worker_mut(|worker| {
                         let provider =
                             worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
                         ctx.send_bal_hashed_state(
                             &parent_span,
                             provider,
+                            *address,
                             account_changes,
                             &to_sparse_trie_task,
                         );
@@ -413,13 +414,10 @@ where
             let build = Arc::new(move || provider_builder.build());
 
             pool.begin_block(build, caches);
-            for account in prefetch_bal.as_bal() {
-                pool.warm_account(account.address);
-                for change in &account.storage_changes {
-                    pool.warm_storage(account.address, change.slot.into());
-                }
-                for &slot in &account.storage_reads {
-                    pool.warm_storage(account.address, slot.into());
+            for (address, account) in &prefetch_bal.revm_ref().accounts {
+                pool.warm_account(*address);
+                for slot in account.storage.storage.keys() {
+                    pool.warm_storage(*address, (*slot).into());
                 }
             }
             pool.end_block();
@@ -637,13 +635,13 @@ where
         &self,
         parent_span: &Span,
         provider: &mut Option<Box<dyn AccountReader>>,
-        account_changes: &alloy_eip7928::AccountChanges,
+        address: Address,
+        account_changes: &RevmAccountBal,
         to_sparse_trie_task: &CrossbeamSender<StateRootMessage>,
     ) {
         if self.disable_bal_parallel_state_root {
             return;
         }
-        let address = account_changes.address;
         let mut hashed_address = None;
         let account_fields = BalAccountStateFields::from_changes(account_changes);
 
@@ -651,17 +649,17 @@ where
             return;
         }
 
-        if !account_changes.storage_changes.is_empty() {
-            let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
-            let mut storage_map = reth_trie::HashedStorage::new(false);
-
-            for slot_changes in &account_changes.storage_changes {
-                let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
-                if let Some(last_change) = slot_changes.changes.last() {
-                    storage_map.storage.insert(hashed_slot, last_change.new_value);
-                }
+        let mut storage_map = reth_trie::HashedStorage::new(false);
+        for (slot, writes) in &account_changes.storage.storage {
+            if let Some((_, value)) = writes.writes.last() {
+                let hashed_slot = keccak256(slot.to_be_bytes::<32>());
+                storage_map.storage.insert(hashed_slot, *value);
             }
+        }
 
+        let has_storage_writes = !storage_map.storage.is_empty();
+        if has_storage_writes {
+            let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
             let mut hashed_state = reth_trie::HashedPostState::default();
             hashed_state.storages.insert(hashed_address, storage_map);
             let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
@@ -722,17 +720,21 @@ struct BalAccountStateFields {
 }
 
 impl BalAccountStateFields {
-    fn from_changes(account_changes: &alloy_eip7928::AccountChanges) -> Self {
+    fn from_changes(account_changes: &RevmAccountBal) -> Self {
         Self {
-            balance: account_changes.balance_changes.last().map(|change| change.post_balance),
-            nonce: account_changes.nonce_changes.last().map(|change| change.new_nonce),
-            code_hash: account_changes.code_changes.last().map(|code_change| {
-                if code_change.new_code.is_empty() {
-                    alloy_consensus::constants::KECCAK_EMPTY
-                } else {
-                    keccak256(&code_change.new_code)
-                }
-            }),
+            balance: account_changes
+                .account_info
+                .balance
+                .writes
+                .last()
+                .map(|(_, balance)| *balance),
+            nonce: account_changes.account_info.nonce.writes.last().map(|(_, nonce)| *nonce),
+            code_hash: account_changes
+                .account_info
+                .code
+                .writes
+                .last()
+                .map(|(_, (code_hash, _))| *code_hash),
         }
     }
 
@@ -764,11 +766,12 @@ impl BalAccountStateFields {
     }
 }
 
-const fn bal_account_changes_state_root(
-    account_changes: &alloy_eip7928::AccountChanges,
+fn bal_account_changes_state_root(
+    account_changes: &RevmAccountBal,
     account_fields: BalAccountStateFields,
 ) -> bool {
-    !account_fields.is_empty() || !account_changes.storage_changes.is_empty()
+    !account_fields.is_empty() ||
+        account_changes.storage.storage.values().any(|writes| !writes.writes.is_empty())
 }
 
 /// Returns [`MultiProofTargetsV2`] for withdrawal addresses.
@@ -785,16 +788,28 @@ fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProof
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eip7928::{
-        AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges,
-        StorageChange,
-    };
-    use alloy_primitives::{address, bytes};
+    use alloy_eip7928::BlockAccessIndex;
+    use alloy_primitives::bytes;
+    use revm_state::{bal::BalWrites, Bytecode};
+
+    fn account_with_storage_read(slot: U256) -> RevmAccountBal {
+        let mut account = RevmAccountBal::default();
+        account.storage.storage.insert(slot, BalWrites::default());
+        account
+    }
+
+    fn account_with_storage_write(slot: U256, value: U256) -> RevmAccountBal {
+        let mut account = RevmAccountBal::default();
+        account
+            .storage
+            .storage
+            .insert(slot, BalWrites { writes: vec![(BlockAccessIndex::new(1), value)] });
+        account
+    }
 
     #[test]
     fn bal_read_only_account_does_not_change_state_root() {
-        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
-            .with_storage_read(U256::from(1));
+        let changes = account_with_storage_read(U256::from(1));
         let fields = BalAccountStateFields::from_changes(&changes);
 
         assert!(fields.is_empty());
@@ -803,10 +818,15 @@ mod tests {
 
     #[test]
     fn bal_account_with_all_leaf_fields_does_not_need_parent_account() {
-        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
-            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)))
-            .with_nonce_change(NonceChange::new(BlockAccessIndex::new(1), 7))
-            .with_code_change(CodeChange::new(BlockAccessIndex::new(1), bytes!("6001600155")));
+        let mut changes = RevmAccountBal::default();
+        changes.account_info.balance.writes.push((BlockAccessIndex::new(1), U256::from(10)));
+        changes.account_info.nonce.writes.push((BlockAccessIndex::new(1), 7));
+        let bytecode = Bytecode::new_raw(bytes!("6001600155"));
+        changes
+            .account_info
+            .code
+            .writes
+            .push((BlockAccessIndex::new(1), (bytecode.hash_slow(), bytecode)));
         let fields = BalAccountStateFields::from_changes(&changes);
 
         assert!(bal_account_changes_state_root(&changes, fields));
@@ -815,11 +835,7 @@ mod tests {
 
     #[test]
     fn bal_storage_change_needs_parent_account_when_leaf_fields_missing() {
-        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
-            .with_storage_change(SlotChanges::new(
-                U256::from(1),
-                vec![StorageChange::new(BlockAccessIndex::new(1), U256::from(2))],
-            ));
+        let changes = account_with_storage_write(U256::from(1), U256::from(2));
         let fields = BalAccountStateFields::from_changes(&changes);
 
         assert!(bal_account_changes_state_root(&changes, fields));
@@ -828,8 +844,8 @@ mod tests {
 
     #[test]
     fn bal_account_uses_existing_fields_only_when_missing() {
-        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
-            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)));
+        let mut changes = RevmAccountBal::default();
+        changes.account_info.balance.writes.push((BlockAccessIndex::new(1), U256::from(10)));
         let fields = BalAccountStateFields::from_changes(&changes);
         let account = fields.into_account(Some(Account {
             balance: U256::from(1),
