@@ -40,7 +40,7 @@ use reth_trie_sparse::{
 use std::{
     ops::Not,
     sync::{
-        atomic::{AtomicBool, AtomicUsize},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::{self, channel},
         Arc, OnceLock,
     },
@@ -60,6 +60,9 @@ use preserved_sparse_trie::{PreservedSparseTrie, SharedPreservedSparseTrie};
 /// Blocks with fewer transactions than this skip prewarming, since the fixed overhead of spawning
 /// prewarm workers exceeds the execution time saved.
 pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
+
+/// Apply sparse-trie pruning once per N persisted-block prune requests.
+const SPARSE_TRIE_PRUNE_REQUEST_INTERVAL: usize = 4;
 
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorTx<Evm, I> = RecoveredTx<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
@@ -126,6 +129,8 @@ where
     sparse_trie_max_hot_accounts: usize,
     /// Whether sparse trie cache pruning is fully disabled.
     disable_sparse_trie_cache_pruning: bool,
+    /// Counts sparse-trie prune requests so pruning can be applied periodically.
+    sparse_trie_prune_requests: AtomicUsize,
     /// Whether to disable BAL-driven parallel state root computation.
     /// Only valid when BAL parallel execution is also disabled.
     disable_bal_parallel_state_root: bool,
@@ -192,6 +197,7 @@ where
             sparse_trie_max_hot_slots: config.sparse_trie_max_hot_slots(),
             sparse_trie_max_hot_accounts: config.sparse_trie_max_hot_accounts(),
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
+            sparse_trie_prune_requests: AtomicUsize::new(0),
             cache_metrics: (!config.disable_cache_metrics())
                 .then(|| CachedStateMetrics::zeroed(CachedStateMetricsSource::Engine)),
             cache_state_metrics: (!config.disable_cache_metrics())
@@ -210,6 +216,12 @@ where
                 bal_prewarm_pool::BalPrewarmPool::new(bal_prewarm_pool::DEFAULT_BAL_PREWARM_THREADS)
             })
             .clone()
+    }
+
+    /// Returns true when this retained-path sparse-trie prune request should be applied.
+    fn should_apply_sparse_trie_prune(&self) -> bool {
+        let request = self.sparse_trie_prune_requests.fetch_add(1, Ordering::Relaxed);
+        request.is_multiple_of(SPARSE_TRIE_PRUNE_REQUEST_INTERVAL)
     }
 }
 
@@ -415,6 +427,16 @@ where
         let (state_root_tx, state_root_rx) = channel();
         let (hashed_state_tx, hashed_state_rx) = channel();
 
+        let pending_sparse_trie_prune = if self.disable_sparse_trie_cache_pruning ||
+            pending_sparse_trie_prune
+                .as_ref()
+                .is_some_and(|_| !self.should_apply_sparse_trie_prune())
+        {
+            None
+        } else {
+            pending_sparse_trie_prune
+        };
+
         self.spawn_sparse_trie_task(
             proof_handle,
             state_root_tx,
@@ -423,11 +445,7 @@ where
             SparseTrieTaskOptions {
                 parent_state_root,
                 chunk_size: config.multiproof_chunk_size(),
-                pending_sparse_trie_prune: if self.disable_sparse_trie_cache_pruning {
-                    None
-                } else {
-                    pending_sparse_trie_prune
-                },
+                pending_sparse_trie_prune,
             },
         );
 
@@ -1205,6 +1223,21 @@ mod tests {
         let cached = payload_processor.execution_cache.get_cache_for(block_hash);
         assert!(cached.is_some());
         assert_eq!(cached.unwrap().executed_block_hash(), block_hash);
+    }
+
+    #[test]
+    fn sparse_trie_prune_request_cadence_runs_periodically() {
+        let payload_processor = PayloadProcessor::new(
+            reth_tasks::Runtime::test(),
+            EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            &TreeConfig::default(),
+            PrecompileCacheMap::default(),
+        );
+
+        let decisions =
+            (0..8).map(|_| payload_processor.should_apply_sparse_trie_prune()).collect::<Vec<_>>();
+
+        assert_eq!(decisions, vec![true, false, false, false, true, false, false, false]);
     }
 
     #[test]
