@@ -1566,9 +1566,7 @@ where
                         debug!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
                         let now = Instant::now();
 
-                        let block = match self
-                            .payload_validator
-                            .on_inserted_executed_block(payload, &self.state)
+                        let block = match self.payload_validator.on_inserted_executed_block(payload)
                         {
                             Ok(block) => block,
                             Err(err) => {
