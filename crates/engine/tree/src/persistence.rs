@@ -150,14 +150,27 @@ where
         &mut self,
         blocks: Vec<ExecutedBlock<N::Primitives>>,
     ) -> Result<PersistenceResult, PersistenceError> {
-        let first_block = blocks.first().map(|b| b.recovered_block.num_hash());
         let last_block = blocks.last().map(|b| b.recovered_block.num_hash());
         let block_count = blocks.len();
 
         let pending_finalized = self.pending_finalized_block.take();
         let pending_safe = self.pending_safe_block.take();
 
-        debug!(target: "engine::persistence", ?block_count, first=?first_block, last=?last_block, "Saving range of blocks");
+        let (log_first_block, log_last_block) = if tracing::enabled!(
+            target: "engine::persistence",
+            tracing::Level::DEBUG
+        ) {
+            (blocks.first().map(|b| b.recovered_block.num_hash()), last_block)
+        } else {
+            (None, None)
+        };
+        debug!(
+            target: "engine::persistence",
+            ?block_count,
+            first=?log_first_block.as_ref(),
+            last=?log_last_block.as_ref(),
+            "Saving range of blocks"
+        );
 
         let start_time = Instant::now();
 
@@ -182,7 +195,12 @@ where
             let _ = self.provider.bal_store().flush().inspect_err(|err| {
                 warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
             });
-            debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
+            debug!(
+                target: "engine::persistence",
+                first=?log_first_block.as_ref(),
+                last=?log_last_block.as_ref(),
+                "Saved range of blocks"
+            );
         }
 
         let elapsed = start_time.elapsed();
