@@ -536,62 +536,68 @@ where
                     let convert = Arc::new(convert);
                     let iter = iter.enumerate();
 
+                    let (tx_tx, tx_rx) = crossbeam_channel::unbounded();
+
                     // Without BALs, we need to preserve the initial order of transactions.
-                    // Spawn all remaining transactions as FIFO-scheduled chunks, then drain
-                    // completed transactions in order so execution still sees block order.
-                    executor.cpu_pool().in_place_scope_fifo(move |scope| {
-                        let (tx_tx, tx_rx) = crossbeam_channel::unbounded();
-                        let mut iter = iter;
+                    // Seed one Rayon worker from the external thread, then spawn the remaining
+                    // transactions as FIFO-scheduled chunks from inside the pool so chunk jobs use
+                    // the worker-local FIFO path instead of the external injector.
+                    executor.cpu_pool().spawn_fifo(move || {
+                        rayon::scope_fifo(move |scope| {
+                            let mut iter = iter;
 
-                        loop {
-                            let chunk =
-                                iter.by_ref().take(Self::PARALLEL_TX_CHUNK_SIZE).collect::<Vec<_>>();
-                            if chunk.is_empty() {
-                                break;
+                            loop {
+                                let chunk = iter
+                                    .by_ref()
+                                    .take(Self::PARALLEL_TX_CHUNK_SIZE)
+                                    .collect::<Vec<_>>();
+                                if chunk.is_empty() {
+                                    break;
+                                }
+
+                                let tx_tx = tx_tx.clone();
+                                let convert = Arc::clone(&convert);
+
+                                scope.spawn_fifo(move |_| {
+                                    for (i, tx) in chunk {
+                                        let idx = i + prefetch;
+                                        let tx = convert.convert(tx).map(WithTxEnv::new);
+                                        let _ = tx_tx.send((idx, tx));
+                                    }
+                                });
                             }
-
-                            let tx_tx = tx_tx.clone();
-                            let convert = Arc::clone(&convert);
-
-                            scope.spawn_fifo(move |_| {
-                                for (i, tx) in chunk {
-                                    let idx = i + prefetch;
-                                    let tx = convert.convert(tx).map(WithTxEnv::new);
-                                    let _ = tx_tx.send((idx, tx));
-                                }
-                            });
-                        }
-                        drop(tx_tx);
-
-                        let mut next_tx = prefetch;
-                        let mut pending = BTreeMap::new();
-                        let send_converted_tx =
-                            |idx, tx: Result<IteratorTx<Evm, I>, <I as ExecutableTxTuple>::Error>| {
-                                if let Ok(tx) = &tx {
-                                    let _ = prewarm_tx.send((idx, tx.clone()));
-                                }
-                                let _ = execute_tx.send((idx, tx));
-                                trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
-                            };
-
-                        while next_tx < transaction_count {
-                            let Ok((idx, tx)) = tx_rx.recv() else {
-                                break;
-                            };
-
-                            if idx == next_tx {
-                                send_converted_tx(idx, tx);
-                                next_tx += 1;
-
-                                while let Some(tx) = pending.remove(&next_tx) {
-                                    send_converted_tx(next_tx, tx);
-                                    next_tx += 1;
-                                }
-                            } else {
-                                pending.insert(idx, tx);
-                            }
-                        }
+                            drop(tx_tx);
+                        });
                     });
+
+                    let mut next_tx = prefetch;
+                    let mut pending = BTreeMap::new();
+                    let send_converted_tx =
+                        |idx, tx: Result<IteratorTx<Evm, I>, <I as ExecutableTxTuple>::Error>| {
+                            if let Ok(tx) = &tx {
+                                let _ = prewarm_tx.send((idx, tx.clone()));
+                            }
+                            let _ = execute_tx.send((idx, tx));
+                            trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+                        };
+
+                    while next_tx < transaction_count {
+                        let Ok((idx, tx)) = tx_rx.recv() else {
+                            break;
+                        };
+
+                        if idx == next_tx {
+                            send_converted_tx(idx, tx);
+                            next_tx += 1;
+
+                            while let Some(tx) = pending.remove(&next_tx) {
+                                send_converted_tx(next_tx, tx);
+                                next_tx += 1;
+                            }
+                        } else {
+                            pending.insert(idx, tx);
+                        }
+                    }
                 }
             });
         }
