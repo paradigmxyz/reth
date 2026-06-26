@@ -68,11 +68,11 @@ impl<'a> BbEvmPlan<'a> {
     /// `[block_number - 256, block_number)`.
     pub(crate) fn hashes_for_block(&self, block_number: u64) -> Vec<(u64, B256)> {
         let min = block_number.saturating_sub(256);
-        self.block_hashes_to_seed
-            .iter()
-            .copied()
-            .filter(|(n, _)| *n >= min && *n < block_number)
-            .collect()
+        let start = self.block_hashes_to_seed.partition_point(|(n, _)| *n < min);
+        let end =
+            start + self.block_hashes_to_seed[start..].partition_point(|(n, _)| *n < block_number);
+
+        self.block_hashes_to_seed[start..end].to_vec()
     }
 
     /// Returns the segment that contains the transaction at `tx_index`.
@@ -432,16 +432,16 @@ where
         // the receipt root task (which reads receipts incrementally) sees
         // globally-correct values across all segments.
         let offset = self.gas_used_offset;
-        if offset > 0 &&
-            let Some(receipt) = self.inner_mut().receipts.last_mut()
+        if offset > 0
+            && let Some(receipt) = self.inner_mut().receipts.last_mut()
         {
             receipt.cumulative_gas_used += offset;
         }
 
         self.plan.tx_counter += 1;
 
-        while self.plan.next_segment < self.plan.segments.len() &&
-            self.plan.tx_counter == self.plan.segments[self.plan.next_segment].start_tx
+        while self.plan.next_segment < self.plan.segments.len()
+            && self.plan.tx_counter == self.plan.segments[self.plan.next_segment].start_tx
         {
             self.apply_segment_boundary().expect("must succeed");
         }
