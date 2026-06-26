@@ -1,0 +1,536 @@
+{
+   msync-whole-mmap-1
+   Memcheck:Param
+   msync(start)
+   ...
+   fun:dxb_sync_locked*
+}
+{
+   msync-whole-mmap-2
+   Memcheck:Param
+   msync(start)
+   ...
+   fun:env_sync*
+}
+{
+   msync-whole-mmap-3
+   Memcheck:Param
+   msync(start)
+   ...
+   fun:dxb_resize*
+}
+{
+   msync-wipe-steady
+   Memcheck:Param
+   msync(start)
+   ...
+   fun:meta_wipe_steady*
+}
+{
+   msync-meta
+   Memcheck:Param
+   msync(start)
+   ...
+   fun:meta_sync*
+}
+{
+   msync-spill
+   Memcheck:Param
+   msync(start)
+   ...
+   fun:txn_spill*
+}
+
+# memcmp() inside iov_write() as workaround for https://libmdbx.dqdkfa.ru/dead-github/issues/269
+{
+   iov-pagecheck-1
+   Memcheck:Cond
+   fun:bcmp
+   fun:iov_callback4dirtypages
+   fun:osal_ioring_walk
+   fun:iov_complete
+   fun:iov_write
+}
+{
+   iov-pagecheck-2
+   Memcheck:Cond
+   fun:memcmp*
+   fun:iov_callback4dirtypages
+   fun:osal_ioring_walk
+   fun:iov_complete
+   fun:iov_write
+}
+
+# single-page flush by pwrite()
+{
+   pwrite-page-flush
+   Memcheck:Param
+   pwrite(buf)
+   ...
+   fun:iov_write*
+}
+{
+   pwrite64-page-flush
+   Memcheck:Param
+   pwrite64(buf)
+   ...
+   fun:iov_write*
+}
+
+# modern Valgrind don't support the `vector[...]` pattern
+#{
+#   pwritev-page-flush
+#   Memcheck:Param
+#   pwritev(vector[...])
+#   ...
+#   fun:iov_write*
+#}
+# for((i=0;i<64;++i)); do echo -e "{\n   pwritev-page-flush-$i\n   Memcheck:Param\n   pwritev(vector[$i])\n   ...\n   fun:iov_write*\n}"; done >> valgrind_suppress.txt
+{
+   pwritev-page-flush-0
+   Memcheck:Param
+   pwritev(vector[0])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-1
+   Memcheck:Param
+   pwritev(vector[1])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-2
+   Memcheck:Param
+   pwritev(vector[2])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-3
+   Memcheck:Param
+   pwritev(vector[3])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-4
+   Memcheck:Param
+   pwritev(vector[4])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-5
+   Memcheck:Param
+   pwritev(vector[5])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-6
+   Memcheck:Param
+   pwritev(vector[6])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-7
+   Memcheck:Param
+   pwritev(vector[7])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-8
+   Memcheck:Param
+   pwritev(vector[8])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-9
+   Memcheck:Param
+   pwritev(vector[9])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-10
+   Memcheck:Param
+   pwritev(vector[10])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-11
+   Memcheck:Param
+   pwritev(vector[11])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-12
+   Memcheck:Param
+   pwritev(vector[12])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-13
+   Memcheck:Param
+   pwritev(vector[13])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-14
+   Memcheck:Param
+   pwritev(vector[14])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-15
+   Memcheck:Param
+   pwritev(vector[15])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-16
+   Memcheck:Param
+   pwritev(vector[16])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-17
+   Memcheck:Param
+   pwritev(vector[17])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-18
+   Memcheck:Param
+   pwritev(vector[18])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-19
+   Memcheck:Param
+   pwritev(vector[19])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-20
+   Memcheck:Param
+   pwritev(vector[20])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-21
+   Memcheck:Param
+   pwritev(vector[21])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-22
+   Memcheck:Param
+   pwritev(vector[22])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-23
+   Memcheck:Param
+   pwritev(vector[23])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-24
+   Memcheck:Param
+   pwritev(vector[24])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-25
+   Memcheck:Param
+   pwritev(vector[25])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-26
+   Memcheck:Param
+   pwritev(vector[26])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-27
+   Memcheck:Param
+   pwritev(vector[27])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-28
+   Memcheck:Param
+   pwritev(vector[28])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-29
+   Memcheck:Param
+   pwritev(vector[29])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-30
+   Memcheck:Param
+   pwritev(vector[30])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-31
+   Memcheck:Param
+   pwritev(vector[31])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-32
+   Memcheck:Param
+   pwritev(vector[32])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-33
+   Memcheck:Param
+   pwritev(vector[33])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-34
+   Memcheck:Param
+   pwritev(vector[34])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-35
+   Memcheck:Param
+   pwritev(vector[35])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-36
+   Memcheck:Param
+   pwritev(vector[36])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-37
+   Memcheck:Param
+   pwritev(vector[37])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-38
+   Memcheck:Param
+   pwritev(vector[38])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-39
+   Memcheck:Param
+   pwritev(vector[39])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-40
+   Memcheck:Param
+   pwritev(vector[40])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-41
+   Memcheck:Param
+   pwritev(vector[41])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-42
+   Memcheck:Param
+   pwritev(vector[42])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-43
+   Memcheck:Param
+   pwritev(vector[43])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-44
+   Memcheck:Param
+   pwritev(vector[44])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-45
+   Memcheck:Param
+   pwritev(vector[45])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-46
+   Memcheck:Param
+   pwritev(vector[46])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-47
+   Memcheck:Param
+   pwritev(vector[47])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-48
+   Memcheck:Param
+   pwritev(vector[48])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-49
+   Memcheck:Param
+   pwritev(vector[49])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-50
+   Memcheck:Param
+   pwritev(vector[50])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-51
+   Memcheck:Param
+   pwritev(vector[51])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-52
+   Memcheck:Param
+   pwritev(vector[52])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-53
+   Memcheck:Param
+   pwritev(vector[53])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-54
+   Memcheck:Param
+   pwritev(vector[54])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-55
+   Memcheck:Param
+   pwritev(vector[55])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-56
+   Memcheck:Param
+   pwritev(vector[56])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-57
+   Memcheck:Param
+   pwritev(vector[57])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-58
+   Memcheck:Param
+   pwritev(vector[58])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-59
+   Memcheck:Param
+   pwritev(vector[59])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-60
+   Memcheck:Param
+   pwritev(vector[60])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-61
+   Memcheck:Param
+   pwritev(vector[61])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-62
+   Memcheck:Param
+   pwritev(vector[62])
+   ...
+   fun:iov_write*
+}
+{
+   pwritev-page-flush-63
+   Memcheck:Param
+   pwritev(vector[63])
+   ...
+   fun:iov_write*
+}

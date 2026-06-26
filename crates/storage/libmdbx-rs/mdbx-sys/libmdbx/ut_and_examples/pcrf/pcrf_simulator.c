@@ -24,9 +24,16 @@
 
 char opt_db_path[PATH_MAX] = "./mdbx_bench2";
 static MDBX_env *env;
-#define REC_COUNT 10240000
-int64_t ids[REC_COUNT * 10];
-int32_t ids_count = 0;
+#define DEFAULT_REC_COUNT UINT64_C(10240000)
+#define DEFAULT_CHURN_ROUNDS UINT64_MAX
+static int64_t *ids;
+static size_t ids_count;
+static size_t ids_capacity;
+static uint64_t opt_initial_records = DEFAULT_REC_COUNT;
+static uint64_t opt_churn_rounds = DEFAULT_CHURN_ROUNDS;
+static uint64_t opt_churn_batch = 1000;
+static uint64_t opt_churn_extra = 51;
+static uint64_t opt_stat_interval_us = UINT64_C(10000000);
 
 int64_t mdbx_add_count = 0;
 int64_t mdbx_del_count = 0;
@@ -49,6 +56,10 @@ typedef struct {
 } __attribute__((__packed__)) event_data_t;
 
 static void add_id_to_pool(int64_t id) {
+  if (ids_count >= ids_capacity) {
+    fprintf(stderr, "ID pool overflow: capacity %zu\n", ids_capacity);
+    exit(EXIT_FAILURE);
+  }
   ids[ids_count] = id;
   ids_count++;
 }
@@ -67,7 +78,7 @@ static int64_t get_id_from_pool() {
   if (ids_count == 0) {
     return -1;
   }
-  int32_t index = rand() % ids_count;
+  size_t index = (size_t)rand() % ids_count;
   int64_t id = ids[index];
   ids[index] = ids[ids_count - 1];
   ids_count--;
@@ -83,6 +94,83 @@ static int64_t get_id_from_pool() {
     }                                                                                                                  \
   } while (0)
 
+static uint64_t env_uint64(const char *name, uint64_t default_value) {
+  const char *value = getenv(name);
+  if (!value || !*value)
+    return default_value;
+  char *end = NULL;
+  const uint64_t result = strtoull(value, &end, 0);
+  if (!end || *end) {
+    fprintf(stderr, "Invalid %s value: %s\n", name, value);
+    exit(EXIT_FAILURE);
+  }
+  return result;
+}
+
+static uint64_t checked_add(uint64_t a, uint64_t b) {
+  if (UINT64_MAX - a < b) {
+    fprintf(stderr, "PCRF simulator option overflow\n");
+    exit(EXIT_FAILURE);
+  }
+  return a + b;
+}
+
+static uint64_t checked_mul(uint64_t a, uint64_t b) {
+  if (a && UINT64_MAX / a < b) {
+    fprintf(stderr, "PCRF simulator option overflow\n");
+    exit(EXIT_FAILURE);
+  }
+  return a * b;
+}
+
+static void load_options(void) {
+  const char *db_path = getenv("PCRF_DB_PATH");
+  if (db_path && *db_path) {
+    int written = snprintf(opt_db_path, sizeof(opt_db_path), "%s", db_path);
+    if (written < 0 || (size_t)written >= sizeof(opt_db_path)) {
+      fprintf(stderr, "PCRF_DB_PATH is too long\n");
+      exit(EXIT_FAILURE);
+    }
+  }
+
+  opt_initial_records = env_uint64("PCRF_INITIAL_RECORDS", opt_initial_records);
+  opt_churn_rounds = env_uint64("PCRF_CHURN_ROUNDS", opt_churn_rounds);
+  opt_churn_batch = env_uint64("PCRF_CHURN_BATCH", opt_churn_batch);
+  opt_churn_extra = env_uint64("PCRF_CHURN_EXTRA", opt_churn_extra);
+  opt_stat_interval_us = env_uint64("PCRF_STAT_INTERVAL_US", opt_stat_interval_us);
+
+  uint64_t needed = opt_initial_records;
+  if (opt_churn_rounds == DEFAULT_CHURN_ROUNDS)
+    needed = checked_mul(DEFAULT_REC_COUNT, 10);
+  else {
+    needed = checked_add(needed, checked_mul(opt_churn_rounds, opt_churn_extra));
+    needed = checked_add(needed, opt_churn_batch);
+    needed = checked_add(needed, 1024);
+  }
+  if (needed == 0)
+    needed = 1;
+  if (needed > SIZE_MAX / sizeof(*ids)) {
+    fprintf(stderr, "ID pool is too large: %" PRIu64 "\n", needed);
+    exit(EXIT_FAILURE);
+  }
+  ids_capacity = (size_t)needed;
+  ids = calloc(ids_capacity, sizeof(*ids));
+  if (!ids) {
+    fprintf(stderr, "Unable to allocate ID pool: %zu entries\n", ids_capacity);
+    exit(EXIT_FAILURE);
+  }
+}
+
+static void remove_env_file(const char *suffix) {
+  char filename[PATH_MAX];
+  int written = snprintf(filename, sizeof(filename), "%s%s", opt_db_path, suffix);
+  if (written < 0 || (size_t)written >= sizeof(filename)) {
+    fprintf(stderr, "PCRF_DB_PATH plus suffix is too long\n");
+    exit(EXIT_FAILURE);
+  }
+  remove(filename);
+}
+
 static void db_connect() {
   MDBX_dbi dbi_session;
   MDBX_dbi dbi_session_id;
@@ -90,10 +178,13 @@ static void db_connect() {
   MDBX_dbi dbi_ip;
 
   MDBX_CHECK(mdbx_env_create(&env));
-  MDBX_CHECK(mdbx_env_set_geometry(env, 0, 0, REC_COUNT * sizeof(session_data_t) * 10, -1, -1, -1));
+  uint64_t upper = checked_mul((uint64_t)ids_capacity, sizeof(session_data_t) * UINT64_C(10));
+  if (upper < UINT64_C(16) * 1024 * 1024)
+    upper = UINT64_C(16) * 1024 * 1024;
+  MDBX_CHECK(mdbx_env_set_geometry(env, 0, 0, upper, -1, -1, -1));
   MDBX_CHECK(mdbx_env_set_maxdbs(env, 30));
-  MDBX_CHECK(
-      mdbx_env_open(env, opt_db_path, MDBX_CREATE | MDBX_WRITEMAP | MDBX_UTTERLY_NOSYNC | MDBX_LIFORECLAIM, 0664));
+  MDBX_env_flags_t flags = MDBX_CREATE | MDBX_UTTERLY_NOSYNC | MDBX_LIFORECLAIM;
+  MDBX_CHECK(mdbx_env_open(env, opt_db_path, flags, 0664));
   MDBX_txn *txn;
 
   // transaction init
@@ -311,22 +402,16 @@ int main(int argc, char **argv) {
   (void)argc;
   (void)argv;
 
-  char filename[PATH_MAX];
-  int i;
+  load_options();
 
-  strcpy(filename, opt_db_path);
-  strcat(filename, MDBX_DATANAME);
-  remove(filename);
-
-  strcpy(filename, opt_db_path);
-  strcat(filename, MDBX_LOCKNAME);
-  remove(filename);
+  remove_env_file(MDBX_DATANAME);
+  remove_env_file(MDBX_LOCKNAME);
 
   puts("Open DB...");
   db_connect();
   puts("Create data...");
   int64_t t = getClockUs();
-  for (i = 0; i < REC_COUNT; i++) {
+  for (uint64_t i = 0; i < opt_initial_records; i++) {
     int64_t id = obj_id++;
     create_record(id);
     add_id_to_pool(id);
@@ -339,29 +424,27 @@ int main(int argc, char **argv) {
     }
   }
   periodic_stat();
-  while (1) {
-    int i;
-    for (i = 0; i < 1000; i++) {
+  for (uint64_t round = 0; opt_churn_rounds == DEFAULT_CHURN_ROUNDS || round < opt_churn_rounds; round++) {
+    for (uint64_t i = 0; i < opt_churn_batch; i++) {
       int64_t id = obj_id++;
       create_record(id);
       add_id_to_pool(id);
       id = get_id_from_pool();
       delete_record(id);
     }
-    for (i = 0; i < 50; i++) {
+    for (uint64_t i = 0; i < opt_churn_extra; i++) {
       int64_t id = obj_id++;
       create_record(id);
       add_id_to_pool(id);
     }
-    int64_t id = obj_id++;
-    create_record(id);
-    add_id_to_pool(id);
     int64_t now = getClockUs();
-    if ((now - t) > 10000000L) {
+    if (opt_stat_interval_us && (uint64_t)(now - t) > opt_stat_interval_us) {
       periodic_stat();
       t = now;
     }
   }
+  periodic_stat();
   db_disconnect();
+  free(ids);
   return 0;
 }

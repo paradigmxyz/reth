@@ -91,7 +91,11 @@ impl TxnManager {
                         TxnManagerMessage::Abort { tx, sender } => {
                             let _span =
                                 tracing::debug_span!(target: "libmdbx::txn", "abort").entered();
-                            sender.send(mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) })).unwrap();
+                            sender
+                                .send(mdbx_result(unsafe {
+                                    ffi::mdbx_txn_abort_ex(tx.0, ptr::null_mut())
+                                }))
+                                .unwrap();
                         }
                         TxnManagerMessage::Commit { tx, sender } => {
                             let _span =

@@ -73,7 +73,7 @@ impl ReadTxnPool {
 
 /// Aborts a transaction handle, logging any error.
 fn abort_txn(txn: *mut ffi::MDBX_txn) {
-    if let Err(e) = mdbx_result(unsafe { ffi::mdbx_txn_abort(txn) }) {
+    if let Err(e) = mdbx_result(unsafe { ffi::mdbx_txn_abort_ex(txn, std::ptr::null_mut()) }) {
         tracing::error!(target: "libmdbx", %e, "failed to abort transaction");
     }
 }
