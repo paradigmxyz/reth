@@ -1,5 +1,6 @@
 use crate::{
-    ArenaParallelSparseTrie, LeafUpdate, SparseTrie as SparseTrieTrait, SparseTrieUpdates,
+    ArenaParallelSparseTrie, LeafUpdate, SortedLeafUpdates, SparseTrie as SparseTrieTrait,
+    SparseTrieUpdates,
 };
 use alloc::{borrow::Cow, boxed::Box};
 use alloy_primitives::{map::B256Map, B256};
@@ -245,6 +246,26 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
                 Ok(())
             }
             Self::Revealed(trie) => trie.update_leaves(updates, proof_required_fn),
+        }
+    }
+
+    /// Applies sorted batch leaf updates to the sparse trie.
+    ///
+    /// For blind tries, all updates remain in the sorted vector and proof targets are emitted for
+    /// every key. For revealed tries, delegates to the inner implementation.
+    pub fn update_sorted_leaves(
+        &mut self,
+        sorted_updates: &mut SortedLeafUpdates,
+        mut proof_required_fn: impl FnMut(B256, u8),
+    ) -> SparseTrieResult<()> {
+        match self {
+            Self::Blind(_) => {
+                for (key, _, _) in sorted_updates {
+                    proof_required_fn(*key, 0);
+                }
+                Ok(())
+            }
+            Self::Revealed(trie) => trie.update_sorted_leaves(sorted_updates, proof_required_fn),
         }
     }
 }

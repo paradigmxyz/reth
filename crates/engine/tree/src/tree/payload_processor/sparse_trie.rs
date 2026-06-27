@@ -1,6 +1,6 @@
 //! Sparse Trie task related functionality.
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::tree::{
     multiproof::{
@@ -19,7 +19,7 @@ use reth_trie::{
     updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
+use reth_trie_common::{MultiProofTargetsV2, Nibbles, ProofV2Target};
 use reth_trie_parallel::{
     proof_task::{
         AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
@@ -28,8 +28,8 @@ use reth_trie_parallel::{
 };
 use reth_trie_sparse::{
     errors::{SparseStateTrieErrorKind, SparseTrieErrorKind, SparseTrieResult},
-    ArenaParallelSparseTrie, DeferredDrops, LeafUpdate, RevealableSparseTrie, SparseStateTrie,
-    SparseTrie,
+    ArenaParallelSparseTrie, DeferredDrops, LeafUpdate, RevealableSparseTrie, SortedLeafUpdates,
+    SparseStateTrie, SparseTrie,
 };
 use revm_primitives::{hash_map::Entry, B256Map};
 use tracing::{debug, debug_span, error, instrument, trace_span};
@@ -81,7 +81,9 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     ///     account node reveal to complete.
     ///   - Some(_): account was changed/destroyed and is awaiting storage root calculation/reveal
     ///     to complete.
-    pending_account_updates: B256Map<Option<Option<Account>>>,
+    pending_account_updates: BTreeMap<B256, Option<Option<Account>>>,
+    /// Account updates produced by promotion, kept sorted by hashed address / trie path.
+    promoted_account_updates: SortedLeafUpdates,
     /// Cache of account proof targets that were already fetched/requested from the proof workers.
     /// account -> lowest `min_len` requested.
     fetched_account_targets: B256Map<u8>,
@@ -158,6 +160,7 @@ where
             new_account_updates: Default::default(),
             new_storage_updates: Default::default(),
             pending_account_updates: Default::default(),
+            promoted_account_updates: Default::default(),
             fetched_account_targets: Default::default(),
             fetched_storage_targets: Default::default(),
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
@@ -645,6 +648,52 @@ where
         Ok(updates_len_after < updates_len_before)
     }
 
+    /// Applies account leaf updates produced by promotion.
+    ///
+    /// `pending_account_updates` is ordered by hashed address, which is the same order as the
+    /// unpacked fixed-length trie path. Promotion can therefore feed these updates directly into
+    /// the sparse trie without round-tripping through a hash map that would be drained and sorted
+    /// again immediately.
+    fn process_promoted_account_leaf_updates(&mut self) -> SparseTrieResult<bool> {
+        let updates_len_before = self.promoted_account_updates.len();
+        if updates_len_before == 0 {
+            return Ok(false);
+        }
+
+        debug_assert!(
+            self.promoted_account_updates.windows(2).all(|window| window[0].1 <= window[1].1),
+            "promoted account updates must be sorted by trie path",
+        );
+
+        self.trie.trie_mut().update_sorted_leaves(
+            &mut self.promoted_account_updates,
+            |target, min_len| match self.fetched_account_targets.entry(target) {
+                Entry::Occupied(mut entry) => {
+                    if min_len < *entry.get() {
+                        entry.insert(min_len);
+                        self.pending_targets
+                            .push_account_target(ProofV2Target::new(target).with_min_len(min_len));
+                    }
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(min_len);
+                    self.pending_targets
+                        .push_account_target(ProofV2Target::new(target).with_min_len(min_len));
+                }
+            },
+        )?;
+
+        let updates_len_after = self.promoted_account_updates.len();
+        self.account_cache_hits += (updates_len_before - updates_len_after) as u64;
+        self.account_cache_misses += updates_len_after as u64;
+
+        self.account_updates.extend(
+            self.promoted_account_updates.drain(..).map(|(target, _, update)| (target, update)),
+        );
+
+        Ok(updates_len_after < updates_len_before)
+    }
+
     /// Computes storage roots for accounts whose storage updates are fully drained.
     ///
     /// For each storage trie T that:
@@ -728,6 +777,8 @@ where
             let span = trace_span!("promote_updates", promoted = tracing::field::Empty).entered();
             // Now handle pending account updates that can be upgraded to a proper update.
             let account_rlp_buf = &mut self.account_rlp_buf;
+            debug_assert!(self.promoted_account_updates.is_empty());
+            let promoted_account_updates = &mut self.promoted_account_updates;
             let mut num_promoted = 0;
             self.pending_account_updates.retain(|addr, account| {
                 if let Some(updates) = self.storage_updates.get(addr) {
@@ -737,7 +788,11 @@ where
                     } else if let Some(account) = account.take() {
                         let storage_root = self.trie.storage_root(addr).expect("updates are drained, storage trie should be revealed by now");
                         let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
-                        self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
+                        promoted_account_updates.push((
+                            *addr,
+                            Nibbles::unpack(*addr),
+                            LeafUpdate::Changed(encoded),
+                        ));
                         num_promoted += 1;
                         return false;
                     }
@@ -768,7 +823,11 @@ where
                 };
 
                 let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
-                self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
+                promoted_account_updates.push((
+                    *addr,
+                    Nibbles::unpack(*addr),
+                    LeafUpdate::Changed(encoded),
+                ));
                 num_promoted += 1;
 
                 false
@@ -776,12 +835,14 @@ where
             span.record("promoted", num_promoted);
             drop(span);
 
+            let account_updates_drained = self.process_promoted_account_leaf_updates()?;
+
             // Only exit when no new updates are processed.
             //
             // We need to keep iterating if any updates are being drained because that might
             // indicate that more pending account updates can be promoted.
-            if num_promoted == 0 || !self.process_account_leaf_updates(false)? {
-                break
+            if num_promoted == 0 || !account_updates_drained {
+                break;
             }
         }
 

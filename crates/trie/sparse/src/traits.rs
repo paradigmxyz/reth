@@ -25,6 +25,9 @@ pub enum LeafUpdate {
     Touched,
 }
 
+/// Leaf updates sorted by lexicographic trie path.
+pub type SortedLeafUpdates = Vec<(B256, Nibbles, LeafUpdate)>;
+
 impl LeafUpdate {
     /// Returns true if the leaf update is a change.
     pub const fn is_changed(&self) -> bool {
@@ -251,6 +254,35 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
         updates: &mut B256Map<LeafUpdate>,
         proof_required_fn: impl FnMut(B256, u8),
     ) -> SparseTrieResult<()>;
+
+    /// Applies already-sorted leaf updates to the sparse trie.
+    ///
+    /// Implementations may use this to avoid rebuilding and sorting a temporary update vector when
+    /// the caller can cheaply provide lexicographic key order. Any updates that remain blocked by
+    /// blinded nodes are left in `sorted_updates`, still sorted by path.
+    fn update_sorted_leaves(
+        &mut self,
+        sorted_updates: &mut SortedLeafUpdates,
+        proof_required_fn: impl FnMut(B256, u8),
+    ) -> SparseTrieResult<()> {
+        if sorted_updates.is_empty() {
+            return Ok(());
+        }
+
+        let mut updates =
+            B256Map::with_capacity_and_hasher(sorted_updates.len(), Default::default());
+        for (key, _, update) in sorted_updates.drain(..) {
+            updates.insert(key, update);
+        }
+
+        self.update_leaves(&mut updates, proof_required_fn)?;
+
+        sorted_updates
+            .extend(updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)));
+        sorted_updates.sort_unstable_by_key(|entry| entry.1);
+
+        Ok(())
+    }
 }
 
 /// Tracks modifications to the sparse trie structure.

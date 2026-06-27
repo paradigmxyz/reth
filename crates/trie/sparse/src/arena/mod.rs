@@ -8,7 +8,9 @@ use nodes::{
     ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeBranchChild, ArenaSparseNodeState,
 };
 
-use crate::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates};
+use crate::{
+    LeafLookup, LeafLookupError, LeafUpdate, SortedLeafUpdates, SparseTrie, SparseTrieUpdates,
+};
 use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
 use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_trie::TrieMask;
@@ -2814,22 +2816,45 @@ impl SparseTrie for ArenaParallelSparseTrie {
     fn update_leaves(
         &mut self,
         updates: &mut B256Map<LeafUpdate>,
-        mut proof_required_fn: impl FnMut(B256, u8),
+        proof_required_fn: impl FnMut(B256, u8),
     ) -> SparseTrieResult<()> {
         if updates.is_empty() {
             return Ok(());
         }
 
+        let mut sorted: SortedLeafUpdates =
+            updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
+        sorted.sort_unstable_by_key(|entry| entry.1);
+
+        self.update_sorted_leaves(&mut sorted, proof_required_fn)?;
+
+        updates.extend(sorted.drain(..).map(|(key, _, update)| (key, update)));
+
+        Ok(())
+    }
+
+    #[instrument(
+        level = "trace",
+        target = TRACE_TARGET,
+        skip_all,
+        fields(num_updates = sorted.len()),
+    )]
+    fn update_sorted_leaves(
+        &mut self,
+        sorted: &mut SortedLeafUpdates,
+        mut proof_required_fn: impl FnMut(B256, u8),
+    ) -> SparseTrieResult<()> {
+        if sorted.is_empty() {
+            return Ok(());
+        }
+
         #[cfg(feature = "trie-debug")]
         let recorded_updates: Vec<_> =
-            updates.iter().map(|(k, v)| (*k, LeafUpdateRecord::from(v))).collect();
+            sorted.iter().map(|(k, _, v)| (*k, LeafUpdateRecord::from(v))).collect();
         #[cfg(feature = "trie-debug")]
         let mut recorded_proof_targets: Vec<(B256, u8)> = Vec::new();
 
-        // Drain and sort updates lexicographically by nibbles path.
-        let mut sorted: Vec<_> =
-            updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
-        sorted.sort_unstable_by_key(|entry| entry.1);
+        let mut retained = SortedLeafUpdates::new();
 
         let threshold = self.parallelism_thresholds.min_updates;
         let parallelize_distributed_updates = sorted.len() >= threshold.saturating_mul(4);
@@ -2855,7 +2880,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     proof_required_fn(key, min_len);
                     #[cfg(feature = "trie-debug")]
                     recorded_proof_targets.push((key, min_len));
-                    updates.insert(key, update.clone());
+                    retained.push((key, *full_path, update.clone()));
                 }
                 // Subtrie — forward all consecutive updates under this subtrie's prefix.
                 SeekResult::RevealedSubtrie => {
@@ -2864,8 +2889,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     let subtrie_root_path = subtrie_entry.path;
 
                     let subtrie_start = update_idx;
-                    while update_idx < sorted.len() &&
-                        sorted[update_idx].1.starts_with(&subtrie_root_path)
+                    while update_idx < sorted.len()
+                        && sorted[update_idx].1.starts_with(&subtrie_root_path)
                     {
                         update_idx += 1;
                     }
@@ -2884,8 +2909,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         proof_required_fn(proof.key, proof.min_len);
                         #[cfg(feature = "trie-debug")]
                         recorded_proof_targets.push((proof.key, proof.min_len));
-                        for &(key, _, ref update) in subtrie_updates {
-                            updates.insert(key, update.clone());
+                        for &(key, full_path, ref update) in subtrie_updates {
+                            retained.push((key, full_path, update.clone()));
                         }
                         // Pop the subtrie entry before continuing.
                         continue;
@@ -2910,8 +2935,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     let might_empty_subtrie =
                         all_removals && num_subtrie_updates as u64 >= subtrie_num_leaves;
 
-                    if (num_subtrie_updates >= threshold || parallelize_distributed_updates) &&
-                        !might_empty_subtrie
+                    if (num_subtrie_updates >= threshold || parallelize_distributed_updates)
+                        && !might_empty_subtrie
                     {
                         // Take subtrie for parallel update.
                         trace!(target: TRACE_TARGET, ?subtrie_root_path, num_subtrie_updates, "Taking subtrie for parallel update");
@@ -2936,8 +2961,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             proof_required_fn(proof.key, proof.min_len);
                             #[cfg(feature = "trie-debug")]
                             recorded_proof_targets.push((proof.key, proof.min_len));
-                            let (key, _, ref update) = subtrie_updates[target_idx];
-                            updates.insert(key, update.clone());
+                            let (key, full_path, ref update) = subtrie_updates[target_idx];
+                            retained.push((key, full_path, update.clone()));
                         }
 
                         // Check if the subtrie's root became empty after updates.
@@ -2948,10 +2973,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     continue;
                 }
                 // EmptyRoot, leaf, diverged branch, or empty child slot — upsert directly.
-                find_result @ (SeekResult::EmptyRoot |
-                SeekResult::RevealedLeaf |
-                SeekResult::Diverged |
-                SeekResult::NoChild { .. }) => match update {
+                find_result @ (SeekResult::EmptyRoot
+                | SeekResult::RevealedLeaf
+                | SeekResult::Diverged
+                | SeekResult::NoChild { .. }) => match update {
                     LeafUpdate::Changed(v) if !v.is_empty() => {
                         let (result, _deltas) = Self::upsert_leaf(
                             &mut self.upper_arena,
@@ -2998,9 +3023,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
                                 proof_required_fn(proof_key, min_len);
                                 #[cfg(feature = "trie-debug")]
                                 recorded_proof_targets.push((proof_key, min_len));
+                                let retained_path = *full_path;
                                 let update =
                                     mem::replace(&mut sorted[update_idx].2, LeafUpdate::Touched);
-                                updates.insert(key, update);
+                                retained.push((key, retained_path, update));
                             }
                             RemoveLeafResult::Removed => {
                                 // remove_leaf may have called collapse_branch, which
@@ -3040,6 +3066,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 proof_targets: recorded_proof_targets,
             });
 
+            *sorted = retained;
+
             return Ok(());
         }
 
@@ -3064,8 +3092,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 proof_required_fn(proof.key, proof.min_len);
                 #[cfg(feature = "trie-debug")]
                 recorded_proof_targets.push((proof.key, proof.min_len));
-                let (key, _, ref update) = subtrie_updates[target_idx];
-                updates.insert(key, update.clone());
+                let (key, full_path, ref update) = subtrie_updates[target_idx];
+                retained.push((key, full_path, update.clone()));
             }
 
             // Restore the subtrie into the upper arena.
@@ -3122,6 +3150,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
             updates: recorded_updates,
             proof_targets: recorded_proof_targets,
         });
+
+        *sorted = retained;
 
         Ok(())
     }
