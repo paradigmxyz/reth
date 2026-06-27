@@ -39,7 +39,7 @@ use alloy_primitives::{
 };
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_execution_errors::StateProofError;
-use reth_primitives_traits::{dashmap::DashMap, FastInstant as Instant};
+use reth_primitives_traits::FastInstant as Instant;
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
 use reth_storage_errors::db::DatabaseError;
 use reth_tasks::Runtime;
@@ -181,8 +181,6 @@ impl ProofWorkerHandle {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
 
-        let cached_storage_roots = Arc::<DashMap<_, _>>::default();
-
         let divisor = if halve_workers { 2 } else { 1 };
         let storage_worker_count =
             runtime.proof_storage_worker_pool().current_num_threads() / divisor;
@@ -205,7 +203,6 @@ impl ProofWorkerHandle {
         let storage_rt = runtime.clone();
         let storage_task_ctx = task_ctx.clone();
         let storage_avail = storage_availability.clone();
-        let storage_roots = cached_storage_roots.clone();
         let storage_parent_span = tracing::Span::current();
         runtime.spawn_blocking_named("storage-workers", move || {
             let worker_id = AtomicUsize::new(0);
@@ -224,7 +221,6 @@ impl ProofWorkerHandle {
                     storage_work_rx.clone(),
                     worker_id,
                     storage_avail.clone(),
-                    storage_roots.clone(),
                     #[cfg(feature = "metrics")]
                     metrics,
                     #[cfg(feature = "metrics")]
@@ -263,7 +259,6 @@ impl ProofWorkerHandle {
                     worker_id,
                     account_tx.clone(),
                     account_avail.clone(),
-                    cached_storage_roots.clone(),
                     #[cfg(feature = "metrics")]
                     metrics,
                     #[cfg(feature = "metrics")]
@@ -561,8 +556,6 @@ struct StorageProofWorker<Factory> {
     worker_id: usize,
     /// Per-worker availability flags
     availability: Arc<AvailabilitySheet>,
-    /// Cached storage roots
-    cached_storage_roots: Arc<DashMap<B256, B256>>,
     /// Metrics collector for this worker
     #[cfg(feature = "metrics")]
     metrics: ProofTaskTrieMetrics,
@@ -581,7 +574,6 @@ where
         work_rx: CrossbeamReceiver<StorageWorkerJob>,
         worker_id: usize,
         availability: Arc<AvailabilitySheet>,
-        cached_storage_roots: Arc<DashMap<B256, B256>>,
         #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
         #[cfg(feature = "metrics")] cursor_metrics: ProofTaskCursorMetrics,
     ) -> Self {
@@ -590,7 +582,6 @@ where
             work_rx,
             worker_id,
             availability,
-            cached_storage_roots,
             #[cfg(feature = "metrics")]
             metrics,
             #[cfg(feature = "metrics")]
@@ -745,10 +736,6 @@ where
             );
         }
 
-        if let Some(root) = root {
-            self.cached_storage_roots.insert(hashed_address, root);
-        }
-
         trace!(
             target: "trie::proof_task",
             worker_id = self.worker_id,
@@ -776,8 +763,6 @@ struct AccountProofWorker<Factory> {
     storage_work_tx: CrossbeamSender<StorageWorkerJob>,
     /// Per-worker availability flags
     availability: Arc<AvailabilitySheet>,
-    /// Cached storage roots
-    cached_storage_roots: Arc<DashMap<B256, B256>>,
     /// Metrics collector for this worker
     #[cfg(feature = "metrics")]
     metrics: ProofTaskTrieMetrics,
@@ -798,7 +783,6 @@ where
         worker_id: usize,
         storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         availability: Arc<AvailabilitySheet>,
-        cached_storage_roots: Arc<DashMap<B256, B256>>,
         #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
         #[cfg(feature = "metrics")] cursor_metrics: ProofTaskCursorMetrics,
     ) -> Self {
@@ -808,7 +792,6 @@ where
             worker_id,
             storage_work_tx,
             availability,
-            cached_storage_roots,
             #[cfg(feature = "metrics")]
             metrics,
             #[cfg(feature = "metrics")]
@@ -982,11 +965,8 @@ where
         let storage_proof_receivers =
             dispatch_v2_storage_proofs(&self.storage_work_tx, &account_targets, storage_targets)?;
 
-        let mut value_encoder = AsyncAccountValueEncoder::new(
-            storage_proof_receivers,
-            self.cached_storage_roots.clone(),
-            v2_storage_calculator,
-        );
+        let mut value_encoder =
+            AsyncAccountValueEncoder::new(storage_proof_receivers, v2_storage_calculator);
 
         let account_proofs =
             v2_account_calculator.proof(&mut value_encoder, &mut account_targets)?;
