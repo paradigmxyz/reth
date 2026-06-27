@@ -640,6 +640,23 @@ impl TrieUpdatesSorted {
         }
     }
 
+    /// Merge sorted trie updates yielded oldest-to-newest.
+    ///
+    /// Save-block persistence already stores blocks in canonical order. For the small bursts that
+    /// path usually persists, extending directly avoids collecting a temporary reversed item list.
+    pub fn merge_oldest_to_newest<T: AsRef<Self>>(iter: impl IntoIterator<Item = T>) -> Self {
+        let mut iter = iter.into_iter();
+        let Some(first) = iter.next() else {
+            return Self::default();
+        };
+
+        let mut acc = first.as_ref().clone();
+        for next in iter {
+            acc.extend_ref_and_sort(next.as_ref());
+        }
+        acc
+    }
+
     /// Batch-merge sorted trie updates from a slice. Slice is **newest to oldest**.
     ///
     /// This variant takes a slice reference directly, avoiding iterator collection overhead.

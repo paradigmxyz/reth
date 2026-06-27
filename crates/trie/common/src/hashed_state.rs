@@ -622,6 +622,23 @@ impl HashedPostStateSorted {
         }
     }
 
+    /// Merge sorted hashed post states yielded oldest-to-newest.
+    ///
+    /// This is optimized for small already-ordered batches, where collecting a temporary reversed
+    /// item list for [`Self::merge_batch`] costs more than extending the accumulator directly.
+    pub fn merge_oldest_to_newest<T: AsRef<Self>>(iter: impl IntoIterator<Item = T>) -> Self {
+        let mut iter = iter.into_iter();
+        let Some(first) = iter.next() else {
+            return Self::default();
+        };
+
+        let mut acc = first.as_ref().clone();
+        for next in iter {
+            acc.extend_ref_and_sort(next.as_ref());
+        }
+        acc
+    }
+
     /// Batch-merge sorted hashed post states from a slice. Slice is **newest to oldest**.
     ///
     /// This variant takes a slice reference directly, avoiding iterator collection overhead.
