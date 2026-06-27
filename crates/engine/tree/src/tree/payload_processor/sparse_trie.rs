@@ -90,6 +90,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     fetched_storage_targets: B256Map<B256Map<u8>>,
     /// Reusable buffer for RLP encoding of accounts.
     account_rlp_buf: Vec<u8>,
+    /// Reusable buffer for storage proof targets discovered while updating one storage trie.
+    storage_proof_targets_buf: Vec<ProofV2Target>,
     /// Whether the last state update has been received.
     finished_state_updates: bool,
     /// Accumulated account leaf update cache hits.
@@ -161,6 +163,7 @@ where
             fetched_account_targets: Default::default(),
             fetched_storage_targets: Default::default(),
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
+            storage_proof_targets_buf: Vec::new(),
             finished_state_updates: Default::default(),
             account_cache_hits: 0,
             account_cache_misses: 0,
@@ -575,7 +578,8 @@ where
 
             let trie = self.trie.get_or_create_storage_trie_mut(*address);
             let fetched = self.fetched_storage_targets.entry(*address).or_default();
-            let mut targets = Vec::new();
+            let targets = &mut self.storage_proof_targets_buf;
+            targets.clear();
 
             let updates_len_before = updates.len();
             trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
@@ -595,7 +599,7 @@ where
             self.storage_cache_misses += updates_len_after as u64;
 
             if !targets.is_empty() {
-                self.pending_targets.extend_storage_targets(address, targets);
+                self.pending_targets.extend_storage_targets_from_buf(address, targets);
             }
         }
 
@@ -868,9 +872,9 @@ impl PendingTargets {
     }
 
     /// Extends storage targets for the given address.
-    fn extend_storage_targets(&mut self, address: &B256, targets: Vec<ProofV2Target>) {
+    fn extend_storage_targets_from_buf(&mut self, address: &B256, targets: &mut Vec<ProofV2Target>) {
         self.len += targets.len();
-        self.targets.storage_targets.entry(*address).or_default().extend(targets);
+        self.targets.storage_targets.entry(*address).or_default().append(targets);
     }
 }
 
