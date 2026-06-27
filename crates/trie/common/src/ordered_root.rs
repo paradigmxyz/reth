@@ -158,7 +158,7 @@ impl OrderedTrieRootEncodedBuilder {
 }
 
 #[inline]
-fn ordered_index_depth_hint(items: usize) -> usize {
+const fn ordered_index_depth_hint(items: usize) -> usize {
     if items == 0 {
         return 0;
     }
