@@ -36,11 +36,13 @@ use revm::{
 use revm_state::bal::Bal as RevmBal;
 use std::sync::Arc;
 
-use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
+use crate::tree::{
+    payload_processor::receipt_root_task::IndexedReceipt, warm_access::WarmAccessSnapshot,
+};
 
 /// Executes one block on the BAL path using the runtime's persistent BAL worker pool.
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
-pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
+pub(crate) fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     runtime: &Runtime,
     evm_config: &'a Evm,
     make_db: &'a MakeDb,
@@ -48,6 +50,7 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     evm_env: EvmEnvFor<Evm>,
     ctx: ExecutionCtxFor<'a, Evm>,
     transaction_count: usize,
+    warm_accesses: WarmAccessSnapshot,
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
 ) -> Result<
@@ -74,6 +77,7 @@ where
             evm_env,
             ctx,
             transaction_count,
+            warm_accesses,
             txs,
             receipt_tx,
             worker_count,
@@ -87,9 +91,10 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     evm_config: &'scope Evm,
     make_db: &'scope MakeDb,
     input_bal: Arc<DecodedBal>,
-    evm_env: EvmEnvFor<Evm>,
+    mut evm_env: EvmEnvFor<Evm>,
     ctx: ExecutionCtxFor<'scope, Evm>,
     transaction_count: usize,
+    warm_accesses: WarmAccessSnapshot,
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
     worker_count: usize,
@@ -105,6 +110,7 @@ where
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'scope,
     ReceiptTy<Evm::Primitives>: Clone,
 {
+    warm_accesses.apply_to_block_env(&mut evm_env.block_env);
     let bal = input_bal.as_bal();
     let input_bal_revm = convert_alloy_to_revm_bal(bal)?;
 
@@ -120,7 +126,6 @@ where
     let (block_result, senders) = {
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
         let (abort_guard, abort_rx) = AbortGuard::new();
-
         for _ in 0..worker_count {
             worker::spawn_worker(
                 scope,
@@ -507,6 +512,7 @@ mod tests {
             evm_env,
             execution_ctx,
             transaction_count,
+            WarmAccessSnapshot::default(),
             tx_stream(txs),
             receipt_tx,
         )
@@ -1134,6 +1140,7 @@ mod tests {
             evm_env,
             execution_ctx,
             1, // transaction_count = 1 → exactly one worker spawned
+            WarmAccessSnapshot::default(),
             tx_rx,
             receipt_tx,
         );

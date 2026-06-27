@@ -296,7 +296,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.37.0"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bogota#8a104c831d95ac6d722a2e04d0325d52e52e6ed7"
+source = "git+https://github.com/Rimeeeeee/evm?branch=eip-8289#123c9c1217b17093c6bf12e033853d9675499faf"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -1023,9 +1023,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.102"
+version = "1.0.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
+checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
 name = "approx"
@@ -1623,19 +1623,40 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
 
 [[package]]
-name = "bitcoin-io"
-version = "0.1.4"
+name = "bitcoin-consensus-encoding"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2dee39a0ee5b4095224a0cfc6bf4cc1baf0f9624b96b367e53b66d974e51d953"
+checksum = "b2d6094e2a1ba3c93b5a596fe5a10d1a10c3c6e06785cde89f693a044c01aa40"
+dependencies = [
+ "bitcoin-internals",
+]
+
+[[package]]
+name = "bitcoin-internals"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a30a22d1f112dde8e16be7b45c63645dc165cef254f835b3e1e9553e485cfa64"
+dependencies = [
+ "hex-conservative 0.3.2",
+]
+
+[[package]]
+name = "bitcoin-io"
+version = "0.1.101"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb5de036369d1ac59d3c1819ebc4d850f89466f5401c571a285b6ed564a4cb78"
+dependencies = [
+ "bitcoin-consensus-encoding",
+]
 
 [[package]]
 name = "bitcoin_hashes"
-version = "0.14.2"
+version = "0.14.101"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ed83caece3afc59919481b33b472e1432d1abc4641ed9100be142ef5110b406"
+checksum = "bca4c7abb40c8817d77403c880988cfd484f23ab2365726afb2f798363e2c4a2"
 dependencies = [
  "bitcoin-io",
- "hex-conservative",
+ "hex-conservative 0.2.2",
 ]
 
 [[package]]
@@ -1927,13 +1948,13 @@ dependencies = [
 
 [[package]]
 name = "bstr"
-version = "1.12.1"
+version = "1.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63044e1ae8e69f3b5a92c736ca6269b8d12fa7efe39bf34ddb06d102cf0e2cab"
+checksum = "5cee35f73844aa3014bb606320a6c1f010249dbdf43342fe54b5a4f6a8ed4b79"
 dependencies = [
  "memchr",
  "regex-automata",
- "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -2127,9 +2148,9 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "chacha20"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f8d983286843e49675a4b7a2d174efe136dc93a18d69130dd18198a6c167601"
+checksum = "d524456ba66e72eb8b115ff89e01e497f8e6d11d78b70b1aa13c0fbd97540a81"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.3.0",
@@ -2889,9 +2910,9 @@ dependencies = [
 
 [[package]]
 name = "debug-helper"
-version = "0.3.13"
+version = "0.3.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f578e8e2c440e7297e008bb5486a3a8a194775224bbc23729b0dbdfaeebf162e"
+checksum = "80a4af69c60438a1a82af89d362f4729fd38db7b73f305a237636fad31ceb2bf"
 
 [[package]]
 name = "delay_map"
@@ -4470,6 +4491,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "hex-conservative"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "830e599c2904b08f0834ee6337d8fe8f0ed4a63b5d9e7a7f49c0ffa06d08d360"
+dependencies = [
+ "arrayvec",
+]
+
+[[package]]
 name = "hickory-net"
 version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5247,9 +5277,9 @@ dependencies = [
 
 [[package]]
 name = "js-sys"
-version = "0.3.102"
+version = "0.3.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03d04c30968dffe80775bd4d7fb676131cd04a1fb46d2686dbffbaec2d9dfd31"
+checksum = "53b44bfcdb3f8d5837a46dae1ca9660a837176eee74a28b229bc626816589102"
 dependencies = [
  "cfg-if",
  "futures-util",
@@ -5866,9 +5896,9 @@ checksum = "88904434abc2901f197fe8cc55f0445e7ded921dba5911dad2e2b39b48e663c4"
 
 [[package]]
 name = "memmap2"
-version = "0.9.10"
+version = "0.9.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "714098028fe011992e1c3962653c96b2d578c4b4bce9036e15ff220319b1e0e3"
+checksum = "d1219ed1b7f229ee7104d281dd01d6802fe28bb6e95d292942c4daacdeb798c0"
 dependencies = [
  "libc",
 ]
@@ -6444,9 +6474,9 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry-semantic-conventions"
-version = "0.32.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ca2f98a0437b427b4b08f19f1caa3c44db885a202bc12cfea13d6c702243d68"
+checksum = "c913ac17a6c451661ee255f4625d143e51647ae78ebd969b75e41c4442f4fe47"
 
 [[package]]
 name = "opentelemetry_sdk"
@@ -7062,9 +7092,9 @@ checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
 
 [[package]]
 name = "quinn"
-version = "0.11.9"
+version = "0.11.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9e20a958963c291dc322d98411f541009df2ced7b5a4f2bd52337638cfccf20"
+checksum = "0c1a41e437b6bbd489372cd4971de128e85c855f56c57f283d20ff016cf7c0a8"
 dependencies = [
  "bytes",
  "cfg_aliases",
@@ -7082,9 +7112,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.14"
+version = "0.11.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "434b42fec591c96ef50e21e886936e66d3cc3f737104fdb9b737c40ffb94c098"
+checksum = "4fcb935c5bec503c2f0e306bdd3e58bb9029dcb14fa8d9ac76e3a5256ac0763e"
 dependencies = [
  "aws-lc-rs",
  "bytes",
@@ -10625,7 +10655,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#92978512ee84e32a3843277d03e0c3f7d2121fa9"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10643,7 +10673,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#92978512ee84e32a3843277d03e0c3f7d2121fa9"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
 dependencies = [
  "bitvec",
  "paste",
@@ -10655,7 +10685,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#92978512ee84e32a3843277d03e0c3f7d2121fa9"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
 dependencies = [
  "bitvec",
  "cfg-if",
@@ -10671,7 +10701,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#92978512ee84e32a3843277d03e0c3f7d2121fa9"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10686,7 +10716,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#92978512ee84e32a3843277d03e0c3f7d2121fa9"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
 dependencies = [
  "alloy-eips",
  "derive_more",
@@ -10701,7 +10731,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#92978512ee84e32a3843277d03e0c3f7d2121fa9"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
 dependencies = [
  "auto_impl",
  "either",
@@ -10714,7 +10744,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#92978512ee84e32a3843277d03e0c3f7d2121fa9"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -10732,7 +10762,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#92978512ee84e32a3843277d03e0c3f7d2121fa9"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
 dependencies = [
  "auto_impl",
  "either",
@@ -10770,7 +10800,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#92978512ee84e32a3843277d03e0c3f7d2121fa9"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -10782,7 +10812,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#92978512ee84e32a3843277d03e0c3f7d2121fa9"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -10807,7 +10837,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#92978512ee84e32a3843277d03e0c3f7d2121fa9"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
 dependencies = [
  "alloy-primitives",
  "once_cell",
@@ -10817,7 +10847,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=bogota#92978512ee84e32a3843277d03e0c3f7d2121fa9"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
 dependencies = [
  "alloy-eip7928",
  "bitflags",
@@ -11182,9 +11212,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.40"
+version = "0.23.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef86cd5876211988985292b91c96a8f2d298df24e75989a43a3c73f2d4d8168b"
+checksum = "6b92b125634d9b795e7beca796cc790df15a7fb38323bf3196fda83292d06b1f"
 dependencies = [
  "aws-lc-rs",
  "log",
@@ -13062,9 +13092,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.23.3"
+version = "1.23.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "144d6b123cef80b301b8f72a9e2ca4370ddec21950d0a103dd22c437006d2db7"
+checksum = "bf80a72845275afea99e7f2b434723d3bc7e38470fcd1c7ed39a599c73319a53"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
@@ -13186,9 +13216,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen"
-version = "0.2.125"
+version = "0.2.126"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ddb3f79143bced6de84270411622a2699cee572fc0875aeaf1e7867cf9fca1a"
+checksum = "4b067c0c11094aef6b7a801c1e34a26affafdf3d051dba08456b868789aaf9a4"
 dependencies = [
  "cfg-if",
  "once_cell",
@@ -13199,9 +13229,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-futures"
-version = "0.4.75"
+version = "0.4.76"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "503b14d284f2c8dac03b819967e155ea753f573586193b2b2c95990cb5d69280"
+checksum = "c62df1340f32221cb9c54d6a27b030e3dba64361d4a95bed55f9aacb44da291d"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
@@ -13209,9 +13239,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro"
-version = "0.2.125"
+version = "0.2.126"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e21a184b13fb19e157296e2c46056aec9092264fab83e4ba59e68c61b323c3d"
+checksum = "167ce5e579f6bcf889c4f7175a8a5a585de84e8ff93976ce393efa5f2837aab1"
 dependencies = [
  "quote",
  "wasm-bindgen-macro-support",
@@ -13219,9 +13249,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro-support"
-version = "0.2.125"
+version = "0.2.126"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fecefd9c35bd935a20fc3fc344b5f29138961e4f47fb03297d88f2587afb5ebd"
+checksum = "f3997c7839262f4ef12cf90b818d6340c18e80f263f1a94bf157d0ec4420380e"
 dependencies = [
  "bumpalo",
  "proc-macro2",
@@ -13232,9 +13262,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-shared"
-version = "0.2.125"
+version = "0.2.126"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23939e44bb9a5d7576fa2b563dc2e136628f1224e88a8deed09e04858b77871f"
+checksum = "dc1b4cb0cc549fcf58d7dfc081778139b3d283a081644e833e84682ad71cea24"
 dependencies = [
  "unicode-ident",
 ]
@@ -13268,9 +13298,9 @@ dependencies = [
 
 [[package]]
 name = "web-sys"
-version = "0.3.102"
+version = "0.3.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6430a72df5eb332242960fe84b3002a241163998241eb596d4f739b9757061d"
+checksum = "8622dcb61c0bcc9fffa6938bed81210af2da9a7e4a1a834b2e37a59b6dfb6141"
 dependencies = [
  "js-sys",
  "wasm-bindgen",

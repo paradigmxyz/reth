@@ -45,6 +45,7 @@ use crate::tree::{
     payload_processor::PayloadProcessor,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     types::{InsertPayloadResult, ValidationOutput},
+    warm_access::WarmAccessSnapshot,
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
@@ -382,7 +383,9 @@ where
             type_name = ?input.type_name(),
         )
     )]
-    pub fn validate_block_with_state<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
+    pub(crate) fn validate_block_with_state<
+        T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
+    >(
         &mut self,
         input: BlockOrPayload<T>,
         mut ctx: TreeCtx<'_, N>,
@@ -493,6 +496,9 @@ where
             gas_used: input.gas_used(),
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
             decoded_bal: decoded_bal.as_ref().map(Arc::clone),
+            warm_accesses: WarmAccessSnapshot::from_multiset(
+                &ctx.state().tree_state().warm_accesses,
+            ),
         };
 
         // Plan the strategy used for state root computation.
@@ -1075,9 +1081,11 @@ where
 
         let (spec_id, mut executor) = {
             let _span = debug_span!(target: "engine::tree", "create_evm").entered();
-            let spec_id = *env.evm_env.spec_id();
+            let mut evm_env = env.evm_env;
+            env.warm_accesses.apply_to_block_env(&mut evm_env.block_env);
+            let spec_id = *evm_env.spec_id();
             let evm_config = self.evm_config.clone().with_jit_support();
-            let evm = evm_config.evm_with_env(&mut db, env.evm_env);
+            let evm = evm_config.evm_with_env(&mut db, evm_env);
             let ctx = self
                 .execution_ctx_for(input)
                 .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
@@ -1224,6 +1232,7 @@ where
             env.evm_env,
             ctx,
             env.transaction_count,
+            env.warm_accesses,
             handle.clone_transaction_receiver(),
             receipt_tx,
         )?;

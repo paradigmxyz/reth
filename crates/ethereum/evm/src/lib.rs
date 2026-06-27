@@ -320,6 +320,7 @@ where
             basefee: payload.payload.saturated_base_fee_per_gas(),
             blob_excess_gas_and_price,
             slot_num: payload.payload.as_v4().map(|v4| v4.slot_number).unwrap_or_default(),
+            warm_accesses: Default::default(),
         };
 
         Ok(EvmEnv { cfg_env, block_env })
