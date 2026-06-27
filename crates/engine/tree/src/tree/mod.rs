@@ -1270,9 +1270,28 @@ where
 
             // For OpStack, or if explicitly configured, the proposers are allowed to reorg their
             // own chain at will, so we need to always trigger a new payload job if requested.
-            if self.engine_kind.is_opstack() ||
-                self.config.always_process_payload_attributes_on_canonical_head()
+            let always_trigger_payload_job = self.engine_kind.is_opstack() ||
+                self.config.always_process_payload_attributes_on_canonical_head();
+
+            // If not always triggering a new payload job, we need to check if the new head is below
+            // the finalized block, meaning a too deep reorg is requested.
+            //
+            // Change: https://github.com/ethereum/execution-apis/pull/786
+            let too_deep_reorg = if !always_trigger_payload_job &&
+                let Ok(Some(finalized_header)) =
+                    self.find_canonical_header(state.finalized_block_hash)
             {
+                canonical_header.number() <= finalized_header.number()
+            } else {
+                false
+            };
+
+            // TODO: use proper error type when https://github.com/alloy-rs/alloy/pull/3935 is merged
+            if too_deep_reorg {
+                return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::invalid_state())));
+            }
+
+            if always_trigger_payload_job {
                 // We need to effectively unwind the _canonical_ chain to the FCU's head, which is
                 // part of the canonical chain. We need to update the latest block state to reflect
                 // the canonical ancestor. This ensures that state providers and the transaction
