@@ -332,7 +332,7 @@ mod tests {
         let mut chain = backfill_stream.next().await.unwrap().unwrap();
         chain.execution_outcome_mut().state_mut().reverts.sort();
 
-        assert!(chain.blocks_iter().eq(&blocks));
+        assert!(chain.blocks_iter().map(|block| block.as_ref()).eq(&blocks));
         assert_eq!(chain.execution_outcome(), &execution_outcome);
 
         // expect no more blocks

@@ -213,6 +213,8 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Must be called only after `root()` has computed hashes for the current trie state.
     /// Calling `prune` on a dirty trie is a hard error and may panic.
     ///
+    /// `retained_leaves` must be sorted lexicographically.
+    ///
     /// # Returns
     ///
     /// The number of nodes converted to hash stubs.

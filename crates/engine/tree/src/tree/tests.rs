@@ -454,6 +454,7 @@ impl ValidatorTestHarness {
         let ctx = TreeCtx::new(
             &mut self.harness.tree.state,
             &self.harness.tree.canonical_in_memory_state,
+            &mut self.harness.tree.pending_sparse_trie_prune,
         );
         let result = self.validator.validate_block(block, ctx);
         self.metrics.record_validation(result.is_ok());
@@ -572,6 +573,32 @@ async fn test_tree_persist_blocks() {
     } else {
         panic!("unexpected action received {received_action:?}");
     }
+}
+
+#[test]
+fn on_new_persisted_block_queues_sparse_trie_prune_request() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    test_harness
+        .tree
+        .persistence_state
+        .finish(blocks[0].recovered_block().hash(), blocks[0].recovered_block().number);
+
+    test_harness.tree.on_new_persisted_block().unwrap();
+
+    assert!(test_harness.tree.pending_sparse_trie_prune.is_some());
+}
+
+#[test]
+fn remove_blocks_clears_pending_sparse_trie_prune_request() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    test_harness.tree.persistence_state.last_persisted_block =
+        BlockNumHash { hash: B256::random(), number: 10 };
+    test_harness.tree.pending_sparse_trie_prune = Some(Default::default());
+
+    test_harness.tree.remove_blocks(9);
+
+    assert!(test_harness.tree.pending_sparse_trie_prune.is_none());
 }
 
 #[tokio::test]
