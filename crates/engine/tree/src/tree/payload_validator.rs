@@ -1245,7 +1245,8 @@ where
     {
         debug!(target: "engine::tree::payload_validator", "Executing block via BAL path");
 
-        let (receipt_tx, result_rx) = self.spawn_receipt_root_task(env.transaction_count);
+        let transaction_count = env.transaction_count;
+        let evm_env = env.evm_env;
         let input_bal = env.decoded_bal.ok_or_else(|| {
             InsertBlockErrorKind::Other("BAL execute path: no decoded BAL available".into())
         })?;
@@ -1258,14 +1259,15 @@ where
         let execution_start = Instant::now();
         let ctx =
             self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
+        let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let (output, senders, built_bal) = crate::tree::payload_processor::bal::execute_block(
             &self.runtime,
             &self.evm_config,
             &make_db,
             input_bal,
-            env.evm_env,
+            evm_env,
             ctx,
-            env.transaction_count,
+            transaction_count,
             handle.clone_transaction_receiver(),
             receipt_tx,
         )?;
