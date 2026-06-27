@@ -50,6 +50,7 @@ impl Environment {
             txn_dp_limit: None,
             spill_max_denominator: None,
             spill_min_denominator: None,
+            prefer_waf_instead_of_balance: None,
             geometry: None,
             log_level: None,
             kind: Default::default(),
@@ -618,6 +619,7 @@ pub struct EnvironmentBuilder {
     txn_dp_limit: Option<u64>,
     spill_max_denominator: Option<u64>,
     spill_min_denominator: Option<u64>,
+    prefer_waf_instead_of_balance: Option<bool>,
     geometry: Option<Geometry<(Option<usize>, Option<usize>)>>,
     log_level: Option<ffi::MDBX_log_level_t>,
     kind: EnvironmentKind,
@@ -695,6 +697,13 @@ impl EnvironmentBuilder {
                     if let Some(v) = v {
                         mdbx_result(ffi::mdbx_env_set_option(env, opt, v))?;
                     }
+                }
+                if let Some(prefer_waf) = self.prefer_waf_instead_of_balance {
+                    mdbx_result(ffi::mdbx_env_set_option(
+                        env,
+                        ffi::MDBX_opt_prefer_waf_insteadof_balance,
+                        prefer_waf.into(),
+                    ))?;
                 }
 
                 // set max readers if specified
@@ -870,6 +879,11 @@ impl EnvironmentBuilder {
 
     pub fn set_spill_min_denominator(&mut self, v: u8) -> &mut Self {
         self.spill_min_denominator = Some(v.into());
+        self
+    }
+
+    pub fn set_prefer_waf_instead_of_balance(&mut self, v: bool) -> &mut Self {
+        self.prefer_waf_instead_of_balance = Some(v);
         self
     }
 

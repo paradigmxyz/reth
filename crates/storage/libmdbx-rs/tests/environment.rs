@@ -83,6 +83,15 @@ fn test_sync() {
 }
 
 #[test]
+fn test_prefer_waf_option_can_be_configured() {
+    let dir = tempdir().unwrap();
+    assert!(Environment::builder()
+        .set_prefer_waf_instead_of_balance(true)
+        .open(dir.path())
+        .is_ok());
+}
+
+#[test]
 fn test_stat() {
     let dir = tempdir().unwrap();
     let env = Environment::builder().open(dir.path()).unwrap();
