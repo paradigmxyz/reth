@@ -561,108 +561,127 @@ where
                         crossbeam_channel::bounded(Self::PARALLEL_TX_BACKLOG_HIGH_WATERMARK);
                     let mut tx_tx = Some(tx_tx);
                     let progress_rx = tx_iterator_progress.progress_rx();
-                    let mut next_tx = prefetch;
-                    let mut next_scheduled_tx = prefetch;
-                    let mut throttled = false;
-                    let mut pending = BTreeMap::new();
-                    let send_converted_tx =
-                        |idx, tx: Result<IteratorTx<Evm, I>, <I as ExecutableTxTuple>::Error>| {
-                            if let Ok(tx) = &tx {
-                                if prewarm_tx.send((idx, tx.clone())).is_err() &&
-                                    backpressure_prewarm
-                                {
-                                    tx_iterator_progress.mark_prewarm_done();
-                                }
-                            } else if backpressure_prewarm {
-                                tx_iterator_progress.mark_prewarm_done();
-                            }
-                            let _ = execute_tx.send((idx, tx));
-                            trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
-                        };
 
-                    while next_tx < transaction_count {
-                        while next_scheduled_tx < transaction_count {
-                            let recovery_in_flight = next_scheduled_tx.saturating_sub(next_tx);
-                            if recovery_in_flight >= Self::PARALLEL_TX_BACKLOG_HIGH_WATERMARK {
-                                break;
-                            }
+                    // Enter the CPU pool before spawning FIFO chunks so Rayon can enqueue them on
+                    // the current worker instead of routing every chunk through the external
+                    // injector used by non-worker threads.
+                    executor.cpu_pool().install(move || {
+                        rayon::scope_fifo(move |scope| {
+                            let mut next_tx = prefetch;
+                            let mut next_scheduled_tx = prefetch;
+                            let mut throttled = false;
+                            let mut pending = BTreeMap::new();
+                            let send_converted_tx =
+                                |idx,
+                                 tx: Result<
+                                    IteratorTx<Evm, I>,
+                                    <I as ExecutableTxTuple>::Error,
+                                >| {
+                                    if let Ok(tx) = &tx {
+                                        if prewarm_tx.send((idx, tx.clone())).is_err() &&
+                                            backpressure_prewarm
+                                        {
+                                            tx_iterator_progress.mark_prewarm_done();
+                                        }
+                                    } else if backpressure_prewarm {
+                                        tx_iterator_progress.mark_prewarm_done();
+                                    }
+                                    let _ = execute_tx.send((idx, tx));
+                                    trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+                                };
 
-                            let engine_backlog =
-                                next_tx.saturating_sub(tx_iterator_progress.executed_tx_count());
-                            let prewarm_backlog = backpressure_prewarm.then(|| {
-                                next_tx.saturating_sub(tx_iterator_progress.prewarmed_tx_count())
-                            });
+                            while next_tx < transaction_count {
+                                while next_scheduled_tx < transaction_count {
+                                    let recovery_in_flight =
+                                        next_scheduled_tx.saturating_sub(next_tx);
+                                    if recovery_in_flight >=
+                                        Self::PARALLEL_TX_BACKLOG_HIGH_WATERMARK
+                                    {
+                                        break;
+                                    }
 
-                            if throttled {
-                                let engine_needs_tx =
-                                    engine_backlog <= Self::PARALLEL_TX_BACKLOG_LOW_WATERMARK;
-                                let prewarm_needs_tx = prewarm_backlog
-                                    .is_some_and(|backlog| {
-                                        backlog <= Self::PARALLEL_TX_BACKLOG_LOW_WATERMARK
+                                    let engine_backlog = next_tx
+                                        .saturating_sub(tx_iterator_progress.executed_tx_count());
+                                    let prewarm_backlog = backpressure_prewarm.then(|| {
+                                        next_tx.saturating_sub(
+                                            tx_iterator_progress.prewarmed_tx_count(),
+                                        )
                                     });
-                                throttled = !(engine_needs_tx || prewarm_needs_tx);
-                            } else {
-                                let engine_has_runway =
-                                    engine_backlog >= Self::PARALLEL_TX_BACKLOG_HIGH_WATERMARK;
-                                let prewarm_has_runway = prewarm_backlog
-                                    .map(|backlog| {
-                                        backlog >= Self::PARALLEL_TX_BACKLOG_HIGH_WATERMARK
-                                    })
-                                    .unwrap_or(true);
-                                throttled = engine_has_runway && prewarm_has_runway;
-                            }
 
-                            if throttled {
-                                break;
-                            }
+                                    if throttled {
+                                        let engine_needs_tx = engine_backlog <=
+                                            Self::PARALLEL_TX_BACKLOG_LOW_WATERMARK;
+                                        let prewarm_needs_tx =
+                                            prewarm_backlog.is_some_and(|backlog| {
+                                                backlog <=
+                                                    Self::PARALLEL_TX_BACKLOG_LOW_WATERMARK
+                                            });
+                                        throttled = !(engine_needs_tx || prewarm_needs_tx);
+                                    } else {
+                                        let engine_has_runway = engine_backlog >=
+                                            Self::PARALLEL_TX_BACKLOG_HIGH_WATERMARK;
+                                        let prewarm_has_runway = prewarm_backlog
+                                            .map(|backlog| {
+                                                backlog >=
+                                                    Self::PARALLEL_TX_BACKLOG_HIGH_WATERMARK
+                                            })
+                                            .unwrap_or(true);
+                                        throttled = engine_has_runway && prewarm_has_runway;
+                                    }
 
-                            let chunk = iter
-                                .by_ref()
-                                .take(Self::PARALLEL_TX_CHUNK_SIZE)
-                                .collect::<Vec<_>>();
-                            if chunk.is_empty() {
-                                next_scheduled_tx = transaction_count;
-                                tx_tx.take();
-                                break;
-                            }
+                                    if throttled {
+                                        break;
+                                    }
 
-                            next_scheduled_tx += chunk.len();
-                            let Some(tx_tx) = tx_tx.as_ref().cloned() else {
-                                break;
-                            };
-                            let convert = Arc::clone(&convert);
+                                    let chunk = iter
+                                        .by_ref()
+                                        .take(Self::PARALLEL_TX_CHUNK_SIZE)
+                                        .collect::<Vec<_>>();
+                                    if chunk.is_empty() {
+                                        next_scheduled_tx = transaction_count;
+                                        tx_tx.take();
+                                        break;
+                                    }
 
-                            executor.cpu_pool().spawn_fifo(move || {
-                                for (i, tx) in chunk {
-                                    let idx = i + prefetch;
-                                    let tx = convert.convert(tx).map(WithTxEnv::new);
-                                    let _ = tx_tx.send((idx, tx));
+                                    next_scheduled_tx += chunk.len();
+                                    let Some(tx_tx) = tx_tx.as_ref().cloned() else {
+                                        break;
+                                    };
+                                    let convert = Arc::clone(&convert);
+
+                                    scope.spawn_fifo(move |_| {
+                                        for (i, tx) in chunk {
+                                            let idx = i + prefetch;
+                                            let tx = convert.convert(tx).map(WithTxEnv::new);
+                                            let _ = tx_tx.send((idx, tx));
+                                        }
+                                    });
                                 }
-                            });
-                        }
 
-                        if next_scheduled_tx >= transaction_count {
-                            tx_tx.take();
-                        }
+                                if next_scheduled_tx >= transaction_count {
+                                    tx_tx.take();
+                                }
 
-                        let msg = crossbeam_channel::select! {
-                            recv(tx_rx) -> msg => msg,
-                            recv(progress_rx) -> _ => continue,
-                        };
-                        let Ok((idx, tx)) = msg else { break };
+                                let msg = crossbeam_channel::select! {
+                                    recv(tx_rx) -> msg => msg,
+                                    recv(progress_rx) -> _ => continue,
+                                };
+                                let Ok((idx, tx)) = msg else { break };
 
-                        if idx == next_tx {
-                            send_converted_tx(idx, tx);
-                            next_tx += 1;
+                                if idx == next_tx {
+                                    send_converted_tx(idx, tx);
+                                    next_tx += 1;
 
-                            while let Some(tx) = pending.remove(&next_tx) {
-                                send_converted_tx(next_tx, tx);
-                                next_tx += 1;
+                                    while let Some(tx) = pending.remove(&next_tx) {
+                                        send_converted_tx(next_tx, tx);
+                                        next_tx += 1;
+                                    }
+                                } else {
+                                    pending.insert(idx, tx);
+                                }
                             }
-                        } else {
-                            pending.insert(idx, tx);
-                        }
-                    }
+                        });
+                    });
                 }
             });
         }
