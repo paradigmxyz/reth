@@ -5,7 +5,7 @@ use clap::{value_parser, Args, Parser};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
-use reth_db::init_db;
+use reth_db::{init_db, is_database_empty};
 use reth_node_builder::NodeBuilder;
 use reth_node_core::{
     args::{
@@ -16,7 +16,24 @@ use reth_node_core::{
     node_config::NodeConfig,
     version,
 };
-use std::{ffi::OsString, fmt, path::PathBuf, sync::Arc};
+use std::{
+    ffi::OsString,
+    fmt,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+
+const STARTUP_SYNC_DB_PAGE_SIZE: usize = 16 * 1024;
+
+fn apply_startup_sync_database_defaults(
+    db: &mut DatabaseArgs,
+    startup_sync_state_idle: bool,
+    db_path: &Path,
+) {
+    if startup_sync_state_idle && db.page_size.is_none() && is_database_empty(db_path) {
+        db.page_size = Some(STARTUP_SYNC_DB_PAGE_SIZE);
+    }
+}
 
 /// Start the node
 #[derive(Debug, Parser)]
@@ -209,10 +226,15 @@ where
 
         let data_dir = node_config.datadir();
         let db_path = data_dir.db();
+        apply_startup_sync_database_defaults(
+            &mut node_config.db,
+            node_config.debug.startup_sync_state_idle,
+            &db_path,
+        );
 
         tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let database = init_db(db_path.clone(), self.db.database_args())?
-            .with_metrics_if(self.db.metrics_enabled());
+        let database = init_db(db_path.clone(), node_config.db.database_args())?
+            .with_metrics_if(node_config.db.metrics_enabled());
 
         if with_unused_ports {
             node_config = node_config.with_unused_ports();
@@ -269,6 +291,7 @@ mod tests {
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use reth_ethereum_cli::chainspec::{EthereumChainSpecParser, SUPPORTED_CHAINS};
     use std::{
+        fs,
         net::{IpAddr, Ipv4Addr, SocketAddr},
         path::Path,
     };
@@ -458,5 +481,74 @@ mod tests {
 
         // make sure the ipc path is not the default
         assert_ne!(cmd.rpc.ipcpath, String::from("/tmp/reth.ipc"));
+    }
+
+    #[test]
+    fn startup_sync_uses_large_page_size_for_fresh_db() {
+        let mut cmd: NodeCommand<EthereumChainSpecParser> =
+            NodeCommand::parse_from(["reth", "--debug.startup-sync-state-idle"]);
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join("db");
+
+        apply_startup_sync_database_defaults(
+            &mut cmd.db,
+            cmd.debug.startup_sync_state_idle,
+            &db_path,
+        );
+
+        assert_eq!(cmd.db.page_size, Some(STARTUP_SYNC_DB_PAGE_SIZE));
+    }
+
+    #[test]
+    fn startup_sync_preserves_explicit_page_size() {
+        let mut cmd: NodeCommand<EthereumChainSpecParser> = NodeCommand::parse_from([
+            "reth",
+            "--debug.startup-sync-state-idle",
+            "--db.page-size",
+            "8KB",
+        ]);
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join("db");
+
+        apply_startup_sync_database_defaults(
+            &mut cmd.db,
+            cmd.debug.startup_sync_state_idle,
+            &db_path,
+        );
+
+        assert_eq!(cmd.db.page_size, Some(8 * 1024));
+    }
+
+    #[test]
+    fn startup_sync_preserves_existing_db_page_size() {
+        let mut cmd: NodeCommand<EthereumChainSpecParser> =
+            NodeCommand::parse_from(["reth", "--debug.startup-sync-state-idle"]);
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join("db");
+        fs::create_dir(&db_path).unwrap();
+        fs::write(db_path.join("mdbx.dat"), []).unwrap();
+
+        apply_startup_sync_database_defaults(
+            &mut cmd.db,
+            cmd.debug.startup_sync_state_idle,
+            &db_path,
+        );
+
+        assert_eq!(cmd.db.page_size, None);
+    }
+
+    #[test]
+    fn normal_startup_keeps_default_page_size() {
+        let mut cmd: NodeCommand<EthereumChainSpecParser> = NodeCommand::parse_from(["reth"]);
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join("db");
+
+        apply_startup_sync_database_defaults(
+            &mut cmd.db,
+            cmd.debug.startup_sync_state_idle,
+            &db_path,
+        );
+
+        assert_eq!(cmd.db.page_size, None);
     }
 }
