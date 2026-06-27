@@ -1043,7 +1043,7 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Optional decoded BAL for the block.
     /// Used to validate and optimize execution.
     pub decoded_bal: Option<Arc<DecodedBal>>,
-    /// Warm accesses inherited from earlier blocks in the EIP-8289 warming window.
+    /// Payload BAL accesses that are present in the EIP-8289 warming window.
     pub(crate) warm_accesses: crate::tree::warm_access::WarmAccessSnapshot,
 }
 

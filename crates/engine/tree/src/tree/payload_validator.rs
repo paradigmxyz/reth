@@ -570,8 +570,9 @@ where
             gas_used: input.gas_used(),
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
             decoded_bal: decoded_bal.as_ref().map(Arc::clone),
-            warm_accesses: WarmAccessSnapshot::from_multiset(
+            warm_accesses: WarmAccessSnapshot::from_wam_and_bal(
                 &ctx.state().tree_state().warm_accesses,
+                decoded_bal.as_deref(),
             ),
         };
 
