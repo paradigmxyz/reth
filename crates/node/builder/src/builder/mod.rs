@@ -719,7 +719,7 @@ where
     {
         let Self { builder, task_executor } = self;
 
-        let engine_tree_config = builder.config.engine.tree_config();
+        let engine_tree_config = builder.config.tree_config();
 
         let launcher = DebugNodeLauncher::new(EngineNodeLauncher::new(
             task_executor,
@@ -732,7 +732,7 @@ where
     /// Returns an [`EngineNodeLauncher`] that can be used to launch the node with engine API
     /// support.
     pub fn engine_api_launcher(&self) -> EngineNodeLauncher {
-        let engine_tree_config = self.builder.config.engine.tree_config();
+        let engine_tree_config = self.builder.config.tree_config();
         EngineNodeLauncher::new(
             self.task_executor.clone(),
             self.builder.config.datadir(),

@@ -325,10 +325,9 @@ pub(super) fn test_remove_leaf_branch_collapses_to_leaf<T: SparseTrie>(new_trie:
     let harness = SuiteTestHarness::new(base_storage);
     let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
 
-    // Compute root to cache hashes, take and commit updates to establish baseline masks.
+    // Compute root to cache hashes and drain initial updates.
     let _ = trie.root();
-    let updates = trie.take_updates();
-    trie.commit_updates(&updates.updated_nodes, &updates.removed_nodes);
+    let _ = trie.take_updates();
 
     // Remove key_a → branch collapses to a single leaf (key_b).
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&BTreeMap::from([(key_a, U256::ZERO)]));
@@ -1270,10 +1269,9 @@ pub(super) fn test_remove_leaf_does_not_reveal_blind_subtries<T: SparseTrie>(new
     let mut harness = SuiteTestHarness::new(storage.clone());
     let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
 
-    // Compute initial root and commit to establish baseline.
+    // Compute initial root and drain initial updates.
     let _ = trie.root();
-    let updates = trie.take_updates();
-    trie.commit_updates(&updates.updated_nodes, &updates.removed_nodes);
+    let _ = trie.take_updates();
 
     // Prune: retain only keys[0] and keys[1] (nibbles 0x0 and 0x1).
     // All other subtries become blinded.

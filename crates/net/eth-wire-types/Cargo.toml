@@ -49,6 +49,7 @@ arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 rand.workspace = true
+test-case.workspace = true
 
 [features]
 default = ["std"]

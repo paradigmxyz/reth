@@ -101,6 +101,7 @@ impl PayloadValidator<BbPayloadTypes> for BbEngineValidator {
 
         // Update block's gas usage to make sure metrics are correct
         block.header.gas_used += blocks.iter().map(|b| b.gas_used).sum::<u64>();
+        block.header.gas_limit += blocks.iter().map(|b| b.gas_limit).sum::<u64>();
 
         // Prepend transactions from previous blocks to make sure that persistence indices are
         // correct.

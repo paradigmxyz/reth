@@ -825,6 +825,13 @@ where
         self.pool.blob_store().get_by_versioned_hashes_v4(versioned_hashes, indices_bitarray)
     }
 
+    fn has_blobs_for_versioned_hashes(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<bool>, BlobStoreError> {
+        self.pool.blob_store().has_versioned_hashes(versioned_hashes)
+    }
+
     fn blob_store(&self) -> Box<dyn BlobStore> {
         Box::new(self.pool.blob_store().clone())
     }

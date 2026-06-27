@@ -395,6 +395,13 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         Ok(vec![None; versioned_hashes.len()])
     }
 
+    fn has_blobs_for_versioned_hashes(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<bool>, BlobStoreError> {
+        Ok(vec![false; versioned_hashes.len()])
+    }
+
     fn blob_store(&self) -> Box<dyn BlobStore> {
         Box::new(NoopBlobStore)
     }

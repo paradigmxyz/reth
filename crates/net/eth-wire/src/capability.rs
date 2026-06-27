@@ -562,10 +562,10 @@ mod tests {
     fn relative_message_id_accounts_for_intermediate_capabilities() {
         let intermediate_cap = Capability::new_static("foo", 1);
         let intermediate = Protocol::new(intermediate_cap.clone(), 3);
-        let snap = Capability::snap(SnapVersion::V1);
+        let snap = Capability::snap(SnapVersion::V2);
         let eth = Capability::eth(EthVersion::Eth69);
         let local_capabilities =
-            vec![EthVersion::Eth69.into(), intermediate, Protocol::snap(SnapVersion::V1)];
+            vec![EthVersion::Eth69.into(), intermediate, Protocol::snap(SnapVersion::V2)];
         let peer_capabilities = vec![eth, intermediate_cap, snap.clone()];
 
         let shared = SharedCapabilities::try_new(local_capabilities, peer_capabilities).unwrap();
@@ -579,9 +579,9 @@ mod tests {
     fn capability_message_id_rejects_other_capability_range() {
         let intermediate_cap = Capability::new_static("foo", 1);
         let intermediate = Protocol::new(intermediate_cap.clone(), 3);
-        let snap = Capability::snap(SnapVersion::V1);
+        let snap = Capability::snap(SnapVersion::V2);
         let local_capabilities =
-            vec![EthVersion::Eth69.into(), intermediate, Protocol::snap(SnapVersion::V1)];
+            vec![EthVersion::Eth69.into(), intermediate, Protocol::snap(SnapVersion::V2)];
         let peer_capabilities =
             vec![Capability::eth(EthVersion::Eth69), intermediate_cap.clone(), snap.clone()];
 
@@ -589,7 +589,7 @@ mod tests {
         let intermediate_id = shared.relative_message_id(&intermediate_cap, 1).unwrap();
 
         assert_eq!(shared.capability_message_id(&snap, intermediate_id), None);
-        assert_eq!(shared.relative_message_id(&snap, SnapVersion::V1.message_count()), None);
+        assert_eq!(shared.relative_message_id(&snap, SnapVersion::V2.message_count()), None);
     }
 
     #[test]

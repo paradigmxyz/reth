@@ -131,9 +131,8 @@ pub(super) fn test_take_updates_contains_updated_and_removed_nodes<T: SparseTrie
     // Cache initial branch hashes.
     let _ = trie.root();
 
-    // Commit initial updates to establish the masks baseline.
-    let initial_updates = trie.take_updates();
-    trie.commit_updates(&initial_updates.updated_nodes, &initial_updates.removed_nodes);
+    // Drain initial updates before the mutation under test.
+    let _ = trie.take_updates();
 
     // Remove all 512 leaves from group 0x2 and add a new leaf in group 0x1.
     let mut changeset: BTreeMap<B256, U256> = BTreeMap::new();

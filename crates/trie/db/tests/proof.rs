@@ -121,6 +121,9 @@ fn testspec_empty_storage_proof() {
         assert_eq!(slots.len(), account_proof.storage_proofs.len());
         for (idx, slot) in slots.into_iter().enumerate() {
             let proof = account_proof.storage_proofs.get(idx).unwrap();
+            // The underlying proof for an empty storage trie is the `0x80` sentinel node.
+            // The empty-array (geth) normalization happens only at the EIP-1186 response layer
+            // (`StorageProof::into_eip1186_proof`), not here.
             assert_eq!(
                 proof,
                 &StorageProof::new(slot).with_proof(vec![Bytes::from([EMPTY_STRING_CODE])])
@@ -128,6 +131,33 @@ fn testspec_empty_storage_proof() {
             assert_eq!(proof.verify(account_proof.storage_root), Ok(()));
         }
         assert_eq!(account_proof.verify(root), Ok(()));
+    });
+}
+
+#[test]
+fn empty_state_trie_account_proof() {
+    // Empty database => empty account (state) trie, root == EMPTY_ROOT_HASH.
+    // The account proof generation has no `empty()` sentinel of its own, yet the hash builder
+    // still emits the empty-root node, so the raw proof is the lone `0x80` sentinel. The
+    // empty-array (geth) normalization happens only at the EIP-1186 response layer
+    // (`AccountProof::into_eip1186_response`), keeping this internal proof unchanged.
+    let factory = create_test_provider_factory();
+
+    let target = address!("0x1ed9b1dd266b607ee278726d324b855a093394a6");
+
+    let provider = factory.provider().unwrap();
+    reth_trie_db::with_adapter!(provider, |A| {
+        let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref());
+        let account_proof = proof.account_proof(target, &[]).unwrap();
+        assert_eq!(account_proof.info, None, "absent account should have no info");
+        assert_eq!(account_proof.storage_root, EMPTY_ROOT_HASH);
+        assert_eq!(
+            account_proof.proof,
+            vec![Bytes::from([EMPTY_STRING_CODE])],
+            "empty account trie yields the 0x80 sentinel at the proof layer, got {:?}",
+            account_proof.proof
+        );
+        assert_eq!(account_proof.verify(EMPTY_ROOT_HASH), Ok(()));
     });
 }
 

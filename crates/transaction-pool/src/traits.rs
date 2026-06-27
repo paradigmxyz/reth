@@ -748,6 +748,14 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         indices_bitarray: B128,
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError>;
 
+    /// Return whether each requested blob versioned hash is available.
+    ///
+    /// The response is always the same length and order as the request.
+    fn has_blobs_for_versioned_hashes(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<bool>, BlobStoreError>;
+
     /// Returns the blob store used by the pool.
     fn blob_store(&self) -> Box<dyn BlobStore>;
 }

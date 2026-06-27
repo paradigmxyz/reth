@@ -94,6 +94,7 @@ where
     }
 
     /// Creates a new [`TrieNodeIter`].
+    #[allow(clippy::missing_const_for_fn)]
     fn new(walker: TrieWalker<C, K>, hashed_cursor: H, trie_type: TrieType) -> Self {
         Self {
             walker,

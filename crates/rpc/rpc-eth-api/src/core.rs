@@ -385,7 +385,11 @@ pub trait EthApi<
     ///
     /// This will return a timeout error if the transaction isn't included within some time period.
     #[method(name = "sendRawTransactionSync")]
-    async fn send_raw_transaction_sync(&self, bytes: Bytes) -> RpcResult<R>;
+    async fn send_raw_transaction_sync(
+        &self,
+        bytes: Bytes,
+        timeout_ms: Option<u64>,
+    ) -> RpcResult<R>;
 
     /// Returns an Ethereum specific signature with: sign(keccak256("\x19Ethereum Signed Message:\n"
     /// + len(message) + message))).
@@ -912,9 +916,13 @@ where
     }
 
     /// Handler for: `eth_sendRawTransactionSync`
-    async fn send_raw_transaction_sync(&self, tx: Bytes) -> RpcResult<RpcReceipt<T::NetworkTypes>> {
-        trace!(target: "rpc::eth", ?tx, "Serving eth_sendRawTransactionSync");
-        Ok(EthTransactions::send_raw_transaction_sync(self, tx).await?)
+    async fn send_raw_transaction_sync(
+        &self,
+        tx: Bytes,
+        timeout_ms: Option<u64>,
+    ) -> RpcResult<RpcReceipt<T::NetworkTypes>> {
+        trace!(target: "rpc::eth", ?tx, ?timeout_ms, "Serving eth_sendRawTransactionSync");
+        Ok(EthTransactions::send_raw_transaction_sync(self, tx, timeout_ms).await?)
     }
 
     /// Handler for: `eth_sign`

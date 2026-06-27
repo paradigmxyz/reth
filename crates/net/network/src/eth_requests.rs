@@ -647,6 +647,13 @@ mod tests {
             Ok(vec![None; versioned_hashes.len()])
         }
 
+        fn has_versioned_hashes(
+            &self,
+            versioned_hashes: &[B256],
+        ) -> Result<Vec<bool>, BlobStoreError> {
+            Ok(vec![false; versioned_hashes.len()])
+        }
+
         fn get_cells(
             &self,
             _tx_hash: TxHash,

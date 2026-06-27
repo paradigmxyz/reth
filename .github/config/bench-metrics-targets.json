@@ -92,6 +92,30 @@
       "target": "decrease",
       "floor_pct": 2.5,
       "min_value_pct_total_latency": 1.4
+    },
+    {
+      "query": "reth_executor_named_worker_queue_wait_duration_seconds",
+      "target": "decrease",
+      "floor_pct": 10.0,
+      "min_value_pct_total_latency": 1.0
+    },
+    {
+      "query": "reth_executor_named_worker_task_duration_seconds",
+      "target": "decrease",
+      "floor_pct": 7.5,
+      "min_value_pct_total_latency": 1.0
+    },
+    {
+      "query": "reth_executor_worker_pool_job_queue_wait_duration_seconds",
+      "target": "decrease",
+      "floor_pct": 25.0,
+      "min_value_pct_total_latency": 2.5
+    },
+    {
+      "query": "reth_executor_worker_pool_job_duration_seconds",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 1.0
     }
   ]
 }

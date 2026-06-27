@@ -94,15 +94,13 @@ pub trait EstimateCall: Call {
         }
 
         // the gas limit of the corresponding block
-        let max_gas_limit = evm_env
-            .cfg_env
-            .tx_gas_limit_cap
-            // If EIP-8037 is enabled, the transaction gas limit cap is not applicable
-            .filter(|_| !evm_env.cfg_env.is_amsterdam_eip8037_enabled())
-            .map_or_else(
-                || evm_env.block_env.gas_limit(),
-                |cap| cap.min(evm_env.block_env.gas_limit()),
-            );
+        let block_gas_limit = evm_env.block_env.gas_limit();
+        // If EIP-8037 is enabled, the transaction gas limit cap is not applicable
+        let max_gas_limit = if evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
+            block_gas_limit
+        } else {
+            evm_env.cfg_env.tx_gas_limit_cap().min(block_gas_limit)
+        };
 
         // Determine the highest possible gas limit, considering both the request's specified limit
         // and the block's limit.

@@ -16,7 +16,6 @@
 pub mod capability;
 mod disconnect;
 pub mod errors;
-pub mod eth_snap_stream;
 mod ethstream;
 mod hello;
 pub mod multiplex;
