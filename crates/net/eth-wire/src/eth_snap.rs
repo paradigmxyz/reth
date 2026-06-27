@@ -1,72 +1,61 @@
 //! A dedicated `eth` + `snap/2` stream.
 //!
 //! [`EthSnapStream`] carries `eth` as the primary protocol and `snap/2` (EIP-8189) as a typed
-//! side-channel over a single `RLPx` connection.
+//! side-channel over a single `RLPx` connection. It owns the raw [`P2PStream`] directly and reuses
+//! the transport-free [`EthStreamInner`] codec for `eth` framing, demultiplexing the two protocols
+//! by capability message-id offset.
 
 use crate::{
     capability::SharedCapabilities,
     errors::{EthStreamError, P2PStreamError},
     handshake::EthRlpxHandshake,
-    CanDisconnect, Capability, DisconnectReason, EthMessage, EthStream, P2PStream, UnifiedStatus,
-    HANDSHAKE_TIMEOUT,
+    message::EthBroadcastMessage,
+    Capability, EthMessage, EthNetworkPrimitives, EthStreamInner, EthVersion, NetworkPrimitives,
+    P2PStream, UnifiedStatus, HANDSHAKE_TIMEOUT,
 };
-use bytes::{Bytes, BytesMut};
+use alloy_primitives::bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use reth_eth_wire_types::{
     snap::{SnapProtocolMessage, SnapVersion},
-    EthNetworkPrimitives, NetworkPrimitives,
+    RawCapabilityMessage,
 };
 use reth_ethereum_forks::ForkFilter;
 use std::{
     io,
-    pin::{pin, Pin},
+    pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
 };
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// A dedicated stream that carries `eth` as the primary protocol and `snap/2` (EIP-8189) as a typed
 /// side-channel on the same `RLPx` connection.
 ///
 /// Both protocols are exposed through the [`Stream`]/[`Sink`] impls, which yield and accept
 /// [`EthSnapMessage`] (an `eth` message or a `snap/2` message). A single poll surfaces whichever
-/// protocol has data, so the owner drives one stream rather than two.
+/// protocol the next inbound frame belongs to, so the owner drives one stream rather than two.
 #[derive(Debug)]
 pub struct EthSnapStream<St, N: NetworkPrimitives = EthNetworkPrimitives> {
-    /// The raw `RLPx` stream that owns the wire.
+    /// The raw `RLPx` stream carrying both `eth` and `snap/2` frames.
     conn: P2PStream<St>,
-    /// The `eth` primary, reading/writing `eth` bytes through channels bridged to `conn`.
-    eth: EthStream<EthProxy, N>,
-    /// Forwards inbound `eth` bytes from the wire to [`Self::eth`].
-    to_eth: mpsc::UnboundedSender<BytesMut>,
-    /// Outbound `eth` bytes produced by [`Self::eth`], to be framed onto the wire.
-    from_eth: UnboundedReceiverStream<Bytes>,
-    /// Forwards inbound `snap/2` bytes (snap-relative ids) to the consumer.
-    to_snap: mpsc::UnboundedSender<BytesMut>,
-    /// Inbound `snap/2` bytes (snap-relative ids) for the consumer to read.
-    snap_inbound: UnboundedReceiverStream<BytesMut>,
-    /// Outbound `snap/2` bytes (snap-relative ids) queued by the consumer.
-    snap_outbound: mpsc::UnboundedSender<BytesMut>,
-    /// Outbound `snap/2` bytes (snap-relative ids) to be masked and framed onto the wire.
-    from_snap: UnboundedReceiverStream<BytesMut>,
-    /// Relative message-id offset of the `snap/2` capability in the combined message space.
+    /// Transport-free `eth` codec, reused from [`EthStream`](crate::EthStream).
+    eth: EthStreamInner<N>,
+    /// Relative message-id offset of the `snap/2` capability in the combined message space. Ids at
+    /// or above it are snap, rebased to snap-relative and validated by
+    /// [`SnapProtocolMessage::decode_versioned`].
     snap_offset: u8,
-    /// Number of message ids reserved by the negotiated `snap/2` capability. Combined ids in
-    /// `snap_offset..snap_offset + snap_messages` are snap; anything beyond is out of range.
-    snap_messages: u8,
 }
 
 impl<St, N> EthSnapStream<St, N>
 where
-    St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin + Send,
+    St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin + Send + Sync,
     N: NetworkPrimitives,
 {
     /// Performs the `eth` status handshake over a connection that negotiated both `eth` and
     /// `snap/2`, returning the established [`EthSnapStream`] and the remote's status.
     ///
-    /// `snap/2` messages that arrive during the `eth` handshake are buffered and delivered once the
-    /// stream is polled.
+    /// The handshake runs directly on the underlying [`P2PStream`]; a `snap/2` message arriving
+    /// before the status exchange completes is a protocol violation and surfaces as a handshake
+    /// error.
     pub async fn handshake(
         mut conn: P2PStream<St>,
         status: UnifiedStatus,
@@ -75,86 +64,27 @@ where
         eth_max_message_size: usize,
     ) -> Result<(Self, UnifiedStatus), EthStreamError> {
         let eth_version = conn.shared_capabilities().eth_version()?;
-        let (snap_offset, snap_messages) = eth_snap_layout(conn.shared_capabilities())?;
+        let snap_offset = eth_snap_layout(conn.shared_capabilities())?;
 
-        // eth bytes flow conn <-> demux <-> EthProxy <-> EthStream.
-        let (to_eth, eth_from_wire) = mpsc::unbounded_channel();
-        let (eth_to_wire, mut from_eth) = mpsc::unbounded_channel();
-        let proxy = EthProxy {
-            from_wire: UnboundedReceiverStream::new(eth_from_wire),
-            to_wire: eth_to_wire,
-        };
+        let their_status =
+            handshake.handshake(&mut conn, status, fork_filter, HANDSHAKE_TIMEOUT).await?;
 
-        // snap bytes (snap-relative ids) flow conn <-> demux <-> consumer.
-        let (to_snap, snap_inbound) = mpsc::unbounded_channel();
-        let (snap_outbound, from_snap) = mpsc::unbounded_channel();
-
-        // Drive the connection and the `eth` handshake concurrently: route inbound messages to the
-        // eth proxy or buffer them for snap, and flush the proxy's outbound status messages.
-        let mut unauth = UnauthEthProxy { inner: proxy };
-        let their_status = {
-            let f = handshake.handshake(&mut unauth, status, fork_filter, HANDSHAKE_TIMEOUT);
-            let mut f = pin!(f);
-            loop {
-                tokio::select! {
-                    biased;
-                    inbound = conn.next() => match inbound {
-                        Some(Ok(msg)) => {
-                            route_inbound(msg, snap_offset, snap_messages, &to_eth, &to_snap)?;
-                        }
-                        // Surface a peer error / disconnect immediately instead of waiting for the
-                        // handshake to time out.
-                        Some(Err(err)) => return Err(err.into()),
-                        None => {
-                            return Err(P2PStreamError::Disconnected(
-                                DisconnectReason::DisconnectRequested,
-                            )
-                            .into())
-                        }
-                    },
-                    Some(bytes) = from_eth.recv() => {
-                        conn.send(bytes).await?;
-                    }
-                    res = &mut f => break res?,
-                }
-            }
-        };
-
-        let eth = EthStream::with_max_message_size(
-            eth_version,
-            unauth.into_inner(),
-            eth_max_message_size,
-        );
-
-        Ok((
-            Self {
-                conn,
-                eth,
-                to_eth,
-                from_eth: UnboundedReceiverStream::new(from_eth),
-                to_snap,
-                snap_inbound: UnboundedReceiverStream::new(snap_inbound),
-                snap_outbound,
-                from_snap: UnboundedReceiverStream::new(from_snap),
-                snap_offset,
-                snap_messages,
-            },
-            their_status,
-        ))
+        let eth = EthStreamInner::with_max_message_size(eth_version, eth_max_message_size);
+        Ok((Self { conn, eth, snap_offset }, their_status))
     }
 }
 
 impl<St, N: NetworkPrimitives> EthSnapStream<St, N> {
-    /// Returns a reference to the underlying `eth` stream.
+    /// Returns the negotiated `eth` version.
     #[inline]
-    pub const fn primary(&self) -> &EthStream<EthProxy, N> {
-        &self.eth
+    pub const fn version(&self) -> EthVersion {
+        self.eth.version()
     }
 
-    /// Returns mutable access to the underlying `eth` stream.
+    /// Sets whether to reject block announcement messages before RLP decoding.
     #[inline]
-    pub const fn primary_mut(&mut self) -> &mut EthStream<EthProxy, N> {
-        &mut self.eth
+    pub const fn set_reject_block_announcements(&mut self, reject: bool) {
+        self.eth.set_reject_block_announcements(reject);
     }
 
     /// Returns a reference to the underlying [`P2PStream`].
@@ -176,6 +106,25 @@ impl<St, N: NetworkPrimitives> EthSnapStream<St, N> {
     }
 }
 
+impl<St, N> EthSnapStream<St, N>
+where
+    St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
+    N: NetworkPrimitives,
+{
+    /// Queues an [`EthBroadcastMessage`] to be sent on the wire.
+    pub fn start_send_broadcast(
+        &mut self,
+        item: EthBroadcastMessage<N>,
+    ) -> Result<(), EthStreamError> {
+        self.conn.start_send_unpin(self.eth.encode_broadcast(item)).map_err(Into::into)
+    }
+
+    /// Sends a raw capability message over the connection.
+    pub fn start_send_raw(&mut self, msg: RawCapabilityMessage) -> Result<(), EthStreamError> {
+        self.conn.start_send_unpin(self.eth.encode_raw(msg)).map_err(Into::into)
+    }
+}
+
 /// A message carried by an [`EthSnapStream`]: either an `eth` message or a `snap/2` message.
 #[derive(Debug)]
 pub enum EthSnapMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
@@ -183,43 +132,6 @@ pub enum EthSnapMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     Eth(EthMessage<N>),
     /// A `snap/2` (EIP-8189) protocol message.
     Snap(SnapProtocolMessage),
-}
-
-impl<St, N> EthSnapStream<St, N>
-where
-    St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
-    N: NetworkPrimitives,
-{
-    /// Moves queued outbound bytes from the proxy channels onto the wire, `eth` before `snap`.
-    ///
-    /// Returns `Ready(Ok(()))` once both channels are drained (the wire holds every queued frame),
-    /// `Pending` while the wire is not ready to accept more, or an error from the wire. This is the
-    /// single place that bridges the proxy channels to `conn`, so [`Sink::poll_flush`] can rely on
-    /// it instead of reporting flushed while bytes still sit in the channels.
-    fn poll_service_outbound(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), EthStreamError>> {
-        loop {
-            match self.conn.poll_ready_unpin(cx) {
-                Poll::Ready(Ok(())) => {
-                    let next = match self.from_eth.poll_next_unpin(cx) {
-                        Poll::Ready(Some(bytes)) => Some(bytes),
-                        _ => match self.from_snap.poll_next_unpin(cx) {
-                            Poll::Ready(Some(mut bytes)) => {
-                                mask_snap(&mut bytes, self.snap_offset)?;
-                                Some(bytes.freeze())
-                            }
-                            _ => None,
-                        },
-                    };
-                    match next {
-                        Some(bytes) => self.conn.start_send_unpin(bytes)?,
-                        None => return Poll::Ready(Ok(())),
-                    }
-                }
-                Poll::Ready(Err(err)) => return Poll::Ready(Err(err.into())),
-                Poll::Pending => return Poll::Pending,
-            }
-        }
-    }
 }
 
 impl<St, N> Stream for EthSnapStream<St, N>
@@ -231,63 +143,28 @@ where
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
-        loop {
-            // Return any `eth` message the primary already decoded.
-            match this.eth.poll_next_unpin(cx) {
-                Poll::Ready(Some(Ok(msg))) => {
-                    return Poll::Ready(Some(Ok(EthSnapMessage::Eth(msg))))
-                }
-                Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err))),
-                _ => {}
-            }
+        let mut bytes = match ready!(this.conn.poll_next_unpin(cx)) {
+            Some(Ok(bytes)) => bytes,
+            Some(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
+            None => return Poll::Ready(None),
+        };
 
-            // Return the next decoded inbound `snap/2` message. An id invalid in snap/2 (the
-            // removed trie-node messages `0x06`/`0x07`), an unknown id, or a malformed
-            // payload is a protocol violation by the peer and surfaces as a
-            // protocol-breach error, not silently dropped.
-            if let Poll::Ready(Some(bytes)) = this.snap_inbound.poll_next_unpin(cx) {
-                return match SnapProtocolMessage::decode_versioned(SnapVersion::V2, &bytes) {
-                    Ok(msg) => Poll::Ready(Some(Ok(EthSnapMessage::Snap(msg)))),
-                    Err(err) => Poll::Ready(Some(Err(err.into()))),
-                }
-            }
+        let Some(&id) = bytes.first() else {
+            return Poll::Ready(Some(Err(P2PStreamError::EmptyProtocolMessage.into())))
+        };
 
-            // Move queued outbound (`eth` then `snap`) from the proxy channels onto the wire.
-            if let Poll::Ready(Err(err)) = this.poll_service_outbound(cx) {
-                return Poll::Ready(Some(Err(err)))
-            }
-
-            // Pull inbound messages off the wire and route them by capability.
-            let mut delegated = false;
-            loop {
-                match this.conn.poll_next_unpin(cx) {
-                    Poll::Ready(Some(Ok(msg))) => {
-                        delegated = true;
-                        route_inbound(
-                            msg,
-                            this.snap_offset,
-                            this.snap_messages,
-                            &this.to_eth,
-                            &this.to_snap,
-                        )?;
-                    }
-                    Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err.into()))),
-                    Poll::Ready(None) => return Poll::Ready(None),
-                    Poll::Pending => break,
-                }
-            }
-
-            // Surface flush errors instead of dropping them.
-            if let Poll::Ready(Err(err)) = this.conn.poll_flush_unpin(cx) {
-                return Poll::Ready(Some(Err(err.into())))
-            }
-
-            // Loop to surface anything we just routed to the primary/snap; otherwise yield.
-            if delegated {
-                continue
-            }
-            return Poll::Pending
-        }
+        // `eth` occupies ids below the snap offset and is decoded by the shared codec. Ids at or
+        // above it are snap: rebased to snap-relative (`0x00..`) and validated by
+        // `decode_versioned`, which rejects ids that are out of range or invalid for `snap/2`.
+        let Some(snap_id) = id.checked_sub(this.snap_offset) else {
+            return Poll::Ready(Some(this.eth.decode_message(bytes).map(EthSnapMessage::Eth)))
+        };
+        bytes[0] = snap_id;
+        Poll::Ready(Some(
+            SnapProtocolMessage::decode_versioned(SnapVersion::V2, &bytes)
+                .map(EthSnapMessage::Snap)
+                .map_err(Into::into),
+        ))
     }
 }
 
@@ -299,200 +176,50 @@ where
     type Error = EthStreamError;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let this = self.get_mut();
-        if let Err(err) = ready!(this.conn.poll_ready_unpin(cx)) {
-            return Poll::Ready(Err(err.into()))
-        }
-        this.eth.poll_ready_unpin(cx)
+        self.get_mut().conn.poll_ready_unpin(cx).map_err(Into::into)
     }
 
     fn start_send(self: Pin<&mut Self>, item: EthSnapMessage<N>) -> Result<(), Self::Error> {
         let this = self.get_mut();
-        match item {
-            EthSnapMessage::Eth(msg) => this.eth.start_send_unpin(msg),
+        let bytes = match item {
+            EthSnapMessage::Eth(msg) => this.eth.encode_message(msg)?,
             EthSnapMessage::Snap(msg) => {
-                // Reclaim the freshly-encoded buffer as mutable without copying the payload.
-                let bytes =
+                // Reclaim the freshly-encoded buffer as mutable without copying the payload, then
+                // rebase the snap-relative id into the combined message space.
+                let mut buf =
                     msg.encode().0.try_into_mut().unwrap_or_else(|b| BytesMut::from(b.as_ref()));
-                this.snap_outbound
-                    .send(bytes)
-                    .map_err(|_| io::Error::from(io::ErrorKind::BrokenPipe).into())
+                mask_snap(&mut buf, this.snap_offset)?;
+                buf.freeze()
             }
-        }
+        };
+        this.conn.start_send_unpin(bytes).map_err(Into::into)
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let this = self.get_mut();
-        // Push the eth stream's encoded bytes into the proxy channel...
-        ready!(this.eth.poll_flush_unpin(cx))?;
-        // ...move all queued eth/snap bytes from the proxy channels onto the wire...
-        ready!(this.poll_service_outbound(cx))?;
-        // ...then flush the wire itself.
-        this.conn.poll_flush_unpin(cx).map_err(Into::into)
+        self.get_mut().conn.poll_flush_unpin(cx).map_err(Into::into)
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let this = self.get_mut();
-        // Flush before closing: drain the eth stream and the proxy channels onto the wire first, so
-        // a close after start_send/feed cannot silently drop queued eth or snap frames.
-        ready!(this.eth.poll_flush_unpin(cx))?;
-        ready!(this.poll_service_outbound(cx))?;
-        this.conn.poll_close_unpin(cx).map_err(Into::into)
+        self.get_mut().conn.poll_close_unpin(cx).map_err(Into::into)
     }
 }
 
-/// In-memory transport handed to the inner [`EthStream`] so it frames `eth` messages without owning
-/// the shared wire.
+/// Resolves the `snap/2` message-id offset from the negotiated capabilities, rejecting any layout
+/// other than `eth` at relative offset 0 immediately followed by `snap/2`.
 ///
-/// [`EthSnapStream`] owns the `RLPx` connection and demultiplexes it: inbound `eth` bytes are
-/// routed into this proxy for [`EthStream`] to decode, and the bytes [`EthStream`] encodes come
-/// back out to be framed onto the wire. `eth` is the first shared capability (relative offset `0`),
-/// so bytes pass through verbatim with no id masking in either direction.
-#[derive(Debug)]
-pub struct EthProxy {
-    from_wire: UnboundedReceiverStream<BytesMut>,
-    to_wire: mpsc::UnboundedSender<Bytes>,
-}
-
-impl Stream for EthProxy {
-    type Item = Result<BytesMut, io::Error>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.from_wire.poll_next_unpin(cx).map(|opt| opt.map(Ok))
-    }
-}
-
-impl Sink<Bytes> for EthProxy {
-    type Error = io::Error;
-
-    fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
-        if item.is_empty() {
-            return Err(io::ErrorKind::InvalidInput.into())
-        }
-        self.to_wire.send(item).map_err(|_| io::ErrorKind::BrokenPipe.into())
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-}
-
-impl CanDisconnect<Bytes> for EthProxy {
-    fn disconnect(
-        &mut self,
-        _reason: DisconnectReason,
-    ) -> Pin<Box<dyn std::future::Future<Output = Result<(), io::Error>> + Send + '_>> {
-        Box::pin(async move { Ok(()) })
-    }
-}
-
-/// Adapter so the injected [`EthRlpxHandshake`] can run over [`EthProxy`] with the
-/// [`P2PStreamError`] error type it expects.
-#[derive(Debug)]
-struct UnauthEthProxy {
-    inner: EthProxy,
-}
-
-impl UnauthEthProxy {
-    fn into_inner(self) -> EthProxy {
-        self.inner
-    }
-}
-
-impl Stream for UnauthEthProxy {
-    type Item = Result<BytesMut, P2PStreamError>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.inner.poll_next_unpin(cx).map(|opt| opt.map(|res| res.map_err(P2PStreamError::from)))
-    }
-}
-
-impl Sink<Bytes> for UnauthEthProxy {
-    type Error = P2PStreamError;
-
-    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready_unpin(cx).map_err(P2PStreamError::from)
-    }
-
-    fn start_send(mut self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
-        self.inner.start_send_unpin(item).map_err(P2PStreamError::from)
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_flush_unpin(cx).map_err(P2PStreamError::from)
-    }
-
-    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_close_unpin(cx).map_err(P2PStreamError::from)
-    }
-}
-
-impl CanDisconnect<Bytes> for UnauthEthProxy {
-    fn disconnect(
-        &mut self,
-        reason: DisconnectReason,
-    ) -> Pin<Box<dyn std::future::Future<Output = Result<(), P2PStreamError>> + Send + '_>> {
-        let fut = self.inner.disconnect(reason);
-        Box::pin(async move { fut.await.map_err(P2PStreamError::from) })
-    }
-}
-
-/// Resolves the `snap/2` message-id offset and count from the negotiated capabilities, rejecting
-/// any layout other than `eth` at relative offset 0 immediately followed by `snap/2`.
-///
-/// [`route_inbound`] forwards every combined id below the snap offset to the eth decoder verbatim,
-/// so a capability before `eth`, or between `eth` and `snap/2`, would feed non-eth ids into it.
-fn eth_snap_layout(caps: &SharedCapabilities) -> Result<(u8, u8), EthStreamError> {
+/// The stream forwards every combined id below the snap offset to the eth codec verbatim, so a
+/// capability before `eth`, or between `eth` and `snap/2`, would feed non-eth ids into it.
+fn eth_snap_layout(caps: &SharedCapabilities) -> Result<u8, EthStreamError> {
     let snap = caps
         .ensure_matching_capability(&Capability::snap_2())
         .map_err(|_| EthStreamError::from(P2PStreamError::CapabilityNotShared))?;
     let snap_offset = snap.relative_message_id_offset();
-    let snap_messages = snap.num_messages();
 
     let eth = caps.eth()?;
     if eth.relative_message_id_offset() != 0 || eth.num_messages() != snap_offset {
         return Err(P2PStreamError::CapabilityNotShared.into())
     }
-    Ok((snap_offset, snap_messages))
-}
-
-/// Routes an inbound combined-id message to the `eth` primary or buffers it for `snap/2`.
-///
-/// The combined id space is partitioned as `eth = 0..snap_offset` and
-/// `snap = snap_offset..snap_offset + snap_messages`. `eth` ids pass through unchanged; `snap` ids
-/// are rebased to snap-relative (`0x00..`) before buffering. An id beyond the `snap/2` range is a
-/// protocol violation (the connection carries only `eth` and `snap/2`).
-fn route_inbound(
-    mut msg: BytesMut,
-    snap_offset: u8,
-    snap_messages: u8,
-    to_eth: &mpsc::UnboundedSender<BytesMut>,
-    to_snap: &mpsc::UnboundedSender<BytesMut>,
-) -> Result<(), EthStreamError> {
-    let id = *msg.first().ok_or(P2PStreamError::EmptyProtocolMessage)?;
-
-    // A send fails only once the consumer half is dropped, i.e. the stream is being torn down;
-    // dropping the frame then is correct, so the send results are intentionally ignored.
-    let Some(snap_id) = id.checked_sub(snap_offset) else {
-        // Below the snap offset: an `eth` id, forwarded unchanged.
-        let _ = to_eth.send(msg);
-        return Ok(())
-    };
-    if snap_id >= snap_messages {
-        return Err(P2PStreamError::UnknownReservedMessageId(id).into())
-    }
-    // A `snap/2` id, rebased to snap-relative (`0x00..`) before buffering.
-    msg[0] = snap_id;
-    let _ = to_snap.send(msg);
-    Ok(())
+    Ok(snap_offset)
 }
 
 /// Rebases a snap-relative message id to the combined message space.
@@ -521,54 +248,6 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio_util::codec::Decoder;
 
-    // `snap/2` shares the connection right after `eth` (e.g. eth/69 reserves 17 ids), so the snap
-    // capability sits at this relative offset in the combined message space and reserves 10 ids.
-    const SNAP_OFFSET: u8 = 17;
-    const SNAP_MESSAGES: u8 = 10;
-
-    #[test]
-    fn routes_inbound_by_capability_offset() {
-        let (to_eth, mut eth_rx) = mpsc::unbounded_channel();
-        let (to_snap, mut snap_rx) = mpsc::unbounded_channel();
-
-        // An `eth` message (combined id < snap offset) passes through unchanged.
-        route_inbound(
-            BytesMut::from(&[5u8, 0xaa][..]),
-            SNAP_OFFSET,
-            SNAP_MESSAGES,
-            &to_eth,
-            &to_snap,
-        )
-        .unwrap();
-        // A `snap/2` GetBlockAccessLists (0x08) arrives at combined id `SNAP_OFFSET + 8`.
-        route_inbound(
-            BytesMut::from(&[SNAP_OFFSET + 8, 0xbb][..]),
-            SNAP_OFFSET,
-            SNAP_MESSAGES,
-            &to_eth,
-            &to_snap,
-        )
-        .unwrap();
-
-        assert_eq!(eth_rx.try_recv().unwrap()[0], 5);
-        // Rebased to a snap-relative id.
-        assert_eq!(snap_rx.try_recv().unwrap()[0], 8);
-    }
-
-    #[test]
-    fn snap_masking_round_trips_with_routing() {
-        // Outbound: a snap-relative id is masked into the combined space...
-        let mut bytes = BytesMut::from(&[8u8, 0xcc][..]);
-        mask_snap(&mut bytes, SNAP_OFFSET).unwrap();
-        assert_eq!(bytes[0], SNAP_OFFSET + 8);
-
-        // ...and inbound routing rebases it back to the same snap-relative id.
-        let (to_eth, _eth_rx) = mpsc::unbounded_channel();
-        let (to_snap, mut snap_rx) = mpsc::unbounded_channel();
-        route_inbound(bytes, SNAP_OFFSET, SNAP_MESSAGES, &to_eth, &to_snap).unwrap();
-        assert_eq!(snap_rx.try_recv().unwrap()[0], 8);
-    }
-
     /// Builds shared capabilities from matching local protocols and peer capabilities.
     fn shared_caps(local: Vec<Protocol>, peer: Vec<Capability>) -> SharedCapabilities {
         SharedCapabilities::try_new(local, peer).unwrap()
@@ -580,10 +259,8 @@ mod tests {
             vec![EthVersion::Eth68.into(), Protocol::snap_2()],
             vec![EthVersion::Eth68.into(), Capability::snap_2()],
         );
-        let (offset, messages) = eth_snap_layout(&caps).unwrap();
-        // eth occupies `0..offset`, snap directly follows it and reserves 10 ids.
+        let offset = eth_snap_layout(&caps).unwrap();
         assert_eq!(offset, caps.eth().unwrap().num_messages());
-        assert_eq!(messages, SnapVersion::V2.message_count());
     }
 
     #[test]
@@ -616,28 +293,10 @@ mod tests {
     }
 
     #[test]
-    fn route_inbound_rejects_empty_message() {
-        let (to_eth, _eth_rx) = mpsc::unbounded_channel();
-        let (to_snap, _snap_rx) = mpsc::unbounded_channel();
-        assert!(
-            route_inbound(BytesMut::new(), SNAP_OFFSET, SNAP_MESSAGES, &to_eth, &to_snap).is_err()
-        );
-    }
-
-    #[test]
-    fn route_inbound_rejects_id_beyond_snap_range() {
-        // An id past the `eth` + `snap/2` range cannot belong to this connection.
-        let (to_eth, _eth_rx) = mpsc::unbounded_channel();
-        let (to_snap, _snap_rx) = mpsc::unbounded_channel();
-        let out_of_range = SNAP_OFFSET + SNAP_MESSAGES;
-        assert!(route_inbound(
-            BytesMut::from(&[out_of_range, 0x00][..]),
-            SNAP_OFFSET,
-            SNAP_MESSAGES,
-            &to_eth,
-            &to_snap,
-        )
-        .is_err());
+    fn mask_snap_rebases_into_combined_space() {
+        let mut bytes = BytesMut::from(&[8u8, 0xcc][..]);
+        mask_snap(&mut bytes, 17).unwrap();
+        assert_eq!(bytes[0], 17 + 8);
     }
 
     /// End-to-end: two peers negotiate `eth` + `snap/2`, then a `GetBlockAccessLists` request and
@@ -655,7 +314,7 @@ mod tests {
         let server = tokio::spawn(async move {
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = crate::PassthroughCodec::default().framed(incoming);
-            let server_hello = eth_hello().0.with_snap(true);
+            let server_hello = eth_snap_hello();
             let (conn, _) = UnauthedP2PStream::new(stream).handshake(server_hello).await.unwrap();
 
             let (mut stream, _) = EthSnapStream::<_, EthNetworkPrimitives>::handshake(
@@ -680,7 +339,7 @@ mod tests {
         });
 
         // Client: connect, negotiate, send the request, and await the correlated response.
-        let conn = connect_passthrough(local_addr, eth_hello().0.with_snap(true)).await;
+        let conn = connect_passthrough(local_addr, eth_snap_hello()).await;
         let (mut stream, _) = EthSnapStream::<_, EthNetworkPrimitives>::handshake(
             conn,
             status,
@@ -712,5 +371,12 @@ mod tests {
         assert_eq!(response.request_id, 7);
 
         server.abort();
+    }
+
+    /// Builds a hello advertising `eth` + `snap/2`.
+    fn eth_snap_hello() -> crate::HelloMessageWithProtocols {
+        let mut hello = eth_hello().0;
+        hello.try_add_protocol(Protocol::snap_2()).unwrap();
+        hello
     }
 }

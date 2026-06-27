@@ -199,6 +199,19 @@ where
 
         Ok(Bytes::from(alloy_rlp::encode(ProtocolMessage::from(item))))
     }
+
+    /// Encodes an [`EthBroadcastMessage`] to bytes.
+    pub fn encode_broadcast(&self, item: EthBroadcastMessage<N>) -> Bytes {
+        Bytes::from(alloy_rlp::encode(ProtocolBroadcastMessage::from(item)))
+    }
+
+    /// Encodes a raw capability message (`id` followed by its payload) to bytes.
+    pub fn encode_raw(&self, msg: RawCapabilityMessage) -> Bytes {
+        let mut bytes = Vec::with_capacity(msg.payload.len() + 1);
+        msg.id.encode(&mut bytes);
+        bytes.extend_from_slice(&msg.payload);
+        bytes.into()
+    }
 }
 
 /// An `EthStream` wraps over any `Stream` that yields bytes and makes it
@@ -272,20 +285,13 @@ where
         &mut self,
         item: EthBroadcastMessage<N>,
     ) -> Result<(), EthStreamError> {
-        self.inner.start_send_unpin(Bytes::from(alloy_rlp::encode(
-            ProtocolBroadcastMessage::from(item),
-        )))?;
-
+        self.inner.start_send_unpin(self.eth.encode_broadcast(item))?;
         Ok(())
     }
 
     /// Sends a raw capability message directly over the stream
     pub fn start_send_raw(&mut self, msg: RawCapabilityMessage) -> Result<(), EthStreamError> {
-        let mut bytes = Vec::with_capacity(msg.payload.len() + 1);
-        msg.id.encode(&mut bytes);
-        bytes.extend_from_slice(&msg.payload);
-
-        self.inner.start_send_unpin(bytes.into())?;
+        self.inner.start_send_unpin(self.eth.encode_raw(msg))?;
         Ok(())
     }
 }
