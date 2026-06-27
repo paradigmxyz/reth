@@ -6,7 +6,7 @@ use crate::{
     tree::{error::InsertPayloadError, payload_validator::TreeCtx},
 };
 use alloy_consensus::BlockHeader;
-use alloy_eip8289::{WamItems, WARMING_WINDOW};
+use alloy_eip8289::{WamItems, WarmAccessMultiset, WARMING_WINDOW};
 use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rpc_types_engine::{
@@ -507,6 +507,33 @@ where
             .saturating_sub(self.persistence_state.last_persisted_block.number)
     }
 
+    fn reconstruct_warm_accesses(&self, tip: BlockNumHash) -> ProviderResult<WarmAccessMultiset> {
+        let mut warm_accesses = WarmAccessMultiset::default();
+        let start = tip.number.saturating_sub(WARMING_WINDOW.saturating_sub(1));
+
+        for number in start..=tip.number {
+            let Some(hash) = self.state.tree_state.block_hash_on_chain(tip.hash, number, || {
+                self.provider.block_hash(number).ok().flatten()
+            }) else {
+                continue;
+            };
+
+            let Some(bal) = self.provider.bal_store().get_decoded_by_hash(hash)? else {
+                continue;
+            };
+            let items = WamItems::from_accounts(bal.as_bal().as_slice());
+            warm_accesses.apply_item_transition(&items, None);
+        }
+
+        Ok(warm_accesses)
+    }
+
+    fn update_canonical_warm_accesses(&mut self, tip: BlockNumHash) -> ProviderResult<()> {
+        let warm_accesses = self.reconstruct_warm_accesses(tip)?;
+        self.state.tree_state.set_warm_accesses(warm_accesses);
+        Ok(())
+    }
+
     /// Returns `true` when the main loop should stop draining the tree input channel.
     ///
     /// This is the case when persistence is already running and the gap between the canonical tip
@@ -978,6 +1005,7 @@ where
 
         // Update tree state with the new canonical head
         self.state.tree_state.set_canonical_head(canonical_header.num_hash());
+        self.update_canonical_warm_accesses(canonical_header.num_hash())?;
 
         // Handle the state update based on whether this is an unwind scenario
         if new_head_number < current_head_number {
@@ -1846,6 +1874,7 @@ where
             // update the tracked chain height, after backfill sync both the canonical height and
             // persisted height are the same
             self.state.tree_state.set_canonical_head(new_head.num_hash());
+            self.update_canonical_warm_accesses(new_head.num_hash())?;
             self.persistence_state.finish(new_head.hash(), new_head.number());
 
             // update the tracked canonical head
@@ -2680,6 +2709,9 @@ where
 
         // update the tracked canonical head
         self.state.tree_state.set_canonical_head(chain_update.tip().num_hash());
+        if let Err(err) = self.update_canonical_warm_accesses(chain_update.tip().num_hash()) {
+            warn!(target: "engine::tree", %err, tip = ?chain_update.tip().num_hash(), "Failed to update canonical WAM");
+        }
 
         let tip = chain_update.tip().clone_sealed_header();
         let notification = chain_update.to_chain_notification();
@@ -3016,33 +3048,8 @@ where
             executed_block: executed,
             execution_timing_stats: timing_stats,
             raw_bal,
-            wam_items,
+            wam_items: _,
         } = execute(&mut self.payload_validator, input, ctx)?;
-
-        if let Some(wam_items) = wam_items {
-            let block_number = executed.recovered_block().number();
-            let leaving_items = block_number.checked_sub(WARMING_WINDOW).and_then(|number| {
-                let hash = self.state.tree_state.block_hash_on_chain(
-                    executed.recovered_block().parent_hash(),
-                    number,
-                    || self.provider.block_hash(number).ok().flatten(),
-                )?;
-
-                match self.provider.bal_store().get_decoded_by_hash(hash) {
-                    Ok(Some(bal)) => Some(WamItems::from_accounts(bal.as_bal().as_slice())),
-                    Ok(None) => {
-                        warn!(target: "engine::tree", ?number, ?hash, "BAL leaving warming window is missing from cache");
-                        None
-                    }
-                    Err(err) => {
-                        warn!(target: "engine::tree", ?number, ?hash, %err, "Failed to fetch BAL leaving warming window");
-                        None
-                    }
-                }
-            });
-
-            self.state.tree_state.apply_wam_transition(&wam_items, leaving_items.as_ref());
-        }
 
         if let Some(raw_bal) = raw_bal {
             let num_hash = executed.recovered_block().num_hash();

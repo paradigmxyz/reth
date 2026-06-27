@@ -111,7 +111,7 @@ use crate::tree::{
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
-use alloy_eip8289::WamItems;
+use alloy_eip8289::{WamItems, WarmAccessMultiset, WARMING_WINDOW};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{map::B256Set, B256};
@@ -144,10 +144,10 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     providers::{OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory},
-    BlockExecutionOutput, BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
-    StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StorageChangeSetReader, StorageSettingsCache,
+    BalProvider, BlockExecutionOutput, BlockNumReader, BlockReader, ChangeSetReader,
+    DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider, ProviderError,
+    PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,
+    StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
@@ -316,6 +316,7 @@ where
                           + BlockNumReader
                           + StorageSettingsCache,
         > + BlockReader<Header = N::BlockHeader>
+        + BalProvider
         + ChangeSetReader
         + BlockNumReader
         + StateProviderFactory
@@ -561,6 +562,9 @@ where
                 .map_err(ConsensusError::from));
         }
 
+        let parent_wam =
+            ensure_ok!(self.warm_accesses_for_parent(input.parent_hash(), ctx.state()));
+
         let env = ExecutionEnv {
             evm_env,
             hash: input.hash(),
@@ -571,7 +575,7 @@ where
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
             decoded_bal: decoded_bal.as_ref().map(Arc::clone),
             warm_accesses: WarmAccessSnapshot::from_wam_and_bal(
-                &ctx.state().tree_state().warm_accesses,
+                &parent_wam,
                 decoded_bal.as_deref(),
             ),
         };
@@ -1259,6 +1263,54 @@ where
         }
 
         Ok(parallel_execution)
+    }
+
+    fn warm_accesses_for_parent(
+        &self,
+        parent_hash: B256,
+        state: &EngineApiTreeState<N>,
+    ) -> ProviderResult<WarmAccessMultiset> {
+        let tree_state = state.tree_state();
+        if parent_hash == tree_state.canonical_block_hash() {
+            return Ok(tree_state.warm_accesses.clone());
+        }
+
+        let parent_number = if let Some(header) = tree_state.sealed_header_by_hash(&parent_hash) {
+            header.number()
+        } else {
+            self.provider
+                .header(parent_hash)?
+                .ok_or(ProviderError::HeaderNotFound(parent_hash.into()))?
+                .number()
+        };
+
+        self.reconstruct_warm_accesses(parent_hash, parent_number, state)
+    }
+
+    fn reconstruct_warm_accesses(
+        &self,
+        tip_hash: B256,
+        tip_number: u64,
+        state: &EngineApiTreeState<N>,
+    ) -> ProviderResult<WarmAccessMultiset> {
+        let mut warm_accesses = WarmAccessMultiset::default();
+        let start = tip_number.saturating_sub(WARMING_WINDOW.saturating_sub(1));
+
+        for number in start..=tip_number {
+            let Some(hash) = state.tree_state().block_hash_on_chain(tip_hash, number, || {
+                self.provider.block_hash(number).ok().flatten()
+            }) else {
+                continue;
+            };
+
+            let Some(bal) = self.provider.bal_store().get_decoded_by_hash(hash)? else {
+                continue;
+            };
+            let items = WamItems::from_accounts(bal.as_bal().as_slice());
+            warm_accesses.apply_item_transition(&items, None);
+        }
+
+        Ok(warm_accesses)
     }
 
     /// Executes the block on the BAL path. Mirrors the return shape of [`Self::execute_block`]
@@ -2274,6 +2326,7 @@ where
                           + BlockNumReader
                           + StorageSettingsCache,
         > + BlockReader<Header = N::BlockHeader>
+        + BalProvider
         + StateProviderFactory
         + StateReader
         + ChangeSetReader

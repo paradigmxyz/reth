@@ -1,7 +1,7 @@
 //! Functionality related to tree state.
 
 use crate::engine::EngineApiKind;
-use alloy_eip8289::{WamItem, WamItems, WarmAccessMultiset};
+use alloy_eip8289::{WamItem, WarmAccessMultiset};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
     map::{B256Map, B256Set},
@@ -41,7 +41,7 @@ pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     pub(crate) engine_kind: EngineApiKind,
     /// Flattened state trie overlays for in-memory blocks.
     pub(crate) state_trie_overlays: StateTrieOverlayManager<N>,
-    /// Warm accesses collected from the latest validated block access lists.
+    /// Warm accesses for the current canonical head.
     pub warm_accesses: WarmAccessMultiset,
 }
 
@@ -88,9 +88,9 @@ impl<N: NodePrimitives> TreeState<N> {
         self.warm_accesses.count(item)
     }
 
-    /// Adds one validated BAL and removes the BAL leaving the warming window.
-    pub fn apply_wam_transition(&mut self, add: &WamItems, del: Option<&WamItems>) {
-        self.warm_accesses.apply_item_transition(add, del);
+    /// Updates the canonical head WAM.
+    pub fn set_warm_accesses(&mut self, warm_accesses: WarmAccessMultiset) {
+        self.warm_accesses = warm_accesses;
     }
 
     /// Finds the hash at `target_number` on the chain ending at `hash`.
