@@ -398,7 +398,7 @@ where
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
-        Self {
+        let mut this = Self {
             provider,
             consensus,
             payload_validator,
@@ -420,7 +420,14 @@ where
             building_payload: false,
             pending_sparse_trie_prune: None,
             runtime,
+        };
+
+        let canonical_head = this.state.tree_state.current_canonical_head;
+        if let Err(err) = this.update_canonical_warm_accesses(canonical_head) {
+            warn!(target: "engine::tree", %err, tip = ?canonical_head, "Failed to initialize canonical WAM");
         }
+
+        this
     }
 
     /// Creates a new [`EngineApiTreeHandler`] instance and spawns it in its
@@ -531,6 +538,50 @@ where
     fn update_canonical_warm_accesses(&mut self, tip: BlockNumHash) -> ProviderResult<()> {
         let warm_accesses = self.reconstruct_warm_accesses(tip)?;
         self.state.tree_state.set_warm_accesses(warm_accesses);
+        Ok(())
+    }
+
+    fn advance_canonical_warm_accesses(
+        &mut self,
+        new_blocks: &[ExecutedBlock<N>],
+    ) -> ProviderResult<()> {
+        for block in new_blocks {
+            let num_hash = block.recovered_block().num_hash();
+            let Some(add_bal) = self.provider.bal_store().get_decoded_by_hash(num_hash.hash)?
+            else {
+                warn!(target: "engine::tree", ?num_hash, "Canonical BAL missing; rebuilding WAM");
+                return self.update_canonical_warm_accesses(num_hash);
+            };
+            let add = WamItems::from_accounts(add_bal.as_bal().as_slice());
+
+            let leaving_items =
+                num_hash.number.checked_sub(WARMING_WINDOW).and_then(|number| {
+                    let hash = self.state.tree_state.block_hash_on_chain(
+                        block.recovered_block().parent_hash(),
+                        number,
+                        || self.provider.block_hash(number).ok().flatten(),
+                    )?;
+
+                    match self.provider.bal_store().get_decoded_by_hash(hash) {
+                        Ok(Some(bal)) => Some(WamItems::from_accounts(bal.as_bal().as_slice())),
+                        Ok(None) => {
+                            warn!(target: "engine::tree", ?number, ?hash, "Leaving BAL missing; rebuilding WAM");
+                            None
+                        }
+                        Err(err) => {
+                            warn!(target: "engine::tree", ?number, ?hash, %err, "Failed to fetch leaving BAL; rebuilding WAM");
+                            None
+                        }
+                    }
+                });
+
+            if num_hash.number >= WARMING_WINDOW && leaving_items.is_none() {
+                return self.update_canonical_warm_accesses(num_hash);
+            }
+
+            self.state.tree_state.warm_accesses.apply_item_transition(&add, leaving_items.as_ref());
+        }
+
         Ok(())
     }
 
@@ -2709,7 +2760,13 @@ where
 
         // update the tracked canonical head
         self.state.tree_state.set_canonical_head(chain_update.tip().num_hash());
-        if let Err(err) = self.update_canonical_warm_accesses(chain_update.tip().num_hash()) {
+        let wam_result = match &chain_update {
+            NewCanonicalChain::Commit { new } => self.advance_canonical_warm_accesses(new),
+            NewCanonicalChain::Reorg { .. } => {
+                self.update_canonical_warm_accesses(chain_update.tip().num_hash())
+            }
+        };
+        if let Err(err) = wam_result {
             warn!(target: "engine::tree", %err, tip = ?chain_update.tip().num_hash(), "Failed to update canonical WAM");
         }
 
