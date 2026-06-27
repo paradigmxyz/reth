@@ -373,16 +373,11 @@ where
                 let _span = branch_span.entered();
 
                 stream_bal.as_bal().par_iter().for_each(|account_changes| {
-                    WorkerPool::with_worker_mut(|worker| {
-                        let provider =
-                            worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
-                        ctx.send_bal_hashed_state(
-                            &parent_span,
-                            provider,
-                            account_changes,
-                            &to_sparse_trie_task,
-                        );
-                    });
+                    ctx.send_bal_hashed_state(
+                        &parent_span,
+                        account_changes,
+                        &to_sparse_trie_task,
+                    );
                 });
 
                 let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
@@ -636,7 +631,6 @@ where
     fn send_bal_hashed_state(
         &self,
         parent_span: &Span,
-        provider: &mut Option<Box<dyn AccountReader>>,
         account_changes: &alloy_eip7928::AccountChanges,
         to_sparse_trie_task: &CrossbeamSender<StateRootMessage>,
     ) {
@@ -668,38 +662,48 @@ where
         }
 
         let existing_account = if account_fields.needs_parent_account() {
-            if provider.is_none() {
-                let _span = debug_span!(
-                    target: "engine::tree::payload_processor::prewarm",
-                    parent: parent_span,
-                    "bal_hashed_state_provider_init",
-                    has_saved_cache = !self.disable_bal_batch_io && self.saved_cache.is_some(),
-                )
-                .entered();
+            let account = WorkerPool::with_worker_mut(|worker| {
+                let provider = worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
+                if provider.is_none() {
+                    let _span = debug_span!(
+                        target: "engine::tree::payload_processor::prewarm",
+                        parent: parent_span,
+                        "bal_hashed_state_provider_init",
+                        has_saved_cache = !self.disable_bal_batch_io && self.saved_cache.is_some(),
+                    )
+                    .entered();
 
-                let inner = match self.provider.build() {
-                    Ok(p) => p,
-                    Err(err) => {
-                        warn!(
-                            target: "engine::tree::payload_processor::prewarm",
-                            ?err,
-                            "Failed to build provider for BAL account reads"
-                        );
-                        return;
-                    }
-                };
-                let boxed: Box<dyn AccountReader> =
-                    match (self.disable_bal_batch_io, &self.saved_cache) {
-                        (false, Some(saved)) => {
-                            let caches = saved.cache().clone();
-                            Box::new(CachedStateProvider::new_prewarm(inner, caches))
+                    let inner = match self.provider.build() {
+                        Ok(p) => p,
+                        Err(err) => {
+                            warn!(
+                                target: "engine::tree::payload_processor::prewarm",
+                                ?err,
+                                "Failed to build provider for BAL account reads"
+                            );
+                            return Err(());
                         }
-                        _ => Box::new(inner),
                     };
-                *provider = Some(boxed);
+                    let boxed: Box<dyn AccountReader> =
+                        match (self.disable_bal_batch_io, &self.saved_cache) {
+                            (false, Some(saved)) => {
+                                let caches = saved.cache().clone();
+                                Box::new(CachedStateProvider::new_prewarm(inner, caches))
+                            }
+                            _ => Box::new(inner),
+                        };
+                    *provider = Some(boxed);
+                }
+                let account_reader = provider.as_ref().expect("provider just initialized");
+                Ok(account_reader.basic_account(&address).ok().flatten())
+            });
+
+            match account {
+                Ok(account) => account,
+                Err(()) => {
+                    return;
+                }
             }
-            let account_reader = provider.as_ref().expect("provider just initialized");
-            account_reader.basic_account(&address).ok().flatten()
         } else {
             None
         };
