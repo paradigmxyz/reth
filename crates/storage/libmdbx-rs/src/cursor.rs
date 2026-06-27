@@ -97,7 +97,7 @@ where
                     &mut data_val,
                     op,
                 ))?;
-                assert_ne!(data_ptr, data_val.iov_base);
+                debug_assert_ne!(data_ptr, data_val.iov_base);
                 let key_out = {
                     // MDBX wrote in new key
                     if ptr::eq(key_ptr, key_val.iov_base) {
