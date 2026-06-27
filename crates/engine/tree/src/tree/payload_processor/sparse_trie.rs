@@ -654,24 +654,25 @@ where
     ///
     /// we trigger state root computation on a rayon pool.
     fn compute_drained_storage_roots(&mut self) {
-        let addresses_to_compute_roots: Vec<_> = self
-            .storage_updates
-            .iter()
-            .filter_map(|(address, updates)| updates.is_empty().then_some(*address))
-            .collect();
-
         struct SendStorageTriePtr<S>(*mut RevealableSparseTrie<S>);
         // SAFETY: this wrapper only forwards the pointer across rayon; deref invariants are
         // documented at the use site below.
         unsafe impl<S: Send> Send for SendStorageTriePtr<S> {}
 
-        let mut tries_to_compute_roots: Vec<(B256, SendStorageTriePtr<S>)> =
-            Vec::with_capacity(addresses_to_compute_roots.len());
-        for address in addresses_to_compute_roots {
-            if let Some(trie) = self.trie.storage_tries_mut().get_mut(&address) &&
+        let storage_updates = &self.storage_updates;
+        let pending_account_updates = &self.pending_account_updates;
+        let storage_tries = self.trie.storage_tries_mut();
+
+        let mut tries_to_compute_roots = Vec::new();
+        for (address, updates) in storage_updates {
+            if !updates.is_empty() || !pending_account_updates.contains_key(address) {
+                continue;
+            }
+
+            if let Some(trie) = storage_tries.get_mut(address) &&
                 !trie.is_root_cached()
             {
-                tries_to_compute_roots.push((address, SendStorageTriePtr(trie)));
+                tries_to_compute_roots.push((*address, SendStorageTriePtr(trie)));
             }
         }
 
@@ -698,8 +699,8 @@ where
             };
             let _enter = span.entered();
             // SAFETY:
-            // - pointers are created from `storage_tries_mut().get_mut(address)` above;
-            // - `addresses_to_compute_roots` comes from map iteration, so addresses are unique;
+            // - pointers are created from `storage_tries.get_mut(address)` above;
+            // - `storage_updates` comes from map iteration, so addresses are unique;
             // - we do not insert/remove entries between pointer collection and use, so pointers
             //   stay valid and map reallocation cannot occur;
             // - each pointer is consumed by at most one rayon task, so no aliasing mutable access.
