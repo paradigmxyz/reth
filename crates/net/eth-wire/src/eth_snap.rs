@@ -204,11 +204,13 @@ where
     }
 }
 
-/// Resolves the `snap/2` message-id offset from the negotiated capabilities, rejecting any layout
-/// other than `eth` at relative offset 0 immediately followed by `snap/2`.
+/// Resolves the `snap/2` message-id offset from the negotiated capabilities, accepting only a
+/// connection that shares exactly `eth` at relative offset 0 immediately followed by `snap/2`.
 ///
-/// The stream forwards every combined id below the snap offset to the eth codec verbatim, so a
-/// capability before `eth`, or between `eth` and `snap/2`, would feed non-eth ids into it.
+/// The stream forwards every combined id below the snap offset to the eth codec and treats every
+/// id at or above it as snap, so any other shared capability before `eth`, between `eth` and
+/// `snap/2`, or after `snap/2` would be mis-routed. Such layouts belong on the general-purpose
+/// satellite multiplexer and are rejected here.
 fn eth_snap_layout(caps: &SharedCapabilities) -> Result<u8, EthStreamError> {
     let snap = caps
         .ensure_matching_capability(&Capability::snap_2())
@@ -216,7 +218,8 @@ fn eth_snap_layout(caps: &SharedCapabilities) -> Result<u8, EthStreamError> {
     let snap_offset = snap.relative_message_id_offset();
 
     let eth = caps.eth()?;
-    if eth.relative_message_id_offset() != 0 || eth.num_messages() != snap_offset {
+    if caps.len() != 2 || eth.relative_message_id_offset() != 0 || eth.num_messages() != snap_offset
+    {
         return Err(P2PStreamError::CapabilityNotShared.into())
     }
     Ok(snap_offset)
@@ -288,6 +291,18 @@ mod tests {
         let caps = shared_caps(
             vec![EthVersion::Eth68.into(), Protocol::new(cap.clone(), 5), Protocol::snap_2()],
             vec![EthVersion::Eth68.into(), cap, Capability::snap_2()],
+        );
+        assert!(eth_snap_layout(&caps).is_err());
+    }
+
+    #[test]
+    fn eth_snap_layout_rejects_capability_after_snap() {
+        // "zzz" sorts after "snap"; eth+snap still line up, but its frames would be mis-routed as
+        // snap, so the layout must be rejected (it belongs on the satellite multiplexer).
+        let cap = Capability::new_static("zzz", 1);
+        let caps = shared_caps(
+            vec![EthVersion::Eth68.into(), Protocol::snap_2(), Protocol::new(cap.clone(), 5)],
+            vec![EthVersion::Eth68.into(), Capability::snap_2(), cap],
         );
         assert!(eth_snap_layout(&caps).is_err());
     }
