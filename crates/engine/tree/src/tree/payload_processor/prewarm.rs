@@ -42,6 +42,9 @@ use std::sync::{
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
+/// Number of transactions grouped into one prewarming pool task.
+const PREWARM_TX_BATCH_SIZE: usize = 4;
+
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 #[derive(Debug)]
 pub enum PrewarmMode<Tx> {
@@ -149,6 +152,7 @@ where
                     pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
                 });
 
+                let mut batch = Vec::with_capacity(PREWARM_TX_BATCH_SIZE);
                 while let Ok((index, tx)) = pending.recv() {
                     if ctx.should_stop() {
                         trace!(
@@ -164,16 +168,47 @@ where
                     }
 
                     tx_count += 1;
+                    batch.push((index, tx));
+                    if batch.len() < PREWARM_TX_BATCH_SIZE {
+                        continue;
+                    }
+
+                    let batch_to_spawn =
+                        std::mem::replace(&mut batch, Vec::with_capacity(PREWARM_TX_BATCH_SIZE));
+                    let batch_len = batch_to_spawn.len();
+                    let first_index = batch_to_spawn.first().map(|(index, _)| *index).unwrap_or(0);
                     let parent_span = Span::current();
                     s.spawn(move |_| {
                         let _enter = trace_span!(
                             target: "engine::tree::payload_processor::prewarm",
                             parent: parent_span,
-                            "prewarm_tx",
-                            i = index,
+                            "prewarm_tx_batch",
+                            first = first_index,
+                            len = batch_len,
                         )
                         .entered();
-                        Self::transact_worker(ctx, index, tx, to_sparse_trie_task);
+                        for (index, tx) in batch_to_spawn {
+                            Self::transact_worker(ctx, index, tx, to_sparse_trie_task);
+                        }
+                    });
+                }
+
+                if !batch.is_empty() {
+                    let batch_len = batch.len();
+                    let first_index = batch.first().map(|(index, _)| *index).unwrap_or(0);
+                    let parent_span = Span::current();
+                    s.spawn(move |_| {
+                        let _enter = trace_span!(
+                            target: "engine::tree::payload_processor::prewarm",
+                            parent: parent_span,
+                            "prewarm_tx_batch",
+                            first = first_index,
+                            len = batch_len,
+                        )
+                        .entered();
+                        for (index, tx) in batch {
+                            Self::transact_worker(ctx, index, tx, to_sparse_trie_task);
+                        }
                     });
                 }
 
