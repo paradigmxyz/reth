@@ -121,7 +121,19 @@ where
     where
         Value: TableObject,
     {
-        let (_, v, _) = mdbx_try_optional!(self.get::<(), Value>(key, data, op));
+        let v = unsafe {
+            let mut key_val = slice_to_val(key);
+            let mut data_val = slice_to_val(data);
+            mdbx_try_optional!(self.txn.txn_execute(|txn| {
+                mdbx_result(ffi::mdbx_cursor_get(
+                    self.cursor,
+                    &mut key_val,
+                    &mut data_val,
+                    op,
+                ))?;
+                Value::decode_val::<K>(txn, data_val)
+            })?)
+        };
 
         Ok(Some(v))
     }
