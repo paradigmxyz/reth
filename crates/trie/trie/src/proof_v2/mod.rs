@@ -1486,6 +1486,29 @@ where
         let mut trie_cursor_state = TrieCursorState::unseeked();
         let mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)> = None;
 
+        // Plain multiproof requests retain the trie root for every target. In that common case all
+        // targets belong to one root sub-trie, so skip the sub-trie-prefix sort/chunk pass and sort
+        // directly by proof key.
+        if targets.iter().all(|target| target.min_len == 0) {
+            targets.sort_unstable_by_key(|target| target.key_nibbles);
+            if let Err(err) = self.proof_subtrie(
+                value_encoder,
+                &mut trie_cursor_state,
+                &mut hashed_cursor_current,
+                SubTrieTargets { prefix: Nibbles::new(), targets, retain_root: true },
+            ) {
+                self.clear_computation_state();
+                return Err(err)
+            }
+
+            trace!(
+                target: TRACE_TARGET,
+                retained_proofs_len = ?self.retained_proofs.len(),
+                "proof_inner: returning from root-target fast path",
+            );
+            return Ok(core::mem::take(&mut self.retained_proofs))
+        }
+
         // Divide targets into chunks, each chunk corresponding to a different sub-trie within the
         // overall trie, and handle all proofs within that sub-trie.
         for sub_trie_targets in iter_sub_trie_targets(targets) {
