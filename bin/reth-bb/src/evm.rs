@@ -77,6 +77,19 @@ impl<'a> BbEvmPlan<'a> {
 
     /// Returns the segment that contains the transaction at `tx_index`.
     pub(crate) fn segment_index_for_tx(&self, tx_index: usize) -> usize {
+        let last_segment = self.segments.len().saturating_sub(1);
+        if last_segment == 0 {
+            return 0;
+        }
+
+        if tx_index < self.segments[1].start_tx {
+            return 0;
+        }
+
+        if tx_index >= self.segments[last_segment].start_tx {
+            return last_segment;
+        }
+
         self.segments.partition_point(|segment| segment.start_tx <= tx_index).saturating_sub(1)
     }
 }
