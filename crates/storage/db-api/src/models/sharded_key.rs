@@ -70,9 +70,11 @@ impl Decode for ShardedKey<Address> {
         if value.len() != 20 + BLOCK_NUMBER_SIZE {
             return Err(DatabaseError::Decode);
         }
+
         let key = Address::from_slice(&value[..20]);
-        let highest_block_number =
-            u64::from_be_bytes(value[20..].try_into().map_err(|_| DatabaseError::Decode)?);
+        let mut block_number = [0u8; BLOCK_NUMBER_SIZE];
+        block_number.copy_from_slice(&value[20..28]);
+        let highest_block_number = u64::from_be_bytes(block_number);
         Ok(Self::new(key, highest_block_number))
     }
 }

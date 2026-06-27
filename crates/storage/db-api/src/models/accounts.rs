@@ -64,8 +64,14 @@ impl Encode for BlockNumberAddress {
 
 impl Decode for BlockNumberAddress {
     fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
-        let num = u64::from_be_bytes(value[..8].try_into().map_err(|_| DatabaseError::Decode)?);
-        let hash = Address::from_slice(&value[8..]);
+        if value.len() != 28 {
+            return Err(DatabaseError::Decode);
+        }
+
+        let mut block_number = [0u8; 8];
+        block_number.copy_from_slice(&value[..8]);
+        let num = u64::from_be_bytes(block_number);
+        let hash = Address::from_slice(&value[8..28]);
         Ok(Self((num, hash)))
     }
 }
@@ -133,8 +139,12 @@ impl Encode for AddressStorageKey {
 
 impl Decode for AddressStorageKey {
     fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        if value.len() != 52 {
+            return Err(DatabaseError::Decode);
+        }
+
         let address = Address::from_slice(&value[..20]);
-        let storage_key = StorageKey::from_slice(&value[20..]);
+        let storage_key = StorageKey::from_slice(&value[20..52]);
         Ok(Self((address, storage_key)))
     }
 }

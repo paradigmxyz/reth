@@ -79,13 +79,12 @@ impl Decode for StorageShardedKey {
         if value.len() != STORAGE_SHARD_KEY_BYTES_SIZE {
             return Err(DatabaseError::Decode)
         }
-        let block_num_index = value.len() - 8;
 
-        let highest_block_number = u64::from_be_bytes(
-            value[block_num_index..].try_into().map_err(|_| DatabaseError::Decode)?,
-        );
-        let address = Address::decode(&value[..20])?;
-        let storage_key = B256::decode(&value[20..52])?;
+        let mut block_number = [0u8; 8];
+        block_number.copy_from_slice(&value[52..60]);
+        let highest_block_number = u64::from_be_bytes(block_number);
+        let address = Address::from_slice(&value[..20]);
+        let storage_key = B256::from_slice(&value[20..52]);
 
         Ok(Self { address, sharded_key: ShardedKey::new(storage_key, highest_block_number) })
     }
