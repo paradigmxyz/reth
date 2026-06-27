@@ -1498,9 +1498,10 @@ impl RocksDBProvider {
             return Ok(vec![(last_key, last_shard)]);
         }
 
+        let shard_count = (last_shard.len() as usize).div_ceil(NUM_OF_INDICES_IN_SHARD);
         let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
         let mut chunks_peekable = chunks.into_iter().peekable();
-        let mut shards = Vec::new();
+        let mut shards = Vec::with_capacity(shard_count);
 
         while let Some(chunk) = chunks_peekable.next() {
             let shard = BlockNumberList::new_pre_sorted(chunk);
