@@ -1,7 +1,7 @@
 //! Functionality related to tree state.
 
 use crate::engine::EngineApiKind;
-use alloy_eip8289::{WamItem, WarmAccessMultiset};
+use alloy_eip8289::{WamItem, WarmAccessMultiset, WARMING_WINDOW};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
     map::{B256Map, B256Set},
@@ -43,6 +43,9 @@ pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     pub(crate) state_trie_overlays: StateTrieOverlayManager<N>,
     /// Warm accesses for the current canonical head.
     pub warm_accesses: WarmAccessMultiset,
+    /// Number of BAL-bearing canonical blocks represented in `warm_accesses`, capped at the
+    /// warming window.
+    pub(crate) warm_access_depth: u64,
 }
 
 impl<N: NodePrimitives> TreeState<N> {
@@ -60,6 +63,7 @@ impl<N: NodePrimitives> TreeState<N> {
             engine_kind,
             state_trie_overlays,
             warm_accesses: WarmAccessMultiset::default(),
+            warm_access_depth: 0,
         }
     }
 
@@ -74,6 +78,7 @@ impl<N: NodePrimitives> TreeState<N> {
         self.blocks_by_number.clear();
         self.parent_to_child.clear();
         self.warm_accesses = WarmAccessMultiset::default();
+        self.warm_access_depth = 0;
         self.current_canonical_head = current_canonical_head;
         self.engine_kind = engine_kind;
     }
@@ -89,8 +94,9 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Updates the canonical head WAM.
-    pub fn set_warm_accesses(&mut self, warm_accesses: WarmAccessMultiset) {
+    pub fn set_warm_accesses(&mut self, warm_accesses: WarmAccessMultiset, depth: u64) {
         self.warm_accesses = warm_accesses;
+        self.warm_access_depth = depth.min(WARMING_WINDOW);
     }
 
     /// Finds the hash at `target_number` on the chain ending at `hash`.

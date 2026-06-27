@@ -514,8 +514,12 @@ where
             .saturating_sub(self.persistence_state.last_persisted_block.number)
     }
 
-    fn reconstruct_warm_accesses(&self, tip: BlockNumHash) -> ProviderResult<WarmAccessMultiset> {
+    fn reconstruct_warm_accesses(
+        &self,
+        tip: BlockNumHash,
+    ) -> ProviderResult<(WarmAccessMultiset, u64)> {
         let mut warm_accesses = WarmAccessMultiset::default();
+        let mut depth = 0;
         let start = tip.number.saturating_sub(WARMING_WINDOW.saturating_sub(1));
 
         for number in start..=tip.number {
@@ -530,14 +534,15 @@ where
             };
             let items = WamItems::from_accounts(bal.as_bal().as_slice());
             warm_accesses.apply_item_transition(&items, None);
+            depth += 1;
         }
 
-        Ok(warm_accesses)
+        Ok((warm_accesses, depth))
     }
 
     fn update_canonical_warm_accesses(&mut self, tip: BlockNumHash) -> ProviderResult<()> {
-        let warm_accesses = self.reconstruct_warm_accesses(tip)?;
-        self.state.tree_state.set_warm_accesses(warm_accesses);
+        let (warm_accesses, depth) = self.reconstruct_warm_accesses(tip)?;
+        self.state.tree_state.set_warm_accesses(warm_accesses, depth);
         Ok(())
     }
 
@@ -554,7 +559,8 @@ where
             };
             let add = WamItems::from_accounts(add_bal.as_bal().as_slice());
 
-            let leaving_items =
+            let previous_depth = self.state.tree_state.warm_access_depth;
+            let leaving_items = if previous_depth >= WARMING_WINDOW {
                 num_hash.number.checked_sub(WARMING_WINDOW).and_then(|number| {
                     let hash = self.state.tree_state.block_hash_on_chain(
                         block.recovered_block().parent_hash(),
@@ -573,13 +579,18 @@ where
                             None
                         }
                     }
-                });
+                })
+            } else {
+                None
+            };
 
-            if num_hash.number >= WARMING_WINDOW && leaving_items.is_none() {
+            if previous_depth >= WARMING_WINDOW && leaving_items.is_none() {
                 return self.update_canonical_warm_accesses(num_hash);
             }
 
             self.state.tree_state.warm_accesses.apply_item_transition(&add, leaving_items.as_ref());
+            self.state.tree_state.warm_access_depth =
+                previous_depth.saturating_add(1).min(WARMING_WINDOW);
         }
 
         Ok(())
