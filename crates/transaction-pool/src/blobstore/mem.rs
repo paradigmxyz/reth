@@ -1,4 +1,6 @@
-use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize};
+use crate::blobstore::{
+    BlobCellAvailability, BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize,
+};
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
@@ -95,29 +97,35 @@ impl PartialEq for InMemoryBlobStoreInner {
 }
 
 impl BlobStore for InMemoryBlobStore {
-    fn insert(&self, tx: B256, data: BlobTransactionSidecarVariant) -> Result<(), BlobStoreError> {
+    fn insert(
+        &self,
+        tx: B256,
+        data: BlobTransactionSidecarVariant,
+    ) -> Result<Option<BlobCellAvailability>, BlobStoreError> {
         let mut store = self.inner.store.write();
         self.inner.size_tracker.add_size(insert_size(&mut store, tx, data));
         self.inner.size_tracker.update_len(store.len());
-        Ok(())
+        Ok(Some(BlobCellAvailability::full()))
     }
 
     fn insert_all(
         &self,
         txs: Vec<(B256, BlobTransactionSidecarVariant)>,
-    ) -> Result<(), BlobStoreError> {
+    ) -> Result<Vec<(B256, Option<BlobCellAvailability>)>, BlobStoreError> {
         if txs.is_empty() {
-            return Ok(())
+            return Ok(Vec::new())
         }
         let mut store = self.inner.store.write();
         let mut total_add = 0;
+        let mut availability = Vec::with_capacity(txs.len());
         for (tx, data) in txs {
             let add = insert_size(&mut store, tx, data);
             total_add += add;
+            availability.push((tx, Some(BlobCellAvailability::full())));
         }
         self.inner.size_tracker.add_size(total_add);
         self.inner.size_tracker.update_len(store.len());
-        Ok(())
+        Ok(availability)
     }
 
     fn delete(&self, tx: B256) -> Result<(), BlobStoreError> {
@@ -348,7 +356,8 @@ mod tests {
         let store = InMemoryBlobStore::default();
 
         let (sidecar, versioned_hash, expected) = eip7594_single_blob_sidecar();
-        store.insert(B256::random(), sidecar).unwrap();
+        let availability = store.insert(B256::random(), sidecar).unwrap();
+        assert_eq!(availability, Some(BlobCellAvailability::full()));
 
         assert_ne!(versioned_hash, B256::ZERO);
 
@@ -358,6 +367,25 @@ mod tests {
 
         let v3 = store.get_by_versioned_hashes_v3(&request).unwrap();
         assert_eq!(v3, vec![Some(expected), None]);
+    }
+
+    #[test]
+    fn mem_insert_all_returns_full_availability_for_full_sidecars() {
+        let store = InMemoryBlobStore::default();
+        let (sidecar, _, _) = eip7594_single_blob_sidecar();
+        let tx_a = B256::random();
+        let tx_b = B256::random();
+
+        let availability =
+            store.insert_all(vec![(tx_a, sidecar.clone()), (tx_b, sidecar)]).unwrap();
+
+        assert_eq!(
+            availability,
+            vec![
+                (tx_a, Some(BlobCellAvailability::full())),
+                (tx_b, Some(BlobCellAvailability::full()))
+            ]
+        );
     }
 
     #[test]

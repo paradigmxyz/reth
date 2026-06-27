@@ -24,6 +24,36 @@ mod mem;
 mod noop;
 mod tracker;
 
+/// Blob cell availability stored for a transaction.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct BlobCellAvailability(B128);
+
+impl BlobCellAvailability {
+    /// Full availability for all blob cells in a stored full sidecar.
+    pub const FULL: Self = Self(B128::new([0xff; 16]));
+
+    /// Creates a new availability mask from the raw cell bitmask.
+    pub const fn new(mask: B128) -> Self {
+        Self(mask)
+    }
+
+    /// Returns full availability for all blob cells.
+    pub const fn full() -> Self {
+        Self::FULL
+    }
+
+    /// Returns the raw cell bitmask.
+    pub const fn mask(self) -> B128 {
+        self.0
+    }
+
+    /// Returns true if all blob cells are available.
+    pub fn is_full(self) -> bool {
+        self == Self::FULL
+    }
+}
+
 /// A blob store that can be used to store blob data of EIP4844 transactions.
 ///
 /// This type is responsible for keeping track of blob data until it is no longer needed (after
@@ -31,14 +61,26 @@ mod tracker;
 ///
 /// Note: this is Clone because it is expected to be wrapped in an Arc.
 pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
+    /// Returns the availability that would be stored for this full sidecar.
+    fn availability_for_insert(
+        &self,
+        _data: &BlobTransactionSidecarVariant,
+    ) -> Option<BlobCellAvailability> {
+        Some(BlobCellAvailability::full())
+    }
+
     /// Inserts the blob sidecar into the store
-    fn insert(&self, tx: B256, data: BlobTransactionSidecarVariant) -> Result<(), BlobStoreError>;
+    fn insert(
+        &self,
+        tx: B256,
+        data: BlobTransactionSidecarVariant,
+    ) -> Result<Option<BlobCellAvailability>, BlobStoreError>;
 
     /// Inserts multiple blob sidecars into the store
     fn insert_all(
         &self,
         txs: Vec<(B256, BlobTransactionSidecarVariant)>,
-    ) -> Result<(), BlobStoreError>;
+    ) -> Result<Vec<(B256, Option<BlobCellAvailability>)>, BlobStoreError>;
 
     /// Deletes the blob sidecar from the store
     fn delete(&self, tx: B256) -> Result<(), BlobStoreError>;

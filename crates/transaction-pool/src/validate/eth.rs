@@ -1546,7 +1546,8 @@ mod tests {
         let res = pool.add_external_transaction(transaction.clone()).await;
         assert!(res.is_ok());
         let tx = pool.get(transaction.hash());
-        assert!(tx.is_some());
+        let tx = tx.unwrap();
+        assert_eq!(tx.transaction.blob_cell_availability(), None);
     }
 
     // <https://github.com/paradigmxyz/reth/issues/8550>

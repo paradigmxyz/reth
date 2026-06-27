@@ -66,7 +66,7 @@
 //!    category (2.) and become pending.
 
 use crate::{
-    blobstore::BlobStore,
+    blobstore::{BlobCellAvailability, BlobStore},
     error::{PoolError, PoolErrorKind, PoolResult},
     identifier::{SenderId, SenderIdentifiers, TransactionId},
     metrics::BlobStoreMetrics,
@@ -580,7 +580,10 @@ where
         pool: &mut RwLockWriteGuard<'_, TxPool<T>>,
         origin: TransactionOrigin,
         tx: TransactionValidationOutcome<T::Transaction>,
-    ) -> (PoolResult<AddedTransactionOutcome>, Option<AddedTransactionMeta<T::Transaction>>) {
+    ) -> (PoolResult<AddedTransactionOutcome>, Option<AddedTransactionMeta<T::Transaction>>)
+    where
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    {
         match tx {
             TransactionValidationOutcome::Valid {
                 balance,
@@ -594,7 +597,7 @@ where
                 let transaction_id = TransactionId::new(sender_id, transaction.nonce());
 
                 // split the valid transaction and the blob sidecar if it has any
-                let (transaction, blob_sidecar) = match transaction {
+                let (mut transaction, blob_sidecar) = match transaction {
                     ValidTransaction::Valid(tx) => (tx, None),
                     ValidTransaction::ValidWithSidecar { transaction, sidecar } => {
                         debug_assert!(
@@ -604,6 +607,10 @@ where
                         (transaction, Some(sidecar))
                     }
                 };
+                if let Some(sidecar) = &blob_sidecar {
+                    let availability = self.blob_store.availability_for_insert(sidecar);
+                    transaction.set_blob_cell_availability(availability);
+                }
 
                 let tx = ValidPoolTransaction {
                     transaction,
@@ -641,7 +648,10 @@ where
         &self,
         origin: TransactionOrigin,
         tx: TransactionValidationOutcome<T::Transaction>,
-    ) -> PoolResult<TransactionEvents> {
+    ) -> PoolResult<TransactionEvents>
+    where
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    {
         let listener = {
             let mut listener = self.event_listener.write();
             let events = listener.subscribe(tx.tx_hash());
@@ -661,7 +671,10 @@ where
         &self,
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = TransactionValidationOutcome<T::Transaction>>,
-    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
+    ) -> Vec<PoolResult<AddedTransactionOutcome>>
+    where
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    {
         self.add_transactions_with_origins(transactions.into_iter().map(|tx| (origin, tx)))
     }
 
@@ -672,7 +685,10 @@ where
         transactions: impl IntoIterator<
             Item = (TransactionOrigin, TransactionValidationOutcome<T::Transaction>),
         >,
-    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
+    ) -> Vec<PoolResult<AddedTransactionOutcome>>
+    where
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    {
         // Collect results and metadata while holding the pool write lock
         let (mut results, added_metas, discarded) = {
             let mut pool = self.pool.write();
@@ -1294,13 +1310,24 @@ where
     }
 
     /// Inserts a blob transaction into the blob store
-    fn insert_blob(&self, hash: TxHash, blob: BlobTransactionSidecarVariant) {
+    fn insert_blob(
+        &self,
+        hash: TxHash,
+        blob: BlobTransactionSidecarVariant,
+    ) -> Option<BlobCellAvailability> {
         debug!(target: "txpool", "[{:?}] storing blob sidecar", hash);
-        if let Err(err) = self.blob_store.insert(hash, blob) {
-            warn!(target: "txpool", %err, "[{:?}] failed to insert blob", hash);
-            self.blob_store_metrics.blobstore_failed_inserts.increment(1);
+        match self.blob_store.insert(hash, blob) {
+            Ok(availability) => {
+                self.update_blob_store_metrics();
+                availability
+            }
+            Err(err) => {
+                warn!(target: "txpool", %err, "[{:?}] failed to insert blob", hash);
+                self.blob_store_metrics.blobstore_failed_inserts.increment(1);
+                self.update_blob_store_metrics();
+                None
+            }
         }
-        self.update_blob_store_metrics();
     }
 
     /// Delete a blob from the blob store
