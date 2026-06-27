@@ -21,6 +21,7 @@ crossbeam-queue.workspace = true
 parking_lot.workspace = true
 smallvec.workspace = true
 thiserror.workspace = true
+thread-priority.workspace = true
 tracing.workspace = true
 
 dashmap = { workspace = true, features = ["inline"], optional = true }

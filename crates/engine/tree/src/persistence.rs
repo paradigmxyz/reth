@@ -11,7 +11,7 @@ use reth_provider::{
 };
 use reth_prune::{PrunerError, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
-use reth_tasks::spawn_os_thread;
+use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use std::{
     sync::{
         mpsc::{Receiver, SendError, Sender},
@@ -291,6 +291,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         let db_service =
             PersistenceService::new(provider_factory, db_service_rx, pruner, sync_metrics_tx);
         let join_handle = spawn_os_thread("persistence", || {
+            increase_thread_priority();
             if let Err(err) = db_service.run() {
                 error!(target: "engine::persistence", ?err, "Persistence service failed");
             }

@@ -7,6 +7,7 @@ use std::{
     fmt, ptr,
     sync::mpsc::{sync_channel, Receiver, SyncSender},
 };
+use thread_priority::{ThreadPriority, ThreadPriorityValue};
 
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct TxnPtr(pub(crate) *mut ffi::MDBX_txn);
@@ -65,6 +66,8 @@ impl TxnManager {
     /// - [`TxnManagerMessage::Commit`] commits a transaction with [`ffi::mdbx_txn_commit_ex`]
     fn start_message_listener(&self, env: EnvPtr, rx: Receiver<TxnManagerMessage>) {
         let task = move || {
+            increase_txn_manager_priority();
+
             let env = env;
             loop {
                 let msg = rx.recv();
@@ -116,6 +119,34 @@ impl TxnManager {
 
     pub(crate) fn send_message(&self, message: TxnManagerMessage) {
         self.sender.send(message).unwrap()
+    }
+}
+
+/// Increases the priority of the MDBX transaction-manager thread.
+///
+/// The manager executes write transaction begin/commit/abort calls for the persistence path, so it
+/// should not lose CPU time to proof, execution, or tracing workers when replay is saturated.
+fn increase_txn_manager_priority() {
+    let thread_name = std::thread::current().name().unwrap_or("unnamed").to_string();
+    if let Err(err) = ThreadPriority::Max.set_for_current() {
+        tracing::debug!(
+            target: "libmdbx::txn",
+            %thread_name,
+            ?err,
+            "failed to set max thread priority, trying moderate bump"
+        );
+
+        let fallback = ThreadPriority::Crossplatform(
+            ThreadPriorityValue::try_from(62u8).expect("62 is within the valid 0..100 range"),
+        );
+        if let Err(err) = fallback.set_for_current() {
+            tracing::debug!(
+                target: "libmdbx::txn",
+                %thread_name,
+                ?err,
+                "failed to set moderate thread priority"
+            );
+        }
     }
 }
 
