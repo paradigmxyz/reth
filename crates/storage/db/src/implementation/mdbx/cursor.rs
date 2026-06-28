@@ -61,6 +61,43 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
     }
 }
 
+impl<T: Table> Cursor<RW, T> {
+    fn put_with_metric(
+        &mut self,
+        operation: Operation,
+        write_operation: DatabaseWriteOperation,
+        flags: WriteFlags,
+        key: impl AsRef<[u8]> + IntoVec,
+        value: Option<&[u8]>,
+    ) -> Result<(), DatabaseError> {
+        if let Some(value) = value {
+            self.execute_with_operation_metric(operation, Some(value.len()), |this| {
+                this.inner.put(key.as_ref(), value, flags).map_err(|e| {
+                    DatabaseWriteError {
+                        info: e.into(),
+                        operation: write_operation,
+                        table_name: T::NAME,
+                        key: key.into_vec(),
+                    }
+                    .into()
+                })
+            })
+        } else {
+            self.execute_with_operation_metric(operation, Some(self.buf.len()), |this| {
+                this.inner.put(key.as_ref(), &this.buf, flags).map_err(|e| {
+                    DatabaseWriteError {
+                        info: e.into(),
+                        operation: write_operation,
+                        table_name: T::NAME,
+                        key: key.into_vec(),
+                    }
+                    .into()
+                })
+            })
+        }
+    }
+}
+
 /// Decodes a `(key, value)` pair from the database.
 #[expect(clippy::type_complexity)]
 pub fn decode<T>(
@@ -257,44 +294,24 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
     fn upsert(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
         let value = compress_to_buf_or_ref!(self, value);
-        self.execute_with_operation_metric(
+        self.put_with_metric(
             Operation::CursorUpsert,
-            Some(value.unwrap_or(&self.buf).len()),
-            |this| {
-                this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::UPSERT)
-                    .map_err(|e| {
-                        DatabaseWriteError {
-                            info: e.into(),
-                            operation: DatabaseWriteOperation::CursorUpsert,
-                            table_name: T::NAME,
-                            key: key.into_vec(),
-                        }
-                        .into()
-                    })
-            },
+            DatabaseWriteOperation::CursorUpsert,
+            WriteFlags::UPSERT,
+            key,
+            value,
         )
     }
 
     fn insert(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
         let value = compress_to_buf_or_ref!(self, value);
-        self.execute_with_operation_metric(
+        self.put_with_metric(
             Operation::CursorInsert,
-            Some(value.unwrap_or(&self.buf).len()),
-            |this| {
-                this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::NO_OVERWRITE)
-                    .map_err(|e| {
-                        DatabaseWriteError {
-                            info: e.into(),
-                            operation: DatabaseWriteOperation::CursorInsert,
-                            table_name: T::NAME,
-                            key: key.into_vec(),
-                        }
-                        .into()
-                    })
-            },
+            DatabaseWriteOperation::CursorInsert,
+            WriteFlags::NO_OVERWRITE,
+            key,
+            value,
         )
     }
 
@@ -303,22 +320,12 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
     fn append(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
         let value = compress_to_buf_or_ref!(self, value);
-        self.execute_with_operation_metric(
+        self.put_with_metric(
             Operation::CursorAppend,
-            Some(value.unwrap_or(&self.buf).len()),
-            |this| {
-                this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::APPEND)
-                    .map_err(|e| {
-                        DatabaseWriteError {
-                            info: e.into(),
-                            operation: DatabaseWriteOperation::CursorAppend,
-                            table_name: T::NAME,
-                            key: key.into_vec(),
-                        }
-                        .into()
-                    })
-            },
+            DatabaseWriteOperation::CursorAppend,
+            WriteFlags::APPEND,
+            key,
+            value,
         )
     }
 
@@ -339,22 +346,12 @@ impl<T: DupSort> DbDupCursorRW<T> for Cursor<RW, T> {
     fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
         let value = compress_to_buf_or_ref!(self, value);
-        self.execute_with_operation_metric(
+        self.put_with_metric(
             Operation::CursorAppendDup,
-            Some(value.unwrap_or(&self.buf).len()),
-            |this| {
-                this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::APPEND_DUP)
-                    .map_err(|e| {
-                        DatabaseWriteError {
-                            info: e.into(),
-                            operation: DatabaseWriteOperation::CursorAppendDup,
-                            table_name: T::NAME,
-                            key: key.into_vec(),
-                        }
-                        .into()
-                    })
-            },
+            DatabaseWriteOperation::CursorAppendDup,
+            WriteFlags::APPEND_DUP,
+            key,
+            value,
         )
     }
 }
