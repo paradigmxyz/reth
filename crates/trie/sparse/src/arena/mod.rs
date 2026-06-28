@@ -427,7 +427,21 @@ impl ArenaSparseSubtrie {
                     self.num_dirty_leaves =
                         (self.num_dirty_leaves as i64 + deltas.num_dirty_leaves_delta) as u64;
                 }
-                LeafUpdate::Changed(_) => {
+                LeafUpdate::StorageValue(value) if !value.is_zero() => {
+                    let encoded = alloy_rlp::encode_fixed_size(value);
+                    let (_result, deltas) = ArenaParallelSparseTrie::upsert_leaf(
+                        &mut self.arena,
+                        &mut self.buffers.cursor,
+                        &mut self.root,
+                        full_path,
+                        encoded.as_slice(),
+                        find_result,
+                    );
+                    self.num_leaves = (self.num_leaves as i64 + deltas.num_leaves_delta) as u64;
+                    self.num_dirty_leaves =
+                        (self.num_dirty_leaves as i64 + deltas.num_dirty_leaves_delta) as u64;
+                }
+                update if update.is_removal() => {
                     let (result, deltas) = ArenaParallelSparseTrie::remove_leaf(
                         &mut self.arena,
                         &mut self.buffers.cursor,
@@ -448,6 +462,7 @@ impl ArenaSparseSubtrie {
                     }
                 }
                 LeafUpdate::Touched => {}
+                LeafUpdate::Changed(_) | LeafUpdate::StorageValue(_) => unreachable!(),
             }
         }
 
@@ -1818,7 +1833,7 @@ impl ArenaParallelSparseTrie {
     ) -> Option<ArenaRequiredProof> {
         let num_removals = subtrie_updates
             .iter()
-            .filter(|(_, _, u)| matches!(u, LeafUpdate::Changed(v) if v.is_empty()))
+            .filter(|(_, _, u)| u.is_removal())
             .count() as u64;
 
         // Touched is a no-op that doesn't alter trie structure, so it must be
@@ -1829,8 +1844,7 @@ impl ArenaParallelSparseTrie {
         // request for the blinded sibling, and later panic in
         // `maybe_collapse_or_remove_branch` when the subtrie empties inline.
         let num_changed =
-            subtrie_updates.iter().filter(|(_, _, u)| matches!(u, LeafUpdate::Changed(_))).count()
-                as u64;
+            subtrie_updates.iter().filter(|(_, _, u)| u.is_changed()).count() as u64;
 
         if num_removals == 0 || num_removals != num_changed {
             return None;
@@ -2901,8 +2915,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         // Filter out Touched, as they don't affect the structure of the trie. So an
                         // update set with 2 removals and one Touched could still result in an empty
                         // sub trie.
-                        .filter(|(_, _, u)| matches!(u, LeafUpdate::Changed(_)))
-                        .all(|(_, _, u)| matches!(u, LeafUpdate::Changed(v) if v.is_empty()));
+                        .filter(|(_, _, u)| u.is_changed())
+                        .all(|(_, _, u)| u.is_removal());
                     let subtrie_num_leaves = match &self.upper_arena[child_idx] {
                         ArenaSparseNode::Subtrie(s) => s.num_leaves,
                         _ => 0,
@@ -2948,10 +2962,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     continue;
                 }
                 // EmptyRoot, leaf, diverged branch, or empty child slot — upsert directly.
-                find_result @ (SeekResult::EmptyRoot |
-                SeekResult::RevealedLeaf |
-                SeekResult::Diverged |
-                SeekResult::NoChild { .. }) => match update {
+                find_result @ (SeekResult::EmptyRoot
+                | SeekResult::RevealedLeaf
+                | SeekResult::Diverged
+                | SeekResult::NoChild { .. }) => match update {
                     LeafUpdate::Changed(v) if !v.is_empty() => {
                         let (result, _deltas) = Self::upsert_leaf(
                             &mut self.upper_arena,
@@ -2983,7 +2997,32 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             UpsertLeafResult::Updated => {}
                         }
                     }
-                    LeafUpdate::Changed(_) => {
+                    LeafUpdate::StorageValue(value) if !value.is_zero() => {
+                        let encoded = alloy_rlp::encode_fixed_size(value);
+                        let (result, _deltas) = Self::upsert_leaf(
+                            &mut self.upper_arena,
+                            &mut cursor,
+                            &mut self.root,
+                            full_path,
+                            encoded.as_slice(),
+                            find_result,
+                        );
+                        match result {
+                            UpsertLeafResult::NewChild => {
+                                let head = cursor.head().expect("cursor is non-empty");
+                                if Self::should_be_subtrie(head.path.len()) {
+                                    self.maybe_wrap_in_subtrie(head.index, &head.path);
+                                } else {
+                                    self.maybe_wrap_branch_children(&cursor);
+                                }
+                            }
+                            UpsertLeafResult::NewLeaf => {
+                                self.maybe_wrap_branch_children(&cursor);
+                            }
+                            UpsertLeafResult::Updated => {}
+                        }
+                    }
+                    update if update.is_removal() => {
                         let (result, _deltas) = Self::remove_leaf(
                             &mut self.upper_arena,
                             &mut cursor,
@@ -3020,6 +3059,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         }
                     }
                     LeafUpdate::Touched => {}
+                    LeafUpdate::Changed(_) | LeafUpdate::StorageValue(_) => unreachable!(),
                 },
             }
 
@@ -3188,18 +3228,11 @@ mod tests {
 
             self.minimize_trie_updates(&mut expected_trie_updates);
 
-            // Build leaf updates for the APST: non-zero values are upserts (RLP-encoded),
-            // zero values are deletions (empty vec).
+            // Build leaf updates for the APST: non-zero values are upserts, zero values are
+            // deletions.
             let mut leaf_updates: B256Map<LeafUpdate> = changes
                 .iter()
-                .map(|(&slot, &value)| {
-                    let rlp_value = if value == U256::ZERO {
-                        Vec::new()
-                    } else {
-                        alloy_rlp::encode_fixed_size(&value).to_vec()
-                    };
-                    (slot, LeafUpdate::Changed(rlp_value))
-                })
+                .map(|(&slot, &value)| (slot, LeafUpdate::StorageValue(value)))
                 .collect();
 
             // Reveal-update loop: call update_leaves, collect required proofs, fetch them,

@@ -5,7 +5,7 @@ use core::fmt::Debug;
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
     map::{B256Map, HashMap, HashSet},
-    B256,
+    B256, U256,
 };
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::SparseTrieResult;
@@ -20,6 +20,12 @@ pub enum LeafUpdate {
     /// The leaf value has been changed to the given RLP-encoded value.
     /// Empty Vec indicates the leaf has been removed.
     Changed(Vec<u8>),
+    /// Storage leaf value before RLP encoding.
+    ///
+    /// This avoids allocating a temporary `Vec` for storage updates that are applied to the trie
+    /// immediately. Zero indicates the leaf has been removed, matching the storage trie encoding
+    /// semantics.
+    StorageValue(U256),
     /// The leaf value may have changed, but the new value is not yet known.
     /// Used for optimistic prewarming when the actual value is unavailable.
     Touched,
@@ -28,12 +34,26 @@ pub enum LeafUpdate {
 impl LeafUpdate {
     /// Returns true if the leaf update is a change.
     pub const fn is_changed(&self) -> bool {
-        matches!(self, Self::Changed(_))
+        matches!(self, Self::Changed(_) | Self::StorageValue(_))
     }
 
     /// Returns true if the leaf update is a touched update.
     pub const fn is_touched(&self) -> bool {
         matches!(self, Self::Touched)
+    }
+
+    /// Returns true if the update removes the leaf.
+    pub fn is_removal(&self) -> bool {
+        match self {
+            Self::Changed(value) => value.is_empty(),
+            Self::StorageValue(value) => value.is_zero(),
+            Self::Touched => false,
+        }
+    }
+
+    /// Returns true if the update changes the leaf to a non-empty value.
+    pub fn is_upsert(&self) -> bool {
+        self.is_changed() && !self.is_removal()
     }
 }
 

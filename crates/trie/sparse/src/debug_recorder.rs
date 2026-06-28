@@ -201,6 +201,9 @@ impl From<&crate::LeafUpdate> for LeafUpdateRecord {
     fn from(update: &crate::LeafUpdate) -> Self {
         match update {
             crate::LeafUpdate::Changed(value) => Self::Changed(value.clone().into()),
+            crate::LeafUpdate::StorageValue(value) => {
+                Self::Changed(alloy_rlp::encode_fixed_size(value).to_vec().into())
+            }
             crate::LeafUpdate::Touched => Self::Touched,
         }
     }

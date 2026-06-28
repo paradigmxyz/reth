@@ -455,12 +455,7 @@ where
                 for (&slot, &value) in &storage.storage {
                     self.trie.record_slot_touch(address, slot);
 
-                    let encoded = if value.is_zero() {
-                        Vec::new()
-                    } else {
-                        alloy_rlp::encode_fixed_size(&value).to_vec()
-                    };
-                    new_updates.insert(slot, LeafUpdate::Changed(encoded));
+                    new_updates.insert(slot, LeafUpdate::StorageValue(value));
 
                     // Remove an existing storage update if it exists.
                     if let Some(ref mut existing) = existing_updates {
@@ -747,6 +742,9 @@ where
                 let trie_account = match self.account_updates.get(addr) {
                     Some(LeafUpdate::Changed(encoded)) => {
                         Some(encoded).filter(|encoded| !encoded.is_empty())
+                    }
+                    Some(LeafUpdate::StorageValue(_)) => {
+                        unreachable!("storage value update cannot be queued for account trie")
                     }
                     // Needs to be revealed first
                     Some(LeafUpdate::Touched) => return true,
