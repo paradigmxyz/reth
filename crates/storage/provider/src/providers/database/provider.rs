@@ -558,11 +558,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     }
 
     /// Creates the context for `RocksDB` writes.
-    fn rocksdb_write_ctx(&self, first_block: BlockNumber) -> RocksDBWriteCtx {
+    fn rocksdb_write_ctx(
+        &self,
+        first_block: BlockNumber,
+        storage_settings: StorageSettings,
+    ) -> RocksDBWriteCtx {
         RocksDBWriteCtx {
             first_block_number: first_block,
             prune_tx_lookup: self.prune_modes.transaction_lookup,
-            storage_settings: self.cached_storage_settings(),
+            storage_settings,
             pending_batches: self.pending_rocksdb_batches.clone(),
         }
     }
@@ -618,8 +622,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let sf_provider = &self.static_file_provider;
         let sf_ctx = self.static_file_write_ctx(save_mode, first_number, last_block_number)?;
         let rocksdb_provider = self.rocksdb_provider.clone();
-        let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
-        let rocksdb_enabled = rocksdb_ctx.storage_settings.storage_v2;
+        let storage_settings = self.cached_storage_settings();
+        let rocksdb_ctx = self.rocksdb_write_ctx(first_number, storage_settings);
+        let rocksdb_enabled = storage_settings.storage_v2;
 
         let mut sf_result = None;
         let mut rocksdb_result = None;
@@ -658,7 +663,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             let mdbx_start = Instant::now();
 
             // Collect all transaction hashes across all blocks, sort them, and write in batch
-            if !self.cached_storage_settings().storage_v2 &&
+            if !storage_settings.storage_v2 &&
                 self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
             {
                 let start = Instant::now();
