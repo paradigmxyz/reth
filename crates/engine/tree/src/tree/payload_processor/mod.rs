@@ -460,7 +460,7 @@ where
     /// Non-BAL execution must consume transactions in block order, while rayon may recover
     /// individual transactions in any order. Windowing prioritizes the next contiguous range while
     /// still using parallel recovery inside that range.
-    const PARALLEL_TX_WINDOW_SIZE: usize = 64;
+    const FIRST_PARALLEL_TX_WINDOW_SIZE: usize = 64;
 
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     ///
@@ -534,6 +534,8 @@ where
 
                     let mut iter = iter.enumerate();
 
+                    let mut batch_size = Self::FIRST_PARALLEL_TX_WINDOW_SIZE;
+
                     // Without BALs, we need to preserve the initial order of transactions.
                     // Process contiguous windows in order so recovery prioritizes the next
                     // transaction range execution will request. Each window still recovers in
@@ -542,11 +544,13 @@ where
                         loop {
                             let chunk = iter
                                 .by_ref()
-                                .take(Self::PARALLEL_TX_WINDOW_SIZE)
+                                .take(batch_size)
                                 .collect::<Vec<_>>();
                             if chunk.is_empty() {
                                 break;
                             }
+
+                            batch_size = batch_size.saturating_mul(2);
 
                             let chunk = chunk
                                 .into_par_iter()
