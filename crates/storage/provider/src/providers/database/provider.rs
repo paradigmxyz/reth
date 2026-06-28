@@ -67,7 +67,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-    HashedPostStateSorted,
+    HashedPostStateSorted, HashedStorageSorted,
 };
 use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm_database::states::{
@@ -2708,7 +2708,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         }
 
         // Write hashed storage changes.
-        let sorted_storages = hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
+        let mut sorted_storages: SmallVec<[(&B256, &HashedStorageSorted); 16]> =
+            hashed_state.account_storages().iter().collect();
+        if sorted_storages.len() > 1 {
+            sorted_storages.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        }
         let mut hashed_storage_cursor =
             self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
         for (hashed_address, storage) in sorted_storages {
