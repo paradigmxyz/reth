@@ -32,9 +32,13 @@ fn main() {
     #[cfg(debug_assertions)]
     cc.define("MDBX_DEBUG", "1").define("MDBX_ENABLE_PROFGC", "1");
 
-    // Disables debug logging on optimized builds
+    // Keep optimized builds on the replay hot path: page validation and page-op statistics are
+    // diagnostic-only work that sits under every MDBX cursor/page access.
     #[cfg(not(debug_assertions))]
-    cc.define("MDBX_DEBUG", "0").define("NDEBUG", None);
+    cc.define("MDBX_DEBUG", "0")
+        .define("MDBX_DISABLE_VALIDATION", "1")
+        .define("MDBX_ENABLE_PGOP_STAT", "0")
+        .define("NDEBUG", None);
 
     // Propagate `-C target-cpu=native`
     let rustflags = env::var("CARGO_ENCODED_RUSTFLAGS").unwrap();
