@@ -505,11 +505,10 @@ where
                                 (i, tx)
                             })
                             .for_each(|(idx, tx)| {
-                                let tx = tx.map(|tx| {
-                                    let tx = WithTxEnv::new(tx);
-                                    let _ = prewarm_tx.send((idx, tx.clone()));
-                                    tx
-                                });
+                                // BAL mode warms from the access list instead of the transaction
+                                // receiver, so avoid cloning every converted tx into an unused
+                                // transaction-prewarm channel.
+                                let tx = tx.map(WithTxEnv::new);
                                 let _ = execute_tx.send((idx, tx));
                                 trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
                             });
