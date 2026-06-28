@@ -37,6 +37,15 @@ static TRACE_TARGET: &str = "trie::proof_v2";
 /// Number of bytes to pre-allocate for [`ProofCalculator`]'s `rlp_encode_buf` field.
 const RLP_ENCODE_BUF_SIZE: usize = 1024;
 
+/// A hashed cursor entry with the unpacked trie key cached beside the original database key.
+type PendingHashedEntry<V> = (Nibbles, B256, V);
+
+#[inline]
+fn pending_hashed_entry<V>((key_b256, val): (B256, V)) -> PendingHashedEntry<V> {
+    debug_assert_eq!(key_b256.len(), 32);
+    (Nibbles::unpack_array(key_b256.as_ref()), key_b256, val)
+}
+
 /// A proof calculator that generates merkle proofs using only leaf data.
 ///
 /// The calculator:
@@ -687,42 +696,32 @@ where
         &mut self,
         value_encoder: &mut VE,
         targets: &mut Option<TargetsCursor<'a>>,
-        hashed_cursor_current: &mut Option<(Nibbles, VE::DeferredEncoder)>,
+        hashed_cursor_current: &mut Option<PendingHashedEntry<HC::Value>>,
         lower_bound: Nibbles,
         upper_bound: Option<Nibbles>,
     ) -> Result<(), StateProofError> {
-        // A helper closure for mapping entries returned from the `hashed_cursor`, converting the
-        // key to Nibbles and immediately creating the DeferredValueEncoder so that encoding of the
-        // leaf value can begin ASAP.
-        let mut map_hashed_cursor_entry = |(key_b256, val): (B256, _)| {
-            debug_assert_eq!(key_b256.len(), 32);
-            let key = Nibbles::unpack_array(key_b256.as_ref());
-            let val = value_encoder.deferred_encoder(key_b256, val);
-            (key, val)
-        };
-
         // If the cursor hasn't been used, or the last iterated key is prior to this range's
         // key range, then seek forward to at least the first key.
-        if hashed_cursor_current.as_ref().is_none_or(|(key, _)| key < &lower_bound) {
+        if hashed_cursor_current.as_ref().is_none_or(|(key, ..)| key < &lower_bound) {
             trace!(
                 target: TRACE_TARGET,
-                current=?hashed_cursor_current.as_ref().map(|(k, _)| k),
+                current=?hashed_cursor_current.as_ref().map(|(k, ..)| k),
                 "Seeking hashed cursor to meet lower bound",
             );
 
             let lower_key = B256::right_padding_from(&lower_bound.pack());
-            *hashed_cursor_current =
-                self.hashed_cursor.seek(lower_key)?.map(&mut map_hashed_cursor_entry);
+            *hashed_cursor_current = self.hashed_cursor.seek(lower_key)?.map(pending_hashed_entry);
         }
 
         // Loop over all keys in the range, calling `push_leaf` on each.
-        while let Some((key, _)) = hashed_cursor_current.as_ref() &&
-            upper_bound.is_none_or(|upper_bound| key < &upper_bound)
+        while let Some((key, ..)) = hashed_cursor_current.as_ref() &&
+            upper_bound.as_ref().is_none_or(|upper_bound| key < upper_bound)
         {
-            let (key, val) =
+            let (key, key_b256, val) =
                 core::mem::take(hashed_cursor_current).expect("while-let checks for Some");
+            let val = value_encoder.deferred_encoder(key_b256, val);
             self.push_leaf(targets, key, val)?;
-            *hashed_cursor_current = self.hashed_cursor.next()?.map(&mut map_hashed_cursor_entry);
+            *hashed_cursor_current = self.hashed_cursor.next()?.map(pending_hashed_entry);
         }
 
         trace!(target: TRACE_TARGET, "No further keys within range");
@@ -1309,7 +1308,7 @@ where
         &mut self,
         value_encoder: &mut VE,
         trie_cursor_state: &mut TrieCursorState,
-        hashed_cursor_current: &mut Option<(Nibbles, VE::DeferredEncoder)>,
+        hashed_cursor_current: &mut Option<PendingHashedEntry<HC::Value>>,
         sub_trie_targets: SubTrieTargets<'a>,
     ) -> Result<(), StateProofError> {
         let sub_trie_upper_bound = sub_trie_targets.upper_bound();
@@ -1398,7 +1397,7 @@ where
             // more data and we should complete computation.
             if hashed_cursor_current
                 .as_ref()
-                .is_none_or(|(key, _)| !key.starts_with(&sub_trie_targets.prefix))
+                .is_none_or(|(key, ..)| !key.starts_with(&sub_trie_targets.prefix))
             {
                 break;
             }
@@ -1484,7 +1483,7 @@ where
         // Initialize the variables which track the state of the two cursors. Both indicate the
         // cursors are unseeked.
         let mut trie_cursor_state = TrieCursorState::unseeked();
-        let mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)> = None;
+        let mut hashed_cursor_current: Option<PendingHashedEntry<HC::Value>> = None;
 
         // Divide targets into chunks, each chunk corresponding to a different sub-trie within the
         // overall trie, and handle all proofs within that sub-trie.
@@ -1564,7 +1563,7 @@ where
         // Initialize the variables which track the state of the two cursors. Both indicate the
         // cursors are unseeked.
         let mut trie_cursor_state = TrieCursorState::unseeked();
-        let mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)> = None;
+        let mut hashed_cursor_current: Option<PendingHashedEntry<HC::Value>> = None;
 
         static EMPTY_TARGETS: [ProofV2Target; 0] = [];
         let sub_trie_targets =
