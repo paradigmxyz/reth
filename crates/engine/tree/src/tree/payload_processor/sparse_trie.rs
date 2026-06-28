@@ -645,19 +645,25 @@ where
         Ok(updates_len_after < updates_len_before)
     }
 
-    /// Computes storage roots for accounts whose storage updates are fully drained.
+    /// Computes storage roots for pending account promotions whose storage updates are fully
+    /// drained.
     ///
     /// For each storage trie T that:
-    /// 1. was modified in the current block,
-    /// 2. all the storage updates are fully drained,
+    /// 1. has a pending account update waiting for a storage root,
+    /// 2. has all storage updates fully drained,
     /// 3. but the storage root hasn't been updated yet,
     ///
     /// we trigger state root computation on a rayon pool.
     fn compute_drained_storage_roots(&mut self) {
         let addresses_to_compute_roots: Vec<_> = self
-            .storage_updates
-            .iter()
-            .filter_map(|(address, updates)| updates.is_empty().then_some(*address))
+            .pending_account_updates
+            .keys()
+            .filter_map(|address| {
+                self.storage_updates
+                    .get(address)
+                    .is_some_and(B256Map::is_empty)
+                    .then_some(*address)
+            })
             .collect();
 
         struct SendStorageTriePtr<S>(*mut RevealableSparseTrie<S>);
@@ -974,6 +980,74 @@ mod tests {
         assert_eq!(decoded.balance, U256::from(42));
         assert_eq!(decoded.storage_root, storage_root);
         assert_eq!(account_rlp_buf, encoded);
+    }
+
+    #[test]
+    fn compute_drained_storage_roots_only_computes_pending_promotions() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = provider_factory.chain_spec().genesis_hash();
+        let overlay_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayBuilder::<reth_chain_state::EthPrimitives>::new(
+                anchor_hash,
+                ChangesetCache::new(),
+            ),
+        );
+        let proof_worker_handle =
+            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
+
+        let (_, updates_rx) = crossbeam_channel::unbounded();
+        let (final_hashed_state_tx, _) = std::sync::mpsc::channel();
+        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let trie: SparseStateTrie<ArenaParallelSparseTrie, ArenaParallelSparseTrie> =
+            SparseStateTrie::default()
+                .with_accounts_trie(RevealableSparseTrie::revealed_empty())
+                .with_default_storage_trie(default_trie)
+                .with_updates(true);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            final_hashed_state_tx,
+            proof_worker_handle,
+            MultiProofTaskMetrics::default(),
+            trie,
+            B256::ZERO,
+            1,
+        );
+
+        let pending_address = B256::with_last_byte(1);
+        let prefetched_address = B256::with_last_byte(2);
+
+        task.trie.insert_storage_trie(
+            pending_address,
+            dirty_storage_trie(B256::with_last_byte(3), 0x11),
+        );
+        task.trie.insert_storage_trie(
+            prefetched_address,
+            dirty_storage_trie(B256::with_last_byte(4), 0x22),
+        );
+        task.storage_updates.insert(pending_address, B256Map::default());
+        task.storage_updates.insert(prefetched_address, B256Map::default());
+        task.pending_account_updates.insert(pending_address, None);
+
+        task.compute_drained_storage_roots();
+
+        let storage_tries = task.trie.storage_tries_mut();
+        assert!(storage_tries.get(&pending_address).unwrap().is_root_cached());
+        assert!(!storage_tries.get(&prefetched_address).unwrap().is_root_cached());
+    }
+
+    fn dirty_storage_trie(
+        slot: B256,
+        value: u8,
+    ) -> RevealableSparseTrie<ArenaParallelSparseTrie> {
+        let mut trie = RevealableSparseTrie::revealed_empty();
+        let mut updates = B256Map::from_iter([(slot, LeafUpdate::Changed(vec![value]))]);
+        trie.update_leaves(&mut updates, |_, _| {}).unwrap();
+        assert!(updates.is_empty());
+        assert!(!trie.is_root_cached());
+        trie
     }
 
     #[test]
