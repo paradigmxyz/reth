@@ -1432,7 +1432,7 @@ impl RocksDBProvider {
         blocks: &[ExecutedBlock<N>],
         ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
-        let mut storage_history: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
+        let mut storage_history = Vec::new();
 
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
@@ -1444,16 +1444,26 @@ impl RocksDBProvider {
                 for revert in storage_block_reverts {
                     for (slot, _) in revert.storage_revert {
                         let plain_key = B256::new(slot.to_be_bytes());
-                        storage_history
-                            .entry((revert.address, plain_key))
-                            .or_default()
-                            .push(block_number);
+                        storage_history.push(((revert.address, plain_key), block_number));
                     }
                 }
             }
         }
 
-        let shard_puts = storage_history
+        storage_history.sort_unstable();
+
+        let mut grouped_storage_history = Vec::new();
+        let mut storage_history = storage_history.into_iter().peekable();
+        while let Some((key, block_number)) = storage_history.next() {
+            let mut indices = vec![block_number];
+            while storage_history.peek().is_some_and(|(next_key, _)| *next_key == key) {
+                let (_, next_block_number) = storage_history.next().expect("peeked Some");
+                indices.push(next_block_number);
+            }
+            grouped_storage_history.push((key, indices));
+        }
+
+        let shard_puts = grouped_storage_history
             .into_par_iter()
             .map(|((address, slot), indices)| {
                 self.storage_history_shards_to_put(address, slot, indices)
