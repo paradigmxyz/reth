@@ -1410,7 +1410,10 @@ impl RocksDBProvider {
             // changesets written, ensuring history indices match changeset entries.
             for account_block_reverts in reverts.accounts {
                 for (address, _) in account_block_reverts {
-                    account_history.entry(address).or_default().push(block_number);
+                    push_history_block_number(
+                        account_history.entry(address).or_default(),
+                        block_number,
+                    );
                 }
             }
         }
@@ -1444,10 +1447,10 @@ impl RocksDBProvider {
                 for revert in storage_block_reverts {
                     for (slot, _) in revert.storage_revert {
                         let plain_key = B256::new(slot.to_be_bytes());
-                        storage_history
-                            .entry((revert.address, plain_key))
-                            .or_default()
-                            .push(block_number);
+                        push_history_block_number(
+                            storage_history.entry((revert.address, plain_key)).or_default(),
+                            block_number,
+                        );
                     }
                 }
             }
@@ -1515,6 +1518,13 @@ impl RocksDBProvider {
         }
 
         Ok(shards)
+    }
+}
+
+#[inline]
+fn push_history_block_number(indices: &mut Vec<u64>, block_number: u64) {
+    if indices.last().copied() != Some(block_number) {
+        indices.push(block_number);
     }
 }
 
