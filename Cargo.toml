@@ -693,10 +693,10 @@ tracing-subscriber = { version = "0.3", default-features = false }
 tracing-tracy = "0.11"
 triehash = "0.8"
 typenum = "1.15.0"
-vergen = "9.1.0"
+vergen = "10.0.1"
 visibility = "0.1.1"
 walkdir = "2.3.3"
-vergen-git2 = "9.1.0"
+vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
