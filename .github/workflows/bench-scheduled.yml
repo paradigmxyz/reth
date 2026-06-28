@@ -1043,7 +1043,7 @@ jobs:
               },
               {
                 type: 'section',
-                text: { type: 'mrkdwn', text: `*${modeLabel} regression* failed while *${failedStep}*\ncc <@U09FARE0B9Q> <@U09FAL2UMLJ>\n<@U0AAA8F0JEM> investigate this` },
+                text: { type: 'mrkdwn', text: `*${modeLabel} regression* failed while *${failedStep}*\ncc <@U09FARE0B9Q> <@U09FAL2UMLJ>\n<@U0ANX3AM5RR> investigate this` },
               },
               {
                 type: 'actions',
