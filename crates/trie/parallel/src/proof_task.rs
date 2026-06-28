@@ -33,10 +33,7 @@ use crate::{
     root::ParallelStateRootError,
     value_encoder::{AsyncAccountValueEncoder, ValueEncoderStats},
 };
-use alloy_primitives::{
-    map::{B256Map, B256Set},
-    B256, U256,
-};
+use alloy_primitives::{map::B256Map, B256, U256};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_execution_errors::StateProofError;
 use reth_primitives_traits::{dashmap::DashMap, FastInstant as Instant};
@@ -50,8 +47,6 @@ use reth_trie::{
     DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target,
 };
 use std::{
-    cell::RefCell,
-    rc::Rc,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
@@ -69,16 +64,7 @@ use crate::proof_task_metrics::{
 type V2AccountProofCalculator<'a, Provider> = proof_v2::ProofCalculator<
     InstrumentedTrieCursor<'a, <Provider as TrieCursorFactory>::AccountTrieCursor<'a>>,
     InstrumentedHashedCursor<'a, <Provider as HashedCursorFactory>::AccountCursor<'a>>,
-    AsyncAccountValueEncoder<
-        InstrumentedTrieCursor<'a, <Provider as TrieCursorFactory>::StorageTrieCursor<'a>>,
-        InstrumentedHashedCursor<'a, <Provider as HashedCursorFactory>::StorageCursor<'a>>,
-    >,
->;
-
-/// Type alias for the V2 storage proof calculator with instrumented cursors.
-type V2StorageProofCalculator<'a, Provider> = proof_v2::StorageProofCalculator<
-    InstrumentedTrieCursor<'a, <Provider as TrieCursorFactory>::StorageTrieCursor<'a>>,
-    InstrumentedHashedCursor<'a, <Provider as HashedCursorFactory>::StorageCursor<'a>>,
+    AsyncAccountValueEncoder,
 >;
 
 /// Tracks worker availability counts.
@@ -845,13 +831,10 @@ where
         let mut account_proofs_processed = 0u64;
         let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
 
-        // Create both account and storage calculators for V2 proofs.
-        // The storage calculator is wrapped in Rc<RefCell<...>> for sharing with value encoders.
+        // Create the account proof calculator. Storage-root fallbacks are routed through storage
+        // workers, so account workers do not need storage trie cursors.
         let account_trie_cursor = provider.account_trie_cursor()?;
         let account_hashed_cursor = provider.hashed_account_cursor()?;
-
-        let storage_trie_cursor = provider.storage_trie_cursor(B256::ZERO)?;
-        let storage_hashed_cursor = provider.hashed_storage_cursor(B256::ZERO)?;
 
         let instrumented_account_trie_cursor = InstrumentedTrieCursor::new(
             account_trie_cursor,
@@ -861,35 +844,12 @@ where
             account_hashed_cursor,
             &mut cursor_metrics_cache.account_hashed_cursor,
         );
-        let instrumented_storage_trie_cursor = InstrumentedTrieCursor::new(
-            storage_trie_cursor,
-            &mut cursor_metrics_cache.storage_trie_cursor,
-        );
-        let instrumented_storage_hashed_cursor = InstrumentedHashedCursor::new(
-            storage_hashed_cursor,
-            &mut cursor_metrics_cache.storage_hashed_cursor,
-        );
 
         let mut v2_account_calculator =
-            proof_v2::ProofCalculator::<
-                _,
-                _,
-                AsyncAccountValueEncoder<
-                    InstrumentedTrieCursor<
-                        '_,
-                        <Factory::Provider as TrieCursorFactory>::StorageTrieCursor<'_>,
-                    >,
-                    InstrumentedHashedCursor<
-                        '_,
-                        <Factory::Provider as HashedCursorFactory>::StorageCursor<'_>,
-                    >,
-                >,
-            >::new(instrumented_account_trie_cursor, instrumented_account_hashed_cursor);
-        let v2_storage_calculator =
-            Rc::new(RefCell::new(proof_v2::StorageProofCalculator::new_storage(
-                instrumented_storage_trie_cursor,
-                instrumented_storage_hashed_cursor,
-            )));
+            proof_v2::ProofCalculator::<_, _, AsyncAccountValueEncoder>::new(
+                instrumented_account_trie_cursor,
+                instrumented_account_hashed_cursor,
+            );
 
         // Count this worker as available only after successful initialization.
         self.availability.mark_idle(self.worker_id);
@@ -921,7 +881,6 @@ where
                 AccountWorkerJob::AccountMultiproof { input } => {
                     let value_encoder_stats = self.process_account_multiproof::<Factory::Provider>(
                         &mut v2_account_calculator,
-                        v2_storage_calculator.clone(),
                         *input,
                         &mut account_proofs_processed,
                     );
@@ -938,7 +897,6 @@ where
 
         // Drop calculators to release mutable borrows on cursor_metrics_cache.
         drop(v2_account_calculator);
-        drop(v2_storage_calculator);
 
         trace!(
             target: "trie::proof_task",
@@ -961,7 +919,6 @@ where
     fn compute_v2_account_multiproof<'a, Provider>(
         &self,
         v2_account_calculator: &mut V2AccountProofCalculator<'a, Provider>,
-        v2_storage_calculator: Rc<RefCell<V2StorageProofCalculator<'a, Provider>>>,
         targets: MultiProofTargetsV2,
     ) -> Result<(DecodedMultiProofV2, ValueEncoderStats), ParallelStateRootError>
     where
@@ -980,12 +937,12 @@ where
         trace!(target: "trie::proof_task", "Processing V2 account multiproof");
 
         let storage_proof_receivers =
-            dispatch_v2_storage_proofs(&self.storage_work_tx, &account_targets, storage_targets)?;
+            dispatch_v2_storage_proofs(&self.storage_work_tx, storage_targets)?;
 
         let mut value_encoder = AsyncAccountValueEncoder::new(
             storage_proof_receivers,
             self.cached_storage_roots.clone(),
-            v2_storage_calculator,
+            self.storage_work_tx.clone(),
         );
 
         let account_proofs =
@@ -1004,7 +961,6 @@ where
     fn process_account_multiproof<'a, Provider>(
         &self,
         v2_account_calculator: &mut V2AccountProofCalculator<'a, Provider>,
-        v2_storage_calculator: Rc<RefCell<V2StorageProofCalculator<'a, Provider>>>,
         input: AccountMultiproofInput,
         account_proofs_processed: &mut u64,
     ) -> ValueEncoderStats
@@ -1014,14 +970,11 @@ where
         let proof_start = Instant::now();
 
         let AccountMultiproofInput { targets, proof_result_sender } = input;
-        let (result, value_encoder_stats) = match self.compute_v2_account_multiproof::<Provider>(
-            v2_account_calculator,
-            v2_storage_calculator,
-            targets,
-        ) {
-            Ok((proof, stats)) => (Ok(proof), stats),
-            Err(e) => (Err(e), ValueEncoderStats::default()),
-        };
+        let (result, value_encoder_stats) =
+            match self.compute_v2_account_multiproof::<Provider>(v2_account_calculator, targets) {
+                Ok((proof, stats)) => (Ok(proof), stats),
+                Err(e) => (Err(e), ValueEncoderStats::default()),
+            };
 
         let ProofResultContext { sender: result_tx, state, start_time: start } =
             proof_result_sender;
@@ -1061,25 +1014,20 @@ where
 /// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
 fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
-    account_targets: &[ProofV2Target],
     mut storage_targets: B256Map<Vec<ProofV2Target>>,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
     if storage_targets.is_empty() {
-        return Ok(B256Map::default())
+        return Ok(B256Map::default());
     }
 
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(storage_targets.len(), Default::default());
 
-    // Collect hashed addresses from account targets that need their storage roots computed
-    let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
-
-    // For storage targets with associated account proofs, ensure the first target has
-    // min_len(0) so the root node is returned for storage root computation
-    for (hashed_address, targets) in &mut storage_targets {
-        if account_target_addresses.contains(hashed_address) &&
-            let Some(first) = targets.first_mut()
-        {
+    // Ensure every dispatched storage proof returns a root. Account proof traversal can encounter
+    // storage-bearing accounts that are not explicit account targets, and those account leaves
+    // still need the storage root for encoding.
+    for targets in storage_targets.values_mut() {
+        if let Some(first) = targets.first_mut() {
             *first = first.with_min_len(0);
         }
     }
