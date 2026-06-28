@@ -216,6 +216,14 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// Returns reference to the configured [`BlockAssembler`].
     fn block_assembler(&self) -> &Self::BlockAssembler;
 
+    /// Returns the transaction capacity to reserve for block building.
+    fn block_builder_transaction_capacity<'a>(
+        &self,
+        _ctx: &<Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
+    ) -> usize {
+        0
+    }
+
     /// Creates a new [`EvmEnv`] for the given header.
     fn evm_env(&self, header: &HeaderTy<Self::Primitives>) -> Result<EvmEnvFor<Self>, Self::Error>;
 
@@ -397,12 +405,13 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         DB: Database,
         I: InspectorFor<Self, &'a mut State<DB>> + 'a,
     {
+        let transaction_capacity = self.block_builder_transaction_capacity(&ctx);
         BasicBlockBuilder {
             executor: self.create_executor(evm, ctx.clone()),
             ctx,
             assembler: self.block_assembler(),
             parent,
-            transactions: Vec::new(),
+            transactions: Vec::with_capacity(transaction_capacity),
         }
     }
 

@@ -158,6 +158,13 @@ where
         &self.block_assembler
     }
 
+    fn block_builder_transaction_capacity<'a>(
+        &self,
+        ctx: &EthBlockExecutionCtx<'a>,
+    ) -> usize {
+        ctx.tx_count_hint.unwrap_or_default()
+    }
+
     fn with_jit_support_enabled(self, enabled: bool) -> Self
     where
         Self: Sized,
