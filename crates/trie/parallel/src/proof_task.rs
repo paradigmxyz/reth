@@ -330,17 +330,33 @@ impl ProofWorkerHandle {
     ) -> Result<(), ProviderError> {
         let hashed_address = input.hashed_address;
         self.storage_work_tx
-            .send(StorageWorkerJob::StorageProof { input, proof_result_sender })
+            .send(StorageWorkerJob::StorageProof {
+                input,
+                proof_result_target: StorageProofResultTarget::AccountValueEncoder(
+                    proof_result_sender,
+                ),
+            })
             .map_err(|err| {
-                let StorageWorkerJob::StorageProof { proof_result_sender, .. } = err.0;
-                let _ = proof_result_sender.send(StorageProofResultMessage {
-                    hashed_address,
-                    result: Err(
-                        DatabaseError::Other("storage workers unavailable".to_string()).into()
-                    ),
-                });
+                let StorageWorkerJob::StorageProof { proof_result_target, .. } = err.0;
+                send_storage_worker_unavailable(hashed_address, proof_result_target)
+            })
+    }
 
-                ProviderError::other(std::io::Error::other("storage workers unavailable"))
+    /// Dispatch a storage proof computation directly to the sparse trie result channel.
+    pub fn dispatch_storage_multiproof(
+        &self,
+        input: StorageProofInput,
+        proof_result_sender: ProofResultContext,
+    ) -> Result<(), ProviderError> {
+        let hashed_address = input.hashed_address;
+        self.storage_work_tx
+            .send(StorageWorkerJob::StorageProof {
+                input,
+                proof_result_target: StorageProofResultTarget::SparseTrie(proof_result_sender),
+            })
+            .map_err(|err| {
+                let StorageWorkerJob::StorageProof { proof_result_target, .. } = err.0;
+                send_storage_worker_unavailable(hashed_address, proof_result_target)
             })
     }
 
@@ -536,6 +552,15 @@ pub struct StorageProofResultMessage {
     pub(crate) result: Result<StorageProofResult, StateProofError>,
 }
 
+/// Destination for a completed storage proof.
+#[derive(Debug)]
+pub(crate) enum StorageProofResultTarget {
+    /// Send back to an account proof's async value encoder.
+    AccountValueEncoder(CrossbeamSender<StorageProofResultMessage>),
+    /// Send directly to the sparse trie task as a storage-only V2 multiproof.
+    SparseTrie(ProofResultContext),
+}
+
 /// Internal message for storage workers.
 #[derive(Debug)]
 pub(crate) enum StorageWorkerJob {
@@ -543,9 +568,40 @@ pub(crate) enum StorageWorkerJob {
     StorageProof {
         /// Storage proof input parameters
         input: StorageProofInput,
-        /// Context for sending the proof result.
-        proof_result_sender: CrossbeamSender<StorageProofResultMessage>,
+        /// Destination for the proof result.
+        proof_result_target: StorageProofResultTarget,
     },
+}
+
+fn send_storage_worker_unavailable(
+    hashed_address: B256,
+    proof_result_target: StorageProofResultTarget,
+) -> ProviderError {
+    const ERROR_MESSAGE: &str = "storage workers unavailable";
+
+    let error = ProviderError::other(std::io::Error::other(ERROR_MESSAGE));
+
+    match proof_result_target {
+        StorageProofResultTarget::AccountValueEncoder(proof_result_sender) => {
+            let _ = proof_result_sender.send(StorageProofResultMessage {
+                hashed_address,
+                result: Err(DatabaseError::Other(ERROR_MESSAGE.to_string()).into()),
+            });
+        }
+        StorageProofResultTarget::SparseTrie(ProofResultContext {
+            sender: result_tx,
+            state,
+            start_time,
+        }) => {
+            let _ = result_tx.send(ProofResultMessage {
+                result: Err(ParallelStateRootError::Provider(error.clone())),
+                elapsed: start_time.elapsed(),
+                state,
+            });
+        }
+    }
+
+    error
 }
 
 /// Worker for storage trie operations.
@@ -667,12 +723,12 @@ where
             }
 
             match job {
-                StorageWorkerJob::StorageProof { input, proof_result_sender } => {
+                StorageWorkerJob::StorageProof { input, proof_result_target } => {
                     self.process_storage_proof(
                         &proof_tx,
                         &mut v2_calculator,
                         input,
-                        proof_result_sender,
+                        proof_result_target,
                         &mut storage_proofs_processed,
                     );
                 }
@@ -710,7 +766,7 @@ where
         proof_tx: &ProofTaskTx<Provider>,
         v2_calculator: &mut proof_v2::StorageProofCalculator<TC, HC>,
         input: StorageProofInput,
-        proof_result_sender: CrossbeamSender<StorageProofResultMessage>,
+        proof_result_target: StorageProofResultTarget,
         storage_proofs_processed: &mut u64,
     ) where
         Provider: TrieCursorFactory + HashedCursorFactory,
@@ -735,14 +791,46 @@ where
 
         let root = result.as_ref().ok().and_then(|result| result.root());
 
-        if proof_result_sender.send(StorageProofResultMessage { hashed_address, result }).is_err() {
-            trace!(
-                target: "trie::proof_task",
-                worker_id = self.worker_id,
-                hashed_address = ?hashed_address,
-                storage_proofs_processed,
-                "Proof result receiver dropped, discarding result"
-            );
+        match proof_result_target {
+            StorageProofResultTarget::AccountValueEncoder(proof_result_sender) => {
+                if proof_result_sender
+                    .send(StorageProofResultMessage { hashed_address, result })
+                    .is_err()
+                {
+                    trace!(
+                        target: "trie::proof_task",
+                        worker_id = self.worker_id,
+                        hashed_address = ?hashed_address,
+                        storage_proofs_processed,
+                        "Proof result receiver dropped, discarding result"
+                    );
+                }
+            }
+            StorageProofResultTarget::SparseTrie(ProofResultContext {
+                sender: result_tx,
+                state,
+                start_time,
+            }) => {
+                let result = result
+                    .map(|result| DecodedMultiProofV2 {
+                        account_proofs: Vec::new(),
+                        storage_proofs: B256Map::from_iter([(hashed_address, result.proof)]),
+                    })
+                    .map_err(ParallelStateRootError::from);
+
+                if result_tx
+                    .send(ProofResultMessage { result, elapsed: start_time.elapsed(), state })
+                    .is_err()
+                {
+                    trace!(
+                        target: "trie::proof_task",
+                        worker_id = self.worker_id,
+                        hashed_address = ?hashed_address,
+                        storage_proofs_processed,
+                        "Sparse trie proof result receiver dropped, discarding result"
+                    );
+                }
+            }
         }
 
         if let Some(root) = root {
@@ -1097,7 +1185,10 @@ fn dispatch_v2_storage_proofs(
         let input = StorageProofInput::new(hashed_address, targets);
 
         storage_work_tx
-            .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
+            .send(StorageWorkerJob::StorageProof {
+                input,
+                proof_result_target: StorageProofResultTarget::AccountValueEncoder(result_tx),
+            })
             .map_err(|_| {
                 ParallelStateRootError::Other(format!(
                     "Failed to queue storage proof for {hashed_address:?}: storage worker pool unavailable",

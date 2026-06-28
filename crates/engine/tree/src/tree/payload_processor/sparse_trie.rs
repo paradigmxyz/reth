@@ -9,7 +9,7 @@ use crate::tree::{
     },
     payload_processor::multiproof::MultiProofTaskMetrics,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256Set, B256};
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -23,6 +23,7 @@ use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use reth_trie_parallel::{
     proof_task::{
         AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
+        StorageProofInput,
     },
     root::ParallelStateRootError,
 };
@@ -803,7 +804,15 @@ where
             self.proof_worker_handle.has_multiple_idle_account_workers(),
             self.proof_worker_handle.has_multiple_idle_storage_workers(),
             MultiProofTargetsV2::chunks,
-            |proof_targets| {
+            |mut proof_targets| {
+                self.dispatch_storage_only_targets(split_mixed_storage_only_targets(
+                    &mut proof_targets,
+                ));
+
+                if proof_targets.is_empty() {
+                    return;
+                }
+
                 if let Err(e) =
                     self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput {
                         targets: proof_targets,
@@ -819,6 +828,43 @@ where
             },
         );
     }
+
+    fn dispatch_storage_only_targets(&self, storage_targets: B256Map<Vec<ProofV2Target>>) {
+        for (hashed_address, targets) in storage_targets {
+            if let Err(e) = self.proof_worker_handle.dispatch_storage_multiproof(
+                StorageProofInput::new(hashed_address, targets),
+                ProofResultContext::new(
+                    self.proof_result_tx.clone(),
+                    HashedPostState::default(),
+                    Instant::now(),
+                ),
+            ) {
+                error!("failed to dispatch storage multiproof: {e:?}");
+            }
+        }
+    }
+}
+
+fn split_mixed_storage_only_targets(
+    targets: &mut MultiProofTargetsV2,
+) -> B256Map<Vec<ProofV2Target>> {
+    if targets.account_targets.is_empty() || targets.storage_targets.is_empty() {
+        return B256Map::default();
+    }
+
+    let account_targets: B256Set = targets.account_targets.iter().map(ProofV2Target::key).collect();
+    let mut storage_only_targets = B256Map::default();
+    let storage_targets = std::mem::take(&mut targets.storage_targets);
+
+    for (address, storage_targets) in storage_targets {
+        if account_targets.contains(&address) {
+            targets.storage_targets.insert(address, storage_targets);
+        } else {
+            storage_only_targets.insert(address, storage_targets);
+        }
+    }
+
+    storage_only_targets
 }
 
 /// RLP-encodes the account as a [`TrieAccount`] leaf value, or returns empty for deletions.
@@ -974,6 +1020,47 @@ mod tests {
         assert_eq!(decoded.balance, U256::from(42));
         assert_eq!(decoded.storage_root, storage_root);
         assert_eq!(account_rlp_buf, encoded);
+    }
+
+    #[test]
+    fn split_mixed_storage_only_targets_keeps_account_storage_with_account_proof() {
+        let account = B256::from([0x11; 32]);
+        let storage_only_account = B256::from([0x22; 32]);
+        let account_slot = B256::from([0x33; 32]);
+        let storage_only_slot = B256::from([0x44; 32]);
+        let mut targets = MultiProofTargetsV2::default();
+        targets.account_targets.push(ProofV2Target::new(account));
+        targets.storage_targets.insert(account, vec![ProofV2Target::new(account_slot)]);
+        targets
+            .storage_targets
+            .insert(storage_only_account, vec![ProofV2Target::new(storage_only_slot)]);
+
+        let mut split = split_mixed_storage_only_targets(&mut targets);
+
+        assert_eq!(targets.account_targets.len(), 1);
+        assert!(targets.storage_targets.contains_key(&account));
+        assert!(!targets.storage_targets.contains_key(&storage_only_account));
+
+        let split_targets = split.remove(&storage_only_account).unwrap();
+        assert_eq!(split_targets.len(), 1);
+        assert_eq!(split_targets[0].key(), storage_only_slot);
+        assert!(split.is_empty());
+    }
+
+    #[test]
+    fn split_mixed_storage_only_targets_leaves_pure_storage_chunk_unchanged() {
+        let storage_only_account = B256::from([0x22; 32]);
+        let storage_only_slot = B256::from([0x44; 32]);
+        let mut targets = MultiProofTargetsV2::default();
+        targets
+            .storage_targets
+            .insert(storage_only_account, vec![ProofV2Target::new(storage_only_slot)]);
+
+        let split = split_mixed_storage_only_targets(&mut targets);
+
+        assert!(split.is_empty());
+        assert!(targets.account_targets.is_empty());
+        assert!(targets.storage_targets.contains_key(&storage_only_account));
     }
 
     #[test]
