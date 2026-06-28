@@ -164,7 +164,9 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
             let slots: Vec<_> = storage_iter.by_ref().take(remaining_capacity).collect();
 
             count += slots.len();
-            chunk.storage_targets.insert(account_addr, slots);
+            if !slots.is_empty() {
+                chunk.storage_targets.insert(account_addr, slots);
+            }
 
             // If iterator is exhausted, clear current_account_storage
             if storage_iter.len() == 0 {
@@ -198,7 +200,9 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
                         storage_iter.by_ref().take(remaining_capacity).collect();
                     count += slots_in_chunk.len();
 
-                    chunk.storage_targets.insert(account_addr, slots_in_chunk);
+                    if !slots_in_chunk.is_empty() {
+                        chunk.storage_targets.insert(account_addr, slots_in_chunk);
+                    }
 
                     // Save remaining storage slots for next chunk
                     self.current_account_storage = Some((account_addr, storage_iter));
@@ -229,7 +233,9 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
                 let slots_in_chunk: Vec<_> =
                     storage_iter.by_ref().take(remaining_capacity).collect();
 
-                chunk.storage_targets.insert(account_addr, slots_in_chunk);
+                if !slots_in_chunk.is_empty() {
+                    chunk.storage_targets.insert(account_addr, slots_in_chunk);
+                }
 
                 // Save remaining storage slots for next chunk
                 if storage_iter.len() > 0 {
