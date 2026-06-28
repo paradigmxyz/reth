@@ -18,9 +18,16 @@ pub use rayon::*;
 use reth_primitives_traits::Account;
 
 #[cfg(feature = "rayon")]
-use rayon::prelude::{FromParallelIterator, IntoParallelIterator, ParallelIterator};
+use rayon::prelude::{
+    FromParallelIterator, IntoParallelIterator, ParallelIterator, ParallelSliceMut,
+};
 
 use revm_database::{AccountStatus, BundleAccount};
+
+#[cfg(feature = "rayon")]
+const PARALLEL_SORT_THRESHOLD: usize = 4096;
+#[cfg(feature = "rayon")]
+const PARALLEL_STORAGE_SORT_THRESHOLD: usize = 128;
 
 /// In-memory hashed state that stores account and storage changes with keccak256-hashed keys in
 /// hash maps.
@@ -328,13 +335,9 @@ impl HashedPostState {
     /// Converts hashed post state into [`HashedPostStateSorted`].
     pub fn into_sorted(self) -> HashedPostStateSorted {
         let mut accounts: Vec<_> = self.accounts.into_iter().collect();
-        accounts.sort_unstable_by_key(|(address, _)| *address);
+        sort_b256_pairs(&mut accounts);
 
-        let storages = self
-            .storages
-            .into_iter()
-            .map(|(hashed_address, storage)| (hashed_address, storage.into_sorted()))
-            .collect();
+        let storages = sort_hashed_storages(self.storages);
 
         HashedPostStateSorted { accounts, storages }
     }
@@ -343,13 +346,9 @@ impl HashedPostState {
     /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
     pub fn clone_into_sorted(&self) -> HashedPostStateSorted {
         let mut accounts: Vec<_> = self.accounts.iter().map(|(&k, &v)| (k, v)).collect();
-        accounts.sort_unstable_by_key(|(address, _)| *address);
+        sort_b256_pairs(&mut accounts);
 
-        let storages = self
-            .storages
-            .iter()
-            .map(|(&hashed_address, storage)| (hashed_address, storage.clone_into_sorted()))
-            .collect();
+        let storages = clone_sorted_hashed_storages(&self.storages);
 
         HashedPostStateSorted { accounts, storages }
     }
@@ -498,7 +497,7 @@ impl HashedStorage {
     /// Converts hashed storage into [`HashedStorageSorted`].
     pub fn into_sorted(self) -> HashedStorageSorted {
         let mut storage_slots: Vec<_> = self.storage.into_iter().collect();
-        storage_slots.sort_unstable_by_key(|(key, _)| *key);
+        sort_b256_pairs(&mut storage_slots);
 
         HashedStorageSorted { storage_slots, wiped: self.wiped }
     }
@@ -507,10 +506,86 @@ impl HashedStorage {
     /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
     pub fn clone_into_sorted(&self) -> HashedStorageSorted {
         let mut storage_slots: Vec<_> = self.storage.iter().map(|(&k, &v)| (k, v)).collect();
-        storage_slots.sort_unstable_by_key(|(key, _)| *key);
+        sort_b256_pairs(&mut storage_slots);
 
         HashedStorageSorted { storage_slots, wiped: self.wiped }
     }
+}
+
+#[cfg(feature = "rayon")]
+fn sort_b256_pairs<T: Send>(items: &mut [(B256, T)]) {
+    if items.len() >= PARALLEL_SORT_THRESHOLD {
+        items.par_sort_unstable_by_key(|(key, _)| *key);
+    } else {
+        items.sort_unstable_by_key(|(key, _)| *key);
+    }
+}
+
+#[cfg(not(feature = "rayon"))]
+fn sort_b256_pairs<T>(items: &mut [(B256, T)]) {
+    items.sort_unstable_by_key(|(key, _)| *key);
+}
+
+#[cfg(feature = "rayon")]
+fn sort_hashed_storages(
+    storages: B256Map<HashedStorage>,
+) -> B256Map<HashedStorageSorted> {
+    if storages.len() >= PARALLEL_STORAGE_SORT_THRESHOLD {
+        storages
+            .into_iter()
+            .collect::<Vec<_>>()
+            .into_par_iter()
+            .map(|(hashed_address, storage)| (hashed_address, storage.into_sorted()))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .collect()
+    } else {
+        storages
+            .into_iter()
+            .map(|(hashed_address, storage)| (hashed_address, storage.into_sorted()))
+            .collect()
+    }
+}
+
+#[cfg(not(feature = "rayon"))]
+fn sort_hashed_storages(
+    storages: B256Map<HashedStorage>,
+) -> B256Map<HashedStorageSorted> {
+    storages
+        .into_iter()
+        .map(|(hashed_address, storage)| (hashed_address, storage.into_sorted()))
+        .collect()
+}
+
+#[cfg(feature = "rayon")]
+fn clone_sorted_hashed_storages(
+    storages: &B256Map<HashedStorage>,
+) -> B256Map<HashedStorageSorted> {
+    if storages.len() >= PARALLEL_STORAGE_SORT_THRESHOLD {
+        storages
+            .iter()
+            .collect::<Vec<_>>()
+            .into_par_iter()
+            .map(|(&hashed_address, storage)| (hashed_address, storage.clone_into_sorted()))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .collect()
+    } else {
+        storages
+            .iter()
+            .map(|(&hashed_address, storage)| (hashed_address, storage.clone_into_sorted()))
+            .collect()
+    }
+}
+
+#[cfg(not(feature = "rayon"))]
+fn clone_sorted_hashed_storages(
+    storages: &B256Map<HashedStorage>,
+) -> B256Map<HashedStorageSorted> {
+    storages
+        .iter()
+        .map(|(&hashed_address, storage)| (hashed_address, storage.clone_into_sorted()))
+        .collect()
 }
 
 /// Sorted hashed post state optimized for iterating during state trie calculation.

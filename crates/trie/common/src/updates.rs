@@ -10,6 +10,13 @@ use alloy_primitives::{
     map::{B256Map, B256Set, HashMap, HashSet},
     FixedBytes, B256,
 };
+#[cfg(feature = "rayon")]
+use rayon::prelude::{IntoParallelIterator, ParallelIterator, ParallelSliceMut};
+
+#[cfg(feature = "rayon")]
+const PARALLEL_SORT_THRESHOLD: usize = 4096;
+#[cfg(feature = "rayon")]
+const PARALLEL_STORAGE_SORT_THRESHOLD: usize = 128;
 
 /// The aggregation of trie updates.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
@@ -169,13 +176,9 @@ impl TrieUpdates {
             .collect::<Vec<_>>();
 
         account_nodes.extend(self.removed_nodes.drain().map(|path| (path, None)));
-        account_nodes.sort_unstable_by_key(|a| a.0);
+        sort_nibbles_pairs(&mut account_nodes);
 
-        let storage_tries = self
-            .storage_tries
-            .drain()
-            .map(|(hashed_address, updates)| (hashed_address, updates.into_sorted()))
-            .collect();
+        let storage_tries = sort_storage_tries(self.storage_tries);
         TrieUpdatesSorted { account_nodes, storage_tries }
     }
 
@@ -195,13 +198,9 @@ impl TrieUpdates {
                 .filter(|path| !self.account_nodes.contains_key(*path))
                 .map(|path| (*path, None)),
         );
-        account_nodes.sort_unstable_by_key(|a| a.0);
+        sort_nibbles_pairs(&mut account_nodes);
 
-        let storage_tries = self
-            .storage_tries
-            .iter()
-            .map(|(&hashed_address, updates)| (hashed_address, updates.clone_into_sorted()))
-            .collect();
+        let storage_tries = clone_sorted_storage_tries(&self.storage_tries);
         TrieUpdatesSorted { account_nodes, storage_tries }
     }
 
@@ -373,7 +372,7 @@ impl StorageTrieUpdates {
             .collect::<Vec<_>>();
 
         storage_nodes.extend(self.removed_nodes.into_iter().map(|path| (path, None)));
-        storage_nodes.sort_unstable_by_key(|a| a.0);
+        sort_nibbles_pairs(&mut storage_nodes);
 
         StorageTrieUpdatesSorted { is_deleted: self.is_deleted, storage_nodes }
     }
@@ -394,7 +393,7 @@ impl StorageTrieUpdates {
                 .filter(|path| !self.storage_nodes.contains_key(*path))
                 .map(|path| (*path, None)),
         );
-        storage_nodes.sort_unstable_by_key(|a| a.0);
+        sort_nibbles_pairs(&mut storage_nodes);
 
         StorageTrieUpdatesSorted { is_deleted: self.is_deleted, storage_nodes }
     }
@@ -407,6 +406,82 @@ impl StorageTrieUpdates {
             storage_nodes: self.storage_nodes.iter().collect::<BTreeMap<_, _>>(),
         }
     }
+}
+
+#[cfg(feature = "rayon")]
+fn sort_nibbles_pairs<T: Send>(items: &mut [(Nibbles, T)]) {
+    if items.len() >= PARALLEL_SORT_THRESHOLD {
+        items.par_sort_unstable_by_key(|(key, _)| *key);
+    } else {
+        items.sort_unstable_by_key(|(key, _)| *key);
+    }
+}
+
+#[cfg(not(feature = "rayon"))]
+fn sort_nibbles_pairs<T>(items: &mut [(Nibbles, T)]) {
+    items.sort_unstable_by_key(|(key, _)| *key);
+}
+
+#[cfg(feature = "rayon")]
+fn sort_storage_tries(
+    storage_tries: B256Map<StorageTrieUpdates>,
+) -> B256Map<StorageTrieUpdatesSorted> {
+    if storage_tries.len() >= PARALLEL_STORAGE_SORT_THRESHOLD {
+        storage_tries
+            .into_iter()
+            .collect::<Vec<_>>()
+            .into_par_iter()
+            .map(|(hashed_address, updates)| (hashed_address, updates.into_sorted()))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .collect()
+    } else {
+        storage_tries
+            .into_iter()
+            .map(|(hashed_address, updates)| (hashed_address, updates.into_sorted()))
+            .collect()
+    }
+}
+
+#[cfg(not(feature = "rayon"))]
+fn sort_storage_tries(
+    storage_tries: B256Map<StorageTrieUpdates>,
+) -> B256Map<StorageTrieUpdatesSorted> {
+    storage_tries
+        .into_iter()
+        .map(|(hashed_address, updates)| (hashed_address, updates.into_sorted()))
+        .collect()
+}
+
+#[cfg(feature = "rayon")]
+fn clone_sorted_storage_tries(
+    storage_tries: &B256Map<StorageTrieUpdates>,
+) -> B256Map<StorageTrieUpdatesSorted> {
+    if storage_tries.len() >= PARALLEL_STORAGE_SORT_THRESHOLD {
+        storage_tries
+            .iter()
+            .collect::<Vec<_>>()
+            .into_par_iter()
+            .map(|(&hashed_address, updates)| (hashed_address, updates.clone_into_sorted()))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .collect()
+    } else {
+        storage_tries
+            .iter()
+            .map(|(&hashed_address, updates)| (hashed_address, updates.clone_into_sorted()))
+            .collect()
+    }
+}
+
+#[cfg(not(feature = "rayon"))]
+fn clone_sorted_storage_tries(
+    storage_tries: &B256Map<StorageTrieUpdates>,
+) -> B256Map<StorageTrieUpdatesSorted> {
+    storage_tries
+        .iter()
+        .map(|(&hashed_address, updates)| (hashed_address, updates.clone_into_sorted()))
+        .collect()
 }
 
 /// Serializes and deserializes any [`HashSet`] that includes [`Nibbles`] elements, by using the
