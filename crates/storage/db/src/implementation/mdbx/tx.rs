@@ -100,7 +100,9 @@ impl<K: TransactionKind> Tx<K> {
 
         Ok(Cursor::new_with_metrics(
             inner,
-            self.metrics_handler.as_ref().map(|h| h.env_metrics.table_operation_metrics(T::NAME)),
+            self.metrics_handler
+                .as_ref()
+                .and_then(|h| h.env_metrics.table_operation_metrics(T::NAME)),
         ))
     }
 
@@ -163,12 +165,18 @@ impl<K: TransactionKind> Tx<K> {
     ) -> R {
         if let Some(metrics_handler) = &self.metrics_handler {
             metrics_handler.log_backtrace_on_long_read_transaction();
-            metrics_handler
-                .env_metrics
-                .record_operation(T::NAME, operation, value_size, || f(&self.inner))
-        } else {
-            f(&self.inner)
+
+            if metrics_handler.env_metrics.operation_metrics_enabled() {
+                return metrics_handler.env_metrics.record_operation(
+                    T::NAME,
+                    operation,
+                    value_size,
+                    || f(&self.inner),
+                );
+            }
         }
+
+        f(&self.inner)
     }
 }
 

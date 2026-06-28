@@ -549,6 +549,12 @@ impl DatabaseEnv {
         self
     }
 
+    /// Enables metrics on the database, including per-table operation metrics.
+    pub fn with_operation_metrics(mut self) -> Self {
+        self.metrics = Some(DatabaseEnvMetrics::new_with_operation_metrics(true).into());
+        self
+    }
+
     /// Enables metrics on the database if requested.
     pub fn with_metrics_if(self, enabled: bool) -> Self {
         if enabled {
