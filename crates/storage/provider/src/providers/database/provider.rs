@@ -3752,7 +3752,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         if storage_settings.storage_v2 {
             self.with_rocksdb_batch(|mut batch| {
                 for (address, blocks) in account_transitions {
-                    batch.append_account_history_shard(address, blocks)?;
+                    batch.append_account_history_shard_vec(address, blocks)?;
                 }
                 Ok(((), Some(batch.into_inner())))
             })?;
