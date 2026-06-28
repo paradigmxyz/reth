@@ -14,7 +14,7 @@ use std::{
     any::Any,
     collections::VecDeque,
     fs::OpenOptions,
-    io::{self, BufWriter, Read, Seek, SeekFrom, Write},
+    io::{self, BufWriter, Read, Write},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -42,20 +42,6 @@ const SEGMENTED_DOWNLOAD_MAX_BACKOFF_SECS: u64 = 30;
 /// Segmented piece requests should time out quickly enough to recover from slow or stalled
 /// requests.
 const SEGMENTED_DOWNLOAD_REQUEST_TIMEOUT_SECS: u64 = 120;
-
-#[cfg(unix)]
-fn write_all_at(file: &std::fs::File, buf: &[u8], offset: u64) -> io::Result<()> {
-    use std::os::unix::fs::FileExt;
-
-    file.write_all_at(buf, offset)
-}
-
-#[cfg(not(unix))]
-fn write_all_at(file: &std::fs::File, buf: &[u8], offset: u64) -> io::Result<()> {
-    let mut file = file.try_clone()?;
-    file.seek(SeekFrom::Start(offset))?;
-    file.write_all(buf)
-}
 
 /// Paths for one downloaded archive and its `.part` file.
 #[derive(Debug, Clone)]
@@ -720,6 +706,8 @@ impl SegmentedDownload {
         piece_progress_bytes: &AtomicU64,
         cancel_token: &CancellationToken,
     ) -> std::result::Result<(), PieceAttemptFailure> {
+        use std::os::unix::fs::FileExt;
+
         let expected_len = piece.end - piece.start + 1;
 
         let response = match client
@@ -765,7 +753,7 @@ impl SegmentedDownload {
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    write_all_at(file, &buf[..n], offset)
+                    file.write_all_at(&buf[..n], offset)
                         .map_err(|error| PieceAttemptFailure::Terminal(error.into()))?;
                     offset += n as u64;
                     if let Some(progress) = shared {
