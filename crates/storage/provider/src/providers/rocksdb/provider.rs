@@ -1505,7 +1505,7 @@ impl RocksDBProvider {
         while let Some(chunk) = chunks_peekable.next() {
             let shard = BlockNumberList::new_pre_sorted(chunk);
             let highest_block_number = if chunks_peekable.peek().is_some() {
-                shard.iter().next_back().expect("`chunks` does not return empty list")
+                shard.max().expect("`chunks` does not return empty list")
             } else {
                 u64::MAX
             };
@@ -1932,7 +1932,7 @@ impl<'a> RocksDBBatch<'a> {
         while let Some(chunk) = chunks_peekable.next() {
             let shard = BlockNumberList::new_pre_sorted(chunk);
             let highest_block_number = if chunks_peekable.peek().is_some() {
-                shard.iter().next_back().expect("`chunks` does not return empty list")
+                shard.max().expect("`chunks` does not return empty list")
             } else {
                 u64::MAX
             };

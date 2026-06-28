@@ -1445,7 +1445,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             while let Some(chunk) = chunks_peekable.next() {
                 let shard = BlockNumberList::new_pre_sorted(chunk);
                 let highest_block_number = if chunks_peekable.peek().is_some() {
-                    shard.iter().next_back().expect("`chunks` does not return empty list")
+                    shard.max().expect("`chunks` does not return empty list")
                 } else {
                     // Insert last list with `u64::MAX`.
                     u64::MAX
