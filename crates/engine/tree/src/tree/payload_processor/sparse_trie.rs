@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::tree::{
     multiproof::{
         dispatch_with_chunking, evm_state_to_hashed_post_state, StateRootComputeOutcome,
-        StateRootMessage, DEFAULT_MAX_TARGETS_FOR_CHUNKING,
+        PartialAccountState, StateRootMessage, DEFAULT_MAX_TARGETS_FOR_CHUNKING,
     },
     payload_processor::multiproof::MultiProofTaskMetrics,
 };
@@ -33,6 +33,23 @@ use reth_trie_sparse::{
 };
 use revm_primitives::{hash_map::Entry, B256Map};
 use tracing::{debug, debug_span, error, instrument, trace_span};
+
+/// Account update blocked on account proof and/or storage-root computation.
+#[derive(Debug, Clone, Copy)]
+enum PendingAccountUpdate {
+    /// Storage changed but the account leaf fields themselves are unchanged.
+    Unchanged,
+    /// Complete post-state account, or `None` for deletion.
+    Full(Option<Account>),
+    /// Partial post-state account fields that need to be merged with the revealed account leaf.
+    Partial(PartialAccountState),
+}
+
+impl PendingAccountUpdate {
+    const fn is_partial(&self) -> bool {
+        matches!(self, Self::Partial(_))
+    }
+}
 
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaParallelSparseTrie> {
@@ -76,12 +93,9 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// Invariant: for each entry in `pending_account_updates` account must either be already
     /// revealed in the trie or have an entry in `account_updates`.
     ///
-    /// Values can be either of:
-    ///   - None: account had a storage update and is awaiting storage root calculation and/or
-    ///     account node reveal to complete.
-    ///   - Some(_): account was changed/destroyed and is awaiting storage root calculation/reveal
-    ///     to complete.
-    pending_account_updates: B256Map<Option<Option<Account>>>,
+    /// Values can be either storage-only, full account post-state, or partial account post-state
+    /// that still needs to be merged with the revealed account leaf.
+    pending_account_updates: B256Map<PendingAccountUpdate>,
     /// Cache of account proof targets that were already fetched/requested from the proof workers.
     /// account -> lowest `min_len` requested.
     fetched_account_targets: B256Map<u8>,
@@ -204,6 +218,9 @@ where
                 }
                 StateRootMessage::HashedStateUpdate(state) => {
                     SparseTrieTaskMessage::HashedState(state)
+                }
+                StateRootMessage::PartialAccountStateUpdate { hashed_address, account } => {
+                    SparseTrieTaskMessage::PartialAccountState { hashed_address, account }
                 }
             };
             if hashed_state_tx.send(msg).is_err() {
@@ -401,15 +418,29 @@ where
             SparseTrieTaskMessage::HashedState(hashed_state) => {
                 self.on_hashed_state_update(hashed_state)
             }
+            SparseTrieTaskMessage::PartialAccountState { hashed_address, account } => {
+                self.on_partial_account_state_update(hashed_address, account)
+            }
             SparseTrieTaskMessage::FinishedStateUpdates => {
-                let _ = self
-                    .final_hashed_state_tx
-                    .take()
-                    .unwrap()
-                    .send(core::mem::take(&mut self.final_hashed_state));
-                self.finished_state_updates = true
+                self.finished_state_updates = true;
+                self.maybe_send_final_hashed_state();
             }
         }
+    }
+
+    fn maybe_send_final_hashed_state(&mut self) {
+        if !self.finished_state_updates ||
+            self.final_hashed_state_tx.is_none() ||
+            self.pending_account_updates.values().any(PendingAccountUpdate::is_partial)
+        {
+            return;
+        }
+
+        let _ = self
+            .final_hashed_state_tx
+            .take()
+            .unwrap()
+            .send(core::mem::take(&mut self.final_hashed_state));
     }
 
     #[instrument(
@@ -475,7 +506,9 @@ where
 
             // Make sure account is tracked in `pending_account_updates` so that once storage root
             // is computed, it will be updated in the accounts trie.
-            self.pending_account_updates.entry(address).or_insert(None);
+            self.pending_account_updates
+                .entry(address)
+                .or_insert(PendingAccountUpdate::Unchanged);
         }
 
         for (&address, &account) in &hashed_state_update.accounts {
@@ -489,10 +522,25 @@ where
 
             // Track account in `pending_account_updates` so that once storage root is computed,
             // it will be updated in the accounts trie.
-            self.pending_account_updates.insert(address, Some(account));
+            self.pending_account_updates.insert(address, PendingAccountUpdate::Full(account));
         }
 
         self.final_hashed_state.extend(hashed_state_update);
+    }
+
+    fn on_partial_account_state_update(
+        &mut self,
+        hashed_address: B256,
+        account: PartialAccountState,
+    ) {
+        if account.is_empty() {
+            return;
+        }
+
+        self.trie.record_account_touch(hashed_address);
+        self.new_account_updates.insert(hashed_address, LeafUpdate::Touched);
+        self.pending_account_updates
+            .insert(hashed_address, PendingAccountUpdate::Partial(account));
     }
 
     fn on_proof_result(
@@ -729,18 +777,29 @@ where
             // Now handle pending account updates that can be upgraded to a proper update.
             let account_rlp_buf = &mut self.account_rlp_buf;
             let mut num_promoted = 0;
-            self.pending_account_updates.retain(|addr, account| {
-                if let Some(updates) = self.storage_updates.get(addr) {
-                    if !updates.is_empty() {
-                        // If account has pending storage updates, it is still pending.
-                        return true;
-                    } else if let Some(account) = account.take() {
-                        let storage_root = self.trie.storage_root(addr).expect("updates are drained, storage trie should be revealed by now");
-                        let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
-                        self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
-                        num_promoted += 1;
-                        return false;
-                    }
+            self.pending_account_updates.retain(|addr, account_update| {
+                let has_drained_storage_updates =
+                    if let Some(updates) = self.storage_updates.get(addr) {
+                        if !updates.is_empty() {
+                            // If account has pending storage updates, it is still pending.
+                            return true;
+                        }
+                        true
+                    } else {
+                        false
+                    };
+
+                if let PendingAccountUpdate::Full(account) = *account_update &&
+                    has_drained_storage_updates
+                {
+                    let storage_root = self
+                        .trie
+                        .storage_root(addr)
+                        .expect("updates are drained, storage trie should be revealed by now");
+                    let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
+                    self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
+                    num_promoted += 1;
+                    return false;
                 }
 
                 // Get the current account state either from the trie or from latest account update.
@@ -753,18 +812,46 @@ where
                     None => self.trie.get_account_value(addr),
                 };
 
-                let trie_account = trie_account.map(|value| TrieAccount::decode(&mut &value[..]).expect("invalid account RLP"));
+                let trie_account = trie_account.map(|value| {
+                    TrieAccount::decode(&mut &value[..]).expect("invalid account RLP")
+                });
 
-                let (account, storage_root) = if let Some(account) = account.take() {
-                    // If account is Some(_) here it means it didn't have any storage updates
-                    // and we can fetch the storage root directly from the account trie.
-                    //
-                    // If it did have storage updates, we would've had processed it above when iterating over storage tries.
-                    let storage_root = trie_account.map(|account| account.storage_root).unwrap_or(EMPTY_ROOT_HASH);
+                let (account, storage_root) = match *account_update {
+                    PendingAccountUpdate::Full(account) => {
+                        // If account is Some(_) here it means it didn't have any storage updates
+                        // and we can fetch the storage root directly from the account trie.
+                        //
+                        // If it did have storage updates, we would've had processed it above when
+                        // iterating over storage tries.
+                        let storage_root = trie_account
+                            .map(|account| account.storage_root)
+                            .unwrap_or(EMPTY_ROOT_HASH);
 
-                    (account, storage_root)
-                } else {
-                    (trie_account.map(Into::into), self.trie.storage_root(addr).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
+                        (account, storage_root)
+                    }
+                    PendingAccountUpdate::Partial(partial) => {
+                        let account = partial.apply_to(trie_account.map(Into::into));
+                        let storage_root = if has_drained_storage_updates {
+                            self.trie
+                                .storage_root(addr)
+                                .expect("updates are drained, storage trie should be revealed by now")
+                        } else {
+                            trie_account
+                                .map(|account| account.storage_root)
+                                .unwrap_or(EMPTY_ROOT_HASH)
+                        };
+                        self.final_hashed_state.accounts.insert(*addr, Some(account));
+
+                        (Some(account), storage_root)
+                    }
+                    PendingAccountUpdate::Unchanged => {
+                        (
+                            trie_account.map(Into::into),
+                            self.trie.storage_root(addr).expect(
+                                "account had storage updates that were applied to its trie, storage root must be revealed by now",
+                            ),
+                        )
+                    }
                 };
 
                 let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
@@ -784,6 +871,8 @@ where
                 break
             }
         }
+
+        self.maybe_send_final_hashed_state();
 
         Ok(())
     }
@@ -878,6 +967,8 @@ impl PendingTargets {
 enum SparseTrieTaskMessage {
     /// A hashed state update ready to be processed.
     HashedState(HashedPostState),
+    /// Partial account post-state fields ready to be merged after account proof reveal.
+    PartialAccountState { hashed_address: B256, account: PartialAccountState },
     /// Prefetch proof targets (passed through directly).
     PrefetchProofs(MultiProofTargetsV2),
     /// Signals that all state updates have been received.
@@ -939,6 +1030,48 @@ mod tests {
 
         let storage = received.storages.get(&address).unwrap();
         assert_eq!(*storage.storage.get(&slot).unwrap(), value);
+
+        let second = hashed_state_rx.recv().unwrap();
+        assert!(matches!(second, SparseTrieTaskMessage::FinishedStateUpdates));
+
+        assert!(hashed_state_rx.recv().is_err());
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn test_run_hashing_task_partial_account_update_forwards() {
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
+
+        let hashed_address = keccak256(Address::random());
+        let partial = PartialAccountState { balance: Some(U256::from(100)), ..Default::default() };
+
+        let handle = std::thread::spawn(move || {
+            SparseTrieCacheTask::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::run_hashing_task(
+                updates_rx,
+                hashed_state_tx,
+                MultiProofTaskMetrics::default(),
+            );
+        });
+
+        updates_tx
+            .send(StateRootMessage::PartialAccountStateUpdate {
+                hashed_address,
+                account: partial,
+            })
+            .unwrap();
+        updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
+        drop(updates_tx);
+
+        let SparseTrieTaskMessage::PartialAccountState {
+            hashed_address: received_address,
+            account: received_partial,
+        } = hashed_state_rx.recv().unwrap() else {
+            panic!("expected PartialAccountState message");
+        };
+
+        assert_eq!(received_address, hashed_address);
+        assert_eq!(received_partial, partial);
 
         let second = hashed_state_rx.recv().unwrap();
         assert!(matches!(second, SparseTrieTaskMessage::FinishedStateUpdates));

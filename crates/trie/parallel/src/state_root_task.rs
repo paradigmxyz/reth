@@ -2,12 +2,52 @@
 
 use crate::root::ParallelStateRootError;
 use alloy_eip7928::BlockAccessList;
-use alloy_primitives::{keccak256, B256};
+use alloy_primitives::{keccak256, B256, U256};
 use derive_more::derive::Deref;
+use reth_primitives_traits::Account;
 use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2};
 use revm_state::EvmState;
 use std::sync::Arc;
 use tracing::trace;
+
+/// Partial post-state account fields from a source that can provide changed BAL fields but not the
+/// unchanged fields without an extra parent-state read.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PartialAccountState {
+    /// Post-state balance when changed.
+    pub balance: Option<U256>,
+    /// Post-state nonce when changed.
+    pub nonce: Option<u64>,
+    /// Post-state bytecode hash when changed.
+    pub bytecode_hash: Option<B256>,
+}
+
+impl PartialAccountState {
+    /// Returns true if no account leaf field was changed.
+    pub const fn is_empty(&self) -> bool {
+        self.balance.is_none() && self.nonce.is_none() && self.bytecode_hash.is_none()
+    }
+
+    /// Applies this partial update on top of the currently revealed account.
+    pub fn apply_to(self, existing_account: Option<Account>) -> Account {
+        let existing_account = existing_account.as_ref();
+        Account {
+            balance: self.balance.unwrap_or_else(|| {
+                existing_account
+                    .map(|account| account.balance)
+                    .unwrap_or(alloy_primitives::U256::ZERO)
+            }),
+            nonce: self
+                .nonce
+                .unwrap_or_else(|| existing_account.map(|account| account.nonce).unwrap_or(0)),
+            bytecode_hash: self.bytecode_hash.or_else(|| {
+                existing_account
+                    .and_then(|account| account.bytecode_hash)
+                    .or_else(|| Some(alloy_primitives::keccak256([])))
+            }),
+        }
+    }
+}
 
 /// Messages used internally by the multi proof task.
 #[derive(Debug)]
@@ -18,6 +58,16 @@ pub enum StateRootMessage {
     StateUpdate(EvmState),
     /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
     HashedStateUpdate(HashedPostState),
+    /// Partial account post-state fields from BAL conversion.
+    ///
+    /// The sparse trie task merges these fields with the revealed parent account leaf, avoiding a
+    /// parent-state provider read on the BAL streaming path.
+    PartialAccountStateUpdate {
+        /// Hashed account address for the account leaf update.
+        hashed_address: B256,
+        /// Partial post-state account fields.
+        account: PartialAccountState,
+    },
     /// Block Access List (EIP-7928; BAL) containing complete state changes for the block.
     ///
     /// When received, the task generates a single state update from the BAL and processes it.
@@ -149,6 +199,27 @@ impl StateHookSender {
     /// Creates a new [`StateHookSender`] wrapping the given channel sender.
     pub const fn new(inner: crossbeam_channel::Sender<StateRootMessage>) -> Self {
         Self(inner)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn partial_account_state_merges_with_existing_account() {
+        let existing = Account {
+            balance: U256::from(1),
+            nonce: 7,
+            bytecode_hash: Some(B256::repeat_byte(0xaa)),
+        };
+        let partial = PartialAccountState { balance: Some(U256::from(10)), ..Default::default() };
+
+        let account = partial.apply_to(Some(existing));
+
+        assert_eq!(account.balance, U256::from(10));
+        assert_eq!(account.nonce, existing.nonce);
+        assert_eq!(account.bytecode_hash, existing.bytecode_hash);
     }
 }
 

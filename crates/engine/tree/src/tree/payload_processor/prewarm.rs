@@ -13,7 +13,7 @@
 
 use super::bal_prewarm_pool::BalPrewarmPool;
 use crate::tree::{
-    payload_processor::multiproof::StateRootMessage,
+    payload_processor::multiproof::{PartialAccountState, StateRootMessage},
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
     PayloadExecutionCache, SavedCache, StateProviderBuilder,
@@ -667,6 +667,15 @@ where
             let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
         }
 
+        if account_fields.is_partial() {
+            let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
+            let _ = to_sparse_trie_task.send(StateRootMessage::PartialAccountStateUpdate {
+                hashed_address,
+                account: account_fields.into_partial_account_state(),
+            });
+            return;
+        }
+
         let existing_account = if account_fields.needs_parent_account() {
             if provider.is_none() {
                 let _span = debug_span!(
@@ -742,6 +751,18 @@ impl BalAccountStateFields {
 
     const fn needs_parent_account(self) -> bool {
         self.balance.is_none() || self.nonce.is_none() || self.code_hash.is_none()
+    }
+
+    const fn is_partial(self) -> bool {
+        !self.is_empty() && self.needs_parent_account()
+    }
+
+    const fn into_partial_account_state(self) -> PartialAccountState {
+        PartialAccountState {
+            balance: self.balance,
+            nonce: self.nonce,
+            bytecode_hash: self.code_hash,
+        }
     }
 
     fn into_account(self, existing_account: Option<Account>) -> Account {
@@ -824,6 +845,23 @@ mod tests {
 
         assert!(bal_account_changes_state_root(&changes, fields));
         assert!(fields.needs_parent_account());
+        assert!(!fields.is_partial());
+    }
+
+    #[test]
+    fn bal_balance_only_change_streams_as_partial_account_state() {
+        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
+            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)));
+        let fields = BalAccountStateFields::from_changes(&changes);
+
+        assert!(bal_account_changes_state_root(&changes, fields));
+        assert!(fields.needs_parent_account());
+        assert!(fields.is_partial());
+
+        let partial = fields.into_partial_account_state();
+        assert_eq!(partial.balance, Some(U256::from(10)));
+        assert_eq!(partial.nonce, None);
+        assert_eq!(partial.bytecode_hash, None);
     }
 
     #[test]
