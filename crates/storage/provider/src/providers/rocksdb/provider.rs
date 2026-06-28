@@ -1400,7 +1400,7 @@ impl RocksDBProvider {
         ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
         let mut batch = self.batch();
-        let mut account_history: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
+        let mut account_history = Vec::new();
 
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
@@ -1410,13 +1410,21 @@ impl RocksDBProvider {
             // changesets written, ensuring history indices match changeset entries.
             for account_block_reverts in reverts.accounts {
                 for (address, _) in account_block_reverts {
-                    account_history.entry(address).or_default().push(block_number);
+                    account_history.push((address, block_number));
                 }
             }
         }
 
+        account_history.sort_unstable();
+
         // Write account history using proper shard append logic
-        for (address, indices) in account_history {
+        let mut account_history = account_history.into_iter().peekable();
+        while let Some((address, block_number)) = account_history.next() {
+            let mut indices = vec![block_number];
+            while account_history.peek().is_some_and(|(next_address, _)| *next_address == address) {
+                let (_, next_block_number) = account_history.next().expect("peeked Some");
+                indices.push(next_block_number);
+            }
             batch.append_account_history_shard(address, indices)?;
         }
         ctx.pending_batches.lock().push(batch.into_inner());
