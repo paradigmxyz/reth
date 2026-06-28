@@ -235,3 +235,16 @@ bitflags! {
         const MULTIPLE = MDBX_MULTIPLE;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::EnvironmentFlags;
+    use crate::ffi;
+
+    #[test]
+    fn no_meminit_sets_mdbx_flag() {
+        let flags = EnvironmentFlags { no_meminit: true, ..Default::default() }.make_flags();
+
+        assert_ne!(flags & ffi::MDBX_NOMEMINIT, 0);
+    }
+}

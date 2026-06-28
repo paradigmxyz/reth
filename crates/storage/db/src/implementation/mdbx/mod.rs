@@ -469,6 +469,9 @@ impl DatabaseEnv {
             // We disable readahead because it improves performance for linear scans, but
             // worsens it for random access (which is our access pattern outside of sync)
             no_rdahead: true,
+            // Avoid zero-filling MDBX page padding on the replay write path. Logical table data is
+            // still fully written by the caller, and unused page bytes are ignored by MDBX readers.
+            no_meminit: true,
             coalesce: true,
             exclusive: args.exclusive.unwrap_or_default(),
             ..Default::default()
