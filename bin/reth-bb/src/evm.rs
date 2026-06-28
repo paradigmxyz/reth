@@ -491,9 +491,13 @@ where
         // Merge requests accumulated from earlier segment boundaries into
         // the final result.
         if !self.accumulated_requests.is_empty() {
-            let mut merged = self.accumulated_requests;
-            merged.extend(result.requests);
-            result.requests = merged;
+            if result.requests.is_empty() {
+                result.requests = self.accumulated_requests;
+            } else {
+                let mut merged = self.accumulated_requests;
+                merged.extend(result.requests);
+                result.requests = merged;
+            }
         }
 
         Ok((evm, result))
