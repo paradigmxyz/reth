@@ -4,7 +4,9 @@ use alloy_primitives::{
     Address, B256, U256,
 };
 use core::cell::RefCell;
-use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
+use revm::{
+    bytecode::Bytecode, primitives::KECCAK_EMPTY, state::AccountInfo, Database, DatabaseRef,
+};
 
 /// A container type that caches reads from an underlying [`DatabaseRef`].
 ///
@@ -123,6 +125,10 @@ impl<DB: DatabaseRef> Database for CachedReadsDbMut<'_, DB> {
     }
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        if code_hash == KECCAK_EMPTY {
+            return Ok(Bytecode::default());
+        }
+
         let code = match self.cached.contracts.entry(code_hash) {
             Entry::Occupied(entry) => entry.get().clone(),
             Entry::Vacant(entry) => entry.insert(self.db.code_by_hash_ref(code_hash)?).clone(),
@@ -216,6 +222,33 @@ impl CachedAccount {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::{cell::Cell, convert::Infallible};
+
+    #[derive(Default)]
+    struct CountingCodeDb {
+        code_hash_reads: Cell<usize>,
+    }
+
+    impl DatabaseRef for CountingCodeDb {
+        type Error = Infallible;
+
+        fn basic_ref(&self, _address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+            Ok(None)
+        }
+
+        fn code_by_hash_ref(&self, _code_hash: B256) -> Result<Bytecode, Self::Error> {
+            self.code_hash_reads.set(self.code_hash_reads.get() + 1);
+            Ok(Bytecode::default())
+        }
+
+        fn storage_ref(&self, _address: Address, _index: U256) -> Result<U256, Self::Error> {
+            Ok(U256::ZERO)
+        }
+
+        fn block_hash_ref(&self, _number: u64) -> Result<B256, Self::Error> {
+            Ok(B256::ZERO)
+        }
+    }
 
     #[test]
     fn test_extend_with_two_cached_reads() {
@@ -264,5 +297,15 @@ mod tests {
                 primary.block_hashes.get(&2) == Some(&hash2),
             "All expected entries should be present"
         );
+    }
+
+    #[test]
+    fn test_empty_code_hash_bypasses_cache_and_database() {
+        let mut cached = CachedReads::default();
+        let mut db = cached.as_db_mut(CountingCodeDb::default());
+
+        assert_eq!(db.code_by_hash(KECCAK_EMPTY).unwrap(), Bytecode::default());
+        assert_eq!(db.db.code_hash_reads.get(), 0);
+        assert!(db.cached.contracts.is_empty());
     }
 }
