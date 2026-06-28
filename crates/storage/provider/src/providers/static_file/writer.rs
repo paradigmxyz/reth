@@ -249,6 +249,8 @@ pub struct StaticFileProviderRW<N> {
     prune_on_commit: Option<PruneStrategy>,
     /// Whether `sync_all()` has been called. Used by `finalize()` to avoid redundant syncs.
     synced: bool,
+    /// Whether normal finalization should synchronize static-file data before publishing rows.
+    sync_on_commit: bool,
     /// Changeset offsets sidecar writer (only for changeset segments).
     changeset_offsets: Option<ChangesetOffsetWriter>,
     /// Current block's changeset offset being written.
@@ -265,6 +267,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         block: BlockNumber,
         reader: Weak<StaticFileProviderInner<N>>,
         metrics: Option<Arc<StaticFileProviderMetrics>>,
+        sync_on_commit: bool,
     ) -> ProviderResult<Self> {
         let (writer, data_path) = Self::open(segment, block, reader.clone(), metrics.clone())?;
 
@@ -277,6 +280,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             metrics,
             prune_on_commit: None,
             synced: false,
+            sync_on_commit,
             changeset_offsets: None,
             current_changeset_offset: None,
         };
@@ -581,12 +585,24 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         }
         if self.writer.is_dirty() {
             if !self.synced {
-                // Must call self.sync_all() to flush changeset offsets and update
-                // the header's changeset_offsets_len, not just the inner writer
-                self.sync_all()?;
+                if self.sync_on_commit {
+                    // Must call self.sync_all() to flush changeset offsets and update
+                    // the header's changeset_offsets_len, not just the inner writer.
+                    self.sync_all()?;
+                } else {
+                    self.flush_current_changeset_offset()?;
+                    if let Some(writer) = &mut self.changeset_offsets {
+                        writer.flush().map_err(ProviderError::other)?;
+                        self.writer.user_header_mut().set_changeset_offsets_len(writer.len());
+                    }
+                }
             }
 
-            self.writer.finalize().map_err(ProviderError::other)?;
+            if self.synced || self.sync_on_commit {
+                self.writer.finalize().map_err(ProviderError::other)?;
+            } else {
+                self.writer.commit_without_sync_all().map_err(ProviderError::other)?;
+            }
             self.update_index()?;
         }
         self.synced = false;

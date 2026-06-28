@@ -379,7 +379,6 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     ///
     /// This function flushes the buffered data to the data file and commits the offsets,
     /// but it does not guarantee that all data is synchronized to persistent storage.
-    #[cfg(feature = "test-utils")]
     pub fn commit_without_sync_all(&mut self) -> Result<(), NippyJarError> {
         self.data_file.flush()?;
 
@@ -400,7 +399,6 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         Ok(())
     }
 
-    #[cfg(feature = "test-utils")]
     fn commit_offsets_without_sync_all(&mut self) -> Result<(), NippyJarError> {
         self.commit_offsets_inner()
     }

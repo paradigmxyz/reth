@@ -132,6 +132,11 @@ impl ChangesetOffsetWriter {
         self.file.sync_all()
     }
 
+    /// Flushes buffered sidecar data without synchronizing it to persistent storage.
+    pub fn flush(&mut self) -> io::Result<()> {
+        self.file.flush()
+    }
+
     /// Truncates the file to contain exactly `len` records and syncs to disk.
     /// Used after prune operations to reclaim space.
     ///

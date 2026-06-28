@@ -128,6 +128,7 @@ impl<N> Clone for StaticFileProvider<N> {
 pub struct StaticFileProviderBuilder<P> {
     access: StaticFileAccess,
     use_metrics: bool,
+    sync_on_commit: bool,
     blocks_per_file: StaticFileMap<u64>,
     path: P,
     genesis_block_number: u64,
@@ -141,6 +142,7 @@ impl<P: AsRef<Path>> StaticFileProviderBuilder<P> {
             access: StaticFileAccess::RW,
             blocks_per_file: Default::default(),
             use_metrics: false,
+            sync_on_commit: true,
             genesis_block_number: 0,
         }
     }
@@ -152,6 +154,7 @@ impl<P: AsRef<Path>> StaticFileProviderBuilder<P> {
             access: StaticFileAccess::RO,
             blocks_per_file: Default::default(),
             use_metrics: false,
+            sync_on_commit: true,
             genesis_block_number: 0,
         }
     }
@@ -201,6 +204,16 @@ impl<P: AsRef<Path>> StaticFileProviderBuilder<P> {
         self
     }
 
+    /// Sets whether writer finalization synchronizes static-file data and offsets to disk before
+    /// making new rows visible.
+    ///
+    /// The default is `true`. Setting this to `false` preserves in-process visibility but weakens
+    /// crash durability, matching no-sync database modes used by short-lived replay workloads.
+    pub const fn with_sync_on_commit(mut self, sync_on_commit: bool) -> Self {
+        self.sync_on_commit = sync_on_commit;
+        self
+    }
+
     /// Sets the genesis block number for the [`StaticFileProvider`].
     ///
     /// This configures the genesis block number, which is used to determine the starting point
@@ -224,6 +237,7 @@ impl<P: AsRef<Path>> StaticFileProviderBuilder<P> {
         if self.use_metrics {
             provider.metrics = Some(Arc::new(StaticFileProviderMetrics::default()));
         }
+        provider.sync_on_commit = self.sync_on_commit;
 
         for (segment, blocks_per_file) in *self.blocks_per_file {
             provider.blocks_per_file.insert(segment, blocks_per_file);
@@ -297,6 +311,8 @@ pub struct StaticFileProviderInner<N> {
     access: StaticFileAccess,
     /// Number of blocks per file, per segment.
     blocks_per_file: StaticFileMap<u64>,
+    /// Whether normal writer finalization synchronizes static-file data before publishing rows.
+    sync_on_commit: bool,
     /// Write lock for when access is [`StaticFileAccess::RW`].
     _lock_file: Option<StorageLock>,
     /// Genesis block number, default is 0;
@@ -326,6 +342,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
             metrics: None,
             access,
             blocks_per_file,
+            sync_on_commit: true,
             _lock_file,
             genesis_block_number: 0,
         };
@@ -2279,7 +2296,13 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
 
         trace!(target: "providers::static_file", ?block, ?segment, "Getting static file writer.");
         self.writers.get_or_create(segment, || {
-            StaticFileProviderRW::new(segment, block, Arc::downgrade(&self.0), self.metrics.clone())
+            StaticFileProviderRW::new(
+                segment,
+                block,
+                Arc::downgrade(&self.0),
+                self.metrics.clone(),
+                self.0.sync_on_commit,
+            )
         })
     }
 

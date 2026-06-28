@@ -493,6 +493,7 @@ where
                 .with_metrics()
                 .with_blocks_per_file_for_segments(&static_files_config.as_blocks_per_file_map())
                 .with_genesis_block_number(self.chain_spec().genesis().number.unwrap_or_default())
+                .with_sync_on_commit(!self.node_config().debug.startup_sync_state_idle)
                 .build()?;
 
         // Use the provided RocksDB provider or create a new one
