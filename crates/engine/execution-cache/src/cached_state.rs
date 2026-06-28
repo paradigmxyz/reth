@@ -1070,7 +1070,9 @@ impl ExecutionCache {
 
             // Now we iterate over all storage and make updates to the cached storage values
             for (key, slot) in &account.storage {
-                self.insert_storage(*addr, (*key).into(), Some(slot.present_value));
+                if slot.is_changed() {
+                    self.insert_storage(*addr, (*key).into(), Some(slot.present_value));
+                }
             }
 
             // Insert will update if present, so we just use the new account info as the new value
@@ -1178,7 +1180,7 @@ mod tests {
     use super::*;
     use alloy_primitives::{map::HashMap, U256};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-    use reth_revm::db::{AccountStatus, BundleAccount};
+    use reth_revm::db::{states::StorageSlot, AccountStatus, BundleAccount};
     use revm_state::AccountInfo;
 
     #[test]
@@ -1439,6 +1441,42 @@ mod tests {
         assert!(caches.insert_state(&bundle).is_ok());
         assert_eq!(caches.0.account_stats.size(), 0);
         assert!(caches.0.account_cache.get(&addr).is_none());
+    }
+
+    #[test]
+    fn test_insert_state_only_publishes_changed_storage() {
+        let caches = ExecutionCache::new(1000);
+        let addr = Address::random();
+        let unchanged_key = U256::from(1);
+        let changed_key = U256::from(2);
+        let unchanged_value = U256::from(10);
+        let changed_value = U256::from(30);
+
+        let bundle = BundleState {
+            state: HashMap::from_iter([(
+                addr,
+                BundleAccount::new(
+                    None,
+                    Some(AccountInfo::default()),
+                    HashMap::from_iter([
+                        (unchanged_key, StorageSlot::new(unchanged_value)),
+                        (
+                            changed_key,
+                            StorageSlot::new_changed(U256::from(20), changed_value),
+                        ),
+                    ]),
+                    AccountStatus::Changed,
+                ),
+            )]),
+            contracts: Default::default(),
+            reverts: Default::default(),
+            state_size: 0,
+            reverts_size: 0,
+        };
+
+        assert!(caches.insert_state(&bundle).is_ok());
+        assert!(caches.0.storage_cache.get(&(addr, unchanged_key.into())).is_none());
+        assert_eq!(caches.0.storage_cache.get(&(addr, changed_key.into())), Some(changed_value));
     }
 
     #[test]
