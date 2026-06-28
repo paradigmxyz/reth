@@ -541,19 +541,17 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<()> {
         for block in blocks {
             let block_number = block.recovered_block().number();
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
-
-            let changeset: Vec<_> = reverts
-                .storage
-                .into_iter()
+            let changeset: Vec<_> = block
+                .execution_outcome()
+                .state
+                .reverts
+                .iter()
                 .flatten()
-                .flat_map(|revert| {
-                    revert.storage_revert.into_iter().map(move |(key, revert_to_slot)| {
-                        StorageBeforeTx {
-                            address: revert.address,
-                            key: B256::from(key.to_be_bytes()),
-                            value: revert_to_slot.to_previous_value(),
-                        }
+                .flat_map(|(address, revert)| {
+                    revert.storage.iter().map(move |(key, revert_to_slot)| StorageBeforeTx {
+                        address: *address,
+                        key: B256::from(key.to_be_bytes()),
+                        value: (*revert_to_slot).to_previous_value(),
                     })
                 })
                 .collect();

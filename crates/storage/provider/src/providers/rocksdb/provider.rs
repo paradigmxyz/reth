@@ -1436,19 +1436,13 @@ impl RocksDBProvider {
 
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
 
             // Iterate through storage reverts - these are exactly the slots that have
             // changesets written, ensuring history indices match changeset entries.
-            for storage_block_reverts in reverts.storage {
-                for revert in storage_block_reverts {
-                    for (slot, _) in revert.storage_revert {
-                        let plain_key = B256::new(slot.to_be_bytes());
-                        storage_history
-                            .entry((revert.address, plain_key))
-                            .or_default()
-                            .push(block_number);
-                    }
+            for (address, revert) in block.execution_outcome().state.reverts.iter().flatten() {
+                for slot in revert.storage.keys() {
+                    let plain_key = B256::new(slot.to_be_bytes());
+                    storage_history.entry((*address, plain_key)).or_default().push(block_number);
                 }
             }
         }
