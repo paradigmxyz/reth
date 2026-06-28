@@ -121,6 +121,7 @@ use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 use reth_trie_sparse::SparseTrieRetainedPaths;
 
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
+use alloy_consensus::BlockHeader;
 use reth_chain_state::{
     CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats,
 };
@@ -562,8 +563,7 @@ where
                 .map_err(ConsensusError::from));
         }
 
-        let parent_wam =
-            ensure_ok!(self.warm_accesses_for_parent(input.parent_hash(), ctx.state()));
+        let parent_wam = ensure_ok!(self.warm_accesses_for_parent(input.parent_hash(), &ctx));
 
         let env = ExecutionEnv {
             evm_env,
@@ -1268,8 +1268,9 @@ where
     fn warm_accesses_for_parent(
         &self,
         parent_hash: B256,
-        state: &EngineApiTreeState<N>,
+        ctx: &TreeCtx<'_, N>,
     ) -> ProviderResult<WarmAccessMultiset> {
+        let state = ctx.state();
         let tree_state = state.tree_state();
         if parent_hash == tree_state.canonical_block_hash() {
             return Ok(tree_state.warm_accesses.clone());
@@ -1284,26 +1285,37 @@ where
                 .number()
         };
 
-        self.reconstruct_warm_accesses(parent_hash, parent_number, state)
+        self.reconstruct_warm_accesses(parent_hash, parent_number, ctx)
     }
 
     fn reconstruct_warm_accesses(
         &self,
         tip_hash: B256,
         tip_number: u64,
-        state: &EngineApiTreeState<N>,
+        ctx: &TreeCtx<'_, N>,
     ) -> ProviderResult<WarmAccessMultiset> {
+        let state = ctx.state();
         let mut warm_accesses = WarmAccessMultiset::default();
         let start = tip_number.saturating_sub(WARMING_WINDOW.saturating_sub(1));
 
         for number in start..=tip_number {
-            let Some(hash) = state.tree_state().block_hash_on_chain(tip_hash, number, || {
-                self.provider.block_hash(number).ok().flatten()
-            }) else {
-                continue;
+            let hash = if number == tip_number {
+                Some(tip_hash)
+            } else {
+                // After restart/reset, the tree can be empty; the provider fallback is the
+                // recoverable canonical history path for the warming window.
+                state.tree_state().block_hash_on_chain(tip_hash, number, |number| {
+                    self.provider.block_hash(number).ok().flatten()
+                })
+            };
+            let Some(hash) = hash else {
+                return Err(Self::missing_canonical_hash_error(number, tip_hash, tip_number))
             };
 
             let Some(bal) = self.provider.bal_store().get_decoded_by_hash(hash)? else {
+                if self.block_has_bal_hash(hash, ctx)? {
+                    return Err(Self::missing_expected_bal_error(number, hash))
+                }
                 continue;
             };
             let items = WamItems::from_accounts(bal.as_bal().as_slice());
@@ -1311,6 +1323,35 @@ where
         }
 
         Ok(warm_accesses)
+    }
+
+    fn block_has_bal_hash(&self, hash: B256, ctx: &TreeCtx<'_, N>) -> ProviderResult<bool> {
+        let state = ctx.state();
+        if let Some(header) = state.tree_state().sealed_header_by_hash(&hash) {
+            return Ok(header.block_access_list_hash().is_some())
+        }
+
+        let canonical_head = ctx.canonical_in_memory_state().get_canonical_head();
+        if canonical_head.hash() == hash {
+            return Ok(canonical_head.block_access_list_hash().is_some())
+        }
+
+        self.provider
+            .header(hash)?
+            .ok_or(ProviderError::HeaderNotFound(hash.into()))
+            .map(|header| header.block_access_list_hash().is_some())
+    }
+
+    fn missing_expected_bal_error(number: u64, hash: B256) -> ProviderError {
+        ProviderError::other(std::io::Error::other(format!(
+            "missing expected BAL for block #{number} ({hash})"
+        )))
+    }
+
+    fn missing_canonical_hash_error(number: u64, tip_hash: B256, tip_number: u64) -> ProviderError {
+        ProviderError::other(std::io::Error::other(format!(
+            "failed to resolve canonical block #{number} while reconstructing WAM for tip #{tip_number} ({tip_hash})"
+        )))
     }
 
     /// Executes the block on the BAL path. Mirrors the return shape of [`Self::execute_block`]

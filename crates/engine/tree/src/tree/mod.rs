@@ -423,9 +423,8 @@ where
         };
 
         let canonical_head = this.state.tree_state.current_canonical_head;
-        if let Err(err) = this.update_canonical_warm_accesses(canonical_head) {
-            warn!(target: "engine::tree", %err, tip = ?canonical_head, "Failed to initialize canonical WAM");
-        }
+        this.update_canonical_warm_accesses(canonical_head)
+            .expect("failed to initialize canonical WAM from provider BAL history");
 
         this
     }
@@ -523,13 +522,23 @@ where
         let start = tip.number.saturating_sub(WARMING_WINDOW.saturating_sub(1));
 
         for number in start..=tip.number {
-            let Some(hash) = self.state.tree_state.block_hash_on_chain(tip.hash, number, || {
-                self.provider.block_hash(number).ok().flatten()
-            }) else {
-                continue;
+            let hash = if number == tip.number {
+                Some(tip.hash)
+            } else {
+                // After restart/reset, the tree can be empty; the provider fallback is the
+                // recoverable canonical history path for the warming window.
+                self.state.tree_state.block_hash_on_chain(tip.hash, number, |number| {
+                    self.provider.block_hash(number).ok().flatten()
+                })
+            };
+            let Some(hash) = hash else {
+                return Err(Self::missing_canonical_hash_error(number, tip))
             };
 
             let Some(bal) = self.provider.bal_store().get_decoded_by_hash(hash)? else {
+                if self.block_has_bal_hash(hash)? {
+                    return Err(Self::missing_expected_bal_error(number, hash))
+                }
                 continue;
             };
             let items = WamItems::from_accounts(bal.as_bal().as_slice());
@@ -538,6 +547,35 @@ where
         }
 
         Ok((warm_accesses, depth))
+    }
+
+    fn block_has_bal_hash(&self, hash: B256) -> ProviderResult<bool> {
+        if let Some(header) = self.state.tree_state.sealed_header_by_hash(&hash) {
+            return Ok(header.block_access_list_hash().is_some())
+        }
+
+        let canonical_head = self.canonical_in_memory_state.get_canonical_head();
+        if canonical_head.hash() == hash {
+            return Ok(canonical_head.block_access_list_hash().is_some())
+        }
+
+        self.provider
+            .header(hash)?
+            .ok_or(ProviderError::HeaderNotFound(hash.into()))
+            .map(|header| header.block_access_list_hash().is_some())
+    }
+
+    fn missing_expected_bal_error(number: u64, hash: B256) -> ProviderError {
+        ProviderError::other(std::io::Error::other(format!(
+            "missing expected BAL for block #{number} ({hash})"
+        )))
+    }
+
+    fn missing_canonical_hash_error(number: u64, tip: BlockNumHash) -> ProviderError {
+        ProviderError::other(std::io::Error::other(format!(
+            "failed to resolve canonical block #{number} while reconstructing WAM for tip {:?}",
+            tip
+        )))
     }
 
     fn update_canonical_warm_accesses(&mut self, tip: BlockNumHash) -> ProviderResult<()> {
@@ -554,32 +592,34 @@ where
             let num_hash = block.recovered_block().num_hash();
             let Some(add_bal) = self.provider.bal_store().get_decoded_by_hash(num_hash.hash)?
             else {
-                warn!(target: "engine::tree", ?num_hash, "Canonical BAL missing; rebuilding WAM");
-                return self.update_canonical_warm_accesses(num_hash);
+                if block.recovered_block().header().block_access_list_hash().is_some() {
+                    return Err(Self::missing_expected_bal_error(num_hash.number, num_hash.hash))
+                }
+                continue;
             };
             let add = WamItems::from_accounts(add_bal.as_bal().as_slice());
 
             let previous_depth = self.state.tree_state.warm_access_depth;
             let leaving_items = if previous_depth >= WARMING_WINDOW {
-                num_hash.number.checked_sub(WARMING_WINDOW).and_then(|number| {
-                    let hash = self.state.tree_state.block_hash_on_chain(
-                        block.recovered_block().parent_hash(),
-                        number,
-                        || self.provider.block_hash(number).ok().flatten(),
-                    )?;
+                let Some(number) = num_hash.number.checked_sub(WARMING_WINDOW) else { continue };
+                let Some(hash) = self.state.tree_state.block_hash_on_chain(
+                    block.recovered_block().parent_hash(),
+                    number,
+                    |number| self.provider.block_hash(number).ok().flatten(),
+                ) else {
+                    return self.update_canonical_warm_accesses(num_hash)
+                };
 
-                    match self.provider.bal_store().get_decoded_by_hash(hash) {
-                        Ok(Some(bal)) => Some(WamItems::from_accounts(bal.as_bal().as_slice())),
-                        Ok(None) => {
-                            warn!(target: "engine::tree", ?number, ?hash, "Leaving BAL missing; rebuilding WAM");
-                            None
-                        }
-                        Err(err) => {
-                            warn!(target: "engine::tree", ?number, ?hash, %err, "Failed to fetch leaving BAL; rebuilding WAM");
-                            None
-                        }
+                match self.provider.bal_store().get_decoded_by_hash(hash)? {
+                    Some(bal) => Some(WamItems::from_accounts(bal.as_bal().as_slice())),
+                    None if self.block_has_bal_hash(hash)? => {
+                        return Err(Self::missing_expected_bal_error(number, hash))
                     }
-                })
+                    None => {
+                        warn!(target: "engine::tree", ?number, ?hash, "Leaving pre-BAL block has no BAL; rebuilding WAM");
+                        None
+                    }
+                }
             } else {
                 None
             };

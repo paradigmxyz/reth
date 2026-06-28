@@ -100,25 +100,32 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Finds the hash at `target_number` on the chain ending at `hash`.
+    ///
+    /// The canonical fallback is used only after the in-memory walk reaches the tracked canonical
+    /// head or a block that the provider confirms is canonical at its number. Missing side-chain
+    /// ancestors return `None` instead of mixing canonical hashes into a noncanonical branch.
     pub fn block_hash_on_chain(
         &self,
         mut hash: B256,
         target_number: BlockNumber,
-        mut canonical_hash: impl FnMut() -> Option<B256>,
+        mut canonical_hash: impl FnMut(BlockNumber) -> Option<B256>,
     ) -> Option<B256> {
         loop {
             if hash == self.canonical_block_hash() {
-                return canonical_hash()
+                return canonical_hash(target_number)
             }
 
-            let Some(block) = self.blocks_by_hash.get(&hash) else { return canonical_hash() };
+            let Some(block) = self.blocks_by_hash.get(&hash) else { return None };
 
             let number = block.block_number();
+            if canonical_hash(number).is_some_and(|canonical| canonical == hash) {
+                return canonical_hash(target_number)
+            }
             if number == target_number {
                 return Some(hash)
             }
             if number < target_number {
-                return canonical_hash()
+                return None
             }
             hash = block.recovered_block().parent_hash();
         }
@@ -539,6 +546,83 @@ mod tests {
 
         assert_eq!(tree_state.blocks_by_number[&4].len(), 2);
         assert_eq!(tree_state.blocks_by_number[&5].len(), 2);
+    }
+
+    #[test]
+    fn block_hash_on_chain_uses_canonical_fallback_only_after_rejoin() {
+        let mut tree_state = TreeState::new(
+            BlockNumHash::default(),
+            EngineApiKind::Ethereum,
+            StateTrieOverlayManager::default(),
+        );
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
+
+        for block in &blocks {
+            tree_state.insert_executed(block.clone());
+        }
+
+        let canonical_head = blocks[1].recovered_block().num_hash();
+        tree_state.set_canonical_head(canonical_head);
+
+        let fork_block_3 = test_block_builder
+            .get_executed_block_with_number(3, blocks[1].recovered_block().hash());
+        let fork_block_4 = test_block_builder
+            .get_executed_block_with_number(4, fork_block_3.recovered_block().hash());
+
+        tree_state.insert_executed(fork_block_3.clone());
+        tree_state.insert_executed(fork_block_4.clone());
+
+        let expected = blocks[0].recovered_block().hash();
+        let canonical_block_2 = blocks[1].recovered_block().hash();
+        let actual =
+            tree_state.block_hash_on_chain(fork_block_4.recovered_block().hash(), 1, |number| {
+                match number {
+                    1 => Some(expected),
+                    2 => Some(canonical_block_2),
+                    _ => None,
+                }
+            });
+
+        assert_eq!(actual, Some(expected));
+    }
+
+    #[test]
+    fn block_hash_on_chain_rejects_missing_sidechain_ancestor() {
+        let mut tree_state = TreeState::new(
+            BlockNumHash::default(),
+            EngineApiKind::Ethereum,
+            StateTrieOverlayManager::default(),
+        );
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..3).collect();
+
+        for block in &blocks {
+            tree_state.insert_executed(block.clone());
+        }
+
+        tree_state.set_canonical_head(blocks[1].recovered_block().num_hash());
+
+        let missing_fork_block_3 = test_block_builder
+            .get_executed_block_with_number(3, blocks[1].recovered_block().hash());
+        let fork_block_4 = test_block_builder
+            .get_executed_block_with_number(4, missing_fork_block_3.recovered_block().hash());
+
+        tree_state.insert_executed(fork_block_4.clone());
+
+        let mut canonical_fallback_called = false;
+        let actual =
+            tree_state.block_hash_on_chain(fork_block_4.recovered_block().hash(), 1, |number| {
+                if number == 1 {
+                    canonical_fallback_called = true;
+                    Some(blocks[0].recovered_block().hash())
+                } else {
+                    None
+                }
+            });
+
+        assert_eq!(actual, None);
+        assert!(!canonical_fallback_called);
     }
 
     #[tokio::test]
