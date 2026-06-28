@@ -31,6 +31,7 @@ use rocksdb::{
     OptimisticTransactionOptions, Options, SnapshotWithThreadMode, Transaction,
     WriteBatchWithTransaction, WriteBufferManager, WriteOptions, DB,
 };
+use smallvec::SmallVec;
 use std::{
     collections::BTreeMap,
     fmt,
@@ -47,7 +48,8 @@ fn synced_write_options() -> WriteOptions {
 }
 
 /// Pending `RocksDB` batches type alias.
-pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
+pub(crate) type PendingRocksDBBatches =
+    Arc<Mutex<SmallVec<[WriteBatchWithTransaction<true>; 4]>>>;
 
 /// Raw key-value result from a `RocksDB` iterator.
 type RawKVResult = Result<(Box<[u8]>, Box<[u8]>), rocksdb::Error>;
