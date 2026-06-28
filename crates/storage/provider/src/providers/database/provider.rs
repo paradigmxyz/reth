@@ -2298,9 +2298,10 @@ impl<TX: DbTxMut, N: NodeTypes> StageCheckpointWriter for DatabaseProvider<TX, N
         // iterate over all existing stages in the table and update its progress.
         let mut cursor = self.tx.cursor_write::<tables::StageCheckpoints>()?;
         for stage_id in StageId::ALL {
-            let (_, checkpoint) = cursor.seek_exact(stage_id.to_string())?.unwrap_or_default();
+            let stage_key = stage_id.to_string();
+            let (_, checkpoint) = cursor.seek_exact(stage_key.clone())?.unwrap_or_default();
             cursor.upsert(
-                stage_id.to_string(),
+                stage_key,
                 &StageCheckpoint {
                     block_number,
                     ..if drop_stage_checkpoint { Default::default() } else { checkpoint }
