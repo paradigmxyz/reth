@@ -286,12 +286,12 @@ where
 
         if let Some(saved_cache) = saved_cache {
             debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
-            execution_cache.update_with_guard(|cached| {
-                // consumes the `SavedCache` held by the prewarming task, which releases its cache
-                // handle
-                let caches = saved_cache.cache().clone();
-                let new_cache = SavedCache::new(hash, caches);
+            // Consume the `SavedCache` held by the prewarming task before entering the guarded
+            // update so the mutex is held only while mutating and publishing the warmed cache.
+            let caches = saved_cache.cache().clone();
+            let new_cache = SavedCache::new(hash, caches);
 
+            execution_cache.update_with_guard(|cached| {
                 // Insert state into cache while holding the lock
                 // Access the BundleState through the shared ExecutionOutcome
                 if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
