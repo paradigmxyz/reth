@@ -56,8 +56,7 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
         /// The receiver for the storage proof result. This is an `Option` so that `encode` can
         /// take ownership of the receiver, preventing the `Drop` impl from trying to receive on
         /// it again.
-        proof_result_rx:
-            Option<Result<CrossbeamReceiver<StorageProofResultMessage>, DatabaseError>>,
+        proof_result_rx: Option<CrossbeamReceiver<StorageProofResultMessage>>,
         /// Shared storage proof results.
         storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNodeV2>>>>,
         /// Shared stats for tracking wait time and counts.
@@ -97,10 +96,8 @@ impl<TC, HC> Drop for AsyncAccountDeferredValueEncoder<TC, HC> {
             let Some(proof_result_rx) = proof_result_rx.take() else { return };
 
             (|| -> Result<(), StateProofError> {
-                let rx = proof_result_rx?;
-
                 let wait_start = Instant::now();
-                let msg = rx.recv().map_err(|_| {
+                let msg = proof_result_rx.recv().map_err(|_| {
                     StateProofError::Database(DatabaseError::Other(format!(
                         "Storage proof channel closed for {hashed_address:?}",
                     )))
@@ -145,7 +142,7 @@ where
                     .take()
                     .expect("encode called on already-consumed Dispatched encoder");
                 let wait_start = Instant::now();
-                let result = proof_result_rx?
+                let result = proof_result_rx
                     .recv()
                     .map_err(|_| {
                         StateProofError::Database(DatabaseError::Other(format!(
@@ -309,7 +306,7 @@ where
             return AsyncAccountDeferredValueEncoder::Dispatched {
                 hashed_address,
                 account,
-                proof_result_rx: Some(Ok(rx)),
+                proof_result_rx: Some(rx),
                 storage_proof_results: self.storage_proof_results.clone(),
                 stats: self.stats.clone(),
                 storage_calculator: self.storage_calculator.clone(),
