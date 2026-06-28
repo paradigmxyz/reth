@@ -9,7 +9,7 @@ use revm::{
 /// Current-block accesses that are already present in the EIP-8289 warming window.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct WarmAccessSnapshot {
-    items: WarmAccessList,
+    items: Option<WarmAccessList>,
 }
 
 impl WarmAccessSnapshot {
@@ -39,10 +39,12 @@ impl WarmAccessSnapshot {
         }
 
         Self {
-            items: items
-                .into_iter()
-                .map(|(address, keys)| (address, keys.into_iter().collect()))
-                .collect(),
+            items: Some(
+                items
+                    .into_iter()
+                    .map(|(address, keys)| (address, keys.into_iter().collect()))
+                    .collect(),
+            ),
         }
     }
 
@@ -56,6 +58,7 @@ mod tests {
     use super::*;
     use alloy_eip7928::{bal::Bal, AccountChanges};
     use alloy_primitives::{address, Bytes, U256};
+    use revm::context::BlockEnv;
 
     #[test]
     fn warm_snapshot_only_contains_payload_bal_items_present_in_wam() {
@@ -84,8 +87,9 @@ mod tests {
 
         let snapshot = WarmAccessSnapshot::from_wam_and_bal(&warm_accesses, Some(&decoded_bal));
 
-        assert_eq!(snapshot.items.len(), 1);
-        let (address, slots) = &snapshot.items[0];
+        let items = snapshot.items.as_ref().unwrap();
+        assert_eq!(items.len(), 1);
+        let (address, slots) = &items[0];
         assert_eq!(*address, warm_address);
         assert_eq!(slots.as_slice(), &[U256::from(1)]);
     }
@@ -100,6 +104,39 @@ mod tests {
 
         let snapshot = WarmAccessSnapshot::from_wam_and_bal(&warm_accesses, None);
 
-        assert!(snapshot.items.is_empty());
+        assert!(snapshot.items.is_none());
+    }
+
+    #[test]
+    fn default_warm_snapshot_applies_no_warm_accesses_to_block_env() {
+        let mut block_env = BlockEnv::default();
+
+        WarmAccessSnapshot::default().apply_to_block_env(&mut block_env);
+
+        assert!(block_env.warm_accesses.is_none());
+    }
+
+    #[test]
+    fn warm_snapshot_applies_warm_accesses_to_block_env() {
+        let warm_address = address!("0000000000000000000000000000000000000001");
+
+        let mut warm_accesses = WarmAccessMultiset::new();
+        warm_accesses.apply_item_transition(
+            &WamItems::new(vec![WamItem::slot(warm_address, U256::from(1))]),
+            None,
+        );
+        let decoded_bal = DecodedBal::new(
+            Bal::new(vec![AccountChanges::new(warm_address).with_storage_read(U256::from(1))]),
+            Bytes::new(),
+        );
+        let snapshot = WarmAccessSnapshot::from_wam_and_bal(&warm_accesses, Some(&decoded_bal));
+        let mut block_env = BlockEnv::default();
+
+        snapshot.apply_to_block_env(&mut block_env);
+
+        let applied = block_env.warm_accesses.as_ref().unwrap();
+        assert_eq!(applied.len(), 1);
+        assert_eq!(applied[0].0, warm_address);
+        assert_eq!(applied[0].1.as_slice(), &[U256::from(1)]);
     }
 }

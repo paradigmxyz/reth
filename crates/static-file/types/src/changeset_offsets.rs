@@ -6,8 +6,7 @@
 use crate::ChangesetOffset;
 use std::{
     fs::{File, OpenOptions},
-    io::{self, Write},
-    os::unix::fs::FileExt,
+    io::{self, Read, Seek, SeekFrom, Write},
     path::Path,
 };
 
@@ -185,7 +184,9 @@ impl ChangesetOffsetReader {
 
         let byte_pos = block_index * Self::RECORD_SIZE as u64;
         let mut buf = [0u8; Self::RECORD_SIZE];
-        self.file.read_exact_at(&mut buf, byte_pos)?;
+        let mut file = self.file.try_clone()?;
+        file.seek(SeekFrom::Start(byte_pos))?;
+        file.read_exact(&mut buf)?;
 
         let offset = u64::from_le_bytes(buf[..8].try_into().unwrap());
         let num_changes = u64::from_le_bytes(buf[8..].try_into().unwrap());
@@ -205,10 +206,12 @@ impl ChangesetOffsetReader {
 
         let mut result = Vec::with_capacity(count);
         let mut buf = [0u8; Self::RECORD_SIZE];
+        let mut file = self.file.try_clone()?;
 
         for i in 0..count {
             let pos = byte_pos + (i as u64) * Self::RECORD_SIZE as u64;
-            self.file.read_exact_at(&mut buf, pos)?;
+            file.seek(SeekFrom::Start(pos))?;
+            file.read_exact(&mut buf)?;
             let offset = u64::from_le_bytes(buf[..8].try_into().unwrap());
             let num_changes = u64::from_le_bytes(buf[8..].try_into().unwrap());
             result.push(ChangesetOffset::new(offset, num_changes));

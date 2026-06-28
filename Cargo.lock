@@ -296,7 +296,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.37.0"
-source = "git+https://github.com/Rimeeeeee/evm?branch=eip-8289#123c9c1217b17093c6bf12e033853d9675499faf"
+source = "git+https://github.com/Rimeeeeee/evm?branch=eip-8289#9a0244627428324079a46a2f9ca2b5228db4b1de"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -2038,9 +2038,9 @@ dependencies = [
 
 [[package]]
 name = "camino"
-version = "1.2.3"
+version = "1.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4ce8d3bd5823c7504d3f579f13e7b2f3da252fcb938c594d5680ee508bf846f"
+checksum = "5f2d30e4173c4026932d51d31d6b0613b1fd3014bf3f9f8943d4ba139c437ba0"
 dependencies = [
  "serde_core",
 ]
@@ -3340,18 +3340,18 @@ dependencies = [
 
 [[package]]
 name = "enum-ordinalize"
-version = "4.3.2"
+version = "4.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a1091a7bb1f8f2c4b28f1fe2cef4980ca2d410a3d727d67ecc3178c9b0800f0"
+checksum = "07f808d588c10e464ea6f7d3eaed500049eff30aaac103460f61828c2d65b3eb"
 dependencies = [
  "enum-ordinalize-derive",
 ]
 
 [[package]]
 name = "enum-ordinalize-derive"
-version = "4.3.2"
+version = "4.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ca9601fb2d62598ee17836250842873a413586e5d7ed88b356e38ddbb0ec631"
+checksum = "42e528e2d34ba8a67a1a650b86beae8ef69fc5fdb638016f386b973226590432"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4664,9 +4664,9 @@ dependencies = [
 
 [[package]]
 name = "hybrid-array"
-version = "0.4.12"
+version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9155a582abd142abc056962c29e3ce5ff2ad5469f4246b537ed42c5deba857da"
+checksum = "818356c5132c1fede50f837ca96afbe78ff42413047f4abb886217845e1b6c8c"
 dependencies = [
  "typenum",
 ]
@@ -7272,9 +7272,9 @@ dependencies = [
 
 [[package]]
 name = "rapidhash"
-version = "4.4.1"
+version = "4.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5e48930979c155e2f33aa36ab3119b5ee81332beb6482199a8ecd6029b80b59"
+checksum = "32b266a82f4aa99bb5c25e28d11cc44ace63d91adbcbcee4d323e2ae3d49ef37"
 dependencies = [
  "rand 0.9.4",
  "rustversion",
@@ -10655,7 +10655,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#f22cd40e2e1b7f2d5b74312cdad0ad70ee0d6420"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10673,7 +10673,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#f22cd40e2e1b7f2d5b74312cdad0ad70ee0d6420"
 dependencies = [
  "bitvec",
  "paste",
@@ -10685,7 +10685,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#f22cd40e2e1b7f2d5b74312cdad0ad70ee0d6420"
 dependencies = [
  "bitvec",
  "cfg-if",
@@ -10701,7 +10701,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#f22cd40e2e1b7f2d5b74312cdad0ad70ee0d6420"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10716,7 +10716,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#f22cd40e2e1b7f2d5b74312cdad0ad70ee0d6420"
 dependencies = [
  "alloy-eips",
  "derive_more",
@@ -10731,7 +10731,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#f22cd40e2e1b7f2d5b74312cdad0ad70ee0d6420"
 dependencies = [
  "auto_impl",
  "either",
@@ -10744,7 +10744,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#f22cd40e2e1b7f2d5b74312cdad0ad70ee0d6420"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -10762,7 +10762,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#f22cd40e2e1b7f2d5b74312cdad0ad70ee0d6420"
 dependencies = [
  "auto_impl",
  "either",
@@ -10800,7 +10800,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#f22cd40e2e1b7f2d5b74312cdad0ad70ee0d6420"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -10812,7 +10812,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#f22cd40e2e1b7f2d5b74312cdad0ad70ee0d6420"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -10837,7 +10837,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#f22cd40e2e1b7f2d5b74312cdad0ad70ee0d6420"
 dependencies = [
  "alloy-primitives",
  "once_cell",
@@ -10847,7 +10847,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "41.0.0"
-source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#95a20e74c52f667c05ef8ab772fc7834482a3135"
+source = "git+https://github.com/Rimeeeeee/revm?branch=eip-8289#f22cd40e2e1b7f2d5b74312cdad0ad70ee0d6420"
 dependencies = [
  "alloy-eip7928",
  "bitflags",

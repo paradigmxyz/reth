@@ -140,8 +140,8 @@ use reth_payload_primitives::{
     PayloadTypes,
 };
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives,
-    RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
+    BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives, RecoveredBlock,
+    SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
     providers::{OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory},
@@ -154,7 +154,7 @@ use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State}
 use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm_primitives::{Address, KECCAK_EMPTY};
+use revm_primitives::{hardfork::SpecId, Address, KECCAK_EMPTY};
 use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
@@ -563,7 +563,14 @@ where
                 .map_err(ConsensusError::from));
         }
 
-        let parent_wam = ensure_ok!(self.warm_accesses_for_parent(input.parent_hash(), &ctx));
+        let is_bogota_active =
+            Into::<SpecId>::into(*evm_env.spec_id()).is_enabled_in(SpecId::BOGOTA);
+        let warm_accesses = if is_bogota_active {
+            let parent_wam = ensure_ok!(self.warm_accesses_for_parent(input.parent_hash(), &ctx));
+            WarmAccessSnapshot::from_wam_and_bal(&parent_wam, decoded_bal.as_deref())
+        } else {
+            WarmAccessSnapshot::default()
+        };
 
         let env = ExecutionEnv {
             evm_env,
@@ -574,10 +581,7 @@ where
             gas_used: input.gas_used(),
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
             decoded_bal: decoded_bal.as_ref().map(Arc::clone),
-            warm_accesses: WarmAccessSnapshot::from_wam_and_bal(
-                &parent_wam,
-                decoded_bal.as_deref(),
-            ),
+            warm_accesses,
         };
 
         // Plan the strategy used for state root computation.
