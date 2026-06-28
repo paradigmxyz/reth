@@ -644,11 +644,15 @@ where
         // Initially mark this worker as available.
         self.availability.mark_idle(self.worker_id);
 
+        let track_idle_time = cfg!(feature = "metrics")
+            || tracing::enabled!(target: "trie::proof_task", tracing::Level::TRACE);
         let mut total_idle_time = Duration::ZERO;
         let mut idle_start = Instant::now();
 
         while let Ok(job) = self.work_rx.recv() {
-            total_idle_time += idle_start.elapsed();
+            if track_idle_time {
+                total_idle_time += idle_start.elapsed();
+            }
 
             // Mark worker as busy.
             self.availability.mark_busy(self.worker_id);
@@ -681,7 +685,9 @@ where
             // Mark worker as available again.
             self.availability.mark_idle(self.worker_id);
 
-            idle_start = Instant::now();
+            if track_idle_time {
+                idle_start = Instant::now();
+            }
         }
 
         // Drop calculator to release mutable borrows on cursor_metrics_cache.
@@ -894,12 +900,16 @@ where
         // Count this worker as available only after successful initialization.
         self.availability.mark_idle(self.worker_id);
 
+        let track_idle_time = cfg!(feature = "metrics")
+            || tracing::enabled!(target: "trie::proof_task", tracing::Level::TRACE);
         let mut total_idle_time = Duration::ZERO;
         let mut idle_start = Instant::now();
         let mut value_encoder_stats_cache = ValueEncoderStats::default();
 
         while let Ok(job) = self.work_rx.recv() {
-            total_idle_time += idle_start.elapsed();
+            if track_idle_time {
+                total_idle_time += idle_start.elapsed();
+            }
 
             // Mark worker as busy.
             self.availability.mark_busy(self.worker_id);
@@ -925,7 +935,9 @@ where
                         *input,
                         &mut account_proofs_processed,
                     );
-                    total_idle_time += value_encoder_stats.storage_wait_time;
+                    if track_idle_time {
+                        total_idle_time += value_encoder_stats.storage_wait_time;
+                    }
                     value_encoder_stats_cache.extend(&value_encoder_stats);
                 }
             }
@@ -933,7 +945,9 @@ where
             // Mark worker as available again.
             self.availability.mark_idle(self.worker_id);
 
-            idle_start = Instant::now();
+            if track_idle_time {
+                idle_start = Instant::now();
+            }
         }
 
         // Drop calculators to release mutable borrows on cursor_metrics_cache.
@@ -1065,7 +1079,7 @@ fn dispatch_v2_storage_proofs(
     mut storage_targets: B256Map<Vec<ProofV2Target>>,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
     if storage_targets.is_empty() {
-        return Ok(B256Map::default())
+        return Ok(B256Map::default());
     }
 
     let mut storage_proof_receivers =
@@ -1077,8 +1091,8 @@ fn dispatch_v2_storage_proofs(
     // For storage targets with associated account proofs, ensure the first target has
     // min_len(0) so the root node is returned for storage root computation
     for (hashed_address, targets) in &mut storage_targets {
-        if account_target_addresses.contains(hashed_address) &&
-            let Some(first) = targets.first_mut()
+        if account_target_addresses.contains(hashed_address)
+            && let Some(first) = targets.first_mut()
         {
             *first = first.with_min_len(0);
         }
