@@ -41,6 +41,7 @@ use rayon::ThreadPoolBuilder;
 use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::noop::NoopConsensus;
+use reth_db::mdbx::SyncMode;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_db_common::init::{
     init_genesis_with_settings, init_genesis_with_settings_and_validate, InitStorageError,
@@ -499,11 +500,18 @@ where
         let rocksdb_provider = if let Some(provider) = rocksdb_provider {
             provider
         } else {
-            RocksDBProvider::builder(self.data_dir().rocksdb())
+            let mut builder = RocksDBProvider::builder(self.data_dir().rocksdb())
                 .with_default_tables()
                 .with_metrics()
-                .with_statistics()
-                .build()?
+                .with_statistics();
+
+            if self.node_config().debug.startup_sync_state_idle
+                && !matches!(self.node_config().db.sync_mode, Some(SyncMode::Durable))
+            {
+                builder = builder.with_sync_writes(false);
+            }
+
+            builder.build()?
         };
 
         let prune_config = self.prune_config();

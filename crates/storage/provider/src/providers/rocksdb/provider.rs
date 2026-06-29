@@ -39,10 +39,10 @@ use std::{
 };
 use tracing::instrument;
 
-/// Returns [`WriteOptions`] with WAL sync enabled for crash durability.
-fn synced_write_options() -> WriteOptions {
+/// Returns [`WriteOptions`] configured for the requested WAL durability.
+fn write_options(sync_writes: bool) -> WriteOptions {
     let mut opts = WriteOptions::default();
-    opts.set_sync(true);
+    opts.set_sync(sync_writes);
     opts
 }
 
@@ -162,6 +162,7 @@ pub struct RocksDBBuilder {
     log_level: rocksdb::LogLevel,
     block_cache: Cache,
     read_only: bool,
+    sync_writes: bool,
 }
 
 impl fmt::Debug for RocksDBBuilder {
@@ -186,6 +187,7 @@ impl RocksDBBuilder {
             log_level: rocksdb::LogLevel::Info,
             block_cache: cache,
             read_only: false,
+            sync_writes: true,
         }
     }
 
@@ -341,6 +343,12 @@ impl RocksDBBuilder {
         self
     }
 
+    /// Sets whether write commits should sync the `RocksDB` WAL.
+    pub const fn with_sync_writes(mut self, sync_writes: bool) -> Self {
+        self.sync_writes = sync_writes;
+        self
+    }
+
     /// Builds the [`RocksDBProvider`].
     pub fn build(self) -> ProviderResult<RocksDBProvider> {
         let options =
@@ -404,7 +412,11 @@ impl RocksDBBuilder {
                             code: -1,
                         }))
                     })?;
-            Ok(RocksDBProvider(Arc::new(RocksDBProviderInner::ReadWrite { db, metrics })))
+            Ok(RocksDBProvider(Arc::new(RocksDBProviderInner::ReadWrite {
+                db,
+                metrics,
+                sync_writes: self.sync_writes,
+            })))
         }
     }
 }
@@ -435,6 +447,8 @@ enum RocksDBProviderInner {
         db: OptimisticTransactionDB,
         /// Metrics latency & operations.
         metrics: Option<RocksDBMetrics>,
+        /// Whether writes should sync the WAL before returning.
+        sync_writes: bool,
     },
     /// Secondary mode using `DB` opened with `open_cf_descriptors_as_secondary`.
     /// Supports catching up with the primary via `try_catch_up_with_primary`.
@@ -465,6 +479,15 @@ impl RocksDBProviderInner {
                 panic!("Cannot perform write operation on secondary RocksDB provider")
             }
         }
+    }
+
+    /// Returns configured write options for this provider.
+    fn write_options(&self) -> WriteOptions {
+        let sync_writes = match self {
+            Self::ReadWrite { sync_writes, .. } => *sync_writes,
+            Self::Secondary { .. } => false,
+        };
+        write_options(sync_writes)
     }
 
     /// Gets the column family handle for a table.
@@ -783,7 +806,7 @@ impl RocksDBProvider {
     /// # Panics
     /// Panics if the provider is in read-only mode.
     pub fn tx(&self) -> RocksTx<'_> {
-        let write_options = synced_write_options();
+        let write_options = self.0.write_options();
         let txn_options = OptimisticTransactionOptions::default();
         let inner = self.0.db_rw().transaction_opt(&write_options, &txn_options);
         RocksTx { inner, provider: self }
@@ -1286,7 +1309,8 @@ impl RocksDBProvider {
     /// Panics if the provider is in read-only mode.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = batch.len(), batch_size = batch.size_in_bytes()))]
     pub fn commit_batch(&self, batch: WriteBatchWithTransaction<true>) -> ProviderResult<()> {
-        self.0.db_rw().write_opt(batch, &synced_write_options()).map_err(|e| {
+        let write_options = self.0.write_options();
+        self.0.db_rw().write_opt(batch, &write_options).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,
@@ -1824,12 +1848,17 @@ impl<'a> RocksDBBatch<'a> {
                 "Auto-committing RocksDB batch"
             );
             let old_batch = std::mem::take(&mut self.inner);
-            self.provider.0.db_rw().write_opt(old_batch, &synced_write_options()).map_err(|e| {
-                ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
-                    message: e.to_string().into(),
-                    code: -1,
-                }))
-            })?;
+            let write_options = self.provider.0.write_options();
+            self.provider
+                .0
+                .db_rw()
+                .write_opt(old_batch, &write_options)
+                .map_err(|e| {
+                    ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    }))
+                })?;
         }
         Ok(())
     }
@@ -1842,7 +1871,8 @@ impl<'a> RocksDBBatch<'a> {
     /// Panics if the provider is in read-only mode.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = self.inner.len(), batch_size = self.inner.size_in_bytes()))]
     pub fn commit(self) -> ProviderResult<()> {
-        self.provider.0.db_rw().write_opt(self.inner, &synced_write_options()).map_err(|e| {
+        let write_options = self.provider.0.write_options();
+        self.provider.0.db_rw().write_opt(self.inner, &write_options).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,
@@ -2822,6 +2852,28 @@ mod tests {
         let key = StorageShardedKey::new(Address::ZERO, B256::ZERO, 100);
         provider.put::<tables::StoragesHistory>(key.clone(), &value).unwrap();
         assert!(provider.get::<tables::StoragesHistory>(key).unwrap().is_some());
+    }
+
+    #[test]
+    fn test_with_sync_writes_controls_write_durability() {
+        let default_dir = TempDir::new().unwrap();
+        let provider =
+            RocksDBBuilder::new(default_dir.path()).with_default_tables().build().unwrap();
+        match provider.0.as_ref() {
+            RocksDBProviderInner::ReadWrite { sync_writes, .. } => assert!(*sync_writes),
+            RocksDBProviderInner::Secondary { .. } => panic!("expected read-write provider"),
+        }
+
+        let unsynced_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(unsynced_dir.path())
+            .with_default_tables()
+            .with_sync_writes(false)
+            .build()
+            .unwrap();
+        match provider.0.as_ref() {
+            RocksDBProviderInner::ReadWrite { sync_writes, .. } => assert!(!*sync_writes),
+            RocksDBProviderInner::Secondary { .. } => panic!("expected read-write provider"),
+        }
     }
 
     #[derive(Debug)]
