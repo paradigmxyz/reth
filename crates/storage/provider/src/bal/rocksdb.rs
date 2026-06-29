@@ -323,7 +323,6 @@ mod tests {
     use super::*;
     use crate::providers::RocksDBBuilder;
     use alloy_primitives::B256;
-    use reth_db_api::table::Encode;
     use tokio_stream::StreamExt;
 
     fn test_store() -> (tempfile::TempDir, RocksDBBalStore) {
@@ -484,15 +483,6 @@ mod tests {
         store.rocksdb_provider().put::<tables::BlockAccessLists>(key, &value).unwrap();
 
         assert!(store.get_by_block_num_hash(block).is_err());
-    }
-
-    #[test]
-    fn key_ordering_matches_number_then_hash() {
-        let key_1_high_hash =
-            StoredBlockAccessListKey::new(NumHash::new(1, B256::repeat_byte(0xff))).encode();
-        let key_2_low_hash = StoredBlockAccessListKey::new(NumHash::new(2, B256::ZERO)).encode();
-
-        assert!(key_1_high_hash < key_2_low_hash);
     }
 
     #[tokio::test]

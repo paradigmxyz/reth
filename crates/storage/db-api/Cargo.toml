@@ -82,6 +82,4 @@ arbitrary = [
     "reth-stages-types/arbitrary",
     "alloy-consensus/arbitrary",
     "reth-ethereum-primitives/arbitrary",
-    "alloy-eip7928/arbitrary",
-    "alloy-eips/arbitrary",
 ]
