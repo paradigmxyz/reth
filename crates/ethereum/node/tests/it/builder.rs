@@ -6,10 +6,8 @@ use reth_db::{
     test_utils::{create_test_rw_db, TempDatabase},
     DatabaseEnv,
 };
-use reth_node_api::NodeTypesWithDBAdapter;
-use reth_node_builder::{
-    EngineNodeLauncher, FullNodeComponents, LaunchExecutors, NodeBuilder, NodeConfig,
-};
+use reth_node_api::{FullNodeComponents, NodeTypesWithDBAdapter};
+use reth_node_builder::{EngineNodeLauncher, NodeBuilder, NodeConfig};
 use reth_node_core::{
     args::{DatadirArgs, NetworkArgs},
     dirs::{DataDirPath, MaybePlatformPath},
@@ -17,7 +15,7 @@ use reth_node_core::{
 use reth_node_ethereum::node::{EthereumAddOns, EthereumNode};
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_builder::Identity;
-use reth_tasks::{Runtime, RuntimeBuilder, RuntimeConfig};
+use reth_tasks::Runtime;
 use tempfile::tempdir;
 use tokio::sync::oneshot;
 
@@ -72,7 +70,7 @@ async fn test_eth_launcher() {
             })
             .launch_with_fn(|builder| {
                 let launcher = EngineNodeLauncher::new(
-                    LaunchExecutors::single(runtime.clone()),
+                    builder.task_executor().clone(),
                     builder.config().datadir(),
                     Default::default(),
                 );
@@ -82,15 +80,9 @@ async fn test_eth_launcher() {
 
 #[test]
 fn test_eth_launcher_with_latency_runtime() {
-    let main = RuntimeBuilder::new(RuntimeConfig::default()).build().unwrap();
-    let executors = LaunchExecutors::with_latency(main.clone(), 2).unwrap();
-
-    assert!(executors.latency_isolated());
-    assert_ne!(main.handle().id(), executors.rpc().handle().id());
-    assert_eq!(main.handle().id(), executors.main().handle().id());
-
     let main_rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
     let node_handle = main_rt.block_on(async move {
+        let runtime = Runtime::test();
         let tempdir = tempdir().expect("temp datadir");
         let datadir_args = DatadirArgs {
             datadir: MaybePlatformPath::<DataDirPath>::from(tempdir.path().to_path_buf()),
@@ -100,25 +92,26 @@ fn test_eth_launcher_with_latency_runtime() {
         };
         let mut network = NetworkArgs::default();
         network.discovery.disable_discovery = true;
-        let config = NodeConfig::test().with_datadir_args(datadir_args).with_network(network);
+        let mut config = NodeConfig::test().with_datadir_args(datadir_args).with_network(network);
+        config.rpc.latency_worker_threads = 2;
         let db = create_test_rw_db();
         let (initialized_tx, initialized_rx) = oneshot::channel();
         let builder =
             NodeBuilder::new(config)
                 .with_database(db)
-                .with_launch_executors(executors.clone())
+                .with_launch_context(runtime.clone())
                 .with_types_and_provider::<EthereumNode, BlockchainProvider<
                     NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
                 >>()
                 .with_components(EthereumNode::components())
                 .with_add_ons(EthereumAddOns::default())
-                .on_component_initialized(move |node| {
-                    assert!(node.latency_isolated());
-                    assert_ne!(
-                        node.task_executor().handle().id(),
-                        node.rpc_task_executor().handle().id(),
-                    );
+                .on_component_initialized(move |_| {
                     let _ = initialized_tx.send(());
+                    Ok(())
+                })
+                .on_node_started(|node| {
+                    let latency = node.latency_runtime.as_ref().expect("latency runtime");
+                    assert_ne!(node.task_executor.handle().id(), latency.handle().id(),);
                     Ok(())
                 })
                 .apply(|builder| {
@@ -127,7 +120,7 @@ fn test_eth_launcher_with_latency_runtime() {
                 });
 
         let launcher = EngineNodeLauncher::new(
-            executors.clone(),
+            runtime.clone(),
             builder.config().datadir(),
             Default::default(),
         );
@@ -178,7 +171,7 @@ fn test_eth_launcher_with_tokio_runtime() {
                 })
                 .launch_with_fn(|builder| {
                     let launcher = EngineNodeLauncher::new(
-                        LaunchExecutors::single(runtime.clone()),
+                        builder.task_executor().clone(),
                         builder.config().datadir(),
                         Default::default(),
                     );

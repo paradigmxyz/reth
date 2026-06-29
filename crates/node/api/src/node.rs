@@ -100,19 +100,6 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// This can be used to spawn critical, blocking tasks or register tasks that should be
     /// terminated gracefully.
     fn task_executor(&self) -> &TaskExecutor;
-
-    /// Returns the RPC/latency executor handle.
-    ///
-    /// When latency isolation is enabled, this is a dedicated tokio runtime for the sendRaw path.
-    /// Otherwise, this is the same as [`Self::task_executor`].
-    fn rpc_task_executor(&self) -> &TaskExecutor {
-        self.task_executor()
-    }
-
-    /// Returns `true` if a dedicated latency runtime is configured.
-    fn latency_isolated(&self) -> bool {
-        false
-    }
 }
 
 /// Context passed to [`NodeAddOns::launch_add_ons`],
@@ -122,6 +109,8 @@ pub struct AddOnsContext<'a, N: FullNodeComponents> {
     pub node: N,
     /// Node configuration.
     pub config: &'a NodeConfig<<N::Types as NodeTypes>::ChainSpec>,
+    /// RPC/latency task executor when a dedicated runtime is configured.
+    pub rpc_task_executor: TaskExecutor,
     /// Handle to the beacon consensus engine.
     pub beacon_engine_handle: ConsensusEngineHandle<<N::Types as NodeTypes>::Payload>,
     /// Notification channel for engine API events
