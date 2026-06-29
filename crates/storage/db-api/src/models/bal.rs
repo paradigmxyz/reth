@@ -105,13 +105,6 @@ impl StoredBlockAccessList {
         Self { hash, raw }
     }
 
-    /// Creates a stored BAL without recomputing its hash.
-    ///
-    /// `hash` must be the keccak hash of `raw`.
-    pub const fn new_unchecked(raw: RawBal, hash: B256) -> Self {
-        Self { hash, raw }
-    }
-
     fn has_valid_hash(&self) -> bool {
         keccak256(self.raw.as_raw().as_ref()) == self.hash
     }
@@ -203,10 +196,10 @@ mod tests {
 
     #[test]
     fn stored_bal_rejects_hash_mismatch() {
-        let stored = StoredBlockAccessList::new_unchecked(
-            RawBal::from(Bytes::from_static(&[0xc0])),
-            B256::ZERO,
-        );
+        let mut encoded = Vec::new();
+        encoded.extend_from_slice(B256::ZERO.as_slice());
+        encoded.extend_from_slice(&[0xc0]);
+        let stored = StoredBlockAccessList::decompress(&encoded).unwrap();
 
         assert!(stored.into_verified_raw().is_err());
     }

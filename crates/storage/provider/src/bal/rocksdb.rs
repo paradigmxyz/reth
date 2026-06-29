@@ -284,7 +284,7 @@ impl BalStore for RocksDBBalStore {
 
         let mut batch = self.rocksdb.batch();
         for (key, bal) in &pending {
-            let value = StoredBlockAccessList::new_unchecked(bal.clone(), bal.hash());
+            let value = StoredBlockAccessList::new(bal.clone());
             batch.put::<tables::BlockAccessLists>(*key, &value)?;
         }
         batch.commit()?;
@@ -476,10 +476,10 @@ mod tests {
         let (_dir, store) = test_store();
         let block = NumHash::new(1, B256::with_last_byte(1));
         let key = StoredBlockAccessListKey::new(block);
-        let value = StoredBlockAccessList::new_unchecked(
-            RawBal::from(Bytes::from_static(&[0xc0])),
-            B256::ZERO,
-        );
+        let mut encoded = Vec::new();
+        encoded.extend_from_slice(B256::ZERO.as_slice());
+        encoded.extend_from_slice(&[0xc0]);
+        let value = StoredBlockAccessList::decompress(&encoded).unwrap();
 
         store.rocksdb_provider().put::<tables::BlockAccessLists>(key, &value).unwrap();
 
