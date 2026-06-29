@@ -144,17 +144,18 @@ use reth_primitives_traits::{
     RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    providers::{OverlayBuilder, OverlayStateProviderFactory},
+    providers::{OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory},
     BlockExecutionOutput, BlockNumReader, BlockReader, BorrowedEvmStateProviderDatabase,
     ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
     ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
 use reth_trie_common::KeccakKeyHasher;
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{
+    panic::{self, AssertUnwindSafe},
     sync::{atomic::Ordering, mpsc::RecvTimeoutError, Arc},
     time::Duration,
 };
@@ -587,6 +588,8 @@ where
         );
         let overlay_factory =
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
+        let changeset_provider = (!matches!(strategy, StateRootStrategy::Skipped))
+            .then(|| self.spawn_changeset_provider_task(overlay_factory.clone()));
 
         // Spawn the appropriate processor based on strategy
         let pending_sparse_trie_prune = if matches!(strategy, StateRootStrategy::StateRootTask) {
@@ -989,8 +992,25 @@ where
             let _ = valid_block_tx.send(());
         }
 
-        let executed_block =
-            self.spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output);
+        let changeset_provider = if let Some(changeset_provider) = changeset_provider {
+            Some(ensure_ok_post_block!(
+                changeset_provider
+                    .try_into_inner()
+                    .ok()
+                    .expect("changeset provider handle is not cloned"),
+                block
+            ))
+        } else {
+            None
+        };
+
+        let executed_block = self.spawn_deferred_trie_task(
+            Arc::new(block),
+            output,
+            hashed_state,
+            trie_output,
+            changeset_provider,
+        );
         #[cfg(any())]
         let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
         #[cfg(not(any()))]
@@ -1051,6 +1071,26 @@ where
 
             Ok(block)
         })
+    }
+
+    /// Spawns the overlay provider used by the deferred trie changeset producer.
+    fn spawn_changeset_provider_task(
+        &self,
+        overlay_factory: OverlayStateProviderFactory<P, N>,
+    ) -> LazyHandle<ProviderResult<OverlayStateProvider<P::Provider>>> {
+        let parent_span = Span::current();
+        self.payload_processor.executor().spawn_blocking_named(
+            DEFERRED_TRIE_WORKER_NAME,
+            move || {
+                let _span = debug_span!(
+                    target: "engine::tree::payload_validator",
+                    parent: parent_span,
+                    "changeset_provider",
+                )
+                .entered();
+                overlay_factory.database_provider_ro()
+            },
+        )
     }
 
     /// Return sealed block header from database or in-memory state by hash.
@@ -1121,8 +1161,7 @@ where
                 // SAFETY: The borrowed EVM database is consumed by this synchronous block
                 // execution call and cannot outlive `state_provider`.
                 let db = unsafe { BorrowedEvmStateProviderDatabase::new(&state_provider) };
-                let evm_config = self.evm_config.clone().with_jit_support();
-                let evm = evm_config.evm_with_env(evm2::evm::Db::new(db), env.evm_env.clone());
+                let evm = self.evm_config.evm_with_env(evm2::evm::Db::new(db), env.evm_env.clone());
                 let mut executor =
                     self.evm_config.create_executor::<BorrowedEvmStateProviderDatabase>(
                         evm,
@@ -1703,6 +1742,7 @@ where
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         hashed_state: LazyHashedPostState,
         trie_output: Arc<TrieUpdates>,
+        changeset_provider: Option<impl TrieCursorFactory + Send + 'static>,
     ) -> ExecutedBlock<N> {
         // Create deferred handle and task that owns the unsorted inputs.
         // Resolve the lazy handle into Arc<HashedPostState>. By this point the hashed state has
@@ -1715,8 +1755,12 @@ where
             DeferredTrieData::pending(hashed_state, trie_output);
         let block_validation_metrics = self.metrics.block_validation.clone();
 
-        // Capture block info for tracing.
+        // Capture block info for tracing and cache registration.
+        let block_hash = block.hash();
         let block_number = block.number();
+        let pending_changeset_guard = changeset_provider
+            .as_ref()
+            .map(|_| self.changeset_cache.register_pending(block_number, block_hash));
 
         // Spawn background task to compute trie data.
         let compute_trie_input_task = move || {
@@ -1727,19 +1771,59 @@ where
             )
             .entered();
 
-            let compute_start = Instant::now();
-            let computed = deferred_trie_task.compute_and_publish();
-            block_validation_metrics
-                .deferred_trie_compute_duration
-                .record(compute_start.elapsed().as_secs_f64());
+            let result = panic::catch_unwind(AssertUnwindSafe(|| {
+                let compute_start = Instant::now();
+                let computed = deferred_trie_task.compute_and_publish();
+                block_validation_metrics
+                    .deferred_trie_compute_duration
+                    .record(compute_start.elapsed().as_secs_f64());
 
-            // Record sizes of the computed trie data
-            block_validation_metrics
-                .hashed_post_state_size
-                .record(computed.hashed_state.total_len() as f64);
-            block_validation_metrics
-                .trie_updates_sorted_size
-                .record(computed.trie_updates.total_len() as f64);
+                // Record sizes of the computed trie data.
+                block_validation_metrics
+                    .hashed_post_state_size
+                    .record(computed.hashed_state.total_len() as f64);
+                block_validation_metrics
+                    .trie_updates_sorted_size
+                    .record(computed.trie_updates.total_len() as f64);
+
+                let (Some(changeset_provider), Some(pending_changeset_guard)) =
+                    (changeset_provider, pending_changeset_guard)
+                else {
+                    return
+                };
+
+                let changeset_start = Instant::now();
+                match reth_trie::changesets::compute_trie_changesets(
+                    &changeset_provider,
+                    &computed.trie_updates,
+                ) {
+                    Ok(changesets) => {
+                        debug!(
+                            target: "engine::tree::changeset",
+                            ?block_number,
+                            elapsed = ?changeset_start.elapsed(),
+                            "Computed and caching changesets"
+                        );
+
+                        pending_changeset_guard.resolve(Arc::new(changesets));
+                    }
+                    Err(err) => {
+                        warn!(
+                            target: "engine::tree::changeset",
+                            ?block_number,
+                            %err,
+                            "Failed to compute changesets for deferred trie producer"
+                        );
+                    }
+                }
+            }));
+
+            if result.is_err() {
+                error!(
+                    target: "engine::tree::payload_validator",
+                    "Deferred trie task panicked"
+                );
+            }
         };
 
         // Spawn task that computes trie data asynchronously.
@@ -1964,6 +2048,7 @@ pub trait EngineValidator<
     fn on_inserted_executed_block(
         &self,
         block: BuiltPayloadExecutedBlock<N>,
+        state: &EngineApiTreeState<N>,
     ) -> ProviderResult<ExecutedBlock<N>>;
 
     /// Returns [`SavedCache`] for the given block hash.
@@ -2036,17 +2121,26 @@ where
     fn on_inserted_executed_block(
         &self,
         block: BuiltPayloadExecutedBlock<N>,
+        state: &EngineApiTreeState<N>,
     ) -> ProviderResult<ExecutedBlock<N>> {
         self.payload_processor.on_inserted_executed_block(
             block.recovered_block.block_with_parent(),
             &block.execution_output.state,
         );
 
+        let parent_hash = block.recovered_block.parent_hash();
+        let changeset_provider = OverlayStateProviderFactory::new(
+            self.provider.clone(),
+            Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone()),
+        )
+        .database_provider_ro()?;
+
         Ok(self.spawn_deferred_trie_task(
             block.recovered_block,
             block.execution_output,
             LazyHashedPostState::ready(block.hashed_state),
             block.trie_updates,
+            Some(changeset_provider),
         ))
     }
 

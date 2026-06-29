@@ -2,6 +2,8 @@
 use alloc::string::String;
 use alloc::sync::Arc;
 use core::fmt::Debug;
+#[cfg(feature = "jit")]
+use core::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(feature = "std")]
 use alloy_consensus::Header;
@@ -194,7 +196,7 @@ pub struct RethEvmFactory {
     #[cfg(feature = "jit")]
     metrics: JitMetrics,
     #[cfg(feature = "jit")]
-    jit_support: bool,
+    jit_support: Arc<AtomicBool>,
 }
 
 impl Default for RethEvmFactory {
@@ -225,8 +227,8 @@ impl RethEvmFactory {
     }
 
     /// Creates a new factory configuration that owns the backend and records metrics.
-    pub const fn new_with_metrics(backend: JitBackend, metrics: JitMetrics) -> Self {
-        Self { backend, metrics, jit_support: false }
+    pub fn new_with_metrics(backend: JitBackend, metrics: JitMetrics) -> Self {
+        Self { backend, metrics, jit_support: Arc::new(AtomicBool::new(false)) }
     }
 
     /// Returns a reference to the JIT backend.
@@ -235,18 +237,18 @@ impl RethEvmFactory {
     }
 
     /// Enables or disables local JIT support for subsequently created EVMs.
-    pub const fn set_jit_support(&mut self, enabled: bool) {
-        self.jit_support = enabled;
+    pub fn set_jit_support(&self, enabled: bool) {
+        self.jit_support.store(enabled, Ordering::Relaxed);
     }
 
     /// Returns whether subsequently created EVMs install the JIT interpreter runner.
-    pub const fn jit_support_enabled(&self) -> bool {
-        self.jit_support
+    pub fn jit_support_enabled(&self) -> bool {
+        self.jit_support.load(Ordering::Relaxed)
     }
 
     /// Installs the evm2 JIT interpreter runner on a configured EVM if locally enabled.
     pub fn configure_evm(&self, evm: &mut evm2::Evm<evm2::BaseEvmTypes>) {
-        if self.jit_support {
+        if self.jit_support_enabled() {
             evm.set_interpreter_runner(evm2_jit::evm2_evm::JitInterpreterRunner::new(
                 self.backend.clone(),
             ));
@@ -279,7 +281,9 @@ impl RethEvmFactory {
 #[cfg(feature = "jit")]
 impl reth_evm::JitBackend for RethEvmFactory {
     fn set_enabled(&self, enabled: bool) -> Result<(), String> {
-        self.backend.set_enabled(enabled).map_err(|err| err.to_string())
+        self.backend.set_enabled(enabled).map_err(|err| err.to_string())?;
+        self.set_jit_support(enabled);
+        Ok(())
     }
 
     fn pause(&self) {
