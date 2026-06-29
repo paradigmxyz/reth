@@ -1046,6 +1046,21 @@ mod tests {
     }
 
     #[test]
+    fn payload_status_with_witness_encodes_execution_witness() {
+        let payload_status = EngineSszPayloadStatus::try_from(PayloadStatus {
+            status: PayloadStatusEnum::Valid,
+            latest_valid_hash: Some(B256::with_last_byte(1)),
+        })
+        .unwrap();
+        let response =
+            PayloadStatusWithWitness::new(payload_status, Some(ExecutionWitnessV1::default()));
+
+        let decoded = PayloadStatusWithWitness::from_ssz_bytes(&response.as_ssz_bytes()).unwrap();
+        assert!(decoded.witness.is_some());
+        assert_eq!(decoded.witness.as_ref(), Some(&ExecutionWitnessV1::default()));
+    }
+
+    #[test]
     fn decodes_forkchoice_v4_with_custody_columns() {
         let forkchoice_state = ForkchoiceState {
             head_block_hash: B256::ZERO,
