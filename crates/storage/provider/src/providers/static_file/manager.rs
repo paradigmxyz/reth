@@ -50,6 +50,7 @@ use reth_storage_api::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
+use revm_database::states::reverts::AccountInfoRevert;
 use std::{
     collections::BTreeMap,
     fmt::Debug,
@@ -520,14 +521,25 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<()> {
         for block in blocks {
             let block_number = block.recovered_block().number();
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
 
-            let changeset: Vec<_> = reverts
-                .accounts
-                .into_iter()
-                .flatten()
-                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
-                .collect();
+            let reverts = &block.execution_outcome().state.reverts;
+            let mut changeset =
+                Vec::with_capacity(reverts.iter().map(Vec::len).sum::<usize>());
+            for account_block_reverts in reverts.iter() {
+                changeset.extend(account_block_reverts.iter().filter_map(|(address, revert)| {
+                    match &revert.account {
+                        AccountInfoRevert::RevertTo(account) => Some(AccountBeforeTx {
+                            address: *address,
+                            info: Some(account.clone().into()),
+                        }),
+                        AccountInfoRevert::DeleteIt => {
+                            Some(AccountBeforeTx { address: *address, info: None })
+                        }
+                        AccountInfoRevert::DoNothing => None,
+                    }
+                }));
+            }
+
             w.append_account_changeset(changeset, block_number)?;
         }
         Ok(())
@@ -541,22 +553,26 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<()> {
         for block in blocks {
             let block_number = block.recovered_block().number();
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
 
-            let changeset: Vec<_> = reverts
-                .storage
-                .into_iter()
-                .flatten()
-                .flat_map(|revert| {
-                    revert.storage_revert.into_iter().map(move |(key, revert_to_slot)| {
+            let reverts = &block.execution_outcome().state.reverts;
+            let capacity = reverts
+                .iter()
+                .flat_map(|storage_block_reverts| storage_block_reverts.iter())
+                .map(|(_, revert)| revert.storage.len())
+                .sum();
+            let mut changeset = Vec::with_capacity(capacity);
+            for storage_block_reverts in reverts.iter() {
+                for (address, revert) in storage_block_reverts {
+                    changeset.extend(revert.storage.iter().map(|(key, revert_to_slot)| {
                         StorageBeforeTx {
-                            address: revert.address,
-                            key: B256::from(key.to_be_bytes()),
-                            value: revert_to_slot.to_previous_value(),
+                            address: *address,
+                            key: B256::from((*key).to_be_bytes()),
+                            value: (*revert_to_slot).to_previous_value(),
                         }
-                    })
-                })
-                .collect();
+                    }));
+                }
+            }
+
             w.append_storage_changeset(changeset, block_number)?;
         }
         Ok(())
