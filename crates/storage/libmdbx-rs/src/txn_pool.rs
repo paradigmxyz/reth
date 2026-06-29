@@ -1,6 +1,8 @@
 use crate::error::mdbx_result;
 use crossbeam_queue::ArrayQueue;
 
+const READ_TXN_POOL_CAPACITY: usize = 512;
+
 /// Lock-free pool of reset read-only MDBX transaction handles.
 ///
 /// With `MDBX_NOSTICKYTHREADS` (which reth always sets), every `mdbx_txn_begin_ex` for a read
@@ -24,7 +26,7 @@ unsafe impl Sync for PooledTxn {}
 
 impl ReadTxnPool {
     pub(crate) fn new() -> Self {
-        Self { queue: ArrayQueue::new(256) }
+        Self { queue: ArrayQueue::new(READ_TXN_POOL_CAPACITY) }
     }
 
     /// Takes a reset transaction handle from the pool, renews it, and returns it ready for use.
@@ -86,6 +88,7 @@ impl Drop for ReadTxnPool {
 
 #[cfg(test)]
 mod tests {
+    use super::READ_TXN_POOL_CAPACITY;
     use crate::{Environment, WriteFlags};
 
     /// Opens a fresh test environment.
@@ -387,18 +390,20 @@ mod tests {
     #[test]
     fn pool_overflow_aborts_excess() {
         let dir = tempfile::tempdir().unwrap();
-        let env = Environment::builder().set_max_readers(512).open(dir.path()).unwrap();
+        let env = Environment::builder().set_max_readers(768).open(dir.path()).unwrap();
         seed(&env);
 
-        // Open more txns than the pool capacity (256), drop them all.
-        let txns: Vec<_> = (0..300).map(|_| env.begin_ro_txn().unwrap()).collect();
+        // Open more txns than the pool capacity, drop them all.
+        let txns: Vec<_> =
+            (0..READ_TXN_POOL_CAPACITY + 44).map(|_| env.begin_ro_txn().unwrap()).collect();
         drop(txns);
 
-        // Pool is capped at 256; excess handles are aborted.
-        assert_eq!(env.ro_txn_pool().queue.len(), 256);
+        // Pool is capped; excess handles are aborted.
+        assert_eq!(env.ro_txn_pool().queue.len(), READ_TXN_POOL_CAPACITY);
 
-        // All 256 pooled handles should still work.
-        let txns: Vec<_> = (0..256).map(|_| env.begin_ro_txn().unwrap()).collect();
+        // All pooled handles should still work.
+        let txns: Vec<_> =
+            (0..READ_TXN_POOL_CAPACITY).map(|_| env.begin_ro_txn().unwrap()).collect();
         for txn in &txns {
             let db = txn.open_db(None).unwrap();
             let val: Option<[u8; 3]> = txn.get(db.dbi(), b"key").unwrap();
