@@ -52,6 +52,24 @@ pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<
 /// Raw key-value result from a `RocksDB` iterator.
 type RawKVResult = Result<(Box<[u8]>, Box<[u8]>), rocksdb::Error>;
 
+fn block_has_account_history_reverts<N: reth_node_types::NodePrimitives>(
+    block: &ExecutedBlock<N>,
+) -> bool {
+    block.execution_outcome().state.reverts.iter().any(|transition| {
+        transition.iter().any(|(_, revert)| revert.account != Default::default())
+    })
+}
+
+fn block_has_storage_history_reverts<N: reth_node_types::NodePrimitives>(
+    block: &ExecutedBlock<N>,
+) -> bool {
+    block.execution_outcome().state.reverts.iter().any(|transition| {
+        transition
+            .iter()
+            .any(|(_, revert)| revert.wipe_storage || !revert.storage.is_empty())
+    })
+}
+
 /// Statistics for a single `RocksDB` table (column family).
 #[derive(Debug, Clone)]
 pub struct RocksDBTableStats {
@@ -1317,8 +1335,10 @@ impl RocksDBProvider {
 
         let write_tx_hash =
             ctx.storage_settings.storage_v2 && ctx.prune_tx_lookup.is_none_or(|m| !m.is_full());
-        let write_account_history = ctx.storage_settings.storage_v2;
-        let write_storage_history = ctx.storage_settings.storage_v2;
+        let write_account_history = ctx.storage_settings.storage_v2 &&
+            blocks.iter().any(block_has_account_history_reverts::<N>);
+        let write_storage_history = ctx.storage_settings.storage_v2 &&
+            blocks.iter().any(block_has_storage_history_reverts::<N>);
 
         // Propagate tracing context into rayon-spawned threads so that RocksDB
         // write spans appear as children of write_blocks_data in traces.
