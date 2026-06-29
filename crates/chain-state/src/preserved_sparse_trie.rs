@@ -1,63 +1,23 @@
 //! Preserved sparse trie for reuse across payload validations.
 
 use alloy_primitives::B256;
-use parking_lot::Mutex;
-use reth_primitives_traits::FastInstant as Instant;
 use reth_trie_sparse::SparseStateTrie;
-use std::sync::Arc;
 use tracing::debug;
 
 /// Type alias for the sparse trie type used in preservation.
 pub type SparseTrie = SparseStateTrie;
 
-/// Shared handle to a preserved sparse trie that can be reused across payload validations.
-///
-/// This is stored in [`StateTrieOverlayManager`](crate::StateTrieOverlayManager) and cloned to pass
-/// to the sparse trie task for trie reuse.
-#[derive(Debug, Default, Clone)]
-pub struct SharedPreservedSparseTrie(Arc<Mutex<Option<PreservedSparseTrie>>>);
-
-impl SharedPreservedSparseTrie {
-    /// Takes the preserved trie if present, leaving `None` in its place.
-    pub fn take(&self) -> Option<PreservedSparseTrie> {
-        self.0.lock().take()
-    }
-
-    /// Acquires a guard that blocks `take()` until dropped.
-    /// Use this before sending the state root result to ensure the next block
-    /// waits for the trie to be stored.
-    pub fn lock(&self) -> PreservedTrieGuard<'_> {
-        PreservedTrieGuard(self.0.lock())
-    }
-
-    /// Waits until the sparse trie lock becomes available.
-    ///
-    /// This acquires and immediately releases the lock, ensuring that any
-    /// ongoing operations complete before returning. Useful for synchronization
-    /// before starting payload processing.
-    ///
-    /// Returns the time spent waiting for the lock.
-    pub fn wait_for_availability(&self) -> std::time::Duration {
-        let start = Instant::now();
-        let _guard = self.0.lock();
-        let elapsed = start.elapsed();
-        if elapsed.as_millis() > 5 {
-            debug!(
-                target: "engine::tree::payload_processor",
-                blocked_for=?elapsed,
-                "Waited for preserved sparse trie to become available"
-            );
-        }
-        elapsed
-    }
-}
-
 /// Guard that holds the lock on the preserved trie.
-/// While held, `take()` will block. Call `store()` to save the trie before dropping.
+/// While held, the next trie take will block. Call `store()` to save the trie before dropping.
 #[derive(Debug)]
 pub struct PreservedTrieGuard<'a>(parking_lot::MutexGuard<'a, Option<PreservedSparseTrie>>);
 
-impl PreservedTrieGuard<'_> {
+impl<'a> PreservedTrieGuard<'a> {
+    /// Creates a new guard from the preserved trie lock.
+    pub(crate) fn new(guard: parking_lot::MutexGuard<'a, Option<PreservedSparseTrie>>) -> Self {
+        PreservedTrieGuard(guard)
+    }
+
     /// Stores a preserved trie for later reuse.
     pub fn store(&mut self, trie: PreservedSparseTrie) {
         self.0.replace(trie);
