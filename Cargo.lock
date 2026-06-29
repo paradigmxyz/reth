@@ -3638,6 +3638,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "eyre",
+ "reth-chain-state",
  "reth-engine-tree",
  "reth-ethereum",
  "reth-trie",

@@ -209,11 +209,6 @@ where
             })
             .clone()
     }
-
-    /// Returns the state trie overlay manager used by this payload processor.
-    pub fn state_trie_overlays(&self) -> StateTrieOverlayManager<N> {
-        self.state_trie_overlays.clone()
-    }
 }
 
 impl<N, Evm> WaitForCaches for PayloadProcessor<N, Evm>

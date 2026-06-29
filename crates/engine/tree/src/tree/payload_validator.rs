@@ -333,11 +333,10 @@ where
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
         changeset_cache: ChangesetCache,
+        state_trie_overlays: StateTrieOverlayManager<N>,
         runtime: reth_tasks::Runtime,
     ) -> Self {
         let precompile_cache_map = PrecompileCacheMap::default();
-        let state_trie_overlays =
-            StateTrieOverlayManager::new(runtime.state_trie_overlay_worker_pool());
         let payload_processor = PayloadProcessor::new(
             runtime.clone(),
             evm_config.clone(),
@@ -2166,11 +2165,6 @@ pub trait EngineValidator<
         parent_state_root: B256,
         state: &EngineApiTreeState<N>,
     ) -> Option<StateRootHandle>;
-
-    /// Returns the state trie overlay manager used by this validator, if any.
-    fn state_trie_overlay_manager(&self) -> Option<StateTrieOverlayManager<N>> {
-        None
-    }
 }
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
@@ -2268,10 +2262,6 @@ where
             &self.config,
             None,
         ))
-    }
-
-    fn state_trie_overlay_manager(&self) -> Option<StateTrieOverlayManager<N>> {
-        Some(self.payload_processor.state_trie_overlays())
     }
 }
 

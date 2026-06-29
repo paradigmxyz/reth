@@ -391,10 +391,6 @@ where
         runtime: reth_tasks::Runtime,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
-        let mut state = state;
-        if let Some(state_trie_overlays) = payload_validator.state_trie_overlay_manager() {
-            state.tree_state.state_trie_overlays = state_trie_overlays;
-        }
 
         Self {
             provider,
@@ -434,6 +430,7 @@ where
         persistence: PersistenceHandle<N>,
         payload_builder: PayloadBuilderHandle<T>,
         canonical_in_memory_state: CanonicalInMemoryState<N>,
+        state_trie_overlays: StateTrieOverlayManager<N>,
         config: TreeConfig,
         kind: EngineApiKind,
         evm_config: C,
@@ -450,10 +447,6 @@ where
         };
 
         let (tx, outgoing) = unbounded_channel();
-        let state_trie_overlays =
-            payload_validator.state_trie_overlay_manager().unwrap_or_else(|| {
-                StateTrieOverlayManager::new(runtime.state_trie_overlay_worker_pool())
-            });
         let state = EngineApiTreeState::new(
             config.block_buffer_limit(),
             config.max_invalid_header_cache_length(),
