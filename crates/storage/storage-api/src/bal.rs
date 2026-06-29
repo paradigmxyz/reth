@@ -179,13 +179,6 @@ pub trait BalStore: Send + Sync + 'static {
         Ok(())
     }
 
-    /// Deletes BALs whose block number is less than or equal to `to_block`.
-    ///
-    /// Returns the number of BAL entries deleted.
-    fn delete_range_by_number(&self, _to_block: BlockNumber) -> ProviderResult<usize> {
-        Ok(0)
-    }
-
     /// Returns a stream of BAL insert notifications.
     ///
     /// Notifications are emitted only after a BAL has been successfully inserted into the store.
@@ -339,12 +332,6 @@ impl BalStoreHandle {
         out: &mut Vec<Option<Bytes>>,
     ) -> ProviderResult<()> {
         self.inner.append_by_block_num_hashes_with_limit(blocks, limit, out)
-    }
-
-    /// Deletes BALs whose block number is less than or equal to `to_block`.
-    #[inline]
-    pub fn delete_range_by_number(&self, to_block: BlockNumber) -> ProviderResult<usize> {
-        self.inner.delete_range_by_number(to_block)
     }
 
     /// Returns a stream of BAL insert notifications.

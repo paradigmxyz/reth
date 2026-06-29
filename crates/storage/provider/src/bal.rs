@@ -248,22 +248,6 @@ impl BalStore for InMemoryBalStore {
         Ok(())
     }
 
-    fn delete_range_by_number(&self, to_block: BlockNumber) -> ProviderResult<usize> {
-        let mut inner = self.inner.write();
-        let mut deleted = 0;
-        while let Some((&block_number, _)) = inner.hashes_by_number.first_key_value() {
-            if block_number > to_block {
-                break
-            }
-
-            let Some((_, hashes)) = inner.hashes_by_number.pop_first() else { break };
-            for hash in hashes {
-                deleted += usize::from(inner.entries.remove(&hash).is_some());
-            }
-        }
-        Ok(deleted)
-    }
-
     fn bal_stream(&self) -> BalNotificationStream {
         self.notifications.new_listener()
     }

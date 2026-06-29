@@ -34,14 +34,6 @@ impl StoredBlockAccessListKey {
         Self::new(NumHash::new(block_number, B256::ZERO))
     }
 
-    /// Returns the exclusive upper bound for a range ending at `block_number`.
-    pub const fn after_number(block_number: BlockNumber) -> Option<Self> {
-        match block_number.checked_add(1) {
-            Some(next) => Some(Self::first_at_number(next)),
-            None => None,
-        }
-    }
-
     /// Returns the block number.
     pub const fn number(&self) -> BlockNumber {
         self.0.number
@@ -114,18 +106,7 @@ impl StoredBlockAccessList {
         Self { hash, raw }
     }
 
-    /// Returns the stored hash.
-    pub const fn hash(&self) -> B256 {
-        self.hash
-    }
-
-    /// Returns the raw BAL bytes.
-    pub const fn raw(&self) -> &RawBal {
-        &self.raw
-    }
-
-    /// Returns true if the raw bytes match the stored hash.
-    pub fn has_valid_hash(&self) -> bool {
+    fn has_valid_hash(&self) -> bool {
         keccak256(self.raw.as_raw().as_ref()) == self.hash
     }
 

@@ -44,7 +44,7 @@ where
                 output_db,
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
-                RocksDBProvider::builder(output_datadir.rocksdb()).with_default_tables().build()?,
+                RocksDBProvider::builder(output_datadir.rocksdb()).build()?,
                 runtime,
             )?,
             to,

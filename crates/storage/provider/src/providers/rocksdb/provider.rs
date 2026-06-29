@@ -1127,18 +1127,6 @@ impl RocksDBProvider {
         Ok(RocksDBRawIter { inner: iter })
     }
 
-    /// Creates a raw iterator starting from the given key.
-    ///
-    /// Returns raw `(key_bytes, value_bytes)` pairs without decoding values.
-    pub fn raw_iter_from<T: Table>(&self, key: T::Key) -> ProviderResult<RocksDBRawIter<'_>> {
-        let cf = self.get_cf_handle::<T>()?;
-        let encoded_key = key.encode();
-        let iter = self
-            .0
-            .iterator_cf(cf, IteratorMode::From(encoded_key.as_ref(), rocksdb::Direction::Forward));
-        Ok(RocksDBRawIter { inner: iter })
-    }
-
     /// Creates a raw key iterator starting from the given key.
     pub(crate) fn raw_key_iter_from<T: Table>(
         &self,

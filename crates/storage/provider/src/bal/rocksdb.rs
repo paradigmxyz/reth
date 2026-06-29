@@ -56,32 +56,7 @@ impl RocksDBBalStore {
         &self.rocksdb
     }
 
-    fn keys_through_block(
-        &self,
-        to_block: BlockNumber,
-    ) -> ProviderResult<Vec<StoredBlockAccessListKey>> {
-        let mut keys = Vec::new();
-        let end = StoredBlockAccessListKey::after_number(to_block);
-        let iter = self.rocksdb.raw_key_iter_from::<tables::BlockAccessLists>(
-            StoredBlockAccessListKey::first_at_number(0),
-        )?;
-
-        for key_bytes in iter {
-            let key_bytes = key_bytes?;
-            let key = StoredBlockAccessListKey::decode(&key_bytes)
-                .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
-            if end.is_some_and(|end| key >= end) {
-                break
-            }
-            keys.push(key);
-        }
-
-        Ok(keys)
-    }
-
     fn keys_to_prune(&self, tip: BlockNumber) -> ProviderResult<Vec<StoredBlockAccessListKey>> {
-        let Some(prune_mode) = self.config.retention else { return Ok(Vec::new()) };
-
         let mut keys = Vec::new();
         let iter = self.rocksdb.raw_key_iter_from::<tables::BlockAccessLists>(
             StoredBlockAccessListKey::first_at_number(0),
@@ -91,7 +66,7 @@ impl RocksDBBalStore {
             let key_bytes = key_bytes?;
             let key = StoredBlockAccessListKey::decode(&key_bytes)
                 .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
-            if !prune_mode.should_prune(key.number(), tip) {
+            if !self.config.retention.should_prune(key.number(), tip) {
                 break
             }
             keys.push(key);
@@ -147,18 +122,13 @@ impl std::fmt::Debug for RocksDBBalStore {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct RocksDBBalStoreConfig {
     /// Retention policy for on-disk BALs.
-    retention: Option<PruneMode>,
+    retention: PruneMode,
 }
 
 impl RocksDBBalStoreConfig {
     /// Returns a config that keeps on-disk BALs within the given block distance.
     pub const fn with_retention_distance(blocks: u64) -> Self {
-        Self { retention: Some(PruneMode::Distance(blocks)) }
-    }
-
-    /// Returns a config with no on-disk BAL retention limit.
-    pub const fn unbounded() -> Self {
-        Self { retention: None }
+        Self { retention: PruneMode::Distance(blocks) }
     }
 }
 
@@ -207,25 +177,11 @@ impl RocksDBBalStoreBuffer {
             .collect()
     }
 
-    fn keys_through_block(&self, to_block: BlockNumber) -> Vec<StoredBlockAccessListKey> {
-        self.hashes_by_number
-            .iter()
-            .take_while(|(block_number, _)| **block_number <= to_block)
-            .flat_map(|(block_number, hashes)| {
-                hashes.iter().map(move |hash| {
-                    StoredBlockAccessListKey::new(NumHash::new(*block_number, *hash))
-                })
-            })
-            .collect()
-    }
-
     fn keys_to_prune(
         &self,
-        prune_mode: Option<PruneMode>,
+        prune_mode: PruneMode,
         tip: BlockNumber,
     ) -> Vec<StoredBlockAccessListKey> {
-        let Some(prune_mode) = prune_mode else { return Vec::new() };
-
         self.hashes_by_number
             .iter()
             .take_while(|(block_number, _)| prune_mode.should_prune(**block_number, tip))
@@ -405,18 +361,6 @@ impl BalStore for RocksDBBalStore {
         Ok(())
     }
 
-    fn delete_range_by_number(&self, to_block: BlockNumber) -> ProviderResult<usize> {
-        let disk_keys = self.keys_through_block(to_block)?;
-        let mut buffer = self.buffer.write();
-        let buffer_keys = buffer.keys_through_block(to_block);
-        let deleted =
-            disk_keys.iter().chain(buffer_keys.iter()).copied().collect::<BTreeSet<_>>().len();
-
-        self.delete_keys(disk_keys)?;
-        buffer.remove_keys(&buffer_keys);
-        Ok(deleted)
-    }
-
     fn bal_stream(&self) -> BalNotificationStream {
         self.notifications.new_listener()
     }
@@ -540,52 +484,6 @@ mod tests {
                 .unwrap(),
             vec![Some(bal_a), Some(bal_b)]
         );
-    }
-
-    #[test]
-    fn delete_range_by_number_removes_all_hashes_at_old_heights() {
-        let (_dir, store) = test_store();
-        let old_a = B256::with_last_byte(1);
-        let old_b = B256::with_last_byte(2);
-        let new_hash = B256::with_last_byte(3);
-        let new_bal = Bytes::from_static(&[0xc1, 0x03]);
-
-        store
-            .insert(NumHash::new(7, old_a), RawBal::from(Bytes::from_static(&[0xc1, 0x01])))
-            .unwrap();
-        store
-            .insert(NumHash::new(7, old_b), RawBal::from(Bytes::from_static(&[0xc1, 0x02])))
-            .unwrap();
-        store.insert(NumHash::new(9, new_hash), RawBal::from(new_bal.clone())).unwrap();
-        store.flush(9).unwrap();
-
-        assert_eq!(store.delete_range_by_number(7).unwrap(), 2);
-        assert_eq!(disk_bal(&store, NumHash::new(7, old_a)), None);
-        assert_eq!(disk_bal(&store, NumHash::new(7, old_b)), None);
-        assert_eq!(disk_bal(&store, NumHash::new(9, new_hash)), Some(new_bal.clone()));
-        assert_eq!(
-            store
-                .get_by_block_num_hashes(&[
-                    NumHash::new(7, old_a),
-                    NumHash::new(7, old_b),
-                    NumHash::new(9, new_hash),
-                ])
-                .unwrap(),
-            vec![None, None, Some(new_bal)]
-        );
-    }
-
-    #[test]
-    fn delete_range_by_number_removes_read_payloads() {
-        let (_dir, store) = test_store();
-        let block = NumHash::new(7, B256::with_last_byte(1));
-        let bal = Bytes::from_static(&[0xc1, 0x01]);
-
-        store.insert(block, RawBal::from(bal.clone())).unwrap();
-        assert_eq!(store.get_by_block_num_hash(block).unwrap(), Some(bal));
-
-        assert_eq!(store.delete_range_by_number(7).unwrap(), 1);
-        assert_eq!(store.get_by_block_num_hash(block).unwrap(), None);
     }
 
     #[test]
