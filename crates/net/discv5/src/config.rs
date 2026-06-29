@@ -72,12 +72,15 @@ pub struct ConfigBuilder {
     /// NOTE: IP address of `RLPx` socket overwrites IP address of same IP version in
     /// [`discv5::ListenConfig`].
     tcp_socket: SocketAddr,
-    /// IP address to advertise in the local ENR instead of the listen socket address.
+    /// IPv4 address to advertise in the local ENR instead of the listen socket address.
     ///
     /// This is separate from [`discv5::ListenConfig`] because the listen address describes where
     /// discv5 binds its UDP socket. Nodes commonly bind to an unspecified address like `0.0.0.0`
     /// while advertising an externally reachable address from NAT configuration.
-    advertised_ip: Option<IpAddr>,
+    advertised_ipv4: Option<Ipv4Addr>,
+    /// IPv6 address to advertise in the local ENR instead of the listen socket address. See
+    /// [`Self::advertised_ipv4`].
+    advertised_ipv6: Option<Ipv6Addr>,
     /// List of `(key, rlp-encoded-value)` tuples that should be advertised in local node record
     /// (in addition to tcp port, udp port and fork).
     other_enr_kv_pairs: Vec<(&'static [u8], Bytes)>,
@@ -101,7 +104,8 @@ impl ConfigBuilder {
             bootstrap_nodes,
             fork,
             tcp_socket,
-            advertised_ip,
+            advertised_ipv4,
+            advertised_ipv6,
             other_enr_kv_pairs,
             lookup_interval,
             bootstrap_lookup_interval,
@@ -114,7 +118,8 @@ impl ConfigBuilder {
             bootstrap_nodes,
             fork: fork.map(|(key, fork_id)| (key, fork_id.fork_id)),
             tcp_socket,
-            advertised_ip,
+            advertised_ipv4,
+            advertised_ipv6,
             other_enr_kv_pairs,
             lookup_interval: Some(lookup_interval),
             bootstrap_lookup_interval: Some(bootstrap_lookup_interval),
@@ -187,8 +192,14 @@ impl ConfigBuilder {
 
     /// Sets the IP address to advertise in the local [`Enr`](discv5::enr::Enr), without changing
     /// the discv5 listen socket.
+    ///
+    /// Routed to the matching address family, so calling this once per family yields a dual-stack
+    /// advertisement.
     pub const fn advertised_ip(mut self, ip: IpAddr) -> Self {
-        self.advertised_ip = Some(ip);
+        match ip {
+            IpAddr::V4(ip) => self.advertised_ipv4 = Some(ip),
+            IpAddr::V6(ip) => self.advertised_ipv6 = Some(ip),
+        }
         self
     }
 
@@ -236,7 +247,8 @@ impl ConfigBuilder {
             bootstrap_nodes,
             fork,
             tcp_socket,
-            advertised_ip,
+            advertised_ipv4,
+            advertised_ipv6,
             other_enr_kv_pairs,
             lookup_interval,
             bootstrap_lookup_interval,
@@ -250,7 +262,7 @@ impl ConfigBuilder {
 
         discv5_config.listen_config =
             amend_listen_config_wrt_rlpx(&discv5_config.listen_config, tcp_socket.ip());
-        if advertised_ip.is_some() {
+        if advertised_ipv4.is_some() || advertised_ipv6.is_some() {
             // The upstream discv5 service can update local ENR IP fields from peer-observed
             // socket addresses. When the operator configured a NAT address, that address is
             // intentional advertisement state and must not be replaced by peer observations.
@@ -273,7 +285,8 @@ impl ConfigBuilder {
             bootstrap_nodes,
             fork,
             tcp_socket,
-            advertised_ip,
+            advertised_ipv4,
+            advertised_ipv6,
             other_enr_kv_pairs,
             lookup_interval,
             bootstrap_lookup_interval,
@@ -299,8 +312,10 @@ pub struct Config {
     /// NOTE: IP address of `RLPx` socket overwrites IP address of same IP version in
     /// [`discv5::ListenConfig`].
     pub(super) tcp_socket: SocketAddr,
-    /// IP address to advertise in the local ENR instead of the listen socket address.
-    pub(super) advertised_ip: Option<IpAddr>,
+    /// IPv4 address to advertise in the local ENR instead of the listen socket address.
+    pub(super) advertised_ipv4: Option<Ipv4Addr>,
+    /// IPv6 address to advertise in the local ENR instead of the listen socket address.
+    pub(super) advertised_ipv6: Option<Ipv6Addr>,
     /// Additional kv-pairs (besides tcp port, udp port and fork) that should be advertised to
     /// peers by including in local node record.
     pub(super) other_enr_kv_pairs: Vec<(&'static [u8], Bytes)>,
@@ -325,7 +340,8 @@ impl Config {
             bootstrap_nodes: HashSet::default(),
             fork: None,
             tcp_socket: rlpx_tcp_socket,
-            advertised_ip: None,
+            advertised_ipv4: None,
+            advertised_ipv6: None,
             other_enr_kv_pairs: Vec::new(),
             lookup_interval: None,
             bootstrap_lookup_interval: None,

@@ -41,6 +41,7 @@ parking_lot = { workspace = true, optional = true }
 reth-consensus = { workspace = true, features = ["test-utils"] }
 
 parking_lot.workspace = true
+test-case.workspace = true
 tokio = { workspace = true, features = ["full"] }
 
 [features]

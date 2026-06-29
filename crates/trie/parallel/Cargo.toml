@@ -30,7 +30,7 @@ alloy-rlp.workspace = true
 tracing.workspace = true
 
 # revm
-revm-state.workspace = true
+revm.workspace = true
 
 # misc
 thiserror.workspace = true

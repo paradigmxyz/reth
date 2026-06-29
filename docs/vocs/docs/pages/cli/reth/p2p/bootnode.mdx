@@ -20,7 +20,9 @@ Options:
           This will also deterministically set the peer ID. If a path is provided but no key exists at that path, a new random secret will be generated and stored there. If no path is specified, a new ephemeral random secret will be used.
 
       --nat <NAT>
-          NAT resolution method (any|none|upnp|publicip|extip:\<IP\>)
+          NAT resolution method (any|none|upnp|publicip|extip:\<IP\>).
+
+          Can be repeated with one IPv4 and one IPv6 `extip:<IP>` to advertise a dual-stack discv5 ENR (discv4 binds a single socket and always advertises only the `--addr` family).
 
           [default: any]
 

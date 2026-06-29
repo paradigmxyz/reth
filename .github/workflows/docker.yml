@@ -148,7 +148,7 @@ jobs:
 
             *Action required:* Re-run the workflow or investigate the build failure.
 
-            <@U0AAA8F0JEM> investigate and re-run if flaky
+            <@U0ANX3AM5RR> investigate and re-run if flaky
           SLACK_FOOTER: "paradigmxyz/reth · docker.yml"
           MSG_MINIMAL: true
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}

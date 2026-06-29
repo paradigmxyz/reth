@@ -104,6 +104,8 @@ jobs:
         run: |
           mkdir reproducible-artifacts
           cp docker-artifacts/reth reproducible-artifacts/reth-reproducible-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu
+          cp -R docker-artifacts/LICENSES reproducible-artifacts/LICENSES
+          cp docker-artifacts/README.md reproducible-artifacts/README.md
           cp docker-artifacts/*.deb reproducible-artifacts/reth-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu-reproducible.deb
 
       - name: Configure GPG and create artifacts
@@ -115,7 +117,7 @@ jobs:
           echo -n "$GPG_SIGNING_KEY" | base64 --decode | gpg --batch --import
 
           cd reproducible-artifacts
-          tar -czf reth-reproducible-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz reth-reproducible-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu --remove-files
+          tar -czf reth-reproducible-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz reth-reproducible-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu LICENSES README.md --remove-files
           echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab reth-reproducible-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz
           echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab reth-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu-reproducible.deb
 
@@ -125,4 +127,3 @@ jobs:
         run: |
           gh release upload ${{ needs.extract-version.outputs.VERSION }} \
             reproducible-artifacts/*
-

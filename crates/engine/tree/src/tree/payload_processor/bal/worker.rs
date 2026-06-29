@@ -8,8 +8,7 @@ use alloy_evm::{
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
-use revm::database::State;
-use revm_state::bal::Bal as RevmBal;
+use revm::{database::State, state::bal::Bal as RevmBal};
 use std::sync::Arc;
 
 #[derive(Debug, thiserror::Error)]

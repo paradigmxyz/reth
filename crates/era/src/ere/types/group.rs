@@ -214,10 +214,8 @@ impl DynamicBlockIndex {
         );
 
         let mut offsets = Vec::with_capacity(total_offsets);
-        for chunk in data[8..8 + offsets_bytes].chunks_exact(8) {
-            let offset = i64::from_le_bytes(
-                chunk.try_into().map_err(|_| E2sError::Ssz("Failed to read offset".to_string()))?,
-            );
+        for chunk in data[8..8 + offsets_bytes].as_chunks::<8>().0 {
+            let offset = i64::from_le_bytes(*chunk);
             offsets.push(offset);
         }
 
