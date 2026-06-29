@@ -62,6 +62,7 @@ reth-metrics = { workspace = true, features = ["common"] }
 indexmap.workspace = true
 schnellru.workspace = true
 rayon.workspace = true
+smallvec.workspace = true
 tracing.workspace = true
 derive_more.workspace = true
 crossbeam-channel.workspace = true

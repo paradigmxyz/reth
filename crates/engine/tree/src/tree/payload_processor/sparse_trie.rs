@@ -34,6 +34,7 @@ use reth_trie_sparse::{
     ArenaParallelSparseTrie, DeferredDrops, LeafUpdate, RevealableSparseTrie, SparseStateTrie,
     SparseTrie,
 };
+use smallvec::SmallVec;
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
@@ -577,7 +578,7 @@ where
 
             let trie = self.trie.get_or_create_storage_trie_mut(*address);
             let fetched = self.fetched_storage_targets.entry(*address).or_default();
-            let mut targets = Vec::new();
+            let mut targets = SmallVec::<[ProofV2Target; 4]>::new();
 
             let updates_len_before = updates.len();
             trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
@@ -870,7 +871,12 @@ impl PendingTargets {
     }
 
     /// Extends storage targets for the given address.
-    fn extend_storage_targets(&mut self, address: &B256, targets: Vec<ProofV2Target>) {
+    fn extend_storage_targets<I>(&mut self, address: &B256, targets: I)
+    where
+        I: IntoIterator<Item = ProofV2Target>,
+        I::IntoIter: ExactSizeIterator,
+    {
+        let targets = targets.into_iter();
         self.len += targets.len();
         self.targets.storage_targets.entry(*address).or_default().extend(targets);
     }
