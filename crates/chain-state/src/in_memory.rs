@@ -1095,7 +1095,10 @@ mod tests {
     }
 
     impl HashedPostStateProvider for MockStateProvider {
-        fn hashed_post_state(&self, _bundle_state: &revm_database::BundleState) -> HashedPostState {
+        fn hashed_post_state(
+            &self,
+            _bundle_state: &revm::database::BundleState,
+        ) -> HashedPostState {
             HashedPostState::default()
         }
     }
