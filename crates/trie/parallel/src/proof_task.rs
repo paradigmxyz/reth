@@ -3,7 +3,7 @@
 //!
 //! # Architecture
 //!
-//! - **Worker Pools**: Pre-spawned workers with dedicated database transactions
+//! - **Worker Pools**: Pre-spawned workers that lazily open database transactions
 //!   - Storage pool: Handles storage proofs
 //!   - Account pool: Handles account multiproofs
 //! - **Direct Channel Access**: `ProofWorkerHandle` provides type-safe queue methods with direct
@@ -151,7 +151,7 @@ pub struct ProofWorkerHandle {
 }
 
 impl ProofWorkerHandle {
-    /// Spawns storage and account worker pools with dedicated database transactions.
+    /// Spawns storage and account worker pools.
     ///
     /// Returns a handle for submitting proof tasks to the worker pools.
     /// Workers run until the last handle is dropped.
@@ -602,21 +602,51 @@ where
     ///
     /// # Lifecycle
     ///
-    /// 1. Initializes database provider and transaction
-    /// 2. Advertises availability
-    /// 3. Processes jobs in a loop:
+    /// 1. Advertises availability
+    /// 2. Waits for first job
+    /// 3. Initializes database provider and transaction
+    /// 4. Processes jobs in a loop:
     ///    - Receives job from channel
     ///    - Marks worker as busy
     ///    - Processes the job
     ///    - Marks worker as available
-    /// 4. Shuts down when channel closes
+    /// 5. Shuts down when channel closes
     ///
     /// # Panic Safety
     ///
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
     fn run(mut self) -> ProviderResult<()> {
-        // Create provider from factory
+        // Initially mark this worker as available. Provider/cursor setup is delayed until the
+        // first job so idle workers do not open unused read transactions.
+        self.availability.mark_idle(self.worker_id);
+
+        let mut total_idle_time = Duration::ZERO;
+        let idle_start = Instant::now();
+
+        let mut job = match self.work_rx.recv() {
+            Ok(job) => {
+                total_idle_time += idle_start.elapsed();
+                self.availability.mark_busy(self.worker_id);
+                job
+            }
+            Err(_) => {
+                total_idle_time += idle_start.elapsed();
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id = self.worker_id,
+                    total_idle_time_us = total_idle_time.as_micros(),
+                    "Storage worker shutting down without work"
+                );
+
+                #[cfg(feature = "metrics")]
+                self.metrics.record_storage_worker_idle_time(total_idle_time);
+
+                return Ok(());
+            }
+        };
+
+        // Create provider from factory after the worker has actual proof work.
         let provider = self.task_ctx.factory.database_provider_ro()?;
         let proof_tx = ProofTaskTx::new(provider, self.worker_id);
 
@@ -641,18 +671,7 @@ where
             instrumented_hashed_cursor,
         );
 
-        // Initially mark this worker as available.
-        self.availability.mark_idle(self.worker_id);
-
-        let mut total_idle_time = Duration::ZERO;
-        let mut idle_start = Instant::now();
-
-        while let Ok(job) = self.work_rx.recv() {
-            total_idle_time += idle_start.elapsed();
-
-            // Mark worker as busy.
-            self.availability.mark_busy(self.worker_id);
-
+        loop {
             #[cfg(feature = "trie-debug")]
             if let Some(max_jitter) = self.task_ctx.proof_jitter {
                 let jitter =
@@ -681,7 +700,18 @@ where
             // Mark worker as available again.
             self.availability.mark_idle(self.worker_id);
 
-            idle_start = Instant::now();
+            let idle_start = Instant::now();
+            match self.work_rx.recv() {
+                Ok(next_job) => {
+                    total_idle_time += idle_start.elapsed();
+                    self.availability.mark_busy(self.worker_id);
+                    job = next_job;
+                }
+                Err(_) => {
+                    total_idle_time += idle_start.elapsed();
+                    break;
+                }
+            }
         }
 
         // Drop calculator to release mutable borrows on cursor_metrics_cache.
@@ -820,20 +850,50 @@ where
     ///
     /// # Lifecycle
     ///
-    /// 1. Initializes database provider and transaction
-    /// 2. Advertises availability
-    /// 3. Processes jobs in a loop:
+    /// 1. Advertises availability
+    /// 2. Waits for first job
+    /// 3. Initializes database provider and transaction
+    /// 4. Processes jobs in a loop:
     ///    - Receives job from channel
     ///    - Marks worker as busy
     ///    - Processes the job
     ///    - Marks worker as available
-    /// 4. Shuts down when channel closes
+    /// 5. Shuts down when channel closes
     ///
     /// # Panic Safety
     ///
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
     fn run(mut self) -> ProviderResult<()> {
+        // Initially mark this worker as available. Provider/cursor setup is delayed until the
+        // first job so idle workers do not open unused read transactions.
+        self.availability.mark_idle(self.worker_id);
+
+        let mut total_idle_time = Duration::ZERO;
+        let idle_start = Instant::now();
+
+        let mut job = match self.work_rx.recv() {
+            Ok(job) => {
+                total_idle_time += idle_start.elapsed();
+                self.availability.mark_busy(self.worker_id);
+                job
+            }
+            Err(_) => {
+                total_idle_time += idle_start.elapsed();
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id = self.worker_id,
+                    total_idle_time_us = total_idle_time.as_micros(),
+                    "Account worker shutting down without work"
+                );
+
+                #[cfg(feature = "metrics")]
+                self.metrics.record_account_worker_idle_time(total_idle_time);
+
+                return Ok(());
+            }
+        };
+
         let provider = self.task_ctx.factory.database_provider_ro()?;
 
         trace!(
@@ -891,19 +951,9 @@ where
                 instrumented_storage_hashed_cursor,
             )));
 
-        // Count this worker as available only after successful initialization.
-        self.availability.mark_idle(self.worker_id);
-
-        let mut total_idle_time = Duration::ZERO;
-        let mut idle_start = Instant::now();
         let mut value_encoder_stats_cache = ValueEncoderStats::default();
 
-        while let Ok(job) = self.work_rx.recv() {
-            total_idle_time += idle_start.elapsed();
-
-            // Mark worker as busy.
-            self.availability.mark_busy(self.worker_id);
-
+        loop {
             #[cfg(feature = "trie-debug")]
             if let Some(max_jitter) = self.task_ctx.proof_jitter {
                 let jitter =
@@ -933,7 +983,18 @@ where
             // Mark worker as available again.
             self.availability.mark_idle(self.worker_id);
 
-            idle_start = Instant::now();
+            let idle_start = Instant::now();
+            match self.work_rx.recv() {
+                Ok(next_job) => {
+                    total_idle_time += idle_start.elapsed();
+                    self.availability.mark_busy(self.worker_id);
+                    job = next_job;
+                }
+                Err(_) => {
+                    total_idle_time += idle_start.elapsed();
+                    break;
+                }
+            }
         }
 
         // Drop calculators to release mutable borrows on cursor_metrics_cache.
@@ -1065,7 +1126,7 @@ fn dispatch_v2_storage_proofs(
     mut storage_targets: B256Map<Vec<ProofV2Target>>,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
     if storage_targets.is_empty() {
-        return Ok(B256Map::default())
+        return Ok(B256Map::default());
     }
 
     let mut storage_proof_receivers =
@@ -1077,8 +1138,8 @@ fn dispatch_v2_storage_proofs(
     // For storage targets with associated account proofs, ensure the first target has
     // min_len(0) so the root node is returned for storage root computation
     for (hashed_address, targets) in &mut storage_targets {
-        if account_target_addresses.contains(hashed_address) &&
-            let Some(first) = targets.first_mut()
+        if account_target_addresses.contains(hashed_address)
+            && let Some(first) = targets.first_mut()
         {
             *first = first.with_min_len(0);
         }
