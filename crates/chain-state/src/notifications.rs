@@ -158,7 +158,9 @@ impl<N: NodePrimitives> CanonStateNotification<N> {
     /// The boolean in the tuple (2nd element) denotes whether the receipt was from the reverted
     /// chain segment.
     pub fn block_receipts(&self) -> Vec<(BlockReceipts<N::Receipt>, bool)> {
-        let mut receipts = Vec::new();
+        let old_len = self.reverted().as_deref().map_or(0, Chain::len);
+        let new_len = self.committed().len();
+        let mut receipts = Vec::with_capacity(old_len + new_len);
 
         // get old receipts
         if let Some(old) = self.reverted() {
