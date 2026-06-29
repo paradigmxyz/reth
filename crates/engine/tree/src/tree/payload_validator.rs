@@ -766,7 +766,8 @@ where
                 .ok()
         };
 
-        let wam_items = built_bal.as_ref().map(WamItems::from_bal);
+        let wam_items =
+            is_bogota_active.then(|| built_bal.as_ref().map(WamItems::from_bal)).flatten();
         ensure_ok_post_block!(
             self.validate_post_execution(
                 &block,

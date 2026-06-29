@@ -41,6 +41,7 @@ use reth_tasks::{spawn_os_thread, utils::increase_thread_priority, WorkerPool};
 use reth_trie_db::ChangesetCache;
 use reth_trie_sparse::SparseTrieRetainedPaths;
 use revm::interpreter::debug_unreachable;
+use revm_primitives::hardfork::SpecId;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
 
@@ -565,6 +566,24 @@ where
             .map(|header| header.block_access_list_hash().is_some())
     }
 
+    fn is_bogota_active_at(&self, tip: BlockNumHash) -> ProviderResult<bool> {
+        let canonical_head = self.canonical_in_memory_state.get_canonical_head();
+        let header = if canonical_head.hash() == tip.hash {
+            canonical_head
+        } else if let Some(header) = self.state.tree_state.sealed_header_by_hash(&tip.hash) {
+            header.clone()
+        } else {
+            let header = self
+                .provider
+                .header(tip.hash)?
+                .ok_or(ProviderError::HeaderNotFound(tip.hash.into()))?;
+            SealedHeader::new(header, tip.hash)
+        };
+
+        let evm_env = self.evm_config.evm_env(header.header()).map_err(ProviderError::other)?;
+        Ok(Into::<SpecId>::into(*evm_env.spec_id()).is_enabled_in(SpecId::BOGOTA))
+    }
+
     fn missing_expected_bal_error(number: u64, hash: B256) -> ProviderError {
         ProviderError::other(std::io::Error::other(format!(
             "missing expected BAL for block #{number} ({hash})"
@@ -579,6 +598,11 @@ where
     }
 
     fn update_canonical_warm_accesses(&mut self, tip: BlockNumHash) -> ProviderResult<()> {
+        if !self.is_bogota_active_at(tip)? {
+            self.state.tree_state.set_warm_accesses(WarmAccessMultiset::default(), 0);
+            return Ok(())
+        }
+
         let (warm_accesses, depth) = self.reconstruct_warm_accesses(tip)?;
         self.state.tree_state.set_warm_accesses(warm_accesses, depth);
         Ok(())
@@ -590,6 +614,11 @@ where
     ) -> ProviderResult<()> {
         for block in new_blocks {
             let num_hash = block.recovered_block().num_hash();
+            if !self.is_bogota_active_at(num_hash)? {
+                self.state.tree_state.set_warm_accesses(WarmAccessMultiset::default(), 0);
+                continue
+            }
+
             let Some(add_bal) = self.provider.bal_store().get_decoded_by_hash(num_hash.hash)?
             else {
                 if block.recovered_block().header().block_access_list_hash().is_some() {
