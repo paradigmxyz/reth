@@ -27,7 +27,7 @@ use reth_provider::{
     BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader,
 };
 use reth_revm::db::BundleState;
-use reth_tasks::{utils::increase_thread_priority, ForEachOrdered, Runtime};
+use reth_tasks::{utils::increase_thread_priority, Runtime};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, HashedPostState,
 };
@@ -448,14 +448,17 @@ where
     /// waiting for rayon scheduling.
     const PARALLEL_PREFETCH_COUNT: usize = 4;
 
+    /// Size of the first parallel tx batch in non-BAL path.
+    const FIRST_PARALLEL_TX_WINDOW_SIZE: usize = 64;
+
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     ///
     /// For blocks with fewer than [`Self::SMALL_BLOCK_TX_THRESHOLD`] transactions, uses
     /// sequential iteration to avoid rayon overhead. For larger blocks, uses rayon parallel
     /// iteration to convert transactions in parallel while streaming results to execution.
     ///
-    /// When `parallel_bal_execution` is disabled, uses [`ForEachOrdered`] to preserve the
-    /// original transaction order. Otherwise, streams results as they become available.
+    /// When `parallel_bal_execution` is disabled, preserves the original transaction order.
+    /// Otherwise, streams results as they become available.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_tx_iterator<I: ExecutableTxIterator<Evm>>(
         &self,
@@ -512,31 +515,48 @@ where
                     // few transactions are recovered sequentially and sent immediately before
                     // entering the parallel iterator for the remainder.
                     let prefetch = Self::PARALLEL_PREFETCH_COUNT.min(transaction_count);
-                    let mut all: Vec<_> = transactions.into_iter().collect();
-                    let rest = all.split_off(prefetch);
+                    let mut iter = transactions.into_iter();
 
                     // Convert the first few transactions sequentially so execution can
                     // start immediately without waiting for rayon work-stealing.
-                    convert_serial(all.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                    convert_serial(iter.by_ref().take(prefetch), &convert, &prewarm_tx, &execute_tx);
 
-                    // Without BALs, we need to preserve the initial order of transactions,
-                    // so we have to use `for_each_ordered_in`.
-                    rest.into_par_iter()
-                        .enumerate()
-                        .map(|(i, tx)| {
-                            let idx = i + prefetch;
-                            let tx = convert.convert(tx);
-                            (idx, tx)
-                        })
-                        .for_each_ordered_in(executor.cpu_pool(), |(idx, tx)| {
-                            let tx = tx.map(|tx| {
-                                let tx = WithTxEnv::new(tx);
-                                let _ = prewarm_tx.send((idx, tx.clone()));
-                                tx
-                            });
-                            let _ = execute_tx.send((idx, tx));
-                            trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
-                        });
+                    let mut iter = iter.enumerate();
+
+                    let mut batch_size = Self::FIRST_PARALLEL_TX_WINDOW_SIZE;
+
+                    // Without BALs, we need to preserve the initial order of transactions.
+                    // Process exponentially increasing windows to make sure that first transactions are prioritized.
+                    executor.cpu_pool().install(move || {
+                        loop {
+                            let chunk = iter
+                                .by_ref()
+                                .take(batch_size)
+                                .collect::<Vec<_>>();
+                            if chunk.is_empty() {
+                                break;
+                            }
+
+                            batch_size = batch_size.saturating_mul(2);
+
+                            let chunk = chunk
+                                .into_par_iter()
+                                .map(|(i, tx)| {
+                                    let idx = i + prefetch;
+                                    let tx = convert.convert(tx).map(WithTxEnv::new);
+                                    (idx, tx)
+                                })
+                                .collect::<Vec<_>>();
+
+                            for (idx, tx) in chunk {
+                                if let Ok(tx) = &tx {
+                                    let _ = prewarm_tx.send((idx, tx.clone()));
+                                }
+                                let _ = execute_tx.send((idx, tx));
+                                trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+                            }
+                        }
+                    });
                 }
             });
         }
@@ -1069,7 +1089,9 @@ mod tests {
         precompile_cache::PrecompileCacheMap,
         ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
     };
+    use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
+    use alloy_primitives::{map::HashMap, Address, B256, U256};
     use rand::Rng;
     use reth_chain_state::StateTrieOverlayManager;
     use reth_chainspec::ChainSpec;
@@ -1088,8 +1110,7 @@ mod tests {
     use reth_testing_utils::generators;
     use reth_trie::{test_utils::state_root, HashedPostState};
     use reth_trie_db::ChangesetCache;
-    use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
-    use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
+    use revm::state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
     use std::sync::Arc;
 
     fn make_saved_cache(hash: B256) -> SavedCache {
@@ -1330,7 +1351,7 @@ mod tests {
                     }
                 }
 
-                let mut account = revm_state::Account::default();
+                let mut account = revm::state::Account::default();
                 account.info = AccountInfo {
                     balance: U256::from(rng.random::<u64>()),
                     nonce: rng.random::<u64>(),

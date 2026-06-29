@@ -119,6 +119,8 @@ use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 use reth_trie_sparse::SparseTrieRetainedPaths;
 
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
+use alloy_consensus::constants::KECCAK_EMPTY;
+use alloy_primitives::Address;
 use reth_chain_state::{
     CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats,
     StateTrieOverlayManager,
@@ -152,7 +154,6 @@ use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State}
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm_primitives::{Address, KECCAK_EMPTY};
 use std::{
     collections::HashMap,
     sync::{
