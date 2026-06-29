@@ -373,6 +373,11 @@ where
                 let _span = branch_span.entered();
 
                 stream_bal.as_bal().par_iter().for_each(|account_changes| {
+                    let account_fields = BalAccountStateFields::from_changes(account_changes);
+                    if !bal_account_changes_state_root(account_changes, account_fields) {
+                        return;
+                    }
+
                     WorkerPool::with_worker_mut(|worker| {
                         let provider =
                             worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
@@ -380,6 +385,7 @@ where
                             &parent_span,
                             provider,
                             account_changes,
+                            account_fields,
                             &to_sparse_trie_task,
                         );
                     });
@@ -638,6 +644,7 @@ where
         parent_span: &Span,
         provider: &mut Option<Box<dyn AccountReader>>,
         account_changes: &alloy_eip7928::AccountChanges,
+        account_fields: BalAccountStateFields,
         to_sparse_trie_task: &CrossbeamSender<StateRootMessage>,
     ) {
         if self.disable_bal_parallel_state_root {
@@ -645,11 +652,6 @@ where
         }
         let address = account_changes.address;
         let mut hashed_address = None;
-        let account_fields = BalAccountStateFields::from_changes(account_changes);
-
-        if !bal_account_changes_state_root(account_changes, account_fields) {
-            return;
-        }
 
         if !account_changes.storage_changes.is_empty() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
