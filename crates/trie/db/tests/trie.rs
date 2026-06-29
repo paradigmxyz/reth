@@ -751,10 +751,8 @@ fn storage_trie_sorted_updates_append_tail_suffix() {
     let hashed_address = B256::with_last_byte(0x42);
 
     reth_trie_db::with_adapter!(tx, |A| {
-        let mut cursor = tx
-            .tx_ref()
-            .cursor_dup_write::<<A as TrieTableAdapter>::StorageTrieTable>()
-            .unwrap();
+        let mut cursor =
+            tx.tx_ref().cursor_dup_write::<<A as TrieTableAdapter>::StorageTrieTable>().unwrap();
         for (path, node) in [
             (nibble_path([0x01]), storage_tail_test_node(0x0001)),
             (nibble_path([0x02]), storage_tail_test_node(0x0002)),
@@ -765,9 +763,7 @@ fn storage_trie_sorted_updates_append_tail_suffix() {
                 <A as TrieKeyAdapter>::StorageSubKey::from(path),
                 node,
             );
-            cursor
-                .upsert(hashed_address, &entry)
-                .unwrap();
+            cursor.upsert(hashed_address, &entry).unwrap();
         }
         drop(cursor);
 
@@ -788,10 +784,8 @@ fn storage_trie_sorted_updates_append_tail_suffix() {
             .unwrap();
         assert_eq!(modified, 18);
 
-        let cursor = tx
-            .tx_ref()
-            .cursor_dup_read::<<A as TrieTableAdapter>::StorageTrieTable>()
-            .unwrap();
+        let cursor =
+            tx.tx_ref().cursor_dup_read::<<A as TrieTableAdapter>::StorageTrieTable>().unwrap();
         let mut storage_cursor = DatabaseStorageTrieCursor::<_, A>::new(cursor, hashed_address);
         assert_eq!(
             storage_cursor.seek_exact(nibble_path([0x01])).unwrap(),
