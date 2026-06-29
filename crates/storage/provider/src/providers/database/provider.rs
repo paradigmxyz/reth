@@ -385,10 +385,7 @@ impl<TX, N: NodeTypes> RocksDBProviderFactory for DatabaseProvider<TX, N> {
 
     fn commit_pending_rocksdb_batches(&self) -> ProviderResult<()> {
         let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
-        for batch in batches {
-            self.rocksdb_provider.commit_batch(batch)?;
-        }
-        Ok(())
+        self.rocksdb_provider.commit_batches_with_single_wal_sync(batches)
     }
 }
 

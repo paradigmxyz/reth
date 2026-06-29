@@ -46,6 +46,11 @@ fn synced_write_options() -> WriteOptions {
     opts
 }
 
+/// Returns [`WriteOptions`] that append to the WAL without syncing it immediately.
+fn unsynced_write_options() -> WriteOptions {
+    WriteOptions::default()
+}
+
 /// Pending `RocksDB` batches type alias.
 pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
 
@@ -1287,6 +1292,52 @@ impl RocksDBProvider {
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all, fields(batch_len = batch.len(), batch_size = batch.size_in_bytes()))]
     pub fn commit_batch(&self, batch: WriteBatchWithTransaction<true>) -> ProviderResult<()> {
         self.0.db_rw().write_opt(batch, &synced_write_options()).map_err(|e| {
+            ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
+        })
+    }
+
+    /// Commits pending `RocksDB` batches and syncs the WAL once after all writes.
+    ///
+    /// Some callers collect several independent history batches before an explicit table flush.
+    /// They only need those batches to be durable when this method returns, so syncing the WAL once
+    /// after the group avoids repeated fsyncs without merging batches or changing table ordering.
+    ///
+    /// Single-batch commits keep the existing fully synced path.
+    ///
+    /// # Panics
+    /// Panics if the provider is in read-only mode.
+    pub fn commit_batches_with_single_wal_sync(
+        &self,
+        batches: Vec<WriteBatchWithTransaction<true>>,
+    ) -> ProviderResult<()> {
+        let mut batches = batches.into_iter();
+        let Some(first) = batches.next() else { return Ok(()) };
+        let Some(second) = batches.next() else { return self.commit_batch(first) };
+
+        let write_options = unsynced_write_options();
+        self.commit_unsynced_batch(first, &write_options)?;
+        self.commit_unsynced_batch(second, &write_options)?;
+        for batch in batches {
+            self.commit_unsynced_batch(batch, &write_options)?;
+        }
+
+        self.0.db_rw().flush_wal(true).map_err(|e| {
+            ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
+        })
+    }
+
+    fn commit_unsynced_batch(
+        &self,
+        batch: WriteBatchWithTransaction<true>,
+        write_options: &WriteOptions,
+    ) -> ProviderResult<()> {
+        self.0.db_rw().write_opt(batch, write_options).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,
