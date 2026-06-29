@@ -70,9 +70,8 @@ use reth_node_metrics::{
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
     BalStoreHandle, BlockHashReader, BlockNumReader, ProviderError, ProviderFactory,
-    ProviderResult, RocksDBBalStore, RocksDBBalStoreConfig, RocksDBProviderFactory,
-    StageCheckpointReader, StaticFileProviderBuilder, StaticFileProviderFactory,
-    StorageSettingsCache,
+    ProviderResult, RocksDBBalStore, RocksDBProviderFactory, StageCheckpointReader,
+    StaticFileProviderBuilder, StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -508,16 +507,15 @@ where
         };
 
         let prune_config = self.prune_config();
-        let bal_store_config = self
+        let bal_store = self
             .node_config()
             .db
             .balstore_cache_size
-            .map(RocksDBBalStoreConfig::with_retention_distance)
-            .unwrap_or_default();
-        let bal_store = BalStoreHandle::new(RocksDBBalStore::with_config(
-            rocksdb_provider.clone(),
-            bal_store_config,
-        ));
+            .map(|distance| {
+                RocksDBBalStore::with_retention_distance(rocksdb_provider.clone(), distance)
+            })
+            .unwrap_or_else(|| RocksDBBalStore::new(rocksdb_provider.clone()));
+        let bal_store = BalStoreHandle::new(bal_store);
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),

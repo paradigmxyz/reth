@@ -289,8 +289,7 @@ pub trait BalProvider {
     fn bal_store(&self) -> &BalStoreHandle;
 }
 
-/// Fetches the BAL for a block hash, resolving the block number if hash-only lookup misses.
-pub fn get_bal_by_hash<Provider>(
+fn get_bal_by_hash<Provider>(
     provider: &Provider,
     block_hash: BlockHash,
 ) -> ProviderResult<Option<Bytes>>
@@ -303,21 +302,6 @@ where
 
     let Some(block_number) = provider.block_number(block_hash)? else { return Ok(None) };
     provider.bal_store().get_by_block_num_hash(NumHash::new(block_number, block_hash))
-}
-
-/// Fetches BALs for block hashes, resolving block numbers for hash-only misses.
-pub fn get_bals_by_hashes<Provider>(
-    provider: &Provider,
-    block_hashes: &[BlockHash],
-) -> ProviderResult<Vec<Option<Bytes>>>
-where
-    Provider: BalProvider + BlockNumReader + ?Sized,
-{
-    let mut out = Vec::with_capacity(block_hashes.len());
-    for block_hash in block_hashes {
-        out.push(get_bal_by_hash(provider, *block_hash)?);
-    }
-    Ok(out)
 }
 
 /// Fetches BAL response entries for block hashes, resolving block numbers for hash-only misses.
@@ -354,16 +338,7 @@ pub fn get_revm_bal_by_hash<Provider>(
 where
     Provider: BalProvider + BlockNumReader + ?Sized,
 {
-    if let Some(bal) = provider.bal_store().revm_bal_by_hash(block_hash)? {
-        return Ok(Some(bal))
-    }
-
-    let Some(block_number) = provider.block_number(block_hash)? else { return Ok(None) };
-    provider
-        .bal_store()
-        .get_by_block_num_hash(NumHash::new(block_number, block_hash))?
-        .map(revm_bal_from_raw)
-        .transpose()
+    get_bal_by_hash(provider, block_hash)?.map(revm_bal_from_raw).transpose()
 }
 
 fn revm_bal_from_raw(raw: Bytes) -> ProviderResult<DecodedBal<Arc<RevmBal>>> {

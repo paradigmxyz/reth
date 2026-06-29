@@ -39,7 +39,7 @@ pub mod either_writer;
 pub use either_writer::*;
 
 mod bal;
-pub use bal::{BalConfig, InMemoryBalStore, RocksDBBalStore, RocksDBBalStoreConfig};
+pub use bal::{BalConfig, InMemoryBalStore, RocksDBBalStore};
 
 pub use reth_chain_state::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotificationStream,

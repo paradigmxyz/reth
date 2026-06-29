@@ -23,26 +23,26 @@ use std::{
 /// the block number/hash pair.
 #[derive(Clone)]
 pub struct RocksDBBalStore {
-    config: RocksDBBalStoreConfig,
+    retention: PruneMode,
     rocksdb: RocksDBProvider,
     buffer: Arc<RwLock<RocksDBBalStoreBuffer>>,
     notifications: EventSender<BalNotification>,
 }
 
 impl RocksDBBalStore {
-    /// Creates a new RocksDB-backed BAL store with the default config.
+    /// Creates a new RocksDB-backed BAL store with the default retention distance.
     ///
     /// The provider must be built with the `BlockAccessLists` column family.
     pub fn new(rocksdb: RocksDBProvider) -> Self {
-        Self::with_config(rocksdb, RocksDBBalStoreConfig::default())
+        Self::with_retention_distance(rocksdb, BAL_RETENTION_PERIOD_SLOTS)
     }
 
-    /// Creates a new RocksDB-backed BAL store with the given config.
+    /// Creates a new RocksDB-backed BAL store with the given retention distance.
     ///
     /// The provider must be built with the `BlockAccessLists` column family.
-    pub fn with_config(rocksdb: RocksDBProvider, config: RocksDBBalStoreConfig) -> Self {
+    pub fn with_retention_distance(rocksdb: RocksDBProvider, blocks: u64) -> Self {
         Self {
-            config,
+            retention: PruneMode::Distance(blocks),
             rocksdb,
             buffer: Arc::new(RwLock::new(RocksDBBalStoreBuffer::default())),
             notifications: EventSender::new(super::DEFAULT_BAL_NOTIFICATION_CHANNEL_SIZE),
@@ -64,7 +64,7 @@ impl RocksDBBalStore {
             let key_bytes = key_bytes?;
             let key = StoredBlockAccessListKey::decode(&key_bytes)
                 .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
-            if !self.config.retention.should_prune(key.number(), tip) {
+            if !self.retention.should_prune(key.number(), tip) {
                 break
             }
             keys.push(key);
@@ -107,32 +107,9 @@ impl RocksDBBalStore {
 impl std::fmt::Debug for RocksDBBalStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RocksDBBalStore")
-            .field("config", &self.config)
+            .field("retention", &self.retention)
             .field("rocksdb", &self.rocksdb)
             .finish_non_exhaustive()
-    }
-}
-
-/// Configuration for [`RocksDBBalStore`].
-///
-/// Retention controls logical BAL availability. RocksDB reclaims deleted BlobDB payload space later
-/// through compaction and blob garbage collection.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub struct RocksDBBalStoreConfig {
-    /// Retention policy for on-disk BALs.
-    retention: PruneMode,
-}
-
-impl RocksDBBalStoreConfig {
-    /// Returns a config that keeps on-disk BALs within the given block distance.
-    pub const fn with_retention_distance(blocks: u64) -> Self {
-        Self { retention: PruneMode::Distance(blocks) }
-    }
-}
-
-impl Default for RocksDBBalStoreConfig {
-    fn default() -> Self {
-        Self::with_retention_distance(BAL_RETENTION_PERIOD_SLOTS)
     }
 }
 
@@ -266,7 +243,7 @@ impl BalStore for RocksDBBalStore {
         let mut buffer = self.buffer.write();
         buffer.insert(block, bal.clone());
         if let Some(highest_block_number) = buffer.highest_block_number {
-            let keys = buffer.keys_to_prune(self.config.retention, highest_block_number);
+            let keys = buffer.keys_to_prune(self.retention, highest_block_number);
             buffer.remove_keys(&keys);
         }
         drop(buffer);
@@ -286,7 +263,7 @@ impl BalStore for RocksDBBalStore {
             buffer.insert(*block, bal.clone());
         }
         if let Some(highest_block_number) = buffer.highest_block_number {
-            let keys = buffer.keys_to_prune(self.config.retention, highest_block_number);
+            let keys = buffer.keys_to_prune(self.retention, highest_block_number);
             buffer.remove_keys(&keys);
         }
         drop(buffer);
@@ -318,7 +295,7 @@ impl BalStore for RocksDBBalStore {
     fn prune(&self, tip: BlockNumber) -> ProviderResult<usize> {
         let disk_keys = self.keys_to_prune(tip)?;
         let mut buffer = self.buffer.write();
-        let buffer_keys = buffer.keys_to_prune(self.config.retention, tip);
+        let buffer_keys = buffer.keys_to_prune(self.retention, tip);
         let pruned =
             disk_keys.iter().chain(buffer_keys.iter()).copied().collect::<BTreeSet<_>>().len();
 
@@ -474,10 +451,7 @@ mod tests {
     fn prune_uses_configured_retention() {
         let dir = tempfile::tempdir().unwrap();
         let rocksdb = RocksDBBuilder::new(dir.path()).with_default_tables().build().unwrap();
-        let store = RocksDBBalStore::with_config(
-            rocksdb,
-            RocksDBBalStoreConfig::with_retention_distance(2),
-        );
+        let store = RocksDBBalStore::with_retention_distance(rocksdb, 2);
         let old_hash = B256::with_last_byte(1);
         let retained_hash = B256::with_last_byte(2);
         let retained_bal = Bytes::from_static(&[0xc1, 0x02]);

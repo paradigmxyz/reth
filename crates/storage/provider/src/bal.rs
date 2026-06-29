@@ -14,7 +14,7 @@ use std::{
 };
 
 mod rocksdb;
-pub use rocksdb::{RocksDBBalStore, RocksDBBalStoreConfig};
+pub use rocksdb::RocksDBBalStore;
 
 /// Basic in-memory BAL store keyed by block hash.
 #[derive(Debug, Clone)]

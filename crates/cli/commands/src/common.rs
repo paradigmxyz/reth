@@ -27,8 +27,7 @@ use reth_provider::{
         BlockchainProvider, NodeTypesForProvider, RocksDBProvider, StaticFileProvider,
         StaticFileProviderBuilder,
     },
-    BalStoreHandle, ProviderFactory, RocksDBBalStore, RocksDBBalStoreConfig,
-    StaticFileProviderFactory, StorageSettings,
+    BalStoreHandle, ProviderFactory, RocksDBBalStore, StaticFileProviderFactory, StorageSettings,
 };
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
@@ -196,15 +195,14 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
-        let bal_store_config = self
+        let bal_store = self
             .db
             .balstore_cache_size
-            .map(RocksDBBalStoreConfig::with_retention_distance)
-            .unwrap_or_default();
-        let bal_store = BalStoreHandle::new(RocksDBBalStore::with_config(
-            rocksdb_provider.clone(),
-            bal_store_config,
-        ));
+            .map(|distance| {
+                RocksDBBalStore::with_retention_distance(rocksdb_provider.clone(), distance)
+            })
+            .unwrap_or_else(|| RocksDBBalStore::new(rocksdb_provider.clone()));
+        let bal_store = BalStoreHandle::new(bal_store);
         let factory = ProviderFactory::<NodeTypesWithDBAdapter<N, DatabaseEnv>>::new(
             db,
             self.chain.clone(),
