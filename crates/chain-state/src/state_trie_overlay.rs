@@ -4,15 +4,16 @@
 //! parent has not been persisted yet. [`StateTrieOverlayManager`] tracks those in-memory blocks and
 //! builds reusable flattened state trie overlays on demand.
 
-use crate::{EthPrimitives, ExecutedBlock};
+use crate::{EthPrimitives, ExecutedBlock, PreservedSparseTrie, PreservedTrieGuard};
 use alloy_primitives::B256;
+use parking_lot::Mutex;
 use reth_metrics::{
     metrics::{Counter, Histogram},
     Metrics,
 };
 use reth_primitives_traits::{
     dashmap::{mapref::entry::Entry, DashMap},
-    AlloyBlockHeader, NodePrimitives,
+    AlloyBlockHeader, FastInstant, NodePrimitives,
 };
 #[cfg(feature = "rayon")]
 use reth_tasks::WorkerPool;
@@ -32,6 +33,7 @@ use tracing::{debug, trace};
 pub struct StateTrieOverlayManager<N: NodePrimitives = EthPrimitives> {
     blocks: Arc<DashMap<B256, ExecutedBlock<N>>>,
     overlays: Arc<DashMap<OverlayCacheKey, OverlayCacheEntry>>,
+    preserved_sparse_trie: Arc<Mutex<Option<PreservedSparseTrie>>>,
     #[cfg(feature = "rayon")]
     worker_pool: Option<Arc<WorkerPool>>,
     metrics: StateTrieOverlayMetrics,
@@ -54,6 +56,7 @@ impl<N: NodePrimitives> Default for StateTrieOverlayManager<N> {
         Self {
             blocks: Default::default(),
             overlays: Default::default(),
+            preserved_sparse_trie: Default::default(),
             #[cfg(feature = "rayon")]
             worker_pool: None,
             metrics: Default::default(),
@@ -77,9 +80,41 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         Self {
             blocks: Default::default(),
             overlays: Default::default(),
+            preserved_sparse_trie: Default::default(),
             worker_pool: Some(worker_pool),
             metrics: Default::default(),
         }
+    }
+
+    /// Takes the preserved sparse trie if present, leaving `None` in its place.
+    pub fn take_sparse_trie(&self) -> Option<PreservedSparseTrie> {
+        self.preserved_sparse_trie.lock().take()
+    }
+
+    /// Acquires a guard that blocks taking the trie until dropped.
+    ///
+    /// Use this before sending the state root result to ensure the next block waits for the trie
+    /// to be stored.
+    pub fn lock_sparse_trie(&self) -> PreservedTrieGuard<'_> {
+        PreservedTrieGuard::new(self.preserved_sparse_trie.lock())
+    }
+
+    /// Waits until the sparse trie lock becomes available.
+    ///
+    /// This acquires and immediately releases the lock, ensuring that any ongoing operations
+    /// complete before returning. Returns the time spent waiting for the lock.
+    pub fn wait_for_sparse_trie_availability(&self) -> std::time::Duration {
+        let start = FastInstant::now();
+        let _guard = self.preserved_sparse_trie.lock();
+        let elapsed = start.elapsed();
+        if elapsed.as_millis() > 5 {
+            debug!(
+                target: "engine::tree::payload_processor",
+                blocked_for=?elapsed,
+                "Waited for preserved sparse trie to become available"
+            );
+        }
+        elapsed
     }
 
     /// Inserts an executed in-memory block into the state trie overlay manager.

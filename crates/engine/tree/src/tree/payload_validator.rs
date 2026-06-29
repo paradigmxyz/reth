@@ -123,6 +123,7 @@ use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::Address;
 use reth_chain_state::{
     CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats,
+    StateTrieOverlayManager,
 };
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -333,6 +334,7 @@ where
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
         changeset_cache: ChangesetCache,
+        state_trie_overlays: StateTrieOverlayManager<N>,
         runtime: reth_tasks::Runtime,
     ) -> Self {
         let precompile_cache_map = PrecompileCacheMap::default();
@@ -341,6 +343,7 @@ where
             evm_config.clone(),
             &config,
             precompile_cache_map.clone(),
+            state_trie_overlays,
         );
         Self {
             provider,

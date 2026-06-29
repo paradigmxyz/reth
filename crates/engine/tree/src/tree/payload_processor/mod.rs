@@ -15,6 +15,7 @@ use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender
 use multiproof::*;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
+use reth_chain_state::{PreservedSparseTrie, StateTrieOverlayManager};
 use reth_evm::{
     block::ExecutableTxParts,
     execute::{ExecutableTxFor, WithTxEnv},
@@ -50,12 +51,9 @@ use tracing::{debug, debug_span, instrument, trace, warn, Span};
 pub mod bal;
 pub(crate) mod bal_prewarm_pool;
 pub mod multiproof;
-mod preserved_sparse_trie;
 pub mod prewarm;
 pub mod receipt_root_task;
 pub mod sparse_trie;
-
-use preserved_sparse_trie::{PreservedSparseTrie, SharedPreservedSparseTrie};
 
 /// Blocks with fewer transactions than this skip prewarming, since the fixed overhead of spawning
 /// prewarm workers exceeds the execution time saved.
@@ -64,10 +62,10 @@ pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorTx<Evm, I> = RecoveredTx<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
 
-type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
+type IteratorPayloadHandle<Evm, I> = PayloadHandle<
     IteratorTx<Evm, I>,
     <I as ExecutableTxTuple>::Error,
-    <N as NodePrimitives>::Receipt,
+    <<Evm as ConfigureEvm>::Primitives as NodePrimitives>::Receipt,
 >;
 
 type IteratorPrewarmTxReceiver<Evm, I> =
@@ -116,10 +114,8 @@ where
     precompile_cache_disabled: bool,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
-    /// A preserved `SparseStateTrie`, kept around as a cache of already revealed trie nodes and to
-    /// re-use allocated memory. Stored with the block hash it was computed for to enable trie
-    /// preservation across sequential payload validations.
-    sparse_state_trie: SharedPreservedSparseTrie,
+    /// State trie overlay manager that owns the preserved sparse trie.
+    state_trie_overlays: StateTrieOverlayManager<Evm::Primitives>,
     /// LFU hot-slot capacity: max storage slots retained across prune cycles.
     sparse_trie_max_hot_slots: usize,
     /// LFU hot-account capacity: max account addresses retained across prune cycles.
@@ -161,10 +157,9 @@ struct SparseTrieTaskOptions {
     pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
 }
 
-impl<N, Evm> PayloadProcessor<Evm>
+impl<Evm> PayloadProcessor<Evm>
 where
-    N: NodePrimitives,
-    Evm: ConfigureEvm<Primitives = N>,
+    Evm: ConfigureEvm,
 {
     /// Returns a reference to the workload executor driving payload tasks.
     pub const fn executor(&self) -> &Runtime {
@@ -177,6 +172,7 @@ where
         evm_config: Evm,
         config: &TreeConfig,
         precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+        state_trie_overlays: StateTrieOverlayManager<Evm::Primitives>,
     ) -> Self {
         Self {
             executor,
@@ -188,7 +184,7 @@ where
             disable_state_cache: config.disable_state_cache(),
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
-            sparse_state_trie: SharedPreservedSparseTrie::default(),
+            state_trie_overlays,
             sparse_trie_max_hot_slots: config.sparse_trie_max_hot_slots(),
             sparse_trie_max_hot_accounts: config.sparse_trie_max_hot_accounts(),
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
@@ -220,11 +216,9 @@ where
     fn wait_for_caches(&self) -> CacheWaitDurations {
         debug!(target: "engine::tree::payload_processor", "Waiting for execution cache and sparse trie locks");
 
-        // Wait for both caches in parallel using std threads
         let execution_cache = self.execution_cache.clone();
-        let sparse_trie = self.sparse_state_trie.clone();
+        let state_trie_overlays = self.state_trie_overlays.clone();
 
-        // Use channels and spawn_blocking instead of std::thread::spawn
         let (execution_tx, execution_rx) = std::sync::mpsc::channel();
         let (sparse_trie_tx, sparse_trie_rx) = std::sync::mpsc::channel();
 
@@ -232,7 +226,7 @@ where
             let _ = execution_tx.send(execution_cache.wait_for_availability());
         });
         self.executor.spawn_blocking_named("wait-sparse-tri", move || {
-            let _ = sparse_trie_tx.send(sparse_trie.wait_for_availability());
+            let _ = sparse_trie_tx.send(state_trie_overlays.wait_for_sparse_trie_availability());
         });
 
         let execution_cache_duration =
@@ -253,10 +247,9 @@ where
     }
 }
 
-impl<N, Evm> PayloadProcessor<Evm>
+impl<Evm> PayloadProcessor<Evm>
 where
-    N: NodePrimitives,
-    Evm: ConfigureEvm<Primitives = N> + 'static,
+    Evm: ConfigureEvm + 'static,
 {
     /// Spawns all background tasks and returns a handle connected to the tasks.
     ///
@@ -290,11 +283,11 @@ where
         &mut self,
         env: ExecutionEnv<Evm>,
         transactions: I,
-        provider_builder: StateProviderBuilder<N, P>,
+        provider_builder: StateProviderBuilder<Evm::Primitives, P>,
         multiproof_provider_factory: F,
         config: &TreeConfig,
         options: PayloadProcessorSpawnOptions,
-    ) -> IteratorPayloadHandle<Evm, I, N>
+    ) -> IteratorPayloadHandle<Evm, I>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -351,9 +344,9 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         transactions: I,
-        provider_builder: StateProviderBuilder<N, P>,
+        provider_builder: StateProviderBuilder<Evm::Primitives, P>,
         parallel_bal_execution: bool,
-    ) -> IteratorPayloadHandle<Evm, I, N>
+    ) -> IteratorPayloadHandle<Evm, I>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
@@ -571,10 +564,10 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         transactions: mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
-        provider_builder: StateProviderBuilder<N, P>,
+        provider_builder: StateProviderBuilder<Evm::Primitives, P>,
         to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
         parallel_bal_execution: bool,
-    ) -> CacheTaskHandle<N::Receipt>
+    ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
@@ -664,7 +657,7 @@ where
     ) {
         let SparseTrieTaskOptions { parent_state_root, chunk_size, pending_sparse_trie_prune } =
             options;
-        let preserved_sparse_trie = self.sparse_state_trie.clone();
+        let state_trie_overlays = self.state_trie_overlays.clone();
         let trie_metrics = self.trie_metrics.clone();
         let max_hot_slots = self.sparse_trie_max_hot_slots;
         let max_hot_accounts = self.sparse_trie_max_hot_accounts;
@@ -682,7 +675,7 @@ where
             // we can reuse the preserved trie structure. Otherwise, we clear the trie but
             // keep allocations.
             let start = Instant::now();
-            let preserved = preserved_sparse_trie.take();
+            let preserved = state_trie_overlays.take_sparse_trie();
             trie_metrics
                 .sparse_trie_cache_wait_duration_histogram
                 .record(start.elapsed().as_secs_f64());
@@ -718,13 +711,14 @@ where
 
             // Acquire the guard before sending the result to prevent a race condition:
             // Without this, the next block could start after send() but before store(),
-            // causing take() to return None and forcing it to create a new empty trie
+            // causing take_sparse_trie() to return None and forcing it to create a new empty trie
             // instead of reusing the preserved one. Holding the guard ensures the next
-            // block's take() blocks until we've stored the trie for reuse.
-            let mut guard = preserved_sparse_trie.lock();
+            // block's take_sparse_trie() blocks until we've stored the trie for reuse.
+            let mut guard = state_trie_overlays.lock_sparse_trie();
 
             let task_result = result.as_ref().ok().cloned();
-            // Send state root computation result - next block may start but will block on take()
+            // Send state root computation result - next block may start but will block on
+            // take_sparse_trie().
             if state_root_tx.send(result).is_err() {
                 // Receiver dropped - payload was likely invalid or cancelled.
                 // Clear the trie instead of preserving potentially invalid state.
@@ -1089,6 +1083,7 @@ mod tests {
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
     use alloy_primitives::{map::HashMap, Address, B256, U256};
     use rand::Rng;
+    use reth_chain_state::StateTrieOverlayManager;
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
@@ -1111,6 +1106,10 @@ mod tests {
     fn make_saved_cache(hash: B256) -> SavedCache {
         let execution_cache = ExecutionCache::new(1_000);
         SavedCache::new(hash, execution_cache)
+    }
+
+    fn state_trie_overlays() -> StateTrieOverlayManager<EthPrimitives> {
+        StateTrieOverlayManager::default()
     }
 
     #[test]
@@ -1196,6 +1195,7 @@ mod tests {
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
+            state_trie_overlays(),
         );
 
         let parent_hash = B256::from([1u8; 32]);
@@ -1225,6 +1225,7 @@ mod tests {
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
+            state_trie_overlays(),
         );
 
         // Setup: populate cache with block 1
@@ -1260,6 +1261,7 @@ mod tests {
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
+            state_trie_overlays(),
         );
 
         let parent_hash = B256::from([1u8; 32]);
@@ -1417,6 +1419,7 @@ mod tests {
             EthEvmConfig::new(factory.chain_spec()),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
+            state_trie_overlays(),
         );
 
         let provider_factory = BlockchainProvider::new(factory).unwrap();
