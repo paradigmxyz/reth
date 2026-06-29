@@ -728,51 +728,62 @@ where
             let span = trace_span!("promote_updates", promoted = tracing::field::Empty).entered();
             // Now handle pending account updates that can be upgraded to a proper update.
             let account_rlp_buf = &mut self.account_rlp_buf;
-            let mut num_promoted = 0;
-            self.pending_account_updates.retain(|addr, account| {
-                if let Some(updates) = self.storage_updates.get(addr) {
-                    if !updates.is_empty() {
-                        // If account has pending storage updates, it is still pending.
-                        return true;
-                    } else if let Some(account) = account.take() {
-                        let storage_root = self.trie.storage_root(addr).expect("updates are drained, storage trie should be revealed by now");
-                        let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
-                        self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
-                        num_promoted += 1;
-                        return false;
+            let trie = &mut self.trie;
+            let storage_updates = &self.storage_updates;
+            let account_updates = &mut self.account_updates;
+            let num_promoted = self
+                .pending_account_updates
+                .extract_if(|addr, account| {
+                    if let Some(updates) = storage_updates.get(addr) {
+                        if !updates.is_empty() {
+                            // If account has pending storage updates, it is still pending.
+                            return false;
+                        } else if let Some(account) = account.take() {
+                            let storage_root = trie
+                                .storage_root(addr)
+                                .expect("updates are drained, storage trie should be revealed by now");
+                            let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
+                            account_updates.insert(*addr, LeafUpdate::Changed(encoded));
+                            return true;
+                        }
                     }
-                }
 
-                // Get the current account state either from the trie or from latest account update.
-                let trie_account = match self.account_updates.get(addr) {
-                    Some(LeafUpdate::Changed(encoded)) => {
-                        Some(encoded).filter(|encoded| !encoded.is_empty())
-                    }
-                    // Needs to be revealed first
-                    Some(LeafUpdate::Touched) => return true,
-                    None => self.trie.get_account_value(addr),
-                };
+                    // Get the current account state either from the trie or from latest account update.
+                    let trie_account = match account_updates.get(addr) {
+                        Some(LeafUpdate::Changed(encoded)) => {
+                            Some(encoded).filter(|encoded| !encoded.is_empty())
+                        }
+                        // Needs to be revealed first
+                        Some(LeafUpdate::Touched) => return false,
+                        None => trie.get_account_value(addr),
+                    };
 
-                let trie_account = trie_account.map(|value| TrieAccount::decode(&mut &value[..]).expect("invalid account RLP"));
+                    let trie_account = trie_account
+                        .map(|value| TrieAccount::decode(&mut &value[..]).expect("invalid account RLP"));
 
-                let (account, storage_root) = if let Some(account) = account.take() {
-                    // If account is Some(_) here it means it didn't have any storage updates
-                    // and we can fetch the storage root directly from the account trie.
-                    //
-                    // If it did have storage updates, we would've had processed it above when iterating over storage tries.
-                    let storage_root = trie_account.map(|account| account.storage_root).unwrap_or(EMPTY_ROOT_HASH);
+                    let (account, storage_root) = if let Some(account) = account.take() {
+                        // If account is Some(_) here it means it didn't have any storage updates
+                        // and we can fetch the storage root directly from the account trie.
+                        //
+                        // If it did have storage updates, we would've had processed it above when iterating over storage tries.
+                        let storage_root = trie_account.map(|account| account.storage_root).unwrap_or(EMPTY_ROOT_HASH);
 
-                    (account, storage_root)
-                } else {
-                    (trie_account.map(Into::into), self.trie.storage_root(addr).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
-                };
+                        (account, storage_root)
+                    } else {
+                        (
+                            trie_account.map(Into::into),
+                            trie.storage_root(addr).expect(
+                                "account had storage updates that were applied to its trie, storage root must be revealed by now",
+                            ),
+                        )
+                    };
 
-                let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
-                self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
-                num_promoted += 1;
+                    let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
+                    account_updates.insert(*addr, LeafUpdate::Changed(encoded));
 
-                false
-            });
+                    true
+                })
+                .count();
             span.record("promoted", num_promoted);
             drop(span);
 
