@@ -19,7 +19,7 @@ use reth_revm::{
         BalWrites as RevmBalWrites, StorageBal as RevmStorageBal,
     },
 };
-use reth_storage_api::{BalProvider, BlockReader, TransactionVariant};
+use reth_storage_api::{get_revm_bal_by_hash, BalProvider, BlockReader, TransactionVariant};
 use reth_tasks::Runtime;
 use schnellru::{ByLength, Limiter, LruMap};
 use std::{
@@ -615,9 +615,7 @@ where
                                     ActionSender::new(CacheKind::Bal, block_hash, action_tx);
                                 this.action_task_spawner.spawn_blocking_task(async move {
                                     let _permit = rate_limiter.acquire().await;
-                                    let res = provider
-                                        .bal_store()
-                                        .revm_bal_by_hash(block_hash)
+                                    let res = get_revm_bal_by_hash(&provider, block_hash)
                                         .map(|maybe_bal| maybe_bal.map(CachedRevmBal::new));
                                     action_sender.send_bal(res);
                                 });

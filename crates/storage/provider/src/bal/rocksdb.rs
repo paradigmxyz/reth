@@ -51,8 +51,8 @@ impl RocksDBBalStore {
         }
     }
 
-    /// Returns a reference to the underlying RocksDB provider.
-    pub const fn rocksdb_provider(&self) -> &RocksDBProvider {
+    #[cfg(test)]
+    fn rocksdb_provider(&self) -> &RocksDBProvider {
         &self.rocksdb
     }
 
@@ -557,8 +557,12 @@ mod tests {
             .insert(NumHash::new(7, old_b), RawBal::from(Bytes::from_static(&[0xc1, 0x02])))
             .unwrap();
         store.insert(NumHash::new(9, new_hash), RawBal::from(new_bal.clone())).unwrap();
+        store.flush(9).unwrap();
 
         assert_eq!(store.delete_range_by_number(7).unwrap(), 2);
+        assert_eq!(disk_bal(&store, NumHash::new(7, old_a)), None);
+        assert_eq!(disk_bal(&store, NumHash::new(7, old_b)), None);
+        assert_eq!(disk_bal(&store, NumHash::new(9, new_hash)), Some(new_bal.clone()));
         assert_eq!(
             store
                 .get_by_block_num_hashes(&[
@@ -620,8 +624,11 @@ mod tests {
             .insert(NumHash::new(7, old_hash), RawBal::from(Bytes::from_static(&[0xc1, 0x01])))
             .unwrap();
         store.insert(NumHash::new(8, retained_hash), RawBal::from(retained_bal.clone())).unwrap();
+        store.flush(8).unwrap();
 
         assert_eq!(store.prune(10).unwrap(), 1);
+        assert_eq!(disk_bal(&store, NumHash::new(7, old_hash)), None);
+        assert_eq!(disk_bal(&store, NumHash::new(8, retained_hash)), Some(retained_bal.clone()));
         assert_eq!(
             store
                 .get_by_block_num_hashes(&[

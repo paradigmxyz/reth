@@ -67,7 +67,7 @@ pub struct DatabaseArgs {
     /// performance for history lookups.
     #[arg(long = "db.rocksdb-block-cache-size", value_parser = parse_byte_size)]
     pub rocksdb_block_cache_size: Option<usize>,
-    /// Number of recent blocks to retain in the BAL store.
+    /// Retention distance, in recent blocks, for the BAL store.
     #[arg(long = "db.balstore-cache-size")]
     pub balstore_cache_size: Option<u64>,
     /// Disable built-in database metrics.

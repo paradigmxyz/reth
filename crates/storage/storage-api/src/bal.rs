@@ -1,3 +1,4 @@
+use crate::BlockNumReader;
 use alloc::{sync::Arc, vec::Vec};
 use alloy_eip7928::bal::DecodedBal;
 pub use alloy_eip7928::bal::RawBal;
@@ -106,15 +107,7 @@ pub trait BalStore: Send + Sync + 'static {
         &self,
         block_hash: BlockHash,
     ) -> ProviderResult<Option<DecodedBal<Arc<RevmBal>>>> {
-        self.get_decoded_by_hash(block_hash)?
-            .map(|decoded| {
-                decoded.try_map(|bal| {
-                    RevmBal::try_from(Vec::from(bal))
-                        .map(Arc::new)
-                        .map_err(reth_storage_errors::provider::ProviderError::other)
-                })
-            })
-            .transpose()
+        self.get_by_hash(block_hash)?.map(revm_bal_from_raw).transpose()
     }
 
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is
@@ -381,6 +374,93 @@ pub trait BalProvider {
     fn bal_store(&self) -> &BalStoreHandle;
 }
 
+/// Fetches the BAL for a block hash, resolving the block number if hash-only lookup misses.
+pub fn get_bal_by_hash<Provider>(
+    provider: &Provider,
+    block_hash: BlockHash,
+) -> ProviderResult<Option<Bytes>>
+where
+    Provider: BalProvider + BlockNumReader + ?Sized,
+{
+    if let Some(bal) = provider.bal_store().get_by_hash(block_hash)? {
+        return Ok(Some(bal))
+    }
+
+    let Some(block_number) = provider.block_number(block_hash)? else { return Ok(None) };
+    provider.bal_store().get_by_block_num_hash(NumHash::new(block_number, block_hash))
+}
+
+/// Fetches BALs for block hashes, resolving block numbers for hash-only misses.
+pub fn get_bals_by_hashes<Provider>(
+    provider: &Provider,
+    block_hashes: &[BlockHash],
+) -> ProviderResult<Vec<Option<Bytes>>>
+where
+    Provider: BalProvider + BlockNumReader + ?Sized,
+{
+    let mut out = Vec::with_capacity(block_hashes.len());
+    for block_hash in block_hashes {
+        out.push(get_bal_by_hash(provider, *block_hash)?);
+    }
+    Ok(out)
+}
+
+/// Fetches BAL response entries for block hashes, resolving block numbers for hash-only misses.
+pub fn get_bals_by_hashes_with_limit<Provider>(
+    provider: &Provider,
+    block_hashes: &[BlockHash],
+    limit: GetBlockAccessListLimit,
+) -> ProviderResult<Vec<Option<Bytes>>>
+where
+    Provider: BalProvider + BlockNumReader + ?Sized,
+{
+    let mut out = Vec::new();
+    let mut size = 0;
+
+    for block_hash in block_hashes {
+        let bal = get_bal_by_hash(provider, *block_hash)?;
+        size += bal.as_ref().map_or(1, |bytes| bytes.len());
+        out.push(bal);
+
+        if limit.exceeds(size) {
+            break
+        }
+    }
+
+    out.shrink_to_fit();
+    Ok(out)
+}
+
+/// Fetches the BAL for a block hash in revm representation, resolving the block number on miss.
+pub fn get_revm_bal_by_hash<Provider>(
+    provider: &Provider,
+    block_hash: BlockHash,
+) -> ProviderResult<Option<DecodedBal<Arc<RevmBal>>>>
+where
+    Provider: BalProvider + BlockNumReader + ?Sized,
+{
+    if let Some(bal) = provider.bal_store().revm_bal_by_hash(block_hash)? {
+        return Ok(Some(bal))
+    }
+
+    let Some(block_number) = provider.block_number(block_hash)? else { return Ok(None) };
+    provider
+        .bal_store()
+        .get_by_block_num_hash(NumHash::new(block_number, block_hash))?
+        .map(revm_bal_from_raw)
+        .transpose()
+}
+
+fn revm_bal_from_raw(raw: Bytes) -> ProviderResult<DecodedBal<Arc<RevmBal>>> {
+    DecodedBal::from_rlp_bytes(raw)
+        .map_err(reth_storage_errors::provider::ProviderError::from)?
+        .try_map(|bal| {
+            RevmBal::try_from(Vec::from(bal))
+                .map(Arc::new)
+                .map_err(reth_storage_errors::provider::ProviderError::other)
+        })
+}
+
 /// No-op BAL store used as the default wiring target until a concrete implementation is injected.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NoopBalStore;
@@ -480,6 +560,31 @@ mod tests {
     }
 
     #[test]
+    fn provider_lookup_resolves_block_number_on_hash_miss() {
+        let block = NumHash::new(7, B256::random());
+        let raw_bal = Bytes::from_static(&[EMPTY_LIST_CODE]);
+        let store = BalStoreHandle::new(NumberOnlyBalStore { block, raw_bal: raw_bal.clone() });
+        let provider = TestBalProvider { block, store };
+        let missing = B256::random();
+
+        assert_eq!(get_bal_by_hash(&provider, block.hash).unwrap(), Some(raw_bal.clone()));
+        assert_eq!(get_bal_by_hash(&provider, missing).unwrap(), None);
+        assert_eq!(
+            get_bals_by_hashes_with_limit(
+                &provider,
+                &[block.hash, missing],
+                GetBlockAccessListLimit::None,
+            )
+            .unwrap(),
+            vec![Some(raw_bal.clone()), None]
+        );
+
+        let revm_bal = get_revm_bal_by_hash(&provider, block.hash).unwrap().unwrap();
+        assert_eq!(revm_bal.as_raw(), &raw_bal);
+        assert!(revm_bal.as_bal().accounts.is_empty());
+    }
+
+    #[test]
     fn noop_store_limited_lookup_returns_prefix() {
         let store = BalStoreHandle::default();
         let hashes = [B256::random(), B256::random(), B256::random()];
@@ -536,6 +641,88 @@ mod tests {
         #[cfg(feature = "std")]
         fn bal_stream(&self) -> BalNotificationStream {
             reth_tokio_util::EventSender::new(1).new_listener()
+        }
+    }
+
+    #[derive(Debug)]
+    struct NumberOnlyBalStore {
+        block: NumHash,
+        raw_bal: Bytes,
+    }
+
+    impl BalStore for NumberOnlyBalStore {
+        fn insert(&self, _num_hash: NumHash, _bal: RawBal) -> ProviderResult<()> {
+            Ok(())
+        }
+
+        fn prune(&self, _tip: BlockNumber) -> ProviderResult<usize> {
+            Ok(0)
+        }
+
+        fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
+            Ok(block_hashes.iter().map(|_| None).collect())
+        }
+
+        fn get_by_block_num_hashes(
+            &self,
+            blocks: &[NumHash],
+        ) -> ProviderResult<Vec<Option<Bytes>>> {
+            Ok(blocks
+                .iter()
+                .map(|block| (*block == self.block).then(|| self.raw_bal.clone()))
+                .collect())
+        }
+
+        #[cfg(feature = "std")]
+        fn bal_stream(&self) -> BalNotificationStream {
+            reth_tokio_util::EventSender::new(1).new_listener()
+        }
+    }
+
+    #[derive(Debug)]
+    struct TestBalProvider {
+        block: NumHash,
+        store: BalStoreHandle,
+    }
+
+    impl BalProvider for TestBalProvider {
+        fn bal_store(&self) -> &BalStoreHandle {
+            &self.store
+        }
+    }
+
+    impl crate::BlockHashReader for TestBalProvider {
+        fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
+            Ok((number == self.block.number).then_some(self.block.hash))
+        }
+
+        fn canonical_hashes_range(
+            &self,
+            _start: BlockNumber,
+            _end: BlockNumber,
+        ) -> ProviderResult<Vec<B256>> {
+            Ok(Vec::new())
+        }
+    }
+
+    impl BlockNumReader for TestBalProvider {
+        fn chain_info(&self) -> ProviderResult<reth_chainspec::ChainInfo> {
+            Ok(reth_chainspec::ChainInfo {
+                best_hash: self.block.hash,
+                best_number: self.block.number,
+            })
+        }
+
+        fn best_block_number(&self) -> ProviderResult<BlockNumber> {
+            Ok(self.block.number)
+        }
+
+        fn last_block_number(&self) -> ProviderResult<BlockNumber> {
+            Ok(self.block.number)
+        }
+
+        fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
+            Ok((hash == self.block.hash).then_some(self.block.number))
         }
     }
 }

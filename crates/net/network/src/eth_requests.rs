@@ -17,7 +17,10 @@ use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
 use reth_primitives_traits::Block;
-use reth_storage_api::{BalProvider, BlockReader, GetBlockAccessListLimit, HeaderProvider};
+use reth_storage_api::{
+    get_bals_by_hashes_with_limit, BalProvider, BlockReader, GetBlockAccessListLimit,
+    HeaderProvider,
+};
 use reth_transaction_pool::{blobstore::NoopBlobStore, BlobStore};
 use std::{
     future::Future,
@@ -359,7 +362,7 @@ where
 impl<C, N> EthRequestHandler<C, N>
 where
     N: NetworkPrimitives,
-    C: BalProvider,
+    C: BalProvider + BlockReader<Block = N::Block, Receipt = N::Receipt>,
 {
     /// Handles [`GetBlockAccessLists`] queries.
     ///
@@ -376,7 +379,7 @@ where
 
         let limit = GetBlockAccessListLimit::ResponseSizeSoftLimit(SOFT_RESPONSE_LIMIT);
         let access_lists =
-            self.client.bal_store().get_by_hashes_with_limit(&request.0, limit).unwrap_or_default();
+            get_bals_by_hashes_with_limit(&self.client, &request.0, limit).unwrap_or_default();
         let _ = response.send(Ok(BlockAccessLists(access_lists)));
     }
 }
