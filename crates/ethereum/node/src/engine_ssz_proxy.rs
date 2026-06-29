@@ -17,9 +17,19 @@ use alloy_consensus::{Transaction, TxEnvelope};
 use alloy_eips::{eip2718::Decodable2718, eip7685::RequestsOrHash};
 use alloy_primitives::{Bytes, B128, B256, B64};
 use alloy_rpc_types_engine::{
+<<<<<<< HEAD
     CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadFieldV2,
     ExecutionPayloadSidecar, ForkchoiceState, PayloadAttributes, PayloadId, PayloadStatusEnum,
     PraguePayloadFields,
+=======
+    ssz_engine_types::{
+        ExecutionPayloadEnvelopeAmsterdam, ExecutionWitnessV1,
+        PayloadStatus as EngineSszPayloadStatus, PayloadStatusWithWitness,
+    },
+    CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
+    ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ExecutionPayloadV4,
+    ForkchoiceState, PayloadAttributes, PayloadStatus, PayloadStatusEnum, PraguePayloadFields,
+>>>>>>> 7c5d7d2b2 (fix(engine): decode Amsterdam SSZ payload envelope)
 };
 use http_body_util::BodyExt;
 use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};

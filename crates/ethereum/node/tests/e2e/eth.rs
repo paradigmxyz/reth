@@ -1,4 +1,6 @@
-use crate::utils::{advance_with_random_transactions, eth_payload_attributes};
+use crate::utils::{
+    advance_with_random_transactions, eth_payload_attributes, eth_payload_attributes_amsterdam,
+};
 use alloy_eips::{eip4844::BlobAndProofV1, eip7685::RequestsOrHash};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
@@ -19,6 +21,7 @@ use reth_node_core::{
 };
 use reth_node_ethereum::{
     engine_ssz_containers::{
+        ExecutionPayloadEnvelopeAmsterdam,
         ForkchoiceUpdateResponse as SszForkchoiceUpdateResponse, PayloadStatus as SszPayloadStatus,
         PayloadStatusWithWitness,
     },
@@ -525,7 +528,7 @@ async fn test_engine_ssz_proxy_payloads_witness_returns_execution_witness() -> e
         node.task_executor.clone(),
     )));
 
-    let node = NodeTestContext::new(node, eth_payload_attributes).await?;
+    let node = NodeTestContext::new(node, eth_payload_attributes_amsterdam).await?;
     let wallets = Wallet::new(1).wallet_gen();
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallets[0].clone()).await;
 
@@ -535,7 +538,7 @@ async fn test_engine_ssz_proxy_payloads_witness_returns_execution_witness() -> e
         suggested_fee_recipient: Address::ZERO,
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
-        slot_number: None,
+        slot_number: Some(chain_spec.genesis().timestamp + 1),
         target_gas_limit: None,
     };
 
@@ -549,7 +552,9 @@ async fn test_engine_ssz_proxy_payloads_witness_returns_execution_witness() -> e
         .await?;
 
     let payload = envelope.execution_payload;
-    let block_hash = payload.payload_inner.payload_inner.block_hash;
+    let block_hash = payload.payload_inner.payload_inner.payload_inner.block_hash;
+    let request =
+        ExecutionPayloadEnvelopeAmsterdam::from((payload, B256::ZERO, envelope.execution_requests));
     let client = reqwest::Client::new();
     let auth_server = node.auth_server_handle();
     let auth_url = auth_server.http_url();
@@ -561,7 +566,7 @@ async fn test_engine_ssz_proxy_payloads_witness_returns_execution_witness() -> e
         .header(ENGINE_EXECUTION_VERSION_HEADER, ENGINE_AMSTERDAM_FORK_HEADER)
         .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
         .header(reqwest::header::ACCEPT, "application/octet-stream")
-        .body((payload, B256::ZERO, envelope.execution_requests.take()).as_ssz_bytes())
+        .body(request.as_ssz_bytes())
         .send()
         .await?;
     assert_eq!(response.status(), reqwest::StatusCode::OK);
