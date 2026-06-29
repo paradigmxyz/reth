@@ -21,13 +21,15 @@ use reth_storage_api::StorageSettingsCache;
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
     test_utils::{state_root, state_root_prehashed, storage_root, storage_root_prehashed},
+    trie_cursor::TrieCursor,
     triehash::KeccakHasher,
-    updates::StorageTrieUpdates,
+    updates::{StorageTrieUpdates, StorageTrieUpdatesSorted},
     BranchNodeCompact, HashBuilder, IntermediateStateRootState, Nibbles, StateRoot,
     StateRootProgress, StorageRoot, TrieMask,
 };
 use reth_trie_db::{
-    DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieCursorFactory,
+    DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseStorageRoot, DatabaseStorageTrieCursor,
+    DatabaseTrieCursorFactory, StorageTrieEntryLike, TrieKeyAdapter, TrieTableAdapter,
 };
 use std::{collections::BTreeMap, ops::Mul, str::FromStr, sync::Arc};
 
@@ -731,6 +733,91 @@ fn storage_trie_around_extension_node() {
         assert_eq!(expected_root, got);
         assert_eq!(expected_updates, updates);
         assert_trie_updates(updates.storage_nodes_ref());
+    });
+}
+
+fn storage_tail_test_node(mask: u16) -> BranchNodeCompact {
+    BranchNodeCompact::new(mask, 0, 0, Vec::new(), None)
+}
+
+fn nibble_path<const N: usize>(nibbles: [u8; N]) -> Nibbles {
+    Nibbles::from_nibbles_unchecked(nibbles)
+}
+
+#[test]
+fn storage_trie_sorted_updates_append_tail_suffix() {
+    let factory = create_test_provider_factory();
+    let tx = factory.provider_rw().unwrap();
+    let hashed_address = B256::with_last_byte(0x42);
+
+    reth_trie_db::with_adapter!(tx, |A| {
+        let mut cursor = tx
+            .tx_ref()
+            .cursor_dup_write::<<A as TrieTableAdapter>::StorageTrieTable>()
+            .unwrap();
+        for (path, node) in [
+            (nibble_path([0x01]), storage_tail_test_node(0x0001)),
+            (nibble_path([0x02]), storage_tail_test_node(0x0002)),
+            (nibble_path([0x03]), storage_tail_test_node(0x0003)),
+            (nibble_path([0x07]), storage_tail_test_node(0x0007)),
+        ] {
+            let entry = <<A as TrieKeyAdapter>::StorageValue as StorageTrieEntryLike>::new(
+                <A as TrieKeyAdapter>::StorageSubKey::from(path),
+                node,
+            );
+            cursor
+                .upsert(hashed_address, &entry)
+                .unwrap();
+        }
+        drop(cursor);
+
+        let mut storage_nodes = vec![
+            (nibble_path([0x02]), Some(storage_tail_test_node(0x0022))),
+            (nibble_path([0x03]), None),
+        ];
+        for suffix in 0..16 {
+            storage_nodes.push((
+                nibble_path([0x08, suffix]),
+                (suffix != 7).then(|| storage_tail_test_node(0x0080 + suffix as u16)),
+            ));
+        }
+        let updates = StorageTrieUpdatesSorted { is_deleted: false, storage_nodes };
+
+        let modified = tx
+            .write_storage_trie_updates_sorted(core::iter::once((&hashed_address, &updates)))
+            .unwrap();
+        assert_eq!(modified, 18);
+
+        let cursor = tx
+            .tx_ref()
+            .cursor_dup_read::<<A as TrieTableAdapter>::StorageTrieTable>()
+            .unwrap();
+        let mut storage_cursor = DatabaseStorageTrieCursor::<_, A>::new(cursor, hashed_address);
+        assert_eq!(
+            storage_cursor.seek_exact(nibble_path([0x01])).unwrap(),
+            Some((nibble_path([0x01]), storage_tail_test_node(0x0001)))
+        );
+        assert_eq!(
+            storage_cursor.seek_exact(nibble_path([0x02])).unwrap(),
+            Some((nibble_path([0x02]), storage_tail_test_node(0x0022)))
+        );
+        assert!(storage_cursor.seek_exact(nibble_path([0x03])).unwrap().is_none());
+        assert_eq!(
+            storage_cursor.seek_exact(nibble_path([0x07])).unwrap(),
+            Some((nibble_path([0x07]), storage_tail_test_node(0x0007)))
+        );
+
+        for suffix in 0..16 {
+            let path = nibble_path([0x08, suffix]);
+            if suffix == 7 {
+                assert!(storage_cursor.seek_exact(path).unwrap().is_none());
+            } else {
+                assert_eq!(
+                    storage_cursor.seek_exact(path).unwrap(),
+                    Some((path, storage_tail_test_node(0x0080 + suffix as u16)))
+                );
+            }
+        }
     });
 }
 

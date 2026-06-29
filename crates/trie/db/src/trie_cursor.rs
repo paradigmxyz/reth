@@ -14,6 +14,8 @@ use reth_trie::{
 };
 use std::marker::PhantomData;
 
+const STORAGE_TRIE_TAIL_APPEND_MIN_UPDATES: usize = 16;
+
 /// Trait abstracting nibble encoding for trie keys.
 ///
 /// Allows the same cursor implementation to work with both legacy (65-byte) and
@@ -282,15 +284,37 @@ where
         updates: &StorageTrieUpdatesSorted,
     ) -> Result<usize, DatabaseError> {
         // The storage trie for this account has to be deleted.
-        if updates.is_deleted() && self.cursor.seek_exact(self.hashed_address)?.is_some() {
+        let deleted = updates.is_deleted();
+        if deleted && self.cursor.seek_exact(self.hashed_address)?.is_some() {
             self.cursor.delete_current_duplicates()?;
         }
+
+        let mut append_tail = if !deleted &&
+            updates.storage_nodes.len() >= STORAGE_TRIE_TAIL_APPEND_MIN_UPDATES &&
+            self.cursor.seek_exact(self.hashed_address)?.is_some()
+        {
+            self.cursor.last_dup()?.map(|entry| entry.nibbles().clone())
+        } else {
+            None
+        };
 
         let mut num_entries = 0;
         for (nibbles, maybe_updated) in updates.storage_nodes.iter().filter(|(n, _)| !n.is_empty())
         {
             num_entries += 1;
             let nibbles = A::StorageSubKey::from(*nibbles);
+
+            if append_tail.as_ref().is_some_and(|last| nibbles > *last) {
+                if let Some(node) = maybe_updated {
+                    self.cursor.append_dup(
+                        self.hashed_address,
+                        A::StorageValue::new(nibbles.clone(), node.clone()),
+                    )?;
+                    append_tail = Some(nibbles);
+                }
+                continue;
+            }
+
             // Delete the old entry if it exists.
             if self
                 .cursor
