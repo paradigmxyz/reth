@@ -531,19 +531,20 @@ where
                     let mut iter = iter.enumerate();
 
                     let mut batch_size = Self::FIRST_PARALLEL_TX_WINDOW_SIZE;
+                    let mut remaining = transaction_count - prefetch;
 
                     // Without BALs, we need to preserve the initial order of transactions.
                     // Process exponentially increasing windows to make sure that first transactions are prioritized.
                     executor.cpu_pool().install(move || {
-                        loop {
-                            let chunk = iter
-                                .by_ref()
-                                .take(batch_size)
-                                .collect::<Vec<_>>();
+                        while remaining > 0 {
+                            let window_size = batch_size.min(remaining);
+                            let mut chunk = Vec::with_capacity(window_size);
+                            chunk.extend(iter.by_ref().take(window_size));
                             if chunk.is_empty() {
                                 break;
                             }
 
+                            remaining = remaining.saturating_sub(chunk.len());
                             batch_size = batch_size.saturating_mul(2);
 
                             let chunk = chunk
