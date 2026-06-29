@@ -651,13 +651,35 @@ where
             return;
         }
 
+        if !account_fields.needs_parent_account() {
+            let hashed_address = keccak256(address);
+            let mut hashed_state = reth_trie::HashedPostState::default();
+
+            if !account_changes.storage_changes.is_empty() {
+                let mut storage_map = reth_trie::HashedStorage::new(false);
+
+                for slot_changes in &account_changes.storage_changes {
+                    if let Some(last_change) = slot_changes.changes.last() {
+                        let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
+                        storage_map.storage.insert(hashed_slot, last_change.new_value);
+                    }
+                }
+
+                hashed_state.storages.insert(hashed_address, storage_map);
+            }
+
+            hashed_state.accounts.insert(hashed_address, Some(account_fields.into_account(None)));
+            let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
+            return;
+        }
+
         if !account_changes.storage_changes.is_empty() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
             let mut storage_map = reth_trie::HashedStorage::new(false);
 
             for slot_changes in &account_changes.storage_changes {
-                let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
                 if let Some(last_change) = slot_changes.changes.last() {
+                    let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
                     storage_map.storage.insert(hashed_slot, last_change.new_value);
                 }
             }
