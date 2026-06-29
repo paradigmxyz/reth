@@ -69,11 +69,8 @@ pub(crate) fn dispatch_with_chunking<T, I>(
     I: IntoIterator<Item = T>,
 {
     let has_full_chunks = chunking_len >= chunk_size.saturating_mul(2);
-    let should_chunk = chunking_len > max_targets_for_chunking ||
-        (has_full_chunks &&
-            (has_multiple_idle_account_workers || has_multiple_idle_storage_workers));
 
-    if should_chunk && chunking_len > chunk_size {
+    if has_full_chunks {
         for chunk in chunker(items, chunk_size) {
             dispatch(chunk);
         }
