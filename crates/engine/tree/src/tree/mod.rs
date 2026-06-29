@@ -1468,7 +1468,7 @@ where
         // Ensure we can apply a new chain update for the head block
         if let Some(chain_update) = self.on_new_head(state.head_block_hash)? {
             let tip = chain_update.tip().clone_sealed_header();
-            self.on_canonical_chain_update(chain_update);
+            self.on_canonical_chain_update(chain_update)?;
 
             // Update the safe and finalized blocks and ensure their values are valid
             if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
@@ -2095,7 +2095,7 @@ where
     /// This will update the tracked canonical in memory state and do the necessary housekeeping.
     fn make_canonical(&mut self, target: B256) -> ProviderResult<()> {
         if let Some(chain_update) = self.on_new_head(target)? {
-            self.on_canonical_chain_update(chain_update);
+            self.on_canonical_chain_update(chain_update)?;
         }
 
         self.on_canonicalized_sync_target(target);
@@ -2834,21 +2834,21 @@ where
     /// Invoked when we the canonical chain has been updated.
     ///
     /// This is invoked on a valid forkchoice update, or if we can make the target block canonical.
-    fn on_canonical_chain_update(&mut self, chain_update: NewCanonicalChain<N>) {
+    fn on_canonical_chain_update(
+        &mut self,
+        chain_update: NewCanonicalChain<N>,
+    ) -> ProviderResult<()> {
         trace!(target: "engine::tree", new_blocks = %chain_update.new_block_count(), reorged_blocks =  %chain_update.reorged_block_count(), "applying new chain update");
         let start = Instant::now();
 
         // update the tracked canonical head
         self.state.tree_state.set_canonical_head(chain_update.tip().num_hash());
-        let wam_result = match &chain_update {
+        match &chain_update {
             NewCanonicalChain::Commit { new } => self.advance_canonical_warm_accesses(new),
             NewCanonicalChain::Reorg { .. } => {
                 self.update_canonical_warm_accesses(chain_update.tip().num_hash())
             }
-        };
-        if let Err(err) = wam_result {
-            warn!(target: "engine::tree", %err, tip = ?chain_update.tip().num_hash(), "Failed to update canonical WAM");
-        }
+        }?;
 
         let tip = chain_update.tip().clone_sealed_header();
         let notification = chain_update.to_chain_notification();
@@ -2880,6 +2880,8 @@ where
             Box::new(tip),
             start.elapsed(),
         ));
+
+        Ok(())
     }
 
     /// This updates metrics based on the given reorg length and first reorged block number.
