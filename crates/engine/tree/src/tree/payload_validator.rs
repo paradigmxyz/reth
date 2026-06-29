@@ -154,6 +154,7 @@ use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State}
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
+use revm::state::bal::Bal as RevmBal;
 use std::{
     collections::HashMap,
     sync::{
@@ -169,6 +170,9 @@ pub use crate::tree::types::ValidationOutcome;
 
 /// Handle to a [`HashedPostState`] computed on a background thread.
 type LazyHashedPostState = reth_tasks::LazyHandle<Arc<HashedPostState>>;
+/// Handle to a received BAL converted into revm's lookup representation.
+type LazyRevmBal =
+    LazyHandle<Result<Arc<RevmBal>, crate::tree::payload_processor::bal::BalExecutionError>>;
 
 /// Multiplier over the parent's gas limit beyond which a block's claimed gas usage cannot be
 /// legitimate. Gas limit can change by at most 1/1024 per block, so anything over this is rejected
@@ -559,6 +563,14 @@ where
                 .validate_gas_limit(input.gas_limit())
                 .map_err(ConsensusError::from));
         }
+        let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(decoded_bal.as_deref()));
+        let revm_bal = if parallel_bal_execution {
+            Some(self.spawn_revm_bal_conversion(Arc::clone(
+                decoded_bal.as_ref().expect("BAL path eligibility requires decoded BAL"),
+            )))
+        } else {
+            None
+        };
 
         let env = ExecutionEnv {
             evm_env,
@@ -593,8 +605,6 @@ where
         );
         let overlay_factory =
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
-
-        let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
 
         // Spawn the appropriate processor based on strategy
         let pending_sparse_trie_prune = if matches!(strategy, StateRootStrategy::StateRootTask) {
@@ -683,7 +693,13 @@ where
         // as transactions complete, allowing parallel computation during execution.
         let execute_block_start = Instant::now();
         let execution_result = if parallel_bal_execution {
-            self.execute_block_bal(env, &input, &handle, &make_state_provider)
+            self.execute_block_bal(
+                env,
+                &input,
+                &handle,
+                &make_state_provider,
+                revm_bal.expect("BAL path eligibility spawned revm BAL conversion"),
+            )
         } else {
             let state_provider = make_state_provider(false);
             match state_provider {
@@ -1061,6 +1077,22 @@ where
         })
     }
 
+    /// Spawns conversion of a decoded BAL into revm's lookup representation.
+    fn spawn_revm_bal_conversion(&self, decoded_bal: Arc<DecodedBal>) -> LazyRevmBal {
+        let parent_span = Span::current();
+        self.payload_processor.executor().spawn_blocking_named("bal-convert", move || {
+            let _span = debug_span!(
+                target: "engine::tree::payload_validator",
+                parent: parent_span,
+                "convert_bal_for_revm",
+            )
+            .entered();
+            crate::tree::payload_processor::bal::execute::convert_alloy_to_revm_bal(
+                decoded_bal.as_bal(),
+            )
+        })
+    }
+
     /// Return sealed block header from database or in-memory state by hash.
     fn sealed_header_by_hash(
         &self,
@@ -1230,6 +1262,7 @@ where
         input: &BlockOrPayload<T>,
         handle: &PayloadHandle<Tx, Err, N::Receipt>,
         make_state_provider: &MakeStateProvider,
+        input_bal_revm: LazyRevmBal,
     ) -> Result<
         (
             BlockExecutionOutput<N::Receipt>,
@@ -1253,6 +1286,14 @@ where
         let input_bal = env.decoded_bal.ok_or_else(|| {
             InsertBlockErrorKind::Other("BAL execute path: no decoded BAL available".into())
         })?;
+        let input_bal_revm = match input_bal_revm.try_into_inner() {
+            Ok(result) => result?,
+            Err(_) => {
+                return Err(InsertBlockErrorKind::Other(
+                    "BAL conversion handle unexpectedly cloned".into(),
+                ))
+            }
+        };
 
         let make_db = |fill_on_miss| {
             let provider = make_state_provider(fill_on_miss)
@@ -1267,6 +1308,7 @@ where
             &self.evm_config,
             &make_db,
             input_bal,
+            input_bal_revm,
             env.evm_env,
             ctx,
             env.transaction_count,

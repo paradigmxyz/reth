@@ -45,6 +45,7 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     evm_config: &'a Evm,
     make_db: &'a MakeDb,
     input_bal: Arc<DecodedBal>,
+    input_bal_revm: Arc<RevmBal>,
     evm_env: EvmEnvFor<Evm>,
     ctx: ExecutionCtxFor<'a, Evm>,
     transaction_count: usize,
@@ -71,6 +72,7 @@ where
             evm_config,
             make_db,
             input_bal,
+            input_bal_revm,
             evm_env,
             ctx,
             transaction_count,
@@ -87,6 +89,7 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     evm_config: &'scope Evm,
     make_db: &'scope MakeDb,
     input_bal: Arc<DecodedBal>,
+    input_bal_revm: Arc<RevmBal>,
     evm_env: EvmEnvFor<Evm>,
     ctx: ExecutionCtxFor<'scope, Evm>,
     transaction_count: usize,
@@ -106,7 +109,6 @@ where
     ReceiptTy<Evm::Primitives>: Clone,
 {
     let bal = input_bal.as_bal();
-    let input_bal_revm = convert_alloy_to_revm_bal(bal)?;
 
     let block_gas_limit = evm_env.block_env.gas_limit();
     let enable_amsterdam_eip8037 = evm_env.cfg_env.enable_amsterdam_eip8037;
@@ -180,7 +182,9 @@ where
     ))
 }
 
-fn convert_alloy_to_revm_bal(alloy_bal: &AlloyBal) -> Result<Arc<RevmBal>, BalExecutionError> {
+pub(crate) fn convert_alloy_to_revm_bal(
+    alloy_bal: &AlloyBal,
+) -> Result<Arc<RevmBal>, BalExecutionError> {
     // Convert the BAL from alloy to a BAL that can be consumed by revm, that is more amenable
     // for state lookups.
     //
@@ -498,12 +502,14 @@ mod tests {
         let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
         let evm_env = evm_config.evm_env(block.header()).unwrap();
         let execution_ctx = evm_config.context_for_block(block).unwrap();
+        let input_bal_revm = convert_alloy_to_revm_bal(input_bal.as_bal())?;
         let make_db = |_: bool| make_db();
         execute_block(
             runtime,
             &evm_config,
             &make_db,
             input_bal,
+            input_bal_revm,
             evm_env,
             execution_ctx,
             transaction_count,
@@ -1121,6 +1127,9 @@ mod tests {
         let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
         let evm_env = evm_config.evm_env(block.header()).unwrap();
         let execution_ctx = evm_config.context_for_block(&block).unwrap();
+        let input_bal = to_arc_decoded(BlockAccessList::default());
+        let input_bal_revm =
+            convert_alloy_to_revm_bal(input_bal.as_bal()).expect("default BAL converts");
         let make_db = db_factory(system_contracts_db());
         let make_db = |_: bool| make_db();
 
@@ -1128,7 +1137,8 @@ mod tests {
             &Runtime::test(),
             &evm_config,
             &make_db,
-            to_arc_decoded(BlockAccessList::default()),
+            input_bal,
+            input_bal_revm,
             evm_env,
             execution_ctx,
             1, // transaction_count = 1 → exactly one worker spawned
