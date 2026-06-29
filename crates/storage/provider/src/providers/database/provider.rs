@@ -84,6 +84,8 @@ use std::{
 };
 use tracing::{debug, instrument, trace};
 
+const HASHED_STORAGE_TAIL_APPEND_MIN_SLOTS: usize = 8;
+
 /// Determines the commit order for database operations.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum CommitOrder {
@@ -2716,8 +2718,38 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 hashed_storage_cursor.delete_current_duplicates()?;
             }
 
+            let append_tail = if !storage.is_wiped() &&
+                storage.storage_slots_ref().len() >= HASHED_STORAGE_TAIL_APPEND_MIN_SLOTS
+            {
+                if hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
+                    Some(hashed_storage_cursor.last_dup()?.map(|entry| entry.key))
+                } else {
+                    Some(None)
+                }
+            } else {
+                None
+            };
+            let mut append_suffix_started = false;
+
             for (hashed_slot, value) in storage.storage_slots_ref() {
                 let entry = StorageEntry { key: *hashed_slot, value: *value };
+
+                let appendable = match append_tail {
+                    Some(None) => true,
+                    Some(Some(tail)) => entry.key > tail,
+                    None => false,
+                };
+                if appendable {
+                    if !entry.value.is_zero() {
+                        if append_suffix_started {
+                            hashed_storage_cursor.append_dup(*hashed_address, entry)?;
+                        } else {
+                            hashed_storage_cursor.upsert(*hashed_address, &entry)?;
+                            append_suffix_started = true;
+                        }
+                    }
+                    continue;
+                }
 
                 if let Some(db_entry) =
                     hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
@@ -3965,7 +3997,8 @@ mod tests {
     use reth_storage_api::MetadataWriter;
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
-        HashedPostState, KeccakKeyHasher, Nibbles, StoredNibbles, StoredNibblesSubKey,
+        HashedPostState, HashedStorageSorted, KeccakKeyHasher, Nibbles, StoredNibbles,
+        StoredNibblesSubKey,
     };
     use revm_database::BundleState;
     use revm_state::AccountInfo;
@@ -4692,6 +4725,100 @@ mod tests {
             .expect("entry should exist");
         assert_eq!(entry.key, hashed_slot);
         assert_eq!(entry.value, old_value);
+    }
+
+    #[test]
+    fn test_write_hashed_state_tail_append_fast_paths_preserve_rows() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let existing_address = B256::with_last_byte(0x10);
+        let empty_address = B256::with_last_byte(0x20);
+
+        let slot = |byte| B256::with_last_byte(byte);
+
+        let provider_rw = factory.provider_rw().unwrap();
+        {
+            let mut cursor = provider_rw.tx.cursor_dup_write::<tables::HashedStorages>().unwrap();
+            cursor
+                .upsert(existing_address, &StorageEntry { key: slot(1), value: U256::from(10) })
+                .unwrap();
+            cursor
+                .upsert(existing_address, &StorageEntry { key: slot(3), value: U256::from(30) })
+                .unwrap();
+        }
+
+        let mut storages = B256Map::default();
+        storages.insert(
+            existing_address,
+            HashedStorageSorted {
+                wiped: false,
+                storage_slots: vec![
+                    (slot(2), U256::from(20)),
+                    (slot(3), U256::ZERO),
+                    (slot(4), U256::from(40)),
+                    (slot(5), U256::ZERO),
+                    (slot(6), U256::from(60)),
+                    (slot(7), U256::from(70)),
+                    (slot(8), U256::ZERO),
+                    (slot(9), U256::from(90)),
+                ],
+            },
+        );
+        storages.insert(
+            empty_address,
+            HashedStorageSorted {
+                wiped: false,
+                storage_slots: vec![
+                    (slot(0), U256::ZERO),
+                    (slot(1), U256::from(101)),
+                    (slot(2), U256::from(102)),
+                    (slot(3), U256::ZERO),
+                    (slot(4), U256::from(104)),
+                    (slot(5), U256::from(105)),
+                    (slot(6), U256::ZERO),
+                    (slot(7), U256::from(107)),
+                ],
+            },
+        );
+
+        provider_rw.write_hashed_state(&HashedPostStateSorted::new(Vec::new(), storages)).unwrap();
+
+        let mut cursor = provider_rw.tx.cursor_dup_read::<tables::HashedStorages>().unwrap();
+        let existing_rows = cursor
+            .walk_dup(Some(existing_address), None)
+            .unwrap()
+            .map_ok(|(_, entry)| (entry.key, entry.value))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            existing_rows,
+            vec![
+                (slot(1), U256::from(10)),
+                (slot(2), U256::from(20)),
+                (slot(4), U256::from(40)),
+                (slot(6), U256::from(60)),
+                (slot(7), U256::from(70)),
+                (slot(9), U256::from(90)),
+            ]
+        );
+
+        let empty_rows = cursor
+            .walk_dup(Some(empty_address), None)
+            .unwrap()
+            .map_ok(|(_, entry)| (entry.key, entry.value))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            empty_rows,
+            vec![
+                (slot(1), U256::from(101)),
+                (slot(2), U256::from(102)),
+                (slot(4), U256::from(104)),
+                (slot(5), U256::from(105)),
+                (slot(7), U256::from(107)),
+            ]
+        );
     }
 
     #[test]
