@@ -19,17 +19,21 @@ type BuildProviderFn = dyn Fn() -> ProviderResult<StateProviderBox> + Send + Syn
 
 /// A single warm request: a whole account (basic account + its bytecode) or one storage slot.
 enum PrewarmTarget {
+    BasicAccount(Address),
     Account(Address),
     Storage(Address, StorageKey),
 }
 
 /// A message in a worker's queue. The per-block lifecycle is explicit and ordered (the queue is
-/// FIFO): one `BeginBlock`, then the worker's share of `Warm`s, then one `EndBlock`.
+/// FIFO): one `BeginBlock`, then the worker's share of `Warm`s, optional `Flush` barriers, then
+/// one `EndBlock`.
 enum PrewarmMsg {
     /// Open a read txn for the new block: build a provider over the parent state and hold it.
     BeginBlock { build: Arc<BuildProviderFn>, caches: ExecutionCache },
     /// Warm one target into the held provider's cache. Ignored if no provider is held.
     Warm(PrewarmTarget),
+    /// Signal after all previously queued warm targets on each worker have drained.
+    Flush(Arc<SendOnDrop>),
     /// Drop the held provider (and its read txn).
     EndBlock(Arc<SendOnDrop>),
 }
@@ -78,9 +82,20 @@ impl BalPrewarmPool {
         self.send_warm(PrewarmTarget::Account(addr));
     }
 
+    /// Fire-and-forget: warm only the basic account fields on some worker.
+    pub(crate) fn warm_basic_account(&self, addr: Address) {
+        self.send_warm(PrewarmTarget::BasicAccount(addr));
+    }
+
     /// Fire-and-forget: warm one storage slot on some worker.
     pub(crate) fn warm_storage(&self, addr: Address, slot: StorageKey) {
         self.send_warm(PrewarmTarget::Storage(addr, slot));
+    }
+
+    /// Waits until every worker has processed all warm requests queued before this call, while
+    /// keeping the per-block providers alive for later warm requests.
+    pub(crate) fn flush(&self) {
+        self.wait_for_workers(PrewarmMsg::Flush);
     }
 
     /// Ends the block: every worker drops its provider (and read txn) once it has drained the warm
@@ -88,11 +103,15 @@ impl BalPrewarmPool {
     ///
     /// Blocks until all workers processed the end block message.
     pub(crate) fn end_block(&self) {
+        self.wait_for_workers(PrewarmMsg::EndBlock);
+    }
+
+    fn wait_for_workers(&self, message: impl Fn(Arc<SendOnDrop>) -> PrewarmMsg) {
         let (tx, rx) = oneshot::channel();
         let tx = Arc::new(SendOnDrop { sender: Some(tx) });
 
         for worker in &self.workers {
-            let _ = worker.send(PrewarmMsg::EndBlock(tx.clone()));
+            let _ = worker.send(message(tx.clone()));
         }
 
         drop(tx);
@@ -147,10 +166,13 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
             PrewarmMsg::Warm(target) => {
                 let Some(provider) = provider.as_ref() else { continue };
                 match target {
+                    PrewarmTarget::BasicAccount(addr) => {
+                        let _ = provider.basic_account(&addr);
+                    }
                     PrewarmTarget::Account(addr) => {
-                        if let Ok(Some(account)) = provider.basic_account(&addr) &&
-                            let Some(code_hash) = account.bytecode_hash &&
-                            code_hash != alloy_consensus::constants::KECCAK_EMPTY
+                        if let Ok(Some(account)) = provider.basic_account(&addr)
+                            && let Some(code_hash) = account.bytecode_hash
+                            && code_hash != alloy_consensus::constants::KECCAK_EMPTY
                         {
                             let _ = provider.bytecode_by_hash(&code_hash);
                         }
@@ -160,6 +182,7 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                     }
                 }
             }
+            PrewarmMsg::Flush(done) => drop(done),
             PrewarmMsg::EndBlock(end_tx) => {
                 provider = None;
                 drop(end_tx);
