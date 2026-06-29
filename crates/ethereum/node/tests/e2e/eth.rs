@@ -549,7 +549,7 @@ async fn test_engine_ssz_proxy_payloads_witness_returns_execution_witness() -> e
         .await?;
 
     let payload = envelope.execution_payload;
-    let block_hash = payload.payload_inner.payload_inner.payload_inner.block_hash;
+    let block_hash = payload.payload_inner.payload_inner.block_hash;
     let client = reqwest::Client::new();
     let auth_server = node.auth_server_handle();
     let auth_url = auth_server.http_url();
