@@ -1139,6 +1139,18 @@ impl RocksDBProvider {
         Ok(RocksDBRawIter { inner: iter })
     }
 
+    /// Creates a raw key iterator starting from the given key.
+    pub(crate) fn raw_key_iter_from<T: Table>(
+        &self,
+        key: T::Key,
+    ) -> ProviderResult<RocksDBRawKeyIter<'_>> {
+        let cf = self.get_cf_handle::<T>()?;
+        let encoded_key = key.encode();
+        let mut iter = self.0.raw_iterator_cf(cf);
+        iter.seek(encoded_key.as_ref());
+        Ok(RocksDBRawKeyIter { inner: iter })
+    }
+
     /// Returns all account history shards for the given address in ascending key order.
     ///
     /// This is used for unwind operations where we need to scan all shards for an address
@@ -2763,6 +2775,39 @@ impl Iterator for RocksDBRawIter<'_> {
                 code: -1,
             })))),
         }
+    }
+}
+
+/// Raw key iterator over a `RocksDB` table (non-transactional).
+pub(crate) struct RocksDBRawKeyIter<'db> {
+    inner: RocksDBRawIterEnum<'db>,
+}
+
+impl fmt::Debug for RocksDBRawKeyIter<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RocksDBRawKeyIter").finish_non_exhaustive()
+    }
+}
+
+impl Iterator for RocksDBRawKeyIter<'_> {
+    type Item = ProviderResult<Box<[u8]>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.inner.valid() {
+            return self.inner.status().err().map(|e| {
+                Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                })))
+            })
+        }
+
+        let Some(key) = self.inner.key() else {
+            return Some(Err(ProviderError::Database(DatabaseError::Decode)))
+        };
+        let key = Box::from(key);
+        self.inner.next();
+        Some(Ok(key))
     }
 }
 

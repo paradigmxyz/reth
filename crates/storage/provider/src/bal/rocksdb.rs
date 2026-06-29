@@ -62,12 +62,12 @@ impl RocksDBBalStore {
     ) -> ProviderResult<Vec<StoredBlockAccessListKey>> {
         let mut keys = Vec::new();
         let end = StoredBlockAccessListKey::after_number(to_block);
-        let iter = self.rocksdb.raw_iter_from::<tables::BlockAccessLists>(
+        let iter = self.rocksdb.raw_key_iter_from::<tables::BlockAccessLists>(
             StoredBlockAccessListKey::first_at_number(0),
         )?;
 
-        for row in iter {
-            let (key_bytes, _) = row?;
+        for key_bytes in iter {
+            let key_bytes = key_bytes?;
             let key = StoredBlockAccessListKey::decode(&key_bytes)
                 .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
             if end.is_some_and(|end| key >= end) {
@@ -83,12 +83,12 @@ impl RocksDBBalStore {
         let Some(prune_mode) = self.config.retention else { return Ok(Vec::new()) };
 
         let mut keys = Vec::new();
-        let iter = self.rocksdb.raw_iter_from::<tables::BlockAccessLists>(
+        let iter = self.rocksdb.raw_key_iter_from::<tables::BlockAccessLists>(
             StoredBlockAccessListKey::first_at_number(0),
         )?;
 
-        for row in iter {
-            let (key_bytes, _) = row?;
+        for key_bytes in iter {
+            let key_bytes = key_bytes?;
             let key = StoredBlockAccessListKey::decode(&key_bytes)
                 .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
             if !prune_mode.should_prune(key.number(), tip) {
