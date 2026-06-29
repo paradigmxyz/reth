@@ -11,9 +11,12 @@
 //! 2. Prewarming tasks execute transactions in parallel using shared caches
 //! 3. When actual block execution happens, it benefits from the warmed cache
 
-use super::bal_prewarm_pool::BalPrewarmPool;
+use super::state_io_pool::StateIoPool;
 use crate::tree::{
-    payload_processor::multiproof::StateRootMessage,
+    payload_processor::{
+        lthash::{send_bal_storage_to_lthash, LthashMessage},
+        multiproof::StateRootMessage,
+    },
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
     PayloadExecutionCache, SavedCache, StateProviderBuilder,
@@ -72,6 +75,10 @@ where
     ctx: PrewarmContext<N, P, Evm>,
     /// Sender to emit evm state outcome messages to the sparse trie task, if any.
     to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
+    /// Sender to emit BAL-derived account/storage updates to the Lthash task, if any.
+    ///
+    /// None if LtHash is not enabled.
+    to_lthash_task: Option<CrossbeamSender<LthashMessage>>,
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent<N::Receipt>>,
     /// Parent span for tracing
@@ -85,11 +92,12 @@ where
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Initializes the task with the given transactions pending execution
-    pub fn new(
+    pub(crate) fn new(
         executor: Runtime,
         execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
         to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
+        to_lthash_task: Option<CrossbeamSender<LthashMessage>>,
     ) -> (Self, Sender<PrewarmTaskEvent<N::Receipt>>) {
         let (actions_tx, actions_rx) = channel();
 
@@ -106,6 +114,7 @@ where
                 execution_cache,
                 ctx,
                 to_sparse_trie_task,
+                to_lthash_task,
                 actions_rx,
                 parent_span: Span::current(),
             },
@@ -340,6 +349,9 @@ where
             if let Some(to_sparse_trie_task) = self.to_sparse_trie_task.as_ref() {
                 let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
             }
+            if let Some(to_lthash_task) = self.to_lthash_task.as_ref() {
+                let _ = to_lthash_task.send(LthashMessage::FinishedUpdates);
+            }
             let _ =
                 actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
             return;
@@ -353,6 +365,9 @@ where
 
         let ctx = self.ctx.clone();
         let to_sparse_trie_task = self.to_sparse_trie_task.clone();
+        let to_lthash_task = self.to_lthash_task.clone();
+        let finish_lthash_task = to_lthash_task.clone();
+        let lthash_warms_storage_changes = to_lthash_task.is_some();
         let executor = self.executor.clone();
         let parent_span = Span::current();
         let stream_parent_span = parent_span;
@@ -360,7 +375,7 @@ where
         let stream_bal = Arc::clone(&decoded_bal);
         let (stream_tx, stream_rx) = oneshot::channel();
 
-        if let Some(to_sparse_trie_task) = to_sparse_trie_task {
+        if to_sparse_trie_task.is_some() || to_lthash_task.is_some() {
             let ctx = ctx.clone();
             executor.bal_streaming_pool().spawn(move || {
                 let branch_span = debug_span!(
@@ -380,12 +395,15 @@ where
                             &parent_span,
                             provider,
                             account_changes,
-                            &to_sparse_trie_task,
+                            to_sparse_trie_task.as_ref(),
+                            to_lthash_task.as_ref(),
                         );
                     });
                 });
 
-                let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
+                if let Some(to_sparse_trie_task) = to_sparse_trie_task {
+                    let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
+                }
                 let _ = stream_tx.send(());
             });
         } else {
@@ -394,40 +412,50 @@ where
 
         if let Some(saved_cache) = ctx.saved_cache &&
             !ctx.disable_bal_batch_io &&
-            let Some(pool) = ctx.bal_prewarm_pool.as_ref()
+            let Some(pool) = ctx.state_io_pool.as_ref()
         {
             // If
             //
-            // - BAL path is enabled (and so bal_prewarm_pool is present),
+            // - BAL path is enabled (and so state_io_pool is present),
             // - dispatch_bal_batch_io is false
             // - execution cache is not disabled
             //
             // we launch prewarming sequence of the BAL read set here. The BAL read-set consists
-            // of the accounts, their code if present, and declared storages (both storage_reads
-            // and storage_changes).
+            // of the accounts, their code if present, and declared storages. When Lthash is active,
+            // non-empty changed storage slots are read through the same pool for old-value
+            // subtraction, and that read also fills the shared execution cache.
             //
             // This runs side-by-side with the parallel transaction execution reducing the time it
             // spends blocking on the data.
-            let caches = saved_cache.cache().clone();
-            let provider_builder = ctx.provider.clone();
-            let build = Arc::new(move || provider_builder.build());
+            if !ctx.state_io_pool_opened_by_lthash {
+                let caches = saved_cache.cache().clone();
+                let provider_builder = ctx.provider.clone();
+                let build = Arc::new(move || provider_builder.build());
 
-            pool.begin_block(build, caches);
+                pool.begin_block(build, caches, None);
+            }
             for account in prefetch_bal.as_bal() {
                 pool.warm_account(account.address);
                 for change in &account.storage_changes {
-                    pool.warm_storage(account.address, change.slot.into());
+                    if !lthash_warms_storage_changes || change.changes.is_empty() {
+                        pool.warm_storage(account.address, change.slot.into());
+                    }
                 }
                 for &slot in &account.storage_reads {
                     pool.warm_storage(account.address, slot.into());
                 }
             }
-            pool.end_block();
+            if !ctx.state_io_pool_opened_by_lthash {
+                let _ = pool.end_block();
+            }
         }
 
         stream_rx
             .blocking_recv()
             .expect("BAL hashed-state streaming task dropped without signaling completion");
+        if let Some(to_lthash_task) = finish_lthash_task {
+            let _ = to_lthash_task.send(LthashMessage::FinishedUpdates);
+        }
 
         // Drop the per-thread providers
         executor.bal_streaming_pool().clear();
@@ -523,9 +551,11 @@ where
     pub saved_cache: Option<SavedCache>,
     /// Provider to obtain the state
     pub provider: StateProviderBuilder<N, P>,
-    /// Dedicated blocking pool for warming the BAL read-set. `Some` only on the BAL parallel
-    /// execution path; the pool is owned by the [`PayloadProcessor`](super::PayloadProcessor).
-    pub(crate) bal_prewarm_pool: Option<Arc<BalPrewarmPool>>,
+    /// Dedicated blocking pool for parent-state I/O. `Some` only on paths that need background
+    /// parent-state reads; the pool is owned by the [`PayloadProcessor`](super::PayloadProcessor).
+    pub(crate) state_io_pool: Option<Arc<StateIoPool>>,
+    /// True when Lthash opened the state I/O pool for this block and will close it.
+    pub(crate) state_io_pool_opened_by_lthash: bool,
     /// The metrics for the prewarm task.
     pub metrics: PrewarmMetrics,
     /// Metrics for the execution cache.
@@ -625,11 +655,11 @@ where
         self.terminate_execution.store(true, Ordering::Relaxed);
     }
 
-    /// Hashes and streams a single BAL account's state to the sparse trie task.
+    /// Hashes and streams a single BAL account's state to sparse-trie and Lthash tasks.
     ///
-    /// For each changed account, storage slots are hashed and sent immediately, then the account
-    /// is sent as a separate update. The parent account is read only when the BAL did not provide
-    /// all account leaf fields needed by the sparse trie.
+    /// Storage slots are hashed and sent immediately. Account updates are sent only when a consumer
+    /// needs them. The parent account is read only when the BAL did not provide all account leaf
+    /// fields needed to construct the post-state account.
     ///
     /// The `provider` is lazily initialized on first call and reused across accounts on the same
     /// thread.
@@ -638,20 +668,19 @@ where
         parent_span: &Span,
         provider: &mut Option<Box<dyn AccountReader>>,
         account_changes: &alloy_eip7928::AccountChanges,
-        to_sparse_trie_task: &CrossbeamSender<StateRootMessage>,
+        to_sparse_trie_task: Option<&CrossbeamSender<StateRootMessage>>,
+        to_lthash_task: Option<&CrossbeamSender<LthashMessage>>,
     ) {
-        if self.disable_bal_parallel_state_root {
-            return;
-        }
         let address = account_changes.address;
         let mut hashed_address = None;
         let account_fields = BalAccountStateFields::from_changes(account_changes);
+        let sparse_enabled = to_sparse_trie_task.is_some() && !self.disable_bal_parallel_state_root;
 
-        if !bal_account_changes_state_root(account_changes, account_fields) {
-            return;
+        if let Some(to_lthash_task) = to_lthash_task {
+            send_bal_storage_to_lthash(account_changes, to_lthash_task);
         }
 
-        if !account_changes.storage_changes.is_empty() {
+        if sparse_enabled && !account_changes.storage_changes.is_empty() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
             let mut storage_map = reth_trie::HashedStorage::new(false);
 
@@ -664,7 +693,18 @@ where
 
             let mut hashed_state = reth_trie::HashedPostState::default();
             hashed_state.storages.insert(hashed_address, storage_map);
-            let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
+            if let Some(to_sparse_trie_task) = to_sparse_trie_task {
+                let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
+            }
+        }
+
+        let account_fields_changed = !account_fields.is_empty();
+        let sparse_needs_account =
+            sparse_enabled && bal_account_changes_state_root(account_changes, account_fields);
+        let lthash_needs_account = to_lthash_task.is_some() && account_fields_changed;
+
+        if !sparse_needs_account && !lthash_needs_account {
+            return;
         }
 
         let existing_account = if account_fields.needs_parent_account() {
@@ -706,11 +746,26 @@ where
 
         let account = account_fields.into_account(existing_account);
 
-        let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
-        let mut hashed_state = reth_trie::HashedPostState::default();
-        hashed_state.accounts.insert(hashed_address, Some(account));
+        if let Some(to_lthash_task) = to_lthash_task &&
+            lthash_needs_account
+        {
+            let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
+            let _ = to_lthash_task.send(LthashMessage::AccountTouched {
+                address,
+                hashed_address,
+                new_account: Some(account.clone()),
+            });
+        }
 
-        let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
+        if sparse_needs_account {
+            let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
+            let mut hashed_state = reth_trie::HashedPostState::default();
+            hashed_state.accounts.insert(hashed_address, Some(account));
+
+            if let Some(to_sparse_trie_task) = to_sparse_trie_task {
+                let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
+            }
+        }
     }
 }
 

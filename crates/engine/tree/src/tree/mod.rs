@@ -14,7 +14,7 @@ use alloy_rpc_types_engine::{
 use error::{InsertBlockError, InsertBlockFatalError, InsertBlockValidationError};
 use reth_chain_state::{
     CanonicalInMemoryState, ComputedTrieData, ExecutedBlock, ExecutionTimingStats,
-    MemoryOverlayStateProvider, NewCanonicalChain, StateTrieOverlayManager,
+    LthashAccumulator, MemoryOverlayStateProvider, NewCanonicalChain, StateTrieOverlayManager,
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
@@ -117,6 +117,16 @@ impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
         overlay: Option<Vec<ExecutedBlock<N>>>,
     ) -> Self {
         Self { provider_factory, historical, overlay }
+    }
+
+    /// Returns the parent Lthash accumulator if the parent is still in the in-memory overlay.
+    ///
+    /// Persisted parents do not have a stored accumulator in this experiment, so callers should
+    /// start from zero when this returns `None`.
+    ///
+    /// TODO: This requires attention.
+    pub fn lthash_parent_accumulator(&self) -> Option<Arc<LthashAccumulator>> {
+        self.overlay.as_ref()?.last()?.lthash_accumulator_handle()
     }
 }
 

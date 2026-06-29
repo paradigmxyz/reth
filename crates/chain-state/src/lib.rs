@@ -11,6 +11,12 @@
 mod execution_stats;
 pub use execution_stats::ExecutionTimingStats;
 
+mod lthash;
+pub use lthash::{
+    lthash_account_element, lthash_storage_element, LthashAccumulator, LTHASH_ACCOUNT_ELEMENT_LEN,
+    LTHASH_ACCUMULATOR_LEN, LTHASH_STORAGE_ELEMENT_LEN,
+};
+
 mod in_memory;
 pub use in_memory::*;
 

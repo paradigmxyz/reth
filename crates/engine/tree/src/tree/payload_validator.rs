@@ -774,6 +774,7 @@ where
         let root_time = Instant::now();
         let mut maybe_state_root = None;
         let mut state_root_task_failed = false;
+        let state_root_skipped = strategy.is_skipped();
         #[cfg(feature = "trie-debug")]
         let mut trie_debug_recorders = Vec::new();
 
@@ -981,6 +982,34 @@ where
             .into())
         }
 
+        let lthash_start = Instant::now();
+        let lthash_outcome = ensure_ok_post_block!(
+            handle.lthash_outcome().map_err(|err| InsertBlockErrorKind::Other(Box::new(err))),
+            block
+        );
+        if let Some(outcome) = lthash_outcome.as_ref() {
+            let elapsed = lthash_start.elapsed();
+            if state_root_skipped {
+                info!(
+                    target: "engine::tree::payload_validator",
+                    root = %outcome.root,
+                    account_updates = outcome.account_updates,
+                    storage_updates = outcome.storage_updates,
+                    ?elapsed,
+                    "Lthash root task finished"
+                );
+            } else {
+                debug!(
+                    target: "engine::tree::payload_validator",
+                    root = %outcome.root,
+                    account_updates = outcome.account_updates,
+                    storage_updates = outcome.storage_updates,
+                    ?elapsed,
+                    "Lthash root task finished"
+                );
+            }
+        }
+
         let timing_stats = state_provider_stats.filter(|_| slow_block_enabled).map(|stats| {
             self.calculate_timing_stats(
                 &block,
@@ -998,6 +1027,11 @@ where
 
         let executed_block =
             self.spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output);
+        let executed_block = if let Some(outcome) = lthash_outcome {
+            executed_block.with_lthash_accumulator(outcome.accumulator)
+        } else {
+            executed_block
+        };
         let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
         Ok(ValidationOutput::new(executed_block, timing_stats).with_raw_bal(raw_bal))
     }
@@ -1789,6 +1823,8 @@ where
                     txs,
                     provider_builder,
                     parallel_bal_execution,
+                    // TODO: hack to detect whether we need to enable lthash.
+                    strategy.is_skipped(),
                 );
 
                 // Record prewarming initialization duration
@@ -2091,6 +2127,13 @@ enum StateRootStrategy<N: NodePrimitives> {
     Synchronous,
     /// Custom state root computation strategy.
     Custom(#[debug(skip)] CustomStateRoot<N>),
+}
+
+impl<N: NodePrimitives> StateRootStrategy<N> {
+    /// Returns `true` if the state root is skipped.
+    fn is_skipped(&self) -> bool {
+        matches!(self, StateRootStrategy::Skipped)
+    }
 }
 
 /// Type that validates the payloads processed by the engine.
