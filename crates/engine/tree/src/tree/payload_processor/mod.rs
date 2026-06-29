@@ -537,9 +537,7 @@ where
                     let mut batch_size = Self::FIRST_PARALLEL_TX_WINDOW_SIZE;
 
                     // Without BALs, we need to preserve the initial order of transactions.
-                    // Process contiguous windows in order so recovery prioritizes the next
-                    // transaction range execution will request. Each window still recovers in
-                    // parallel, then drains in block order.
+                    // Process exponentially increasing windows to make sure that first transactions are prioritized.
                     executor.cpu_pool().install(move || {
                         loop {
                             let chunk = iter
