@@ -17,7 +17,9 @@ installed.
 3. Updates the `NetworkStateCache` (applies the `LastNBlocksPolicy` eviction).
 4. Computes the actual Merkle multiproof for the missed state and writes a
    **witness sidecar** + a JSON benchmark **manifest** to `./sidecar/`.
-5. Logs accessed/missed counts, miss ratio, witness size, and cache footprint.
+5. *(optional)* Computes the **full-witness baseline** — a second multiproof over
+   *all* accessed state, ignoring the cache — to report the reduction ratio.
+6. Logs accessed/missed counts, miss ratio, witness size, and cache footprint.
 
 On `ChainReorged` the new chain is replayed into the cache; `ChainReverted` is
 logged but not rolled back (PoC limitation).
@@ -38,6 +40,18 @@ The cache windows are set in `CacheConfig` ([main.rs](./src/main.rs)) — defaul
 `account_window = 60`, `storage_window = 30` blocks. Adjust there and rebuild.
 (Use [`cache_window_bench`](../partial-stateless/src/bin/README.md) to pick good
 values offline before committing to them.)
+
+Two benchmark-only features are off by default and enabled per run via environment
+variables, so the core path stays lean:
+
+| Env var | Effect |
+| --- | --- |
+| `PS_CAPTURE_DIR=<dir>` | dump each block's `BlockAccessedState` fixture to `<dir>` (see below) |
+| `PS_WITNESS_BASELINE=1` | also compute the full-witness baseline + reduction ratio (an extra, larger multiproof per block) |
+
+When `PS_WITNESS_BASELINE` is unset, the manifest's `full_sidecar_baseline_stats`
+and `reduction` are `null` and no baseline multiproof is computed. A baseline
+failure is non-fatal — it never blocks the real (partial) sidecar.
 
 ### Capturing a benchmark dataset
 
@@ -63,6 +77,3 @@ snapshot is the portable, self-contained artifact.
 | `./sidecar/block_<N>_<hash>.bin` | witness sidecar (verify with `sidecar_verifier`) |
 | `./sidecar/block_<N>_<hash>.manifest.json` | per-block benchmark manifest |
 | `$PS_CAPTURE_DIR/accessed_<N>.bin` | captured fixture (when capture is enabled) |
-
-See the [PoC design doc](../../partial_stateless_prototype_plan.md) for the
-protocol rationale and roadmap.

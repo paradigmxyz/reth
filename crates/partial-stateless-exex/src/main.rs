@@ -19,7 +19,7 @@ use partial_stateless::{
     policy::LastNBlocksPolicy,
     witness::{
         accessed_to_state_targets, build_sidecar_targets, cache_hit_targets,
-        measure_multiproof_size, state_targets_to_proof_targets,
+        measure_multiproof_size, state_targets_to_proof_targets, WitnessResult,
     },
     CacheFootprintStats, PartialExecutionWitness, PartialExecutionWitnessState,
     PartialStatelessSidecar, PartitionCheck, SerializableMultiProof, SidecarBenchmarkManifest,
@@ -158,6 +158,20 @@ async fn partial_stateless_exex<
         );
     }
 
+    // Optional benchmark-only comparison against the FULL witness (every accessed
+    // key, ignoring the cache). It computes a second, larger multiproof per block,
+    // so it is off by default and gated behind `PS_WITNESS_BASELINE`. Core sidecar
+    // generation never depends on it.
+    let compute_baseline = std::env::var("PS_WITNESS_BASELINE")
+        .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "on"))
+        .unwrap_or(false);
+    if compute_baseline {
+        info!(
+            target: "partial_stateless",
+            "Full-witness baseline comparison ENABLED (PS_WITNESS_BASELINE) — extra multiproof per block"
+        );
+    }
+
     while let Some(notification) = ctx.notifications.try_next().await? {
         match &notification {
             ExExNotification::ChainCommitted { new } => {
@@ -287,9 +301,6 @@ async fn partial_stateless_exex<
                         let (raw_targets, targets) = build_sidecar_targets(&miss);
                         let target_accounts = targets.len();
                         let target_slots: usize = targets.values().map(|slots| slots.len()).sum();
-                        let full_targets = state_targets_to_proof_targets(&accessed_targets);
-                        let full_target_accounts = full_targets.len();
-                        let full_target_slots: usize = full_targets.values().map(|slots| slots.len()).sum();
 
                         // Calculate total bytes of missed bytecodes
                         let missed_bytecode_bytes: usize = miss.missed_codes
@@ -303,30 +314,40 @@ async fn partial_stateless_exex<
                             .filter_map(|code_hash| accessed.codes.get(code_hash).cloned())
                             .collect();
 
-                        let full_bytecode_bytes: usize =
-                            accessed.codes.values().map(|bytes| bytes.len()).sum();
-                        let full_start = Instant::now();
-                        let full_sidecar_baseline_stats = match state_provider
-                            .multiproof(TrieInput::default(), full_targets)
-                        {
-                            Ok(full_proof) => {
-                                let elapsed_ms = full_start.elapsed().as_millis() as u64;
-                                let mut full_result =
-                                    measure_multiproof_size(&full_proof, full_bytecode_bytes);
-                                full_result.computation_time_ms = Some(elapsed_ms);
-                                full_result.target_accounts = full_target_accounts;
-                                full_result.target_storage_slots = full_target_slots;
-                                full_result
+                        // Optional full-witness baseline (every accessed key, ignoring the
+                        // cache). Gated behind PS_WITNESS_BASELINE since it is an extra,
+                        // larger multiproof. A failure here is non-fatal — it only drops the
+                        // comparison for this block and never skips the real partial sidecar.
+                        let full_sidecar_baseline_stats: Option<WitnessResult> = if compute_baseline {
+                            let full_targets = state_targets_to_proof_targets(&accessed_targets);
+                            let full_target_accounts = full_targets.len();
+                            let full_target_slots: usize =
+                                full_targets.values().map(|slots| slots.len()).sum();
+                            let full_bytecode_bytes: usize =
+                                accessed.codes.values().map(|bytes| bytes.len()).sum();
+                            let full_start = Instant::now();
+                            match state_provider.multiproof(TrieInput::default(), full_targets) {
+                                Ok(full_proof) => {
+                                    let elapsed_ms = full_start.elapsed().as_millis() as u64;
+                                    let mut full_result =
+                                        measure_multiproof_size(&full_proof, full_bytecode_bytes);
+                                    full_result.computation_time_ms = Some(elapsed_ms);
+                                    full_result.target_accounts = full_target_accounts;
+                                    full_result.target_storage_slots = full_target_slots;
+                                    Some(full_result)
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        target: "partial_stateless",
+                                        block = *block_number,
+                                        error = %e,
+                                        "Failed to compute full sidecar baseline multiproof (comparison dropped for this block)"
+                                    );
+                                    None
+                                }
                             }
-                            Err(e) => {
-                                warn!(
-                                    target: "partial_stateless",
-                                    block = *block_number,
-                                    error = %e,
-                                    "Failed to compute full sidecar baseline multiproof"
-                                );
-                                continue;
-                            }
+                        } else {
+                            None
                         };
 
                         let start = Instant::now();
@@ -467,10 +488,9 @@ async fn partial_stateless_exex<
                                         partition,
                                         full_sidecar_baseline_stats: full_sidecar_baseline_stats.clone(),
                                         partial_sidecar_stats: result.clone(),
-                                        reduction: WitnessReductionStats::new(
-                                            &result,
-                                            &full_sidecar_baseline_stats,
-                                        ),
+                                        reduction: full_sidecar_baseline_stats
+                                            .as_ref()
+                                            .map(|full| WitnessReductionStats::new(&result, full)),
                                     };
                                     let manifest_path = sidecar_path.with_extension("manifest.json");
                                     let manifest_bytes = match serde_json::to_vec_pretty(&manifest) {
