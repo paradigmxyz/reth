@@ -143,9 +143,9 @@ where
 
         canonical_executor.apply_pre_execution_changes()?;
         let mut senders = Vec::with_capacity(transaction_count);
-        let mut last_sent_len = 0usize;
         for output in ordered_worker_outputs(&result_rx, transaction_count) {
             let output = output?;
+            let tx_index = output.index;
 
             gas_tracker.validate_tx_limit(output.tx_gas_limit)?;
             gas_tracker.record_result(output.result.result());
@@ -154,13 +154,8 @@ where
             let _ = canonical_executor.commit_transaction(output.result);
             senders.push(output.signer);
 
-            let current_len = canonical_executor.receipts().len();
-            if current_len > last_sent_len {
-                last_sent_len = current_len;
-                if let Some(receipt) = canonical_executor.receipts().last() {
-                    let tx_index = current_len - 1;
-                    let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
-                }
+            if let Some(receipt) = canonical_executor.receipts().get(tx_index) {
+                let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
             }
         }
         drop(abort_guard);
