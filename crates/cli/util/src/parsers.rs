@@ -109,6 +109,9 @@ pub fn read_json_from_file<T: serde::de::DeserializeOwned>(path: &str) -> Result
 /// - "2" -> 2 ETH = 2 * 10^18 wei
 pub fn parse_ether_value(value: &str) -> eyre::Result<u128> {
     let eth = value.parse::<f64>()?;
+    if !eth.is_finite() {
+        return Err(eyre::eyre!("Ether value must be finite"))
+    }
     if eth.is_sign_negative() {
         return Err(eyre::eyre!("Ether value cannot be negative"))
     }
@@ -175,6 +178,11 @@ mod tests {
 
         // Test negative value fails
         assert!(parse_ether_value("-1").is_err());
+
+        // Test non-finite values fail
+        assert!(parse_ether_value("NaN").is_err());
+        assert!(parse_ether_value("inf").is_err());
+        assert!(parse_ether_value("-inf").is_err());
 
         // Test invalid input fails
         assert!(parse_ether_value("abc").is_err());
