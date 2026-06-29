@@ -1466,6 +1466,9 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
             .map(|l| l.iter().map(|i| i.storage_keys.len()).sum::<usize>())
             .unwrap_or_default() as u64,
         transaction.authorization_list().map(|l| l.len()).unwrap_or_default() as u64,
+        // EIP-2780 only activates at Amsterdam; this pre-check caps `spec_id` at PRAGUE,
+        // so the gas calculation never applies the EIP-2780 adjustment here.
+        None,
     );
 
     let gas_limit = transaction.gas_limit();
