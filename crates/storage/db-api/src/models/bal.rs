@@ -1,4 +1,4 @@
-//! Block access list database models.
+//! Block access list table models.
 
 use crate::{
     table::{Compress, Decode, Decompress, Encode},
@@ -12,19 +12,21 @@ use core::cmp::Ordering;
 use reth_codecs::DecompressError;
 use serde::{Deserialize, Serialize};
 
-/// Number of encoded bytes in a [`StoredBlockAccessListKey`].
+/// Encoded [`StoredBlockAccessListKey`] length.
 const BLOCK_ACCESS_LIST_KEY_BYTES: usize = 8 + 32;
 
-/// Number of hash bytes prefixed to a stored BAL value.
+/// Hash prefix length in [`StoredBlockAccessList`] values.
 const STORED_BLOCK_ACCESS_LIST_HASH_BYTES: usize = 32;
 
-/// A stored block access list key ordered by block number first, then block hash.
+/// Block access list table key.
+///
+/// Encoded as block number followed by block hash so pruning can scan by block number.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(transparent)]
 pub struct StoredBlockAccessListKey(NumHash);
 
 impl StoredBlockAccessListKey {
-    /// Creates a new stored block access list key.
+    /// Creates a key from a block number/hash pair.
     pub const fn new(num_hash: NumHash) -> Self {
         Self(num_hash)
     }
@@ -85,23 +87,27 @@ impl Decode for StoredBlockAccessListKey {
     }
 }
 
-/// Raw block access list bytes with a stored hash for corruption checks.
+/// Stored block access list value.
+///
+/// The hash prefix lets reads detect corrupted payload bytes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StoredBlockAccessList {
-    /// Keccak hash of the raw BAL bytes.
+    /// Expected keccak hash of the raw BAL bytes.
     hash: B256,
-    /// Raw RLP BAL.
+    /// Raw BAL RLP bytes.
     raw: RawBal,
 }
 
 impl StoredBlockAccessList {
-    /// Creates a stored BAL from raw RLP bytes.
+    /// Creates a stored BAL from raw bytes.
     pub fn new(raw: RawBal) -> Self {
         let hash = keccak256(raw.as_raw().as_ref());
         Self { hash, raw }
     }
 
-    /// Creates a stored BAL from raw RLP bytes and an expected hash.
+    /// Creates a stored BAL without recomputing its hash.
+    ///
+    /// `hash` must be the keccak hash of `raw`.
     pub const fn new_unchecked(raw: RawBal, hash: B256) -> Self {
         Self { hash, raw }
     }
@@ -110,7 +116,7 @@ impl StoredBlockAccessList {
         keccak256(self.raw.as_raw().as_ref()) == self.hash
     }
 
-    /// Consumes this value and returns the raw BAL if the stored hash matches.
+    /// Returns the raw BAL after verifying its hash prefix.
     pub fn into_verified_raw(self) -> Result<RawBal, StoredBlockAccessListHashError> {
         if self.has_valid_hash() {
             Ok(self.raw)

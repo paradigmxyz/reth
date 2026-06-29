@@ -17,10 +17,10 @@ use std::{
     sync::Arc,
 };
 
-/// RocksDB-backed BAL store keyed by `(block_number, block_hash)`.
+/// RocksDB-backed BAL store.
 ///
-/// Hash-only lookups are served from the pending in-memory overlay. Persisted disk lookups require
-/// the block number/hash pair.
+/// Persisted BALs are keyed by `(block_number, block_hash)`. Hash-only lookups only read the
+/// pending buffer.
 #[derive(Clone)]
 pub struct RocksDBBalStore {
     retention: PruneMode,
@@ -30,16 +30,12 @@ pub struct RocksDBBalStore {
 }
 
 impl RocksDBBalStore {
-    /// Creates a new RocksDB-backed BAL store with the default retention distance.
-    ///
-    /// The provider must be built with the `BlockAccessLists` column family.
+    /// Creates a new store with the default retention distance.
     pub fn new(rocksdb: RocksDBProvider) -> Self {
         Self::with_retention_distance(rocksdb, BAL_RETENTION_PERIOD_SLOTS)
     }
 
-    /// Creates a new RocksDB-backed BAL store with the given retention distance.
-    ///
-    /// The provider must be built with the `BlockAccessLists` column family.
+    /// Creates a new store with the given retention distance.
     pub fn with_retention_distance(rocksdb: RocksDBProvider, blocks: u64) -> Self {
         Self {
             retention: PruneMode::Distance(blocks),
@@ -113,10 +109,14 @@ impl std::fmt::Debug for RocksDBBalStore {
     }
 }
 
+/// Buffered BALs waiting to be flushed to RocksDB.
 #[derive(Debug, Default)]
 struct RocksDBBalStoreBuffer {
+    // Hash index for serving hash-only lookups before flush.
     entries: HashMap<BlockHash, RocksDBBalEntry>,
+    // Block-number index for pruning buffered entries.
     hashes_by_number: BTreeMap<BlockNumber, Vec<BlockHash>>,
+    // Ordered writes waiting for flush.
     pending: BTreeMap<StoredBlockAccessListKey, RawBal>,
     highest_block_number: Option<BlockNumber>,
 }
@@ -232,6 +232,7 @@ impl RocksDBBalStoreBuffer {
     }
 }
 
+/// Buffered BAL entry with its block number.
 #[derive(Debug)]
 struct RocksDBBalEntry {
     block_number: BlockNumber,

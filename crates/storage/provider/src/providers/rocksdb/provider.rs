@@ -153,14 +153,13 @@ const DEFAULT_COMPRESS_BUF_CAPACITY: usize = 4096;
 /// The consistency check on startup heals any crash that occurs between auto-commits.
 const DEFAULT_AUTO_COMMIT_THRESHOLD: usize = 512 * 1024 * 1024;
 
-/// Minimum BAL value size stored in BlobDB files instead of regular SST values.
+/// Minimum BAL value size stored in BlobDB files.
 ///
-/// This keeps small/empty BALs inline while moving real payloads out of the normal LSM compaction
-/// path.
-pub(crate) const DEFAULT_BAL_MIN_BLOB_SIZE: u64 = 4 * 1024;
+/// Smaller BALs stay inline. Larger payloads avoid regular LSM value compaction.
+const DEFAULT_BAL_MIN_BLOB_SIZE: u64 = 4 * 1024;
 
 /// Target BAL blob file size.
-pub(crate) const DEFAULT_BAL_BLOB_FILE_SIZE: u64 = 256 * 1024 * 1024;
+const DEFAULT_BAL_BLOB_FILE_SIZE: u64 = 256 * 1024 * 1024;
 
 /// Builder for [`RocksDBProvider`].
 pub struct RocksDBBuilder {
@@ -269,7 +268,7 @@ impl RocksDBBuilder {
     }
 
     /// Creates column family options for block access list payloads.
-    pub(crate) fn block_access_lists_column_family_options(cache: &Cache) -> Options {
+    fn block_access_lists_column_family_options(cache: &Cache) -> Options {
         let mut cf_options = Self::default_column_family_options(cache);
         cf_options.set_enable_blob_files(true);
         cf_options.set_min_blob_size(DEFAULT_BAL_MIN_BLOB_SIZE);
@@ -1127,7 +1126,7 @@ impl RocksDBProvider {
         Ok(RocksDBRawIter { inner: iter })
     }
 
-    /// Creates a raw key iterator starting from the given key.
+    /// Creates a raw key iterator positioned at `key`.
     pub(crate) fn raw_key_iter_from<T: Table>(
         &self,
         key: T::Key,
@@ -2894,7 +2893,6 @@ mod tests {
         provider.put::<tables::StoragesHistory>(key.clone(), &value).unwrap();
         assert!(provider.get::<tables::StoragesHistory>(key).unwrap().is_some());
 
-        // Should be able to write/read BlockAccessLists
         let bal_key = reth_db_api::models::StoredBlockAccessListKey::new(NumHash::new(
             1,
             B256::with_last_byte(1),

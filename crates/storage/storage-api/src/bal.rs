@@ -34,21 +34,17 @@ mod subscriptions {
     pub type BalNotificationStream = reth_tokio_util::EventStream<BalNotification>;
 }
 
-/// Store for Block Access Lists (BALs).
+/// Block Access List (BAL) storage.
 ///
-/// This abstraction intentionally does not prescribe where BALs live. Implementations may keep
-/// recent BALs in memory, read canonical BALs from static files, or compose multiple tiers behind
-/// a single interface. Callers that know the block number should prefer block number/hash lookups;
-/// some stores intentionally do not maintain a hash-only index.
+/// Stores may only support persisted lookups by block number and hash.
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BalStore: Send + Sync + 'static {
-    /// Insert the BAL for the given block.
+    /// Inserts the BAL for the given block.
     ///
-    /// Implementations may buffer inserts. Call [`Self::flush`] when pending BALs need to be made
-    /// durable.
+    /// Implementations may buffer inserts until [`Self::flush`] is called.
     fn insert(&self, num_hash: NumHash, bal: RawBal) -> ProviderResult<()>;
 
-    /// Insert multiple BALs.
+    /// Inserts multiple BALs.
     ///
     /// The default implementation preserves the behavior of repeated [`Self::insert`] calls.
     fn insert_many(&self, entries: Vec<(NumHash, RawBal)>) -> ProviderResult<()> {
@@ -58,7 +54,7 @@ pub trait BalStore: Send + Sync + 'static {
         Ok(())
     }
 
-    /// Flushes pending BALs up to and including `to_block` to the backing store.
+    /// Flushes pending BALs through `to_block` to the backing store.
     ///
     /// In-memory implementations may treat this as a no-op.
     fn flush(&self, _to_block: BlockNumber) -> ProviderResult<()> {
@@ -70,7 +66,7 @@ pub trait BalStore: Send + Sync + 'static {
     /// Returns the number of BALs pruned.
     fn prune(&self, tip: BlockNumber) -> ProviderResult<usize>;
 
-    /// Fetch BALs for the given block hashes.
+    /// Fetches BALs for the given block hashes.
     ///
     /// The returned vector must align with `block_hashes`.
     fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>>;
@@ -101,10 +97,9 @@ pub trait BalStore: Send + Sync + 'static {
         self.get_by_hash(block_hash)?.map(revm_bal_from_raw).transpose()
     }
 
-    /// Returns a stream of BAL insert notifications.
+    /// Returns BAL insert notifications.
     ///
-    /// Notifications are emitted only after a BAL has been successfully inserted into the store.
-    /// They do not imply canonicality.
+    /// Notifications do not imply canonicality.
     #[cfg(feature = "std")]
     fn bal_stream(&self) -> BalNotificationStream;
 }
@@ -126,19 +121,19 @@ impl BalStoreHandle {
         Self::new(NoopBalStore)
     }
 
-    /// Insert the BAL for the given block.
+    /// Inserts the BAL for the given block.
     #[inline]
     pub fn insert(&self, num_hash: NumHash, bal: RawBal) -> ProviderResult<()> {
         self.inner.insert(num_hash, bal)
     }
 
-    /// Insert multiple BALs.
+    /// Inserts multiple BALs.
     #[inline]
     pub fn insert_many(&self, entries: Vec<(NumHash, RawBal)>) -> ProviderResult<()> {
         self.inner.insert_many(entries)
     }
 
-    /// Flushes pending BALs up to and including `to_block` to the backing store.
+    /// Flushes pending BALs through `to_block` to the backing store.
     #[inline]
     pub fn flush(&self, to_block: BlockNumber) -> ProviderResult<()> {
         self.inner.flush(to_block)
@@ -150,7 +145,7 @@ impl BalStoreHandle {
         self.inner.prune(tip)
     }
 
-    /// Fetch BALs for the given block hashes.
+    /// Fetches BALs for the given block hashes.
     #[inline]
     pub fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
         self.inner.get_by_hashes(block_hashes)
@@ -210,61 +205,7 @@ pub trait BalProvider {
     fn bal_store(&self) -> &BalStoreHandle;
 }
 
-/// Fetches the BAL for a block hash, resolving the block number if hash-only lookup misses.
-pub fn get_bal_by_hash<Provider>(
-    provider: &Provider,
-    block_hash: BlockHash,
-) -> ProviderResult<Option<Bytes>>
-where
-    Provider: BalProvider + BlockNumReader + ?Sized,
-{
-    if let Some(bal) = provider.bal_store().get_by_hash(block_hash)? {
-        return Ok(Some(bal))
-    }
-
-    let Some(block_number) = provider.block_number(block_hash)? else { return Ok(None) };
-    provider.bal_store().get_by_block_num_hash(NumHash::new(block_number, block_hash))
-}
-
-/// Fetches BAL response entries for block hashes, resolving block numbers for hash-only misses.
-pub fn get_bals_by_hashes<Provider>(
-    provider: &Provider,
-    block_hashes: &[BlockHash],
-) -> ProviderResult<Vec<Option<Bytes>>>
-where
-    Provider: BalProvider + BlockNumReader + ?Sized,
-{
-    let mut out = Vec::with_capacity(block_hashes.len());
-
-    for block_hash in block_hashes {
-        out.push(get_bal_by_hash(provider, *block_hash)?);
-    }
-
-    Ok(out)
-}
-
-/// Fetches the BAL for a block hash in revm representation, resolving the block number on miss.
-pub fn get_revm_bal_by_hash<Provider>(
-    provider: &Provider,
-    block_hash: BlockHash,
-) -> ProviderResult<Option<DecodedBal<Arc<RevmBal>>>>
-where
-    Provider: BalProvider + BlockNumReader + ?Sized,
-{
-    get_bal_by_hash(provider, block_hash)?.map(revm_bal_from_raw).transpose()
-}
-
-fn revm_bal_from_raw(raw: Bytes) -> ProviderResult<DecodedBal<Arc<RevmBal>>> {
-    DecodedBal::from_rlp_bytes(raw)
-        .map_err(reth_storage_errors::provider::ProviderError::from)?
-        .try_map(|bal| {
-            RevmBal::try_from(Vec::from(bal))
-                .map(Arc::new)
-                .map_err(reth_storage_errors::provider::ProviderError::other)
-        })
-}
-
-/// No-op BAL store used as the default wiring target until a concrete implementation is injected.
+/// BAL store that discards writes and returns no entries.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NoopBalStore;
 
@@ -289,6 +230,60 @@ impl BalStore for NoopBalStore {
     fn bal_stream(&self) -> BalNotificationStream {
         reth_tokio_util::EventSender::new(1).new_listener()
     }
+}
+
+/// Fetches a BAL by hash, falling back to block-number lookup.
+pub fn get_bal_by_hash<Provider>(
+    provider: &Provider,
+    block_hash: BlockHash,
+) -> ProviderResult<Option<Bytes>>
+where
+    Provider: BalProvider + BlockNumReader + ?Sized,
+{
+    if let Some(bal) = provider.bal_store().get_by_hash(block_hash)? {
+        return Ok(Some(bal))
+    }
+
+    let Some(block_number) = provider.block_number(block_hash)? else { return Ok(None) };
+    provider.bal_store().get_by_block_num_hash(NumHash::new(block_number, block_hash))
+}
+
+/// Fetches BALs by hash, falling back to block-number lookup.
+pub fn get_bals_by_hashes<Provider>(
+    provider: &Provider,
+    block_hashes: &[BlockHash],
+) -> ProviderResult<Vec<Option<Bytes>>>
+where
+    Provider: BalProvider + BlockNumReader + ?Sized,
+{
+    let mut out = Vec::with_capacity(block_hashes.len());
+
+    for block_hash in block_hashes {
+        out.push(get_bal_by_hash(provider, *block_hash)?);
+    }
+
+    Ok(out)
+}
+
+/// Fetches a revm BAL by hash, falling back to block-number lookup.
+pub fn get_revm_bal_by_hash<Provider>(
+    provider: &Provider,
+    block_hash: BlockHash,
+) -> ProviderResult<Option<DecodedBal<Arc<RevmBal>>>>
+where
+    Provider: BalProvider + BlockNumReader + ?Sized,
+{
+    get_bal_by_hash(provider, block_hash)?.map(revm_bal_from_raw).transpose()
+}
+
+fn revm_bal_from_raw(raw: Bytes) -> ProviderResult<DecodedBal<Arc<RevmBal>>> {
+    DecodedBal::from_rlp_bytes(raw)
+        .map_err(reth_storage_errors::provider::ProviderError::from)?
+        .try_map(|bal| {
+            RevmBal::try_from(Vec::from(bal))
+                .map(Arc::new)
+                .map_err(reth_storage_errors::provider::ProviderError::other)
+        })
 }
 
 #[cfg(test)]
