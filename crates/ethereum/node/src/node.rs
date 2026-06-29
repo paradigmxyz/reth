@@ -11,6 +11,12 @@ use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthBuiltPayload, EthPayloadAttributes};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
+#[cfg(not(feature = "jit"))]
+use reth_evm_ethereum::RethEvmFactory;
+#[cfg(feature = "jit")]
+use reth_evm_ethereum::{
+    Evm2JitBackend, JitMetrics, JitMode, RethEvmFactory, RuntimeConfig, RuntimeTuning,
+};
 use reth_network::{primitives::BasicNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives,
@@ -48,7 +54,9 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
-use reth_tracing::tracing::{debug, info, warn};
+#[cfg(feature = "jit")]
+use reth_tracing::tracing::warn;
+use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, PoolPooledTx, PoolTransaction,
     TransactionPool, TransactionValidationTaskExecutor,
@@ -58,6 +66,11 @@ use std::{marker::PhantomData, sync::Arc, time::SystemTime};
 pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
 
 /// Handles the legacy JIT helper subcommand hook.
+#[cfg(feature = "jit")]
+pub use reth_evm_ethereum::maybe_run_jit_helper;
+
+/// Handles the legacy JIT helper subcommand hook.
+#[cfg(not(feature = "jit"))]
 pub const fn maybe_run_jit_helper() -> eyre::Result<std::ops::ControlFlow<()>> {
     Ok(std::ops::ControlFlow::Continue(()))
 }
@@ -468,18 +481,93 @@ impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
     }
 }
 
+/// Builds a [`RuntimeConfig`] from CLI [`JitArgs`].
+#[cfg(feature = "jit")]
+fn jit_runtime_config(jit: &JitArgs) -> RuntimeConfig {
+    let default_tuning = RuntimeTuning::default();
+    let tuning = RuntimeTuning {
+        channel_capacity: jit.channel_capacity,
+        jit_hot_threshold: jit.hot_threshold,
+        jit_max_bytecode_len: jit.max_bytecode_len,
+        jit_max_pending_jobs: jit.max_pending_jobs,
+        jit_worker_count: jit.worker_count.unwrap_or(default_tuning.jit_worker_count),
+        resident_code_cache_bytes: jit.code_cache_bytes,
+        idle_evict_duration: Some(jit.idle_evict_duration),
+        ..default_tuning
+    };
+
+    RuntimeConfig {
+        enabled: jit.enabled,
+        tuning,
+        debug_assertions: jit.debug,
+        blocking: jit.blocking,
+        jit_mode: JitMode::OutOfProcess,
+        ..RuntimeConfig::default()
+    }
+}
+
+/// Builds an [`EthEvmConfig`] with evm2 JIT from CLI [`JitArgs`].
+///
+/// This is the shared setup used by both [`EthereumExecutorBuilder`] and `reth re-execute`.
+///
+/// Returns the EVM config and metrics recorder if JIT starts enabled.
+#[cfg(feature = "jit")]
+#[allow(clippy::type_complexity)]
+pub fn build_jit_evm_config<C: EthereumHardforks>(
+    chain_spec: Arc<C>,
+    jit: &JitArgs,
+    dump_dir: Option<std::path::PathBuf>,
+) -> eyre::Result<(EthEvmConfig<C, RethEvmFactory>, Option<Arc<JitMetrics>>)> {
+    if !jit.enabled {
+        let factory = RethEvmFactory::disabled();
+        return Ok((EthEvmConfig::new_with_evm_factory(chain_spec, factory), None));
+    }
+
+    let mut config = jit_runtime_config(jit);
+    config.dump_dir = dump_dir;
+
+    let jit_metrics = Arc::new(JitMetrics::default());
+    let compilation_metrics = jit_metrics.clone();
+    config.on_compilation = Some(Arc::new(move |event| {
+        compilation_metrics.record_compilation(&event);
+    }));
+
+    let tuning = config.tuning;
+    let jit_mode = config.jit_mode;
+    let backend = Evm2JitBackend::new(config)?;
+
+    warn!(target: "reth::cli",
+        hot_threshold = tuning.jit_hot_threshold,
+        workers = tuning.jit_worker_count,
+        mode = ?jit_mode,
+        blocking = jit.blocking,
+        "Started experimental evm2 JIT backend; this may cause instability",
+    );
+
+    let factory = RethEvmFactory::new_with_metrics(backend, jit_metrics.as_ref().clone());
+    let evm_config = EthEvmConfig::new_with_evm_factory(chain_spec, factory);
+
+    Ok((evm_config, Some(jit_metrics)))
+}
+
 /// Builds an [`EthEvmConfig`] from CLI [`JitArgs`].
+///
+/// Compiled without the `jit` feature: errors if JIT was requested via [`JitArgs`] and otherwise
+/// returns a plain interpreter-backed config.
+#[cfg(not(feature = "jit"))]
 #[allow(clippy::type_complexity)]
 pub fn build_jit_evm_config<C: EthereumHardforks>(
     chain_spec: Arc<C>,
     jit: &JitArgs,
     _dump_dir: Option<std::path::PathBuf>,
-) -> eyre::Result<(EthEvmConfig<C>, Option<()>)> {
+) -> eyre::Result<(EthEvmConfig<C, RethEvmFactory>, Option<()>)> {
     if jit.enabled {
-        warn!(target: "reth::cli", "JIT is unsupported by the active EVM execution path; ignoring --jit");
+        eyre::bail!(
+            "JIT compilation was requested but this binary was compiled without the `jit` feature"
+        );
     }
-
-    Ok((EthEvmConfig::new(chain_spec), None))
+    let factory = RethEvmFactory::disabled();
+    Ok((EthEvmConfig::new_with_evm_factory(chain_spec, factory), None))
 }
 
 /// A regular ethereum evm and executor builder.
@@ -495,13 +583,32 @@ where
     >,
     Node: FullNodeTypes<Types = Types>,
 {
-    type EVM = EthEvmConfig<Types::ChainSpec>;
+    type EVM = EthEvmConfig<Types::ChainSpec, RethEvmFactory>;
 
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
         let jit = &ctx.config().jit;
         let dump_dir = jit.debug.then(|| ctx.config().datadir().data_dir().join("jit"));
 
-        let (evm_config, _) = build_jit_evm_config(ctx.chain_spec(), jit, dump_dir)?;
+        let (evm_config, jit_metrics) = build_jit_evm_config(ctx.chain_spec(), jit, dump_dir)?;
+
+        #[cfg(not(feature = "jit"))]
+        let _ = jit_metrics;
+
+        #[cfg(feature = "jit")]
+        if let Some(jit_metrics) = jit_metrics {
+            let metrics_backend = evm_config.executor_factory.evm_factory().backend().clone();
+            ctx.task_executor().spawn_with_graceful_shutdown_signal(|shutdown| async move {
+                let mut shutdown = std::pin::pin!(shutdown);
+                loop {
+                    tokio::select! {
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
+                            jit_metrics.record(&metrics_backend.stats());
+                        }
+                        _ = &mut shutdown => break,
+                    }
+                }
+            });
+        }
 
         Ok(evm_config)
     }

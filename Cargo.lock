@@ -1596,7 +1596,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "miniz_oxide",
- "object",
+ "object 0.37.3",
  "rustc-demangle",
  "windows-link 0.2.1",
 ]
@@ -2273,7 +2273,7 @@ checksum = "0b023947811758c97c59bf9d1c188fd619ad4718dcaa767947df1cadb14f39f4"
 dependencies = [
  "glob",
  "libc",
- "libloading",
+ "libloading 0.8.9",
 ]
 
 [[package]]
@@ -3446,7 +3446,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3525,6 +3525,7 @@ dependencies = [
  "k256",
  "once_cell",
  "p256",
+ "paste",
  "phf 0.14.0",
  "ripemd 0.2.0",
  "secp256k1 0.31.1",
@@ -3550,6 +3551,121 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "evm2-jit"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/evm2?rev=f2fe13998cb73c23adcb7b6636635fce7a638ef5#f2fe13998cb73c23adcb7b6636635fce7a638ef5"
+dependencies = [
+ "evm2",
+ "evm2-jit-backend",
+ "evm2-jit-build",
+ "evm2-jit-builtins",
+ "evm2-jit-codegen",
+ "evm2-jit-context",
+ "evm2-jit-llvm",
+ "evm2-jit-runtime",
+]
+
+[[package]]
+name = "evm2-jit-backend"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/evm2?rev=f2fe13998cb73c23adcb7b6636635fce7a638ef5#f2fe13998cb73c23adcb7b6636635fce7a638ef5"
+dependencies = [
+ "eyre",
+ "ruint",
+]
+
+[[package]]
+name = "evm2-jit-build"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/evm2?rev=f2fe13998cb73c23adcb7b6636635fce7a638ef5#f2fe13998cb73c23adcb7b6636635fce7a638ef5"
+
+[[package]]
+name = "evm2-jit-builtins"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/evm2?rev=f2fe13998cb73c23adcb7b6636635fce7a638ef5#f2fe13998cb73c23adcb7b6636635fce7a638ef5"
+dependencies = [
+ "alloy-primitives",
+ "evm2",
+ "evm2-jit-backend",
+ "evm2-jit-context",
+ "paste",
+ "tracing",
+]
+
+[[package]]
+name = "evm2-jit-codegen"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/evm2?rev=f2fe13998cb73c23adcb7b6636635fce7a638ef5#f2fe13998cb73c23adcb7b6636635fce7a638ef5"
+dependencies = [
+ "alloy-primitives",
+ "bitflags 2.13.0",
+ "bitvec",
+ "derive_more",
+ "either",
+ "evm2",
+ "evm2-jit-backend",
+ "evm2-jit-build",
+ "evm2-jit-builtins",
+ "evm2-jit-context",
+ "evm2-jit-llvm",
+ "indexmap 2.14.0",
+ "oxc_index",
+ "smallvec",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
+name = "evm2-jit-context"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/evm2?rev=f2fe13998cb73c23adcb7b6636635fce7a638ef5#f2fe13998cb73c23adcb7b6636635fce7a638ef5"
+dependencies = [
+ "alloy-primitives",
+ "evm2",
+ "ruint",
+]
+
+[[package]]
+name = "evm2-jit-llvm"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/evm2?rev=f2fe13998cb73c23adcb7b6636635fce7a638ef5#f2fe13998cb73c23adcb7b6636635fce7a638ef5"
+dependencies = [
+ "alloy-primitives",
+ "cc",
+ "evm2-jit-backend",
+ "inkwell",
+ "object 0.39.1",
+ "tracing",
+]
+
+[[package]]
+name = "evm2-jit-runtime"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/evm2?rev=f2fe13998cb73c23adcb7b6636635fce7a638ef5#f2fe13998cb73c23adcb7b6636635fce7a638ef5"
+dependencies = [
+ "alloy-primitives",
+ "crossbeam-channel",
+ "crossbeam-queue",
+ "dashmap",
+ "derive_more",
+ "evm2",
+ "evm2-jit-backend",
+ "evm2-jit-builtins",
+ "evm2-jit-codegen",
+ "evm2-jit-context",
+ "evm2-jit-llvm",
+ "eyre",
+ "libc",
+ "libloading 0.9.0",
+ "quanta",
+ "rayon",
+ "tempfile",
+ "tracing",
+ "wait-timeout",
+ "wincode",
 ]
 
 [[package]]
@@ -4293,8 +4409,8 @@ dependencies = [
  "libc",
  "log",
  "rustversion",
- "windows-link 0.1.3",
- "windows-result 0.3.4",
+ "windows-link 0.2.1",
+ "windows-result 0.4.1",
 ]
 
 [[package]]
@@ -4861,7 +4977,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.61.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -5110,6 +5226,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "inkwell"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7decbc9dfa45a4a827a6ff7b822c113b1285678a937e84213417d4ca8a095782"
+dependencies = [
+ "bitflags 2.13.0",
+ "inkwell_internals",
+ "libc",
+ "llvm-sys",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "inkwell_internals"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6cfe97ee860815a90ed17e09639513269e39420a7440f3f4c996f238c514cf8d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "inotify"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5218,7 +5358,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5704,6 +5844,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "libloading"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "754ca22de805bb5744484a5b151a9e1a8e837d5dc232c2d7d8c2e3492edc8b60"
+dependencies = [
+ "cfg-if",
+ "windows-link 0.2.1",
+]
+
+[[package]]
 name = "libm"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5821,6 +5971,20 @@ name = "litrs"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
+
+[[package]]
+name = "llvm-sys"
+version = "221.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2abcc34a3b190f03c2a61b555f218f529589ff13657bdd2ff8ac3e85f2abe6bb"
+dependencies = [
+ "anyhow",
+ "cc",
+ "lazy_static",
+ "libc",
+ "regex-lite",
+ "semver 1.0.28",
+]
 
 [[package]]
 name = "lock_api"
@@ -6221,6 +6385,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "nonmax"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "610a5acd306ec67f907abe5567859a3c693fb9886eb1f012ab8f2a47bef3db51"
+
+[[package]]
 name = "notify"
 version = "8.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6262,7 +6432,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6431,6 +6601,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "object"
+version = "0.39.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e5a6c098c7a3b6547378093f5cc30bc54fd361ce711e05293a5cc589562739b"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6567,6 +6746,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxc_index"
+version = "5.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "191884bee6c3744909a51acc7d78d4ae370d817b25875b10642f632327b6296e"
+dependencies = [
+ "nonmax",
+]
+
+[[package]]
 name = "p256"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6676,6 +6864,12 @@ name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
+
+[[package]]
+name = "pastey"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
 
 [[package]]
 name = "pbkdf2"
@@ -7250,7 +7444,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -7562,6 +7756,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "regex-lite"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cab834c73d247e67f4fae452806d17d3c7501756d98c8808d7c9c7aa7d18f973"
+
+[[package]]
 name = "regex-syntax"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7637,6 +7837,7 @@ dependencies = [
  "aquamarine",
  "backon",
  "clap",
+ "evm2-jit-build",
  "reth-chainspec",
  "reth-cli-runner",
  "reth-cli-util",
@@ -8827,11 +9028,14 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-sol-types",
  "evm2",
+ "evm2-jit",
+ "metrics",
  "reth-chainspec",
  "reth-ethereum-forks",
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-execution-types",
+ "reth-metrics",
  "reth-primitives-traits",
  "reth-storage-errors",
  "reth-testing-utils",
@@ -10887,7 +11091,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -10967,7 +11171,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 1.0.7",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -11844,7 +12048,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -13117,7 +13321,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -13125,6 +13329,31 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
+
+[[package]]
+name = "wincode"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66d967db7705dc29120bb6e8ce5b5a2e27734ed5976d1c904e95bd238d1c3c5a"
+dependencies = [
+ "pastey",
+ "proc-macro2",
+ "quote",
+ "thiserror 2.0.18",
+ "wincode-derive",
+]
+
+[[package]]
+name = "wincode-derive"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15ab90b719560d0fda79c74550ad1c948d17b118765942838055ebaf34d67071"
+dependencies = [
+ "darling 0.23.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
 
 [[package]]
 name = "windows"

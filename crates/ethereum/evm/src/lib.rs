@@ -19,6 +19,8 @@ use alloy_eips::Decodable2718;
 use alloy_primitives::{Address, Bytes, B256};
 #[cfg(feature = "std")]
 use alloy_rpc_types_engine::ExecutionData;
+#[cfg(feature = "jit")]
+use core::any::Any;
 use core::{convert::Infallible, fmt::Debug, marker::PhantomData};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthExecutorSpec, MAINNET};
 use reth_ethereum_forks::Hardforks;
@@ -141,6 +143,14 @@ pub use executor::EthBlockExecutor;
 
 mod factory;
 pub use factory::EthBlockExecutorFactory;
+#[cfg(not(feature = "jit"))]
+pub use factory::RethEvmFactory;
+#[cfg(feature = "jit")]
+pub use factory::{
+    maybe_run_jit_helper, CompilationEvent, CompilationKind, CompileTimings,
+    JitBackend as Evm2JitBackend, JitMetrics, JitMode, RethEvmFactory, RuntimeConfig,
+    RuntimeStatsSnapshot, RuntimeTuning,
+};
 
 mod convert;
 pub use convert::{EthTxEnv, ExecutableRecoveredTx};
@@ -188,13 +198,13 @@ impl<ChainSpec> EthEvmConfig<ChainSpec> {
 }
 
 impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory> {
-    /// Creates a new Ethereum EVM configuration with the given EVM factory placeholder.
-    pub fn new_with_evm_factory(chain_spec: Arc<ChainSpec>, _evm_factory: EvmFactory) -> Self {
+    /// Creates a new Ethereum EVM configuration with the given EVM factory configuration.
+    pub fn new_with_evm_factory(chain_spec: Arc<ChainSpec>, evm_factory: EvmFactory) -> Self {
         Self {
             block_assembler: EthBlockAssembler::new(chain_spec.clone()),
             executor_factory: EthBlockExecutorFactory::new_with_evm_factory(
                 chain_spec,
-                _evm_factory,
+                evm_factory,
             ),
         }
     }
@@ -243,6 +253,39 @@ where
     #[cfg(feature = "std")]
     fn block_assembler(&self) -> &Self::BlockAssembler {
         &self.block_assembler
+    }
+
+    fn with_jit_support_enabled(self, enabled: bool) -> Self
+    where
+        Self: Sized,
+    {
+        #[cfg(feature = "jit")]
+        {
+            let mut this = self;
+            if let Some(factory) = (this.executor_factory.evm_factory_mut() as &mut dyn Any)
+                .downcast_mut::<factory::RethEvmFactory>()
+            {
+                factory.set_jit_support(enabled);
+            }
+            this
+        }
+
+        #[cfg(not(feature = "jit"))]
+        {
+            let _ = enabled;
+            self
+        }
+    }
+
+    fn jit_backend(&self) -> Option<&dyn reth_evm::JitBackend> {
+        #[cfg(feature = "jit")]
+        if let Some(factory) = (self.executor_factory.evm_factory() as &dyn Any)
+            .downcast_ref::<factory::RethEvmFactory>()
+        {
+            return Some(factory);
+        }
+
+        None
     }
 
     fn evm_env(&self, header: &Header) -> Result<EvmEnvFor<Self>, Self::Error> {
@@ -475,5 +518,32 @@ mod tests {
         let env = EthEvmConfig::new(Arc::new(chain_spec)).evm_env(&header).unwrap().block;
 
         assert_eq!(env.blob_basefee, U256::from(blob_params.calc_blob_fee(excess_blob_gas)));
+    }
+
+    #[cfg(feature = "jit")]
+    #[test]
+    fn test_jit_support_updates_reth_factory() {
+        let evm_config =
+            EthEvmConfig::new_with_evm_factory(MAINNET.clone(), RethEvmFactory::disabled());
+
+        assert!(evm_config.jit_backend().is_some());
+        assert!(!evm_config.executor_factory.evm_factory().jit_support_enabled());
+
+        let evm_config = evm_config.with_jit_support();
+        assert!(evm_config.executor_factory.evm_factory().jit_support_enabled());
+
+        let evm_config = evm_config.with_jit_support_enabled(false);
+        assert!(!evm_config.executor_factory.evm_factory().jit_support_enabled());
+    }
+
+    #[cfg(feature = "jit")]
+    #[test]
+    fn test_jit_support_ignores_plain_factory() {
+        let evm_config = EthEvmConfig::mainnet();
+
+        assert!(evm_config.jit_backend().is_none());
+
+        let evm_config = evm_config.with_jit_support();
+        assert!(evm_config.jit_backend().is_none());
     }
 }

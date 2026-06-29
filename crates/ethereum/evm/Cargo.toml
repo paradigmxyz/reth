@@ -21,6 +21,7 @@ reth-evm.workspace = true
 reth-trie-common.workspace = true
 reth-storage-errors = { workspace = true, optional = true }
 evm2.workspace = true
+evm2-jit = { workspace = true, optional = true, features = ["llvm"] }
 
 # Alloy
 alloy-primitives.workspace = true
@@ -28,6 +29,10 @@ alloy-eips.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-sol-types.workspace = true
+
+# misc
+metrics = { workspace = true, optional = true }
+reth-metrics = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-testing-utils.workspace = true
@@ -39,6 +44,7 @@ alloy-genesis.workspace = true
 default = ["std"]
 asm-keccak = [
     "evm2/asm-keccak",
+    "evm2-jit?/asm-keccak",
     "reth-evm/asm-keccak",
     "reth-execution-types/asm-keccak",
     "alloy-primitives/asm-keccak",
@@ -57,6 +63,12 @@ portable = [
     "evm2/portable",
     "reth-evm/portable",
     "reth-execution-types/portable",
+]
+jit = [
+    "std",
+    "dep:evm2-jit",
+    "dep:metrics",
+    "dep:reth-metrics",
 ]
 p256-aws-lc-rs = [
     "evm2/p256-aws-lc-rs",
