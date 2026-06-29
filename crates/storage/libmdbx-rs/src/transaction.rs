@@ -13,7 +13,11 @@ use std::{
     fmt::{self, Debug},
     mem::size_of,
     ptr, slice,
-    sync::{atomic::AtomicBool, mpsc::sync_channel, Arc},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::sync_channel,
+        Arc,
+    },
     time::Duration,
 };
 
@@ -308,11 +312,11 @@ where
 {
     /// Marks the transaction as committed.
     fn set_committed(&self) {
-        self.committed.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.committed.store(true, Ordering::Relaxed);
     }
 
     fn has_committed(&self) -> bool {
-        self.committed.load(std::sync::atomic::Ordering::SeqCst)
+        self.committed.load(Ordering::Relaxed)
     }
 
     #[inline]
@@ -566,12 +570,12 @@ impl TransactionPtr {
     /// out using `mdbx_txn_reset`, because MDBX uses it in other cases too.
     #[cfg(feature = "read-tx-timeouts")]
     fn is_timed_out(&self) -> bool {
-        self.timed_out.load(std::sync::atomic::Ordering::SeqCst)
+        self.timed_out.load(Ordering::Relaxed)
     }
 
     #[cfg(feature = "read-tx-timeouts")]
     pub(crate) fn set_timed_out(&self) {
-        self.timed_out.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.timed_out.store(true, Ordering::Relaxed);
     }
 
     /// Acquires the inner transaction lock to guarantee exclusive access to the transaction
