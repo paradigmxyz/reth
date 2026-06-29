@@ -438,6 +438,8 @@ where
             .add_stage(MerkleStage::new_execution(
                 self.stages_config.merkle.rebuild_threshold,
                 self.stages_config.merkle.incremental_threshold,
+                self.stages_config.merkle.rebuild_change_threshold,
+                self.stages_config.merkle.incremental_change_threshold,
             ))
     }
 }

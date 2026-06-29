@@ -13,6 +13,7 @@ mod tests {
     use reth_db::{models::AccountBeforeTx, test_utils::create_test_static_files_dir};
     use reth_primitives_traits::Account;
     use reth_static_file_types::{ChangesetOffset, ChangesetOffsetReader, StaticFileSegment};
+    use reth_storage_api::ChangeSetReader;
     use std::{fs::OpenOptions, io::Write as _, path::PathBuf};
 
     use crate::providers::{
@@ -882,5 +883,23 @@ mod tests {
         );
 
         drop(writer);
+    }
+
+    #[test]
+    fn count_account_changesets_in_range_matches_offsets() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 100);
+
+        let num_blocks = 10;
+        let changes_per_block = 5;
+        write_test_blocks(&provider, num_blocks, changes_per_block);
+
+        let count = provider.count_account_changesets_in_range(0..=(num_blocks - 1)).unwrap();
+        assert_eq!(count, num_blocks * changes_per_block as u64);
+
+        assert_eq!(
+            count as usize,
+            provider.account_changesets_range(0..=(num_blocks - 1)).unwrap().len()
+        );
     }
 }

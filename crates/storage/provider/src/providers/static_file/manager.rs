@@ -2409,6 +2409,13 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
         let range = self.bound_range(range, StaticFileSegment::AccountChangeSets);
         self.walk_account_changeset_range(range).collect()
     }
+
+    fn count_account_changesets_in_range(
+        &self,
+        range: impl core::ops::RangeBounds<BlockNumber>,
+    ) -> ProviderResult<u64> {
+        self.count_changesets_in_range(StaticFileSegment::AccountChangeSets, range)
+    }
 }
 
 impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
@@ -2510,9 +2517,42 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
         let range = self.bound_range(range, StaticFileSegment::StorageChangeSets);
         self.walk_storage_changeset_range(range).collect()
     }
+
+    fn count_storage_changesets_in_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<u64> {
+        self.count_changesets_in_range(StaticFileSegment::StorageChangeSets, range)
+    }
 }
 
 impl<N: NodePrimitives> StaticFileProvider<N> {
+    /// Returns the number of changeset rows in the given block range for a change-based segment.
+    ///
+    /// Uses per-block changeset offset metadata when available, avoiding loading changeset data.
+    pub fn count_changesets_in_range(
+        &self,
+        segment: StaticFileSegment,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<u64> {
+        let range = self.bound_range(range, segment);
+        let mut total = 0u64;
+
+        for block_number in range {
+            let provider = match self.get_segment_provider_for_block(segment, block_number, None) {
+                Ok(provider) => provider,
+                Err(ProviderError::MissingStaticFileBlock(_, _)) => continue,
+                Err(err) => return Err(err),
+            };
+
+            if let Some(offset) = provider.read_changeset_offset(block_number)? {
+                total += offset.num_changes();
+            }
+        }
+
+        Ok(total)
+    }
+
     /// Creates an iterator for walking through account changesets in the specified block range.
     ///
     /// This returns a lazy iterator that fetches changesets block by block to avoid loading
