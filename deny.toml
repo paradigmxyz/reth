@@ -12,9 +12,6 @@ ignore = [
     "RUSTSEC-2023-0089",
     # https://rustsec.org/advisories/RUSTSEC-2026-0173 proc-macro-error2 is unmaintained
     "RUSTSEC-2026-0173",
-    # https://rustsec.org/advisories/RUSTSEC-2026-0173 proc-macro-error2 is unmaintained
-    # and is pulled in transitively by upstream crates with no safe upgrade available.
-    "RUSTSEC-2026-0173",
 ]
 
 # This section is considered when running `cargo deny check bans`.
