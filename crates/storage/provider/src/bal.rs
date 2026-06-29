@@ -183,21 +183,13 @@ impl BalStore for InMemoryBalStore {
         Ok(result)
     }
 
-    fn get_by_block_num_hashes(&self, blocks: &[NumHash]) -> ProviderResult<Vec<Option<Bytes>>> {
+    fn get_by_block_num_hash(&self, block: NumHash) -> ProviderResult<Option<Bytes>> {
         let inner = self.inner.read();
-        let mut result = Vec::with_capacity(blocks.len());
-
-        for block in blocks {
-            result.push(
-                inner
-                    .entries
-                    .get(&block.hash)
-                    .filter(|entry| entry.block_number == block.number)
-                    .map(|entry| entry.bal.clone()),
-            );
-        }
-
-        Ok(result)
+        Ok(inner
+            .entries
+            .get(&block.hash)
+            .filter(|entry| entry.block_number == block.number)
+            .map(|entry| entry.bal.clone()))
     }
 
     fn append_by_hashes_with_limit(
@@ -211,32 +203,6 @@ impl BalStore for InMemoryBalStore {
 
         for hash in block_hashes {
             let bal = inner.entries.get(hash).map(|entry| entry.bal.clone());
-            size += bal.as_ref().map_or(1, |bytes| bytes.len());
-            out.push(bal);
-
-            if limit.exceeds(size) {
-                break
-            }
-        }
-
-        Ok(())
-    }
-
-    fn append_by_block_num_hashes_with_limit(
-        &self,
-        blocks: &[NumHash],
-        limit: GetBlockAccessListLimit,
-        out: &mut Vec<Option<Bytes>>,
-    ) -> ProviderResult<()> {
-        let inner = self.inner.read();
-        let mut size = 0;
-
-        for block in blocks {
-            let bal = inner
-                .entries
-                .get(&block.hash)
-                .filter(|entry| entry.block_number == block.number)
-                .map(|entry| entry.bal.clone());
             size += bal.as_ref().map_or(1, |bytes| bytes.len());
             out.push(bal);
 
@@ -279,10 +245,8 @@ mod tests {
 
         store.insert(NumHash::new(1, hash), RawBal::from(bal.clone())).unwrap();
 
-        assert_eq!(
-            store.get_by_block_num_hashes(&[NumHash::new(1, hash), NumHash::new(2, hash)]).unwrap(),
-            vec![Some(bal), None]
-        );
+        assert_eq!(store.get_by_block_num_hash(NumHash::new(1, hash)).unwrap(), Some(bal));
+        assert_eq!(store.get_by_block_num_hash(NumHash::new(2, hash)).unwrap(), None);
     }
 
     #[test]

@@ -9,9 +9,7 @@ use reth_db_api::{
     tables, DatabaseError,
 };
 use reth_prune_types::PruneMode;
-use reth_storage_api::{
-    BalNotification, BalNotificationStream, BalStore, GetBlockAccessListLimit, RawBal,
-};
+use reth_storage_api::{BalNotification, BalNotificationStream, BalStore, RawBal};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_tokio_util::EventSender;
 use std::{
@@ -334,31 +332,8 @@ impl BalStore for RocksDBBalStore {
         Ok(block_hashes.iter().map(|hash| buffer.get_by_hash(*hash)).collect())
     }
 
-    fn get_by_block_num_hashes(&self, blocks: &[NumHash]) -> ProviderResult<Vec<Option<Bytes>>> {
-        let mut out = Vec::with_capacity(blocks.len());
-        for block in blocks {
-            out.push(self.read_one(*block)?);
-        }
-        Ok(out)
-    }
-
-    fn append_by_block_num_hashes_with_limit(
-        &self,
-        blocks: &[NumHash],
-        limit: GetBlockAccessListLimit,
-        out: &mut Vec<Option<Bytes>>,
-    ) -> ProviderResult<()> {
-        let mut size = 0;
-        for block in blocks {
-            let bal = self.read_one(*block)?;
-            size += bal.as_ref().map_or(1, |bytes| bytes.len());
-            out.push(bal);
-
-            if limit.exceeds(size) {
-                break
-            }
-        }
-        Ok(())
+    fn get_by_block_num_hash(&self, block: NumHash) -> ProviderResult<Option<Bytes>> {
+        self.read_one(block)
     }
 
     fn bal_stream(&self) -> BalNotificationStream {
@@ -394,6 +369,10 @@ mod tests {
             })
     }
 
+    fn read_many(store: &RocksDBBalStore, blocks: &[NumHash]) -> Vec<Option<Bytes>> {
+        blocks.iter().map(|block| store.get_by_block_num_hash(*block).unwrap()).collect()
+    }
+
     #[test]
     fn inserts_and_reads_by_block_num_hash() {
         let (_dir, store) = test_store();
@@ -403,10 +382,7 @@ mod tests {
 
         store.insert(NumHash::new(1, hash), RawBal::from(bal.clone())).unwrap();
 
-        assert_eq!(
-            store.get_by_block_num_hashes(&[NumHash::new(1, hash), missing]).unwrap(),
-            vec![Some(bal), None]
-        );
+        assert_eq!(read_many(&store, &[NumHash::new(1, hash), missing]), vec![Some(bal), None]);
     }
 
     #[test]
@@ -438,10 +414,7 @@ mod tests {
 
         assert_eq!(disk_bal(&store, block_1), Some(bal_1.clone()));
         assert_eq!(disk_bal(&store, block_2), None);
-        assert_eq!(
-            store.get_by_block_num_hashes(&[block_1, block_2]).unwrap(),
-            vec![Some(bal_1), Some(bal_2.clone())]
-        );
+        assert_eq!(read_many(&store, &[block_1, block_2]), vec![Some(bal_1), Some(bal_2.clone())]);
         assert_eq!(
             store.get_by_hashes(&[block_1.hash, block_2.hash]).unwrap(),
             vec![None, Some(bal_2)]
@@ -460,9 +433,7 @@ mod tests {
         store.insert(NumHash::new(10, hash_b), RawBal::from(bal_b.clone())).unwrap();
 
         assert_eq!(
-            store
-                .get_by_block_num_hashes(&[NumHash::new(10, hash_a), NumHash::new(10, hash_b)])
-                .unwrap(),
+            read_many(&store, &[NumHash::new(10, hash_a), NumHash::new(10, hash_b)]),
             vec![Some(bal_a), Some(bal_b)]
         );
     }
@@ -479,9 +450,7 @@ mod tests {
         store.insert(NumHash::new(200, hash_b), RawBal::from(bal_b.clone())).unwrap();
 
         assert_eq!(
-            store
-                .get_by_block_num_hashes(&[NumHash::new(2, hash_a), NumHash::new(200, hash_b)])
-                .unwrap(),
+            read_many(&store, &[NumHash::new(2, hash_a), NumHash::new(200, hash_b)]),
             vec![Some(bal_a), Some(bal_b)]
         );
     }
@@ -496,12 +465,7 @@ mod tests {
         store.insert(NumHash::new(1, empty_hash), RawBal::from(empty_bal.clone())).unwrap();
 
         assert_eq!(
-            store
-                .get_by_block_num_hashes(&[
-                    NumHash::new(1, empty_hash),
-                    NumHash::new(1, missing_hash),
-                ])
-                .unwrap(),
+            read_many(&store, &[NumHash::new(1, empty_hash), NumHash::new(1, missing_hash)]),
             vec![Some(empty_bal), None]
         );
     }
@@ -528,12 +492,7 @@ mod tests {
         assert_eq!(disk_bal(&store, NumHash::new(7, old_hash)), None);
         assert_eq!(disk_bal(&store, NumHash::new(8, retained_hash)), Some(retained_bal.clone()));
         assert_eq!(
-            store
-                .get_by_block_num_hashes(&[
-                    NumHash::new(7, old_hash),
-                    NumHash::new(8, retained_hash)
-                ])
-                .unwrap(),
+            read_many(&store, &[NumHash::new(7, old_hash), NumHash::new(8, retained_hash)]),
             vec![None, Some(retained_bal)]
         );
     }
