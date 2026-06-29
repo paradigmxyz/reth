@@ -15,7 +15,7 @@ use futures_core::ready;
 use futures_util::FutureExt;
 use reth_chain_state::CanonStateNotification;
 use reth_evm::{
-    cached::{AccountInfo, Bytecode, CachedReads},
+    cached::{AccountInfo, CachedReads},
     cancelled::CancelOnDrop,
 };
 use reth_execution_cache::SavedCache;
@@ -235,8 +235,8 @@ where
                         balance: info.balance,
                         nonce: info.nonce,
                         code_hash: info.code_hash,
-                        account_id: None,
-                        code: info.code.map(|code| Bytecode::new_raw(code.original_bytes())),
+                        code: info.code,
+                        _non_exhaustive: (),
                     },
                     storage,
                 );

@@ -158,8 +158,14 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
-    let BuildArguments { cached_reads, execution_cache, trie_handle, config, cancel, best_payload } =
-        args;
+    let BuildArguments {
+        mut cached_reads,
+        execution_cache,
+        trie_handle,
+        config,
+        cancel,
+        best_payload,
+    } = args;
     let PayloadConfig { parent_header, attributes, payload_id, .. } = config;
     let _ = (execution_cache, trie_handle);
 
@@ -266,8 +272,13 @@ where
     // SAFETY: The borrowed EVM database is consumed by this synchronous block execution call and
     // cannot outlive `state_provider`.
     let db = unsafe { BorrowedEvmStateProviderDatabase::new(state_provider.as_ref()) };
-    let output =
-        evm_config.executor(db).execute(&execution_block).map_err(PayloadBuilderError::evm)?;
+    let cached_db = cached_reads.as_db_mut(db);
+    let cached_db_handle = cached_db.clone();
+    let output = evm_config
+        .executor(cached_db)
+        .execute(&execution_block)
+        .map_err(PayloadBuilderError::evm)?;
+    cached_db_handle.sync(&mut cached_reads);
 
     let total_fees = U256::ZERO;
     if !is_better_payload(best_payload.as_ref(), total_fees) {

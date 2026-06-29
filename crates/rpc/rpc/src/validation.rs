@@ -13,7 +13,7 @@ use jsonrpsee_types::error::ErrorObject;
 use reth_consensus::FullConsensus;
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
-use reth_evm::ConfigureEvm;
+use reth_evm::{cached::CachedReads, ConfigureEvm};
 use reth_metrics::{
     metrics,
     metrics::{gauge, Gauge},
@@ -77,7 +77,27 @@ where
         Self { inner }
     }
 
-    // The previous validation cache kept cached reads here.
+    /// Returns the cached reads for the given head hash.
+    #[expect(dead_code)]
+    async fn cached_reads(&self, head: B256) -> CachedReads {
+        let cache = self.inner.cached_state.read().await;
+        if cache.0 == head {
+            cache.1.clone()
+        } else {
+            CachedReads::default()
+        }
+    }
+
+    /// Updates the cached state for the given head hash.
+    #[expect(dead_code)]
+    async fn update_cached_reads(&self, head: B256, cached_state: CachedReads) {
+        let mut cache = self.inner.cached_state.write().await;
+        if cache.0 == head {
+            cache.1.extend(cached_state);
+        } else {
+            *cache = (head, cached_state);
+        }
+    }
 }
 
 #[cfg(any())]
@@ -160,6 +180,7 @@ where
 
         let (output, block_access_list_hash) = {
             let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
+            let cached_db_handle = cached_db.clone();
             let mut executor = self.evm_config.batch_executor(cached_db);
 
             let result = executor.execute_one(&block)?;
@@ -183,7 +204,12 @@ where
                 }
             }
 
-            (BlockExecutionOutput { state: state.take_bundle(), result }, block_access_list_hash)
+            let output = (
+                BlockExecutionOutput { state: state.take_bundle(), result },
+                block_access_list_hash,
+            );
+            cached_db_handle.sync(&mut request_cache);
+            output
         };
 
         // update the cached reads
@@ -588,8 +614,7 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     /// targeting the same state. Stores a tuple of (`block_hash`, `cached_reads`) for the
     /// latest head block state. Uses async `RwLock` to safely handle concurrent validation
     /// requests.
-    #[expect(dead_code)]
-    cached_state: RwLock<(B256, ())>,
+    cached_state: RwLock<(B256, CachedReads)>,
     /// Task spawner for blocking operations
     #[expect(dead_code)]
     task_spawner: Runtime,
