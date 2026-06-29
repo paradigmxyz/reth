@@ -282,7 +282,7 @@ where
     /// Configuration for the tree.
     config: TreeConfig,
     /// Payload processor for state root computation.
-    payload_processor: PayloadProcessor<Evm::Primitives, Evm>,
+    payload_processor: PayloadProcessor<Evm>,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// Precompile cache metrics.

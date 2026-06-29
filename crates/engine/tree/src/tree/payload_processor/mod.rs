@@ -62,10 +62,10 @@ pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorTx<Evm, I> = RecoveredTx<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
 
-type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
+type IteratorPayloadHandle<Evm, I> = PayloadHandle<
     IteratorTx<Evm, I>,
     <I as ExecutableTxTuple>::Error,
-    <N as NodePrimitives>::Receipt,
+    <<Evm as ConfigureEvm>::Primitives as NodePrimitives>::Receipt,
 >;
 
 type IteratorPrewarmTxReceiver<Evm, I> =
@@ -88,10 +88,9 @@ type ExecuteTxSender<TxEnv, Recovered, Err> = IndexedTxSender<RecoveredTx<TxEnv,
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
-pub struct PayloadProcessor<N, Evm>
+pub struct PayloadProcessor<Evm>
 where
-    N: NodePrimitives,
-    Evm: ConfigureEvm<Primitives = N>,
+    Evm: ConfigureEvm,
 {
     /// The executor used by to spawn tasks.
     executor: Runtime,
@@ -116,7 +115,7 @@ where
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// State trie overlay manager that owns the preserved sparse trie.
-    state_trie_overlays: StateTrieOverlayManager<N>,
+    state_trie_overlays: StateTrieOverlayManager<Evm::Primitives>,
     /// LFU hot-slot capacity: max storage slots retained across prune cycles.
     sparse_trie_max_hot_slots: usize,
     /// LFU hot-account capacity: max account addresses retained across prune cycles.
@@ -158,10 +157,9 @@ struct SparseTrieTaskOptions {
     pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
 }
 
-impl<N, Evm> PayloadProcessor<N, Evm>
+impl<Evm> PayloadProcessor<Evm>
 where
-    N: NodePrimitives,
-    Evm: ConfigureEvm<Primitives = N>,
+    Evm: ConfigureEvm,
 {
     /// Returns a reference to the workload executor driving payload tasks.
     pub const fn executor(&self) -> &Runtime {
@@ -174,7 +172,7 @@ where
         evm_config: Evm,
         config: &TreeConfig,
         precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
-        state_trie_overlays: StateTrieOverlayManager<N>,
+        state_trie_overlays: StateTrieOverlayManager<Evm::Primitives>,
     ) -> Self {
         Self {
             executor,
@@ -211,10 +209,9 @@ where
     }
 }
 
-impl<N, Evm> WaitForCaches for PayloadProcessor<N, Evm>
+impl<Evm> WaitForCaches for PayloadProcessor<Evm>
 where
-    N: NodePrimitives,
-    Evm: ConfigureEvm<Primitives = N>,
+    Evm: ConfigureEvm,
 {
     fn wait_for_caches(&self) -> CacheWaitDurations {
         debug!(target: "engine::tree::payload_processor", "Waiting for execution cache and sparse trie locks");
@@ -250,10 +247,9 @@ where
     }
 }
 
-impl<N, Evm> PayloadProcessor<N, Evm>
+impl<Evm> PayloadProcessor<Evm>
 where
-    N: NodePrimitives,
-    Evm: ConfigureEvm<Primitives = N> + 'static,
+    Evm: ConfigureEvm + 'static,
 {
     /// Spawns all background tasks and returns a handle connected to the tasks.
     ///
@@ -287,11 +283,11 @@ where
         &mut self,
         env: ExecutionEnv<Evm>,
         transactions: I,
-        provider_builder: StateProviderBuilder<N, P>,
+        provider_builder: StateProviderBuilder<Evm::Primitives, P>,
         multiproof_provider_factory: F,
         config: &TreeConfig,
         options: PayloadProcessorSpawnOptions,
-    ) -> IteratorPayloadHandle<Evm, I, N>
+    ) -> IteratorPayloadHandle<Evm, I>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -350,9 +346,9 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         transactions: I,
-        provider_builder: StateProviderBuilder<N, P>,
+        provider_builder: StateProviderBuilder<Evm::Primitives, P>,
         parallel_bal_execution: bool,
-    ) -> IteratorPayloadHandle<Evm, I, N>
+    ) -> IteratorPayloadHandle<Evm, I>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
@@ -558,10 +554,10 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         transactions: mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
-        provider_builder: StateProviderBuilder<N, P>,
+        provider_builder: StateProviderBuilder<Evm::Primitives, P>,
         to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
         parallel_bal_execution: bool,
-    ) -> CacheTaskHandle<N::Receipt>
+    ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
