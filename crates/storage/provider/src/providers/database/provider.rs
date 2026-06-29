@@ -3901,9 +3901,7 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
 
             let start = Instant::now();
             let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
-            for batch in batches {
-                self.rocksdb_provider.commit_batch(batch)?;
-            }
+            self.rocksdb_provider.commit_batches_with_single_wal_sync(batches)?;
             timings.rocksdb = start.elapsed();
 
             let start = Instant::now();
