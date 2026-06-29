@@ -598,11 +598,10 @@ where
         } else {
             None
         };
-        let preserved_sparse_trie =
-            ctx.state().tree_state.state_trie_overlays.preserved_sparse_trie();
+        let state_trie_overlays = ctx.state().tree_state.state_trie_overlays.clone();
         let processor_options = PayloadProcessorSpawnOptions::new(
             parallel_bal_execution,
-            preserved_sparse_trie,
+            state_trie_overlays,
             pending_sparse_trie_prune,
         );
         let mut handle = ensure_ok!(self.spawn_payload_processor(
@@ -1748,7 +1747,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         overlay_factory: OverlayStateProviderFactory<P, N>,
         strategy: &StateRootStrategy<N>,
-        options: PayloadProcessorSpawnOptions,
+        options: PayloadProcessorSpawnOptions<N>,
     ) -> Result<
         PayloadHandle<
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
@@ -1759,7 +1758,7 @@ where
     > {
         let PayloadProcessorSpawnOptions {
             parallel_bal_execution,
-            preserved_sparse_trie,
+            state_trie_overlays,
             pending_sparse_trie_prune,
         } = options;
         match strategy {
@@ -1775,7 +1774,7 @@ where
                     &self.config,
                     PayloadProcessorSpawnOptions::new(
                         parallel_bal_execution,
-                        preserved_sparse_trie,
+                        state_trie_overlays,
                         pending_sparse_trie_prune,
                     ),
                 );
@@ -2266,7 +2265,7 @@ where
             // Full proof workers — tx count unknown at FCU time (block built incrementally)
             false,
             &self.config,
-            state.tree_state.state_trie_overlays.preserved_sparse_trie(),
+            state.tree_state.state_trie_overlays.clone(),
             None,
         ))
     }

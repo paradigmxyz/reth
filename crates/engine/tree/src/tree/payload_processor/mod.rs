@@ -15,7 +15,7 @@ use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender
 use multiproof::*;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
-use reth_chain_state::{PreservedSparseTrie, SharedPreservedSparseTrie};
+use reth_chain_state::{PreservedSparseTrie, StateTrieOverlayManager};
 use reth_evm::{
     block::ExecutableTxParts,
     execute::{ExecutableTxFor, WithTxEnv},
@@ -132,30 +132,30 @@ where
 
 /// Options for spawning payload processor tasks.
 #[derive(Debug, Default)]
-pub struct PayloadProcessorSpawnOptions {
+pub struct PayloadProcessorSpawnOptions<N: NodePrimitives> {
     /// Whether to execute BAL blocks through the parallel BAL path.
     pub parallel_bal_execution: bool,
-    /// Preserved sparse trie shared by payload validation and payload building.
-    pub preserved_sparse_trie: SharedPreservedSparseTrie,
+    /// State trie overlay manager that owns the preserved sparse trie.
+    pub state_trie_overlays: StateTrieOverlayManager<N>,
     /// Pending sparse trie prune request to run after successful state root computation.
     pub pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
 }
 
-impl PayloadProcessorSpawnOptions {
+impl<N: NodePrimitives> PayloadProcessorSpawnOptions<N> {
     /// Creates new payload processor spawn options.
     pub const fn new(
         parallel_bal_execution: bool,
-        preserved_sparse_trie: SharedPreservedSparseTrie,
+        state_trie_overlays: StateTrieOverlayManager<N>,
         pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
     ) -> Self {
-        Self { parallel_bal_execution, preserved_sparse_trie, pending_sparse_trie_prune }
+        Self { parallel_bal_execution, state_trie_overlays, pending_sparse_trie_prune }
     }
 }
 
-struct SparseTrieTaskOptions {
+struct SparseTrieTaskOptions<N: NodePrimitives> {
     parent_state_root: B256,
     chunk_size: usize,
-    preserved_sparse_trie: SharedPreservedSparseTrie,
+    state_trie_overlays: StateTrieOverlayManager<N>,
     pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
 }
 
@@ -280,7 +280,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         multiproof_provider_factory: F,
         config: &TreeConfig,
-        options: PayloadProcessorSpawnOptions,
+        options: PayloadProcessorSpawnOptions<N>,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -292,7 +292,7 @@ where
     {
         let PayloadProcessorSpawnOptions {
             parallel_bal_execution,
-            preserved_sparse_trie,
+            state_trie_overlays,
             pending_sparse_trie_prune,
         } = options;
         // start preparing transactions immediately
@@ -307,7 +307,7 @@ where
             env.parent_state_root,
             halve_workers,
             config,
-            preserved_sparse_trie,
+            state_trie_overlays,
             pending_sparse_trie_prune,
         );
         // BAL blocks only bypass the normal execution state hook when the validator decided that
@@ -387,7 +387,7 @@ where
         parent_state_root: B256,
         halve_workers: bool,
         config: &TreeConfig,
-        preserved_sparse_trie: SharedPreservedSparseTrie,
+        state_trie_overlays: StateTrieOverlayManager<N>,
         pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
     ) -> StateRootHandle
     where
@@ -415,7 +415,7 @@ where
             SparseTrieTaskOptions {
                 parent_state_root,
                 chunk_size: config.multiproof_chunk_size(),
-                preserved_sparse_trie,
+                state_trie_overlays,
                 pending_sparse_trie_prune: if self.disable_sparse_trie_cache_pruning {
                     None
                 } else {
@@ -643,14 +643,15 @@ where
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
         hashed_state_tx: mpsc::Sender<HashedPostState>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
-        options: SparseTrieTaskOptions,
+        options: SparseTrieTaskOptions<N>,
     ) {
         let SparseTrieTaskOptions {
             parent_state_root,
             chunk_size,
-            preserved_sparse_trie,
+            state_trie_overlays,
             pending_sparse_trie_prune,
         } = options;
+        let preserved_sparse_trie = state_trie_overlays.preserved_sparse_trie();
         let trie_metrics = self.trie_metrics.clone();
         let max_hot_slots = self.sparse_trie_max_hot_slots;
         let max_hot_accounts = self.sparse_trie_max_hot_accounts;
