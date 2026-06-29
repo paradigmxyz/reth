@@ -2,7 +2,11 @@
 
 use core::fmt;
 
-use reth_metrics::{metrics::Counter, Metrics};
+use reth_metrics::{
+    metrics::{Counter, Histogram},
+    Metrics,
+};
+use std::time::Duration;
 
 /// Task Executor Metrics
 #[derive(Metrics, Clone)]
@@ -59,5 +63,61 @@ impl Drop for IncCounterOnDrop {
     /// Increment the counter when the instance is dropped.
     fn drop(&mut self) {
         self.0.increment(1);
+    }
+}
+
+/// Metrics for a named worker managed by the [`crate::worker_map::WorkerMap`].
+#[derive(Metrics, Clone)]
+#[metrics(scope = "executor.named_worker")]
+pub(crate) struct WorkerThreadMetrics {
+    /// Time spent queued before a named worker starts executing the task.
+    queue_wait_duration_seconds: Histogram,
+    /// Time spent executing a task on a named worker.
+    task_duration_seconds: Histogram,
+}
+
+impl WorkerThreadMetrics {
+    /// Create metrics for the named worker.
+    pub(crate) fn new(worker: &'static str) -> Self {
+        Self::new_with_labels(&[("worker", worker)])
+    }
+
+    /// Record how long a task waited for this worker.
+    pub(crate) fn record_queue_wait(&self, duration: Duration) {
+        self.queue_wait_duration_seconds.record(duration.as_secs_f64());
+    }
+
+    /// Record how long a task executed on this worker.
+    pub(crate) fn record_task_duration(&self, duration: Duration) {
+        self.task_duration_seconds.record(duration.as_secs_f64());
+    }
+}
+
+/// Metrics for jobs submitted through [`crate::pool::WorkerPool`] wrapper methods.
+#[cfg(feature = "rayon")]
+#[derive(Metrics, Clone)]
+#[metrics(scope = "executor.worker_pool")]
+pub(crate) struct WorkerPoolMetrics {
+    /// Time spent queued before the worker pool starts executing the outer job.
+    job_queue_wait_duration_seconds: Histogram,
+    /// Time spent executing the outer job on the worker pool.
+    job_duration_seconds: Histogram,
+}
+
+#[cfg(feature = "rayon")]
+impl WorkerPoolMetrics {
+    /// Create metrics for the worker pool.
+    pub(crate) fn new(pool: &'static str) -> Self {
+        Self::new_with_labels(&[("pool", pool)])
+    }
+
+    /// Record how long an outer job waited for this pool.
+    pub(crate) fn record_job_queue_wait(&self, duration: Duration) {
+        self.job_queue_wait_duration_seconds.record(duration.as_secs_f64());
+    }
+
+    /// Record how long an outer job executed on this pool.
+    pub(crate) fn record_job_duration(&self, duration: Duration) {
+        self.job_duration_seconds.record(duration.as_secs_f64());
     }
 }

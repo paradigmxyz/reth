@@ -42,6 +42,7 @@ where
         let conf = ctx.payload_builder_config();
         let chain = ctx.chain_spec().chain();
         let gas_limit = conf.gas_limit_for(chain);
+        let skip_state_root = ctx.config().tree_config().skip_state_root();
 
         Ok(reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
             ctx.provider().clone(),
@@ -50,7 +51,8 @@ where
             EthereumBuilderConfig::new()
                 .with_gas_limit(gas_limit)
                 .with_max_blobs_per_block(conf.max_blobs_per_block())
-                .with_extra_data(conf.extra_data()),
+                .with_extra_data(conf.extra_data())
+                .with_skip_state_root(skip_state_root),
         ))
     }
 }

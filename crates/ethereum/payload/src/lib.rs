@@ -167,6 +167,7 @@ where
         best_payload,
     } = args;
     let PayloadConfig { parent_header, attributes, payload_id, .. } = config;
+    let skip_state_root = builder_config.skip_state_root;
     let _ = (execution_cache, trie_handle);
 
     if client.chain_spec().is_amsterdam_active_at_timestamp(attributes.timestamp()) {
@@ -285,11 +286,21 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let hashed_state = output.hashed_state.clone().map_or_else(
-        || hashed_post_state_sorted_from_execution_state::<KeccakKeyHasher>(&output.state),
-        HashedPostState::into_sorted,
-    );
-    let state_root = state_provider.state_root_sorted(hashed_state)?;
+    let state_root = if skip_state_root {
+        debug!(
+            target: "payload_builder",
+            id = %payload_id,
+            state_root = ?parent_header.state_root,
+            "skipping payload state-root computation"
+        );
+        parent_header.state_root
+    } else {
+        let hashed_state = output.hashed_state.clone().map_or_else(
+            || hashed_post_state_sorted_from_execution_state::<KeccakKeyHasher>(&output.state),
+            HashedPostState::into_sorted,
+        );
+        state_provider.state_root_sorted(hashed_state)?
+    };
     let receipts_root =
         reth_ethereum_primitives::calculate_receipt_root_no_memo(&output.result.receipts);
     let logs_bloom =

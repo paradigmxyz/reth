@@ -190,7 +190,6 @@ equatable_if_let = "warn"
 explicit_into_iter_loop = "warn"
 explicit_iter_loop = "warn"
 flat_map_option = "warn"
-from_iter_instead_of_collect = "warn"
 if_not_else = "warn"
 if_then_some_else_none = "warn"
 implicit_clone = "warn"
@@ -442,7 +441,8 @@ alloy-sol-types = { version = "1.6.0", default-features = false }
 
 alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-eip7928 = { version = "0.4.4", default-features = false, features = ["rlp"] }
+alloy-eip7928 = { version = "0.4.5", default-features = false, features = ["rlp"] }
+alloy-evm = { version = "0.37.0", default-features = false }
 alloy-rlp = { version = "0.3.13", default-features = false, features = ["core-net"] }
 alloy-trie = { version = "0.9.4", default-features = false }
 
@@ -664,7 +664,7 @@ human_bytes = "0.4.1"
 indexmap = "2"
 interprocess = "2.4.2"
 lz4_flex = { version = "0.12", default-features = false }
-memmap2 = "0.9.4"
+memmap2 = "0.9.11"
 num-traits = "0.2.15"
 page_size = "0.6.0"
 plain_hasher = "0.2"
@@ -686,10 +686,10 @@ tracing-subscriber = { version = "0.3", default-features = false }
 tracing-tracy = "0.11"
 triehash = "0.8"
 typenum = "1.15.0"
-vergen = "9.1.0"
+vergen = "10.0.1"
 visibility = "0.1.1"
 walkdir = "2.3.3"
-vergen-git2 = "9.1.0"
+vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"

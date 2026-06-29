@@ -38,7 +38,7 @@
 //! | `receipt-root` | execution start | compute receipt root and logs bloom incrementally | awaited before post-execution consensus |
 //! | `hash-post-state` | after execution | hash changed accounts and storage from `BundleState` | awaited by post-execution validation and root computation |
 //! | `serial-root` | sparse trie timeout fallback | race serial state-root computation against the sparse trie task | polled by `await_state_root_with_timeout` |
-//! | deferred trie task | after root verification | sort trie data, merge overlays, and cache changesets | not awaited by the validation hot path |
+//! | deferred trie task | after root verification | sort trie data | not awaited by the validation hot path |
 //!
 //! ```mermaid
 //! sequenceDiagram
@@ -87,7 +87,7 @@
 //!         Main->>Main: compute serial StateRoot
 //!     end
 //!     Main->>Main: verify header state root
-//!     Main->>Deferred: spawn trie input sorting and cache update
+//!     Main->>Deferred: spawn trie input sorting
 //!     Main-->>Main: return ValidationOutput
 //! ```
 //!
@@ -144,18 +144,17 @@ use reth_primitives_traits::{
     RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    providers::{OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory},
+    providers::{OverlayBuilder, OverlayStateProviderFactory},
     BlockExecutionOutput, BlockNumReader, BlockReader, BorrowedEvmStateProviderDatabase,
     ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
     ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
+use reth_trie::{updates::TrieUpdates, HashedPostState};
 use reth_trie_common::KeccakKeyHasher;
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{
-    panic::{self, AssertUnwindSafe},
     sync::{atomic::Ordering, mpsc::RecvTimeoutError, Arc},
     time::Duration,
 };
@@ -178,7 +177,7 @@ fn block_output_hashed_state<T>(output: &BlockExecutionOutput<T>) -> HashedPostS
 /// without entering execution.
 const MAX_EXPECTED_GAS_USAGE_MULTIPLIER: u64 = 2;
 
-/// Worker name for deferred trie data and changeset provider preparation.
+/// Worker name for deferred trie data preparation.
 const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
 
 type ReceiptRootSender<N> =
@@ -588,7 +587,6 @@ where
         );
         let overlay_factory =
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
-        let changeset_provider = self.spawn_changeset_provider_task(overlay_factory.clone());
 
         // Spawn the appropriate processor based on strategy
         let pending_sparse_trie_prune = if matches!(strategy, StateRootStrategy::StateRootTask) {
@@ -757,14 +755,13 @@ where
 
         // Run the hashed state validation hook but don't propagate the error yet. If the state root
         // task fails, we might need to re-run this check against a fallback state.
-        let mut hashed_state_validate_result = debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution_with_hashed_state").in_scope(|| {
-            // Wait for the background keccak256 hashing task to complete. This blocks until
-            // all changed addresses and storage slots have been hashed.
-            let hashed_state_ref =
-                debug_span!(target: "engine::tree::payload_validator", "wait_hashed_post_state")
-                    .in_scope(|| hashed_state.get());
-
-            self.validator.validate_block_post_execution_with_hashed_state(hashed_state_ref, &block)
+        let mut hashed_state_validate_result = debug_span!(
+            target: "engine::tree::payload_validator",
+            "validate_block_post_execution_with_hashed_state"
+        )
+        .in_scope(|| {
+            self.validator
+                .validate_block_post_execution_with_hashed_state(&|| hashed_state.get(), &block)
         });
 
         let root_time = Instant::now();
@@ -774,6 +771,18 @@ where
         let mut trie_debug_recorders = Vec::new();
 
         match strategy {
+            StateRootStrategy::Skipped => {
+                debug!(
+                    target: "engine::tree::payload_validator",
+                    state_root = ?block.header().state_root(),
+                    "Skipping trie state-root computation"
+                );
+                maybe_state_root = Some((
+                    block.header().state_root(),
+                    Arc::new(TrieUpdates::default()),
+                    root_time.elapsed(),
+                ));
+            }
             StateRootStrategy::StateRootTask => {
                 debug!(target: "engine::tree::payload_validator", "Using sparse trie state root algorithm");
 
@@ -858,7 +867,7 @@ where
                     });
                     hashed_state_validate_result =
                         self.validator.validate_block_post_execution_with_hashed_state(
-                            hashed_state.get(),
+                            &|| hashed_state.get(),
                             &block,
                         );
                 }
@@ -980,21 +989,8 @@ where
             let _ = valid_block_tx.send(());
         }
 
-        let changeset_provider = ensure_ok_post_block!(
-            changeset_provider
-                .try_into_inner()
-                .ok()
-                .expect("changeset provider handle is not cloned"),
-            block
-        );
-
-        let executed_block = self.spawn_deferred_trie_task(
-            Arc::new(block),
-            output,
-            hashed_state,
-            trie_output,
-            changeset_provider,
-        );
+        let executed_block =
+            self.spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output);
         #[cfg(any())]
         let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
         #[cfg(not(any()))]
@@ -1055,30 +1051,6 @@ where
 
             Ok(block)
         })
-    }
-
-    /// Spawns a background task that creates the changeset provider used by the deferred trie
-    /// producer.
-    ///
-    /// This is started before execution so overlay construction can run concurrently with payload
-    /// validation, then awaited before the deferred trie producer is spawned.
-    fn spawn_changeset_provider_task(
-        &self,
-        overlay_factory: OverlayStateProviderFactory<P, N>,
-    ) -> LazyHandle<ProviderResult<OverlayStateProvider<P::Provider>>> {
-        let parent_span = Span::current();
-        self.payload_processor.executor().spawn_blocking_named(
-            DEFERRED_TRIE_WORKER_NAME,
-            move || {
-                let _span = debug_span!(
-                    target: "engine::tree::payload_validator",
-                    parent: parent_span,
-                    "changeset_provider",
-                )
-                .entered();
-                overlay_factory.database_provider_ro()
-            },
-        )
     }
 
     /// Return sealed block header from database or in-memory state by hash.
@@ -1552,12 +1524,12 @@ where
     ///
     /// This method determines how to execute the block and compute its state root based on
     /// the selected strategy:
+    /// - `Skipped`: Trusts the header state root and does not compute trie state.
     /// - `StateRootTask`: Uses a dedicated task for state root computation with proof generation
     /// - `Parallel`: Computes state root in parallel with block execution
     /// - `Synchronous`: Falls back to sequential execution and state root computation
     ///
-    /// The method handles strategy fallbacks if the preferred approach fails, ensuring
-    /// block execution always completes with a valid state root.
+    /// The method handles strategy fallbacks if the preferred computed-root approach fails.
     ///
     /// # Arguments
     ///
@@ -1615,6 +1587,7 @@ where
 
                 Ok(handle)
             }
+            StateRootStrategy::Skipped |
             StateRootStrategy::Parallel |
             StateRootStrategy::Synchronous |
             StateRootStrategy::Custom(_) => {
@@ -1673,7 +1646,9 @@ where
     /// Note: Use state root task only if prefix sets are empty, otherwise proof generation is
     /// too expensive because it requires walking all paths in every proof.
     fn plan_state_root_computation(&self) -> StateRootStrategy<N> {
-        if let Some(custom_state_root) = &self.custom_state_root {
+        if self.config.skip_state_root() {
+            StateRootStrategy::Skipped
+        } else if let Some(custom_state_root) = &self.custom_state_root {
             StateRootStrategy::Custom(custom_state_root.clone())
         } else if self.config.state_root_fallback() {
             StateRootStrategy::Synchronous
@@ -1728,7 +1703,6 @@ where
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         hashed_state: LazyHashedPostState,
         trie_output: Arc<TrieUpdates>,
-        changeset_provider: impl TrieCursorFactory + Send + 'static,
     ) -> ExecutedBlock<N> {
         // Create deferred handle and task that owns the unsorted inputs.
         // Resolve the lazy handle into Arc<HashedPostState>. By this point the hashed state has
@@ -1741,17 +1715,10 @@ where
             DeferredTrieData::pending(hashed_state, trie_output);
         let block_validation_metrics = self.metrics.block_validation.clone();
 
-        // Capture block info and cache handle for changeset computation
-        let block_hash = block.hash();
+        // Capture block info for tracing.
         let block_number = block.number();
 
-        // Register a pending changeset entry so that concurrent readers will wait for
-        // this computation to finish rather than falling back to the expensive DB path.
-        // The guard ensures the pending entry is cancelled if the task panics.
-        let pending_changeset_guard = self.changeset_cache.register_pending(block_hash);
-
-        // Spawn background task to compute trie data. The task publishes the sorted result before
-        // computing changesets, so trie data waiters do not block on changeset computation.
+        // Spawn background task to compute trie data.
         let compute_trie_input_task = move || {
             let _span = debug_span!(
                 target: "engine::tree::payload_validator",
@@ -1760,56 +1727,19 @@ where
             )
             .entered();
 
-            let result = panic::catch_unwind(AssertUnwindSafe(|| {
-                let compute_start = Instant::now();
-                let computed = deferred_trie_task.compute_and_publish();
-                block_validation_metrics
-                    .deferred_trie_compute_duration
-                    .record(compute_start.elapsed().as_secs_f64());
+            let compute_start = Instant::now();
+            let computed = deferred_trie_task.compute_and_publish();
+            block_validation_metrics
+                .deferred_trie_compute_duration
+                .record(compute_start.elapsed().as_secs_f64());
 
-                // Record sizes of the computed trie data
-                block_validation_metrics
-                    .hashed_post_state_size
-                    .record(computed.hashed_state.total_len() as f64);
-                block_validation_metrics
-                    .trie_updates_sorted_size
-                    .record(computed.trie_updates.total_len() as f64);
-                // Compute and cache changesets using the computed trie_updates.
-                // Use the pre-created provider to avoid races with changeset cache
-                // eviction that can happen between task spawn and execution.
-                let changeset_start = Instant::now();
-
-                match reth_trie::changesets::compute_trie_changesets(
-                    &changeset_provider,
-                    &computed.trie_updates,
-                ) {
-                    Ok(changesets) => {
-                        debug!(
-                            target: "engine::tree::changeset",
-                            ?block_number,
-                            elapsed = ?changeset_start.elapsed(),
-                            "Computed and caching changesets"
-                        );
-
-                        pending_changeset_guard.resolve(block_number, Arc::new(changesets));
-                    }
-                    Err(e) => {
-                        warn!(
-                            target: "engine::tree::changeset",
-                            ?block_number,
-                            ?e,
-                            "Failed to compute changesets for deferred trie producer"
-                        );
-                    }
-                }
-            }));
-
-            if result.is_err() {
-                error!(
-                    target: "engine::tree::payload_validator",
-                    "Deferred trie task panicked"
-                );
-            }
+            // Record sizes of the computed trie data
+            block_validation_metrics
+                .hashed_post_state_size
+                .record(computed.hashed_state.total_len() as f64);
+            block_validation_metrics
+                .trie_updates_sorted_size
+                .record(computed.trie_updates.total_len() as f64);
         };
 
         // Spawn task that computes trie data asynchronously.
@@ -1965,6 +1895,8 @@ where
 /// Strategy describing how to compute the state root.
 #[derive(derive_more::Debug, Clone)]
 enum StateRootStrategy<N: NodePrimitives> {
+    /// Skip trie state-root computation and trust the block header root.
+    Skipped,
     /// Use the state root task (background sparse trie computation).
     StateRootTask,
     /// Run the parallel state root computation on the calling thread.
@@ -2032,7 +1964,6 @@ pub trait EngineValidator<
     fn on_inserted_executed_block(
         &self,
         block: BuiltPayloadExecutedBlock<N>,
-        state: &EngineApiTreeState<N>,
     ) -> ProviderResult<ExecutedBlock<N>>;
 
     /// Returns [`SavedCache`] for the given block hash.
@@ -2105,29 +2036,17 @@ where
     fn on_inserted_executed_block(
         &self,
         block: BuiltPayloadExecutedBlock<N>,
-        state: &EngineApiTreeState<N>,
     ) -> ProviderResult<ExecutedBlock<N>> {
         self.payload_processor.on_inserted_executed_block(
             block.recovered_block.block_with_parent(),
             &block.execution_output.state,
         );
 
-        let overlay_factory = OverlayStateProviderFactory::new(
-            self.provider.clone(),
-            Self::overlay_builder_for_parent(
-                block.recovered_block.parent_hash(),
-                state,
-                self.changeset_cache.clone(),
-            ),
-        );
-        let changeset_provider = overlay_factory.database_provider_ro()?;
-
         Ok(self.spawn_deferred_trie_task(
             block.recovered_block,
             block.execution_output,
             LazyHashedPostState::ready(block.hashed_state),
             block.trie_updates,
-            changeset_provider,
         ))
     }
 
