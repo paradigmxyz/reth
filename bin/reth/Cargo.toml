@@ -20,6 +20,7 @@ assets = [
     ["../../README.md", "usr/share/doc/reth/", "644"],
     ["../../LICENSE-APACHE", "usr/share/doc/reth/", "644"],
     ["../../LICENSE-MIT", "usr/share/doc/reth/", "644"],
+    ["../../LICENSES/*", "usr/share/doc/reth/LICENSES/", "644"],
 ]
 systemd-units = { enable = false, start = false, unit-name = "reth", unit-scripts = "../../pkg/reth/debian" }
 
@@ -91,12 +92,18 @@ default = [
     "jit",
     "keccak-cache-global",
     "asm-keccak",
+    "gmp",
     "min-trace-logs",
 ]
 
 jit = [
     "reth-ethereum-cli/jit",
     "reth-node-ethereum/jit",
+]
+gmp = [
+    "reth-ethereum-cli/gmp",
+    "reth-node-ethereum/gmp",
+    "reth-revm/gmp",
 ]
 
 otlp = [

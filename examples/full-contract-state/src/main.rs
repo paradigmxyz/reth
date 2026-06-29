@@ -7,10 +7,9 @@
 //! 3. Get contract bytecode
 //! 4. Iterate through all storage slots for the contract
 
-use alloy_primitives::map::B256Map;
+use alloy_primitives::{map::B256Map, Address, U256};
 use reth_ethereum::{
     chainspec::ChainSpecBuilder,
-    evm::revm::primitives::{Address, U256},
     node::EthereumNode,
     primitives::{Account, Bytecode},
     provider::{

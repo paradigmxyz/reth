@@ -32,8 +32,8 @@ use reth_tasks::Runtime;
 use revm::{
     context::{result::ResultAndState, Block},
     database::{states::bundle_state::BundleRetention, State},
+    state::bal::Bal as RevmBal,
 };
-use revm_state::bal::Bal as RevmBal;
 use std::sync::Arc;
 
 use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
@@ -923,12 +923,11 @@ mod tests {
         // Deploys `0x60006000fd` (PUSH1 0 PUSH1 0 REVERT) at `revert_contract`. Sender calls
         // it; the call reverts; fees + nonce still apply.
         use alloy_consensus::TxLegacy;
-        use alloy_primitives::{Bytes, TxKind};
+        use alloy_primitives::{keccak256, Bytes, TxKind};
         use reth_chainspec::MAINNET;
         use reth_ethereum_primitives::Transaction;
         use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
         use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
-        use revm::primitives::keccak256;
 
         let evm_config = EthEvmConfig::mainnet();
         let revert_contract: alloy_primitives::Address =
@@ -981,12 +980,11 @@ mod tests {
         //
         // Bytecode: PUSH1 0x42, PUSH1 0x00, SSTORE, STOP → `0x60 0x42 0x60 0x00 0x55 0x00`.
         use alloy_consensus::TxLegacy;
-        use alloy_primitives::{Bytes, TxKind};
+        use alloy_primitives::{keccak256, Bytes, TxKind};
         use reth_chainspec::MAINNET;
         use reth_ethereum_primitives::Transaction;
         use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
         use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
-        use revm::primitives::keccak256;
 
         let evm_config = EthEvmConfig::mainnet();
         let sstore_contract: alloy_primitives::Address =
@@ -1149,10 +1147,12 @@ mod tests {
         // All-state-gas results keep block_regular_gas_used at 0, so a second tx that fits
         // within the block limit but not the remaining cumulative budget proves that
         // non-Amsterdam reads cumulative_tx_gas_used while Amsterdam does not.
-        use revm::context::result::{
-            ExecResultAndState, ExecutionResult, Output, ResultGas, SuccessReason,
+        use revm::{
+            context::result::{
+                ExecResultAndState, ExecutionResult, Output, ResultGas, SuccessReason,
+            },
+            state::EvmState,
         };
-        use revm_state::EvmState;
 
         let block_gas_limit = 1_000_000u64;
         let first_tx_gas = 600_000u64;
@@ -1196,8 +1196,8 @@ mod tests {
                 ExecResultAndState, ExecutionResult, Output, ResultGas, SuccessReason,
             },
             primitives::eip7825::TX_GAS_LIMIT_CAP,
+            state::EvmState,
         };
-        use revm_state::EvmState;
 
         let block_gas_limit = 30_000_000u64;
         let oversized = TX_GAS_LIMIT_CAP + 1_000_000; // 17_777_216 — above the cap
