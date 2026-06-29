@@ -455,11 +455,7 @@ where
     /// waiting for rayon scheduling.
     const PARALLEL_PREFETCH_COUNT: usize = 4;
 
-    /// Number of transactions recovered per ordered parallel window in the non-BAL path.
-    ///
-    /// Non-BAL execution must consume transactions in block order, while rayon may recover
-    /// individual transactions in any order. Windowing prioritizes the next contiguous range while
-    /// still using parallel recovery inside that range.
+    /// Size of the first parallel tx batch in non-BAL path.
     const FIRST_PARALLEL_TX_WINDOW_SIZE: usize = 64;
 
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
