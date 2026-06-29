@@ -198,7 +198,7 @@ impl TestHarness {
             tree_config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
             EngineApiKind::Ethereum,
-            runtime.state_trie_overlay_worker_pool(),
+            StateTrieOverlayManager::new(runtime.state_trie_overlay_worker_pool()),
         );
         let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None, None);
 

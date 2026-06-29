@@ -36,7 +36,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_tasks::{spawn_os_thread, utils::increase_thread_priority, WorkerPool};
+use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie_db::ChangesetCache;
 use reth_trie_sparse::SparseTrieRetainedPaths;
 use revm::interpreter::debug_unreachable;
@@ -157,7 +157,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
         invalid_header_hit_eviction_threshold: u8,
         canonical_block: BlockNumHash,
         engine_kind: EngineApiKind,
-        state_trie_overlay_worker_pool: Arc<WorkerPool>,
+        state_trie_overlays: StateTrieOverlayManager<N>,
     ) -> Self {
         Self {
             invalid_headers: InvalidHeaderCache::new(
@@ -165,11 +165,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
                 invalid_header_hit_eviction_threshold,
             ),
             buffer: BlockBuffer::new(block_buffer_limit),
-            tree_state: TreeState::new(
-                canonical_block,
-                engine_kind,
-                StateTrieOverlayManager::new(state_trie_overlay_worker_pool),
-            ),
+            tree_state: TreeState::new(canonical_block, engine_kind, state_trie_overlays),
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
         }
     }
@@ -395,6 +391,10 @@ where
         runtime: reth_tasks::Runtime,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
+        let mut state = state;
+        if let Some(state_trie_overlays) = payload_validator.state_trie_overlay_manager() {
+            state.tree_state.state_trie_overlays = state_trie_overlays;
+        }
 
         Self {
             provider,
@@ -450,13 +450,17 @@ where
         };
 
         let (tx, outgoing) = unbounded_channel();
+        let state_trie_overlays =
+            payload_validator.state_trie_overlay_manager().unwrap_or_else(|| {
+                StateTrieOverlayManager::new(runtime.state_trie_overlay_worker_pool())
+            });
         let state = EngineApiTreeState::new(
             config.block_buffer_limit(),
             config.max_invalid_header_cache_length(),
             config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
             kind,
-            runtime.state_trie_overlay_worker_pool(),
+            state_trie_overlays,
         );
 
         let task = Self::new(
@@ -1713,28 +1717,8 @@ where
                                     Duration::ZERO
                                 };
 
-                                let cache_wait = wait_for_caches.then(|| {
-                                    let sparse_trie = self
-                                        .state
-                                        .tree_state
-                                        .state_trie_overlays
-                                        .preserved_sparse_trie();
-                                    let (sparse_trie_tx, sparse_trie_rx) =
-                                        std::sync::mpsc::channel();
-                                    self.runtime.spawn_blocking_named(
-                                        "wait-sparse-tri",
-                                        move || {
-                                            let _ = sparse_trie_tx
-                                                .send(sparse_trie.wait_for_availability());
-                                        },
-                                    );
-
-                                    let mut wait = self.payload_validator.wait_for_caches();
-                                    wait.sparse_trie = sparse_trie_rx
-                                        .recv()
-                                        .expect("sparse trie wait task failed to send result");
-                                    wait
-                                });
+                                let cache_wait = wait_for_caches
+                                    .then(|| self.payload_validator.wait_for_caches());
 
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();

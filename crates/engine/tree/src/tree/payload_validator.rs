@@ -121,6 +121,7 @@ use reth_trie_sparse::SparseTrieRetainedPaths;
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
 use reth_chain_state::{
     CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats,
+    StateTrieOverlayManager,
 };
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -281,7 +282,7 @@ where
     /// Configuration for the tree.
     config: TreeConfig,
     /// Payload processor for state root computation.
-    payload_processor: PayloadProcessor<Evm>,
+    payload_processor: PayloadProcessor<Evm::Primitives, Evm>,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// Precompile cache metrics.
@@ -335,11 +336,14 @@ where
         runtime: reth_tasks::Runtime,
     ) -> Self {
         let precompile_cache_map = PrecompileCacheMap::default();
+        let state_trie_overlays =
+            StateTrieOverlayManager::new(runtime.state_trie_overlay_worker_pool());
         let payload_processor = PayloadProcessor::new(
             runtime.clone(),
             evm_config.clone(),
             &config,
             precompile_cache_map.clone(),
+            state_trie_overlays,
         );
         Self {
             provider,
@@ -598,12 +602,8 @@ where
         } else {
             None
         };
-        let state_trie_overlays = ctx.state().tree_state.state_trie_overlays.clone();
-        let processor_options = PayloadProcessorSpawnOptions::new(
-            parallel_bal_execution,
-            state_trie_overlays,
-            pending_sparse_trie_prune,
-        );
+        let processor_options =
+            PayloadProcessorSpawnOptions::new(parallel_bal_execution, pending_sparse_trie_prune);
         let mut handle = ensure_ok!(self.spawn_payload_processor(
             env.clone(),
             txs,
@@ -1747,7 +1747,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         overlay_factory: OverlayStateProviderFactory<P, N>,
         strategy: &StateRootStrategy<N>,
-        options: PayloadProcessorSpawnOptions<N>,
+        options: PayloadProcessorSpawnOptions,
     ) -> Result<
         PayloadHandle<
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
@@ -1756,11 +1756,8 @@ where
         >,
         InsertBlockErrorKind,
     > {
-        let PayloadProcessorSpawnOptions {
-            parallel_bal_execution,
-            state_trie_overlays,
-            pending_sparse_trie_prune,
-        } = options;
+        let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
+            options;
         match strategy {
             StateRootStrategy::StateRootTask => {
                 let spawn_start = Instant::now();
@@ -1774,7 +1771,6 @@ where
                     &self.config,
                     PayloadProcessorSpawnOptions::new(
                         parallel_bal_execution,
-                        state_trie_overlays,
                         pending_sparse_trie_prune,
                     ),
                 );
@@ -2170,6 +2166,11 @@ pub trait EngineValidator<
         parent_state_root: B256,
         state: &EngineApiTreeState<N>,
     ) -> Option<StateRootHandle>;
+
+    /// Returns the state trie overlay manager used by this validator, if any.
+    fn state_trie_overlay_manager(&self) -> Option<StateTrieOverlayManager<N>> {
+        None
+    }
 }
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
@@ -2265,9 +2266,12 @@ where
             // Full proof workers — tx count unknown at FCU time (block built incrementally)
             false,
             &self.config,
-            state.tree_state.state_trie_overlays.clone(),
             None,
         ))
+    }
+
+    fn state_trie_overlay_manager(&self) -> Option<StateTrieOverlayManager<N>> {
+        Some(self.payload_processor.state_trie_overlays())
     }
 }
 

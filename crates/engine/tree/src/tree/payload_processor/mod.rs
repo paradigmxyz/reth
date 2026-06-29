@@ -88,9 +88,10 @@ type ExecuteTxSender<TxEnv, Recovered, Err> = IndexedTxSender<RecoveredTx<TxEnv,
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
-pub struct PayloadProcessor<Evm>
+pub struct PayloadProcessor<N, Evm>
 where
-    Evm: ConfigureEvm,
+    N: NodePrimitives,
+    Evm: ConfigureEvm<Primitives = N>,
 {
     /// The executor used by to spawn tasks.
     executor: Runtime,
@@ -114,6 +115,8 @@ where
     precompile_cache_disabled: bool,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+    /// State trie overlay manager that owns the preserved sparse trie.
+    state_trie_overlays: StateTrieOverlayManager<N>,
     /// LFU hot-slot capacity: max storage slots retained across prune cycles.
     sparse_trie_max_hot_slots: usize,
     /// LFU hot-account capacity: max account addresses retained across prune cycles.
@@ -132,34 +135,30 @@ where
 
 /// Options for spawning payload processor tasks.
 #[derive(Debug, Default)]
-pub struct PayloadProcessorSpawnOptions<N: NodePrimitives> {
+pub struct PayloadProcessorSpawnOptions {
     /// Whether to execute BAL blocks through the parallel BAL path.
     pub parallel_bal_execution: bool,
-    /// State trie overlay manager that owns the preserved sparse trie.
-    pub state_trie_overlays: StateTrieOverlayManager<N>,
     /// Pending sparse trie prune request to run after successful state root computation.
     pub pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
 }
 
-impl<N: NodePrimitives> PayloadProcessorSpawnOptions<N> {
+impl PayloadProcessorSpawnOptions {
     /// Creates new payload processor spawn options.
     pub const fn new(
         parallel_bal_execution: bool,
-        state_trie_overlays: StateTrieOverlayManager<N>,
         pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
     ) -> Self {
-        Self { parallel_bal_execution, state_trie_overlays, pending_sparse_trie_prune }
+        Self { parallel_bal_execution, pending_sparse_trie_prune }
     }
 }
 
-struct SparseTrieTaskOptions<N: NodePrimitives> {
+struct SparseTrieTaskOptions {
     parent_state_root: B256,
     chunk_size: usize,
-    state_trie_overlays: StateTrieOverlayManager<N>,
     pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
 }
 
-impl<N, Evm> PayloadProcessor<Evm>
+impl<N, Evm> PayloadProcessor<N, Evm>
 where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
@@ -175,6 +174,7 @@ where
         evm_config: Evm,
         config: &TreeConfig,
         precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+        state_trie_overlays: StateTrieOverlayManager<N>,
     ) -> Self {
         Self {
             executor,
@@ -186,6 +186,7 @@ where
             disable_state_cache: config.disable_state_cache(),
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
+            state_trie_overlays,
             sparse_trie_max_hot_slots: config.sparse_trie_max_hot_slots(),
             sparse_trie_max_hot_accounts: config.sparse_trie_max_hot_accounts(),
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
@@ -208,39 +209,53 @@ where
             })
             .clone()
     }
+
+    /// Returns the state trie overlay manager used by this payload processor.
+    pub fn state_trie_overlays(&self) -> StateTrieOverlayManager<N> {
+        self.state_trie_overlays.clone()
+    }
 }
 
-impl<Evm> WaitForCaches for PayloadProcessor<Evm>
+impl<N, Evm> WaitForCaches for PayloadProcessor<N, Evm>
 where
-    Evm: ConfigureEvm,
+    N: NodePrimitives,
+    Evm: ConfigureEvm<Primitives = N>,
 {
     fn wait_for_caches(&self) -> CacheWaitDurations {
-        debug!(target: "engine::tree::payload_processor", "Waiting for execution cache lock");
+        debug!(target: "engine::tree::payload_processor", "Waiting for execution cache and sparse trie locks");
 
         let execution_cache = self.execution_cache.clone();
+        let sparse_trie = self.state_trie_overlays.preserved_sparse_trie();
 
         let (execution_tx, execution_rx) = std::sync::mpsc::channel();
+        let (sparse_trie_tx, sparse_trie_rx) = std::sync::mpsc::channel();
 
         self.executor.spawn_blocking_named("wait-exec-cache", move || {
             let _ = execution_tx.send(execution_cache.wait_for_availability());
         });
+        self.executor.spawn_blocking_named("wait-sparse-tri", move || {
+            let _ = sparse_trie_tx.send(sparse_trie.wait_for_availability());
+        });
 
         let execution_cache_duration =
             execution_rx.recv().expect("execution cache wait task failed to send result");
+        let sparse_trie_duration =
+            sparse_trie_rx.recv().expect("sparse trie wait task failed to send result");
 
         debug!(
             target: "engine::tree::payload_processor",
             ?execution_cache_duration,
-            "Execution cache lock acquired"
+            ?sparse_trie_duration,
+            "Execution cache and sparse trie locks acquired"
         );
         CacheWaitDurations {
             execution_cache: execution_cache_duration,
-            sparse_trie: Default::default(),
+            sparse_trie: sparse_trie_duration,
         }
     }
 }
 
-impl<N, Evm> PayloadProcessor<Evm>
+impl<N, Evm> PayloadProcessor<N, Evm>
 where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N> + 'static,
@@ -280,7 +295,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         multiproof_provider_factory: F,
         config: &TreeConfig,
-        options: PayloadProcessorSpawnOptions<N>,
+        options: PayloadProcessorSpawnOptions,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -290,11 +305,8 @@ where
             + Sync
             + 'static,
     {
-        let PayloadProcessorSpawnOptions {
-            parallel_bal_execution,
-            state_trie_overlays,
-            pending_sparse_trie_prune,
-        } = options;
+        let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
+            options;
         // start preparing transactions immediately
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
@@ -307,7 +319,6 @@ where
             env.parent_state_root,
             halve_workers,
             config,
-            state_trie_overlays,
             pending_sparse_trie_prune,
         );
         // BAL blocks only bypass the normal execution state hook when the validator decided that
@@ -387,7 +398,6 @@ where
         parent_state_root: B256,
         halve_workers: bool,
         config: &TreeConfig,
-        state_trie_overlays: StateTrieOverlayManager<N>,
         pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
     ) -> StateRootHandle
     where
@@ -415,7 +425,6 @@ where
             SparseTrieTaskOptions {
                 parent_state_root,
                 chunk_size: config.multiproof_chunk_size(),
-                state_trie_overlays,
                 pending_sparse_trie_prune: if self.disable_sparse_trie_cache_pruning {
                     None
                 } else {
@@ -643,15 +652,11 @@ where
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
         hashed_state_tx: mpsc::Sender<HashedPostState>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
-        options: SparseTrieTaskOptions<N>,
+        options: SparseTrieTaskOptions,
     ) {
-        let SparseTrieTaskOptions {
-            parent_state_root,
-            chunk_size,
-            state_trie_overlays,
-            pending_sparse_trie_prune,
-        } = options;
-        let preserved_sparse_trie = state_trie_overlays.preserved_sparse_trie();
+        let SparseTrieTaskOptions { parent_state_root, chunk_size, pending_sparse_trie_prune } =
+            options;
+        let preserved_sparse_trie = self.state_trie_overlays.preserved_sparse_trie();
         let trie_metrics = self.trie_metrics.clone();
         let max_hot_slots = self.sparse_trie_max_hot_slots;
         let max_hot_accounts = self.sparse_trie_max_hot_accounts;
@@ -1074,6 +1079,7 @@ mod tests {
     };
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
     use rand::Rng;
+    use reth_chain_state::StateTrieOverlayManager;
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
@@ -1097,6 +1103,10 @@ mod tests {
     fn make_saved_cache(hash: B256) -> SavedCache {
         let execution_cache = ExecutionCache::new(1_000);
         SavedCache::new(hash, execution_cache)
+    }
+
+    fn state_trie_overlays() -> StateTrieOverlayManager<EthPrimitives> {
+        StateTrieOverlayManager::default()
     }
 
     #[test]
@@ -1182,6 +1192,7 @@ mod tests {
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
+            state_trie_overlays(),
         );
 
         let parent_hash = B256::from([1u8; 32]);
@@ -1211,6 +1222,7 @@ mod tests {
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
+            state_trie_overlays(),
         );
 
         // Setup: populate cache with block 1
@@ -1246,6 +1258,7 @@ mod tests {
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
+            state_trie_overlays(),
         );
 
         let parent_hash = B256::from([1u8; 32]);
@@ -1403,6 +1416,7 @@ mod tests {
             EthEvmConfig::new(factory.chain_spec()),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
+            state_trie_overlays(),
         );
 
         let provider_factory = BlockchainProvider::new(factory).unwrap();
