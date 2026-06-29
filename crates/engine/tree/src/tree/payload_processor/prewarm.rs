@@ -429,7 +429,6 @@ where
 
         // Drop the per-thread providers
         executor.bal_streaming_pool().clear();
-        executor.prewarming_pool().clear();
 
         let _ = actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
     }

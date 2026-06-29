@@ -34,7 +34,7 @@ use std::sync::Arc;
 
 use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
 
-/// Executes one block on the BAL path using the runtime's persistent BAL worker pool.
+/// Executes one block on the BAL path using the runtime's prewarming pool.
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     runtime: &Runtime,
@@ -58,7 +58,9 @@ where
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'a,
     ReceiptTy<Evm::Primitives>: Clone,
 {
-    let worker_pool = runtime.bal_streaming_pool();
+    // BAL mode does not use transaction prewarming, so this keeps the BAL streaming pool dedicated
+    // to hashed-state streaming for sparse-trie/state-root progress.
+    let worker_pool = runtime.prewarming_pool();
     let worker_count = worker_pool.current_num_threads().max(1).min(transaction_count);
 
     worker_pool.in_place_scope(|scope| {
