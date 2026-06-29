@@ -1346,14 +1346,13 @@ impl ArenaParallelSparseTrie {
             match &arena[current] {
                 ArenaSparseNode::EmptyRoot | ArenaSparseNode::TakenSubtrie => return None,
                 ArenaSparseNode::Leaf { key, value, .. } => {
-                    let remaining = full_path.slice(path_offset..);
-                    return (remaining == *key).then_some(value);
+                    return Self::nibbles_tail_eq(full_path, path_offset, key).then_some(value);
                 }
                 ArenaSparseNode::Branch(b) => {
                     let short_key = &b.short_key;
                     let logical_end = path_offset + short_key.len();
                     if full_path.len() <= logical_end ||
-                        full_path.slice(path_offset..logical_end) != *short_key
+                        !Self::nibbles_range_eq(full_path, path_offset, short_key)
                     {
                         return None;
                     }
@@ -1378,6 +1377,28 @@ impl ArenaParallelSparseTrie {
                 }
             }
         }
+    }
+
+    #[inline]
+    fn nibbles_tail_eq(full_path: &Nibbles, offset: usize, tail: &Nibbles) -> bool {
+        let Some(end) = offset.checked_add(tail.len()) else { return false };
+        end == full_path.len() && Self::nibbles_range_eq(full_path, offset, tail)
+    }
+
+    #[inline]
+    fn nibbles_range_eq(full_path: &Nibbles, offset: usize, expected: &Nibbles) -> bool {
+        let Some(end) = offset.checked_add(expected.len()) else { return false };
+        if end > full_path.len() {
+            return false;
+        }
+
+        for i in 0..expected.len() {
+            if full_path.get_unchecked(offset + i) != expected.get_unchecked(i) {
+                return false;
+            }
+        }
+
+        true
     }
 
     /// Immutable traversal from the given root in `arena`, following `full_path` to find a leaf.
