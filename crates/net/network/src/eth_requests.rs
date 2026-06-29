@@ -17,10 +17,7 @@ use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
 use reth_primitives_traits::Block;
-use reth_storage_api::{
-    get_bals_by_hashes_with_limit, BalProvider, BlockReader, GetBlockAccessListLimit,
-    HeaderProvider,
-};
+use reth_storage_api::{get_bal_by_hash, BalProvider, BlockReader, HeaderProvider};
 use reth_transaction_pool::{blobstore::NoopBlobStore, BlobStore};
 use std::{
     future::Future,
@@ -377,9 +374,24 @@ where
         self.metrics.eth_block_access_lists_requests_received_total.increment(1);
         request.0.truncate(MAX_BLOCK_ACCESS_LISTS_SERVE);
 
-        let limit = GetBlockAccessListLimit::ResponseSizeSoftLimit(SOFT_RESPONSE_LIMIT);
-        let access_lists =
-            get_bals_by_hashes_with_limit(&self.client, &request.0, limit).unwrap_or_default();
+        let mut access_lists = Vec::new();
+        let mut total_bytes = 0;
+
+        for block_hash in request.0 {
+            let bal = match get_bal_by_hash(&self.client, block_hash) {
+                Ok(bal) => bal,
+                Err(_) => {
+                    access_lists.clear();
+                    break
+                }
+            };
+            total_bytes += bal.as_ref().map_or(1, |bytes| bytes.len());
+            access_lists.push(bal);
+
+            if total_bytes > SOFT_RESPONSE_LIMIT {
+                break
+            }
+        }
         let _ = response.send(Ok(BlockAccessLists(access_lists)));
     }
 }

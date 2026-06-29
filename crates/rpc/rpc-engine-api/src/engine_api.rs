@@ -28,8 +28,7 @@ use reth_payload_primitives::{
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
 use reth_storage_api::{
-    get_bals_by_hashes_with_limit, BalProvider, BlockReader, GetBlockAccessListLimit,
-    HeaderProvider, StateProviderFactory,
+    get_bals_by_hashes, BalProvider, BlockReader, HeaderProvider, StateProviderFactory,
 };
 use reth_tasks::Runtime;
 use reth_transaction_pool::TransactionPool;
@@ -816,12 +815,8 @@ where
 
         self.inner.task_spawner.spawn_blocking_task(async move {
             tx.send(
-                get_bals_by_hashes_with_limit(
-                    &inner.provider,
-                    &hashes,
-                    GetBlockAccessListLimit::None,
-                )
-                .map_err(|err| EngineApiError::Internal(Box::new(err))),
+                get_bals_by_hashes(&inner.provider, &hashes)
+                    .map_err(|err| EngineApiError::Internal(Box::new(err))),
             )
             .ok();
         });

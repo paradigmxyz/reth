@@ -3,9 +3,7 @@ use alloy_eips::NumHash;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use parking_lot::RwLock;
 use reth_prune_types::PruneMode;
-use reth_storage_api::{
-    BalNotification, BalNotificationStream, BalStore, GetBlockAccessListLimit, RawBal,
-};
+use reth_storage_api::{BalNotification, BalNotificationStream, BalStore, RawBal};
 use reth_storage_errors::provider::ProviderResult;
 use reth_tokio_util::EventSender;
 use std::{
@@ -192,28 +190,6 @@ impl BalStore for InMemoryBalStore {
             .map(|entry| entry.bal.clone()))
     }
 
-    fn append_by_hashes_with_limit(
-        &self,
-        block_hashes: &[BlockHash],
-        limit: GetBlockAccessListLimit,
-        out: &mut Vec<Option<Bytes>>,
-    ) -> ProviderResult<()> {
-        let inner = self.inner.read();
-        let mut size = 0;
-
-        for hash in block_hashes {
-            let bal = inner.entries.get(hash).map(|entry| entry.bal.clone());
-            size += bal.as_ref().map_or(1, |bytes| bytes.len());
-            out.push(bal);
-
-            if limit.exceeds(size) {
-                break
-            }
-        }
-
-        Ok(())
-    }
-
     fn bal_stream(&self) -> BalNotificationStream {
         self.notifications.new_listener()
     }
@@ -275,30 +251,6 @@ mod tests {
         let store = InMemoryBalStore::default();
 
         store.flush(1).unwrap();
-    }
-
-    #[test]
-    fn limited_lookup_returns_prefix() {
-        let store = InMemoryBalStore::default();
-        let hash0 = B256::random();
-        let hash1 = B256::random();
-        let hash2 = B256::random();
-        let bal0 = Bytes::from_static(&[0xc1, 0x01]);
-        let bal1 = Bytes::from_static(&[0xc1, 0x02]);
-        let bal2 = Bytes::from_static(&[0xc1, 0x03]);
-
-        store.insert(NumHash::new(1, hash0), RawBal::from(bal0.clone())).unwrap();
-        store.insert(NumHash::new(2, hash1), RawBal::from(bal1.clone())).unwrap();
-        store.insert(NumHash::new(3, hash2), RawBal::from(bal2)).unwrap();
-
-        let limited = store
-            .get_by_hashes_with_limit(
-                &[hash0, hash1, hash2],
-                GetBlockAccessListLimit::ResponseSizeSoftLimit(2),
-            )
-            .unwrap();
-
-        assert_eq!(limited, vec![Some(bal0), Some(bal1)]);
     }
 
     #[test]
