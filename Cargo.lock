@@ -10017,6 +10017,7 @@ dependencies = [
  "reth-chain-state",
  "reth-chainspec",
  "reth-consensus",
+ "reth-consensus-common",
  "reth-db-api",
  "reth-engine-primitives",
  "reth-errors",
