@@ -32,7 +32,7 @@
 use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::OnComponentInitializedHook,
-    BuilderContext, ExExLauncher, LaunchExecutors, NodeAdapter, PrimitivesTy,
+    BuilderContext, ExExLauncher, NodeAdapter, PrimitivesTy,
 };
 use alloy_eips::eip2124::Head;
 use alloy_primitives::{BlockNumber, B256};
@@ -81,7 +81,7 @@ use reth_stages::{
     StageId, StageSet,
 };
 use reth_static_file::{blocks_per_file_for_prune_distance, StaticFileProducer, StaticFileSegment};
-use reth_tasks::TaskExecutor;
+use reth_tasks::{Runtime, TaskExecutor, TokioConfig};
 use reth_tracing::{
     throttle,
     tracing::{debug, error, info, warn},
@@ -118,30 +118,16 @@ use reth_node_events::{cl::ConsensusLayerHealthEvents, node::NodeEvent};
 /// ```
 #[derive(Debug, Clone)]
 pub struct LaunchContext {
-    executors: LaunchExecutors,
+    /// The task executor for the node.
+    pub task_executor: TaskExecutor,
     /// The data directory for the node.
     pub data_dir: ChainPath<DataDirPath>,
 }
 
 impl LaunchContext {
     /// Create a new instance of the default node launcher.
-    pub const fn new(executors: LaunchExecutors, data_dir: ChainPath<DataDirPath>) -> Self {
-        Self { executors, data_dir }
-    }
-
-    /// Returns the main task executor.
-    pub const fn task_executor(&self) -> &TaskExecutor {
-        self.executors.main()
-    }
-
-    /// Returns the RPC/latency task executor.
-    pub const fn rpc_task_executor(&self) -> &TaskExecutor {
-        self.executors.rpc()
-    }
-
-    /// Returns `true` if a dedicated latency runtime is configured.
-    pub const fn latency_isolated(&self) -> bool {
-        self.executors.latency_isolated()
+    pub const fn new(task_executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> Self {
+        Self { task_executor, data_dir }
     }
 
     /// Create launch context with attachment.
@@ -161,7 +147,7 @@ impl LaunchContext {
         ChainSpec: EthChainSpec + reth_chainspec::EthereumHardforks,
     {
         let toml_config = self.load_toml_config(&config)?;
-        Ok(self.with(WithConfigs { config, toml_config }))
+        Ok(self.with(WithConfigs { config, toml_config, latency_runtime: None }))
     }
 
     /// Loads the reth config with the configured `data_dir` and overrides settings according to the
@@ -294,17 +280,7 @@ impl<T> LaunchContextWith<T> {
 
     /// Returns the task executor.
     pub const fn task_executor(&self) -> &TaskExecutor {
-        self.inner.task_executor()
-    }
-
-    /// Returns the RPC/latency task executor.
-    pub const fn rpc_task_executor(&self) -> &TaskExecutor {
-        self.inner.rpc_task_executor()
-    }
-
-    /// Returns `true` if a dedicated latency runtime is configured.
-    pub const fn latency_isolated(&self) -> bool {
-        self.inner.latency_isolated()
+        &self.inner.task_executor
     }
 
     /// Attaches another value to the launch context.
@@ -393,6 +369,29 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     pub fn with_adjusted_instance_ports(mut self) -> Self {
         self.node_config_mut().adjust_instance_ports();
         self
+    }
+
+    /// Builds the optional latency-sensitive tokio runtime from CLI args if not already set.
+    pub fn ensure_latency_runtime(&mut self) -> eyre::Result<()> {
+        let threads = self.node_config().rpc.latency_worker_threads;
+        if threads == 0 {
+            return Ok(());
+        }
+        if self.configs().latency_runtime.is_some() {
+            return Ok(());
+        }
+        let rt = self
+            .task_executor()
+            .build_attached_tokio(TokioConfig::latency_runtime(threads))
+            .map_err(|err| eyre::eyre!("failed to build latency tokio runtime: {err}"))?;
+        self.left_mut().latency_runtime = Some(rt);
+        info!(target: "reth::cli", threads, "Latency RPC tokio runtime enabled");
+        Ok(())
+    }
+
+    /// Returns the RPC/latency executor when configured, otherwise the main executor.
+    pub fn rpc_task_executor(&self) -> TaskExecutor {
+        self.configs().latency_runtime.clone().unwrap_or_else(|| self.task_executor().clone())
     }
 
     /// Returns the container for all config types
@@ -885,7 +884,6 @@ where
             head,
             self.blockchain_db().clone(),
             self.task_executor().clone(),
-            self.rpc_task_executor().clone(),
             self.configs().clone(),
         );
 
@@ -897,8 +895,6 @@ where
         let node_adapter = NodeAdapter {
             components,
             task_executor: self.task_executor().clone(),
-            rpc_task_executor: self.rpc_task_executor().clone(),
-            latency_isolated: self.latency_isolated(),
             provider: blockchain_db,
         };
 
@@ -1300,11 +1296,17 @@ pub struct WithConfigs<ChainSpec> {
     pub config: NodeConfig<ChainSpec>,
     /// The loaded reth.toml config.
     pub toml_config: reth_config::Config,
+    /// Optional latency-sensitive tokio runtime, built at launch from CLI args.
+    pub latency_runtime: Option<Runtime>,
 }
 
 impl<ChainSpec> Clone for WithConfigs<ChainSpec> {
     fn clone(&self) -> Self {
-        Self { config: self.config.clone(), toml_config: self.toml_config.clone() }
+        Self {
+            config: self.config.clone(),
+            toml_config: self.toml_config.clone(),
+            latency_runtime: self.latency_runtime.clone(),
+        }
     }
 }
 
@@ -1365,11 +1367,28 @@ pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) 
 
 #[cfg(test)]
 mod tests {
-    use super::{LaunchContext, NodeConfig};
+    use super::{LaunchContext, WithConfigs};
     use reth_config::Config;
     use reth_node_core::args::PruningArgs;
+    use reth_tasks::Runtime;
 
     const EXTENSION: &str = "toml";
+
+    #[test]
+    fn ensure_latency_runtime_creates_second_handle() {
+        let runtime = Runtime::test();
+        let datadir = super::NodeConfig::test().datadir();
+        let mut config = super::NodeConfig::test();
+        config.rpc.latency_worker_threads = 2;
+
+        let mut ctx = LaunchContext::new(runtime.clone(), datadir)
+            .with(WithConfigs { config, toml_config: Config::default(), latency_runtime: None })
+            .attach(());
+
+        ctx.ensure_latency_runtime().unwrap();
+        assert!(ctx.configs().latency_runtime.is_some());
+        assert_ne!(runtime.handle().id(), ctx.rpc_task_executor().handle().id());
+    }
 
     fn with_tempdir(filename: &str, proc: fn(&std::path::Path)) {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -1382,7 +1401,7 @@ mod tests {
     fn test_save_prune_config() {
         with_tempdir("prune-store-test", |config_path| {
             let mut reth_config = Config::default();
-            let node_config = NodeConfig {
+            let node_config = super::NodeConfig {
                 pruning: PruningArgs {
                     full: true,
                     minimal: false,
@@ -1409,7 +1428,7 @@ mod tests {
                     bodies_before: None,
                     minimum_distance: None,
                 },
-                ..NodeConfig::test()
+                ..super::NodeConfig::test()
             };
             LaunchContext::save_pruning_config(&mut reth_config, &node_config, config_path)
                 .unwrap();

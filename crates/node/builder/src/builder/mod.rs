@@ -8,8 +8,7 @@ use crate::{
     components::NodeComponentsBuilder,
     node::FullNode,
     rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
-    BlockReaderFor, DebugNode, DebugNodeLauncher, EngineNodeLauncher, LaunchExecutors, LaunchNode,
-    Node,
+    BlockReaderFor, DebugNode, DebugNodeLauncher, EngineNodeLauncher, LaunchNode, Node,
 };
 use alloy_eips::eip4844::env_settings::EnvKzgSettings;
 use futures::Future;
@@ -245,15 +244,7 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
     ///
     /// This provides the task executor and the data directory for the node.
     pub fn with_launch_context(self, task_executor: TaskExecutor) -> WithLaunchContext<Self> {
-        self.with_launch_executors(LaunchExecutors::single(task_executor))
-    }
-
-    /// Preconfigure the builder with main and RPC launch executors.
-    pub const fn with_launch_executors(
-        self,
-        executors: LaunchExecutors,
-    ) -> WithLaunchContext<Self> {
-        WithLaunchContext { builder: self, executors }
+        WithLaunchContext { builder: self, task_executor }
     }
 
     /// Creates an _ephemeral_ preconfigured node for testing purposes.
@@ -290,10 +281,7 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
 
         let db = reth_db::test_utils::create_test_rw_db_with_datadir(data_dir.data_dir());
 
-        WithLaunchContext {
-            builder: self.with_database(db),
-            executors: LaunchExecutors::single(task_executor),
-        }
+        WithLaunchContext { builder: self.with_database(db), task_executor }
     }
 }
 
@@ -341,28 +329,13 @@ where
 /// See [`WithLaunchContext::launch`]
 pub struct WithLaunchContext<Builder> {
     builder: Builder,
-    executors: LaunchExecutors,
+    task_executor: TaskExecutor,
 }
 
 impl<Builder> WithLaunchContext<Builder> {
-    /// Returns a reference to the main task executor.
+    /// Returns a reference to the task executor.
     pub const fn task_executor(&self) -> &TaskExecutor {
-        self.executors.main()
-    }
-
-    /// Returns a reference to the RPC/latency task executor.
-    pub const fn rpc_task_executor(&self) -> &TaskExecutor {
-        self.executors.rpc()
-    }
-
-    /// Returns `true` if a dedicated latency runtime is configured.
-    pub const fn latency_isolated(&self) -> bool {
-        self.executors.latency_isolated()
-    }
-
-    /// Returns the configured launch executors.
-    pub const fn launch_executors(&self) -> &LaunchExecutors {
-        &self.executors
+        &self.task_executor
     }
 }
 
@@ -394,7 +367,10 @@ where
     where
         T: NodeTypesForProvider<ChainSpec = ChainSpec>,
     {
-        WithLaunchContext { builder: self.builder.with_types(), executors: self.executors.clone() }
+        WithLaunchContext {
+            builder: self.builder.with_types(),
+            task_executor: self.task_executor.clone(),
+        }
     }
 
     /// Configures the types of the node and the provider type that will be used by the node.
@@ -407,7 +383,7 @@ where
     {
         WithLaunchContext {
             builder: self.builder.with_types_and_provider(),
-            executors: self.executors.clone(),
+            task_executor: self.task_executor.clone(),
         }
     }
 
@@ -466,7 +442,7 @@ impl<T: FullNodeTypes> WithLaunchContext<NodeBuilderWithTypes<T>> {
     {
         WithLaunchContext {
             builder: self.builder.with_components(components_builder),
-            executors: self.executors.clone(),
+            task_executor: self.task_executor.clone(),
         }
     }
 }
@@ -487,7 +463,7 @@ where
     {
         WithLaunchContext {
             builder: self.builder.with_add_ons(add_ons),
-            executors: self.executors.clone(),
+            task_executor: self.task_executor.clone(),
         }
     }
 }
@@ -565,7 +541,7 @@ where
     {
         Self {
             builder: self.builder.on_component_initialized(hook),
-            executors: self.executors.clone(),
+            task_executor: self.task_executor.clone(),
         }
     }
 
@@ -576,7 +552,10 @@ where
             + Send
             + 'static,
     {
-        Self { builder: self.builder.on_node_started(hook), executors: self.executors.clone() }
+        Self {
+            builder: self.builder.on_node_started(hook),
+            task_executor: self.task_executor.clone(),
+        }
     }
 
     /// Modifies the addons with the given closure.
@@ -605,7 +584,7 @@ where
     where
         F: FnOnce(AO) -> AO,
     {
-        Self { builder: self.builder.map_add_ons(f), executors: self.executors.clone() }
+        Self { builder: self.builder.map_add_ons(f), task_executor: self.task_executor.clone() }
     }
 
     /// Sets the hook that is run once the rpc server is started.
@@ -618,7 +597,10 @@ where
             + Send
             + 'static,
     {
-        Self { builder: self.builder.on_rpc_started(hook), executors: self.executors.clone() }
+        Self {
+            builder: self.builder.on_rpc_started(hook),
+            task_executor: self.task_executor.clone(),
+        }
     }
 
     /// Sets the hook that is run to configure the rpc modules.
@@ -661,7 +643,10 @@ where
             + Send
             + 'static,
     {
-        Self { builder: self.builder.extend_rpc_modules(hook), executors: self.executors.clone() }
+        Self {
+            builder: self.builder.extend_rpc_modules(hook),
+            task_executor: self.task_executor.clone(),
+        }
     }
 
     /// Installs an `ExEx` (Execution Extension) in the node.
@@ -677,7 +662,7 @@ where
     {
         Self {
             builder: self.builder.install_exex(exex_id, exex),
-            executors: self.executors.clone(),
+            task_executor: self.task_executor.clone(),
         }
     }
 
@@ -744,12 +729,12 @@ where
         T::Types: DebugNode<NodeAdapter<T, CB::Components>>,
         DebugNodeLauncher: LaunchNode<NodeBuilderWithComponents<T, CB, AO>>,
     {
-        let Self { builder, executors } = self;
+        let Self { builder, task_executor } = self;
 
         let engine_tree_config = builder.config.tree_config();
 
         let launcher = DebugNodeLauncher::new(EngineNodeLauncher::new(
-            executors,
+            task_executor,
             builder.config.datadir(),
             engine_tree_config,
         ));
@@ -761,7 +746,7 @@ where
     pub fn engine_api_launcher(&self) -> EngineNodeLauncher {
         let engine_tree_config = self.builder.config.tree_config();
         EngineNodeLauncher::new(
-            self.executors.clone(),
+            self.task_executor.clone(),
             self.builder.config.datadir(),
             engine_tree_config,
         )
@@ -776,8 +761,6 @@ pub struct BuilderContext<Node: FullNodeTypes> {
     pub(crate) provider: Node::Provider,
     /// The executor of the node.
     pub(crate) executor: TaskExecutor,
-    /// The RPC/latency executor of the node.
-    pub(crate) rpc_executor: TaskExecutor,
     /// Config container
     pub(crate) config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
 }
@@ -788,10 +771,9 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         head: Head,
         provider: Node::Provider,
         executor: TaskExecutor,
-        rpc_executor: TaskExecutor,
         config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
     ) -> Self {
-        Self { head, provider, executor, rpc_executor, config_container }
+        Self { head, provider, executor, config_container }
     }
 
     /// Returns the configured provider to interact with the blockchain.
@@ -827,8 +809,11 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     }
 
     /// Returns the RPC/latency executor of the node.
-    pub const fn rpc_task_executor(&self) -> &TaskExecutor {
-        &self.rpc_executor
+    ///
+    /// When a latency runtime is configured, this is the dedicated tokio runtime for the
+    /// sendRaw path. Otherwise, this is the same as [`Self::task_executor`].
+    pub fn rpc_task_executor(&self) -> TaskExecutor {
+        self.config_container.latency_runtime.clone().unwrap_or_else(|| self.executor.clone())
     }
 
     /// Returns the chain spec of the node.

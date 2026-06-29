@@ -5,7 +5,7 @@ use crate::{
     hooks::NodeHooks,
     rpc::{EngineShutdown, EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
-    AddOns, AddOnsContext, FullNode, LaunchContext, LaunchExecutors, LaunchNode, Node, NodeAdapter,
+    AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, Node, NodeAdapter,
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
     RethFullAdapter,
 };
@@ -38,6 +38,7 @@ use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
     BlockNumReader, StorageSettingsCache,
 };
+use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
 use reth_trie_db::ChangesetCache;
@@ -59,11 +60,11 @@ pub struct EngineNodeLauncher {
 impl EngineNodeLauncher {
     /// Create a new instance of the ethereum node launcher.
     pub const fn new(
-        executors: LaunchExecutors,
+        task_executor: TaskExecutor,
         data_dir: ChainPath<DataDirPath>,
         engine_tree_config: TreeConfig,
     ) -> Self {
-        Self { ctx: LaunchContext::new(executors, data_dir), engine_tree_config }
+        Self { ctx: LaunchContext::new(task_executor, data_dir), engine_tree_config }
     }
 
     async fn launch_node<N, DB, T, CB, AO>(
@@ -97,7 +98,7 @@ impl EngineNodeLauncher {
         let disabled_stages = N::disabled_stages();
 
         // setup the launch context
-        let ctx = ctx
+        let mut ctx = ctx
             .with_configured_globals(engine_tree_config.reserved_cpu_cores())
             // load the toml config
             .with_loaded_toml_config(config)?
@@ -134,8 +135,11 @@ impl EngineNodeLauncher {
             // later the components.
             .with_blockchain_db::<T, _>(move |provider_factory| {
                 Ok(BlockchainProvider::new(provider_factory)?)
-            })?
-            .with_components(components_builder, on_component_initialized).await?;
+            })?;
+
+        ctx.ensure_latency_runtime()?;
+
+        let ctx = ctx.with_components(components_builder, on_component_initialized).await?;
 
         // spawn exexs if any
         let maybe_exex_manager_handle = ctx.launch_exex(installed_exex).await?;
@@ -198,6 +202,7 @@ impl EngineNodeLauncher {
         let add_ons_ctx = AddOnsContext {
             node: ctx.node_adapter().clone(),
             config: ctx.node_config(),
+            rpc_task_executor: ctx.rpc_task_executor(),
             beacon_engine_handle: beacon_engine_handle.clone(),
             jwt_secret,
             engine_events: event_sender.clone(),
@@ -428,6 +433,7 @@ impl EngineNodeLauncher {
             task_executor: ctx.task_executor().clone(),
             config: ctx.node_config().clone(),
             data_dir: ctx.data_dir().clone(),
+            latency_runtime: ctx.configs().latency_runtime.clone(),
             add_ons_handle: RpcHandle {
                 rpc_server_handles,
                 rpc_registry,
