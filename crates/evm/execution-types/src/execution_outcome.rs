@@ -345,6 +345,8 @@ impl<T> ExecutionOutcome<T> {
     /// we know that other state was build on top of this one.
     /// In most cases this would be true.
     pub fn extend(&mut self, other: Self) {
+        self.receipts.reserve(other.receipts.len());
+        self.requests.reserve(other.requests.len());
         self.bundle.extend(other.bundle);
         self.receipts.extend(other.receipts);
         self.requests.extend(other.requests);
