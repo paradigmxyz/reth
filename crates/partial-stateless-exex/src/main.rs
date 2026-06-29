@@ -13,6 +13,7 @@
 use futures::TryStreamExt;
 use partial_stateless::{
     accessed_state::BlockAccessedState,
+    fixture::{save_fixture, AccessedStateFixture},
     network_cache::NetworkStateCache,
     persistence::{load_from_file, save_to_file},
     policy::LastNBlocksPolicy,
@@ -144,6 +145,19 @@ async fn partial_stateless_exex<
         "Partial Stateless ExEx started — monitoring cache state per block"
     );
 
+    // Optional reproducible-dataset capture: when `PS_CAPTURE_DIR` is set, dump the
+    // per-block `BlockAccessedState` (the only cache input) so the cache-window
+    // benchmark can replay a fixed range offline, with no node or EVM. This reuses
+    // the exact execution path the live system uses, so the dataset is faithful.
+    let capture_dir = std::env::var("PS_CAPTURE_DIR").ok().map(std::path::PathBuf::from);
+    if let Some(dir) = &capture_dir {
+        info!(
+            target: "partial_stateless",
+            dir = %dir.display(),
+            "Accessed-state fixture capture ENABLED (PS_CAPTURE_DIR) — run until ~300 blocks captured"
+        );
+    }
+
     while let Some(notification) = ctx.notifications.try_next().await? {
         match &notification {
             ExExNotification::ChainCommitted { new } => {
@@ -192,6 +206,41 @@ async fn partial_stateless_exex<
                             "Simulation failed for block. Skipping block."
                         );
                         continue;
+                    }
+
+                    // Capture the reproducible benchmark fixture (independent of the
+                    // cache/sidecar pipeline below, so it survives later failures).
+                    if let Some(dir) = &capture_dir {
+                        let parent_state_root = ctx
+                            .provider()
+                            .sealed_header_by_hash(block.parent_hash)
+                            .ok()
+                            .flatten()
+                            .map(|h| h.state_root)
+                            .unwrap_or_default();
+                        let fixture = AccessedStateFixture {
+                            block_number: *block_number,
+                            block_hash: block.hash(),
+                            parent_state_root,
+                            accessed: accessed.clone(),
+                        };
+                        match save_fixture(dir, &fixture) {
+                            Ok(path) => info!(
+                                target: "partial_stateless",
+                                block = *block_number,
+                                path = %path.display(),
+                                accounts = accessed.accounts.len(),
+                                storage = accessed.storage.len(),
+                                codes = accessed.codes.len(),
+                                "Captured accessed-state fixture"
+                            ),
+                            Err(e) => warn!(
+                                target: "partial_stateless",
+                                block = *block_number,
+                                error = %e,
+                                "Failed to capture accessed-state fixture"
+                            ),
+                        }
                     }
 
                     // Compute miss BEFORE updating cache (simulates what a validator would see)
