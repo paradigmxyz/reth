@@ -14,7 +14,9 @@ pub struct PreservedTrieGuard<'a>(parking_lot::MutexGuard<'a, Option<PreservedSp
 
 impl<'a> PreservedTrieGuard<'a> {
     /// Creates a new guard from the preserved trie lock.
-    pub(crate) fn new(guard: parking_lot::MutexGuard<'a, Option<PreservedSparseTrie>>) -> Self {
+    pub(crate) const fn new(
+        guard: parking_lot::MutexGuard<'a, Option<PreservedSparseTrie>>,
+    ) -> Self {
         PreservedTrieGuard(guard)
     }
 
