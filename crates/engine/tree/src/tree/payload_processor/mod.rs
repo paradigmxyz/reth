@@ -15,6 +15,7 @@ use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender
 use multiproof::*;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
+use reth_chain_state::{PreservedSparseTrie, SharedPreservedSparseTrie};
 use reth_evm::{
     block::ExecutableTxParts,
     execute::{ExecutableTxFor, WithTxEnv},
@@ -50,12 +51,9 @@ use tracing::{debug, debug_span, instrument, trace, warn, Span};
 pub mod bal;
 pub(crate) mod bal_prewarm_pool;
 pub mod multiproof;
-mod preserved_sparse_trie;
 pub mod prewarm;
 pub mod receipt_root_task;
 pub mod sparse_trie;
-
-use preserved_sparse_trie::{PreservedSparseTrie, SharedPreservedSparseTrie};
 
 /// Blocks with fewer transactions than this skip prewarming, since the fixed overhead of spawning
 /// prewarm workers exceeds the execution time saved.
@@ -116,10 +114,6 @@ where
     precompile_cache_disabled: bool,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
-    /// A preserved `SparseStateTrie`, kept around as a cache of already revealed trie nodes and to
-    /// re-use allocated memory. Stored with the block hash it was computed for to enable trie
-    /// preservation across sequential payload validations.
-    sparse_state_trie: SharedPreservedSparseTrie,
     /// LFU hot-slot capacity: max storage slots retained across prune cycles.
     sparse_trie_max_hot_slots: usize,
     /// LFU hot-account capacity: max account addresses retained across prune cycles.
@@ -141,6 +135,8 @@ where
 pub struct PayloadProcessorSpawnOptions {
     /// Whether to execute BAL blocks through the parallel BAL path.
     pub parallel_bal_execution: bool,
+    /// Preserved sparse trie shared by payload validation and payload building.
+    pub preserved_sparse_trie: SharedPreservedSparseTrie,
     /// Pending sparse trie prune request to run after successful state root computation.
     pub pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
 }
@@ -149,15 +145,17 @@ impl PayloadProcessorSpawnOptions {
     /// Creates new payload processor spawn options.
     pub const fn new(
         parallel_bal_execution: bool,
+        preserved_sparse_trie: SharedPreservedSparseTrie,
         pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
     ) -> Self {
-        Self { parallel_bal_execution, pending_sparse_trie_prune }
+        Self { parallel_bal_execution, preserved_sparse_trie, pending_sparse_trie_prune }
     }
 }
 
 struct SparseTrieTaskOptions {
     parent_state_root: B256,
     chunk_size: usize,
+    preserved_sparse_trie: SharedPreservedSparseTrie,
     pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
 }
 
@@ -188,7 +186,6 @@ where
             disable_state_cache: config.disable_state_cache(),
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
-            sparse_state_trie: SharedPreservedSparseTrie::default(),
             sparse_trie_max_hot_slots: config.sparse_trie_max_hot_slots(),
             sparse_trie_max_hot_accounts: config.sparse_trie_max_hot_accounts(),
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
@@ -218,37 +215,27 @@ where
     Evm: ConfigureEvm,
 {
     fn wait_for_caches(&self) -> CacheWaitDurations {
-        debug!(target: "engine::tree::payload_processor", "Waiting for execution cache and sparse trie locks");
+        debug!(target: "engine::tree::payload_processor", "Waiting for execution cache lock");
 
-        // Wait for both caches in parallel using std threads
         let execution_cache = self.execution_cache.clone();
-        let sparse_trie = self.sparse_state_trie.clone();
 
-        // Use channels and spawn_blocking instead of std::thread::spawn
         let (execution_tx, execution_rx) = std::sync::mpsc::channel();
-        let (sparse_trie_tx, sparse_trie_rx) = std::sync::mpsc::channel();
 
         self.executor.spawn_blocking_named("wait-exec-cache", move || {
             let _ = execution_tx.send(execution_cache.wait_for_availability());
         });
-        self.executor.spawn_blocking_named("wait-sparse-tri", move || {
-            let _ = sparse_trie_tx.send(sparse_trie.wait_for_availability());
-        });
 
         let execution_cache_duration =
             execution_rx.recv().expect("execution cache wait task failed to send result");
-        let sparse_trie_duration =
-            sparse_trie_rx.recv().expect("sparse trie wait task failed to send result");
 
         debug!(
             target: "engine::tree::payload_processor",
             ?execution_cache_duration,
-            ?sparse_trie_duration,
-            "Execution cache and sparse trie locks acquired"
+            "Execution cache lock acquired"
         );
         CacheWaitDurations {
             execution_cache: execution_cache_duration,
-            sparse_trie: sparse_trie_duration,
+            sparse_trie: Default::default(),
         }
     }
 }
@@ -303,8 +290,11 @@ where
             + Sync
             + 'static,
     {
-        let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
-            options;
+        let PayloadProcessorSpawnOptions {
+            parallel_bal_execution,
+            preserved_sparse_trie,
+            pending_sparse_trie_prune,
+        } = options;
         // start preparing transactions immediately
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
@@ -317,6 +307,7 @@ where
             env.parent_state_root,
             halve_workers,
             config,
+            preserved_sparse_trie,
             pending_sparse_trie_prune,
         );
         // BAL blocks only bypass the normal execution state hook when the validator decided that
@@ -396,6 +387,7 @@ where
         parent_state_root: B256,
         halve_workers: bool,
         config: &TreeConfig,
+        preserved_sparse_trie: SharedPreservedSparseTrie,
         pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
     ) -> StateRootHandle
     where
@@ -423,6 +415,7 @@ where
             SparseTrieTaskOptions {
                 parent_state_root,
                 chunk_size: config.multiproof_chunk_size(),
+                preserved_sparse_trie,
                 pending_sparse_trie_prune: if self.disable_sparse_trie_cache_pruning {
                     None
                 } else {
@@ -652,9 +645,12 @@ where
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
         options: SparseTrieTaskOptions,
     ) {
-        let SparseTrieTaskOptions { parent_state_root, chunk_size, pending_sparse_trie_prune } =
-            options;
-        let preserved_sparse_trie = self.sparse_state_trie.clone();
+        let SparseTrieTaskOptions {
+            parent_state_root,
+            chunk_size,
+            preserved_sparse_trie,
+            pending_sparse_trie_prune,
+        } = options;
         let trie_metrics = self.trie_metrics.clone();
         let max_hot_slots = self.sparse_trie_max_hot_slots;
         let max_hot_accounts = self.sparse_trie_max_hot_accounts;

@@ -598,8 +598,13 @@ where
         } else {
             None
         };
-        let processor_options =
-            PayloadProcessorSpawnOptions::new(parallel_bal_execution, pending_sparse_trie_prune);
+        let preserved_sparse_trie =
+            ctx.state().tree_state.state_trie_overlays.preserved_sparse_trie();
+        let processor_options = PayloadProcessorSpawnOptions::new(
+            parallel_bal_execution,
+            preserved_sparse_trie,
+            pending_sparse_trie_prune,
+        );
         let mut handle = ensure_ok!(self.spawn_payload_processor(
             env.clone(),
             txs,
@@ -1752,8 +1757,11 @@ where
         >,
         InsertBlockErrorKind,
     > {
-        let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
-            options;
+        let PayloadProcessorSpawnOptions {
+            parallel_bal_execution,
+            preserved_sparse_trie,
+            pending_sparse_trie_prune,
+        } = options;
         match strategy {
             StateRootStrategy::StateRootTask => {
                 let spawn_start = Instant::now();
@@ -1767,6 +1775,7 @@ where
                     &self.config,
                     PayloadProcessorSpawnOptions::new(
                         parallel_bal_execution,
+                        preserved_sparse_trie,
                         pending_sparse_trie_prune,
                     ),
                 );
@@ -2257,6 +2266,7 @@ where
             // Full proof workers — tx count unknown at FCU time (block built incrementally)
             false,
             &self.config,
+            state.tree_state.state_trie_overlays.preserved_sparse_trie(),
             None,
         ))
     }

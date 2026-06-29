@@ -4,7 +4,7 @@
 //! parent has not been persisted yet. [`StateTrieOverlayManager`] tracks those in-memory blocks and
 //! builds reusable flattened state trie overlays on demand.
 
-use crate::{EthPrimitives, ExecutedBlock};
+use crate::{EthPrimitives, ExecutedBlock, SharedPreservedSparseTrie};
 use alloy_primitives::B256;
 use reth_metrics::{
     metrics::{Counter, Histogram},
@@ -32,6 +32,7 @@ use tracing::{debug, trace};
 pub struct StateTrieOverlayManager<N: NodePrimitives = EthPrimitives> {
     blocks: Arc<DashMap<B256, ExecutedBlock<N>>>,
     overlays: Arc<DashMap<OverlayCacheKey, OverlayCacheEntry>>,
+    preserved_sparse_trie: SharedPreservedSparseTrie,
     #[cfg(feature = "rayon")]
     worker_pool: Option<Arc<WorkerPool>>,
     metrics: StateTrieOverlayMetrics,
@@ -54,6 +55,7 @@ impl<N: NodePrimitives> Default for StateTrieOverlayManager<N> {
         Self {
             blocks: Default::default(),
             overlays: Default::default(),
+            preserved_sparse_trie: Default::default(),
             #[cfg(feature = "rayon")]
             worker_pool: None,
             metrics: Default::default(),
@@ -77,9 +79,15 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         Self {
             blocks: Default::default(),
             overlays: Default::default(),
+            preserved_sparse_trie: Default::default(),
             worker_pool: Some(worker_pool),
             metrics: Default::default(),
         }
+    }
+
+    /// Returns the shared preserved sparse trie handle.
+    pub fn preserved_sparse_trie(&self) -> SharedPreservedSparseTrie {
+        self.preserved_sparse_trie.clone()
     }
 
     /// Inserts an executed in-memory block into the state trie overlay manager.

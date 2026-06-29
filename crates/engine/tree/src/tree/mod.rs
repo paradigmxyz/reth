@@ -1713,8 +1713,28 @@ where
                                     Duration::ZERO
                                 };
 
-                                let cache_wait = wait_for_caches
-                                    .then(|| self.payload_validator.wait_for_caches());
+                                let cache_wait = wait_for_caches.then(|| {
+                                    let sparse_trie = self
+                                        .state
+                                        .tree_state
+                                        .state_trie_overlays
+                                        .preserved_sparse_trie();
+                                    let (sparse_trie_tx, sparse_trie_rx) =
+                                        std::sync::mpsc::channel();
+                                    self.runtime.spawn_blocking_named(
+                                        "wait-sparse-tri",
+                                        move || {
+                                            let _ = sparse_trie_tx
+                                                .send(sparse_trie.wait_for_availability());
+                                        },
+                                    );
+
+                                    let mut wait = self.payload_validator.wait_for_caches();
+                                    wait.sparse_trie = sparse_trie_rx
+                                        .recv()
+                                        .expect("sparse trie wait task failed to send result");
+                                    wait
+                                });
 
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
