@@ -6,8 +6,9 @@
 //! [`OrderedTrieRootEncodedBuilder`] when possible. When the channel closes, the task returns the
 //! computed root.
 
+use alloy_consensus::ReceiptWithBloom;
 use alloy_eips::Encodable2718;
-use alloy_primitives::{map::HashMap, Bloom, B256};
+use alloy_primitives::{keccak256_uncached, map::HashMap, Bloom, Log, B256};
 use crossbeam_channel::Receiver;
 use reth_primitives_traits::Receipt;
 use reth_trie_common::ordered_root::OrderedTrieRootEncodedBuilder;
@@ -15,6 +16,24 @@ use tokio::sync::oneshot;
 use tracing::debug_span;
 
 const RECEIPT_ENCODE_BUF_INITIAL_CAPACITY: usize = 512;
+const UNCACHED_BLOOM_RECEIPT_THRESHOLD: usize = 1024;
+
+#[inline]
+fn receipt_bloom_uncached<R: Receipt>(receipt: &R) -> Bloom {
+    let mut bloom = Bloom::ZERO;
+    for log in receipt.logs() {
+        accrue_log_uncached(&mut bloom, log);
+    }
+    bloom
+}
+
+#[inline]
+fn accrue_log_uncached(bloom: &mut Bloom, log: &Log) {
+    bloom.m3_2048_hashed(&keccak256_uncached(log.address.as_slice()));
+    for topic in log.topics() {
+        bloom.m3_2048_hashed(&keccak256_uncached(topic.as_slice()));
+    }
+}
 
 /// Receipt with index, ready to be sent to the background task for encoding and trie building.
 #[derive(Debug, Clone)]
@@ -82,9 +101,15 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
         let mut encode_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
         let mut next = 0usize;
         let mut pending = HashMap::new();
+        let use_uncached_bloom =
+            receipts_len.is_some_and(|len| len >= UNCACHED_BLOOM_RECEIPT_THRESHOLD);
 
         let mut push = |receipt: R| {
-            let receipt_with_bloom = receipt.with_bloom_ref();
+            let receipt_with_bloom = if use_uncached_bloom {
+                ReceiptWithBloom::new(&receipt, receipt_bloom_uncached(&receipt))
+            } else {
+                receipt.with_bloom_ref()
+            };
 
             encode_buf.clear();
             receipt_with_bloom.encode_2718(&mut encode_buf);
@@ -262,6 +287,33 @@ mod tests {
 
         assert_eq!(task_root, expected_root);
         assert_eq!(task_bloom, expected_bloom);
+    }
+
+    #[test]
+    fn test_uncached_receipt_bloom_matches_standard_bloom() {
+        let receipt = Receipt {
+            tx_type: TxType::Eip1559,
+            cumulative_gas_used: 42_000,
+            success: true,
+            logs: vec![
+                Log {
+                    address: Address::ZERO,
+                    data: alloy_primitives::LogData::new_unchecked(
+                        vec![B256::ZERO, b256!("0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20")],
+                        Bytes::from_static(b"receipt-bloom"),
+                    ),
+                },
+                Log {
+                    address: Address::repeat_byte(0x42),
+                    data: alloy_primitives::LogData::new_unchecked(
+                        vec![B256::from([0xff; 32])],
+                        Bytes::new(),
+                    ),
+                },
+            ],
+        };
+
+        assert_eq!(receipt_bloom_uncached(&receipt), receipt.bloom());
     }
 
     #[tokio::test]
