@@ -260,6 +260,45 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
+    /// Commit pending `RocksDB` batches, using the storage pool when multiple independent batches
+    /// are queued.
+    fn commit_rocksdb_batches(
+        runtime: &reth_tasks::Runtime,
+        rocksdb_provider: &RocksDBProvider,
+        batches: Vec<rocksdb::WriteBatchWithTransaction<true>>,
+    ) -> ProviderResult<()> {
+        match batches.len() {
+            0 => Ok(()),
+            1 => {
+                let batch = batches.into_iter().next().expect("len checked");
+                rocksdb_provider.commit_batch(batch)
+            }
+            batch_count => {
+                let (tx, rx) = std::sync::mpsc::channel();
+                runtime.storage_pool().in_place_scope(|scope| {
+                    for batch in batches {
+                        let tx = tx.clone();
+                        let rocksdb_provider = rocksdb_provider.clone();
+                        scope.spawn(move |_| {
+                            let _ = tx.send(rocksdb_provider.commit_batch(batch));
+                        });
+                    }
+                });
+                drop(tx);
+
+                for _ in 0..batch_count {
+                    rx.recv().map_err(|_| {
+                        ProviderError::Database(reth_db_api::DatabaseError::Other(
+                            "rocksdb commit thread panicked".into(),
+                        ))
+                    })??;
+                }
+
+                Ok(())
+            }
+        }
+    }
+
     /// Commits unwind writes in MDBX -> `RocksDB` -> static-file order.
     ///
     /// This keeps MDBX as the first durable step so an interrupted unwind can be recovered by
@@ -281,9 +320,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
         if storage_v2 {
             let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
-            for batch in batches {
-                self.rocksdb_provider.commit_batch(batch)?;
-            }
+            Self::commit_rocksdb_batches(&self.runtime, &self.rocksdb_provider, batches)?;
         }
 
         self.static_file_provider.commit()?;
@@ -3901,9 +3938,7 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
 
             let start = Instant::now();
             let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
-            for batch in batches {
-                self.rocksdb_provider.commit_batch(batch)?;
-            }
+            Self::commit_rocksdb_batches(&self.runtime, &self.rocksdb_provider, batches)?;
             timings.rocksdb = start.elapsed();
 
             let start = Instant::now();
