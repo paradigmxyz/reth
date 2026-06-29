@@ -1,7 +1,7 @@
 //! Execution cache implementation for block processing.
 use alloy_primitives::{
     map::{DefaultHashBuilder, FbBuildHasher},
-    Address, StorageKey, StorageValue, B256,
+    Address, FixedBytes, StorageKey, StorageValue, B256,
 };
 use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
 use metrics::{Counter, Gauge, Histogram};
@@ -69,8 +69,21 @@ const CODE_CACHE_ENTRY_SIZE: usize =
     fixed_cache_key_size_with_value::<Address>(ESTIMATED_AVG_CODE_SIZE);
 
 /// Size in bytes of a single storage cache entry.
-const STORAGE_CACHE_ENTRY_SIZE: usize =
-    fixed_cache_entry_size::<(Address, StorageKey), StorageValue>();
+const STORAGE_CACHE_ENTRY_SIZE: usize = fixed_cache_entry_size::<StorageCacheKey, StorageValue>();
+
+/// Number of bytes in a storage cache key: address bytes followed by storage slot bytes.
+const STORAGE_CACHE_KEY_BYTES: usize = 52;
+
+/// Packed storage cache key.
+type StorageCacheKey = FixedBytes<STORAGE_CACHE_KEY_BYTES>;
+
+#[inline]
+fn storage_cache_key(address: Address, key: StorageKey) -> StorageCacheKey {
+    let mut bytes = [0u8; STORAGE_CACHE_KEY_BYTES];
+    bytes[..20].copy_from_slice(address.as_slice());
+    bytes[20..].copy_from_slice(key.as_slice());
+    StorageCacheKey::new(bytes)
+}
 
 /// Size in bytes of a single account cache entry.
 const ACCOUNT_CACHE_ENTRY_SIZE: usize = fixed_cache_entry_size::<Address, Option<Account>>();
@@ -688,7 +701,9 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
                     Ok(nonzero_storage_value(value))
                 }
             }
-        } else if let Some(value) = self.caches.0.storage_cache.get(&(account, storage_key)) {
+        } else if let Some(value) =
+            self.caches.0.storage_cache.get(&storage_cache_key(account, storage_key))
+        {
             self.record_storage_hit();
             Ok(nonzero_storage_value(value))
         } else {
@@ -843,7 +858,8 @@ struct ExecutionCacheInner {
     code_cache: FixedCache<B256, Option<Bytecode>, FbBuildHasher<32>>,
 
     /// Flat storage cache: maps `(Address, StorageKey)` to storage value.
-    storage_cache: FixedCache<(Address, StorageKey), StorageValue>,
+    storage_cache:
+        FixedCache<StorageCacheKey, StorageValue, FbBuildHasher<STORAGE_CACHE_KEY_BYTES>>,
 
     /// Cache for basic account information (nonce, balance, code hash).
     account_cache: FixedCache<Address, Option<Account>, FbBuildHasher<20>>,
@@ -899,8 +915,11 @@ impl ExecutionCache {
         Self(Arc::new(ExecutionCacheInner {
             code_cache: FixedCache::new(code_capacity, FbBuildHasher::<32>::default())
                 .with_stats(Some(Stats::new(code_stats.clone()))),
-            storage_cache: FixedCache::new(storage_capacity, DefaultHashBuilder::default())
-                .with_stats(Some(Stats::new(storage_stats.clone()))),
+            storage_cache: FixedCache::new(
+                storage_capacity,
+                FbBuildHasher::<STORAGE_CACHE_KEY_BYTES>::default(),
+            )
+            .with_stats(Some(Stats::new(storage_stats.clone()))),
             account_cache: FixedCache::new(account_capacity, FbBuildHasher::<20>::default())
                 .with_stats(Some(Stats::new(account_stats.clone()))),
             code_stats,
@@ -941,8 +960,9 @@ impl ExecutionCache {
         key: StorageKey,
         f: impl FnOnce() -> Result<StorageValue, E>,
     ) -> Result<CachedStatus<StorageValue>, E> {
+        let cache_key = storage_cache_key(address, key);
         let mut miss = false;
-        let result = self.0.storage_cache.get_or_try_insert_with((address, key), |_| {
+        let result = self.0.storage_cache.get_or_try_insert_with(cache_key, |_| {
             miss = true;
             f()
         })?;
@@ -975,7 +995,7 @@ impl ExecutionCache {
 
     /// Insert storage value into cache.
     pub fn insert_storage(&self, address: Address, key: StorageKey, value: Option<StorageValue>) {
-        self.0.storage_cache.insert((address, key), value.unwrap_or_default());
+        self.0.storage_cache.insert(storage_cache_key(address, key), value.unwrap_or_default());
     }
 
     /// Insert code into cache.
@@ -1253,6 +1273,27 @@ mod tests {
     }
 
     #[test]
+    fn test_storage_cache_key_separates_address_and_slot() {
+        let address = Address::random();
+        let other_address = Address::random();
+        let storage_key = StorageKey::random();
+        let other_storage_key = StorageKey::random();
+
+        assert_eq!(
+            storage_cache_key(address, storage_key),
+            storage_cache_key(address, storage_key)
+        );
+        assert_ne!(
+            storage_cache_key(address, storage_key),
+            storage_cache_key(other_address, storage_key)
+        );
+        assert_ne!(
+            storage_cache_key(address, storage_key),
+            storage_cache_key(address, other_storage_key)
+        );
+    }
+
+    #[test]
     fn test_saved_cache_is_available() {
         let execution_cache = ExecutionCache::new(1000);
         let cache = SavedCache::new(B256::ZERO, execution_cache);
@@ -1300,7 +1341,7 @@ mod tests {
         // Verify caches are populated
         assert!(caches.0.account_cache.get(&addr1).is_some());
         assert!(caches.0.account_cache.get(&addr2).is_some());
-        assert!(caches.0.storage_cache.get(&(addr1, storage_key)).is_some());
+        assert!(caches.0.storage_cache.get(&storage_cache_key(addr1, storage_key)).is_some());
 
         let bundle = BundleState {
             // BundleState with a destroyed contract (had code)
@@ -1332,7 +1373,7 @@ mod tests {
         // Verify all caches were cleared
         assert!(caches.0.account_cache.get(&addr1).is_none());
         assert!(caches.0.account_cache.get(&addr2).is_none());
-        assert!(caches.0.storage_cache.get(&(addr1, storage_key)).is_none());
+        assert!(caches.0.storage_cache.get(&storage_cache_key(addr1, storage_key)).is_none());
     }
 
     #[test]
@@ -1376,7 +1417,7 @@ mod tests {
         // Verify only addr1 was removed, other data is still present
         assert!(caches.0.account_cache.get(&addr1).is_none());
         assert!(caches.0.account_cache.get(&addr2).is_some());
-        assert!(caches.0.storage_cache.get(&(addr1, storage_key)).is_some());
+        assert!(caches.0.storage_cache.get(&storage_cache_key(addr1, storage_key)).is_some());
     }
 
     #[test]
