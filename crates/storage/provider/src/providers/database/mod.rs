@@ -1087,7 +1087,7 @@ mod tests {
             Arc::new(chain_spec),
             DatabaseArguments::new(Default::default()),
             StaticFileProvider::read_write(static_dir_path).unwrap(),
-            RocksDBProvider::builder(&rocksdb_path).with_default_tables().build().unwrap(),
+            RocksDBProvider::builder(&rocksdb_path).build().unwrap(),
             reth_tasks::Runtime::test(),
         )
         .unwrap();

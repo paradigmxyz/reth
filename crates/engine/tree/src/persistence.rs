@@ -179,7 +179,6 @@ where
             }
 
             provider_rw.commit()?;
-            // BAL persistence is best-effort serving data and must not roll back block persistence.
             let _ = self.provider.bal_store().flush(last.number).inspect_err(|err| {
                 warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
             });

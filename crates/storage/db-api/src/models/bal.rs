@@ -12,8 +12,10 @@ use core::cmp::Ordering;
 use reth_codecs::DecompressError;
 use serde::{Deserialize, Serialize};
 
+/// Number of encoded bytes in a [`StoredBlockAccessListKey`].
 const BLOCK_ACCESS_LIST_KEY_BYTES: usize = 8 + 32;
 
+/// Number of hash bytes prefixed to a stored BAL value.
 const STORED_BLOCK_ACCESS_LIST_HASH_BYTES: usize = 32;
 
 /// A stored block access list key ordered by block number first, then block hash.
