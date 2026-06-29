@@ -131,4 +131,5 @@ test-utils = [
     "reth-evm-ethereum/test-utils",
     "reth-stages-types/test-utils",
     "reth-tasks/test-utils",
+    "reth-trie-common/test-utils",
 ]
