@@ -324,8 +324,8 @@ reth-cli = { path = "crates/cli/cli" }
 reth-cli-commands = { path = "crates/cli/commands" }
 reth-cli-runner = { path = "crates/cli/runner" }
 reth-cli-util = { path = "crates/cli/util" }
-reth-codecs = { version = "0.5.0", default-features = false }
-reth-codecs-derive = "0.5.0"
+reth-codecs = { version = "0.5.2", default-features = false }
+reth-codecs-derive = "0.5.2"
 reth-config = { path = "crates/config", default-features = false }
 reth-consensus = { path = "crates/consensus/consensus", default-features = false }
 reth-consensus-common = { path = "crates/consensus/common", default-features = false }
@@ -393,7 +393,7 @@ reth-payload-builder-primitives = { path = "crates/payload/builder-primitives" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
 reth-payload-validator = { path = "crates/payload/validator" }
 reth-payload-util = { path = "crates/payload/util" }
-reth-primitives-traits = { version = "0.5.0", default-features = false }
+reth-primitives-traits = { version = "0.5.2", default-features = false }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }
 reth-prune-types = { path = "crates/prune/types", default-features = false }
@@ -409,7 +409,7 @@ reth-rpc-eth-types = { path = "crates/rpc/rpc-eth-types", default-features = fal
 reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
 reth-rpc-server-types = { path = "crates/rpc/rpc-server-types" }
 reth-rpc-convert = { path = "crates/rpc/rpc-convert" }
-reth-rpc-traits = { version = "0.5.0", default-features = false }
+reth-rpc-traits = { version = "0.5.2", default-features = false }
 reth-stages = { path = "crates/stages/stages" }
 reth-stages-api = { path = "crates/stages/api" }
 reth-stages-types = { path = "crates/stages/types", default-features = false }
@@ -428,12 +428,12 @@ reth-trie-common = { path = "crates/trie/common", default-features = false }
 reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
-reth-zstd-compressors = { version = "0.5.0", default-features = false }
+reth-zstd-compressors = { version = "0.5.2", default-features = false }
 
 # revm
 revm = { version = "41.0.0", default-features = false }
 revmc = { git = "https://github.com/paradigmxyz/revmc", branch = "main", default-features = false, features = ["llvm-prefer-static"] }
-revm-inspectors = "0.41.0"
+revm-inspectors = "0.41.1"
 
 # eth
 alloy-dyn-abi = "1.6.0"
@@ -693,3 +693,24 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+revm = { git = "https://github.com/bluealloy/revm", rev = "35d8fb4f97f90d7232964d3bc9a70c607a1d7f50" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "35d8fb4f97f90d7232964d3bc9a70c607a1d7f50" }
+revm-context = { git = "https://github.com/bluealloy/revm", rev = "35d8fb4f97f90d7232964d3bc9a70c607a1d7f50" }
+revm-context-interface = { git = "https://github.com/bluealloy/revm", rev = "35d8fb4f97f90d7232964d3bc9a70c607a1d7f50" }
+revm-database = { git = "https://github.com/bluealloy/revm", rev = "35d8fb4f97f90d7232964d3bc9a70c607a1d7f50" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "35d8fb4f97f90d7232964d3bc9a70c607a1d7f50" }
+revm-handler = { git = "https://github.com/bluealloy/revm", rev = "35d8fb4f97f90d7232964d3bc9a70c607a1d7f50" }
+revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "35d8fb4f97f90d7232964d3bc9a70c607a1d7f50" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "35d8fb4f97f90d7232964d3bc9a70c607a1d7f50" }
+revm-precompile = { git = "https://github.com/bluealloy/revm", rev = "35d8fb4f97f90d7232964d3bc9a70c607a1d7f50" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "35d8fb4f97f90d7232964d3bc9a70c607a1d7f50" }
+revm-state = { git = "https://github.com/bluealloy/revm", rev = "35d8fb4f97f90d7232964d3bc9a70c607a1d7f50" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "cdcf766cba13e392791d2f9fb277284820b1b7c9" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "c135e1a912074039395a4fcbc5067706e8665801" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "9759d776b6a9acea40e3723120deb658b8970ff1" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "9759d776b6a9acea40e3723120deb658b8970ff1" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "9759d776b6a9acea40e3723120deb658b8970ff1" }
+reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "9759d776b6a9acea40e3723120deb658b8970ff1" }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "9759d776b6a9acea40e3723120deb658b8970ff1" }
