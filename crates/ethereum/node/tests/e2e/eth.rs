@@ -22,8 +22,9 @@ use reth_node_core::{
 use reth_node_ethereum::{
     engine_ssz_containers::{
         ExecutionPayloadEnvelopeAmsterdam,
-        ForkchoiceUpdateResponse as SszForkchoiceUpdateResponse, PayloadStatus as SszPayloadStatus,
-        PayloadStatusWithWitness,
+        ForkchoiceUpdateAmsterdam,
+        ForkchoiceUpdateResponse as SszForkchoiceUpdateResponse, Optional,
+        PayloadStatus as SszPayloadStatus, PayloadStatusWithWitness,
     },
     engine_ssz_proxy::{EngineSszProxyLayer, EngineSszWitnessGenerator},
     EthereumAddOns, EthereumEngineValidatorBuilder, EthereumNode,
@@ -553,12 +554,54 @@ async fn test_engine_ssz_proxy_payloads_witness_returns_execution_witness() -> e
 
     let payload = envelope.execution_payload;
     let block_hash = payload.payload_inner.payload_inner.payload_inner.block_hash;
-    let request =
-        ExecutionPayloadEnvelopeAmsterdam::from((payload, B256::ZERO, envelope.execution_requests));
+    let payload_body = ExecutionPayloadEnvelopeAmsterdam::from((
+        payload,
+        B256::ZERO,
+        envelope.execution_requests,
+    ))
+    .as_ssz_bytes();
     let client = reqwest::Client::new();
     let auth_server = node.auth_server_handle();
     let auth_url = auth_server.http_url();
     let auth_header = secret_to_bearer_header(auth_server.jwt_secret());
+
+    let new_payload_response = client
+        .post(format!("{auth_url}{ENGINE_PAYLOADS_ROUTE}"))
+        .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+        .header(ENGINE_EXECUTION_VERSION_HEADER, ENGINE_AMSTERDAM_FORK_HEADER)
+        .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+        .header(reqwest::header::ACCEPT, "application/octet-stream")
+        .body(payload_body.clone())
+        .send()
+        .await?;
+    assert_eq!(new_payload_response.status(), reqwest::StatusCode::OK);
+
+    let status = SszPayloadStatus::from_ssz_bytes(&new_payload_response.bytes().await?).unwrap();
+    assert_eq!(status.status, PayloadStatusEnum::Valid);
+
+    let fcu_response = client
+        .post(format!("{auth_url}{ENGINE_FORKCHOICE_ROUTE}"))
+        .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+        .header(ENGINE_EXECUTION_VERSION_HEADER, ENGINE_AMSTERDAM_FORK_HEADER)
+        .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+        .header(reqwest::header::ACCEPT, "application/octet-stream")
+        .body(
+            ForkchoiceUpdateAmsterdam {
+                forkchoice_state: ForkchoiceState {
+                    head_block_hash: block_hash,
+                    safe_block_hash: genesis_hash,
+                    finalized_block_hash: genesis_hash,
+                },
+                payload_attributes: Optional::none(),
+                custody_columns: Optional::none(),
+            }
+            .as_ssz_bytes(),
+        )
+        .send()
+        .await?;
+    assert_eq!(fcu_response.status(), reqwest::StatusCode::OK);
+
+    node.wait_block(1, block_hash, false).await?;
 
     let response = client
         .post(format!("{auth_url}{ENGINE_PAYLOADS_WITNESS_ROUTE}"))
@@ -566,7 +609,7 @@ async fn test_engine_ssz_proxy_payloads_witness_returns_execution_witness() -> e
         .header(ENGINE_EXECUTION_VERSION_HEADER, ENGINE_AMSTERDAM_FORK_HEADER)
         .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
         .header(reqwest::header::ACCEPT, "application/octet-stream")
-        .body(request.as_ssz_bytes())
+        .body(payload_body)
         .send()
         .await?;
     assert_eq!(response.status(), reqwest::StatusCode::OK);
@@ -574,8 +617,6 @@ async fn test_engine_ssz_proxy_payloads_witness_returns_execution_witness() -> e
     let response = PayloadStatusWithWitness::from_ssz_bytes(&response.bytes().await?).unwrap();
     assert_eq!(response.payload_status.status, PayloadStatusEnum::Valid);
     assert!(response.witness.is_some());
-
-    node.wait_block(1, block_hash, false).await?;
 
     Ok(())
 }
