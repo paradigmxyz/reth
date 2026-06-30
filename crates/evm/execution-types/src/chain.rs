@@ -50,11 +50,6 @@ type ChainTxReceiptMeta<'a, N> = (
     &'a [<N as NodePrimitives>::Receipt],
 );
 
-type ChainBlockReceipts<'a, N> = (
-    &'a Arc<RecoveredBlock<<N as NodePrimitives>::Block>>,
-    &'a Arc<Vec<<N as NodePrimitives>::Receipt>>,
-);
-
 impl<N: NodePrimitives> Default for Chain<N> {
     fn default() -> Self {
         Self {
@@ -236,7 +231,10 @@ impl<N: NodePrimitives> Chain<N> {
     }
 
     /// Returns an iterator over all blocks and their receipts in the chain.
-    pub fn blocks_and_receipts(&self) -> impl Iterator<Item = ChainBlockReceipts<'_, N>> + '_ {
+    #[allow(clippy::type_complexity)]
+    pub fn blocks_and_receipts(
+        &self,
+    ) -> impl Iterator<Item = (&Arc<RecoveredBlock<N::Block>>, &Arc<Vec<N::Receipt>>)> + '_ {
         self.blocks_iter().zip(self.block_receipts_iter())
     }
 
