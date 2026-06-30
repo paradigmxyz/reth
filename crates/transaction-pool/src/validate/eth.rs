@@ -23,12 +23,11 @@ use alloy_consensus::{
 };
 use alloy_eips::{
     eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, eip4844::env_settings::EnvKzgSettings,
-    eip7702::constants::PER_EMPTY_ACCOUNT_COST, eip7825::MAX_TX_GAS_LIMIT_OSAKA,
-    eip7840::BlobParams, BlockId,
+    eip7702::constants::PER_EMPTY_ACCOUNT_COST, eip7840::BlobParams, BlockId,
 };
 use alloy_primitives::U256;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
-use reth_evm::ConfigureEvm;
+use reth_evm::{ConfigureEvm, EvmEnv};
 use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Account, BlockTy, GotExpected, HeaderTy,
     SealedBlock,
@@ -909,14 +908,17 @@ where
 
         self.block_gas_limit.store(new_tip_block.gas_limit(), std::sync::atomic::Ordering::Relaxed);
 
-        let (max_initcode_size, tx_gas_limit_cap) =
-            evm_limit_params_at_timestamp(&*self.chain_spec(), new_tip_block.timestamp());
+        let limits = self
+            .evm_config
+            .evm_env(new_tip_block)
+            .expect("evm_env should not fail for executed block")
+            .transaction_validation_limits();
         self.fork_tracker
             .max_initcode_size
-            .store(max_initcode_size, std::sync::atomic::Ordering::Relaxed);
+            .store(limits.max_initcode_size, std::sync::atomic::Ordering::Relaxed);
         self.fork_tracker
             .tx_gas_limit_cap
-            .store(tx_gas_limit_cap, std::sync::atomic::Ordering::Relaxed);
+            .store(limits.tx_gas_limit_cap, std::sync::atomic::Ordering::Relaxed);
     }
 
     fn max_gas_limit(&self) -> u64 {
@@ -1060,8 +1062,10 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             .header_by_id(BlockId::latest())
             .expect("failed to fetch latest header")
             .expect("latest header is not found");
-        let (max_initcode_size, tx_gas_limit_cap) =
-            evm_limit_params_at_timestamp(&*chain_spec, tip.timestamp());
+        let limits = evm_config
+            .evm_env(&tip)
+            .expect("evm_env should not fail for latest block")
+            .transaction_validation_limits();
 
         Self {
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M.into(),
@@ -1098,8 +1102,8 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             // no custom transaction types by default
             other_tx_types: U256::ZERO,
 
-            tx_gas_limit_cap,
-            max_initcode_size,
+            tx_gas_limit_cap: limits.tx_gas_limit_cap,
+            max_initcode_size: limits.max_initcode_size,
 
             // EIP-7594 sidecars are accepted by default (standard Ethereum behavior)
             eip7594: true,
@@ -1432,22 +1436,6 @@ const ACCESS_LIST_STORAGE_KEY_GAS: u64 = 1_900;
 const INITCODE_WORD_GAS: u64 = 2;
 const PRAGUE_FLOOR_GAS_PER_TOKEN: u64 = 10;
 const PRAGUE_FLOOR_GAS_NON_ZERO_TOKEN_MULTIPLIER: u64 = 4;
-const MAX_INITCODE_SIZE: usize = 0xc000;
-
-fn evm_limit_params_at_timestamp<C: EthereumHardforks>(
-    chain_spec: &C,
-    timestamp: u64,
-) -> (usize, u64) {
-    let tx_gas_limit_cap = if chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
-        0
-    } else if chain_spec.is_osaka_active_at_timestamp(timestamp) {
-        MAX_TX_GAS_LIMIT_OSAKA
-    } else {
-        0
-    };
-
-    (MAX_INITCODE_SIZE, tx_gas_limit_cap)
-}
 
 /// Ensures that gas limit of the transaction exceeds the intrinsic gas of the transaction.
 ///
@@ -1538,6 +1526,8 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::SignedTransaction;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
+
+    const MAX_INITCODE_SIZE: usize = 0xc000;
 
     fn test_evm_config() -> EthEvmConfig {
         EthEvmConfig::mainnet()

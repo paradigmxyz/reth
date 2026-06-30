@@ -75,6 +75,21 @@ impl EvmEnv for EthEvmEnv {
         self.block
     }
 
+    fn transaction_validation_limits(&self) -> reth_evm::EvmTransactionValidationLimits {
+        let tx_gas_limit_cap = if self.version.feature(evm2::EvmFeatures::EIP8037) ||
+            self.version.tx_gas_limit_cap == u64::MAX
+        {
+            0
+        } else {
+            self.version.tx_gas_limit_cap
+        };
+
+        reth_evm::EvmTransactionValidationLimits {
+            max_initcode_size: self.version.max_initcode_size,
+            tx_gas_limit_cap,
+        }
+    }
+
     fn with_nonce_check_disabled(mut self) -> Self {
         self.version.features.remove(evm2::EvmFeatures::NONCE_CHECK);
         self

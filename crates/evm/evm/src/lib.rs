@@ -41,10 +41,22 @@ pub mod precompile_cache;
 mod aliases;
 pub use aliases::*;
 
+/// Transaction validation limits resolved for an EVM environment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EvmTransactionValidationLimits {
+    /// Maximum contract creation initcode size.
+    pub max_initcode_size: usize,
+    /// Transaction gas limit cap. `0` disables the txpool-level cap check.
+    pub tx_gas_limit_cap: u64,
+}
+
 /// Resolved EVM environment data needed by the EVM execution path.
 pub trait EvmEnv: Debug + Clone + Send + Sync + 'static {
     /// Returns the EVM block environment.
     fn block_env(&self) -> evm2::env::BlockEnv;
+
+    /// Returns transaction validation limits active in this environment.
+    fn transaction_validation_limits(&self) -> EvmTransactionValidationLimits;
 
     /// Returns this environment with transaction nonce checks disabled.
     fn with_nonce_check_disabled(self) -> Self;
