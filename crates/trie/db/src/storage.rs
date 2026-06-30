@@ -1,11 +1,15 @@
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, TrieTableAdapter};
-use alloy_primitives::{keccak256, map::hash_map, Address, BlockNumber, B256};
+use alloy_primitives::{
+    keccak256,
+    map::{hash_map, B256Map},
+    Address, BlockNumber, B256,
+};
 use reth_db_api::{models::BlockNumberAddress, transaction::DbTx};
 use reth_execution_errors::StorageRootError;
 use reth_storage_api::{BlockNumReader, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StorageRoot,
+    hashed_cursor::HashedPostStateCursorFactory, HashedPostStateSorted, HashedStorage, StorageRoot,
 };
 
 #[cfg(feature = "metrics")]
@@ -87,9 +91,11 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageRoot<'a, TX>
         address: Address,
         hashed_storage: HashedStorage,
     ) -> Result<B256, StorageRootError> {
+        let hashed_address = keccak256(address);
         let prefix_set = hashed_storage.construct_prefix_set().freeze();
-        let state_sorted =
-            HashedPostState::from_hashed_storage(keccak256(address), hashed_storage).into_sorted();
+        let mut storages = B256Map::with_capacity_and_hasher(1, Default::default());
+        storages.insert(hashed_address, hashed_storage.into_sorted());
+        let state_sorted = HashedPostStateSorted::new(Default::default(), storages);
         StorageRoot::new(
             DatabaseTrieCursorFactory::<_, A>::new(tx),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
