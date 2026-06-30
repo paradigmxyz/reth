@@ -432,12 +432,6 @@ reth-zstd-compressors = { version = "0.5.0", default-features = false }
 
 # revm
 revm = { version = "41.0.0", default-features = false }
-revm-bytecode = { version = "41.0.0", default-features = false }
-revm-database = { version = "41.0.0", default-features = false }
-revm-state = { version = "41.0.0", default-features = false }
-revm-primitives = { version = "41.0.0", default-features = false }
-revm-interpreter = { version = "41.0.0", default-features = false }
-revm-database-interface = { version = "41.0.0", default-features = false }
 revmc = { git = "https://github.com/paradigmxyz/revmc", branch = "main", default-features = false, features = ["llvm-prefer-static"] }
 revm-inspectors = "0.41.0"
 
@@ -693,10 +687,10 @@ tracing-subscriber = { version = "0.3", default-features = false }
 tracing-tracy = "0.11"
 triehash = "0.8"
 typenum = "1.15.0"
-vergen = "9.1.0"
+vergen = "10.0.1"
 visibility = "0.1.1"
 walkdir = "2.3.3"
-vergen-git2 = "9.1.0"
+vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"

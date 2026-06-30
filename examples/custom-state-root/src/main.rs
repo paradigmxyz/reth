@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use alloy_genesis::Genesis;
 use alloy_primitives::B256;
+use reth_chain_state::StateTrieOverlayManager;
 use reth_engine_tree::tree::{payload_validator::CustomStateRoot, BasicEngineValidator};
 use reth_ethereum::{
     chainspec::ChainSpec,
@@ -77,8 +78,12 @@ where
         ctx: &reth_ethereum::node::builder::AddOnsContext<'_, N>,
         tree_config: TreeConfig,
         changeset_cache: ChangesetCache,
+        state_trie_overlays: StateTrieOverlayManager<EthPrimitives>,
     ) -> eyre::Result<Self::EngineValidator> {
-        let validator = self.inner.build_tree_validator(ctx, tree_config, changeset_cache).await?;
+        let validator = self
+            .inner
+            .build_tree_validator(ctx, tree_config, changeset_cache, state_trie_overlays)
+            .await?;
         Ok(validator.with_custom_state_root(self.custom_state_root))
     }
 }
