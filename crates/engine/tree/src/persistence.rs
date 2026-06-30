@@ -392,6 +392,7 @@ mod tests {
     use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_exex_types::FinishedExExHeight;
     use reth_provider::{
+        get_bal_by_hash,
         providers::{ProviderFactoryBuilder, ReadOnlyConfig},
         test_utils::{create_test_provider_factory, MockNodeTypes},
         AccountReader, BalConfig, BalNotificationStream, BalStore, BalStoreHandle,
@@ -519,6 +520,39 @@ mod tests {
         let result = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("test timed out");
 
         assert_eq!(block_hash, result.last_block.unwrap().hash);
+    }
+
+    #[test]
+    fn test_save_blocks_flushes_bal_store() {
+        reth_tracing::init_test_tracing();
+        let provider = create_test_provider_factory();
+
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let executed = test_block_builder.get_executed_block_with_number(0, B256::random());
+        let num_hash = executed.recovered_block.num_hash();
+        let raw_bal = Bytes::from_static(&[0xc0]);
+
+        provider.bal_store().insert(num_hash, RawBal::new(raw_bal.clone())).unwrap();
+        assert_eq!(provider.bal_store().get_by_hash(num_hash.hash).unwrap(), Some(raw_bal.clone()));
+
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+        let pruner =
+            Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
+        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+        let handle = PersistenceHandle::<EthPrimitives>::spawn_service(
+            provider.clone(),
+            pruner,
+            sync_metrics_tx,
+        );
+        let (tx, rx) = crossbeam_channel::bounded(1);
+
+        handle.save_blocks(vec![executed], tx).unwrap();
+
+        let result = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("test timed out");
+        assert_eq!(result.last_block, Some(num_hash));
+        assert_eq!(provider.bal_store().get_by_hash(num_hash.hash).unwrap(), None);
+        assert_eq!(get_bal_by_hash(&provider, num_hash.hash).unwrap(), Some(raw_bal));
     }
 
     #[test]
