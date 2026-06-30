@@ -3290,7 +3290,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "The time it takes for operations that are part of block validation, but not execution or state root, to complete.",
+      "description": "The time it takes for operations that are part of block validation to complete.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -3382,6 +3382,54 @@
           "legendFormat": "Trie input creation duration p{{quantile}}",
           "range": true,
           "refId": "A",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "min(reth_sync_block_validation_state_root_histogram{$instance_label=\"$instance\", quantile=\"0.5\"})",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "State root wait time p50",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "min(reth_sync_block_validation_state_root_histogram{$instance_label=\"$instance\", quantile=\"0.9\"})",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "State root wait time p90",
+          "range": true,
+          "refId": "C",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "min(reth_sync_block_validation_state_root_histogram{$instance_label=\"$instance\", quantile=\"0.99\"})",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "State root wait time p99",
+          "range": true,
+          "refId": "D",
           "useBackend": false
         }
       ],
@@ -3622,7 +3670,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "min by (quantile) (reth_sync_block_validation_state_root_histogram{$instance_label=\"$instance\"})",
+          "expr": "min by (quantile) (reth_sync_block_validation_state_root_histogram{$instance_label=\"$instance\", quantile=~\"(0.5|0.9|0.99)\"})",
           "instant": false,
           "legendFormat": "p{{quantile}}",
           "range": true,
