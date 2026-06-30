@@ -4,11 +4,12 @@
 //! Block-Level Access List (BAL). Workers execute transactions against revm's BAL state. The
 //! main thread commits worker results to a canonical executor in transaction order.
 //!
-//! Consensus validation checks the BAL item-cost bound before this path runs. This path validates
-//! the rebuilt block-level BAL hash after post-execution. It does not yet run per-transaction
-//! fragment checks. It does not yet report rich undeclared-access diagnostics.
+//! Consensus validation checks the BAL item-cost bound before this path runs. This path streams
+//! canonical state updates to a background BAL rebuild task for post-execution hash validation. It
+//! does not yet run per-transaction fragment checks or report rich undeclared-access diagnostics.
 
 mod ordered_outputs;
+pub(crate) mod rebuild;
 mod worker;
 
 pub mod error;

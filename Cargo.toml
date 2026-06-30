@@ -170,6 +170,20 @@ rust.unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tokio_unstable)'] }
 rustdoc.all = "warn"
 # rust.unnameable-types = "warn"
 
+[patch.crates-io]
+revm = { git = "https://github.com/bluealloy/revm", branch = "klkvr/bal-verify" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", branch = "klkvr/bal-verify" }
+revm-context = { git = "https://github.com/bluealloy/revm", branch = "klkvr/bal-verify" }
+revm-context-interface = { git = "https://github.com/bluealloy/revm", branch = "klkvr/bal-verify" }
+revm-database = { git = "https://github.com/bluealloy/revm", branch = "klkvr/bal-verify" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", branch = "klkvr/bal-verify" }
+revm-handler = { git = "https://github.com/bluealloy/revm", branch = "klkvr/bal-verify" }
+revm-inspector = { git = "https://github.com/bluealloy/revm", branch = "klkvr/bal-verify" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", branch = "klkvr/bal-verify" }
+revm-precompile = { git = "https://github.com/bluealloy/revm", branch = "klkvr/bal-verify" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "klkvr/bal-verify" }
+revm-state = { git = "https://github.com/bluealloy/revm", branch = "klkvr/bal-verify" }
+
 [workspace.lints.clippy]
 # These are some of clippy's nursery (i.e., experimental) lints that we like.
 # By default, nursery lints are allowed. Some of the lints below have made good
