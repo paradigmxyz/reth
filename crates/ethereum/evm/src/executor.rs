@@ -5,8 +5,8 @@ use crate::{
         block_requests_from_receipts, execute_transaction, post_block_balance_state_changes,
         post_execution_system_call_state_changes, pre_execution_system_call_state_changes,
     },
-    BlockExecutionContext, BlockSystemCalls, EthBlockExecutionCtx, EthExecutionError, EthTxEnv,
-    HashedStateMode, RethReceiptBuilder,
+    BlockExecutionContext, BlockSystemCalls, EthBlockExecutionCtx, EthTxEnv, HashedStateMode,
+    RethReceiptBuilder,
 };
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::{Header, TxType};
@@ -18,7 +18,7 @@ use evm2::{
     BaseEvmTypes, Evm,
 };
 use reth_ethereum_primitives::{EthPrimitives, Receipt};
-use reth_evm::execute::{BlockExecutionOutput, BlockExecutor, GasOutput};
+use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput, BlockExecutor, GasOutput};
 use reth_execution_types::HashedPostStateSink;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 
@@ -108,7 +108,7 @@ where
     type Primitives = EthPrimitives;
     type Transaction = EthTxEnv;
     type TransactionOutput = GasOutput;
-    type Error = EthExecutionError<DB::Error>;
+    type Error = BlockExecutionError;
 
     fn evm(&self) -> &Evm<BaseEvmTypes> {
         &self.evm
@@ -143,6 +143,7 @@ where
             self.block_number,
             context,
         )
+        .map_err(Into::into)
     }
 
     fn execute_transaction<H>(
@@ -153,6 +154,7 @@ where
     where
         H: FnMut(HashedPostState),
     {
+        let tx_hash = transaction.tx_hash();
         let transaction = transaction.into_envelope();
         let tx_type =
             TxType::try_from(transaction.ty()).expect("transaction envelope has valid type");
@@ -163,7 +165,8 @@ where
             self.hashed_state_mode.stream(),
             on_hashed_state_update,
             &transaction,
-        )?;
+        )
+        .map_err(|err| BlockExecutionError::evm(err, tx_hash))?;
         let gas_used = outcome.gas_used;
         self.cumulative_gas_used += gas_used;
         self.receipts.push(RethReceiptBuilder.build_receipt(
@@ -212,7 +215,8 @@ where
             self.spec_id,
             context,
             &mut requests,
-        )?;
+        )
+        .map_err(BlockExecutionError::from)?;
 
         let withdrawals = self.withdrawals.clone();
         let context = Self::block_context(
@@ -234,7 +238,8 @@ where
             self.block_beneficiary,
             context.ommers,
             context.withdrawals,
-        )?;
+        )
+        .map_err(BlockExecutionError::from)?;
 
         let mut output = RethReceiptBuilder
             .build_block_output_from_receipts_and_state_with_hashed_state(

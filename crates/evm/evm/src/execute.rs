@@ -18,7 +18,8 @@ use core::fmt::Debug;
 #[cfg(feature = "std")]
 use evm2::evm::{CacheDB, Database, Db, DbErrorCode, DbResult, DynDatabase, StateChangeSource};
 pub use reth_execution_errors::{
-    BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
+    BlockExecutionError, BlockValidationError, EvmError, InternalBlockExecutionError,
+    InvalidTxError,
 };
 use reth_execution_types::{
     extend_state_and_collect_reverts, state_source_size_hint, BlockExecutionResult, BlockReverts,
@@ -109,7 +110,7 @@ pub trait BlockExecutor: Sized {
     /// Output returned after a transaction is committed.
     type TransactionOutput: Default;
     /// The error type returned by the executor.
-    type Error: core::error::Error + Send + Sync + 'static;
+    type Error: core::error::Error + Send + Sync + 'static + Into<BlockExecutionError>;
 
     /// Returns the underlying EVM.
     fn evm(&self) -> &evm2::Evm<evm2::BaseEvmTypes>;
@@ -374,7 +375,7 @@ where
     type Executor = Executor;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        self.executor.apply_pre_execution_changes(&mut |_| {}).map_err(BlockExecutionError::other)
+        self.executor.apply_pre_execution_changes(&mut |_| {}).map_err(Into::into)
     }
 
     fn execute_transaction_with_result_closure(
@@ -385,10 +386,7 @@ where
         let (tx_env, tx) = tx.into_parts();
         let transaction = tx.tx().clone();
         let sender = *tx.signer();
-        let output = self
-            .executor
-            .execute_transaction(tx_env, &mut |_| {})
-            .map_err(BlockExecutionError::other)?;
+        let output = self.executor.execute_transaction(tx_env, &mut |_| {}).map_err(Into::into)?;
         f(&output);
         self.transactions.push(transaction);
         self.senders.push(sender);
@@ -400,7 +398,7 @@ where
         state_provider: impl StateProvider,
         state_root_precomputed: Option<(B256, TrieUpdates)>,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
-        let output = self.executor.finish(&mut |_| {}).map_err(BlockExecutionError::other)?;
+        let output = self.executor.finish(&mut |_| {}).map_err(Into::into)?;
         let hashed_state = output
             .hashed_state
             .clone()
@@ -540,14 +538,12 @@ where
         let mut executor =
             self.evm_config.create_executor::<DB>(evm, ctx, HashedStateMode::OutputOnly);
 
-        executor.apply_pre_execution_changes(&mut |_| {}).map_err(BlockExecutionError::other)?;
+        executor.apply_pre_execution_changes(&mut |_| {}).map_err(Into::into)?;
         for transaction in block.clone_transactions_recovered() {
             let tx_env = TxEnvFor::<Evm>::from(transaction);
-            executor
-                .execute_transaction(tx_env, &mut |_| {})
-                .map_err(BlockExecutionError::other)?;
+            executor.execute_transaction(tx_env, &mut |_| {}).map_err(Into::into)?;
         }
-        executor.finish(&mut |_| {}).map_err(BlockExecutionError::other)
+        executor.finish(&mut |_| {}).map_err(Into::into)
     }
 }
 

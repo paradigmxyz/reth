@@ -2,9 +2,8 @@
 
 #[cfg(test)]
 use crate::{convert::recovered_tx_envelope, RethReceiptBuilder};
-#[cfg(test)]
-use alloc::boxed::Box;
 use alloc::{
+    boxed::Box,
     format,
     string::{String, ToString},
     vec::Vec,
@@ -25,7 +24,7 @@ use alloy_eips::{
 };
 use alloy_primitives::{map::AddressMap, Address, Bytes, B256, KECCAK256_EMPTY, U256};
 use alloy_sol_types::{sol, SolEvent};
-use core::convert::Infallible;
+use core::{any::Any, convert::Infallible};
 #[cfg(test)]
 use evm2::evm::Db;
 #[cfg(test)]
@@ -53,6 +52,7 @@ use reth_ethereum_primitives::Receipt;
 use reth_ethereum_primitives::TransactionSigned;
 #[cfg(test)]
 use reth_evm::execute::HashedStateMode;
+use reth_evm::execute::{BlockExecutionError, BlockValidationError, EvmError, InvalidTxError};
 #[cfg(test)]
 use reth_execution_types::BlockExecutionOutput;
 use reth_execution_types::HashedPostStateSink;
@@ -74,6 +74,8 @@ sol! {
 /// Error returned by EVM-backed Ethereum execution.
 #[derive(Debug)]
 pub enum EthExecutionError<E> {
+    /// EVM rejected the transaction during validation.
+    InvalidTx(EthInvalidTxError),
     /// EVM rejected or halted transaction execution before producing a Reth output.
     Handler(HandlerError),
     /// EVM reported a database error and the typed database error was available.
@@ -101,6 +103,7 @@ where
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
+            Self::InvalidTx(err) => write!(f, "invalid transaction: {err}"),
             Self::Handler(err) => write!(f, "EVM execution error: {err}"),
             Self::Database(err) => write!(f, "EVM database error: {err}"),
             Self::MissingDatabaseError(code) => {
@@ -121,6 +124,100 @@ where
 }
 
 impl<E> core::error::Error for EthExecutionError<E> where E: core::error::Error + Send + 'static {}
+
+/// Ethereum transaction validation error returned by evm2 handlers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EthInvalidTxError(HandlerError);
+
+impl EthInvalidTxError {
+    /// Returns the underlying evm2 handler error.
+    pub const fn handler_error(&self) -> HandlerError {
+        self.0
+    }
+}
+
+impl core::fmt::Display for EthInvalidTxError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl core::error::Error for EthInvalidTxError {}
+
+impl InvalidTxError for EthInvalidTxError {
+    fn is_nonce_too_low(&self) -> bool {
+        matches!(self.0, HandlerError::InvalidNonce { expected, got } if got < expected)
+    }
+
+    fn is_gas_limit_too_high(&self) -> bool {
+        matches!(
+            self.0,
+            HandlerError::GasLimitMoreThanBlock { .. } |
+                HandlerError::TxGasLimitGreaterThanCap { .. }
+        )
+    }
+
+    fn is_gas_limit_too_low(&self) -> bool {
+        matches!(self.0, HandlerError::IntrinsicGasTooLow { .. })
+    }
+
+    fn as_any(&self) -> &(dyn Any + 'static) {
+        self
+    }
+}
+
+impl<E> EvmError for EthExecutionError<E>
+where
+    E: core::error::Error + Send + Sync + 'static,
+{
+    type InvalidTransaction = EthInvalidTxError;
+
+    fn as_invalid_tx_err(&self) -> Option<&<Self as EvmError>::InvalidTransaction> {
+        match self {
+            Self::InvalidTx(err) => Some(err),
+            _ => None,
+        }
+    }
+
+    fn try_into_invalid_tx_err(self) -> Result<<Self as EvmError>::InvalidTransaction, Self> {
+        match self {
+            Self::InvalidTx(err) => Ok(err),
+            err => Err(err),
+        }
+    }
+
+    fn is_fatal(&self) -> bool {
+        self.as_invalid_tx_err().is_none()
+    }
+}
+
+impl<E> From<EthExecutionError<E>> for BlockExecutionError
+where
+    E: core::error::Error + Send + Sync + 'static,
+{
+    fn from(err: EthExecutionError<E>) -> Self {
+        match err {
+            EthExecutionError::InvalidTx(err) => BlockValidationError::Other(Box::new(err)).into(),
+            EthExecutionError::MissingParentBeaconBlockRoot => {
+                BlockValidationError::MissingParentBeaconBlockRoot.into()
+            }
+            EthExecutionError::CancunGenesisParentBeaconBlockRootNotZero(
+                parent_beacon_block_root,
+            ) => BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero {
+                parent_beacon_block_root,
+            }
+            .into(),
+            EthExecutionError::DepositRequestDecode(err) => {
+                BlockValidationError::DepositRequestDecode(err).into()
+            }
+            err => Self::other(err),
+        }
+    }
+}
+
+const fn handler_error_is_invalid_tx(err: &HandlerError) -> bool {
+    !matches!(err, HandlerError::Database(_) | HandlerError::WrongTransactionType { .. })
+}
 
 /// Error returned by payload execution over a fallible transaction stream.
 #[derive(Debug)]
@@ -493,6 +590,9 @@ where
         HandlerError::Database(code) => take_database_error::<DB>(evm, code)
             .map(EthExecutionError::Database)
             .unwrap_or(EthExecutionError::MissingDatabaseError(code)),
+        err if handler_error_is_invalid_tx(&err) => {
+            EthExecutionError::InvalidTx(EthInvalidTxError(err))
+        }
         err => EthExecutionError::Handler(err),
     }
 }
@@ -1345,11 +1445,13 @@ mod tests {
 
         assert!(matches!(
             err,
-            EthExecutionError::Handler(HandlerError::GasLimitMoreThanBlock {
-                gas_limit,
-                block_gas_limit,
-            }) if gas_limit == 2_500_000 &&
-                block_gas_limit == U256::from(1_500_000)
+            EthExecutionError::InvalidTx(err)
+                if matches!(
+                    err.handler_error(),
+                    HandlerError::GasLimitMoreThanBlock { gas_limit, block_gas_limit }
+                        if gas_limit == 2_500_000 &&
+                            block_gas_limit == U256::from(1_500_000)
+                )
         ));
     }
 

@@ -83,9 +83,8 @@ impl<Pool, Client, EvmConfig> PayloadBuilder for EthereumPayloadBuilder<Pool, Cl
 where
     EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>
         + 'static,
-    EvmConfig::BlockExecutorFactory: 'static,
     for<'a> EvmConfig::BlockExecutorFactory:
-        BlockExecutorFactory<ExecutionCtx<'a> = ExecutionCtxFor<'a, EvmConfig>>,
+        'static + BlockExecutorFactory<ExecutionCtx<'a> = ExecutionCtxFor<'a, EvmConfig>>,
     Client: StateProviderFactory
         + ChainSpecProvider<ChainSpec: EthereumHardforks + EthChainSpec<Header = Header>>
         + Clone,
@@ -162,9 +161,8 @@ pub fn default_ethereum_payload<EvmConfig, Client, Pool, F>(
 where
     EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>
         + 'static,
-    EvmConfig::BlockExecutorFactory: 'static,
     for<'a> EvmConfig::BlockExecutorFactory:
-        BlockExecutorFactory<ExecutionCtx<'a> = ExecutionCtxFor<'a, EvmConfig>>,
+        'static + BlockExecutorFactory<ExecutionCtx<'a> = ExecutionCtxFor<'a, EvmConfig>>,
     Client: StateProviderFactory
         + ChainSpecProvider<ChainSpec: EthereumHardforks + EthChainSpec<Header = Header>>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
@@ -415,17 +413,15 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let state_root_precomputed = if skip_state_root {
+    let state_root_precomputed = skip_state_root.then(|| {
         debug!(
             target: "payload_builder",
             id = %payload_id,
             state_root = ?parent_header.state_root,
             "skipping payload state-root computation"
         );
-        Some((parent_header.state_root, TrieUpdates::default()))
-    } else {
-        None
-    };
+        (parent_header.state_root, TrieUpdates::default())
+    });
     let BlockBuilderOutcome { execution_result, block, block_access_list, .. } =
         builder.finish(state_provider.as_ref(), state_root_precomputed)?;
     cached_db_handle.sync(&mut cached_reads);

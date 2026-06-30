@@ -1,8 +1,11 @@
 //! Conversion helpers for Ethereum execution.
 
-use alloy_consensus::{transaction::Recovered, BlockHeader};
+use alloy_consensus::{
+    transaction::{Recovered, TxHashRef},
+    BlockHeader,
+};
 use alloy_eips::eip7840::BlobParams;
-use alloy_primitives::{Address, BlockNumber, BlockTimestamp, U256};
+use alloy_primitives::{Address, BlockNumber, BlockTimestamp, B256, U256};
 use alloy_rpc_types_engine::ExecutionData;
 use evm2::{
     env::BlockEnv,
@@ -123,17 +126,25 @@ fn blob_basefee(excess_blob_gas: Option<u64>, blob_params: Option<BlobParams>) -
 
 /// Cached transaction environment used by engine execution and prewarming.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EthTxEnv(RecoveredTxEnvelope);
+pub struct EthTxEnv {
+    envelope: RecoveredTxEnvelope,
+    tx_hash: B256,
+}
 
 impl EthTxEnv {
     /// Returns the wrapped transaction envelope.
     pub const fn as_envelope(&self) -> &RecoveredTxEnvelope {
-        &self.0
+        &self.envelope
+    }
+
+    /// Returns the original transaction hash.
+    pub const fn tx_hash(&self) -> B256 {
+        self.tx_hash
     }
 
     /// Consumes the wrapper and returns the transaction envelope.
     pub fn into_envelope(self) -> RecoveredTxEnvelope {
-        self.0
+        self.envelope
     }
 }
 
@@ -145,7 +156,8 @@ impl AsRef<RecoveredTxEnvelope> for EthTxEnv {
 
 impl From<Recovered<TransactionSigned>> for EthTxEnv {
     fn from(value: Recovered<TransactionSigned>) -> Self {
-        Self(recovered_tx_envelope(value))
+        let tx_hash = *value.tx_hash();
+        Self { envelope: recovered_tx_envelope(value), tx_hash }
     }
 }
 
