@@ -299,15 +299,18 @@ impl ArenaCursor {
     #[instrument(level = "trace", target = TRACE_TARGET, skip(self, arena), ret)]
     pub(super) fn seek(&mut self, arena: &mut NodeArena, full_path: &Nibbles) -> SeekResult {
         // Pop stack until head is ancestor of full_path.
-        while self.stack.len() > 1 &&
-            !full_path.starts_with(&self.stack.last().expect("cursor has root").path)
-        {
+        while self.stack.len() > 1 {
+            let head_path = self.stack.last().expect("cursor has root").path;
+            if path_starts_with(full_path, &head_path) {
+                break;
+            }
             self.pop(arena);
         }
 
         loop {
             let head = self.stack.last().expect("cursor has root");
             let head_idx = head.index;
+            let head_path = head.path;
 
             let head_branch = match &arena[head_idx] {
                 ArenaSparseNode::EmptyRoot => {
@@ -329,17 +332,20 @@ impl ArenaCursor {
                 _ => unreachable!("unexpected node type on stack: {:?}", arena[head_idx]),
             };
 
-            let head_branch_logical_path = logical_branch_path(arena, head);
+            debug_assert!(path_starts_with(full_path, &head_path));
+
+            let short_key = head_branch.short_key;
+            let logical_len = head_path.len() + short_key.len();
 
             // If full_path doesn't extend past the branch's logical path, the target is at or
             // within the branch's short_key — treat as diverged.
-            if full_path.len() <= head_branch_logical_path.len() ||
-                !full_path.starts_with(&head_branch_logical_path)
+            if full_path.len() <= logical_len ||
+                !path_segment_eq(full_path, head_path.len(), &short_key)
             {
                 return SeekResult::Diverged;
             }
 
-            let child_nibble = full_path.get_unchecked(head_branch_logical_path.len());
+            let child_nibble = full_path.get_unchecked(logical_len);
             let Some(branch_child_idx) = BranchChildIdx::new(head_branch.state_mask, child_nibble)
             else {
                 return SeekResult::NoChild { child_nibble };
@@ -351,7 +357,9 @@ impl ArenaCursor {
                 }
                 ArenaSparseNodeBranchChild::Revealed(child_idx) => {
                     let child_idx = *child_idx;
-                    let path = self.child_path(arena, child_nibble);
+                    let mut path = head_path;
+                    path.extend(&short_key);
+                    path.push_unchecked(child_nibble);
                     self.push(arena, child_idx, path);
                 }
             }
@@ -371,4 +379,28 @@ fn logical_branch_path(arena: &NodeArena, entry: &ArenaCursorStackEntry) -> Nibb
 /// Equivalent to `logical_branch_path(arena, entry).len()` but avoids constructing the path.
 fn logical_branch_path_len(arena: &NodeArena, entry: &ArenaCursorStackEntry) -> usize {
     entry.path.len() + arena[entry.index].branch_ref().short_key.len()
+}
+
+#[inline]
+fn path_starts_with(path: &Nibbles, prefix: &Nibbles) -> bool {
+    path_segment_eq(path, 0, prefix)
+}
+
+#[inline]
+fn path_segment_eq(path: &Nibbles, offset: usize, segment: &Nibbles) -> bool {
+    let segment_len = segment.len();
+    let Some(end) = offset.checked_add(segment_len) else {
+        return false;
+    };
+    if path.len() < end {
+        return false;
+    }
+
+    for idx in 0..segment_len {
+        if path.get_unchecked(offset + idx) != segment.get_unchecked(idx) {
+            return false;
+        }
+    }
+
+    true
 }
