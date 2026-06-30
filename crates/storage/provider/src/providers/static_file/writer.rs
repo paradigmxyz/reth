@@ -710,7 +710,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
     /// Updates the `self.reader` internal index.
     fn update_index(&self) -> ProviderResult<()> {
-        let segment = self.writer.user_header().segment();
+        let reader = self.reader();
+        let header = self.writer.user_header();
+        let segment = header.segment();
 
         // We find the maximum block of the segment by checking this writer's last block.
         //
@@ -719,25 +721,20 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         // previous file — but only if that file actually exists. If the previous file doesn't
         // exist (e.g. first-ever file for a segment starting past range boundary), there's
         // nothing to index.
-        let segment_max_block = self
-            .writer
-            .user_header()
-            .block_range()
-            .as_ref()
-            .map(|block_range| block_range.end())
-            .or_else(|| {
-                let expected_start = self.writer.user_header().expected_block_start();
-                if expected_start <= self.reader().genesis_block_number() {
+        let segment_max_block =
+            header.block_range().as_ref().map(|block_range| block_range.end()).or_else(|| {
+                let expected_start = header.expected_block_start();
+                if expected_start <= reader.genesis_block_number() {
                     return None;
                 }
 
                 let prev_block = expected_start - 1;
-                let prev_range = self.reader().find_fixed_range(segment, prev_block);
-                let prev_path = self.reader().directory().join(segment.filename(&prev_range));
+                let prev_range = reader.find_fixed_range(segment, prev_block);
+                let prev_path = reader.directory().join(segment.filename(&prev_range));
                 prev_path.exists().then_some(prev_block)
             });
 
-        self.reader().update_index(segment, segment_max_block)
+        reader.update_index(segment, segment_max_block)
     }
 
     /// Ensures that the writer is positioned at the specified block number.
