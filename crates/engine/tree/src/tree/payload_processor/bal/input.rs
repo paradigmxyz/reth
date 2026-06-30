@@ -2,12 +2,14 @@ use alloy_eip7928::{bal::RawBal, BlockAccessIndex, BlockAccessListGasError};
 use alloy_primitives::Bytes;
 use alloy_rlp::{Decodable, Error as RlpError, Header};
 use reth_consensus::ConsensusError;
-use revm_state::{
+use revm::state::{
     bal::{AccountBal, AccountInfoBal, Bal as RevmBal, BalWrites, StorageBal},
     primitives::{Address, AddressIndexMap, B256, U256},
     Bytecode,
 };
 use std::sync::Arc;
+
+type CodeWrite = (BlockAccessIndex, (B256, Bytecode));
 
 /// Received block access list decoded into the form used by BAL execution.
 #[derive(Debug)]
@@ -150,9 +152,7 @@ fn decode_nonce_writes(mut payload: &[u8]) -> Result<Vec<(BlockAccessIndex, u64)
     Ok(writes)
 }
 
-fn decode_code_writes(
-    mut payload: &[u8],
-) -> Result<Vec<(BlockAccessIndex, (B256, Bytecode))>, RlpError> {
+fn decode_code_writes(mut payload: &[u8]) -> Result<Vec<CodeWrite>, RlpError> {
     let mut writes = Vec::new();
     while !payload.is_empty() {
         let mut change = Header::decode_bytes(&mut payload, true)?;
@@ -167,7 +167,7 @@ fn decode_code_writes(
     Ok(writes)
 }
 
-fn require_empty(payload: &[u8]) -> Result<(), RlpError> {
+const fn require_empty(payload: &[u8]) -> Result<(), RlpError> {
     if payload.is_empty() {
         Ok(())
     } else {

@@ -28,7 +28,6 @@ use reth_tasks::Runtime;
 use revm::{
     context::{result::ResultAndState, Block},
     database::{states::bundle_state::BundleRetention, State},
-    state::bal::Bal as RevmBal,
 };
 use std::sync::Arc;
 
