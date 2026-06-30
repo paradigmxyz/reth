@@ -1603,7 +1603,7 @@ impl RocksDBProvider {
         indices: Vec<u64>,
     ) -> ProviderResult<Vec<(StorageShardedKey, BlockNumberList)>> {
         let last_key = StorageShardedKey::last(address, storage_key);
-        let last_shard_opt = self.get::<tables::StoragesHistory>(last_key.clone())?;
+        let last_shard_opt = self.get::<tables::StoragesHistory>(last_key)?;
         Self::storage_history_shards_to_put_from_last(address, storage_key, last_shard_opt, indices)
     }
 
