@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 use alloy_consensus::{proofs::calculate_receipt_root, BlockHeader, TxReceipt};
-use alloy_eips::Encodable2718;
+use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, Encodable2718};
 use alloy_primitives::{Bloom, Bytes, B256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
@@ -97,7 +97,11 @@ where
         let Some(header_requests_hash) = block.header().requests_hash() else {
             return Err(ConsensusError::RequestsHashMissing)
         };
-        let requests_hash = result.requests.requests_hash();
+        let requests_hash = if result.requests.is_empty() {
+            EMPTY_REQUESTS_HASH
+        } else {
+            result.requests.requests_hash()
+        };
         if requests_hash != header_requests_hash {
             return Err(ConsensusError::BodyRequestsHashDiff(
                 GotExpected::new(requests_hash, header_requests_hash).into(),
