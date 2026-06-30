@@ -158,7 +158,7 @@ impl TaskManager {
     fn do_graceful_shutdown(self, timeout: Option<std::time::Duration>) -> bool {
         drop(self.signal);
         let deadline = timeout.map(|t| std::time::Instant::now() + t);
-        while self.graceful_tasks.load(Ordering::SeqCst) > 0 {
+        while self.graceful_tasks.load(Ordering::Acquire) > 0 {
             if deadline.is_some_and(|d| std::time::Instant::now() > d) {
                 debug!("graceful shutdown timed out");
                 return false;
