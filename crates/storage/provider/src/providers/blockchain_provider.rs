@@ -918,7 +918,11 @@ mod tests {
             provider_rw.write_state(
                 &ExecutionOutcome {
                     first_block: first_block.number,
-                    receipts: receipts.iter().take(database_blocks.len()).cloned().collect(),
+                    receipts: receipts
+                        .iter()
+                        .take(database_blocks.len())
+                        .map(|block_receipts| Arc::new(block_receipts.clone()))
+                        .collect(),
                     ..Default::default()
                 },
                 OriginalValuesKnown::No,

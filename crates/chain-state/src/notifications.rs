@@ -375,7 +375,7 @@ mod tests {
         };
 
         // Wrap the receipt in a `Receipts` structure, as expected in the `ExecutionOutcome`.
-        let receipts = vec![vec![receipt1.clone()]];
+        let receipts = vec![Arc::new(vec![receipt1.clone()])];
 
         // Define an `ExecutionOutcome` with the created receipts.
         let execution_outcome = ExecutionOutcome { receipts, ..Default::default() };
@@ -436,7 +436,7 @@ mod tests {
             logs: vec![],
             success: false,
         };
-        let old_receipts = vec![vec![old_receipt.clone()]];
+        let old_receipts = vec![Arc::new(vec![old_receipt.clone()])];
 
         let old_execution_outcome =
             ExecutionOutcome { receipts: old_receipts, ..Default::default() };
@@ -465,7 +465,7 @@ mod tests {
             logs: vec![],
             success: true,
         };
-        let new_receipts = vec![vec![new_receipt.clone()]];
+        let new_receipts = vec![Arc::new(vec![new_receipt.clone()])];
 
         let new_execution_outcome =
             ExecutionOutcome { receipts: new_receipts, ..Default::default() };

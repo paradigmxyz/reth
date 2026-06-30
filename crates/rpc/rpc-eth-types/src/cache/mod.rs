@@ -798,7 +798,7 @@ struct ChainChange<B: Block, R> {
     receipts: Vec<BlockReceipts<R>>,
 }
 
-impl<B: Block, R: Clone> ChainChange<B, R> {
+impl<B: Block, R> ChainChange<B, R> {
     fn new<N>(chain: Arc<Chain<N>>) -> Self
     where
         N: NodePrimitives<Block = B, Receipt = R>,
@@ -806,10 +806,8 @@ impl<B: Block, R: Clone> ChainChange<B, R> {
         let (blocks, receipts): (Vec<_>, Vec<_>) = chain
             .blocks_and_receipts()
             .map(|(block, receipts)| {
-                let block_receipts = BlockReceipts {
-                    block_hash: block.hash(),
-                    receipts: Arc::new(receipts.clone()),
-                };
+                let block_receipts =
+                    BlockReceipts { block_hash: block.hash(), receipts: Arc::clone(receipts) };
                 (Arc::clone(block), block_receipts)
             })
             .unzip();

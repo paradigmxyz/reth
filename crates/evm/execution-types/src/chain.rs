@@ -50,6 +50,11 @@ type ChainTxReceiptMeta<'a, N> = (
     &'a [<N as NodePrimitives>::Receipt],
 );
 
+type ChainBlockReceipts<'a, N> = (
+    &'a Arc<RecoveredBlock<<N as NodePrimitives>::Block>>,
+    &'a Arc<Vec<<N as NodePrimitives>::Receipt>>,
+);
+
 impl<N: NodePrimitives> Default for Chain<N> {
     fn default() -> Self {
         Self {
@@ -191,13 +196,13 @@ impl<N: NodePrimitives> Chain<N> {
     }
 
     /// Returns an iterator over all the receipts of the blocks in the chain.
-    pub fn block_receipts_iter(&self) -> impl Iterator<Item = &Vec<N::Receipt>> + '_ {
+    pub fn block_receipts_iter(&self) -> impl Iterator<Item = &Arc<Vec<N::Receipt>>> + '_ {
         self.execution_outcome.receipts().iter()
     }
 
     /// Returns an iterator over all receipts in the chain.
     pub fn receipts_iter(&self) -> impl Iterator<Item = &N::Receipt> + '_ {
-        self.block_receipts_iter().flatten()
+        self.block_receipts_iter().flat_map(|receipts| receipts.iter())
     }
 
     /// Returns an iterator over all logs in the chain.
@@ -231,9 +236,7 @@ impl<N: NodePrimitives> Chain<N> {
     }
 
     /// Returns an iterator over all blocks and their receipts in the chain.
-    pub fn blocks_and_receipts(
-        &self,
-    ) -> impl Iterator<Item = (&Arc<RecoveredBlock<N::Block>>, &Vec<N::Receipt>)> + '_ {
+    pub fn blocks_and_receipts(&self) -> impl Iterator<Item = ChainBlockReceipts<'_, N>> + '_ {
         self.blocks_iter().zip(self.block_receipts_iter())
     }
 
@@ -317,7 +320,7 @@ impl<N: NodePrimitives> Chain<N> {
                 .body()
                 .transactions()
                 .iter()
-                .zip(receipts)
+                .zip(receipts.iter())
                 .map(|(tx, receipt)| (*tx.tx_hash(), receipt.clone()))
                 .collect();
 
@@ -744,7 +747,7 @@ mod tests {
                 vec![vec![(Address::new([2; 20]), None, vec![])]],
                 vec![],
             ),
-            vec![vec![]],
+            vec![Arc::new(vec![])],
             1,
             vec![],
         );
@@ -760,7 +763,7 @@ mod tests {
                 vec![vec![(Address::new([3; 20]), None, vec![])]],
                 vec![],
             ),
-            vec![vec![]],
+            vec![Arc::new(vec![])],
             2,
             vec![],
         );
@@ -826,7 +829,7 @@ mod tests {
         };
 
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = vec![vec![receipt1.clone()], vec![receipt2]];
+        let receipts = vec![Arc::new(vec![receipt1.clone()]), Arc::new(vec![receipt2])];
 
         // Create an ExecutionOutcome object with the created bundle, receipts, an empty requests
         // vector, and first_block set to 10
@@ -851,7 +854,7 @@ mod tests {
         // Create an ExecutionOutcome object with a single receipt vector containing receipt1
         let execution_outcome1 = ExecutionOutcome {
             bundle: Default::default(),
-            receipts: vec![vec![receipt1]],
+            receipts: vec![Arc::new(vec![receipt1])],
             requests: vec![],
             first_block: 10,
         };
