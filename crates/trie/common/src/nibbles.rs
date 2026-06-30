@@ -98,13 +98,15 @@ impl StoredNibblesSubKey {
     ///
     /// The first 64 bytes contain the nibble values (right-padded with zeros),
     /// and the 65th byte stores the actual nibble count.
+    #[expect(clippy::needless_range_loop)]
     pub fn to_compact_array(&self) -> [u8; 65] {
         assert!(self.0.len() <= 64);
         let mut buf = [0u8; 65];
-        for (i, nibble) in self.0.iter().enumerate() {
-            buf[i] = nibble;
+        let len = self.0.len();
+        for i in 0..len {
+            buf[i] = self.0.get_unchecked(i);
         }
-        buf[64] = self.0.len() as u8;
+        buf[64] = len as u8;
         buf
     }
 }
