@@ -23,9 +23,13 @@ use std::{
 /// pending buffer.
 #[derive(Clone)]
 pub struct RocksDBBalStore {
+    /// Retention policy for persisted and buffered BALs.
     retention: PruneMode,
+    /// RocksDB provider used for persisted BAL reads and writes.
     rocksdb: RocksDBProvider,
+    /// BALs inserted since the last flush.
     buffer: Arc<RwLock<RocksDBBalStoreBuffer>>,
+    /// Broadcasts BAL insert notifications.
     notifications: EventSender<BalNotification>,
 }
 
