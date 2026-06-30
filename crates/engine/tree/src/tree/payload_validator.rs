@@ -123,6 +123,7 @@ use reth_trie_sparse::SparseTrieRetainedPaths;
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
 use reth_chain_state::{
     CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats,
+    StateTrieOverlayManager,
 };
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -333,9 +334,15 @@ where
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
         changeset_cache: ChangesetCache,
+        state_trie_overlays: StateTrieOverlayManager<N>,
         runtime: reth_tasks::Runtime,
     ) -> Self {
-        let payload_processor = PayloadProcessor::new(runtime.clone(), evm_config.clone(), &config);
+        let payload_processor = PayloadProcessor::new(
+            runtime.clone(),
+            evm_config.clone(),
+            &config,
+            state_trie_overlays,
+        );
         Self {
             provider,
             consensus,

@@ -207,7 +207,7 @@ impl Default for RethEvmFactory {
 
 impl RethEvmFactory {
     /// Creates a factory configuration with JIT compilation disabled.
-    pub fn disabled() -> Self {
+    pub const fn disabled() -> Self {
         #[cfg(feature = "jit")]
         {
             Self::new(JitBackend::disabled())
