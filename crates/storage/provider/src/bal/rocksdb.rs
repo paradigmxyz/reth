@@ -106,8 +106,13 @@ impl RocksDBBalStore {
         self.read_one_from_disk(StoredBlockAccessListKey::new(block))
     }
 
-    const fn buffer_retention() -> PruneMode {
-        PruneMode::Distance(DEFAULT_BAL_BUFFER_RETENTION_DISTANCE)
+    fn buffer_retention(&self) -> PruneMode {
+        match self.retention {
+            PruneMode::Distance(distance) => {
+                PruneMode::Distance(distance.min(DEFAULT_BAL_BUFFER_RETENTION_DISTANCE))
+            }
+            retention => retention,
+        }
     }
 }
 
@@ -189,21 +194,12 @@ impl RocksDBBalStoreBuffer {
             .map(|entry| entry.bal.as_raw().clone())
     }
 
-    fn remove_flushed(&mut self, flushed: &[(StoredBlockAccessListKey, RawBal)]) {
+    fn remove_flushed_pending(&mut self, flushed: &[(StoredBlockAccessListKey, RawBal)]) {
         for (key, bal) in flushed {
             let pending_matches =
                 self.pending.get(key).is_some_and(|pending| pending.as_raw() == bal.as_raw());
             if pending_matches {
                 self.pending.remove(key);
-            }
-
-            let block = key.num_hash();
-            let entry_matches = self.entries.get(&block.hash).is_some_and(|entry| {
-                entry.block_number == block.number && entry.bal.as_raw() == bal.as_raw()
-            });
-            if entry_matches {
-                self.entries.remove(&block.hash);
-                self.remove_hash_from_number(block.number, block.hash);
             }
         }
     }
@@ -254,7 +250,7 @@ impl BalStore for RocksDBBalStore {
         let mut buffer = self.buffer.write();
         buffer.insert(block, bal.clone());
         if let Some(highest_block_number) = buffer.highest_block_number {
-            let keys = buffer.keys_to_prune(Self::buffer_retention(), highest_block_number);
+            let keys = buffer.keys_to_prune(self.buffer_retention(), highest_block_number);
             buffer.remove_keys(&keys);
         }
         drop(buffer);
@@ -274,7 +270,7 @@ impl BalStore for RocksDBBalStore {
             buffer.insert(*block, bal.clone());
         }
         if let Some(highest_block_number) = buffer.highest_block_number {
-            let keys = buffer.keys_to_prune(Self::buffer_retention(), highest_block_number);
+            let keys = buffer.keys_to_prune(self.buffer_retention(), highest_block_number);
             buffer.remove_keys(&keys);
         }
         drop(buffer);
@@ -299,14 +295,14 @@ impl BalStore for RocksDBBalStore {
         }
         batch.commit()?;
 
-        buffer.remove_flushed(&pending);
+        buffer.remove_flushed_pending(&pending);
         Ok(())
     }
 
     fn prune(&self, tip: BlockNumber) -> ProviderResult<usize> {
         let disk_keys = self.keys_to_prune(tip)?;
         let mut buffer = self.buffer.write();
-        let buffer_keys = buffer.keys_to_prune(Self::buffer_retention(), tip);
+        let buffer_keys = buffer.keys_to_prune(self.buffer_retention(), tip);
         let pruned =
             disk_keys.iter().chain(buffer_keys.iter()).copied().collect::<BTreeSet<_>>().len();
 
@@ -422,16 +418,17 @@ mod tests {
 
         store.flush(&[block_1]).unwrap();
 
+        assert!(!store.buffer.read().pending.contains_key(&StoredBlockAccessListKey::new(block_1)));
         assert_eq!(disk_bal(&store, block_1), Some(bal_1.clone()));
         assert_eq!(disk_bal(&store, block_1_fork), None);
         assert_eq!(disk_bal(&store, block_2), None);
         assert_eq!(
             read_many(&store, &[block_1, block_1_fork, block_2]),
-            vec![Some(bal_1), Some(bal_1_fork.clone()), Some(bal_2.clone())]
+            vec![Some(bal_1.clone()), Some(bal_1_fork.clone()), Some(bal_2.clone())]
         );
         assert_eq!(
             store.get_by_hashes(&[block_1.hash, block_1_fork.hash, block_2.hash]).unwrap(),
-            vec![None, Some(bal_1_fork), Some(bal_2)]
+            vec![Some(bal_1), Some(bal_1_fork), Some(bal_2)]
         );
     }
 
