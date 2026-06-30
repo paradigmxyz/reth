@@ -207,7 +207,11 @@ impl Default for RethEvmFactory {
 
 impl RethEvmFactory {
     /// Creates a factory configuration with JIT compilation disabled.
-    pub const fn disabled() -> Self {
+    #[expect(
+        clippy::missing_const_for_fn,
+        reason = "the jit-enabled implementation calls non-const JitBackend constructors"
+    )]
+    pub fn disabled() -> Self {
         #[cfg(feature = "jit")]
         {
             Self::new(JitBackend::disabled())
