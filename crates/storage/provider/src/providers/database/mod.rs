@@ -150,8 +150,6 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         .storage_settings()?
         .unwrap_or(legacy_settings);
 
-        let bal_store = BalStoreHandle::new(RocksDBBalStore::new(rocksdb_provider.clone()));
-
         Ok(Self {
             db,
             chain_spec,
@@ -159,9 +157,9 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             prune_modes: PruneModes::default(),
             storage: Default::default(),
             storage_settings: Arc::new(RwLock::new(storage_settings)),
-            rocksdb_provider,
+            rocksdb_provider: rocksdb_provider.clone(),
             changeset_cache: ChangesetCache::new(),
-            bal_store,
+            bal_store: BalStoreHandle::new(RocksDBBalStore::new(rocksdb_provider)),
             runtime,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             database_provider_metrics,
