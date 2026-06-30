@@ -32,7 +32,8 @@ use reth_tasks::Runtime;
 use revm::{
     context::{result::ResultAndState, Block},
     database::{states::bundle_state::BundleRetention, State},
-    state::bal::Bal as RevmBal,
+    primitives::AddressIndexMap,
+    state::bal::{AccountBal, Bal as RevmBal},
 };
 use std::sync::Arc;
 
@@ -193,12 +194,18 @@ fn convert_alloy_to_revm_bal(alloy_bal: &AlloyBal) -> Result<Arc<RevmBal>, BalEx
     // is triggered then the execution is reverted, and as such no actual code change event takes
     // place. Therefore, if we do observe such a bytecode in a BAL then that means the BAL is
     // invalid as no legal execution should've led to this bytecode deployment.
-    let received_bal_revm = RevmBal::clone_from_alloy(alloy_bal.as_vec()).map_err(|e| {
-        BalExecutionError::Consensus(reth_consensus::ConsensusError::BlockAccessListInvalid(
-            format!("{e:?}"),
-        ))
-    })?;
-    Ok(Arc::new(received_bal_revm))
+    let mut accounts = AddressIndexMap::default();
+    accounts.reserve(alloy_bal.len());
+    for account in alloy_bal {
+        let (address, account_bal) = AccountBal::clone_from_alloy(account).map_err(|e| {
+            BalExecutionError::Consensus(reth_consensus::ConsensusError::BlockAccessListInvalid(
+                format!("{e:?}"),
+            ))
+        })?;
+        accounts.insert(address, account_bal);
+    }
+
+    Ok(Arc::new(RevmBal { accounts }))
 }
 
 fn take_built_bal_and_log_divergence<DB>(
