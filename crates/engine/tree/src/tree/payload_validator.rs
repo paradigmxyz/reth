@@ -956,9 +956,10 @@ where
             return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into())
         }
 
-        self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
+        let root_elapsed_secs = root_elapsed.as_secs_f64();
+        self.metrics.block_validation.record_state_root(&trie_output, root_elapsed_secs);
         self.metrics
-            .record_state_root_gas_bucket(block.header().gas_used(), root_elapsed.as_secs_f64());
+            .record_state_root_gas_bucket(block.header().gas_used(), root_elapsed_secs);
         debug!(target: "engine::tree::payload_validator", ?root_elapsed, "Calculated state root");
 
         // ensure state root matches
