@@ -7,10 +7,11 @@ use crate::{
     PrunerError,
 };
 use alloy_primitives::BlockNumber;
+use rayon::prelude::*;
 use reth_db_api::{models::ShardedKey, tables, transaction::DbTxMut};
 use reth_provider::{
     changeset_walker::StaticFileAccountChangesetWalker, DBProvider, EitherWriter,
-    RocksDBProviderFactory, StaticFileProviderFactory,
+    ProviderError, RocksDBProviderFactory, StaticFileProviderFactory,
 };
 use reth_prune_types::{
     PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
@@ -25,6 +26,14 @@ use tracing::{instrument, trace};
 /// Account History consists of two tables: [`tables::AccountChangeSets`] (either in database or
 /// static files) and [`tables::AccountsHistory`]. We want to prune them to the same block number.
 const ACCOUNT_HISTORY_TABLES_TO_PRUNE: usize = 2;
+#[cfg(not(test))]
+const ROCKSDB_HISTORY_PRUNE_PARALLEL_THRESHOLD: usize = 2048;
+#[cfg(test)]
+const ROCKSDB_HISTORY_PRUNE_PARALLEL_THRESHOLD: usize = 2;
+#[cfg(not(test))]
+const ROCKSDB_HISTORY_PRUNE_CHUNK_SIZE: usize = 2048;
+#[cfg(test)]
+const ROCKSDB_HISTORY_PRUNE_CHUNK_SIZE: usize = 2;
 
 #[derive(Debug)]
 pub struct AccountHistory {
@@ -287,18 +296,36 @@ impl AccountHistory {
         let mut sorted_accounts: Vec<_> = highest_deleted_accounts.into_iter().collect();
         sorted_accounts.sort_unstable_by_key(|(addr, _)| *addr);
 
-        provider.with_rocksdb_batch(|mut batch| {
-            let targets: Vec<_> = sorted_accounts
-                .iter()
-                .map(|(addr, highest)| (*addr, (*highest).min(last_changeset_pruned_block)))
-                .collect();
+        let targets: Vec<_> = sorted_accounts
+            .iter()
+            .map(|(addr, highest)| (*addr, (*highest).min(last_changeset_pruned_block)))
+            .collect();
 
-            let outcomes = batch.prune_account_history_batch(&targets)?;
-            deleted_shards = outcomes.deleted;
-            updated_shards = outcomes.updated;
+        if targets.len() >= ROCKSDB_HISTORY_PRUNE_PARALLEL_THRESHOLD {
+            let rocksdb = provider.rocksdb_provider();
+            let chunk_results = targets
+                .par_chunks(ROCKSDB_HISTORY_PRUNE_CHUNK_SIZE)
+                .map(|chunk| {
+                    let mut batch = rocksdb.batch();
+                    let outcomes = batch.prune_account_history_batch(chunk)?;
+                    Ok::<_, ProviderError>((outcomes, batch.into_inner()))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
 
-            Ok(((), Some(batch.into_inner())))
-        })?;
+            for (outcomes, raw_batch) in chunk_results {
+                deleted_shards += outcomes.deleted;
+                updated_shards += outcomes.updated;
+                provider.set_pending_rocksdb_batch(raw_batch);
+            }
+        } else {
+            provider.with_rocksdb_batch(|mut batch| {
+                let outcomes = batch.prune_account_history_batch(&targets)?;
+                deleted_shards = outcomes.deleted;
+                updated_shards = outcomes.updated;
+
+                Ok(((), Some(batch.into_inner())))
+            })?;
+        }
         trace!(target: "pruner", deleted = deleted_shards, updated = updated_shards, %done, "Pruned account history (RocksDB indices)");
 
         // Delete static file jars only when fully processed. During provider.commit(), RocksDB
