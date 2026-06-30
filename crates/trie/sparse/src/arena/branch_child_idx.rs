@@ -1,8 +1,5 @@
-use alloy_trie::{TrieMask, TrieMaskIter};
-use core::{
-    iter::Enumerate,
-    ops::{Index, IndexMut},
-};
+use alloy_trie::TrieMask;
+use core::ops::{Index, IndexMut};
 use smallvec::SmallVec;
 
 /// A dense index into a branch node's children array.
@@ -60,32 +57,5 @@ impl<T> Index<BranchChildIdx> for SmallVec<[T; 4]> {
 impl<T> IndexMut<BranchChildIdx> for SmallVec<[T; 4]> {
     fn index_mut(&mut self, idx: BranchChildIdx) -> &mut Self::Output {
         &mut self.as_mut_slice()[idx.get()]
-    }
-}
-
-/// An iterator over a branch's children that yields `(BranchChildIdx, nibble)` pairs.
-///
-/// Wraps `TrieMask::iter().enumerate()` to produce [`BranchChildIdx`] values instead of raw
-/// `usize` indices.
-pub(super) struct BranchChildIter {
-    inner: Enumerate<TrieMaskIter>,
-}
-
-impl BranchChildIter {
-    /// Creates a new iterator over the occupied children of the given `state_mask`.
-    pub(super) fn new(state_mask: TrieMask) -> Self {
-        Self { inner: state_mask.iter().enumerate() }
-    }
-}
-
-impl Iterator for BranchChildIter {
-    type Item = (BranchChildIdx, u8);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next().map(|(dense, nibble)| (BranchChildIdx(dense as u8), nibble))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
     }
 }

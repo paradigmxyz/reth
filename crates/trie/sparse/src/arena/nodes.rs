@@ -1,7 +1,4 @@
-use super::{
-    branch_child_idx::{BranchChildIdx, BranchChildIter},
-    ArenaSparseSubtrie, Index, NodeArena,
-};
+use super::{branch_child_idx::BranchChildIdx, ArenaSparseSubtrie, Index, NodeArena};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{keccak256, B256};
 use alloy_trie::{BranchNodeCompact, TrieMask};
@@ -104,7 +101,7 @@ impl ArenaSparseNodeBranch {
     ///
     /// # Panics
     ///
-    /// Panics (debug) if the branch does not have exactly 2 children, or if `nibble` is not set.
+    /// Panics if the branch does not have exactly 2 children, or if `nibble` is not set.
     pub(super) fn sibling_child(&self, nibble: u8) -> &ArenaSparseNodeBranchChild {
         debug_assert_eq!(
             self.state_mask.count_bits(),
@@ -113,15 +110,22 @@ impl ArenaSparseNodeBranch {
         );
         let child_idx =
             BranchChildIdx::new(self.state_mask, nibble).expect("nibble not found in state_mask");
-        // With exactly 2 children the dense array has indices 0 and 1.
-        &self.children[1 - child_idx.get()]
+        match (child_idx.get(), self.children.as_slice()) {
+            (0, [_, sibling]) | (1, [sibling, _]) => sibling,
+            _ => panic!("sibling_child requires exactly 2 children"),
+        }
     }
 
     /// Iterates over `(nibble, &ArenaSparseNodeBranchChild)` pairs in nibble order.
     pub(super) fn child_iter(
         &self,
     ) -> impl Iterator<Item = (u8, &ArenaSparseNodeBranchChild)> + '_ {
-        BranchChildIter::new(self.state_mask).map(|(idx, nibble)| (nibble, &self.children[idx]))
+        debug_assert_eq!(
+            self.children.len(),
+            self.state_mask.len(),
+            "branch children must match state mask"
+        );
+        self.state_mask.iter().zip(self.children.iter())
     }
 
     /// Returns a [`BranchNodeCompact`] from this branch's masks and children hashes.
@@ -305,8 +309,10 @@ impl ArenaSparseNode {
                 value: leaf.value,
             },
             TrieNodeV2::Branch(branch) => {
-                let children = branch.stack[..branch.state_mask.count_bits() as usize]
+                let children = branch
+                    .stack
                     .iter()
+                    .take(branch.state_mask.count_bits() as usize)
                     .map(|rlp| ArenaSparseNodeBranchChild::Blinded(rlp.clone()))
                     .collect();
                 Self::Branch(ArenaSparseNodeBranch {
