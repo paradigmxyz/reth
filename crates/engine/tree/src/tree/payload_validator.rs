@@ -567,7 +567,7 @@ where
             parent_state_root: parent_block.state_root(),
             transaction_count: input.transaction_count(),
             gas_used: input.gas_used(),
-            withdrawals: input.withdrawals().map(|w| w.to_vec()),
+            withdrawals: input.withdrawals().map(|w| w.to_vec().into()),
             decoded_bal: decoded_bal.as_ref().map(Arc::clone),
         };
 
