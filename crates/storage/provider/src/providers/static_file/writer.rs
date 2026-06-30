@@ -1082,7 +1082,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.buf.clear();
         column.to_compact(&mut self.buf);
 
-        self.writer.append_column(Some(Ok(&self.buf))).map_err(ProviderError::other)?;
+        self.writer.append_column_bytes(&self.buf).map_err(ProviderError::other)?;
         Ok(())
     }
 

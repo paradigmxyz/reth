@@ -200,18 +200,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         self.dirty = true;
 
         match column {
-            Some(Ok(value)) => {
-                if self.offsets.is_empty() {
-                    // Represents the offset of the soon to be appended data column
-                    self.offsets.push(self.data_file.stream_position()?);
-                }
-
-                let written = self.write_column(value.as_ref())?;
-
-                // Last offset represents the size of the data file if no more data is to be
-                // appended. Otherwise, represents the offset of the next data item.
-                self.offsets.push(self.offsets.last().expect("qed") + written as u64);
-            }
+            Some(Ok(value)) => self.append_column_bytes_inner(value.as_ref())?,
             None => {
                 return Err(NippyJarError::UnexpectedMissingValue(
                     self.jar.rows as u64,
@@ -220,6 +209,29 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             }
             Some(Err(err)) => return Err(err.into()),
         }
+
+        Ok(())
+    }
+
+    /// Appends an already encoded column to the data file.
+    ///
+    /// This avoids wrapping the common provider-owned byte buffer in `Option<Result<_>>`.
+    pub fn append_column_bytes(&mut self, value: &[u8]) -> Result<(), NippyJarError> {
+        self.dirty = true;
+        self.append_column_bytes_inner(value)
+    }
+
+    fn append_column_bytes_inner(&mut self, value: &[u8]) -> Result<(), NippyJarError> {
+        if self.offsets.is_empty() {
+            // Represents the offset of the soon to be appended data column
+            self.offsets.push(self.data_file.stream_position()?);
+        }
+
+        let written = self.write_column(value)?;
+
+        // Last offset represents the size of the data file if no more data is to be
+        // appended. Otherwise, represents the offset of the next data item.
+        self.offsets.push(self.offsets.last().expect("qed") + written as u64);
 
         Ok(())
     }
