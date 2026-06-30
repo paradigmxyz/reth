@@ -321,7 +321,12 @@ mod tests {
 
         assert_eq!(
             provider.basic_account(&address).unwrap(),
-            Some(Account { nonce: 7, balance: U256::from(42), bytecode_hash: None })
+            Some(Account {
+                nonce: 7,
+                balance: U256::from(42),
+                bytecode_hash: None,
+                storage_root: None,
+            })
         );
     }
 
@@ -342,7 +347,12 @@ mod tests {
 
         assert_eq!(
             provider.basic_account(&address).unwrap(),
-            Some(Account { nonce: 7, balance: U256::from(42), bytecode_hash: Some(code_hash) })
+            Some(Account {
+                nonce: 7,
+                balance: U256::from(42),
+                bytecode_hash: Some(code_hash),
+                storage_root: None,
+            })
         );
         assert_eq!(
             provider.bytecode_by_hash(&code_hash).unwrap(),
@@ -404,11 +414,21 @@ mod tests {
 
         assert_eq!(
             provider.basic_account(&address).unwrap(),
-            Some(Account { nonce: 7, balance: U256::from(42), bytecode_hash: Some(code_hash) })
+            Some(Account {
+                nonce: 7,
+                balance: U256::from(42),
+                bytecode_hash: Some(code_hash),
+                storage_root: None,
+            })
         );
         assert_eq!(
             provider.basic_account(&address).unwrap(),
-            Some(Account { nonce: 7, balance: U256::from(42), bytecode_hash: Some(code_hash) })
+            Some(Account {
+                nonce: 7,
+                balance: U256::from(42),
+                bytecode_hash: Some(code_hash),
+                storage_root: None,
+            })
         );
         assert_eq!(account_reads.load(Ordering::Relaxed), 1);
 

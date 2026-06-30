@@ -412,6 +412,7 @@ where
                     nonce: account.nonce.unwrap_or_default(),
                     balance: account.balance,
                     bytecode_hash,
+                    storage_root: None,
                 }),
                 storage,
             ),
@@ -997,6 +998,7 @@ fn write_account_to_db<TX: DbTxMut>(
         nonce: genesis_account.nonce.unwrap_or_default(),
         balance: genesis_account.balance,
         bytecode_hash,
+        storage_root: None,
     };
 
     let hashed_address = keccak256(address);
@@ -1085,6 +1087,7 @@ where
         nonce: genesis_account.nonce.unwrap_or_default(),
         balance: genesis_account.balance,
         bytecode_hash,
+        storage_root: None,
     };
 
     let hashed_address = keccak256(address);

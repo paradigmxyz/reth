@@ -158,14 +158,24 @@ fn test_empty_account() {
         (
             Address::random(),
             (
-                Account { nonce: 0, balance: U256::from(0), bytecode_hash: None },
+                Account {
+                    nonce: 0,
+                    balance: U256::from(0),
+                    bytecode_hash: None,
+                    storage_root: None,
+                },
                 BTreeMap::from([(B256::with_last_byte(0x4), U256::from(12))]),
             ),
         ),
         (
             Address::random(),
             (
-                Account { nonce: 0, balance: U256::from(0), bytecode_hash: None },
+                Account {
+                    nonce: 0,
+                    balance: U256::from(0),
+                    bytecode_hash: None,
+                    storage_root: None,
+                },
                 BTreeMap::default(),
             ),
         ),
@@ -176,6 +186,7 @@ fn test_empty_account() {
                     nonce: 155,
                     balance: U256::from(414241124u32),
                     bytecode_hash: Some(keccak256("test")),
+                    storage_root: None,
                 },
                 BTreeMap::from([
                     (B256::ZERO, U256::from(3)),
@@ -199,6 +210,7 @@ fn test_empty_storage_root() {
         nonce: 155,
         balance: U256::from(414241124u32),
         bytecode_hash: Some(keccak256(code)),
+        storage_root: None,
     };
     insert_account(tx.tx_ref(), address, account, &Default::default());
     tx.commit().unwrap();
@@ -225,6 +237,7 @@ fn test_storage_root() {
         nonce: 155,
         balance: U256::from(414241124u32),
         bytecode_hash: Some(keccak256(code)),
+        storage_root: None,
     };
 
     insert_account(tx.tx_ref(), address, account, &storage);
@@ -312,7 +325,8 @@ fn test_state_root_with_state(state: State) {
 }
 
 fn encode_account(account: Account, storage_root: Option<B256>) -> Vec<u8> {
-    let account = account.into_trie_account(storage_root.unwrap_or(EMPTY_ROOT_HASH));
+    let account =
+        account.into_trie_account(storage_root.or(account.storage_root).unwrap_or(EMPTY_ROOT_HASH));
     let mut account_rlp = Vec::with_capacity(account.length());
     account.encode(&mut account_rlp);
     account_rlp
@@ -378,7 +392,12 @@ fn account_and_storage_trie() {
 
     // Insert first account
     let key1 = b256!("0xb000000000000000000000000000000000000000000000000000000000000000");
-    let account1 = Account { nonce: 0, balance: U256::from(3).mul(ether), bytecode_hash: None };
+    let account1 = Account {
+        nonce: 0,
+        balance: U256::from(3).mul(ether),
+        bytecode_hash: None,
+        storage_root: None,
+    };
     hashed_account_cursor.upsert(key1, &account1).unwrap();
     hash_builder.add_leaf(Nibbles::unpack(key1), &encode_account(account1, None));
 
@@ -397,8 +416,12 @@ fn account_and_storage_trie() {
     assert_eq!(key3[0], 0xB0);
     assert_eq!(key3[1], 0x41);
     let code_hash = b256!("0x5be74cad16203c4905c068b012a2e9fb6d19d036c410f16fd177f337541440dd");
-    let account3 =
-        Account { nonce: 0, balance: U256::from(2).mul(ether), bytecode_hash: Some(code_hash) };
+    let account3 = Account {
+        nonce: 0,
+        balance: U256::from(2).mul(ether),
+        bytecode_hash: Some(code_hash),
+        storage_root: None,
+    };
     hashed_account_cursor.upsert(key3, &account3).unwrap();
     for (hashed_slot, value) in storage {
         if hashed_storage_cursor
@@ -481,7 +504,12 @@ fn account_and_storage_trie() {
     let address4b = address!("0x4f61f2d5ebd991b85aa1677db97307caf5215c91");
     let key4b = keccak256(address4b);
     assert_eq!(key4b.0[0], key4a.0[0]);
-    let account4b = Account { nonce: 0, balance: U256::from(5).mul(ether), bytecode_hash: None };
+    let account4b = Account {
+        nonce: 0,
+        balance: U256::from(5).mul(ether),
+        bytecode_hash: None,
+        storage_root: None,
+    };
     hashed_account_cursor.upsert(key4b, &account4b).unwrap();
 
     let mut prefix_set = PrefixSetMut::default();
@@ -767,7 +795,12 @@ fn extension_node_storage_trie<N: ProviderNodeTypes>(
 fn extension_node_trie<N: ProviderNodeTypes>(
     tx: &DatabaseProviderRW<Arc<TempDatabase<DatabaseEnv>>, N>,
 ) -> B256 {
-    let a = Account { nonce: 0, balance: U256::from(1u64), bytecode_hash: Some(B256::random()) };
+    let a = Account {
+        nonce: 0,
+        balance: U256::from(1u64),
+        bytecode_hash: Some(B256::random()),
+        storage_root: None,
+    };
     let val = encode_account(a, None);
 
     let mut hashed_accounts = tx.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();

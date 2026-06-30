@@ -1650,7 +1650,15 @@ mod tests {
 
         let state = HashedPostState {
             accounts: B256Map::from_iter([
-                (addr1, Some(Account { nonce: 1, balance: U256::from(100), bytecode_hash: None })),
+                (
+                    addr1,
+                    Some(Account {
+                        nonce: 1,
+                        balance: U256::from(100),
+                        bytecode_hash: None,
+                        storage_root: None,
+                    }),
+                ),
                 (addr2, None),
                 (addr3, Some(Account::default())),
             ]),

@@ -388,7 +388,12 @@ mod tests {
         let mut hashed_state = HashedPostState::default();
         hashed_state.accounts.insert(
             B256::from(U256::from(1)),
-            Some(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
+            Some(Account {
+                nonce: 1,
+                balance: U256::from(10),
+                bytecode_hash: None,
+                storage_root: None,
+            }),
         );
         hashed_state.accounts.insert(B256::from(U256::from(2)), None);
         hashed_state.storages.insert(

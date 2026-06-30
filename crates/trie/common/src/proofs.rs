@@ -248,6 +248,7 @@ impl MultiProof {
                     balance: account.balance,
                     nonce: account.nonce,
                     bytecode_hash: (account.code_hash != KECCAK_EMPTY).then_some(account.code_hash),
+                    storage_root: Some(account.storage_root),
                 })
             }
             None
@@ -377,6 +378,7 @@ impl DecodedMultiProof {
                     balance: account.balance,
                     nonce: account.nonce,
                     bytecode_hash: (account.code_hash != KECCAK_EMPTY).then_some(account.code_hash),
+                    storage_root: Some(account.storage_root),
                 })
             }
             None
@@ -827,7 +829,15 @@ impl AccountProof {
             // See: https://github.com/ethereum/go-ethereum/issues/28441
             (EMPTY_ROOT_HASH, None)
         } else {
-            (storage_hash, Some(Account { nonce, balance, bytecode_hash: code_hash.into() }))
+            (
+                storage_hash,
+                Some(Account {
+                    nonce,
+                    balance,
+                    bytecode_hash: code_hash.into(),
+                    storage_root: Some(storage_hash),
+                }),
+            )
         };
 
         Self { address, info, proof: account_proof, storage_root, storage_proofs }
@@ -1245,7 +1255,12 @@ mod tests {
             address: Address::random(),
             info: Some(
                 // non-empty account
-                Account { nonce: 100, balance: U256::ZERO, bytecode_hash: Some(KECCAK_EMPTY) },
+                Account {
+                    nonce: 100,
+                    balance: U256::ZERO,
+                    bytecode_hash: Some(KECCAK_EMPTY),
+                    storage_root: None,
+                },
             ),
             proof: vec![],
             storage_root: B256::ZERO,
@@ -1340,6 +1355,7 @@ mod tests {
                 nonce: 42,
                 balance: U256::from(100),
                 bytecode_hash: Some(KECCAK_EMPTY),
+                storage_root: None,
             }),
             proof: vec![],
             storage_root: B256::random(),

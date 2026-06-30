@@ -694,3 +694,10 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "165879b69fd5766666f220c1752e4a7f7a15b310" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "165879b69fd5766666f220c1752e4a7f7a15b310" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "165879b69fd5766666f220c1752e4a7f7a15b310" }
+reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "165879b69fd5766666f220c1752e4a7f7a15b310" }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "165879b69fd5766666f220c1752e4a7f7a15b310" }

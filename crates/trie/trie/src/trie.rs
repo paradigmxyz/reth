@@ -269,55 +269,67 @@ where
                     tracker.inc_leaf();
                     storage_ctx.hashed_entries_walked += 1;
 
-                    // calculate storage root, calculating the remaining threshold so we have
-                    // bounded memory usage even while in the middle of storage root calculation
-                    let remaining_threshold = self.threshold.saturating_sub(
-                        storage_ctx.total_updates_len(&account_node_iter, &hash_builder),
-                    );
-
-                    if hashed_storage_cursor.is_none() {
-                        hashed_storage_cursor =
-                            Some(self.hashed_cursor_factory.hashed_storage_cursor(hashed_address)?);
-                    }
-                    if storage_trie_cursor.is_none() {
-                        storage_trie_cursor =
-                            Some(self.trie_cursor_factory.storage_trie_cursor(hashed_address)?);
-                    }
-
-                    let storage_result = StorageRoot::<T, H>::calculate_with_cursors(
-                        StorageRootCalculation {
+                    if let Some(storage_root) = account.storage_root {
+                        storage_ctx.add_account_leaf(
                             hashed_address,
-                            prefix_set: self
-                                .prefix_sets
-                                .storage_prefix_sets
-                                .get(&hashed_address)
-                                .cloned()
-                                .unwrap_or_default(),
-                            previous_state: None,
-                            threshold: remaining_threshold,
+                            account,
+                            storage_root,
+                            &mut hash_builder,
+                        );
+                    } else {
+                        // calculate storage root, calculating the remaining threshold so we have
+                        // bounded memory usage even while in the middle of storage root calculation
+                        let remaining_threshold = self.threshold.saturating_sub(
+                            storage_ctx.total_updates_len(&account_node_iter, &hash_builder),
+                        );
+
+                        if hashed_storage_cursor.is_none() {
+                            hashed_storage_cursor = Some(
+                                self.hashed_cursor_factory.hashed_storage_cursor(hashed_address)?,
+                            );
+                        }
+                        if storage_trie_cursor.is_none() {
+                            storage_trie_cursor =
+                                Some(self.trie_cursor_factory.storage_trie_cursor(hashed_address)?);
+                        }
+
+                        let storage_result = StorageRoot::<T, H>::calculate_with_cursors(
+                            StorageRootCalculation {
+                                hashed_address,
+                                prefix_set: self
+                                    .prefix_sets
+                                    .storage_prefix_sets
+                                    .get(&hashed_address)
+                                    .cloned()
+                                    .unwrap_or_default(),
+                                previous_state: None,
+                                threshold: remaining_threshold,
+                                retain_updates,
+                            },
+                            storage_trie_cursor
+                                .as_mut()
+                                .expect("storage trie cursor is initialized"),
+                            hashed_storage_cursor
+                                .as_mut()
+                                .expect("hashed storage cursor is initialized"),
+                            #[cfg(feature = "metrics")]
+                            &self.metrics.storage_trie,
+                        )?;
+                        if let Some(storage_state) = storage_ctx.process_storage_root_result(
+                            storage_result,
+                            hashed_address,
+                            account,
+                            &mut hash_builder,
                             retain_updates,
-                        },
-                        storage_trie_cursor.as_mut().expect("storage trie cursor is initialized"),
-                        hashed_storage_cursor
-                            .as_mut()
-                            .expect("hashed storage cursor is initialized"),
-                        #[cfg(feature = "metrics")]
-                        &self.metrics.storage_trie,
-                    )?;
-                    if let Some(storage_state) = storage_ctx.process_storage_root_result(
-                        storage_result,
-                        hashed_address,
-                        account,
-                        &mut hash_builder,
-                        retain_updates,
-                    )? {
-                        // storage root hit threshold, need to pause
-                        return Ok(storage_ctx.create_progress_state(
-                            account_node_iter,
-                            hash_builder,
-                            hashed_address,
-                            Some(storage_state),
-                        ))
+                        )? {
+                            // storage root hit threshold, need to pause
+                            return Ok(storage_ctx.create_progress_state(
+                                account_node_iter,
+                                hash_builder,
+                                hashed_address,
+                                Some(storage_state),
+                            ))
+                        }
                     }
 
                     // decide if we need to return intermediate progress
@@ -455,10 +467,7 @@ impl StateRootContext {
                 }
 
                 // Encode the account with the computed storage root
-                self.account_rlp.clear();
-                let trie_account = account.into_trie_account(storage_root);
-                trie_account.encode(&mut self.account_rlp as &mut dyn BufMut);
-                hash_builder.add_leaf(Nibbles::unpack(hashed_address), &self.account_rlp);
+                self.add_account_leaf(hashed_address, account, storage_root, hash_builder);
                 Ok(None)
             }
             StorageRootProgress::Progress(state, storage_slots_walked, updates) => {
@@ -480,6 +489,19 @@ impl StateRootContext {
                 Ok(Some(IntermediateStorageRootState { state: *state, account }))
             }
         }
+    }
+
+    fn add_account_leaf(
+        &mut self,
+        hashed_address: B256,
+        account: Account,
+        storage_root: B256,
+        hash_builder: &mut HashBuilder,
+    ) {
+        self.account_rlp.clear();
+        let trie_account = account.into_trie_account(storage_root);
+        trie_account.encode(&mut self.account_rlp as &mut dyn BufMut);
+        hash_builder.add_leaf(Nibbles::unpack(hashed_address), &self.account_rlp);
     }
 }
 

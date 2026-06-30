@@ -632,7 +632,8 @@ mod tests {
         let addr4 = Address::with_last_byte(4);
         let addr5 = Address::with_last_byte(5);
 
-        let account = Account { nonce: 1, balance: U256::from(100), bytecode_hash: None };
+        let account =
+            Account { nonce: 1, balance: U256::from(100), bytecode_hash: None, storage_root: None };
 
         // Build changesets: blocks 0-4 have 1 change each, block 5 has 4 changes, block 6 has 1
         let changesets: Vec<ChangeSet> = vec![

@@ -760,6 +760,7 @@ impl BalAccountStateFields {
                     .and_then(|account| account.bytecode_hash)
                     .or(Some(alloy_consensus::constants::KECCAK_EMPTY))
             }),
+            storage_root: existing_account.and_then(|account| account.storage_root),
         }
     }
 }
@@ -835,11 +836,13 @@ mod tests {
             balance: U256::from(1),
             nonce: 3,
             bytecode_hash: Some(B256::repeat_byte(0xaa)),
+            storage_root: Some(B256::repeat_byte(0xbb)),
         }));
 
         assert_eq!(account.balance, U256::from(10));
         assert_eq!(account.nonce, 3);
         assert_eq!(account.bytecode_hash, Some(B256::repeat_byte(0xaa)));
+        assert_eq!(account.storage_root, Some(B256::repeat_byte(0xbb)));
     }
 }
 

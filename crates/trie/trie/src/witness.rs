@@ -249,17 +249,18 @@ where
                 .ok_or(TrieWitnessError::MissingAccount(hashed_address))?
                 .unwrap_or_default();
 
-            let storage_root =
-                if let Some(storage_trie) = sparse_trie.storage_trie_mut(&hashed_address) {
-                    storage_trie.root()
-                } else {
-                    let record_root_node = !self.mode.is_canonical() ||
-                        state
-                            .storages
-                            .get(&hashed_address)
-                            .is_some_and(|storage| !storage.storage.is_empty());
-                    self.account_storage_root(hashed_address, record_root_node)?
-                };
+            let storage_root = if let Some(storage_root) = account.storage_root {
+                storage_root
+            } else if let Some(storage_trie) = sparse_trie.storage_trie_mut(&hashed_address) {
+                storage_trie.root()
+            } else {
+                let record_root_node = !self.mode.is_canonical() ||
+                    state
+                        .storages
+                        .get(&hashed_address)
+                        .is_some_and(|storage| !storage.storage.is_empty());
+                self.account_storage_root(hashed_address, record_root_node)?
+            };
 
             if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
                 account_removals.insert(hashed_address, LeafUpdate::Changed(vec![]));

@@ -159,6 +159,7 @@ where
 
                 let root = match result.root {
                     Some(root) => root,
+                    None if let Some(storage_root) = account.storage_root => storage_root,
                     None => {
                         // In `compute_v2_account_multiproof` we ensure that all dispatched storage
                         // proofs computations for which there is also an account proof will return
@@ -185,13 +186,19 @@ where
             Self::Sync { storage_calculator, hashed_address, account, cached_storage_roots } => {
                 let hashed_address = *hashed_address;
                 let account = *account;
-                let mut calculator = storage_calculator.borrow_mut();
-                let root_node = calculator.storage_root_node(hashed_address)?;
-                let storage_root = calculator
-                    .compute_root_hash(&[root_node])?
-                    .expect("storage_root_node returns a node at empty path");
+                let storage_root = if let Some(storage_root) = account.storage_root {
+                    storage_root
+                } else {
+                    let mut calculator = storage_calculator.borrow_mut();
+                    let root_node = calculator.storage_root_node(hashed_address)?;
+                    let storage_root = calculator
+                        .compute_root_hash(&[root_node])?
+                        .expect("storage_root_node returns a node at empty path");
 
-                cached_storage_roots.insert(hashed_address, storage_root);
+                    cached_storage_roots.insert(hashed_address, storage_root);
+                    storage_root
+                };
+
                 (account, storage_root)
             }
         };
@@ -319,6 +326,11 @@ where
 
         // If the address didn't have a job dispatched for it then we can assume it has no targets,
         // and we only need its root.
+
+        if let Some(root) = account.storage_root {
+            self.stats.borrow_mut().from_cache_count += 1;
+            return AsyncAccountDeferredValueEncoder::FromCache { account, root }
+        }
 
         // If the root is already calculated then just use it directly
         if let Some(root) = self.cached_storage_roots.get(&hashed_address) {

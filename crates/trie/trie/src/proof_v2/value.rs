@@ -123,18 +123,24 @@ where
     H: HashedCursorFactory,
 {
     fn encode(self, buf: &mut Vec<u8>) -> Result<(), StateProofError> {
-        let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
-        let hashed_cursor =
-            self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;
+        let storage_root = if let Some(storage_root) = self.account.storage_root {
+            storage_root
+        } else {
+            let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
+            let hashed_cursor =
+                self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;
 
-        let mut storage_proof_calculator = ProofCalculator::new_storage(trie_cursor, hashed_cursor);
-        if let Some(prefix_set) = self.storage_prefix_sets.get(&self.hashed_address) {
-            storage_proof_calculator = storage_proof_calculator.with_prefix_set(prefix_set.clone());
-        }
-        let root_node = storage_proof_calculator.storage_root_node(self.hashed_address)?;
-        let storage_root = storage_proof_calculator
-            .compute_root_hash(&[root_node])?
-            .expect("storage_root_node returns a node at empty path");
+            let mut storage_proof_calculator =
+                ProofCalculator::new_storage(trie_cursor, hashed_cursor);
+            if let Some(prefix_set) = self.storage_prefix_sets.get(&self.hashed_address) {
+                storage_proof_calculator =
+                    storage_proof_calculator.with_prefix_set(prefix_set.clone());
+            }
+            let root_node = storage_proof_calculator.storage_root_node(self.hashed_address)?;
+            storage_proof_calculator
+                .compute_root_hash(&[root_node])?
+                .expect("storage_root_node returns a node at empty path")
+        };
 
         let trie_account = self.account.into_trie_account(storage_root);
         trie_account.encode(buf);
