@@ -1047,9 +1047,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.102"
+version = "1.0.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
+checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
 name = "approx"
@@ -3638,6 +3638,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "eyre",
+ "reth-chain-state",
  "reth-engine-tree",
  "reth-ethereum",
  "reth-trie",
@@ -7671,7 +7672,6 @@ dependencies = [
  "reth-rpc-engine-api",
  "reth-storage-errors",
  "revm",
- "revm-primitives",
  "tokio",
  "tracing",
 ]
@@ -7701,8 +7701,8 @@ dependencies = [
  "reth-tasks",
  "reth-testing-utils",
  "reth-trie",
- "revm-database",
- "revm-state",
+ "reth-trie-sparse",
+ "revm",
  "serde",
  "tokio",
  "tokio-stream",
@@ -8339,7 +8339,6 @@ dependencies = [
  "metrics",
  "metrics-util",
  "moka",
- "parking_lot",
  "proptest",
  "rand 0.8.6",
  "rand 0.9.4",
@@ -8382,9 +8381,6 @@ dependencies = [
  "reth-trie-parallel",
  "reth-trie-sparse",
  "revm",
- "revm-database-interface",
- "revm-primitives",
- "revm-state",
  "schnellru",
  "serde_json",
  "thiserror 2.0.18",
@@ -8799,7 +8795,7 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "reth-trie",
- "revm-state",
+ "revm",
  "tracing",
 ]
 
@@ -8964,8 +8960,6 @@ dependencies = [
  "reth-tracing",
  "reth-trie",
  "revm",
- "revm-bytecode",
- "revm-database",
  "serde",
  "serde_json",
  "tempfile",
@@ -9665,9 +9659,7 @@ dependencies = [
  "reth-tracing",
  "reth-trie",
  "reth-trie-db",
- "revm-database",
- "revm-database-interface",
- "revm-state",
+ "revm",
  "rocksdb",
  "smallvec",
  "strum 0.27.2",
@@ -9819,7 +9811,6 @@ dependencies = [
  "reth-trie-common",
  "revm",
  "revm-inspectors",
- "revm-primitives",
  "serde",
  "serde_json",
  "sha2",
@@ -10332,7 +10323,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-tokio-util",
  "reth-trie-common",
- "revm-database",
+ "revm",
  "serde_json",
  "tokio",
  "tokio-stream",
@@ -10350,8 +10341,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-prune-types",
  "reth-static-file-types",
- "revm-database-interface",
- "revm-state",
+ "revm",
  "thiserror 2.0.18",
 ]
 
@@ -10505,8 +10495,6 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "revm",
- "revm-interpreter",
- "revm-primitives",
  "rustc-hash",
  "schnellru",
  "serde",
@@ -10546,8 +10534,6 @@ dependencies = [
  "reth-tracing",
  "reth-trie-common",
  "reth-trie-sparse",
- "revm-database",
- "revm-state",
  "tracing",
  "triehash",
 ]
@@ -10578,8 +10564,7 @@ dependencies = [
  "rayon",
  "reth-codecs",
  "reth-primitives-traits",
- "revm-database",
- "revm-state",
+ "revm",
  "serde",
  "serde_json",
  "serde_with",
@@ -10609,7 +10594,6 @@ dependencies = [
  "reth-trie",
  "reth-trie-common",
  "revm",
- "revm-database",
  "serde_json",
  "similar-asserts",
  "tracing",
@@ -10644,7 +10628,7 @@ dependencies = [
  "reth-trie",
  "reth-trie-db",
  "reth-trie-sparse",
- "revm-state",
+ "revm",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
