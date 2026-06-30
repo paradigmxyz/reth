@@ -526,6 +526,13 @@ mod tests {
 
     #[test]
     fn test_save_blocks_flushes_bal_store() {
+        use reth_db::{
+            models::{StoredBlockAccessList, StoredBlockAccessListKey},
+            table::Decompress,
+            tables,
+        };
+        use reth_provider::RocksDBProviderFactory;
+
         reth_tracing::init_test_tracing();
         let provider = create_test_provider_factory();
 
@@ -553,7 +560,14 @@ mod tests {
 
         let result = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("test timed out");
         assert_eq!(result.last_block, Some(num_hash));
-        assert_eq!(provider.bal_store().get_by_hash(num_hash.hash).unwrap(), None);
+        assert_eq!(provider.bal_store().get_by_hash(num_hash.hash).unwrap(), Some(raw_bal.clone()));
+        let stored = provider
+            .rocksdb_provider()
+            .get_raw::<tables::BlockAccessLists>(StoredBlockAccessListKey::new(num_hash))
+            .unwrap()
+            .unwrap();
+        let stored = StoredBlockAccessList::decompress(&stored).unwrap();
+        assert_eq!(stored.into_verified_raw().unwrap().into_raw(), raw_bal.clone());
         assert_eq!(get_bal_by_hash(&provider, num_hash.hash).unwrap(), Some(raw_bal));
     }
 

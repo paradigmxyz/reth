@@ -13,7 +13,7 @@ use reth_storage_api::{BalNotification, BalNotificationStream, BalStore, RawBal}
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_tokio_util::EventSender;
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, HashMap},
     sync::Arc,
 };
 
@@ -30,7 +30,7 @@ pub struct RocksDBBalStore {
     retention: PruneMode,
     /// `RocksDB` provider used for persisted BAL reads and writes.
     rocksdb: RocksDBProvider,
-    /// BALs inserted since the last flush.
+    /// Recent BALs and pending writes kept in memory.
     buffer: Arc<RwLock<RocksDBBalStoreBuffer>>,
     /// Broadcasts BAL insert notifications.
     notifications: EventSender<BalNotification>,
@@ -204,6 +204,11 @@ impl RocksDBBalStoreBuffer {
         }
     }
 
+    fn prune(&mut self, prune_mode: PruneMode, tip: BlockNumber) -> usize {
+        let keys = self.keys_to_prune(prune_mode, tip);
+        self.remove_keys(&keys)
+    }
+
     fn remove_keys(&mut self, keys: &[StoredBlockAccessListKey]) -> usize {
         let mut removed = 0;
         for key in keys {
@@ -249,10 +254,6 @@ impl BalStore for RocksDBBalStore {
     fn insert(&self, block: NumHash, bal: RawBal) -> ProviderResult<()> {
         let mut buffer = self.buffer.write();
         buffer.insert(block, bal.clone());
-        if let Some(highest_block_number) = buffer.highest_block_number {
-            let keys = buffer.keys_to_prune(self.buffer_retention(), highest_block_number);
-            buffer.remove_keys(&keys);
-        }
         drop(buffer);
 
         self.notifications.notify(BalNotification::new(block, bal));
@@ -269,10 +270,6 @@ impl BalStore for RocksDBBalStore {
         for (block, bal) in &entries {
             buffer.insert(*block, bal.clone());
         }
-        if let Some(highest_block_number) = buffer.highest_block_number {
-            let keys = buffer.keys_to_prune(self.buffer_retention(), highest_block_number);
-            buffer.remove_keys(&keys);
-        }
         drop(buffer);
 
         for (block, bal) in entries {
@@ -284,31 +281,25 @@ impl BalStore for RocksDBBalStore {
     fn flush(&self, blocks: &[NumHash]) -> ProviderResult<()> {
         let mut buffer = self.buffer.write();
         let pending = buffer.pending_entries(blocks);
-        if pending.is_empty() {
-            return Ok(())
+        if !pending.is_empty() {
+            let mut batch = self.rocksdb.batch();
+            for (key, bal) in &pending {
+                let value = StoredBlockAccessList::new(bal.clone());
+                batch.put::<tables::BlockAccessLists>(*key, &value)?;
+            }
+            batch.commit()?;
+
+            buffer.remove_flushed_pending(&pending);
         }
 
-        let mut batch = self.rocksdb.batch();
-        for (key, bal) in &pending {
-            let value = StoredBlockAccessList::new(bal.clone());
-            batch.put::<tables::BlockAccessLists>(*key, &value)?;
+        if let Some(tip) = blocks.iter().map(|block| block.number).max() {
+            buffer.prune(self.buffer_retention(), tip);
         }
-        batch.commit()?;
-
-        buffer.remove_flushed_pending(&pending);
         Ok(())
     }
 
     fn prune(&self, tip: BlockNumber) -> ProviderResult<usize> {
-        let disk_keys = self.keys_to_prune(tip)?;
-        let mut buffer = self.buffer.write();
-        let buffer_keys = buffer.keys_to_prune(self.buffer_retention(), tip);
-        let pruned =
-            disk_keys.iter().chain(buffer_keys.iter()).copied().collect::<BTreeSet<_>>().len();
-
-        self.delete_keys(disk_keys)?;
-        buffer.remove_keys(&buffer_keys);
-        Ok(pruned)
+        self.delete_keys(self.keys_to_prune(tip)?)
     }
 
     fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
@@ -380,7 +371,7 @@ mod tests {
     }
 
     #[test]
-    fn buffer_retention_keeps_recent_bals() {
+    fn flush_prunes_buffer_retention() {
         let (_dir, store) = test_store();
         let old = NumHash::new(1, B256::with_last_byte(1));
         let retained =
@@ -388,13 +379,21 @@ mod tests {
         let old_bal = Bytes::from_static(&[0xc1, 0x01]);
         let retained_bal = Bytes::from_static(&[0xc1, 0x02]);
 
-        store.insert(old, RawBal::from(old_bal)).unwrap();
+        store.insert(old, RawBal::from(old_bal.clone())).unwrap();
         store.insert(retained, RawBal::from(retained_bal.clone())).unwrap();
+
+        assert_eq!(
+            store.get_by_hashes(&[old.hash, retained.hash]).unwrap(),
+            vec![Some(old_bal), Some(retained_bal.clone())]
+        );
+
+        store.flush(&[retained]).unwrap();
 
         assert_eq!(
             store.get_by_hashes(&[old.hash, retained.hash]).unwrap(),
             vec![None, Some(retained_bal)]
         );
+        assert!(!store.buffer.read().pending.contains_key(&StoredBlockAccessListKey::new(old)));
         assert_eq!(disk_bal(&store, old), None);
     }
 
@@ -497,6 +496,7 @@ mod tests {
             .unwrap();
         store.insert(NumHash::new(8, retained_hash), RawBal::from(retained_bal.clone())).unwrap();
         store.flush(&[NumHash::new(7, old_hash), NumHash::new(8, retained_hash)]).unwrap();
+        store.flush(&[NumHash::new(10, B256::with_last_byte(3))]).unwrap();
 
         assert_eq!(store.prune(10).unwrap(), 1);
         assert_eq!(disk_bal(&store, NumHash::new(7, old_hash)), None);
