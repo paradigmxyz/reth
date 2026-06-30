@@ -17,7 +17,6 @@ reth-chain-state.workspace = true
 reth-chainspec.workspace = true
 reth-config.workspace = true
 reth-evm.workspace = true
-reth-execution-types.workspace = true
 reth-exex-types = { workspace = true, features = ["serde", "serde-bincode-compat"] }
 reth-fs-util.workspace = true
 reth-metrics.workspace = true
@@ -54,6 +53,7 @@ tracing.workspace = true
 [dev-dependencies]
 reth-db-common.workspace = true
 reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
+reth-execution-types.workspace = true
 reth-primitives-traits = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true

@@ -20,8 +20,11 @@ use evm2::evm::{CacheDB, Database, Db, DbErrorCode, DbResult, DynDatabase, State
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
+use reth_execution_types::{
+    extend_state_and_collect_reverts, state_source_size_hint, BlockExecutionResult, BlockReverts,
+    ExecutionState, ExecutionStateAccumulator, HashedPostState,
+};
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
-use reth_execution_types::{BlockExecutionResult, HashedPostState};
 #[cfg(feature = "std")]
 use reth_primitives_traits::BlockTy;
 use reth_primitives_traits::{
@@ -459,6 +462,14 @@ pub trait Executor: Sized {
     /// The size hint of the batch's tracked state size.
     fn size_hint(&self) -> usize;
 
+    /// Converts the accumulated batch state and the provided execution results into an execution
+    /// outcome.
+    fn into_execution_outcome(
+        self,
+        first_block: u64,
+        results: Vec<BlockExecutionResult<ReceiptTy<Self::Primitives>>>,
+    ) -> ExecutionOutcome<ReceiptTy<Self::Primitives>>;
+
     /// Takes the encoded block access list from executor.
     fn take_bal(&mut self) -> Option<Bytes>;
 }
@@ -466,16 +477,30 @@ pub trait Executor: Sized {
 /// Generic block executor backed by a [`ConfigureEvm`] implementation.
 #[cfg(feature = "std")]
 #[expect(missing_debug_implementations)]
-pub struct BasicBlockExecutor<Evm, DB> {
+pub struct BasicBlockExecutor<Evm, DB: Database> {
     evm_config: Evm,
     database: DB,
+    batch_database: SharedBatchDatabase<DB>,
+    batch_state: ExecutionStateAccumulator,
+    batch_block_states: Vec<ExecutionState>,
+    batch_block_reverts: Vec<BlockReverts>,
 }
 
 #[cfg(feature = "std")]
-impl<Evm, DB> BasicBlockExecutor<Evm, DB> {
+impl<Evm, DB> BasicBlockExecutor<Evm, DB>
+where
+    DB: Database + Clone,
+{
     /// Creates a new generic block executor.
-    pub const fn new(evm_config: Evm, database: DB) -> Self {
-        Self { evm_config, database }
+    pub fn new(evm_config: Evm, database: DB) -> Self {
+        Self {
+            evm_config,
+            batch_database: SharedBatchDatabase::new(database.clone()),
+            database,
+            batch_state: ExecutionStateAccumulator::new(),
+            batch_block_states: Vec::new(),
+            batch_block_reverts: Vec::new(),
+        }
     }
 }
 
@@ -527,8 +552,15 @@ where
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        self.execute_block_with_database(block, Db::new(self.database.clone()))
-            .map(|output| output.result)
+        let output = self.execute_block_with_database(block, self.batch_database.clone())?;
+        self.batch_database.commit_source(&output.state);
+
+        let block_state = output.state.into_inner();
+        self.batch_block_reverts
+            .push(extend_state_and_collect_reverts(&mut self.batch_state, &block_state));
+        self.batch_block_states.push(block_state);
+
+        Ok(output.result)
     }
 
     fn execute(
@@ -550,27 +582,34 @@ where
         let Some(block) = blocks.next() else { return Ok(ExecutionOutcome::default()) };
 
         let first_block = block.header().number();
-        let database = SharedBatchDatabase::new(self.database.clone());
-        let mut states = Vec::new();
+        let mut executor = self;
         let mut results = Vec::new();
 
-        let output = self.execute_block_with_database(block, database.clone())?;
-        database.commit_source(&output.state);
-        results.push(output.result);
-        states.push(output.state.into_inner());
+        results.push(executor.execute_one(block)?);
 
         for block in blocks {
-            let output = self.execute_block_with_database(block, database.clone())?;
-            database.commit_source(&output.state);
-            results.push(output.result);
-            states.push(output.state.into_inner());
+            results.push(executor.execute_one(block)?);
         }
 
-        Ok(ExecutionOutcome::from_block_states(first_block, states, results))
+        Ok(executor.into_execution_outcome(first_block, results))
     }
 
     fn size_hint(&self) -> usize {
-        0
+        state_source_size_hint(&self.batch_state)
+    }
+
+    fn into_execution_outcome(
+        self,
+        first_block: u64,
+        results: Vec<BlockExecutionResult<ReceiptTy<Self::Primitives>>>,
+    ) -> ExecutionOutcome<ReceiptTy<Self::Primitives>> {
+        ExecutionOutcome::from_aggregated_state(
+            first_block,
+            self.batch_state,
+            self.batch_block_states,
+            self.batch_block_reverts,
+            results,
+        )
     }
 
     fn take_bal(&mut self) -> Option<Bytes> {
@@ -687,6 +726,20 @@ impl<N: NodePrimitives> Executor for UnsupportedExecutor<N> {
 
     fn size_hint(&self) -> usize {
         0
+    }
+
+    fn into_execution_outcome(
+        self,
+        first_block: u64,
+        results: Vec<BlockExecutionResult<ReceiptTy<Self::Primitives>>>,
+    ) -> ExecutionOutcome<ReceiptTy<Self::Primitives>> {
+        ExecutionOutcome::from_aggregated_state(
+            first_block,
+            ExecutionStateAccumulator::new(),
+            Vec::new(),
+            Vec::new(),
+            results,
+        )
     }
 
     fn take_bal(&mut self) -> Option<Bytes> {

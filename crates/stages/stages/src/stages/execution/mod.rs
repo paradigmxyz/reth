@@ -7,17 +7,14 @@ use reth_config::config::ExecutionConfig;
 use reth_consensus::FullConsensus;
 use reth_db::{static_file::HeaderMask, tables};
 use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
-use reth_execution_types::{
-    extend_state_and_collect_reverts, hashed_post_state_sorted_from_execution_state,
-    state_source_size_hint, Chain, ExecutionStateAccumulator,
-};
+use reth_execution_types::{hashed_post_state_sorted_from_execution_state, Chain};
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriteConfig, StateWriter,
-    StaticFileProviderFactory, StatsReader, StoragePath, StorageSettingsCache, TransactionVariant,
+    BlockHashReader, BlockReader, DBProvider, EitherWriter, HeaderProvider, LatestStateProviderRef,
+    OriginalValuesKnown, ProviderError, StateWriteConfig, StateWriter, StaticFileProviderFactory,
+    StatsReader, StoragePath, StorageSettingsCache, TransactionVariant,
 };
 use reth_stages_api::{
     BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
@@ -332,14 +329,12 @@ where
         let batch_start = Instant::now();
 
         let mut blocks = Vec::new();
-        let mut aggregate_state = ExecutionStateAccumulator::new();
-        let mut block_states = Vec::new();
-        let mut block_reverts = Vec::new();
         let mut results = Vec::new();
         let state_provider = LatestStateProviderRef::new(provider);
         // SAFETY: The shared database is scoped to this synchronous stage execution and is dropped
         // before `state_provider`.
         let batch_db = unsafe { SharedEvmStateProviderDatabase::new(&state_provider) };
+        let mut executor = self.evm_config.batch_executor(batch_db);
         for block_number in start_block..=max_block {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -359,17 +354,14 @@ where
             // Execute the block
             let execute_start = Instant::now();
 
-            let output = self.metrics.metered_one(&block, |input| {
-                self.evm_config.executor(batch_db.clone()).execute(input).map_err(|error| {
-                    StageError::Block {
-                        block: Box::new(block.block_with_parent()),
-                        error: BlockErrorKind::Execution(
-                            reth_evm::execute::BlockExecutionError::msg(error),
-                        ),
-                    }
+            let result = self.metrics.metered_one(&block, |input| {
+                executor.execute_one(input).map_err(|error| StageError::Block {
+                    block: Box::new(block.block_with_parent()),
+                    error: BlockErrorKind::Execution(reth_evm::execute::BlockExecutionError::msg(
+                        error,
+                    )),
                 })
             })?;
-            let result = output.result.clone();
 
             if let Err(err) =
                 self.consensus.validate_block_post_execution(&block, &result, None, None)
@@ -379,16 +371,7 @@ where
                     error: BlockErrorKind::Validation(err),
                 })
             }
-            batch_db.commit_source(&output.state).map_err(|error| StageError::Block {
-                block: Box::new(block.block_with_parent()),
-                error: BlockErrorKind::Execution(reth_evm::execute::BlockExecutionError::msg(
-                    error,
-                )),
-            })?;
-            block_reverts
-                .push(extend_state_and_collect_reverts(&mut aggregate_state, &output.state));
-            results.push(output.result);
-            block_states.push(output.state.into_inner());
+            results.push(result);
 
             execution_duration += execute_start.elapsed();
 
@@ -419,7 +402,7 @@ where
             // Check if we should commit now
             if self.thresholds.is_end_of_batch(
                 block_number - start_block,
-                state_source_size_hint(&aggregate_state) as u64,
+                executor.size_hint() as u64,
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
@@ -429,13 +412,7 @@ where
 
         // prepare execution output for writing
         let time = Instant::now();
-        let mut state = ExecutionOutcome::from_aggregated_state(
-            start_block,
-            aggregate_state,
-            block_states,
-            block_reverts,
-            results,
-        );
+        let mut state = executor.into_execution_outcome(start_block, results);
         let write_preparation_duration = time.elapsed();
 
         // log the gas per second for the range we just executed

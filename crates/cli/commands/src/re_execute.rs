@@ -13,10 +13,7 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_execution_types::{
-    extend_state_and_collect_reverts, state_source_size_hint, BlockReverts,
-    ExecutionStateAccumulator, RevertAccount,
-};
+use reth_execution_types::{BlockReverts, RevertAccount};
 use reth_node_core::args::JitArgs;
 use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
 use reth_provider::{
@@ -162,8 +159,16 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     }
                     let chunk_end = (chunk_start + blocks_per_chunk).min(max_block);
 
-                    let mut state = ExecutionStateAccumulator::new();
-                    let mut block_reverts = Vec::new();
+                    let mut _executor_state_provider =
+                        provider.history_by_block_number(chunk_start.saturating_sub(1))?;
+                    // SAFETY: The shared database is scoped to this synchronous re-execute batch
+                    // and is dropped before `_executor_state_provider`.
+                    let database =
+                        unsafe { SharedEvmStateProviderDatabase::new(&*_executor_state_provider) };
+                    let mut executor = evm_config.batch_executor(database);
+                    let mut executor_start_block = chunk_start;
+                    let mut results = Vec::new();
+                    let mut last_executed_block = None;
                     let mut executor_created = Instant::now();
 
                     'blocks: for block in chunk_start..chunk_end {
@@ -175,18 +180,21 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             .recovered_block(block.into(), TransactionVariant::NoHash)?
                             .unwrap();
 
-                        let state_provider =
-                            provider.history_by_block_number(block.number().saturating_sub(1))?;
-                        // SAFETY: The shared database is consumed by this synchronous execution
-                        // call and does not outlive the state provider borrowed here.
-                        let database =
-                            unsafe { SharedEvmStateProviderDatabase::new(&*state_provider) };
-                        let output = match evm_config.executor(database).execute(&block) {
-                            Ok(output) => output,
+                        let result = match executor.execute_one(&block) {
+                            Ok(result) => result,
                             Err(err) => {
                                 if skip_invalid_blocks {
-                                    state = ExecutionStateAccumulator::new();
-                                    block_reverts.clear();
+                                    drop(executor);
+                                    results.clear();
+                                    let next_state_provider =
+                                        provider.history_by_block_number(block.number())?;
+                                    let database = unsafe {
+                                        SharedEvmStateProviderDatabase::new(&*next_state_provider)
+                                    };
+                                    executor = evm_config.batch_executor(database);
+                                    _executor_state_provider = next_state_provider;
+                                    executor_start_block = block.number() + 1;
+                                    executor_created = Instant::now();
                                     let _ =
                                         info_tx.send((block, eyre::eyre!(err.to_string())));
                                     continue
@@ -194,10 +202,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                 return Err(eyre::eyre!(err.to_string()))
                             }
                         };
-                        let result = &output.result;
-
                         if let Err(err) = consensus
-                            .validate_block_post_execution(&block, result, None,None)
+                            .validate_block_post_execution(&block, &result, None,None)
                             .wrap_err_with(|| {
                                 format!(
                                     "Failed to validate block {} {}",
@@ -245,8 +251,19 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                                         error!(number=?block.number(), ?mismatch, "Gas usage mismatch");
                                         if skip_invalid_blocks {
-                                            state = ExecutionStateAccumulator::new();
-                                            block_reverts.clear();
+                                            drop(executor);
+                                            results.clear();
+                                            let next_state_provider =
+                                                provider.history_by_block_number(block.number())?;
+                                            let database = unsafe {
+                                                SharedEvmStateProviderDatabase::new(
+                                                    &*next_state_provider,
+                                                )
+                                            };
+                                            executor = evm_config.batch_executor(database);
+                                            _executor_state_provider = next_state_provider;
+                                            executor_start_block = block.number() + 1;
+                                            executor_created = Instant::now();
                                             let _ = info_tx.send((block, err));
                                             continue 'blocks;
                                         }
@@ -260,31 +277,46 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             return Err(err);
                         }
                         let _ = stats_tx.send((block.number(), block.gas_used()));
-
-                        block_reverts.push(extend_state_and_collect_reverts(
-                            &mut state,
-                            &output.state,
-                        ));
+                        last_executed_block = Some(block.number());
+                        results.push(result);
 
                         // Verify and drop accumulated state once in a while to avoid OOM.
-                        if state_source_size_hint(&state) > 5_000_000 ||
+                        if executor.size_hint() > 5_000_000 ||
                             executor_created.elapsed() > executor_lifetime
                         {
                             let last_block = block.number();
+                            let next_state_provider =
+                                provider.history_by_block_number(last_block)?;
+                            let database = unsafe {
+                                SharedEvmStateProviderDatabase::new(&*next_state_provider)
+                            };
+                            let next_executor = evm_config.batch_executor(database);
+                            let old_executor = std::mem::replace(&mut executor, next_executor);
+                            let outcome = old_executor.into_execution_outcome(
+                                executor_start_block,
+                                std::mem::take(&mut results),
+                            );
                             verify_reverts_against_changesets(
                                 &provider,
-                                &block_reverts,
+                                outcome.block_reverts(),
                                 last_block,
                             )?;
-                            state = ExecutionStateAccumulator::new();
-                            block_reverts.clear();
+                            _executor_state_provider = next_state_provider;
+                            executor_start_block = last_block + 1;
                             executor_created = Instant::now();
                         }
                     }
 
                     // Full verification at chunk end for remaining unverified blocks
-                    if !block_reverts.is_empty() {
-                        verify_reverts_against_changesets(&provider, &block_reverts, chunk_end - 1)?;
+                    if !results.is_empty() {
+                        let last_block = last_executed_block.unwrap_or(chunk_end - 1);
+                        let outcome =
+                            executor.into_execution_outcome(executor_start_block, results);
+                        verify_reverts_against_changesets(
+                            &provider,
+                            outcome.block_reverts(),
+                            last_block,
+                        )?;
                     }
                 }
 

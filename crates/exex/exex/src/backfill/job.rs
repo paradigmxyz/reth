@@ -10,14 +10,11 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::BlockNumber;
 use reth_ethereum_primitives::Receipt;
 use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput};
-use reth_execution_types::{
-    extend_execution_state, state_source_size_hint, ExecutionStateAccumulator,
-};
 use reth_node_api::{Block as _, BlockBody as _, NodePrimitives};
 use reth_primitives_traits::{format_gas_throughput, RecoveredBlock, SignedTransaction};
 use reth_provider::{
-    BlockReader, Chain, ExecutionOutcome, HeaderProvider, ProviderError,
-    SharedEvmStateProviderDatabase, StateProviderFactory, TransactionVariant,
+    BlockReader, Chain, HeaderProvider, ProviderError, SharedEvmStateProviderDatabase,
+    StateProviderFactory, TransactionVariant,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
@@ -83,10 +80,17 @@ where
         let mut cumulative_gas = 0;
         let batch_start = Instant::now();
 
+        let state_provider = self
+            .provider
+            .history_by_block_number(self.range.start().saturating_sub(1))
+            .map_err(BlockExecutionError::other)?;
+        // SAFETY: The shared database is scoped to this synchronous backfill range execution and
+        // is dropped before `state_provider`.
+        let database = unsafe { SharedEvmStateProviderDatabase::new(&*state_provider) };
+        let mut executor = self.evm_config.batch_executor(database);
+
         let mut blocks = Vec::new();
         let mut results = Vec::new();
-        let mut state = ExecutionStateAccumulator::new();
-        let mut block_states = Vec::new();
         for block_number in self.range.clone() {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -114,26 +118,17 @@ where
             let (header, body) = block.split_sealed_header_body();
             let block = P::Block::new_sealed(header, body).with_senders(senders);
 
-            let state_provider = self
-                .provider
-                .history_by_block_number(block_number.saturating_sub(1))
-                .map_err(BlockExecutionError::other)?;
-            // SAFETY: The shared database is consumed by this synchronous execution call and does
-            // not outlive the state provider borrowed here.
-            let database = unsafe { SharedEvmStateProviderDatabase::new(&*state_provider) };
-            let output = self.evm_config.executor(database).execute(&block).map_err(evm_error)?;
+            let result = executor.execute_one(&block).map_err(evm_error)?;
             execution_duration += execute_start.elapsed();
 
-            extend_execution_state(&mut state, &output.state);
-            block_states.push(output.state.into_inner());
-            results.push(output.result);
+            results.push(result);
 
             // Seal the block back and save it
             blocks.push(block);
             // Check if we should commit now
             if self.thresholds.is_end_of_batch(
                 block_number - *self.range.start() + 1,
-                state_source_size_hint(&state) as u64,
+                executor.size_hint() as u64,
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
@@ -153,8 +148,7 @@ where
         );
         self.range = last_block_number + 1..=*self.range.end();
 
-        let outcome =
-            ExecutionOutcome::from_block_states(first_block_number, block_states, results);
+        let outcome = executor.into_execution_outcome(first_block_number, results);
         let chain = Chain::new(blocks, outcome, BTreeMap::new());
         Ok(chain)
     }
