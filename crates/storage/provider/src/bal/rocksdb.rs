@@ -145,14 +145,13 @@ impl RocksDBBalStoreBuffer {
         );
     }
 
-    fn pending_entries_through(
-        &self,
-        to_block: BlockNumber,
-    ) -> Vec<(StoredBlockAccessListKey, RawBal)> {
-        self.pending
+    fn pending_entries(&self, blocks: &[NumHash]) -> Vec<(StoredBlockAccessListKey, RawBal)> {
+        blocks
             .iter()
-            .take_while(|(key, _)| key.number() <= to_block)
-            .map(|(key, bal)| (*key, bal.clone()))
+            .filter_map(|block| {
+                let key = StoredBlockAccessListKey::new(*block);
+                self.pending.get(&key).map(|bal| (key, bal.clone()))
+            })
             .collect()
     }
 
@@ -279,9 +278,9 @@ impl BalStore for RocksDBBalStore {
         Ok(())
     }
 
-    fn flush(&self, to_block: BlockNumber) -> ProviderResult<()> {
+    fn flush(&self, blocks: &[NumHash]) -> ProviderResult<()> {
         let mut buffer = self.buffer.write();
-        let pending = buffer.pending_entries_through(to_block);
+        let pending = buffer.pending_entries(blocks);
         if pending.is_empty() {
             return Ok(())
         }
@@ -378,27 +377,35 @@ mod tests {
     }
 
     #[test]
-    fn flush_writes_pending_bals_through_block() {
+    fn flush_writes_only_requested_pending_bals() {
         let (_dir, store) = test_store();
         let block_1 = NumHash::new(1, B256::with_last_byte(1));
+        let block_1_fork = NumHash::new(1, B256::with_last_byte(9));
         let block_2 = NumHash::new(2, B256::with_last_byte(2));
         let bal_1 = Bytes::from_static(&[0xc1, 0x01]);
+        let bal_1_fork = Bytes::from_static(&[0xc1, 0x09]);
         let bal_2 = Bytes::from_static(&[0xc1, 0x02]);
 
         store.insert(block_1, RawBal::from(bal_1.clone())).unwrap();
+        store.insert(block_1_fork, RawBal::from(bal_1_fork.clone())).unwrap();
         store.insert(block_2, RawBal::from(bal_2.clone())).unwrap();
 
         assert_eq!(disk_bal(&store, block_1), None);
+        assert_eq!(disk_bal(&store, block_1_fork), None);
         assert_eq!(disk_bal(&store, block_2), None);
 
-        store.flush(1).unwrap();
+        store.flush(&[block_1]).unwrap();
 
         assert_eq!(disk_bal(&store, block_1), Some(bal_1.clone()));
+        assert_eq!(disk_bal(&store, block_1_fork), None);
         assert_eq!(disk_bal(&store, block_2), None);
-        assert_eq!(read_many(&store, &[block_1, block_2]), vec![Some(bal_1), Some(bal_2.clone())]);
         assert_eq!(
-            store.get_by_hashes(&[block_1.hash, block_2.hash]).unwrap(),
-            vec![None, Some(bal_2)]
+            read_many(&store, &[block_1, block_1_fork, block_2]),
+            vec![Some(bal_1), Some(bal_1_fork.clone()), Some(bal_2.clone())]
+        );
+        assert_eq!(
+            store.get_by_hashes(&[block_1.hash, block_1_fork.hash, block_2.hash]).unwrap(),
+            vec![None, Some(bal_1_fork), Some(bal_2)]
         );
     }
 
@@ -464,7 +471,7 @@ mod tests {
             .insert(NumHash::new(7, old_hash), RawBal::from(Bytes::from_static(&[0xc1, 0x01])))
             .unwrap();
         store.insert(NumHash::new(8, retained_hash), RawBal::from(retained_bal.clone())).unwrap();
-        store.flush(8).unwrap();
+        store.flush(&[NumHash::new(7, old_hash), NumHash::new(8, retained_hash)]).unwrap();
 
         assert_eq!(store.prune(10).unwrap(), 1);
         assert_eq!(disk_bal(&store, NumHash::new(7, old_hash)), None);

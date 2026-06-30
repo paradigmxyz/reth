@@ -162,7 +162,7 @@ impl BalStore for InMemoryBalStore {
         Ok(())
     }
 
-    fn flush(&self, _to_block: BlockNumber) -> ProviderResult<()> {
+    fn flush(&self, _blocks: &[NumHash]) -> ProviderResult<()> {
         Ok(())
     }
 
@@ -250,7 +250,7 @@ mod tests {
     fn flush_is_noop() {
         let store = InMemoryBalStore::default();
 
-        store.flush(1).unwrap();
+        store.flush(&[]).unwrap();
     }
 
     #[test]

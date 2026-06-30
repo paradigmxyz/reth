@@ -54,10 +54,10 @@ pub trait BalStore: Send + Sync + 'static {
         Ok(())
     }
 
-    /// Flushes pending BALs through `to_block` to the backing store.
+    /// Flushes pending BALs for the given block number/hash pairs to the backing store.
     ///
     /// In-memory implementations may treat this as a no-op.
-    fn flush(&self, _to_block: BlockNumber) -> ProviderResult<()> {
+    fn flush(&self, _blocks: &[NumHash]) -> ProviderResult<()> {
         Ok(())
     }
 
@@ -133,10 +133,10 @@ impl BalStoreHandle {
         self.inner.insert_many(entries)
     }
 
-    /// Flushes pending BALs through `to_block` to the backing store.
+    /// Flushes pending BALs for the given block number/hash pairs to the backing store.
     #[inline]
-    pub fn flush(&self, to_block: BlockNumber) -> ProviderResult<()> {
-        self.inner.flush(to_block)
+    pub fn flush(&self, blocks: &[NumHash]) -> ProviderResult<()> {
+        self.inner.flush(blocks)
     }
 
     /// Prunes expired BALs according to the store's retention policy and the given chain tip.
@@ -311,7 +311,7 @@ mod tests {
     fn noop_store_flush_is_noop() {
         let store = BalStoreHandle::default();
 
-        store.flush(1).unwrap();
+        store.flush(&[]).unwrap();
     }
 
     #[test]

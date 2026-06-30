@@ -162,6 +162,8 @@ where
         let start_time = Instant::now();
 
         if let Some(last) = last_block {
+            let canonical_blocks =
+                blocks.iter().map(|b| b.recovered_block.num_hash()).collect::<Vec<_>>();
             let provider_rw = self.provider.database_provider_rw()?;
             provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
 
@@ -179,7 +181,7 @@ where
             }
 
             provider_rw.commit()?;
-            let _ = self.provider.bal_store().flush(last.number).inspect_err(|err| {
+            let _ = self.provider.bal_store().flush(&canonical_blocks).inspect_err(|err| {
                 warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
             });
             debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
