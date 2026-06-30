@@ -457,14 +457,14 @@ where
     /// sequential iteration to avoid rayon overhead. For larger blocks, uses rayon parallel
     /// iteration to convert transactions in parallel while streaming results to execution.
     ///
-    /// When `parallel_bal_execution` is disabled, preserves the original transaction order.
-    /// Otherwise, streams results as they become available.
+    /// Preserves prefix-friendly transaction order while still converting larger windows in
+    /// parallel.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_tx_iterator<I: ExecutableTxIterator<Evm>>(
         &self,
         transactions: I,
         transaction_count: usize,
-        parallel_bal_execution: bool,
+        _parallel_bal_execution: bool,
     ) -> (IteratorPrewarmTxReceiver<Evm, I>, IteratorExecuteTxReceiver<Evm, I>) {
         let (prewarm_tx, prewarm_rx) = mpsc::sync_channel(transaction_count);
         let (execute_tx, execute_rx) = crossbeam_channel::bounded(transaction_count);
@@ -489,75 +489,52 @@ where
             let executor = self.executor.clone();
             self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
-                if parallel_bal_execution {
-                    // With BALs, we don't care about the order of transactions in execution and
-                    // prewarming, so we don't have to use `for_each_ordered_in`.
-                    executor.cpu_pool().install(|| {
-                        transactions
-                            .into_par_iter()
-                            .enumerate()
-                            .map(|(i, tx)| {
-                                let tx = convert.convert(tx);
-                                (i, tx)
-                            })
-                            .for_each(|(idx, tx)| {
-                                let tx = tx.map(|tx| {
-                                    let tx = WithTxEnv::new(tx);
-                                    let _ = prewarm_tx.send((idx, tx.clone()));
-                                    tx
-                                });
-                                let _ = execute_tx.send((idx, tx));
-                                trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
-                            });
-                    });
-                } else {
-                    // To avoid a ~1ms stall waiting for rayon to schedule index 0, the first
-                    // few transactions are recovered sequentially and sent immediately before
-                    // entering the parallel iterator for the remainder.
-                    let prefetch = Self::PARALLEL_PREFETCH_COUNT.min(transaction_count);
-                    let mut iter = transactions.into_iter();
+                // To avoid a ~1ms stall waiting for rayon to schedule index 0, the first
+                // few transactions are recovered sequentially and sent immediately before
+                // entering the parallel iterator for the remainder.
+                let prefetch = Self::PARALLEL_PREFETCH_COUNT.min(transaction_count);
+                let mut iter = transactions.into_iter();
 
-                    // Convert the first few transactions sequentially so execution can
-                    // start immediately without waiting for rayon work-stealing.
-                    convert_serial(iter.by_ref().take(prefetch), &convert, &prewarm_tx, &execute_tx);
+                // Convert the first few transactions sequentially so execution can
+                // start immediately without waiting for rayon work-stealing.
+                convert_serial(iter.by_ref().take(prefetch), &convert, &prewarm_tx, &execute_tx);
 
-                    let mut iter = iter.enumerate();
+                let mut iter = iter.enumerate();
 
-                    let mut batch_size = Self::FIRST_PARALLEL_TX_WINDOW_SIZE;
+                let mut batch_size = Self::FIRST_PARALLEL_TX_WINDOW_SIZE;
 
-                    // Without BALs, we need to preserve the initial order of transactions.
-                    // Process exponentially increasing windows to make sure that first transactions are prioritized.
-                    executor.cpu_pool().install(move || {
-                        loop {
-                            let chunk = iter
-                                .by_ref()
-                                .take(batch_size)
-                                .collect::<Vec<_>>();
-                            if chunk.is_empty() {
-                                break;
-                            }
-
-                            batch_size = batch_size.saturating_mul(2);
-
-                            let chunk = chunk
-                                .into_par_iter()
-                                .map(|(i, tx)| {
-                                    let idx = i + prefetch;
-                                    let tx = convert.convert(tx).map(WithTxEnv::new);
-                                    (idx, tx)
-                                })
-                                .collect::<Vec<_>>();
-
-                            for (idx, tx) in chunk {
-                                if let Ok(tx) = &tx {
-                                    let _ = prewarm_tx.send((idx, tx.clone()));
-                                }
-                                let _ = execute_tx.send((idx, tx));
-                                trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
-                            }
+                // Process exponentially increasing windows to make sure that first transactions
+                // are prioritized by the execution consumer.
+                executor.cpu_pool().install(move || {
+                    loop {
+                        let chunk = iter
+                            .by_ref()
+                            .take(batch_size)
+                            .collect::<Vec<_>>();
+                        if chunk.is_empty() {
+                            break;
                         }
-                    });
-                }
+
+                        batch_size = batch_size.saturating_mul(2);
+
+                        let chunk = chunk
+                            .into_par_iter()
+                            .map(|(i, tx)| {
+                                let idx = i + prefetch;
+                                let tx = convert.convert(tx).map(WithTxEnv::new);
+                                (idx, tx)
+                            })
+                            .collect::<Vec<_>>();
+
+                        for (idx, tx) in chunk {
+                            if let Ok(tx) = &tx {
+                                let _ = prewarm_tx.send((idx, tx.clone()));
+                            }
+                            let _ = execute_tx.send((idx, tx));
+                            trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+                        }
+                    }
+                });
             });
         }
 
