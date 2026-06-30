@@ -17,13 +17,16 @@ use std::{
     sync::Arc,
 };
 
+/// Number of recent blocks kept in the in-memory RocksDB BAL buffer.
+const DEFAULT_BAL_BUFFER_RETENTION_DISTANCE: u64 = 32;
+
 /// RocksDB-backed BAL store.
 ///
 /// Persisted BALs are keyed by `(block_number, block_hash)`. Hash-only lookups only read the
 /// pending buffer.
 #[derive(Clone)]
 pub struct RocksDBBalStore {
-    /// Retention policy for persisted and buffered BALs.
+    /// Retention policy for persisted BALs.
     retention: PruneMode,
     /// `RocksDB` provider used for persisted BAL reads and writes.
     rocksdb: RocksDBProvider,
@@ -101,6 +104,10 @@ impl RocksDBBalStore {
         }
 
         self.read_one_from_disk(StoredBlockAccessListKey::new(block))
+    }
+
+    const fn buffer_retention() -> PruneMode {
+        PruneMode::Distance(DEFAULT_BAL_BUFFER_RETENTION_DISTANCE)
     }
 }
 
@@ -247,7 +254,7 @@ impl BalStore for RocksDBBalStore {
         let mut buffer = self.buffer.write();
         buffer.insert(block, bal.clone());
         if let Some(highest_block_number) = buffer.highest_block_number {
-            let keys = buffer.keys_to_prune(self.retention, highest_block_number);
+            let keys = buffer.keys_to_prune(Self::buffer_retention(), highest_block_number);
             buffer.remove_keys(&keys);
         }
         drop(buffer);
@@ -267,7 +274,7 @@ impl BalStore for RocksDBBalStore {
             buffer.insert(*block, bal.clone());
         }
         if let Some(highest_block_number) = buffer.highest_block_number {
-            let keys = buffer.keys_to_prune(self.retention, highest_block_number);
+            let keys = buffer.keys_to_prune(Self::buffer_retention(), highest_block_number);
             buffer.remove_keys(&keys);
         }
         drop(buffer);
@@ -299,7 +306,7 @@ impl BalStore for RocksDBBalStore {
     fn prune(&self, tip: BlockNumber) -> ProviderResult<usize> {
         let disk_keys = self.keys_to_prune(tip)?;
         let mut buffer = self.buffer.write();
-        let buffer_keys = buffer.keys_to_prune(self.retention, tip);
+        let buffer_keys = buffer.keys_to_prune(Self::buffer_retention(), tip);
         let pruned =
             disk_keys.iter().chain(buffer_keys.iter()).copied().collect::<BTreeSet<_>>().len();
 
@@ -377,6 +384,25 @@ mod tests {
     }
 
     #[test]
+    fn buffer_retention_keeps_recent_bals() {
+        let (_dir, store) = test_store();
+        let old = NumHash::new(1, B256::with_last_byte(1));
+        let retained =
+            NumHash::new(DEFAULT_BAL_BUFFER_RETENTION_DISTANCE + 2, B256::with_last_byte(2));
+        let old_bal = Bytes::from_static(&[0xc1, 0x01]);
+        let retained_bal = Bytes::from_static(&[0xc1, 0x02]);
+
+        store.insert(old, RawBal::from(old_bal)).unwrap();
+        store.insert(retained, RawBal::from(retained_bal.clone())).unwrap();
+
+        assert_eq!(
+            store.get_by_hashes(&[old.hash, retained.hash]).unwrap(),
+            vec![None, Some(retained_bal)]
+        );
+        assert_eq!(disk_bal(&store, old), None);
+    }
+
+    #[test]
     fn flush_writes_only_requested_pending_bals() {
         let (_dir, store) = test_store();
         let block_1 = NumHash::new(1, B256::with_last_byte(1));
@@ -434,13 +460,15 @@ mod tests {
         let bal_a = Bytes::from_static(&[0xc1, 0x01]);
         let bal_b = Bytes::from_static(&[0xc1, 0x02]);
 
-        store.insert(NumHash::new(2, hash_a), RawBal::from(bal_a.clone())).unwrap();
-        store.insert(NumHash::new(200, hash_b), RawBal::from(bal_b.clone())).unwrap();
+        let block_a = NumHash::new(2, hash_a);
+        let block_b = NumHash::new(200, hash_b);
 
-        assert_eq!(
-            read_many(&store, &[NumHash::new(2, hash_a), NumHash::new(200, hash_b)]),
-            vec![Some(bal_a), Some(bal_b)]
-        );
+        store.insert(block_a, RawBal::from(bal_a.clone())).unwrap();
+        store.flush(&[block_a]).unwrap();
+        store.insert(block_b, RawBal::from(bal_b.clone())).unwrap();
+        store.flush(&[block_b]).unwrap();
+
+        assert_eq!(read_many(&store, &[block_a, block_b]), vec![Some(bal_a), Some(bal_b)]);
     }
 
     #[test]
