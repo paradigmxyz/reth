@@ -1498,13 +1498,14 @@ impl RocksDBProvider {
             return Ok(vec![(last_key, last_shard)]);
         }
 
+        let shard_count =
+            last_shard.len().div_ceil(NUM_OF_INDICES_IN_SHARD as u64) as usize;
         let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
-        let mut chunks_peekable = chunks.into_iter().peekable();
-        let mut shards = Vec::new();
+        let mut shards = Vec::with_capacity(shard_count);
 
-        while let Some(chunk) = chunks_peekable.next() {
+        for (idx, chunk) in chunks.into_iter().enumerate() {
             let shard = BlockNumberList::new_pre_sorted(chunk);
-            let highest_block_number = if chunks_peekable.peek().is_some() {
+            let highest_block_number = if idx + 1 < shard_count {
                 shard.iter().next_back().expect("`chunks` does not return empty list")
             } else {
                 u64::MAX
@@ -1925,13 +1926,14 @@ impl<'a> RocksDBBatch<'a> {
             return Ok(());
         }
 
-        // Slow path: rechunk into multiple shards
+        // Slow path: rechunk into multiple shards.
+        let shard_count =
+            last_shard.len().div_ceil(NUM_OF_INDICES_IN_SHARD as u64) as usize;
         let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
-        let mut chunks_peekable = chunks.into_iter().peekable();
 
-        while let Some(chunk) = chunks_peekable.next() {
+        for (idx, chunk) in chunks.into_iter().enumerate() {
             let shard = BlockNumberList::new_pre_sorted(chunk);
-            let highest_block_number = if chunks_peekable.peek().is_some() {
+            let highest_block_number = if idx + 1 < shard_count {
                 shard.iter().next_back().expect("`chunks` does not return empty list")
             } else {
                 u64::MAX
