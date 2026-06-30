@@ -1,5 +1,5 @@
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, TrieTableAdapter};
-use alloy_primitives::{keccak256, map::HashMap, Address, B256};
+use alloy_primitives::{keccak256, map::B256Map, Address, B256};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::StateProofError;
 use reth_trie::{
@@ -9,6 +9,12 @@ use reth_trie::{
     AccountProof, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets,
     StorageMultiProof, TrieInput,
 };
+
+fn single_storage_state(hashed_address: B256, storage: HashedStorage) -> HashedPostStateSorted {
+    let mut storages = B256Map::with_capacity_and_hasher(1, Default::default());
+    storages.insert(hashed_address, storage.into_sorted());
+    HashedPostStateSorted::new(Default::default(), storages)
+}
 
 /// Extends [`Proof`] with operations specific for working with a database transaction.
 pub trait DatabaseProof<'a> {
@@ -119,10 +125,7 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageProof<'a, TX>
     ) -> Result<reth_trie::StorageProof, StateProofError> {
         let hashed_address = keccak256(address);
         let prefix_set = storage.construct_prefix_set();
-        let state_sorted = HashedPostStateSorted::new(
-            Default::default(),
-            HashMap::from_iter([(hashed_address, storage.into_sorted())]),
-        );
+        let state_sorted = single_storage_state(hashed_address, storage);
         StorageProof::new(
             DatabaseTrieCursorFactory::<_, A>::new(tx),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
@@ -141,10 +144,7 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageProof<'a, TX>
         let hashed_address = keccak256(address);
         let targets = slots.iter().map(keccak256).collect();
         let prefix_set = storage.construct_prefix_set();
-        let state_sorted = HashedPostStateSorted::new(
-            Default::default(),
-            HashMap::from_iter([(hashed_address, storage.into_sorted())]),
-        );
+        let state_sorted = single_storage_state(hashed_address, storage);
         StorageProof::new(
             DatabaseTrieCursorFactory::<_, A>::new(tx),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
