@@ -53,10 +53,15 @@ where
     R: Receipt,
     ChainSpec: EthereumHardforks,
 {
+    let header = block.header();
+    let header_gas_used = header.gas_used();
+    let block_number = header.number();
+    let timestamp = header.timestamp();
+
     // Check if gas used matches the value set in header.
-    if block.header().gas_used() != result.gas_used {
+    if header_gas_used != result.gas_used {
         return Err(ConsensusError::BlockGasUsed {
-            gas: GotExpected { got: result.gas_used, expected: block.header().gas_used() },
+            gas: GotExpected { got: result.gas_used, expected: header_gas_used },
             gas_spent_by_tx: gas_spent_by_transactions(&result.receipts),
         })
     }
@@ -65,20 +70,16 @@ where
     // operation as hashing that is required for state root got calculated in every
     // transaction This was replaced with is_success flag.
     // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
-    if chain_spec.is_byzantium_active_at_block(block.header().number()) {
+    if chain_spec.is_byzantium_active_at_block(block_number) {
         let res = if let Some((receipts_root, logs_bloom)) = receipt_root_bloom {
             compare_receipts_root_and_logs_bloom(
                 receipts_root,
                 logs_bloom,
-                block.header().receipts_root(),
-                block.header().logs_bloom(),
+                header.receipts_root(),
+                header.logs_bloom(),
             )
         } else {
-            verify_receipts(
-                block.header().receipts_root(),
-                block.header().logs_bloom(),
-                &result.receipts,
-            )
+            verify_receipts(header.receipts_root(), header.logs_bloom(), &result.receipts)
         };
 
         if let Err(error) = res {
@@ -93,8 +94,9 @@ where
     }
 
     // Validate that the header requests hash matches the calculated requests hash
-    if chain_spec.is_prague_active_at_timestamp(block.header().timestamp()) {
-        let Some(header_requests_hash) = block.header().requests_hash() else {
+    let prague_active = chain_spec.is_prague_active_at_timestamp(timestamp);
+    if prague_active {
+        let Some(header_requests_hash) = header.requests_hash() else {
             return Err(ConsensusError::RequestsHashMissing)
         };
         let requests_hash = result.requests.requests_hash();
@@ -106,15 +108,15 @@ where
     }
 
     // Validate that the header block access list hash matches the calculated block access list hash
+    let amsterdam_active = chain_spec.is_amsterdam_active_at_timestamp(timestamp);
     let is_allowed_pre_amsterdam_bal_hash = allow_bal_hashes &&
-        !chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) &&
-        block.header().block_access_list_hash().is_some();
+        !amsterdam_active &&
+        header.block_access_list_hash().is_some();
 
-    if (chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) ||
-        is_allowed_pre_amsterdam_bal_hash) &&
+    if (amsterdam_active || is_allowed_pre_amsterdam_bal_hash) &&
         let Some(block_access_list_hash) = block_access_list_hash
     {
-        let block_bal_hash = block.header().block_access_list_hash().unwrap_or_default();
+        let block_bal_hash = header.block_access_list_hash().unwrap_or_default();
         if block_access_list_hash != block_bal_hash {
             return Err(ConsensusError::BlockAccessListHashMismatch(
                 GotExpected::new(block_access_list_hash, block_bal_hash).into(),
