@@ -11,6 +11,12 @@ use std::{
 /// Size of one offset in bytes.
 pub(crate) const OFFSET_SIZE_BYTES: u8 = 8;
 
+/// Initial number of pending offsets staged before the next sync.
+///
+/// Static-file writers sync after each save-block batch, so this covers the profiled big-block
+/// batches without reserving a million offsets for every opened segment writer.
+const INITIAL_OFFSET_CAPACITY: usize = 128 * 1024;
+
 /// Writer of [`NippyJar`]. Handles table data and offsets only.
 ///
 /// Table data is written directly to disk, while offsets and configuration need to be flushed by
@@ -76,7 +82,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             offsets_file,
             tmp_buf: Vec::with_capacity(1_000_000),
             uncompressed_row_size: 0,
-            offsets: Vec::with_capacity(1_000_000),
+            offsets: Vec::with_capacity(INITIAL_OFFSET_CAPACITY),
             column: 0,
             dirty: false,
         };
