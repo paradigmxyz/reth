@@ -591,8 +591,12 @@ where
             ctx.state(),
             self.changeset_cache.clone(),
         );
-        let overlay_factory =
-            OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
+        let proof_worker_overlay_builder =
+            overlay_builder.clone().with_skip_overlay_when_sparse_trie_matches_parent(true);
+        let overlay_factory = OverlayStateProviderFactory::new(
+            provider_factory.clone(),
+            proof_worker_overlay_builder,
+        );
 
         let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
 
@@ -2252,7 +2256,8 @@ where
     ) -> Option<StateRootHandle> {
         let overlay_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
-            Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone()),
+            Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone())
+                .with_skip_overlay_when_sparse_trie_matches_parent(true),
         );
 
         Some(self.payload_processor.spawn_state_root(

@@ -61,6 +61,15 @@ pub(super) struct Overlay {
     pub(super) hashed_post_state: Arc<HashedPostStateSorted>,
 }
 
+impl Overlay {
+    fn empty() -> Self {
+        Self {
+            trie_updates: Arc::new(TrieUpdatesSorted::default()),
+            hashed_post_state: Arc::new(HashedPostStateSorted::default()),
+        }
+    }
+}
+
 /// Source of overlay data for [`OverlayStateProviderFactory`].
 #[derive(Debug, Clone)]
 pub(super) enum OverlaySource<N: NodePrimitives = EthPrimitives> {
@@ -97,6 +106,9 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     overlay_source: Option<OverlaySource<N>>,
     /// Changeset cache handle for retrieving trie changesets
     changeset_cache: ChangesetCache,
+    /// Whether to skip managed overlay construction when the sparse trie is already anchored to
+    /// the requested parent.
+    skip_overlay_when_sparse_trie_matches_parent: bool,
     /// Metrics for tracking provider operations
     metrics: OverlayStateProviderMetrics,
 }
@@ -108,6 +120,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             parent_hash,
             overlay_source: None,
             changeset_cache,
+            skip_overlay_when_sparse_trie_matches_parent: false,
             metrics: OverlayStateProviderMetrics::default(),
         }
     }
@@ -117,6 +130,13 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// This overlay will be applied on top of any reverts.
     pub(super) fn with_overlay_source(mut self, source: Option<OverlaySource<N>>) -> Self {
         self.overlay_source = source;
+        self
+    }
+
+    /// Set whether managed overlay construction can be skipped when the sparse trie is already
+    /// based on the requested parent.
+    pub const fn with_skip_overlay_when_sparse_trie_matches_parent(mut self, skip: bool) -> Self {
+        self.skip_overlay_when_sparse_trie_matches_parent = skip;
         self
     }
 
@@ -210,6 +230,20 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 Arc::new(TrieUpdatesSorted::default()),
                 Arc::new(HashedPostStateSorted::default()),
             )),
+        }
+    }
+
+    /// Returns true if managed overlay resolution can be skipped for this builder.
+    fn should_skip_overlay_for_matching_sparse_trie(&self) -> bool {
+        if !self.skip_overlay_when_sparse_trie_matches_parent {
+            return false
+        }
+
+        match &self.overlay_source {
+            Some(OverlaySource::Managed { manager, state }) if state.is_empty() => {
+                manager.sparse_trie_is_based_on_parent_hash(self.parent_hash)
+            }
+            _ => false,
         }
     }
 
@@ -394,15 +428,29 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
             (trie_updates, hashed_state_updates)
         } else {
-            // If no reverts are needed then the db tip is the anchor hash. Use overlays directly.
-            let (trie_updates, hashed_state) = self.resolve_overlays(db_tip_block.hash)?;
+            // If no reverts are needed then the db tip is the anchor hash. Use overlays directly,
+            // unless the sparse trie already targets the in-memory parent and no cursor overlay is
+            // needed for proof workers.
+            let Overlay { trie_updates, hashed_post_state } = if self
+                .should_skip_overlay_for_matching_sparse_trie()
+            {
+                debug!(
+                    target: "providers::state::overlay",
+                    parent_hash = %self.parent_hash,
+                    "Skipping overlay construction because sparse trie is based on parent"
+                );
+                Overlay::empty()
+            } else {
+                let (trie_updates, hashed_post_state) = self.resolve_overlays(db_tip_block.hash)?;
+                Overlay { trie_updates, hashed_post_state }
+            };
 
             retrieve_trie_reverts_duration = Duration::ZERO;
             retrieve_hashed_state_reverts_duration = Duration::ZERO;
             trie_updates_total_len = trie_updates.total_len();
-            hashed_state_updates_total_len = hashed_state.total_len();
+            hashed_state_updates_total_len = hashed_post_state.total_len();
 
-            (trie_updates, hashed_state)
+            (trie_updates, hashed_post_state)
         };
 
         // Record metrics
@@ -658,7 +706,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives_traits::Account;
+    use reth_chain_state::{test_utils::TestBlockBuilder, PreservedSparseTrie, SparseTrie};
+    use reth_primitives_traits::{Account, AlloyBlockHeader};
     use reth_trie::HashedPostState;
 
     #[test]
@@ -698,5 +747,32 @@ mod tests {
             panic!("expected managed overlay source")
         };
         assert_eq!(state.total_len(), 1);
+    }
+
+    #[test]
+    fn managed_overlay_skip_requires_matching_sparse_trie_and_no_immediate_state() {
+        let manager = StateTrieOverlayManager::default();
+        let mut block_builder = TestBlockBuilder::eth();
+        let parent = block_builder.get_executed_blocks(1..2).next().unwrap();
+        let parent_hash = parent.recovered_block().hash();
+        let parent_state_root = parent.recovered_block().state_root();
+        manager.insert_block(parent);
+        {
+            let mut guard = manager.lock_sparse_trie();
+            guard.store(PreservedSparseTrie::anchored(SparseTrie::default(), parent_state_root));
+        }
+
+        let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
+            .with_state_trie_overlay_manager(manager.clone());
+        assert!(!builder.should_skip_overlay_for_matching_sparse_trie());
+
+        let builder = builder.with_skip_overlay_when_sparse_trie_matches_parent(true);
+        assert!(builder.should_skip_overlay_for_matching_sparse_trie());
+
+        let hashed_state = HashedPostState::default()
+            .with_accounts([(B256::with_last_byte(2), Some(Account::default()))])
+            .into_sorted();
+        let builder = builder.with_extended_hashed_state_overlay(hashed_state);
+        assert!(!builder.should_skip_overlay_for_matching_sparse_trie());
     }
 }
