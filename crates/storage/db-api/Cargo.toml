@@ -71,6 +71,8 @@ test-utils = [
     "reth-ethereum-primitives/test-utils",
 ]
 arbitrary = [
+    "alloy-eip7928/arbitrary",
+    "alloy-eips/arbitrary",
     "reth-db-models/arbitrary",
     "dep:arbitrary",
     "dep:proptest",

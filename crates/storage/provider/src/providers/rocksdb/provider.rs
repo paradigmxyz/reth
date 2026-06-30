@@ -153,7 +153,7 @@ const DEFAULT_COMPRESS_BUF_CAPACITY: usize = 4096;
 /// The consistency check on startup heals any crash that occurs between auto-commits.
 const DEFAULT_AUTO_COMMIT_THRESHOLD: usize = 512 * 1024 * 1024;
 
-/// Minimum BAL value size stored in BlobDB files.
+/// Minimum BAL value size stored in `BlobDB` files.
 ///
 /// Smaller BALs stay inline. Larger payloads avoid regular LSM value compaction.
 const DEFAULT_BAL_MIN_BLOB_SIZE: u64 = 4 * 1024;

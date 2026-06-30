@@ -25,7 +25,7 @@ use std::{
 pub struct RocksDBBalStore {
     /// Retention policy for persisted and buffered BALs.
     retention: PruneMode,
-    /// RocksDB provider used for persisted BAL reads and writes.
+    /// `RocksDB` provider used for persisted BAL reads and writes.
     rocksdb: RocksDBProvider,
     /// BALs inserted since the last flush.
     buffer: Arc<RwLock<RocksDBBalStoreBuffer>>,
@@ -50,7 +50,7 @@ impl RocksDBBalStore {
     }
 
     #[cfg(test)]
-    fn rocksdb_provider(&self) -> &RocksDBProvider {
+    const fn rocksdb_provider(&self) -> &RocksDBProvider {
         &self.rocksdb
     }
 
@@ -113,7 +113,7 @@ impl std::fmt::Debug for RocksDBBalStore {
     }
 }
 
-/// Buffered BALs waiting to be flushed to RocksDB.
+/// Buffered BALs waiting to be flushed to `RocksDB`.
 #[derive(Debug, Default)]
 struct RocksDBBalStoreBuffer {
     // Hash index for serving hash-only lookups before flush.

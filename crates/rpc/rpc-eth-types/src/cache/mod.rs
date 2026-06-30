@@ -1225,15 +1225,8 @@ mod tests {
         }
 
         fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
-            Ok(block_hashes.iter().map(|_| None).collect())
-        }
-
-        fn revm_bal_by_hash(
-            &self,
-            _block_hash: BlockHash,
-        ) -> ProviderResult<Option<DecodedBal<Arc<RevmBal>>>> {
             self.fetches.fetch_add(1, Ordering::SeqCst);
-            Ok(Some(test_decoded_revm_bal()))
+            Ok(block_hashes.iter().map(|_| Some(Bytes::from_static(&[0xc0]))).collect())
         }
 
         fn bal_stream(&self) -> reth_storage_api::BalNotificationStream {
