@@ -98,7 +98,7 @@ where
     B: BlockBody,
     H: BlockHeader,
 {
-    let ommers_hash = body.calculate_ommers_root();
+    let ommers_hash = calculate_ommers_root(body);
     if Some(header.ommers_hash()) != ommers_hash {
         return Err(ConsensusError::BodyOmmersHashDiff(
             GotExpected {
@@ -183,6 +183,15 @@ where
     Ok(())
 }
 
+#[inline]
+fn calculate_ommers_root<B: BlockBody>(body: &B) -> Option<B256> {
+    match body.ommers() {
+        Some([]) => Some(EMPTY_OMMER_ROOT_HASH),
+        Some(ommers) => Some(alloy_consensus::proofs::calculate_ommers_root(ommers)),
+        None => None,
+    }
+}
+
 /// Validates the ommers hash and other fork-specific fields.
 ///
 /// These fork-specific validations are:
@@ -200,7 +209,7 @@ where
     ChainSpec: EthereumHardforks,
 {
     // Check ommers hash
-    let ommers_hash = block.body().calculate_ommers_root();
+    let ommers_hash = calculate_ommers_root(block.body());
     if Some(block.ommers_hash()) != ommers_hash {
         return Err(ConsensusError::BodyOmmersHashDiff(
             GotExpected {
