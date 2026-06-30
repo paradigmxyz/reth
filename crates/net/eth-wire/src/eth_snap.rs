@@ -116,12 +116,12 @@ where
         &mut self,
         item: EthBroadcastMessage<N>,
     ) -> Result<(), EthStreamError> {
-        self.conn.start_send_unpin(self.eth.encode_broadcast(item)).map_err(Into::into)
+        self.conn.start_send_unpin(item.encoded()).map_err(Into::into)
     }
 
     /// Sends a raw capability message over the connection.
     pub fn start_send_raw(&mut self, msg: RawCapabilityMessage) -> Result<(), EthStreamError> {
-        self.conn.start_send_unpin(self.eth.encode_raw(msg)).map_err(Into::into)
+        self.conn.start_send_unpin(msg.encoded()).map_err(Into::into)
     }
 }
 
