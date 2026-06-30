@@ -206,9 +206,13 @@ pub struct SidecarBenchmarkManifest {
     pub cache_hit: StateTargetSet,
     pub sidecar_miss: StateTargetSet,
     pub partition: PartitionCheck,
-    pub full_sidecar_baseline_stats: WitnessResult,
+    /// Full-witness baseline (all accessed state, ignoring the cache). `None` when
+    /// the comparison is disabled (`PS_WITNESS_BASELINE` unset).
+    pub full_sidecar_baseline_stats: Option<WitnessResult>,
     pub partial_sidecar_stats: WitnessResult,
-    pub reduction: WitnessReductionStats,
+    /// Reduction of the partial sidecar vs the full baseline. `None` when the
+    /// baseline comparison is disabled.
+    pub reduction: Option<WitnessReductionStats>,
 }
 
 /// A serialized representation of a `StorageMultiProof` that can be easily serialized/deserialized with `serde`.

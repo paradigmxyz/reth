@@ -9,6 +9,7 @@
 //! block arrives.
 
 pub mod accessed_state;
+pub mod fixture;
 pub mod network_cache;
 pub mod persistence;
 pub mod policy;
@@ -17,6 +18,7 @@ pub mod witness;
 pub mod sidecar;
 
 pub use accessed_state::BlockAccessedState;
+pub use fixture::{load_fixtures, save_fixture, AccessedStateFixture, LoadedFixtures};
 pub use network_cache::{CachedEntry, NetworkStateCache};
 pub use policy::{CachePolicy, LastNBlocksPolicy};
 pub use witness::{measure_multiproof_size, miss_to_proof_targets, WitnessResult};

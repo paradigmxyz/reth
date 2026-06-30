@@ -10,7 +10,7 @@ use revm_primitives::KECCAK_EMPTY;
 use std::collections::{HashMap, HashSet};
 
 /// All state keys accessed during a single block's execution.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct BlockAccessedState {
     /// Accounts accessed (address → account data).
     pub accounts: HashMap<Address, AccountData>,
