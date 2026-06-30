@@ -274,7 +274,6 @@ impl RocksDBBuilder {
         cf_options.set_min_blob_size(DEFAULT_BAL_MIN_BLOB_SIZE);
         cf_options.set_blob_file_size(DEFAULT_BAL_BLOB_FILE_SIZE);
         cf_options.set_blob_compression_type(DBCompressionType::Lz4);
-        cf_options.set_enable_blob_gc(true);
         cf_options
     }
 
