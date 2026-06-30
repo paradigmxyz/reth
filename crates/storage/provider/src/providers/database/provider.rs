@@ -2712,18 +2712,21 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let mut hashed_storage_cursor =
             self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
         for (hashed_address, storage) in sorted_storages {
-            if storage.is_wiped() && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
+            let storage_wiped = storage.is_wiped();
+            if storage_wiped && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
                 hashed_storage_cursor.delete_current_duplicates()?;
             }
 
             for (hashed_slot, value) in storage.storage_slots_ref() {
                 let entry = StorageEntry { key: *hashed_slot, value: *value };
 
-                if let Some(db_entry) =
-                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
-                    db_entry.key == entry.key
-                {
-                    hashed_storage_cursor.delete_current()?;
+                if !storage_wiped {
+                    if let Some(db_entry) =
+                        hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
+                        db_entry.key == entry.key
+                    {
+                        hashed_storage_cursor.delete_current()?;
+                    }
                 }
 
                 if !entry.value.is_zero() {
