@@ -36,13 +36,16 @@ use crate::{
     metrics::TransactionFetcherMetrics,
 };
 use alloy_consensus::transaction::PooledTransaction;
-use alloy_primitives::{map::FbBuildHasher, TxHash};
+use alloy_primitives::{
+    map::{B256Set, FbBuildHasher},
+    TxHash,
+};
 use derive_more::{Constructor, Deref};
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{
-    DedupPayload, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
-    PartiallyValidData, RequestTxHashes, ValidAnnouncementData,
+    GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData, RequestTxHashes,
+    ValidAnnouncementData,
 };
 use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::PeerRequest;
@@ -881,13 +884,12 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 //
                 // 2. filter out hashes that we didn't request
                 //
-                let payload = UnverifiedPooledTransactions::new(transactions);
-
-                let unverified_len = payload.len();
+                let requested_hashes_len = requested_hashes.len();
                 let (verification_outcome, verified_payload) =
-                    payload.verify(&requested_hashes, &peer_id);
+                    UnverifiedPooledTransactions::new(transactions)
+                        .verify(&mut requested_hashes, &peer_id);
 
-                let unsolicited = unverified_len - verified_payload.len();
+                let unsolicited = verified_payload.unsolicited_transactions;
                 if unsolicited > 0 {
                     self.metrics.unsolicited_transactions.increment(unsolicited as u64);
                 }
@@ -895,7 +897,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 let report_peer = if verification_outcome == VerificationOutcome::ReportPeer {
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
-                        unverified_len,
+                        unverified_len=verified_payload.unverified_len,
                         verified_payload_len=verified_payload.len(),
                         "received `PooledTransactions` response from peer with entries that didn't verify against request, filtered out transactions"
                     );
@@ -909,23 +911,16 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                     return FetchEvent::FetchError { peer_id, error: RequestError::BadResponse }
                 }
 
-                //
-                // 3. stateless validation of payload, e.g. dedup
-                //
-                let unvalidated_payload_len = verified_payload.len();
-
-                let valid_payload = verified_payload.dedup();
-
                 // todo: validate based on announced tx size/type and report peer for sending
                 // invalid response <https://github.com/paradigmxyz/reth/issues/6529>. requires
                 // passing the rlp encoded length down from active session along with the decoded
                 // tx.
 
-                if valid_payload.len() != unvalidated_payload_len {
+                if verified_payload.duplicate_transactions > 0 {
                     trace!(target: "net::tx",
                     peer_id=format!("{peer_id:#}"),
-                    unvalidated_payload_len,
-                    valid_payload_len=valid_payload.len(),
+                    duplicate_transactions=verified_payload.duplicate_transactions,
+                    valid_payload_len=verified_payload.len(),
                     "received `PooledTransactions` response from peer with duplicate entries, filtered them out"
                     );
                 }
@@ -934,26 +929,16 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 // to pending pool imports pipeline for validation.
 
                 //
-                // 4. clear received hashes
+                // 4. record received hashes
                 //
-                let requested_hashes_len = requested_hashes.len();
-                let mut fetched = Vec::with_capacity(valid_payload.len());
-                requested_hashes.retain(|requested_hash| {
-                    if valid_payload.contains_key(requested_hash) {
-                        // hash is now known, stop tracking
-                        fetched.push(*requested_hash);
-                        return false
-                    }
-                    true
-                });
-                fetched.shrink_to_fit();
-                self.metrics.fetched_transactions.increment(fetched.len() as u64);
+                let fetched = verified_payload.fetched_transactions;
+                self.metrics.fetched_transactions.increment(fetched as u64);
 
-                if fetched.len() < requested_hashes_len {
+                if fetched < requested_hashes_len {
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
                         requested_hashes_len=requested_hashes_len,
-                        fetched_len=fetched.len(),
+                        fetched_len=fetched,
                         "peer failed to serve hashes it announced"
                     );
                 }
@@ -963,7 +948,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 //
                 self.try_buffer_hashes_for_retry(requested_hashes, &peer_id);
 
-                let transactions = valid_payload.into_data().into_values().collect();
+                let transactions = verified_payload.into_transactions();
 
                 FetchEvent::TransactionsFetched { peer_id, transactions, report_peer }
             }
@@ -1144,27 +1129,30 @@ pub struct UnverifiedPooledTransactions<T> {
 }
 
 /// [`PooledTransactions`] that have been successfully verified.
-#[derive(Debug, Constructor, Deref)]
+#[derive(Debug, Deref)]
 pub struct VerifiedPooledTransactions<T> {
+    #[deref]
     txns: PooledTransactions<T>,
+    unverified_len: usize,
+    unsolicited_transactions: usize,
+    fetched_transactions: usize,
+    duplicate_transactions: usize,
 }
 
-impl<T: SignedTransaction> DedupPayload for VerifiedPooledTransactions<T> {
-    type Value = T;
-
+impl<T> VerifiedPooledTransactions<T> {
+    /// Returns `true` if no verified transactions remain.
     fn is_empty(&self) -> bool {
-        self.txns.is_empty()
+        self.txns.0.is_empty()
     }
 
+    /// Returns the number of verified transactions.
     fn len(&self) -> usize {
         self.txns.len()
     }
 
-    fn dedup(self) -> PartiallyValidData<Self::Value> {
-        PartiallyValidData::from_raw_data(
-            self.txns.into_iter().map(|tx| (*tx.tx_hash(), tx)).collect(),
-            None,
-        )
+    /// Consumes `self`, returning the verified transactions.
+    fn into_transactions(self) -> PooledTransactions<T> {
+        self.txns
     }
 }
 
@@ -1173,7 +1161,7 @@ trait VerifyPooledTransactionsResponse {
 
     fn verify(
         self,
-        requested_hashes: &RequestTxHashes,
+        requested_hashes: &mut RequestTxHashes,
         peer_id: &PeerId,
     ) -> (VerificationOutcome, VerifiedPooledTransactions<Self::Transaction>);
 }
@@ -1183,33 +1171,47 @@ impl<T: SignedTransaction> VerifyPooledTransactionsResponse for UnverifiedPooled
 
     fn verify(
         self,
-        requested_hashes: &RequestTxHashes,
+        requested_hashes: &mut RequestTxHashes,
         _peer_id: &PeerId,
     ) -> (VerificationOutcome, VerifiedPooledTransactions<T>) {
         let mut verification_outcome = VerificationOutcome::Ok;
 
-        let Self { mut txns } = self;
+        let Self { txns } = self;
+        let unverified_len = txns.len();
+        let mut fetched_hashes = B256Set::with_capacity_and_hasher(txns.len(), Default::default());
+        let mut verified_transactions = Vec::with_capacity(txns.len());
+        let mut duplicate_transactions = 0;
+        let mut unsolicited_transactions = 0;
 
         #[cfg(debug_assertions)]
         let mut tx_hashes_not_requested: smallvec::SmallVec<[TxHash; 16]> = smallvec::smallvec!();
         #[cfg(not(debug_assertions))]
         let mut tx_hashes_not_requested_count = 0;
 
-        txns.0.retain(|tx| {
-            if !requested_hashes.contains(tx.tx_hash()) {
+        for tx in txns.0 {
+            let hash = *tx.tx_hash();
+            if !requested_hashes.contains(&hash) {
                 verification_outcome = VerificationOutcome::ReportPeer;
+                unsolicited_transactions += 1;
 
                 #[cfg(debug_assertions)]
-                tx_hashes_not_requested.push(*tx.tx_hash());
+                tx_hashes_not_requested.push(hash);
                 #[cfg(not(debug_assertions))]
                 {
                     tx_hashes_not_requested_count += 1;
                 }
 
-                return false
+                continue
             }
-            true
-        });
+
+            if fetched_hashes.insert(hash) {
+                verified_transactions.push(tx);
+            } else {
+                duplicate_transactions += 1;
+            }
+        }
+
+        requested_hashes.retain(|requested_hash| !fetched_hashes.contains(requested_hash));
 
         #[cfg(debug_assertions)]
         if !tx_hashes_not_requested.is_empty() {
@@ -1228,7 +1230,16 @@ impl<T: SignedTransaction> VerifyPooledTransactionsResponse for UnverifiedPooled
             );
         }
 
-        (verification_outcome, VerifiedPooledTransactions::new(txns))
+        (
+            verification_outcome,
+            VerifiedPooledTransactions {
+                txns: PooledTransactions(verified_transactions),
+                unverified_len,
+                unsolicited_transactions,
+                fetched_transactions: fetched_hashes.len(),
+                duplicate_transactions,
+            },
+        )
     }
 }
 
@@ -1312,6 +1323,7 @@ mod test {
     };
     use alloy_rlp::Decodable;
     use derive_more::IntoIterator;
+    use reth_eth_wire::PartiallyValidData;
     use reth_eth_wire_types::EthVersion;
     use reth_ethereum_primitives::TransactionSigned;
     use std::str::FromStr;
@@ -1558,8 +1570,7 @@ mod test {
         assert_eq!(tx_fetcher.num_pending_hashes(), 1);
     }
 
-    #[test]
-    fn verify_response_hashes() {
+    fn response_test_transactions() -> (PooledTransaction, PooledTransaction) {
         let input = hex!(
             "02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598daa"
         );
@@ -1570,6 +1581,13 @@ mod test {
         );
         let signed_tx_2: PooledTransaction =
             TransactionSigned::decode(&mut &input[..]).unwrap().try_into().unwrap();
+
+        (signed_tx_1, signed_tx_2)
+    }
+
+    #[test]
+    fn verify_response_hashes() {
+        let (signed_tx_1, signed_tx_2) = response_test_transactions();
 
         // only tx 1 is requested
         let request_hashes = [
@@ -1586,16 +1604,50 @@ mod test {
             assert_ne!(hash, signed_tx_2.hash())
         }
 
-        let request_hashes = RequestTxHashes::new(request_hashes.into_iter().collect());
+        let mut request_hashes = RequestTxHashes::new(request_hashes.into_iter().collect());
 
         // but response contains tx 1 + another tx
         let response_txns = PooledTransactions(vec![signed_tx_1.clone(), signed_tx_2]);
         let payload = UnverifiedPooledTransactions::new(response_txns);
 
-        let (outcome, verified_payload) = payload.verify(&request_hashes, &PeerId::ZERO);
+        let (outcome, verified_payload) = payload.verify(&mut request_hashes, &PeerId::ZERO);
 
         assert_eq!(VerificationOutcome::ReportPeer, outcome);
         assert_eq!(1, verified_payload.len());
-        assert!(verified_payload.contains(&signed_tx_1));
+        assert_eq!(1, verified_payload.fetched_transactions);
+        assert_eq!(1, verified_payload.unsolicited_transactions);
+        let transactions = verified_payload.into_transactions();
+        assert_eq!(*signed_tx_1.hash(), *transactions[0].hash());
+        assert_eq!(3, request_hashes.len());
+        assert!(!request_hashes.contains(signed_tx_1.hash()));
+    }
+
+    #[test]
+    fn verify_response_dedups_and_keeps_missing_requested_hashes_for_retry() {
+        let (signed_tx_1, signed_tx_2) = response_test_transactions();
+        let missing_hash =
+            B256::from_str("0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e67890")
+                .unwrap();
+
+        let mut requested_hashes = RequestTxHashes::new(
+            [*signed_tx_1.hash(), *signed_tx_2.hash(), missing_hash].into_iter().collect(),
+        );
+        let payload = UnverifiedPooledTransactions::new(PooledTransactions(vec![
+            signed_tx_1.clone(),
+            signed_tx_1.clone(),
+            signed_tx_2.clone(),
+        ]));
+
+        let (outcome, verified_payload) = payload.verify(&mut requested_hashes, &PeerId::ZERO);
+
+        assert_eq!(VerificationOutcome::Ok, outcome);
+        assert_eq!(2, verified_payload.fetched_transactions);
+        assert_eq!(1, verified_payload.duplicate_transactions);
+        let transactions = verified_payload.into_transactions();
+        assert_eq!(2, transactions.len());
+        assert_eq!(*signed_tx_1.hash(), *transactions[0].hash());
+        assert_eq!(*signed_tx_2.hash(), *transactions[1].hash());
+        assert_eq!(1, requested_hashes.len());
+        assert!(requested_hashes.contains(&missing_hash));
     }
 }

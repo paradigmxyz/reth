@@ -1397,20 +1397,70 @@ where
 
         let start = Instant::now();
 
-        // mark the transactions as received
-        self.transaction_fetcher
-            .remove_hashes_from_transaction_fetcher(transactions.iter().map(|tx| tx.tx_hash()));
-
         // track that the peer knows these transaction, but only if this is a new broadcast.
-        // If we received the transactions as the response to our `GetPooledTransactions``
+        // If we received the transactions as the response to our `GetPooledTransactions`
         // requests (based on received `NewPooledTransactionHashes`) then we already
         // recorded the hashes as seen by this peer in `Self::on_new_pooled_transaction_hashes`.
         let mut num_already_seen_by_peer = 0;
-        for tx in &transactions {
-            if source.is_broadcast() && !peer.seen_transactions.insert(*tx.tx_hash()) {
-                num_already_seen_by_peer += 1;
+        let mut duplicate_transactions = 0;
+        if source.is_broadcast() {
+            let use_message_dedup = transactions.len() > 1 &&
+                transactions.len() > peer.seen_transactions.limit() as usize;
+            if use_message_dedup {
+                let original_transactions_len = transactions.len();
+                let mut seen_transaction_hashes = B256Set::with_capacity_and_hasher(
+                    original_transactions_len,
+                    Default::default(),
+                );
+                transactions.retain(|tx| {
+                    let tx_hash = *tx.tx_hash();
+                    let already_seen_by_peer = !peer.seen_transactions.insert(tx_hash);
+                    if already_seen_by_peer {
+                        num_already_seen_by_peer += 1;
+                    }
+
+                    let unique_in_message = seen_transaction_hashes.insert(tx_hash);
+                    if !unique_in_message && !already_seen_by_peer {
+                        num_already_seen_by_peer += 1;
+                    }
+                    unique_in_message
+                });
+                duplicate_transactions = original_transactions_len - transactions.len();
+            } else {
+                for tx in &transactions {
+                    if !peer.seen_transactions.insert(*tx.tx_hash()) {
+                        num_already_seen_by_peer += 1;
+                    }
+                }
+            }
+
+            if !use_message_dedup &&
+                num_already_seen_by_peer > 0 &&
+                duplicate_transactions == 0 &&
+                transactions.len() > 1
+            {
+                let original_transactions_len = transactions.len();
+                let mut seen_transaction_hashes = B256Set::with_capacity_and_hasher(
+                    original_transactions_len,
+                    Default::default(),
+                );
+                transactions.retain(|tx| seen_transaction_hashes.insert(*tx.tx_hash()));
+                duplicate_transactions = original_transactions_len - transactions.len();
+            }
+
+            if duplicate_transactions > 0 {
+                trace!(target: "net::tx",
+                    peer_id=format!("{peer_id:#}"),
+                    duplicate_transactions,
+                    %client_version,
+                    "received duplicate transactions in a single message"
+                );
             }
         }
+
+        // mark the transactions as received
+        self.transaction_fetcher
+            .remove_hashes_from_transaction_fetcher(transactions.iter().map(|tx| tx.tx_hash()));
 
         // tracks the quality of the given transactions
         let mut has_bad_transactions = false;
@@ -2608,6 +2658,82 @@ mod tests {
         assert!(!pool.is_empty());
         assert!(pool.get(signed_tx.tx_hash()).is_some());
         handle.terminate().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_duplicate_incoming_transactions_recovered_once() {
+        let (mut tx_manager, _network) = new_tx_manager().await;
+        let peer_id = PeerId::new([1; 64]);
+        let (peer, _) = new_mock_session(peer_id, EthVersion::Eth66);
+        tx_manager.peers.insert(peer_id, peer);
+        tx_manager.network.update_sync_state(SyncState::Idle);
+
+        let input = hex!(
+            "02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76"
+        );
+        let signed_tx = TransactionSigned::decode(&mut &input[..]).unwrap();
+        let pooled_tx = PooledTransactionVariant::try_from(signed_tx.clone())
+            .expect("transaction converts to pooled variant");
+
+        tx_manager.import_transactions(
+            peer_id,
+            PooledTransactions(vec![pooled_tx.clone(), pooled_tx]),
+            TransactionSource::Broadcast,
+        );
+
+        assert_eq!(
+            tx_manager.pending_pool_imports_info.pending_pool_imports.load(Ordering::Relaxed),
+            1
+        );
+        assert_eq!(tx_manager.transactions_by_peers.len(), 1);
+        assert!(tx_manager
+            .transactions_by_peers
+            .get(signed_tx.tx_hash())
+            .unwrap()
+            .contains(&peer_id));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_spaced_duplicate_incoming_transactions_recovered_once() {
+        let (mut tx_manager, _network) = new_tx_manager().await;
+        let peer_id = PeerId::new([1; 64]);
+        let (peer, _) = new_mock_session(peer_id, EthVersion::Eth66);
+        tx_manager.peers.insert(peer_id, peer);
+        tx_manager.network.update_sync_state(SyncState::Idle);
+
+        let unique_transactions = DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER as usize + 2;
+        let mut tx_gen = reth_transaction_pool::test_utils::TransactionGenerator::with_num_signers(
+            rand::rng(),
+            unique_transactions,
+        );
+
+        let duplicate_tx = PooledTransactionVariant::try_from(
+            tx_gen.transaction().nonce(unique_transactions as u64).into_eip1559(),
+        )
+        .expect("transaction converts to pooled variant");
+        let mut transactions = Vec::with_capacity(unique_transactions + 1);
+        transactions.push(duplicate_tx.clone());
+        for nonce in 0..unique_transactions - 1 {
+            transactions.push(
+                PooledTransactionVariant::try_from(
+                    tx_gen.transaction().nonce(nonce as u64).into_eip1559(),
+                )
+                .expect("transaction converts to pooled variant"),
+            );
+        }
+        transactions.push(duplicate_tx);
+
+        tx_manager.import_transactions(
+            peer_id,
+            PooledTransactions(transactions),
+            TransactionSource::Broadcast,
+        );
+
+        assert_eq!(
+            tx_manager.pending_pool_imports_info.pending_pool_imports.load(Ordering::Relaxed),
+            unique_transactions
+        );
+        assert_eq!(tx_manager.transactions_by_peers.len(), unique_transactions);
     }
 
     #[tokio::test(flavor = "multi_thread")]

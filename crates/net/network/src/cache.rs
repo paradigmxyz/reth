@@ -109,6 +109,11 @@ impl<T: Hash + Eq + fmt::Debug, S: BuildHasher> LruCache<T, S> {
         self.inner.len()
     }
 
+    /// Returns the maximum number of elements retained by the cache.
+    pub(crate) const fn limit(&self) -> u32 {
+        self.limit
+    }
+
     /// Returns `true` if there are currently no elements in the cache.
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
