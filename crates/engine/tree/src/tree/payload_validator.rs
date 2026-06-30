@@ -17,8 +17,8 @@
 //! 4. Spawn the payload processor. This always prepares transaction conversion and prewarming; the
 //!    `StateRootTask` strategy also starts proof workers and the sparse trie task.
 //! 5. Execute the block. BAL payloads use the parallel BAL execute path only when state caching and
-//!    BAL parallel execution are enabled. Otherwise the regular executor still builds and validates
-//!    the BAL before post-execution consensus uses the decoded BAL hash.
+//!    BAL parallel execution are enabled. Otherwise the regular executor streams committed state
+//!    updates to a background BAL rebuild task for post-execution consensus validation.
 //! 6. Stop prewarming, terminate execution caching, spawn `hash-post-state`, await
 //!    `payload-convert` and `receipt-root`, then run post-execution consensus validation.
 //! 7. Resolve the state root from the selected strategy and fall back to serial computation when a
@@ -36,6 +36,7 @@
 //! | proof workers | `StateRootTask` setup | fetch trie proofs for sparse trie updates | consumed by the sparse trie task |
 //! | `sparse-trie` | `StateRootTask` setup | apply execution or BAL updates and compute the state root | awaited by `await_state_root_with_timeout` |
 //! | `receipt-root` | execution start | compute receipt root and logs bloom incrementally | awaited before post-execution consensus |
+//! | `bal-rebuild` | BAL present | rebuild and hash the canonical BAL from state-hook updates | awaited by post-execution validation |
 //! | `hash-post-state` | after execution | hash changed accounts and storage from `BundleState` | awaited by post-execution validation and root computation |
 //! | `serial-root` | sparse trie timeout fallback | race serial state-root computation against the sparse trie task | polled by `await_state_root_with_timeout` |
 //! | deferred trie task | after root verification | sort trie data | not awaited by the validation hot path |
@@ -50,6 +51,7 @@
 //!     participant Exec as EVM execution
 //!     participant Receipt as receipt-root
 //!     participant Trie as sparse trie and proofs
+//!     participant Bal as bal-rebuild
 //!     participant Hash as hash-post-state
 //!     participant Deferred as deferred trie task
 //!
@@ -69,7 +71,7 @@
 //!         Main->>Exec: execute_block
 //!         Exec->>Receipt: stream receipts
 //!         Exec->>Trie: stream state hook updates
-//!         Exec->>Exec: rebuild and validate BAL when present
+//!         Exec->>Bal: stream BAL rebuild updates when present
 //!     end
 //!     Main->>Prewarm: stop prewarming and terminate cache
 //!     Main->>Hash: spawn changed-state hashing
@@ -102,14 +104,17 @@ use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     multiproof::{StateRootComputeOutcome, StateRootHandle},
-    payload_processor::{PayloadProcessor, PayloadProcessorSpawnOptions},
+    payload_processor::{
+        bal::rebuild::{BalHashHandle, BalRebuilder, FanoutStateHook},
+        PayloadProcessor, PayloadProcessorSpawnOptions,
+    },
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
+use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{map::B256Set, B256};
@@ -169,6 +174,9 @@ pub use crate::tree::types::ValidationOutcome;
 
 /// Handle to a [`HashedPostState`] computed on a background thread.
 type LazyHashedPostState = reth_tasks::LazyHandle<Arc<HashedPostState>>;
+
+/// Handle to a block access list hash computed on a background thread.
+type LazyBlockAccessListHash = BalHashHandle;
 
 /// Multiplier over the parent's gas limit beyond which a block's claimed gas usage cannot be
 /// legitimate. Gas limit can change by at most 1/1024 per block, so anything over this is rejected
@@ -695,7 +703,8 @@ where
         if let (Some(metrics), Some(stats)) = (&state_provider_metrics, &state_provider_stats) {
             metrics.record_totals(stats);
         }
-        let (output, senders, receipt_root_rx, built_bal) = ensure_ok!(execution_result);
+        let (output, senders, receipt_root_rx, block_access_list_hash) =
+            ensure_ok!(execution_result);
 
         // After executing the block we can stop prewarming transactions
         handle.stop_prewarming_execution();
@@ -759,7 +768,7 @@ where
                 &output,
                 &mut ctx,
                 receipt_root_bloom,
-                built_bal
+                block_access_list_hash,
             ),
             block
         );
@@ -1097,7 +1106,7 @@ where
             BlockExecutionOutput<N::Receipt>,
             Vec<Address>,
             ReceiptRootReceiver,
-            Option<BlockAccessList>,
+            Option<LazyBlockAccessListHash>,
         ),
         InsertBlockErrorKind,
     >
@@ -1111,11 +1120,11 @@ where
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
         let has_bal = env.decoded_bal.is_some();
+        let bal_rebuilder = has_bal.then(|| BalRebuilder::spawn(&self.runtime));
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
                 .with_bundle_update()
-                .with_bal_builder_if(has_bal)
                 .build()
         });
 
@@ -1153,9 +1162,16 @@ where
         let transaction_count = input.transaction_count();
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
-        executor.evm_mut().db_mut().set_state_hook(
-            handle.state_hook().map(|hook| Box::new(hook) as Box<dyn OnStateHook + 'static>),
-        );
+        let state_hook: Option<Box<dyn OnStateHook + 'static>> =
+            match (handle.state_hook(), bal_rebuilder.as_ref().map(BalRebuilder::state_hook)) {
+                (Some(state_root), Some(bal)) => {
+                    Some(Box::new(FanoutStateHook { first: state_root, second: bal }))
+                }
+                (Some(state_root), None) => Some(Box::new(state_root)),
+                (None, Some(bal)) => Some(Box::new(bal)),
+                (None, None) => None,
+            };
+        executor.evm_mut().db_mut().set_state_hook(state_hook);
 
         let execution_start = Instant::now();
 
@@ -1167,6 +1183,7 @@ where
             &receipt_tx,
             &executed_tx_index,
             has_bal,
+            bal_rebuilder.as_ref(),
         )?;
         drop(receipt_tx);
 
@@ -1176,12 +1193,13 @@ where
             .in_scope(|| executor.finish())
             .map(|(evm, result)| (evm.into_db(), result))?;
         self.metrics.record_post_execution(post_exec_start.elapsed());
+        db.set_state_hook(None);
 
         // Merge transitions into bundle state
         debug_span!(target: "engine::tree", "merge_transitions")
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
 
-        let built_bal = if has_bal { db.take_built_alloy_bal() } else { None };
+        let block_access_list_hash = bal_rebuilder.map(BalRebuilder::finish);
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
 
         let execution_duration = execution_start.elapsed();
@@ -1189,7 +1207,7 @@ where
         self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
 
-        Ok((output, senders, result_rx, built_bal))
+        Ok((output, senders, result_rx, block_access_list_hash))
     }
 
     /// Returns true when the BAL execute path should be used for this block.
@@ -1221,7 +1239,7 @@ where
     /// 2. Relies on BAL prewarm to stream sparse-trie updates and optional state prefetches.
     /// 3. Spawns the receipt-root task.
     /// 4. Calls [`crate::tree::payload_processor::bal::execute_block`].
-    /// 5. Returns the rebuilt BAL for post-execution consensus validation.
+    /// 5. Returns a background handle for the rebuilt BAL hash.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     #[expect(clippy::type_complexity)]
     fn execute_block_bal<Tx, Err, MakeStateProvider, T>(
@@ -1235,7 +1253,7 @@ where
             BlockExecutionOutput<N::Receipt>,
             Vec<Address>,
             ReceiptRootReceiver,
-            Option<BlockAccessList>,
+            Option<LazyBlockAccessListHash>,
         ),
         InsertBlockErrorKind,
     >
@@ -1262,17 +1280,18 @@ where
         let execution_start = Instant::now();
         let ctx =
             self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
-        let (output, senders, built_bal) = crate::tree::payload_processor::bal::execute_block(
-            &self.runtime,
-            &self.evm_config,
-            &make_db,
-            input_bal,
-            env.evm_env,
-            ctx,
-            env.transaction_count,
-            handle.clone_transaction_receiver(),
-            receipt_tx,
-        )?;
+        let (output, senders, block_access_list_hash) =
+            crate::tree::payload_processor::bal::execute_block(
+                &self.runtime,
+                &self.evm_config,
+                &make_db,
+                input_bal,
+                env.evm_env,
+                ctx,
+                env.transaction_count,
+                handle.clone_transaction_receiver(),
+                receipt_tx,
+            )?;
         let execution_duration = execution_start.elapsed();
 
         self.metrics.record_block_execution(&output, execution_duration);
@@ -1283,7 +1302,7 @@ where
             "Executed block via BAL path",
         );
 
-        Ok((output, senders, result_rx, Some(built_bal)))
+        Ok((output, senders, result_rx, Some(block_access_list_hash)))
     }
 
     fn spawn_receipt_root_task(
@@ -1310,6 +1329,7 @@ where
     /// - Collecting transaction senders for later use
     ///
     /// Returns the executor (for finalization) and the collected senders.
+    #[expect(clippy::too_many_arguments)]
     fn execute_transactions<'a, E, Tx, InnerTx, Err, DB>(
         &self,
         mut executor: E,
@@ -1318,6 +1338,7 @@ where
         receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
         executed_tx_index: &AtomicUsize,
         has_bal: bool,
+        bal_rebuilder: Option<&BalRebuilder>,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
         E: BlockExecutor<Receipt = N::Receipt, Evm: alloy_evm::Evm<DB = &'a mut State<DB>>>,
@@ -1337,6 +1358,9 @@ where
         // Bump BAL index after pre-execution changes (EIP-7928: index 0 is pre-execution)
         if has_bal {
             executor.evm_mut().db_mut().bump_bal_index();
+            if let Some(bal_rebuilder) = bal_rebuilder {
+                bal_rebuilder.bump_index();
+            }
         }
 
         // Execute transactions
@@ -1390,6 +1414,9 @@ where
             // Bump BAL index after each transaction (EIP-7928)
             if has_bal {
                 executor.evm_mut().db_mut().bump_bal_index();
+                if let Some(bal_rebuilder) = bal_rebuilder {
+                    bal_rebuilder.bump_index();
+                }
             }
         }
 
@@ -1682,7 +1709,7 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
         ctx: &mut TreeCtx<'_, N>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
-        built_bal: Option<BlockAccessList>,
+        block_access_list_hash: Option<LazyBlockAccessListHash>,
     ) -> Result<(), InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
@@ -1695,9 +1722,7 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
-        let block_access_list_hash =
-            built_bal.as_ref().map(|bal| compute_block_access_list_hash(bal));
-
+        let block_access_list_hash = block_access_list_hash.as_ref().map(|hash| *hash.get());
         if let Err(err) = self.consensus.validate_block_post_execution(
             block,
             output,

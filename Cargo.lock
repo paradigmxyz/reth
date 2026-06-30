@@ -10676,8 +10676,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "41.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d51c254839fb36357d0b02d02e46ba57e683d7b017e2da33b47ae74685a9e59"
+source = "git+https://github.com/bluealloy/revm?branch=klkvr%2Fbal-verify#4b950362ed06c3567c80f1761a35c398f104cb75"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10695,8 +10694,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "41.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e33493cf6d996e9242db4f2002caef48ec9aa8c4f3fff3b18aed10ef3942eec7"
+source = "git+https://github.com/bluealloy/revm?branch=klkvr%2Fbal-verify#4b950362ed06c3567c80f1761a35c398f104cb75"
 dependencies = [
  "bitvec",
  "paste",
@@ -10708,8 +10706,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "41.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86e48fc736d9542c082ea5305be44b6a14b53a615f0147ad57f62189fd813068"
+source = "git+https://github.com/bluealloy/revm?branch=klkvr%2Fbal-verify#4b950362ed06c3567c80f1761a35c398f104cb75"
 dependencies = [
  "bitvec",
  "cfg-if",
@@ -10725,8 +10722,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "41.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac68282a454318246817486835a446519291dd0a8167d09de14c7e96f2147696"
+source = "git+https://github.com/bluealloy/revm?branch=klkvr%2Fbal-verify#4b950362ed06c3567c80f1761a35c398f104cb75"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10741,8 +10737,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "41.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d761681a43e48408ea23f7f66ff56ff7b6128cadb8f9135d1b94787d0c0fc6b4"
+source = "git+https://github.com/bluealloy/revm?branch=klkvr%2Fbal-verify#4b950362ed06c3567c80f1761a35c398f104cb75"
 dependencies = [
  "alloy-eips",
  "derive_more",
@@ -10757,8 +10752,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "41.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b96e37d62fa60b45987b408486c84ebef4af4e7ddf1b3b96b4955a7263fd4e92"
+source = "git+https://github.com/bluealloy/revm?branch=klkvr%2Fbal-verify#4b950362ed06c3567c80f1761a35c398f104cb75"
 dependencies = [
  "auto_impl",
  "either",
@@ -10771,8 +10765,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "41.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5e043ebfc0899c435e44475796285898e4f822e637bd67856da79cc170bd9df"
+source = "git+https://github.com/bluealloy/revm?branch=klkvr%2Fbal-verify#4b950362ed06c3567c80f1761a35c398f104cb75"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -10790,8 +10783,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "41.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e470b2a5e177918944d8cd26174455b61b8fbfbbe7fe411d28b4097e410d11e"
+source = "git+https://github.com/bluealloy/revm?branch=klkvr%2Fbal-verify#4b950362ed06c3567c80f1761a35c398f104cb75"
 dependencies = [
  "auto_impl",
  "either",
@@ -10828,8 +10820,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "41.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa5547f653f9e4c47b4f9a9075a0b7c0faea5fa29b7873f392733a943837825d"
+source = "git+https://github.com/bluealloy/revm?branch=klkvr%2Fbal-verify#4b950362ed06c3567c80f1761a35c398f104cb75"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -10841,8 +10832,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "41.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d785931e4b8750cf9d79c808c22f05979c8d191baafc8badd4651db82584c1c"
+source = "git+https://github.com/bluealloy/revm?branch=klkvr%2Fbal-verify#4b950362ed06c3567c80f1761a35c398f104cb75"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -10868,8 +10858,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "41.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66f39151a31afe93d97f7ac894dd9dcc989368d5ccba19ce079bfc1d73b77452"
+source = "git+https://github.com/bluealloy/revm?branch=klkvr%2Fbal-verify#4b950362ed06c3567c80f1761a35c398f104cb75"
 dependencies = [
  "alloy-primitives",
  "once_cell",
@@ -10879,8 +10868,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "41.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73ef2fffc28acc41e8ef7525f2b1d16288a10f80579a1b33e7e62abc9892314a"
+source = "git+https://github.com/bluealloy/revm?branch=klkvr%2Fbal-verify#4b950362ed06c3567c80f1761a35c398f104cb75"
 dependencies = [
  "alloy-eip7928",
  "bitflags 2.13.0",

@@ -7,18 +7,15 @@
 //! streamed transaction, and returns uncommitted transaction results.
 //!
 //! The canonical state owns block effects. It runs the normal pre/post block hooks, commits
-//! worker results in transaction order, tracks block gas admission, and builds the BAL that this
-//! execution actually produced.
-//!
-//! The rebuilt BAL is returned to the outer payload validator for consensus post-execution
-//! validation. This module only logs the first divergence between the received BAL and the BAL
-//! rebuilt from canonical execution.
+//! worker results in transaction order, tracks block gas admission, and streams committed state
+//! updates to a background BAL rebuild task.
 
-use super::{ordered_outputs::ordered_worker_outputs, worker, BalExecutionError};
-use alloy_eip7928::{
-    bal::{Bal as AlloyBal, DecodedBal},
-    compute_block_access_list_hash, BlockAccessList,
+use super::{
+    ordered_outputs::ordered_worker_outputs,
+    rebuild::{BalHashHandle, BalRebuilder},
+    worker, BalExecutionError,
 };
+use alloy_eip7928::bal::{Bal as AlloyBal, DecodedBal};
 use alloy_evm::{
     block::{BlockExecutionError, BlockExecutor, BlockValidationError, TxResult},
     Evm,
@@ -51,7 +48,7 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
 ) -> Result<
-    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
+    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BalHashHandle),
     BalExecutionError,
 >
 where
@@ -68,6 +65,7 @@ where
     worker_pool.in_place_scope(|scope| {
         execute_block_inner(
             scope,
+            runtime,
             evm_config,
             make_db,
             input_bal,
@@ -84,6 +82,7 @@ where
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
 fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     scope: &rayon::Scope<'scope>,
+    runtime: &Runtime,
     evm_config: &'scope Evm,
     make_db: &'scope MakeDb,
     input_bal: Arc<DecodedBal>,
@@ -94,7 +93,7 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
     worker_count: usize,
 ) -> Result<
-    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
+    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BalHashHandle),
     BalExecutionError,
 >
 where
@@ -111,11 +110,10 @@ where
     let block_gas_limit = evm_env.block_env.gas_limit();
     let enable_amsterdam_eip8037 = evm_env.cfg_env.enable_amsterdam_eip8037;
     let tx_gas_limit_cap = evm_env.cfg_env.tx_gas_limit_cap;
-    let mut canonical_state = State::builder()
-        .with_database(make_db(false)?)
-        .with_bundle_update()
-        .with_bal_builder()
-        .build();
+    let bal_rebuilder = BalRebuilder::spawn(runtime);
+    let mut canonical_state =
+        State::builder().with_database(make_db(false)?).with_bundle_update().build();
+    canonical_state.set_state_hook(Some(Box::new(bal_rebuilder.state_hook())));
 
     let (block_result, senders) = {
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
@@ -150,6 +148,7 @@ where
             gas_tracker.validate_tx_limit(output.tx_gas_limit)?;
             gas_tracker.record_result(output.result.result());
             canonical_executor.evm_mut().db_mut().bump_bal_index();
+            bal_rebuilder.bump_index();
 
             let _ = canonical_executor.commit_transaction(output.result);
             senders.push(output.signer);
@@ -166,17 +165,19 @@ where
         drop(abort_guard);
 
         canonical_executor.evm_mut().db_mut().bump_bal_index();
+        bal_rebuilder.bump_index();
         let block_result = canonical_executor.apply_post_execution_changes()?;
         (block_result, senders)
     };
 
-    let built_bal = take_built_bal_and_log_divergence(&mut canonical_state, bal);
-
+    canonical_state.set_state_hook(None);
+    let bal_hash = bal_rebuilder.finish();
     canonical_state.merge_transitions(BundleRetention::Reverts);
+
     Ok((
         BlockExecutionOutput { state: canonical_state.take_bundle(), result: block_result },
         senders,
-        built_bal,
+        bal_hash,
     ))
 }
 
@@ -199,32 +200,6 @@ fn convert_alloy_to_revm_bal(alloy_bal: &AlloyBal) -> Result<Arc<RevmBal>, BalEx
         ))
     })?;
     Ok(Arc::new(received_bal_revm))
-}
-
-fn take_built_bal_and_log_divergence<DB>(
-    canonical_state: &mut State<DB>,
-    received_bal: &AlloyBal,
-) -> BlockAccessList
-where
-    DB: Database,
-{
-    let built_bal = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
-    if tracing::enabled!(target: "engine::tree::payload_processor::bal", tracing::Level::DEBUG) &&
-        built_bal.as_slice() != received_bal.as_slice()
-    {
-        let rebuilt = compute_block_access_list_hash(built_bal.as_slice());
-        let expected = compute_block_access_list_hash(received_bal.as_slice());
-        let div = received_bal.diff(built_bal.as_slice());
-        tracing::debug!(
-            target: "engine::tree::payload_processor::bal",
-            %rebuilt,
-            %expected,
-            %div,
-            "first BAL divergence",
-        );
-    }
-
-    built_bal
 }
 
 /// Closes the abort channel on drop, waking scoped workers before the scope exits.
@@ -488,7 +463,7 @@ mod tests {
         input_bal: Arc<DecodedBal>,
         block: &SealedBlock<Block>,
         txs: Vec<Tx>,
-    ) -> Result<(BlockExecutionOutput<Receipt>, BlockAccessList), BalExecutionError>
+    ) -> Result<(BlockExecutionOutput<Receipt>, B256), BalExecutionError>
     where
         Tx: ExecutableTxFor<EthEvmConfig> + Send,
         DB: Database + Send,
@@ -510,7 +485,7 @@ mod tests {
             tx_stream(txs),
             receipt_tx,
         )
-        .map(|(output, _, built_bal)| (output, built_bal))
+        .map(|(output, _, bal_hash)| (output, *bal_hash.get()))
     }
 
     /// Inserts `AccountInfo { nonce: 0, balance }` for `addr` into the canonical DB.
@@ -1030,10 +1005,10 @@ mod tests {
     }
 
     #[test]
-    fn returns_built_bal_for_final_hash_mismatch() {
-        // Build the BAL an empty block actually produces, then append a phantom address
-        // that execution never touches. The rebuilt BAL omits it, and the outer consensus
-        // validator is responsible for comparing that rebuilt hash to the header commitment.
+    fn returns_rebuilt_hash_for_unused_declared_bal_entry() {
+        // Build the BAL an empty block actually produces, then append a phantom address that
+        // execution never touches. Execution returns the rebuilt hash, and the outer consensus
+        // validator rejects because it differs from the tampered header hash.
         use alloy_eip7928::AccountChanges;
 
         let evm_config = EthEvmConfig::mainnet();
@@ -1068,13 +1043,8 @@ mod tests {
             Vec::<Recovered<TransactionSigned>>::new(),
         );
 
-        match result {
-            Ok((_, built_bal)) => {
-                let rebuilt = alloy_eip7928::compute_block_access_list_hash(&built_bal);
-                assert_ne!(rebuilt, tampered_hash, "rebuilt and header hashes must differ");
-            }
-            Err(e) => panic!("expected success with rebuilt BAL, got {e:?}"),
-        }
+        let (_, rebuilt_hash) = result.expect("execution should return the canonical BAL hash");
+        assert_ne!(rebuilt_hash, tampered_hash, "rebuilt and tampered hashes must differ");
     }
 
     #[test]
